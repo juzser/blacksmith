@@ -2745,9 +2745,10 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     const summary = payload.summary as Record<string, unknown>;
     expect(summary.concurrency).toEqual({
       waves: 1,
-      verdicts: { parallel: 0, partial: 0, serialized: 1, single: 0, unobserved: 0 },
+      verdicts: { parallel: 0, partial: 0, serialized: 1, single: 0, unlinked: 0, unobserved: 0 },
       widest: { declared: 2, observed: 1 },
       unobserved: [],
+      unlinked: [],
       problem: null,
     });
   });
@@ -2822,9 +2823,10 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
     expect(record.summary.concurrency).toEqual({
       waves: 0,
-      verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 },
+      verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unlinked: 0, unobserved: 0 },
       widest: { declared: 0, observed: 0 },
       unobserved: [],
+      unlinked: [],
       problem: null,
     });
   });
@@ -4660,6 +4662,7 @@ describe('epic.ts — how wide the epic ran', () => {
         partial: 0,
         serialized: 2,
         single: 0,
+        unlinked: 0,
         unobserved: 0,
       });
     });
@@ -4683,12 +4686,27 @@ describe('epic.ts — how wide the epic ran', () => {
       expect(concurrency.unobserved).toEqual(['e1', 'e3']);
     });
 
+    // The bug this file exists to close: a wave whose work merged, or was
+    // dispatched, off-lineage is real work and must be named apart from the
+    // waves that truly have nothing behind them.
+    it('names the waves whose work merged off-lineage, apart from the ones with no work at all', () => {
+      const concurrency = summariseEpicConcurrency([
+        wave({ eventId: 'e1', verdict: 'unobserved', peak: 0 }),
+        wave({ eventId: 'e2', verdict: 'unlinked', peak: 0 }),
+        wave({ eventId: 'e3', verdict: 'parallel' }),
+      ]);
+
+      expect(concurrency.unobserved).toEqual(['e1']);
+      expect(concurrency.unlinked).toEqual(['e2']);
+    });
+
     it('answers an epic that never cut a wave with zero rather than with nothing', () => {
       const concurrency = summariseEpicConcurrency([]);
 
       expect(concurrency.waves).toBe(0);
       expect(concurrency.widest).toEqual({ declared: 0, observed: 0 });
       expect(concurrency.unobserved).toEqual([]);
+      expect(concurrency.unlinked).toEqual([]);
     });
   });
 
@@ -4790,6 +4808,24 @@ describe('epic.ts — how wide the epic ran', () => {
       expect(flat).toMatch(/e7/);
     });
 
+    // The bug this file exists to close: a wave whose work merged, or was
+    // dispatched, off the lineage this read walked is not the same fact as a
+    // wave with nothing behind it, and the prompt must not blur them —
+    // judges refuted a real epic on this exact confusion.
+    it('tells the judge a wave is real work off-lineage, never "no work" or "no dispatch"', () => {
+      const flat = promptWith(
+        summariseEpicConcurrency([wave({ eventId: 'e9', verdict: 'unlinked', peak: 0 })]),
+      ).replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/merged off-lineage/i);
+      expect(flat).toMatch(/width unmeasured/i);
+      expect(flat).toContain(
+        "wave e9: admitted, and its work merged or dispatched off this epic's lineage",
+      );
+      expect(flat).not.toMatch(/wave e9: admitted, and the log holds no dispatch on record/i);
+      expect(flat).not.toMatch(/wave e9: admitted, and nothing/i);
+    });
+
     // Zero waves and an unreadable record both fold to zero counts, and they
     // are opposite facts: one says the epic never cut a wave, the other says
     // nobody can tell. A prompt that renders them the same way hands the judge
@@ -4797,9 +4833,10 @@ describe('epic.ts — how wide the epic ran', () => {
     it('tells the judge the record could not be read, rather than reporting zero waves', () => {
       const flat = promptWith({
         waves: 0,
-        verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 },
+        verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unlinked: 0, unobserved: 0 },
         widest: { declared: 0, observed: 0 },
         unobserved: [],
+        unlinked: [],
         problem: 'wave-concurrency.missing-task-ids: wave-admitted "e1" names no tasks',
       }).replace(/\s+/g, ' ');
 

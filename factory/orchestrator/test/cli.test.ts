@@ -4804,6 +4804,7 @@ describe('cli.ts (built binary)', () => {
         partial: 0,
         serialized: 0,
         single: 0,
+        unlinked: 0,
         unobserved: 0,
         ...over,
       });

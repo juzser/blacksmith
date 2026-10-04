@@ -182,7 +182,7 @@ That summary now also states **how wide the epic actually ran**, folded from
 the same lineage the verdict already read:
 
 ```json
-{"concurrency":{"waves":3,"verdicts":{"parallel":1,"partial":0,"serialized":2,"single":0,"unobserved":0},"widest":{"declared":4,"observed":1},"unobserved":[],"problem":null}}
+{"concurrency":{"waves":3,"verdicts":{"parallel":1,"partial":0,"serialized":2,"single":0,"unlinked":0,"unobserved":0},"widest":{"declared":4,"observed":1},"unobserved":[],"unlinked":[],"problem":null}}
 ```
 
 `widest` reads "4 tasks admitted at the widest, 1 ever in flight at once" —
@@ -199,7 +199,12 @@ readiness: a plan whose tasks genuinely depend on one another has nothing to
 run side by side, and a gate that held it would be refusing correct work for
 the shape of its dependency graph. What the judge is told it *may* refute on
 is a wave in `unobserved` — tasks that were admitted with no dispatch on record
-at all, which is a declaration with no work behind it.
+at all, which is a declaration with no work behind it. A wave in `unlinked` is
+not that: its `wave-merged` events or a `dispatch_decision` parented on the
+admission prove the work is real, only off the lineage this close read — the
+usual cause is a wave-runner session started without `--continues` — so its
+width is unmeasured rather than missing, and the judge is told plainly that is
+not grounds to refute the epic.
 
 Because it never blocks, nothing about measuring it is allowed to block either.
 `bs wave audit` *refuses* a `wave-admitted` event that names no tasks, which
@@ -208,7 +213,7 @@ refusal would take down the close over a fact that decides nothing. So it is
 caught and reported instead, in `problem`:
 
 ```json
-{"concurrency":{"waves":0,"verdicts":{"parallel":0,"partial":0,"serialized":0,"single":0,"unobserved":0},"widest":{"declared":0,"observed":0},"unobserved":[],"problem":"wave-concurrency.missing-task-ids: wave-admitted \"sess-1#4\" names no tasks"}}
+{"concurrency":{"waves":0,"verdicts":{"parallel":0,"partial":0,"serialized":0,"single":0,"unlinked":0,"unobserved":0},"widest":{"declared":0,"observed":0},"unobserved":[],"unlinked":[],"problem":"wave-concurrency.missing-task-ids: wave-admitted \"sess-1#4\" names no tasks"}}
 ```
 
 Read those zeros as *nobody counted*, not as *nothing happened*: when `problem`
@@ -517,7 +522,7 @@ whatever slice of its own history the operator's terminal happened to be inside
 `--session` narrows back to one lineage for anyone who wants the old question.
 
 ```json
-{"epics":[{"epicId":"epic-1","eventId":"sess-2#31","closedAt":"2026-09-02T11:04:00.000Z","sessionId":"sess-2","project":"../my-project","closedBy":"verdict","machineVerdict":"go","verdict":"parallel","waves":3,"byVerdict":{"parallel":2,"partial":1,"serialized":0,"single":0,"unobserved":0},"widest":{"declared":4,"observed":4},"unobserved":[],"problem":null}],"verdicts":{"parallel":1,"partial":0,"serialized":0,"single":0,"unobserved":0,"unwaved":0,"unmeasured":0,"unreadable":0},"widest":{"declared":4,"observed":4},"serialized":[],"unobserved":[],"unmeasured":[],"hint":"","exitCode":0}
+{"epics":[{"epicId":"epic-1","eventId":"sess-2#31","closedAt":"2026-09-02T11:04:00.000Z","sessionId":"sess-2","project":"../my-project","closedBy":"verdict","machineVerdict":"go","verdict":"parallel","waves":3,"byVerdict":{"parallel":2,"partial":1,"serialized":0,"single":0,"unlinked":0,"unobserved":0},"widest":{"declared":4,"observed":4},"unobserved":[],"unlinked":[],"problem":null}],"verdicts":{"parallel":1,"partial":0,"serialized":0,"single":0,"unlinked":0,"unobserved":0,"unwaved":0,"unmeasured":0,"unreadable":0},"widest":{"declared":4,"observed":4},"serialized":[],"unobserved":[],"unlinked":[],"unmeasured":[],"hint":"","exitCode":0}
 ```
 
 It folds the closes rather than re-deriving from the waves, for two reasons and
@@ -531,12 +536,12 @@ honest answer to "how much of this do you actually know", and a summary that
 omitted them would report a factory of three measured epics exactly as
 confidently as a factory of three hundred.
 
-Each epic gets one verdict. Five of them are `wave audit`'s, read off the
+Each epic gets one verdict. Six of them are `wave audit`'s, read off the
 record rather than recomputed; three are answers no wave can give:
 
 | Verdict | What it means |
 | --- | --- |
-| `parallel` / `partial` / `serialized` / `single` / `unobserved` | The wave verdicts of §2, as the close recorded them. |
+| `parallel` / `partial` / `serialized` / `single` / `unlinked` / `unobserved` | The wave verdicts of §2, as the close recorded them. |
 | `unwaved` | The close measured, and this epic never cut a wave. Never a fault — a one-task epic has no wave to cut. |
 | `unmeasured` | The close carried no width. Nobody looked. This is not a narrow epic, it is an unknown one. |
 | `unreadable` | A width was recorded that could not be read — either `epic close` already reported a `problem` folding it, or the payload is not the shape it should be. |

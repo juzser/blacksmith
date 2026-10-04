@@ -469,6 +469,16 @@ export interface EpicConcurrency {
    */
   unobserved: string[];
   /**
+   * The `wave-admitted` event ids whose work merged, or was dispatched
+   * directly on the admission, but off the lineage this read walked. Named
+   * separately from `unobserved` because the fact is different: work is
+   * real here, only its width is unmeasured — the usual cause is a
+   * wave-runner session started without `--continues`, so its own
+   * dispatch_decisions never reach this epic's lineage even though they ran.
+   * Not refutable on "no work behind it": the opposite is true.
+   */
+  unlinked: string[];
+  /**
    * Why the fold could not be rendered, or null when it was. `auditWaveConcurrency`
    * refuses a `wave-admitted` event that names no tasks — correctly, for the
    * command whose whole job is that record — and a throw reaching this gate
@@ -498,6 +508,7 @@ export function summariseEpicConcurrency(waves: readonly WaveConcurrency[]): Epi
       observed: waves.reduce((max, wave) => Math.max(max, wave.peak), 0),
     },
     unobserved: waves.filter((wave) => wave.verdict === 'unobserved').map((wave) => wave.eventId),
+    unlinked: waves.filter((wave) => wave.verdict === 'unlinked').map((wave) => wave.eventId),
     problem: null,
   };
 }
@@ -508,6 +519,7 @@ const UNREADABLE_CONCURRENCY = (problem: string): EpicConcurrency => ({
   verdicts: zeroedCounts(WAVE_VERDICTS),
   widest: { declared: 0, observed: 0 },
   unobserved: [],
+  unlinked: [],
   problem,
 });
 
@@ -1277,6 +1289,15 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
                 ),
                 '  (none — every admitted wave has work behind it)',
               ),
+              `  Waves whose work merged off-lineage (width unmeasured): ${concurrency.unlinked.length}`,
+              ...listOr(
+                concurrency.unlinked.map(
+                  (id) =>
+                    `  wave ${id}: admitted, and its work merged or dispatched off this epic's ` +
+                    'lineage — real work, but its width cannot be measured from here',
+                ),
+                '  (none)',
+              ),
             ];
 
   const prompt = [
@@ -1316,7 +1337,9 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     '  depend on one another has nothing to run side by side, and refuting on',
     '  width alone would make your verdict a constant rather than a measurement.',
     '  What is refutable here is a wave whose tasks were admitted and nothing',
-    '  shows them running: that is a declaration with no work behind it.',
+    '  shows them running: that is a declaration with no work behind it. A wave',
+    '  whose work merged off-lineage is not that — its work is real, only its',
+    '  width went unmeasured, and that is not grounds to refute the epic.',
     '',
     'Discretionary closures — decided by a person, not shown by the machine:',
     `Tasks waived rather than completed: ${summary.waivedTasks.length}`,
@@ -1939,6 +1962,7 @@ function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
             verdicts: { ...summary.concurrency.verdicts },
             widest: { ...summary.concurrency.widest },
             unobserved: [...summary.concurrency.unobserved],
+            unlinked: [...summary.concurrency.unlinked],
             problem: summary.concurrency.problem,
           },
     mechanically_ready: summary.mechanicallyReady,

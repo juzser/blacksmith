@@ -167,27 +167,36 @@ bs wave audit --session <session-id> [--epic epic-1] [--state-dir <dir>]
     {"taskId":"epic-1/task-1","startedAt":"...:51.320Z","endedAt":"...:52.107Z","roles":["coder"]},
     {"taskId":"epic-1/task-2","startedAt":"...:51.711Z","endedAt":"...:52.498Z","roles":["coder"]}],
   "unobserved":["epic-1/task-3"],"peak":2,"verdict":"partial"}],
- "serialized":[],"partial":["epic-1"],"unobserved":[],
+ "serialized":[],"partial":["epic-1"],"unobserved":[],"unlinked":[],
  "widest":{"declared":3,"observed":2},"hint":"","exitCode":0}
 ```
 
-Each wave gets one of five verdicts. `parallel` is peak concurrency at least
+Each wave gets one of six verdicts. `parallel` is peak concurrency at least
 as wide as the wave was declared. `partial` is narrower than declared but more
 than one at a time. `serialized` is work that was recorded and never once
 overlapped. `single` is a wave of one, which cannot be either. `unobserved` is
-a wave with no dispatch under any of its tasks at all.
+a wave with no dispatch under any of its tasks at all, and nothing else on the
+lineage says otherwise. `unlinked` is a wave whose work merged, or was
+dispatched directly on the admission, but off the lineage this read walked —
+real work, with its width unmeasured rather than zero; the usual cause is a
+wave-runner session started without `--continues`.
 
-The last two distinctions are the point of the command, so it is worth being
+The last distinctions are the point of the command, so it is worth being
 plain about them.
 
-**`serialized` and `unobserved` are different facts and get different exit
-codes.** Exit 1 says the dispatcher ran your wave one task at a time — that is
-a factory not doing its job. Exit 2 says the wave was admitted and the log
-shows no work for it, which is either a dispatcher that never started or
-agents that ran outside the lineage being read; the two readings are a
-different investigation and the command names both in `hint` rather than
-guessing. Scoring "cannot tell" as "ran narrow" would have manufactured
-failures out of a state dir pointed at the wrong place.
+**`serialized`, `unobserved` and `unlinked` are different facts and get
+different exit codes.** Exit 1 says the dispatcher ran your wave one task at a
+time — that is a factory not doing its job. Exit 2 says the wave was admitted
+and the log shows no work for it at all, which is either a dispatcher that
+never started or agents that ran outside the lineage being read; the two
+readings are a different investigation and the command names both in `hint`
+rather than guessing. `unlinked` exits 0: the lineage holds proof the work
+happened — a `wave-merged` for one of the admitted tasks, or a
+`dispatch_decision` parented on the admission itself — even though this read
+cannot measure how wide it ran. Scoring "cannot tell" as "ran narrow" would
+have manufactured failures out of a state dir pointed at the wrong place, and
+scoring "ran, but off-lineage" as "no work" would have hidden real work behind
+a fault that was really just a missing `--continues`.
 
 **`partial` does not fail.** Three admitted and two in flight is the factory
 working — a dependency landed late, an agent finished early. An exit code that

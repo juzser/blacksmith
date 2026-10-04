@@ -580,7 +580,14 @@ describe('what the factory-wide pass notices', () => {
   // three tests after the first are all about that difference.
   // ------------------------------------------------------------------------
 
-  const COUNTS = { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 };
+  const COUNTS = {
+    parallel: 0,
+    partial: 0,
+    serialized: 0,
+    single: 0,
+    unlinked: 0,
+    unobserved: 0,
+  };
 
   /** An `epic-closed` carrying the concurrency block `epic close` writes. */
   function closed(
@@ -1670,7 +1677,14 @@ describe('who has to say yes to a finding', () => {
         summary: {
           concurrency: {
             waves: 1,
-            verdicts: { parallel: 0, partial: 0, serialized: 1, single: 0, unobserved: 0 },
+            verdicts: {
+              parallel: 0,
+              partial: 0,
+              serialized: 1,
+              single: 0,
+              unlinked: 0,
+              unobserved: 0,
+            },
             widest: { declared: 4, observed: 1 },
             unobserved: [],
             problem: null,
