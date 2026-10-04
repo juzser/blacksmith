@@ -3461,7 +3461,15 @@ export interface LessonsResult {
   approved: (typeof lessons.$inferSelect)[];
   /** Everything that has stopped moving: rejected, superseded, or invalidated. */
   closed: (typeof lessons.$inferSelect)[];
+  /**
+   * The ts of the latest `lessons-pass-completed` event (dream() appends one
+   * at the end of every pass, raised or not), or null if dream() has never
+   * run. DS8 plan §2.3 — the Lessons page's "last checked" line.
+   */
+  lastCheckedAt: string | null;
 }
+
+const LESSONS_PASS_COMPLETED_EVENT_TYPE = 'lessons-pass-completed';
 
 /**
  * Every `lesson_status` the taxonomy declares, mapped to the bucket the
@@ -3505,13 +3513,32 @@ export function lessonOwnerSession(db: SmithDb, lessonId: string): string | null
   return row ? row.sessionId : null;
 }
 
+/** The latest `lessons-pass-completed` event's ts, scoped the same way as the rest of the page. */
+function lastLessonsPassAt(db: SmithDb, scope: Scope): string | null {
+  const eventCond = eq(eventsRaw.eventType, LESSONS_PASS_COMPLETED_EVENT_TYPE);
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const rows = db
+    .select({ ts: eventsRaw.ts })
+    .from(eventsRaw)
+    .where(sessionCond ? and(eventCond, sessionCond) : eventCond)
+    .all();
+  const first = rows[0];
+  if (!first) return null;
+  return rows.reduce((latest, row) => (row.ts > latest ? row.ts : latest), first.ts);
+}
+
 export function lessonsPage(db: SmithDb, scope: Scope = {}): LessonsResult {
   const sessionCond = scopedToSessions(lessons.sessionId, scope);
   const rows = sessionCond
     ? db.select().from(lessons).where(sessionCond).all()
     : db.select().from(lessons).all();
 
-  const result: LessonsResult = { pending: [], approved: [], closed: [] };
+  const result: LessonsResult = {
+    pending: [],
+    approved: [],
+    closed: [],
+    lastCheckedAt: lastLessonsPassAt(db, scope),
+  };
   for (const row of rows) {
     // An unrecognised status lands in `closed` rather than nowhere: being
     // invisible is the defect this map exists to close, and a row the

@@ -1605,6 +1605,29 @@ describe('db/queries.ts', () => {
       ).toEqual([]);
       expect(Object.keys(LESSON_BUCKET_FOR_STATUS).sort()).toEqual([...declared].sort());
     });
+
+    it('reports lastCheckedAt as null when dream() has never run', () => {
+      const result = lessonsPage(handle.db);
+      expect(result.lastCheckedAt).toBeNull();
+    });
+
+    it('reports lastCheckedAt as the latest lessons-pass-completed event', async () => {
+      const logFile = path.join(stateDir, `${SESSION_ID}.jsonl`);
+      const first = '2030-02-01T00:00:00.000Z';
+      const second = '2030-02-02T00:00:00.000Z';
+      await appendFile(logFile, tiedLine('lessons-pass-completed', first, { raised: 0 }), 'utf8');
+      await appendFile(logFile, tiedLine('lessons-pass-completed', second, { raised: 2 }), 'utf8');
+
+      const dbPath = path.join(dbDir, 'lessons-checked.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const checkedHandle = openDb(dbPath);
+      try {
+        const result = lessonsPage(checkedHandle.db);
+        expect(result.lastCheckedAt).toBe(second);
+      } finally {
+        checkedHandle.sqlite.close();
+      }
+    });
   });
 
   describe('errorsPage()', () => {

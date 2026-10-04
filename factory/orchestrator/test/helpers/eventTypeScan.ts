@@ -170,6 +170,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       'An operator edit to a lesson, partially payload-tagged via PAYLOAD_PARTIAL_TAG_MAP (lesson_type and lesson_scope, each checked only when the edit carries it). Same pipeline, same reason.',
   },
   {
+    eventType: 'lessons-pass-completed',
+    writtenBy: 'src',
+    reason:
+      'Appended by dream() (lessons.ts) at the end of every dreaming pass, even one that raises nothing, so the dashboard can show when lessons were last checked. No dimension declares it: a pass completing is a fact about the dreaming job, not a lesson or a status change, and the payload carries only a raised count.',
+  },
+  {
     eventType: 'finding-obligation-repaired',
     writtenBy: 'src',
     reason:
@@ -282,7 +288,13 @@ export interface OffTimelineEventType {
  * separate tasks of one plan; the outlived-gap guard in eventTypes.test.ts
  * prunes it the moment the row is there.
  */
-export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [];
+export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [
+  {
+    eventType: 'lessons-pass-completed',
+    reason:
+      "dream() appends one of these at the end of every pass, including every empty one, so a timeline row would be noise most operators never asked to see. The fact it records -- that lessons were checked, and when -- is surfaced through lessonsPage()'s own lastCheckedAt (DS8 plan §2.3) rather than the general-purpose feed.",
+  },
+];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'coverage']);
 
