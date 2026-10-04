@@ -56,6 +56,27 @@ export function learnedFromLabel(sessionId: string, validFrom: string | null): s
 }
 
 /**
+ * The phone row's short form of `learnedFromLabel` (ds-review.html .mm):
+ * "From <session> · <date>", date dropped when `validFrom` is null. The
+ * compact meta line has no room for the full sentence beside the
+ * effectiveness clause.
+ */
+export function shortLearnedFromLabel(sessionId: string, validFrom: string | null): string {
+  if (!validFrom) return `From ${sessionId}`;
+  return `From ${sessionId} · ${formatShortDate(validFrom)}`;
+}
+
+/**
+ * The phone row's short form of `preventedLabel`, lower case to read as the
+ * tail of one sentence after `shortLearnedFromLabel` rather than its own.
+ */
+export function shortPreventedLabel(timesPrevented: number): string {
+  if (timesPrevented <= 0) return 'no repeat prevented yet';
+  if (timesPrevented === 1) return 'prevented 1 repeat';
+  return `prevented ${timesPrevented} repeats`;
+}
+
+/**
  * The Pending tab's empty-state body (ds-spec.md §4.5, audit item Lessons-2).
  * Always names what this tab is for — a sentence an operator who has never
  * seen this page can read on its own — never the spec's own "(runs

@@ -26,6 +26,16 @@ describe('kit/LessonCard.vue', () => {
     expect(CARD).toMatch(/preventedLabel\(/);
   });
 
+  // ds-review.html .mm: the phone meta line uses the short wording, never
+  // the desktop card's full sentence helpers.
+  it('uses the short-form helpers in the compact meta line', () => {
+    const compactBlock = CARD.slice(CARD.indexOf('v-if="compact"'), CARD.indexOf('v-else'));
+    expect(compactBlock).toMatch(/shortLearnedFromLabel\(/);
+    expect(compactBlock).toMatch(/shortPreventedLabel\(/);
+    expect(compactBlock).not.toMatch(/[^t]learnedFromLabel\(/);
+    expect(compactBlock).not.toMatch(/[^t]preventedLabel\(/);
+  });
+
   // ds-spec.md shell table (:807) names "one-line lesson rows"; the binding
   // mock (ds-review.html .mrow) is the two-line grid that actually ships.
   it('has a compact grid layout distinct from the full card', () => {

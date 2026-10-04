@@ -241,7 +241,7 @@ test.describe('Lessons', () => {
     await page.goto('/lessons');
     const title = page.getByRole('tabpanel').getByText('Run tests at the gate.');
     await expect(title).toBeVisible();
-    const meta = page.getByRole('tabpanel').getByText(/csb-audit-1 on 7 Sep/);
+    const meta = page.getByRole('tabpanel').getByText(/From csb-audit-1.*7 Sep/);
     await expect(meta).toBeVisible();
 
     const [titleOverflow, titleBox, metaBox] = await Promise.all([

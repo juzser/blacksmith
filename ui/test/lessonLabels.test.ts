@@ -4,6 +4,8 @@ import {
   lessonScopeLabel,
   pendingEmptyBody,
   preventedLabel,
+  shortLearnedFromLabel,
+  shortPreventedLabel,
 } from '../src/lib/lessonLabels.js';
 
 describe('lib/lessonLabels.ts', () => {
@@ -69,6 +71,32 @@ describe('lib/lessonLabels.ts', () => {
 
     it('hides the date entirely when validFrom is null', () => {
       expect(learnedFromLabel('csb-audit-1', null)).toBe('Learned from csb-audit-1');
+    });
+  });
+
+  describe('shortLearnedFromLabel', () => {
+    it('reads "From <session> · <date>" when validFrom is set', () => {
+      expect(shortLearnedFromLabel('csb-audit-1', '2026-09-07T00:00:00.000Z')).toBe(
+        'From csb-audit-1 · 7 Sep',
+      );
+    });
+
+    it('drops the date entirely when validFrom is null', () => {
+      expect(shortLearnedFromLabel('csb-audit-1', null)).toBe('From csb-audit-1');
+    });
+  });
+
+  describe('shortPreventedLabel', () => {
+    it('says "no repeat prevented yet" for 0', () => {
+      expect(shortPreventedLabel(0)).toBe('no repeat prevented yet');
+    });
+
+    it('says "prevented 1 repeat" (singular) for 1', () => {
+      expect(shortPreventedLabel(1)).toBe('prevented 1 repeat');
+    });
+
+    it('says "prevented N repeats" (plural) for N > 1', () => {
+      expect(shortPreventedLabel(3)).toBe('prevented 3 repeats');
     });
   });
 

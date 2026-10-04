@@ -10,7 +10,13 @@
 // since both render identical content — only whether the whole card is
 // itself the row's click target differs.
 import type { LessonRecord } from '../../lib/api.js';
-import { learnedFromLabel, lessonScopeLabel, preventedLabel } from '../../lib/lessonLabels.js';
+import {
+  learnedFromLabel,
+  lessonScopeLabel,
+  preventedLabel,
+  shortLearnedFromLabel,
+  shortPreventedLabel,
+} from '../../lib/lessonLabels.js';
 import Card from './Card.vue';
 import Tag from './Tag.vue';
 
@@ -52,7 +58,8 @@ function onClick() {
         })
       }}</Tag>
       <span class="bs-lessoncard__meta">
-        {{ learnedFromLabel(lesson.sessionId, lesson.validFrom) }} · {{ preventedLabel(lesson.timesPrevented) }}
+        {{ shortLearnedFromLabel(lesson.sessionId, lesson.validFrom) }} ·
+        {{ shortPreventedLabel(lesson.timesPrevented) }}
       </span>
     </template>
     <Card v-else padding="sm">
