@@ -4,6 +4,7 @@ import {
   formatBudgetPct,
   formatCompactNumber,
   formatCompactValue,
+  formatDurationMs,
   formatElapsed,
   formatLiveStatus,
   formatMeasuredTokens,
@@ -146,6 +147,24 @@ describe('lib/format.ts formatElapsed()', () => {
 
   it('returns an empty string for an unparseable timestamp', () => {
     expect(formatElapsed('not-a-date', now)).toBe('');
+  });
+});
+
+describe('lib/format.ts formatDurationMs()', () => {
+  it('renders seconds under a minute', () => {
+    expect(formatDurationMs(7000)).toBe('7s');
+  });
+
+  it('renders hours with minutes under a day', () => {
+    expect(formatDurationMs((2 * 60 + 13) * 60 * 1000)).toBe('2h 13m');
+  });
+
+  it('drops the minutes part when it is zero', () => {
+    expect(formatDurationMs(3 * 60 * 60 * 1000)).toBe('3h');
+  });
+
+  it('clamps a negative duration to 0s', () => {
+    expect(formatDurationMs(-500)).toBe('0s');
   });
 });
 

@@ -24,6 +24,7 @@ import {
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
+import { scrollToTimelineRow } from '../lib/scrollToRow.js';
 import {
   type ActivityEntry,
   EVENT_KIND_LABEL,
@@ -179,8 +180,7 @@ function goToTask(taskId: string) {
 
 function becauseOf(promptId: string) {
   highlighted.value = promptId;
-  const el = document.getElementById(`activity-row-${promptId}`);
-  el?.scrollIntoView({ block: 'center' });
+  scrollToTimelineRow(promptId);
 }
 </script>
 
