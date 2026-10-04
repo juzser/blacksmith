@@ -23,6 +23,7 @@ import {
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
+import { nextRovingTabId } from '../lib/rovingTabs.js';
 import {
   type ActivityEntry,
   EVENT_KIND_LABEL,
@@ -91,18 +92,9 @@ function selectPhoneKind(kind: (typeof PHONE_KIND_TABS)[number]) {
 function onPhoneKindKeydown(event: KeyboardEvent) {
   const ids = [...PHONE_KIND_TABS];
   const current = kindFilter.value ?? 'all';
-  const idx = ids.indexOf(current);
-  if (idx === -1) return;
-  let next = idx;
-  if (event.key === 'ArrowRight') next = (idx + 1) % ids.length;
-  else if (event.key === 'ArrowLeft') next = (idx - 1 + ids.length) % ids.length;
-  else if (event.key === 'Home') next = 0;
-  else if (event.key === 'End') next = ids.length - 1;
-  else return;
-  event.preventDefault();
-  const nextId = ids[next];
-  if (nextId === undefined) return;
-  selectPhoneKind(nextId);
+  const nextId = nextRovingTabId(event, ids, current);
+  if (nextId === null) return;
+  selectPhoneKind(nextId as (typeof PHONE_KIND_TABS)[number]);
   document.getElementById(`activity-kind-tab-${nextId}`)?.focus();
 }
 

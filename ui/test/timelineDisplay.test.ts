@@ -1344,7 +1344,9 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     expect(new Set(Object.keys(expected))).toEqual(types);
     for (const eventType of types) {
       const e = entry({ eventType });
-      const [title, meta] = expected[eventType];
+      const pair = expected[eventType];
+      if (pair === undefined) throw new Error(`no expected title/meta for ${eventType}`);
+      const [title, meta] = pair;
       expect(titleFor(e), `titleFor(${eventType})`).toBe(title);
       // dispatch_decision's "Running for" text grows with real elapsed time,
       // so it needs the same frozen `now` the dedicated dispatch tests use.
