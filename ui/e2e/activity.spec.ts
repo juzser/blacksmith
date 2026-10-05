@@ -372,6 +372,27 @@ test.describe('Activity', () => {
     expect(box?.height ?? 0).toBeLessThanOrEqual(70);
   });
 
+  // Fix round 3 item 2 (ds-review.html `.mm`): `.bs-timeline-row__meta` had
+  // an unconditional padding-left sized for the rail variant's dot track, so
+  // on phone the (non-rail) Activity row's meta/time line started at x≈67
+  // instead of aligning with the title above it. Fails on 86af027.
+  test("phone: the meta line starts at the row's content start, same as the kind chip", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const chip = row.locator('.bs-event-kind-tag').first();
+    // The padding lives on `.bs-timeline-row__meta` itself, a full-width flex
+    // container -- its own box always starts at the row's content edge, so
+    // the x that moves with the indent is its first child's, not its own.
+    const metaContent = row.locator('.bs-timeline-row__meta > *').first();
+    const chipBox = await chip.boundingBox();
+    const metaBox = await metaContent.boundingBox();
+    expect(Math.abs((metaBox?.x ?? -999) - (chipBox?.x ?? 0))).toBeLessThanOrEqual(2);
+  });
+
   // Fix round 2 item 2: app-page's flex gap used to stack on top of every
   // sentinel/pill/day-group's own margin, leaving ~55px above "Today" and
   // ~40px more above the first row where the mock's .day margin (24px top,
