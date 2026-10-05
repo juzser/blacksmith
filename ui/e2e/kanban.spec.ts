@@ -274,6 +274,37 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
+  // S4 review fix, 2026-10-05: onCopyTaskId (KanbanTaskCard.vue) only calls
+  // the clipboard lib's single path (clipboard.ts: navigator.clipboard.writeText,
+  // no execCommand fallback), so failing that one call is enough to exercise
+  // copyToClipboard's `false` return. The handler must stay silent on it:
+  // no thrown page error, no "Copied" flash, no peek/detail dialog.
+  test('desktop: a failed clipboard write leaves the copy button silent', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'clipboard', {
+        value: { writeText: () => Promise.reject(new Error('denied')) },
+        configurable: true,
+      });
+    });
+    const pageErrors: Error[] = [];
+    page.on('pageerror', (error) => pageErrors.push(error));
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
+    await page.goto('/work/kanban');
+
+    const copyButton = page.locator('.bs-kanban-card__title-copy button').first();
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toHaveAttribute('aria-label', 'epic-1/task-4 (click to copy)');
+
+    await copyButton.click();
+
+    expect(pageErrors).toEqual([]);
+    // Still the plain tooltip, never the "Copied" flash a success path would show.
+    await expect(copyButton).toHaveAttribute('aria-label', 'epic-1/task-4 (click to copy)');
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  });
+
   // S2 review fix, 2026-10-05: a title long enough to fill both clamped
   // lines used to push the copy icon down onto its own, third line — which
   // also clipped it clean off the card once the title itself filled both
@@ -385,20 +416,11 @@ test.describe('Kanban', () => {
     // The grown hit box stays inside the card...
     expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
     expect(copy_.y + copy_.height).toBeLessThanOrEqual(card_.y + card_.height);
-    // ...and never overlaps the AgentChip row above it (bs-kanban-card__row--1,
-    // the only row that renders above the title — the other `.bs-kanban-card__row`
-    // matches, chips and the footer meta row, sit below the title and would give
-    // a false "below itself" reading if picked up by a bare first-row selector).
-    // This task fixture may render without that row (v-if="!compact"), so count()
-    // first rather than boundingBox(), which would otherwise wait out the full
-    // timeout for a locator that never resolves.
-    const rowAbove = card.locator('.bs-kanban-card__row--1').first();
-    if ((await rowAbove.count()) > 0) {
-      const rowAboveBox = await rowAbove.boundingBox();
-      if (rowAboveBox) {
-        expect(copy_.y).toBeGreaterThanOrEqual(rowAboveBox.y + rowAboveBox.height);
-      }
-    }
+    // At phone width `.bs-kanban-card__row--1` (the AgentChip row) never
+    // renders (`v-if="!compact"`, and KanbanBoard.vue binds `:compact` to
+    // phone width), so the title is the card's own first row. The "inside
+    // the card" check above already bounds the hit box from above.
+    expect(await card.locator('.bs-kanban-card__row--1').count()).toBe(0);
 
     // The row below (chips, `.bs-kanban-card__chips`) sits right after the
     // title with only the card's own flex gap (--bs-space-2, 8px) between
