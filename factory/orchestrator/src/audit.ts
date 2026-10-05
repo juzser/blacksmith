@@ -647,7 +647,7 @@ function mintAuditId(now: Date): string {
  *
  * `path.basename(project)` names every OTHER project correctly, but this
  * clone's own directory is not always named FACTORY_PROJECT
- * (`black-smith`) -- roadmap.ts's own note documents the real `black-smith`/
+ * (`blacksmith`) -- roadmap.ts's own note documents the real `black-smith`/
  * `blacksmith` siblings this factory was built beside -- so a self-audit that
  * used the basename wrote a name `collectProjects()` (projects.ts) had never
  * seen, sent it looking for a checkout under this clone's own parent, and it

@@ -266,7 +266,7 @@ test.describe('Sessions', () => {
     await expect(
       page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Sessions' }),
     ).toBeVisible();
-    await expect(page.getByRole('link', { name: 'View black-smith in Sessions' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'View blacksmith in Sessions' })).toHaveAttribute(
       'href',
       /\/sessions/,
     );

@@ -80,7 +80,7 @@ function envelope(
  * emitTasksAdded, which used it for the epic id and the task specs and let the
  * project fall on the floor. Every event of a demo-rpg run therefore landed
  * with no project at all, and db/queries.ts's projectOf() resolves an absent
- * one to the default: a whole epic filed under black-smith, missing from the
+ * one to the default: a whole epic filed under blacksmith, missing from the
  * board of the project it was actually part of.
  *
  * The plan is the fallback and not an override, because a caller holding a

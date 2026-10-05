@@ -62,6 +62,7 @@ import {
 } from '../findings.js';
 import { DB_MIGRATIONS_DIR, roadmapReadPath, STATE_DB_PATH, STATE_EVENTS_DIR } from '../paths.js';
 import { isPlanRefTaskId, latestPlanVersion, loadPlan } from '../plan.js';
+import { normalizeProjectName } from '../projectName.js';
 import { loadRoadmap, type MilestoneDef } from '../roadmap.js';
 import { assertRuntimeSupported } from '../runtime.js';
 import {
@@ -93,7 +94,7 @@ export interface DbOpts {
   /**
    * Overrides factory/specs/roadmap.md's path; defaults to the real repo file.
    * Not tests-only — `db rebuild`/`db apply`/`ui serve` expose it as
-   * `--roadmap-path`, because every db but black-smith's own needs its own
+   * `--roadmap-path`, because every db but blacksmith's own needs its own
    * roadmap projected into it (projectMilestones rewrites the whole table).
    */
   roadmapPath?: string;
@@ -104,7 +105,7 @@ export interface DbOpts {
    * epic owns a task id the log only ever spelled bare (D-250,
    * planRosterAliases below) — never to project a plan into a table.
    * Exposed as `--specs-dir` for the same reason `--roadmap-path` is: a db
-   * that is not black-smith's own is built from another tree.
+   * that is not blacksmith's own is built from another tree.
    */
   specsDir?: string;
 }
@@ -665,6 +666,16 @@ function errorTaskRefIds(record: EventRecord): string[] {
 }
 
 /**
+ * `record.project`, normalized through the legacy alias -- the one place an
+ * event's raw project value becomes the current one before it reaches a
+ * row, so an old event stamped `project: 'black-smith'` never lands in the
+ * projection under that name.
+ */
+function recordProject(record: EventRecord): string | undefined {
+  return record.project === undefined ? undefined : normalizeProjectName(record.project);
+}
+
+/**
  * The task ids one event asserts something about, spelled the way foldTasks()'s
  * switch reads them: the envelope or payload `task_id` (D-245) for the
  * single-task events, `payload.task_ids` for a wave's admission or merge, and
@@ -843,7 +854,7 @@ export function foldTasks(
         row.claims = readClaims(p.claims) ?? row.claims;
         row.budgetTokens = p.budget_tokens ?? row.budgetTokens;
         row.branch = p.branch ?? branchFor(row.epicId, row.taskId);
-        row.project = record.project ?? row.project;
+        row.project = recordProject(record) ?? row.project;
         break;
       }
       case 'wave-admitted': {
@@ -880,7 +891,7 @@ export function foldTasks(
           row.taskStatus = 'in-progress';
           row.terminalAt = null;
         }
-        row.project = record.project ?? row.project;
+        row.project = recordProject(record) ?? row.project;
         break;
       }
       case 'judge-reported':
@@ -934,7 +945,7 @@ export function foldTasks(
         const taskIds = errorTaskRefIds(record);
         for (const taskId of taskIds) {
           const row = touch(taskId, record.ts, record.session_id);
-          row.project = record.project ?? row.project;
+          row.project = recordProject(record) ?? row.project;
           if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) continue;
           // Severity decides whether the task moves; the error class decides
           // where. taxonomy.yml: S3 is "real but waivable; batched to operator
@@ -1171,7 +1182,7 @@ export function foldEpics(events: readonly StoredEvent[]): EpicFoldRow[] {
       blockers: Array.isArray(p.blockers) ? p.blockers : [],
       closedAt: record.ts,
       eventId: event_id,
-      project: record.project ?? null,
+      project: recordProject(record) ?? null,
     });
   }
 
@@ -1203,7 +1214,7 @@ export function foldEpics(events: readonly StoredEvent[]): EpicFoldRow[] {
  * deliberate that an absent project stays absent on the wire -- but it IS a
  * gap in these tables, because db/queries.ts's projectOf() resolves a NULL
  * column to the DEFAULT project. Left alone, every gate outcome and every
- * failure of a demo-rpg run reads back as black-smith's.
+ * failure of a demo-rpg run reads back as blacksmith's.
  *
  * A child row's project is its task's, which is exactly the rule the Scope
  * docblock in db/queries.ts already states (D-170). Derived from the same
@@ -1241,7 +1252,7 @@ function projectResolver(
  * rows fold to project NULL, projectResolver() hands the NULL down to every
  * dispatch and error under them, and db/queries.ts's projectOf() resolves the
  * lot to the DEFAULT project: the whole demo-rpg epic filed under
- * black-smith, its own board empty. That history cannot be repaired from the
+ * blacksmith, its own board empty. That history cannot be repaired from the
  * log, because the log never held the answer. The plan file did, all along.
  *
  * Same source and same precedence as the write side -- what the envelope
@@ -1268,7 +1279,12 @@ function planProjectResolver(
     let project: string | null = null;
     try {
       const version = latestPlanVersion(epicId, { specsDir });
-      if (version !== null) project = loadPlan(epicId, version, { specsDir }).project ?? null;
+      if (version !== null) {
+        // The plan file is immutable and may still literally say the legacy
+        // name; normalize it the same way an event's project value is.
+        const planProject = loadPlan(epicId, version, { specsDir }).project;
+        project = planProject === undefined ? null : normalizeProjectName(planProject);
+      }
     } catch (err) {
       console.error(
         `db/projector.ts planProjectResolver(): plan file for "${epicId}" ` +
@@ -1290,7 +1306,7 @@ function planProjectResolver(
  * projectTasks() writes the tasks table from another over every session's
  * log, and projectFindings() folds the same events again for
  * findings.project. Split the backfill across only one of them and a single
- * task reads as demo-rpg's on the board and black-smith's on the errors page.
+ * task reads as demo-rpg's on the board and blacksmith's on the errors page.
  */
 function foldTasksWithPlanProject(events: readonly StoredEvent[], opts: DbOpts): TaskFoldRow[] {
   const projectFromPlan = planProjectResolver(opts.specsDir);
@@ -1331,7 +1347,7 @@ export function projectSession(
      * them (D-250), so the task leg alone can never answer. Resolving through
      * it alone left those rows NULL, and queries.ts's projectOf() reads a NULL
      * back as the DEFAULT project, not as "unscoped": every one of them was
-     * filed under black-smith, including the one stop-the-line error in the
+     * filed under blacksmith, including the one stop-the-line error in the
      * shipped logs, which demo-rpg had raised (D-252).
      *
      * epicOfTaskId() answers for a qualified ref; `?? ref` covers the bare
@@ -1374,7 +1390,7 @@ export function projectSession(
           planVersion: record.plan_version,
           causalParent: record.causal_parent,
           payload: JSON.stringify(record.payload),
-          project: record.project ?? projectForRef(eventTask),
+          project: recordProject(record) ?? projectForRef(eventTask),
           actor: record.actor,
         })
         .run();
@@ -1412,7 +1428,7 @@ export function projectSession(
             reason: dispatchReasonText(p),
             parentPromptId: p.parent_prompt_id ?? null,
             causalParent: record.causal_parent,
-            project: record.project ?? projectForRef(eventTask),
+            project: recordProject(record) ?? projectForRef(eventTask),
           })
           .run();
         continue;
@@ -1452,7 +1468,7 @@ export function projectSession(
             errorClass: cls,
             severity: p.severity,
             detail: p.detail ?? null,
-            project: record.project ?? projectForRef(p.task_ref ?? eventTask),
+            project: recordProject(record) ?? projectForRef(p.task_ref ?? eventTask),
           })
           .run();
         continue;
@@ -1476,7 +1492,7 @@ export function projectSession(
             reason: p.reason ?? null,
             repoSlug: p.repo_slug ?? null,
             source: p.source ?? '',
-            project: record.project ?? projectForRef(p.task_ref ?? eventTask),
+            project: recordProject(record) ?? projectForRef(p.task_ref ?? eventTask),
           })
           .run();
         continue;

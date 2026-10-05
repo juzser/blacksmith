@@ -882,7 +882,7 @@ describe('db/queries.ts', () => {
           commentCount: 1,
           prUrl: null,
           dependencies: [],
-          epicLabel: 'black-smith: Epic 1',
+          epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
         },
@@ -912,7 +912,7 @@ describe('db/queries.ts', () => {
               edgeType: 'artifact',
             },
           ],
-          epicLabel: 'black-smith: Epic 1',
+          epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
         },
@@ -934,7 +934,7 @@ describe('db/queries.ts', () => {
           commentCount: 0,
           prUrl: null,
           dependencies: [],
-          epicLabel: 'black-smith: Epic 1',
+          epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
         },
@@ -960,7 +960,7 @@ describe('db/queries.ts', () => {
           commentCount: 1,
           prUrl: null,
           dependencies: [],
-          epicLabel: 'black-smith: Epic 1',
+          epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
         },
@@ -968,7 +968,7 @@ describe('db/queries.ts', () => {
     });
 
     // epicLabelFor must read a tagged project through projectOf() (DEFAULT_PROJECT),
-    // not re-hardcode 'black-smith' as its own fallback literal.
+    // not re-hardcode 'blacksmith' as its own fallback literal.
     it('labels a tagged task with its own project, not the hard-coded default', () => {
       handle.db
         .update(tasks)
@@ -3150,7 +3150,7 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     const fixture = result.runningSessions.find((s) => s.sessionId === SESSION_ID);
     expect(fixture).toMatchObject({
       liveAgentCount: 2, // same two agents overview() already counts
-      projects: ['black-smith'],
+      projects: ['blacksmith'],
       lastEventType: 'operator-feedback-resolved',
     });
     expect(fixture?.eventCount).toBeGreaterThan(0);
@@ -3181,7 +3181,7 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     // The sessions table has no project column, so a session belongs to the
     // projects of its tasks. OTHER has none yet, so it is not this project's.
     expect(
-      overview(handle.db, { project: 'black-smith' }).runningSessions.map((s) => s.sessionId),
+      overview(handle.db, { project: 'blacksmith' }).runningSessions.map((s) => s.sessionId),
     ).toEqual([SESSION_ID]);
     expect(overview(handle.db, { project: 'other-project' }).runningSessions).toEqual([]);
   });

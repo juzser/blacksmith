@@ -197,8 +197,8 @@ describe('issueReporter.ts', () => {
   // --- AC1: one create, four comments, across five sessions/plan versions ---
   it('collapses five rounds of one broken gate into one create and four comments (AC1)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-a', 'black-smith');
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
+    const events = await fiveGateRounds('epic-1/task-a', 'blacksmith');
     const { runner, bucket, calls } = makeStub({ search: foundAfterFirst() });
 
     const records = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
@@ -246,7 +246,7 @@ describe('issueReporter.ts', () => {
     'dedups five rounds of a %s source into one create, four comments (AC2)',
     async (eventType, payload) => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
       const taskId = `epic-1/task-${eventType}`;
       const events: StoredEvent[] = [];
       for (let n = 1; n <= 5; n += 1) {
@@ -256,7 +256,7 @@ describe('issueReporter.ts', () => {
             eventType,
             payload: payload(taskId),
             taskId,
-            project: 'black-smith',
+            project: 'blacksmith',
             planVersion: n,
           }),
         );
@@ -273,8 +273,8 @@ describe('issueReporter.ts', () => {
   // --- AC3: exact-match dedup only ---
   it('comments on an exact fingerprint-line match (AC3a)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-exact', 'black-smith').then((all) =>
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
+    const events = await fiveGateRounds('epic-1/task-exact', 'blacksmith').then((all) =>
       all.slice(0, 1),
     );
     const { runner, bucket } = makeStub({
@@ -293,8 +293,8 @@ describe('issueReporter.ts', () => {
 
   it('opens a new issue when the fingerprint only appears as a substring (AC3b)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-substr', 'black-smith').then((all) =>
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
+    const events = await fiveGateRounds('epic-1/task-substr', 'blacksmith').then((all) =>
       all.slice(0, 1),
     );
     const { runner, bucket } = makeStub({
@@ -342,8 +342,8 @@ describe('issueReporter.ts', () => {
     'search exits 0 with unreadable output: $name (AC4 search-unparseable branch)',
     async ({ stdout }) => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-      const events = await fiveGateRounds('epic-1/task-unreadable-search', 'black-smith').then(
+      const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
+      const events = await fiveGateRounds('epic-1/task-unreadable-search', 'blacksmith').then(
         (all) => all.slice(0, 1),
       );
       const { runner, bucket } = makeStub({
@@ -367,7 +367,7 @@ describe('issueReporter.ts', () => {
     runGit(noOriginDir, ['init', '-q', '-b', 'main']);
 
     const register: ProjectRef[] = [
-      { name: 'black-smith', dir: okDir, self: true },
+      { name: 'blacksmith', dir: okDir, self: true },
       { name: 'no-origin-project', dir: noOriginDir, self: false },
     ];
 
@@ -389,7 +389,7 @@ describe('issueReporter.ts', () => {
     // 1. switch off
     rows.push({
       name: 'switch off',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => false,
       stub: makeStub(),
@@ -419,7 +419,7 @@ describe('issueReporter.ts', () => {
     // 4. gh missing
     rows.push({
       name: 'gh missing',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({ auth: 'missing' }),
@@ -429,7 +429,7 @@ describe('issueReporter.ts', () => {
     // 5. gh unauthenticated
     rows.push({
       name: 'gh unauthenticated',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({ auth: 'unauthenticated' }),
@@ -439,7 +439,7 @@ describe('issueReporter.ts', () => {
     // 6. gh unknown
     rows.push({
       name: 'gh unknown',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({ auth: 'unknown' }),
@@ -449,7 +449,7 @@ describe('issueReporter.ts', () => {
     // 8. search exits non-zero
     rows.push({
       name: 'search fails',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({ search: () => ({ status: 1, stdout: '', stderr: 'boom' }) }),
@@ -459,7 +459,7 @@ describe('issueReporter.ts', () => {
     // 9. exact match, comment succeeds
     rows.push({
       name: 'match, comment ok',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({
@@ -475,7 +475,7 @@ describe('issueReporter.ts', () => {
     // 10. exact match, comment fails
     rows.push({
       name: 'match, comment fails',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({
@@ -492,7 +492,7 @@ describe('issueReporter.ts', () => {
     // 11. no match, create succeeds
     rows.push({
       name: 'no match, create ok',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({ search: noHitOnce }),
@@ -502,7 +502,7 @@ describe('issueReporter.ts', () => {
     // 12. no match, create fails
     rows.push({
       name: 'no match, create fails',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: makeStub({
@@ -532,7 +532,7 @@ describe('issueReporter.ts', () => {
       eventType: 'gate-outcome',
       payload: { outcome: 'blocked', reason: 'tests-failed' },
       taskId: 'epic-1/task-dedup',
-      project: 'black-smith',
+      project: 'blacksmith',
     });
     const firstStub = makeStub({ search: () => ({ status: 0, stdout: '[]', stderr: '' }) });
     await reportErrors([dedupEvent], () => true, register, firstStub.runner, CLOCK, { stateDir });
@@ -541,7 +541,7 @@ describe('issueReporter.ts', () => {
     const historyStub = makeStub();
     rows.push({
       name: 'already reported, nothing new',
-      project: 'black-smith',
+      project: 'blacksmith',
       register,
       enabled: () => true,
       stub: historyStub,
@@ -604,7 +604,7 @@ describe('issueReporter.ts', () => {
     const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const demoDir = await makeRepo('git@github.com:someone/demo-rpg.git');
     const register: ProjectRef[] = [
-      { name: 'black-smith', dir: factoryDir, self: true },
+      { name: 'blacksmith', dir: factoryDir, self: true },
       { name: 'demo-rpg', dir: demoDir, self: false },
     ];
     const events = [
@@ -620,7 +620,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-factory',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const { runner, calls } = makeStub();
@@ -661,7 +661,7 @@ describe('issueReporter.ts', () => {
     const onDir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const offDir = await makeRepo('git@github.com:someone/off-project.git');
     const register: ProjectRef[] = [
-      { name: 'black-smith', dir: onDir, self: true },
+      { name: 'blacksmith', dir: onDir, self: true },
       { name: 'off-project', dir: offDir, self: false },
     ];
     const events = [
@@ -670,7 +670,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-on',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
       await seed({
         sessionId: 'session-off',
@@ -691,7 +691,7 @@ describe('issueReporter.ts', () => {
 
   it('skips with skipped-unresolved-project -- never a default report on the factory itself -- when a row is unstamped and unresolved', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const events = [
       await seed({
         sessionId: 'session-default-on',
@@ -711,14 +711,14 @@ describe('issueReporter.ts', () => {
   // --- AC7: the act is a fact -- allowlist and secret containment ---
   it('appends one issue-reported event per candidate, with the exact allowlisted key set', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const openedEvents = [
       await seed({
         sessionId: 'session-opened',
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-opened',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const dedupEvents = [
@@ -727,7 +727,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-payload-dedup',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const failedEvents = [
@@ -736,7 +736,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-payload-failed',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
 
@@ -844,7 +844,7 @@ describe('issueReporter.ts', () => {
 
   it('never lets a secret in event detail reach the payload or any argv (AC7 secret)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const SECRET = 'SECRETLIKE-abc123';
     const events = [
       await seed({
@@ -857,7 +857,7 @@ describe('issueReporter.ts', () => {
           detail: SECRET,
         },
         taskId: 'epic-1/task-secret',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const { runner, calls } = makeStub();
@@ -880,8 +880,8 @@ describe('issueReporter.ts', () => {
   // --- AC8: the comment body is the renderer's output, byte for byte ---
   it('the comment body is renderComment()s output, strictly equal', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-render', 'black-smith');
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
+    const events = await fiveGateRounds('epic-1/task-render', 'blacksmith');
     const { runner, calls } = makeStub({ search: foundAfterFirst() });
 
     const records = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
@@ -903,7 +903,7 @@ describe('issueReporter.ts', () => {
 
   it('never lets secret detail or a fenced diff reach an argv or the payload (AC8 secret)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const SECRET = 'SECRETLIKE-abc123';
     const DIFF = '```diff\n- old\n+ new\n```';
     const events = [
@@ -912,7 +912,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed', detail: `${SECRET}\n${DIFF}` },
         taskId: 'epic-1/task-secret-comment',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const { bucket: bucket1, runner: runner1 } = makeStub({
@@ -926,7 +926,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed', detail: `${SECRET}\n${DIFF}` },
         taskId: 'epic-1/task-secret-comment',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const { runner: runner2, calls } = makeStub({
@@ -958,14 +958,14 @@ describe('issueReporter.ts', () => {
   // --- AC9: idempotence ---
   it('is idempotent: a second call over the same log records zero creates, zero comments', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const events = [
       await seed({
         sessionId: 'session-idem',
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-idem',
-        project: 'black-smith',
+        project: 'blacksmith',
       }),
     ];
     const { runner: runner1 } = makeStub({
@@ -990,14 +990,14 @@ describe('issueReporter.ts', () => {
   // runner's gh branch throws at step 3 and the log grows by two.
   it('previews A as deduped-open and B with all three argv blocks, spawning no gh and appending nothing (AC9)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
     const candidate = (letter: string) =>
       seed({
         sessionId: `session-preview-${letter}`,
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: `epic-1/task-preview-${letter}`,
-        project: 'black-smith',
+        project: 'blacksmith',
       });
     // A: reported once for real (against a stub), so the log carries a prior
     // `issue-reported` whose fingerprint matches A. B: never reported.
@@ -1221,7 +1221,7 @@ describe('issueReporter.ts', () => {
       const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
       const foreignDir = await makeRepo('git@github.com:example-org/example-app.git');
       const register: ProjectRef[] = [
-        { name: 'black-smith', dir: factoryDir, self: true },
+        { name: 'blacksmith', dir: factoryDir, self: true },
         { name: 'example-app', dir: foreignDir, self: false },
       ];
       const events = [
@@ -1289,7 +1289,7 @@ describe('issueReporter.ts', () => {
 
     it('skips with skipped-unresolved-project rather than defaulting to the factory project when no resolver is wired in (backward compatible)', async () => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
       const events = [
         await seed({
           sessionId: 'session-no-resolver',
@@ -1309,7 +1309,7 @@ describe('issueReporter.ts', () => {
 
     it("does not let one run's own issue-reported project stamp leak into a later run's unresolved row in the same session (S1-a)", async () => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const register: ProjectRef[] = [{ name: 'blacksmith', dir, self: true }];
       const firstEvent = await seed({
         sessionId: 'session-loop',
         eventType: 'gate-outcome',
@@ -1321,7 +1321,7 @@ describe('issueReporter.ts', () => {
       // then writes that answer onto the resulting issue-reported row's own
       // `project` field, exactly as the real resolver would.
       const resolverRun1 = (taskRef: string) =>
-        taskRef === 'epic-1/task-first' ? 'black-smith' : null;
+        taskRef === 'epic-1/task-first' ? 'blacksmith' : null;
       await reportErrors(
         [firstEvent],
         ENABLED,
@@ -1363,7 +1363,7 @@ describe('issueReporter.ts', () => {
       const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
       const foreignDir = await makeRepo('git@github.com:example-org/example-app.git');
       const register: ProjectRef[] = [
-        { name: 'black-smith', dir: factoryDir, self: true },
+        { name: 'blacksmith', dir: factoryDir, self: true },
         { name: 'example-app', dir: foreignDir, self: false },
       ];
       const events = [

@@ -72,7 +72,7 @@ describe('the four axes', () => {
 
 // A self-audit's cut named its milestone, its events and its spec
 // `path.basename(project)` -- correct for every OTHER project, but this
-// clone's own directory is not always named FACTORY_PROJECT (`black-smith`;
+// clone's own directory is not always named FACTORY_PROJECT (`blacksmith`;
 // roadmap.ts documents the `black-smith`/`blacksmith` siblings), so a
 // self-audit wrote a name `collectProjects()` (projects.ts) had never seen
 // and that resolved back to this very clone under it. `auditedProjectName`
