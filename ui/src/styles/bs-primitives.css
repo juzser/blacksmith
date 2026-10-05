@@ -2631,57 +2631,19 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
-/* Review follow-up (S4, 2026-10-05): space-between stretched row 1 across
-   the card's full width, so on a card whose AgentChip renders nothing (it
-   emits no element at all, not an empty one — see AgentChip.vue's `v-if`)
-   the copy IconButton — the only element left between the id and the Quote
-   trigger — floated to the middle of the card instead of sitting right
-   after the id. The row's own gap (from .bs-kanban-card__row) already keeps
-   id and copy button adjacent; the Quote trigger below gets margin-left:
-   auto instead, so it still pins to the right edge whether or not a chip
-   renders. */
-/* Operator fix 2026-10-05: a long AgentChip label used to squeeze the id
-   into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
-   The id now keeps one line and takes the row's remaining space; the chip
-   below shrinks (min-width: 0) and ellipsises its label instead of pushing
-   the id out, and the Quote icon (flex: none below) never shrinks. The grow rule
-   is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
-   class, and an unscoped grow pushed its title away from the id.
-   Operator follow-up fix 2026-10-05: that grow rule then made the id the
-   row's "wins the space" element, so a *short* id ("task-3") still got
-   clipped to "tas…" once the new copy-id button left row 1 even less
-   room. The id must stay readable in full for a short id; the AgentChip
-   label is the thing allowed to ellipsise first. Id and chip swap
-   flex-grow roles: the id caps at 50% and only shrinks past its content's
-   natural width (a short id never reaches that cap); the chip takes
-   whatever the id/buttons leave and ellipsises via its own
-   .bs-agent-chip__text rule. Copy button and Quote icon (flex: none)
-   never shrink either way. */
+/* Operator fix 2026-10-05: row 1's id text + copy button moved to a link
+   icon right after the title (below), so row 1 now only carries the
+   AgentChip and the Quote trigger. The chip grows into the space the id
+   used to take (flex: 1 1 auto, ellipsising via its own .bs-agent-chip__text
+   rule); the Quote trigger (flex: none) stays pinned to the right edge via
+   margin-left: auto so it does not float mid-row on a card whose AgentChip
+   renders nothing at all (see AgentChip.vue's own `v-if`). `.bs-kanban-card__id`
+   itself stays — WaveTaskCard on Roadmap still renders it and is out of
+   this slice's claim. */
 .bs-kanban-card__id {
   white-space: nowrap;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
-}
-.bs-kanban-card__row--1 .bs-kanban-card__id {
-  /* flex-shrink: 0, not 1 — the flexbox shrink algorithm distributes the
-     deficit proportionally to each shrinkable item's flex-basis, so with
-     shrink:1 the id (small basis) was still losing width to the chip (huge
-     basis once its label includes "- a nudge may help") even though the
-     chip is the one meant to give way. An inflexible item's rendered size
-     is its flex-basis clamped to max-width regardless of its siblings, so
-     a short id renders at its full content width (well under the 50% cap)
-     and a long id still clips at the cap — only the chip shrinks. */
-  flex: 0 0 auto;
-  max-width: 50%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  /* ds-review.html mock's `.mono` row-1 id: mono font, faintest text
-     colour. Scoped to row 1 rather than the shared `.bs-kanban-card__id`
-     base rule, which WaveTaskCard also uses and is out of this slice's
-     claim. */
-  color: var(--bs-text-subtlest);
-  font-family: var(--bs-font-mono);
 }
 .bs-kanban-card__row--1 .bs-agent-chip {
   flex: 1 1 auto;
@@ -2690,9 +2652,6 @@ summary.bs-inbox__group-head {
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;
 }
-/* Only the Quote trigger is pushed to the right edge: IconButton wraps the
-   copy button in a Tooltip too, so the shared trigger class must not carry
-   the auto margin or the copy button leaves the id's side. */
 .bs-kanban-card__row--1 .bs-kanban-card__quote {
   margin-left: auto;
 }
@@ -2702,6 +2661,15 @@ summary.bs-inbox__group-head {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  font-weight: var(--bs-font-weight-medium);
+}
+/* The copy-id link icon sits right after the title text as an inline-flex
+   glyph (ds-review.html has no equivalent; this is the operator's row-1
+   replacement) so it flows as the title's last word instead of breaking
+   onto its own line. */
+.bs-kanban-card__title-copy {
+  margin-left: var(--bs-space-1);
+  vertical-align: middle;
 }
 .bs-kanban-card__summary {
   margin: 0;

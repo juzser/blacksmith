@@ -32,24 +32,39 @@ describe('KanbanTaskCard.vue — card chip variant (audit finding 2)', () => {
 describe('KanbanTaskCard.vue — footer dependency line (operator fix 2026-10-05)', () => {
   it('clamps the footer dependency text to one line with a native title tooltip', () => {
     expect(SRC).toMatch(
-      /<span class="bs-kanban-card__footer-dep" :title="footerDependency">\{\{ footerDependency \}\}<\/span>/,
+      /<span\s+v-if="task\.dependencies\.length > 0"\s+class="bs-kanban-card__footer-dep"\s+:title="footerDependency"\s*>\{\{ footerDependency \}\}<\/span\s*>/,
     );
   });
 });
 
-describe('KanbanTaskCard.vue — row 1 id stays on one line (operator fix 2026-10-05)', () => {
-  it('carries the full task id as a title tooltip on the id element', () => {
+describe('KanbanTaskCard.vue — row 1 drops the id text (operator fix 2026-10-05)', () => {
+  it('does not render the id span in row 1 any more', () => {
+    expect(SRC).not.toMatch(/<span class="bs-kanban-card__id"/);
+  });
+
+  it('does not render a "Copy task id" IconButton in row 1', () => {
+    expect(SRC).not.toMatch(/:icon="Copy"/);
+  });
+
+  it('row 1 starts with the AgentChip, then the Quote trigger', () => {
     expect(SRC).toMatch(
-      /<span class="bs-kanban-card__id" :title="task\.taskId">\{\{ shortId \}\}<\/span>/,
+      /class="bs-kanban-card__row bs-kanban-card__row--1">\s*<AgentChip[\s\S]*?<Tooltip[^>]*class="bs-kanban-card__quote"/,
     );
   });
 });
 
-describe('KanbanTaskCard.vue — row 1 copy-id button (ds-review.html mock, ds-spec.md §2.2 TaskCard)', () => {
-  it('renders a sm IconButton labelled "Copy task id" right after the id, before the AgentChip', () => {
+describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)', () => {
+  it('renders a link IconButton right after the title text', () => {
     expect(SRC).toMatch(
-      /<span class="bs-kanban-card__id"[^>]*>\{\{ shortId \}\}<\/span>\s*<IconButton\s+:icon="Copy"\s+:label="copyIdLabel"\s+size="sm"\s+@click="onCopyTaskId"\s*\/>\s*<AgentChip/,
+      /class="bs-kanban-card__title">\s*\{\{ title \}\}\s*<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
     );
+  });
+
+  it('seeds the tooltip label with the full task id plus "(click to copy)"', () => {
+    expect(SRC).toMatch(
+      /copyIdTooltip\s*=\s*computed\(\s*\(\)\s*=>\s*`\$\{props\.task\.taskId\}\s*\(click to copy\)`\s*\)/,
+    );
+    expect(SRC).toMatch(/useCopyFeedback\(copyIdTooltip\.value,\s*'Copied'\)/);
   });
 
   it('copies the full task.taskId to the clipboard via the shared clipboard helper', () => {
@@ -57,27 +72,27 @@ describe('KanbanTaskCard.vue — row 1 copy-id button (ds-review.html mock, ds-s
     expect(SRC).toMatch(/copyToClipboard\(props\.task\.taskId\)/);
   });
 
-  it('uses useCopyFeedback for the idle/"Copied" label, seeded with "Copy task id"', () => {
-    expect(SRC).toMatch(
-      /import\s*\{\s*useCopyFeedback\s*\}\s*from\s*'\.\.\/composables\/useCopyFeedback\.js'/,
-    );
-    expect(SRC).toMatch(/useCopyFeedback\('Copy task id'\)/);
-  });
-
   it('stops the click from propagating to the card, so it never opens the peek panel', () => {
     expect(SRC).toMatch(
       /function onCopyTaskId\(event: MouseEvent\) \{\s*event\.stopPropagation\(\);/,
     );
   });
+
+  it('gives the title medium font-weight via the design token', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title');
+    expect(block).toMatch(/font-weight:\s*var\(--bs-font-weight-medium\)/);
+  });
+});
+
+describe('KanbanTaskCard.vue — footer hides "Waits for: nothing" with no dependencies (operator fix 2026-10-05)', () => {
+  it('gates the footer-dep span on task.dependencies.length > 0', () => {
+    expect(SRC).toMatch(
+      /<span\s+v-if="task\.dependencies\.length > 0"\s+class="bs-kanban-card__footer-dep"/,
+    );
+  });
 });
 
 describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-10-05)', () => {
-  it('caps the id at 50% with flex-shrink 0, so it never loses width to the chip', () => {
-    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__id');
-    expect(block).toMatch(/flex:\s*0 0 auto/);
-    expect(block).toMatch(/max-width:\s*50%/);
-  });
-
   it('makes the AgentChip the element that grows and ellipsises first, not the id', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-agent-chip');
     expect(block).toMatch(/flex:\s*1 1 auto/);
@@ -85,31 +100,23 @@ describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-1
     expect(block).not.toMatch(/max-width/);
   });
 
-  it('keeps the copy-id button and Quote icon from ever shrinking', () => {
+  it('keeps the Quote icon from ever shrinking', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
     expect(block).toMatch(/flex:\s*none/);
   });
 });
 
-describe('KanbanTaskCard.vue — row 1 copy button sits next to the id with no chip (review follow-up S4, 2026-10-05)', () => {
+describe('KanbanTaskCard.vue — row 1 Quote icon sits at the right edge with no chip (review follow-up S4, 2026-10-05)', () => {
   // AgentChip renders no element at all when it has nothing to show (its
   // template root is a `v-if="chip && text"` Tag — see AgentChip.vue), so a
-  // chip-less row 1 only has the id, the copy button and the Quote
-  // trigger. Whether that leaves the copy button ~12px from the id — a
-  // layout computation this `environment: 'node'` suite has no DOM for —
-  // is proved by ui/e2e/kanban.spec.ts "desktop: the copy-id button sits
-  // right after the id on a card with no AgentChip". This only pins the
-  // source rules that make that possible.
+  // chip-less row 1 only has the Quote trigger left in it.
   it('does not stretch row 1 with justify-content: space-between', () => {
     expect(PRIMITIVES_CSS).not.toMatch(
       /\.bs-kanban-card__row--1\s*\{\s*justify-content:\s*space-between;/,
     );
   });
 
-  // IconButton wraps its button in a Tooltip, so the copy button is a
-  // `.bs-tooltip-trigger` too: margin-left: auto on that shared class pushed
-  // the copy button to the right edge. Only the Quote trigger may carry it.
-  it('pins only the Quote tooltip trigger to the right edge via margin-left: auto', () => {
+  it('pins the Quote tooltip trigger to the right edge via margin-left: auto', () => {
     expect(SRC).toMatch(/<Tooltip[^>]*class="bs-kanban-card__quote"/);
     const quote = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__quote');
     expect(quote).toMatch(/margin-left:\s*auto/);
