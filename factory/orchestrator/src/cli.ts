@@ -853,10 +853,10 @@ function isoDateFlag(flags: Record<string, string>, name: string): Date | undefi
  * `event append` writes.
  *
  * `--roadmap-path` belongs here too: both verbs rebuild the whole milestones
- * table from a roadmap file, and unset it falls back to black-smith's own
+ * table from a roadmap file, and unset it falls back to blacksmith's own
  * factory/specs/roadmap.md. Dropping the flag therefore did not mean "keep the
  * existing milestones" — it meant "replace this db's milestones with
- * black-smith's", which is a silent data swap for any db but this repo's.
+ * blacksmith's", which is a silent data swap for any db but this repo's.
  *
  * `--specs-dir` travels for the same reason and is the same flag `plan`
  * already takes: the projector reads an epic's plan file to answer what
@@ -2401,7 +2401,7 @@ async function main(): Promise<number> {
       // plan on disk naming no project is this checkout's own epic, so it
       // reads as FACTORY_PROJECT rather than staying an unresolved null the
       // daemon would report as an unlabeled finding and the on/off switch
-      // for 'black-smith' would never get asked about. Split into strict
+      // for 'blacksmith' would never get asked about. Split into strict
       // (resolveProjectForTaskRef) and self-only (selfFallbackForTaskRef)
       // tiers so a session's own stamp can ride between them (S2-c).
       resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
@@ -5054,7 +5054,7 @@ async function main(): Promise<number> {
     // missing feature but a silent data swap: the read path re-projects each
     // session on the first request (app.ts's createRefresher), and apply()
     // rebuilds the whole milestones table from a roadmap file while it is
-    // there. Unset, that file falls back to black-smith's own
+    // there. Unset, that file falls back to blacksmith's own
     // factory/specs/roadmap.md — so serving another project's db showed this
     // repo's roadmap from the first page load onward.
     const roadmapPath = flags['roadmap-path'];

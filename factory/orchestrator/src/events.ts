@@ -36,7 +36,7 @@ export interface EventInput {
    * often than any §8 dimension, so gating them behind a taxonomy PR would
    * defeat the point of a multi-project hub. Optional: absent events (and
    * every event logged before Phase 6b) are treated as the default project
-   * 'black-smith' by db/queries.ts's read helpers, never by this writer —
+   * 'blacksmith' by db/queries.ts's read helpers, never by this writer —
    * the log stays a faithful record of what was actually stamped.
    */
   project?: string;

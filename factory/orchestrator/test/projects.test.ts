@@ -234,12 +234,12 @@ describe('resolveProjectDirs', () => {
 
 describe('unwatchedProjects', () => {
   const refs = [
-    { name: 'black-smith', dir: '/repo/self', self: true },
+    { name: 'blacksmith', dir: '/repo/self', self: true },
     { name: 'envkit', dir: '/repo/envkit', self: false },
   ];
 
   it('is everything when nothing was passed', () => {
-    expect(unwatchedProjects(refs, []).map((r) => r.name)).toEqual(['black-smith', 'envkit']);
+    expect(unwatchedProjects(refs, []).map((r) => r.name)).toEqual(['blacksmith', 'envkit']);
   });
 
   it('is empty when every repo is watched', () => {

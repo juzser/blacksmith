@@ -41,7 +41,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         sequence: 1,
         goal: 'Stand up the scaffold.',
         epicIds: [],
-        project: 'black-smith',
+        project: 'blacksmith',
         kind: 'factory',
         errorIssuesEnabled: true,
       },
@@ -52,7 +52,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         sequence: 2,
         goal: null,
         epicIds: ['epic-1', 'epic-2'],
-        project: 'black-smith',
+        project: 'blacksmith',
         kind: 'factory',
         errorIssuesEnabled: true,
       },
@@ -70,13 +70,25 @@ describe('roadmap.ts parseRoadmap()', () => {
     expect(milestones[0]?.project).toBe('demo-hub');
   });
 
-  it('defaults project to "black-smith" when the bullet is absent', () => {
+  it('defaults project to "blacksmith" when the bullet is absent', () => {
     const md = `## Phase 1 — Bootstrap
 - id: phase-1
 - status: planned
 `;
     const milestones = parseRoadmap(md);
-    expect(milestones[0]?.project).toBe('black-smith');
+    expect(milestones[0]?.project).toBe('blacksmith');
+  });
+
+  it('normalizes an explicit "- project: black-smith" bullet to the current name', () => {
+    // roadmap.md is mutable, but an old checkout's bullet -- or a bullet
+    // copied from an old example -- may still literally say the legacy name.
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- project: black-smith
+`;
+    const milestones = parseRoadmap(md);
+    expect(milestones[0]?.project).toBe('blacksmith');
   });
 
   it('ignores prose before the first "## " heading', () => {
@@ -488,14 +500,14 @@ ${bullet}`;
 - project: envkit
 - error_issues: off
 
-## black-smith — phase 1
+## blacksmith — phase 1
 - id: phase-1
 - status: planned
 - error_issues: on
 `;
     const milestones = parseRoadmap(md);
     expect(isErrorTrackerWritable(milestones, 'envkit')).toBe(false);
-    expect(isErrorTrackerWritable(milestones, 'black-smith')).toBe(true);
+    expect(isErrorTrackerWritable(milestones, 'blacksmith')).toBe(true);
   });
 
   it('isErrorTrackerWritable defaults to writable for a project that names no milestone at all', () => {

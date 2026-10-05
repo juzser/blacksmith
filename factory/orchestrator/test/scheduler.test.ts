@@ -868,7 +868,7 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
     expect(proposals[0]?.kind === 'error-report' && proposals[0].project).toBe('proj-on');
   });
 
-  it("resolves an unstamped row's project via the injected resolveProjectForTaskRef, not the black-smith default (privacy leak guard)", () => {
+  it("resolves an unstamped row's project via the injected resolveProjectForTaskRef, not the blacksmith default (privacy leak guard)", () => {
     // Unstamped: ev() never sets `project`, exactly what a session driving a
     // foreign project writes when nothing stamps the row.
     const event = errorLogged('epic-9/task-foreign');

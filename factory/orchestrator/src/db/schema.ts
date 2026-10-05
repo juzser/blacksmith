@@ -20,7 +20,7 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
  * operator far more often than any §8 dimension, and forcing a taxonomy PR
  * per new project would defeat the point of a multi-project hub. Nullable
  * for migration safety (every event logged before this column existed has
- * no value here); queries.ts's helpers COALESCE it to 'black-smith' so old
+ * no value here); queries.ts's helpers COALESCE it to 'blacksmith' so old
  * rows and new single-project fixtures both resolve to the same default
  * project rather than an ungrouped null bucket.
  */
@@ -360,14 +360,14 @@ export const milestones = sqliteTable(
     goal: text('goal'),
     epicIds: text('epic_ids').notNull(), // JSON array
     // Phase 6b — see eventsRaw's project comment above. roadmap.ts defaults
-    // an unspecified `- project:` bullet to 'black-smith' at parse time (not
+    // an unspecified `- project:` bullet to 'blacksmith' at parse time (not
     // left null here), since factory/specs/roadmap.md (ROADMAP_PATH) is a
     // hand-authored declaration, not an event replay — there is no "old row"
     // to migrate.
-    project: text('project').notNull().default('black-smith'),
+    project: text('project').notNull().default('blacksmith'),
     // Phase 10 -- 'factory' | 'dogfood' | 'product' (roadmap.ts's
     // MilestoneKind). Defaults to 'factory' here for the same reason project
-    // defaults to 'black-smith': the column default has to agree with what
+    // defaults to 'blacksmith': the column default has to agree with what
     // roadmap.ts resolves for a milestone that declares neither bullet, and
     // for those two that answer is the factory's own.
     kind: text('kind').notNull().default('factory'),

@@ -226,7 +226,7 @@ export const ISSUE_CANDIDATE_EVENT_TYPES: ReadonlySet<string> = new Set(
  * tell" -- never a guess, and never this factory's own name. Optional at
  * every call site in this module (default `() => null`, see below);
  * `cli.ts` is the only caller wiring in a real answer (D-246 precedent:
- * `db/projector.ts`'s `planProjectResolver` never backfills 'black-smith'
+ * `db/projector.ts`'s `planProjectResolver` never backfills 'blacksmith'
  * either). A `null` answer from this resolver no longer becomes a default
  * project anywhere downstream -- `withSessionFallback` below gets one more
  * try from the row's own session before the row is reported unresolvable.

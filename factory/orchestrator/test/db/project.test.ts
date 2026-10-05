@@ -37,7 +37,7 @@ async function buildTwoProjectFixture(opts: EventOpts): Promise<void> {
   );
   parent = root.event_id;
 
-  // Project A: black-smith (default — every event omits `project`).
+  // Project A: blacksmith (default — every event omits `project`).
   const taskA = await appendEvent(
     {
       session_id: SESSION_ID,
@@ -278,7 +278,7 @@ describe('project dimension (Phase 6b)', () => {
   });
 
   it("overview() scoped to a project only sees that project's data", () => {
-    const resultA = overview(db, { project: 'black-smith' });
+    const resultA = overview(db, { project: 'blacksmith' });
     expect(resultA.epicsInFlight).toEqual([]); // task-1 in epic-a is completed, not in-flight
     expect(resultA.tokensByEpic.map((e) => e.epicId)).toEqual(['epic-a']);
 
@@ -292,9 +292,52 @@ describe('project dimension (Phase 6b)', () => {
     expect(result.tokensByEpic.map((e) => e.epicId).sort()).toEqual(['epic-a', 'epic-b']);
     expect(result.projects).toBeDefined();
     const projects = (result.projects ?? []).map((p) => p.project).sort();
-    expect(projects).toEqual(['black-smith', 'demo-hub']);
+    expect(projects).toEqual(['blacksmith', 'demo-hub']);
     const demoHub = result.projects?.find((p) => p.project === 'demo-hub');
     expect(demoHub?.epicsInFlight).toEqual(['epic-b']);
+  });
+
+  it('normalizes an event explicitly stamped with the legacy project name', async () => {
+    // History is immutable: an old event may still literally say
+    // project: 'black-smith'. The projection must never store that spelling.
+    const parent = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id ?? null;
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-legacy/task-1',
+        plan_version: 1,
+        causal_parent: parent,
+        project: 'black-smith',
+        payload: {
+          epic_id: 'epic-legacy',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'completed',
+          budget_tokens: 500,
+        },
+      },
+      { stateDir },
+    );
+
+    const derivedPath = path.join(dbDir, 'derived-legacy.db');
+    await apply(derivedPath, SESSION_ID, { stateDir, roadmapPath });
+    const handle = openDb(derivedPath);
+    try {
+      const legacyTask = handle.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .find((t) => t.taskId === 'epic-legacy/task-1');
+      expect(legacyTask?.project).toBe('blacksmith');
+
+      const projects = (overview(handle.db).projects ?? []).map((p) => p.project).sort();
+      expect(projects).not.toContain('black-smith');
+      expect(projects).toContain('blacksmith');
+    } finally {
+      handle.sqlite.close();
+    }
   });
 
   it('kanban() supports an epicId-less "all epics" mode, still scoped by project', () => {
@@ -304,7 +347,7 @@ describe('project dimension (Phase 6b)', () => {
   });
 
   it('timeline() accepts a project filter', () => {
-    const entriesA = timeline(db, { project: 'black-smith' });
+    const entriesA = timeline(db, { project: 'blacksmith' });
     expect(entriesA.every((e) => e.taskId === null || e.taskId === 'epic-a/task-1')).toBe(true);
     const entriesB = timeline(db, { project: 'demo-hub' });
     expect(entriesB.some((e) => e.taskId === 'epic-b/task-1')).toBe(true);
@@ -312,7 +355,7 @@ describe('project dimension (Phase 6b)', () => {
   });
 
   it('errorsPage() and roadmapPage() accept a project filter', () => {
-    const errA = errorsPage(db, { project: 'black-smith' });
+    const errA = errorsPage(db, { project: 'blacksmith' });
     expect(errA.byClass.map((c) => `${c.errorGroup}.${c.errorClass}`)).toEqual([
       'execution.test-failure',
     ]);
@@ -333,7 +376,7 @@ describe('project dimension (Phase 6b)', () => {
 
   it('scopes the shell pulse to the project, and the projects partition the whole', () => {
     const global = pulse(db);
-    const a = pulse(db, { project: 'black-smith' });
+    const a = pulse(db, { project: 'blacksmith' });
     const b = pulse(db, { project: 'demo-hub' });
 
     expect(a.counts.errors).toBe(1);
@@ -353,7 +396,7 @@ describe('project dimension (Phase 6b)', () => {
   });
 
   it('scopes cost per model_tier/provider to the project (D-207)', () => {
-    expect(analytics(db, { project: 'black-smith' }).costByModelTierAndProvider).toEqual([
+    expect(analytics(db, { project: 'blacksmith' }).costByModelTierAndProvider).toEqual([
       {
         modelTier: 'mid',
         provider: 'claude',
@@ -376,7 +419,7 @@ describe('project dimension (Phase 6b)', () => {
   });
 
   it('scopes the same-mistake rate to the project (D-207)', () => {
-    const a = analytics(db, { project: 'black-smith' }).sameMistakeRateByDay;
+    const a = analytics(db, { project: 'blacksmith' }).sameMistakeRateByDay;
     expect(a.reduce((s, d) => s + d.decisions, 0)).toBe(2);
     expect(a.reduce((s, d) => s + d.sameMistake, 0)).toBe(1);
 
@@ -388,7 +431,7 @@ describe('project dimension (Phase 6b)', () => {
   it('partitions the global figures: the projects sum to the whole (D-207)', () => {
     const global = analytics(db);
     const parts = [
-      analytics(db, { project: 'black-smith' }),
+      analytics(db, { project: 'blacksmith' }),
       analytics(db, { project: 'demo-hub' }),
     ];
 
@@ -461,7 +504,7 @@ describe('project dimension (Phase 6b)', () => {
       expect(codex?.taskCount).toBe(2);
       expect(codex?.totalTokens).toBe(2100);
       expect(
-        analytics(bareHandle.db, { project: 'black-smith' }).costByModelTierAndProvider.some(
+        analytics(bareHandle.db, { project: 'blacksmith' }).costByModelTierAndProvider.some(
           (b) => b.provider === 'codex',
         ),
       ).toBe(false);
@@ -476,7 +519,7 @@ describe('project dimension (Phase 6b)', () => {
   // anything (taskEvents.ts, D-232), so a task's own `task-added` carries the
   // project and the gate outcomes, results and errors that follow it carry
   // nothing. filterByProject() then normalizes those nulls to the DEFAULT
-  // project and files a whole epic's history under black-smith -- the exact
+  // project and files a whole epic's history under blacksmith -- the exact
   // move D-170 already ruled out for one query, stated here for the column.
   // -------------------------------------------------------------------------
 
@@ -571,7 +614,7 @@ describe('project dimension (Phase 6b)', () => {
         errorsPage(handle.db, { project })
           .byClass.filter((c) => `${c.errorGroup}.${c.errorClass}` === 'execution.test-failure')
           .reduce((n, c) => n + c.count, 0);
-      expect(classCount('black-smith')).toBe(1);
+      expect(classCount('blacksmith')).toBe(1);
       expect(classCount('demo-hub')).toBe(1);
     } finally {
       handle.sqlite.close();
@@ -614,8 +657,8 @@ describe('project dimension (Phase 6b)', () => {
   // `<epic>/plan-v2`, `<epic>/epic`, or the bare epic id -- has no task row to
   // resolve through, so events_raw, dispatches and errors filed it as NULL.
   // NULL is not "unscoped": queries.ts's projectOf() reads a null back as the
-  // DEFAULT project, so every one of those rows landed on black-smith's Errors
-  // page and black-smith's Timeline -- another project's work, attributed. The
+  // DEFAULT project, so every one of those rows landed on blacksmith's Errors
+  // page and blacksmith's Timeline -- another project's work, attributed. The
   // `epics` insert and projectFindings() already fall back to the epic map
   // built two lines above them in projectSession(); these three did not.
   // -------------------------------------------------------------------------
@@ -677,7 +720,7 @@ describe('project dimension (Phase 6b)', () => {
           .byClass.filter((c) => `${c.errorGroup}.${c.errorClass}` === 'execution.test-failure')
           .reduce((n, c) => n + c.count, 0);
       expect(failures('demo-hub')).toBe(1);
-      expect(failures('black-smith')).toBe(1);
+      expect(failures('blacksmith')).toBe(1);
     } finally {
       handle.sqlite.close();
     }
@@ -822,7 +865,7 @@ describe('project dimension (Phase 6b)', () => {
       const rolesFor = (project: string) =>
         overview(handle.db, { project }).liveAgentEntries.map((a) => a.agentRole);
       expect(rolesFor('demo-hub')).toContain('planner');
-      expect(rolesFor('black-smith')).not.toContain('planner');
+      expect(rolesFor('blacksmith')).not.toContain('planner');
       // And unscoped it is still one agent, not two.
       expect(
         overview(handle.db, {}).liveAgentEntries.filter((a) => a.agentRole === 'planner'),
@@ -883,7 +926,7 @@ describe('project dimension (Phase 6b)', () => {
     const handle = openDb(withRoadmapPath);
     try {
       const listed = (overview(handle.db).projects ?? []).map((p) => p.project);
-      expect(listed).toEqual(['acme-web', 'black-smith', 'demo-hub']);
+      expect(listed).toEqual(['acme-web', 'blacksmith', 'demo-hub']);
 
       // A declared-but-unstarted project reports zeroes, not absence.
       const acme = overview(handle.db).projects?.find((p) => p.project === 'acme-web');
@@ -907,7 +950,7 @@ describe('project dimension (Phase 6b)', () => {
   // NULL, projectResolver hands that NULL down to every dispatch and error
   // under it, and db/queries.ts's projectOf() resolves the lot to the DEFAULT
   // project -- demo-rpg's board empty, demo-rpg's work filed under
-  // black-smith. No rebuild can repair that from the log alone, because the
+  // blacksmith. No rebuild can repair that from the log alone, because the
   // log never held the answer. The epic's plan file held it the whole time.
   // -------------------------------------------------------------------------
 
@@ -1058,7 +1101,7 @@ describe('project dimension (Phase 6b)', () => {
 
       // projectFindings() folds the same events a second time, on its own, to
       // answer the same question -- so the backfill has to reach that fold
-      // too, or one task reads as demo-rpg's on the board and black-smith's
+      // too, or one task reads as demo-rpg's on the board and blacksmith's
       // on the errors page.
       const finding = handle.db
         .select()
@@ -1070,7 +1113,7 @@ describe('project dimension (Phase 6b)', () => {
       // And the reported symptom: the board of the project the work was
       // actually part of draws the card, and the default project's stops.
       expect(cardsOn(handle, 'demo-rpg')).toContain(taskId);
-      expect(cardsOn(handle, 'black-smith')).not.toContain(taskId);
+      expect(cardsOn(handle, 'blacksmith')).not.toContain(taskId);
     } finally {
       handle.sqlite.close();
       await rm(specsDir, { recursive: true, force: true });
@@ -1124,7 +1167,7 @@ describe('project dimension (Phase 6b)', () => {
           .find((t) => t.taskId === taskId)?.project;
       expect(projectOf(noPlan)).toBeNull();
       expect(projectOf(noProject)).toBeNull();
-      expect(cardsOn(handle, 'black-smith')).toEqual(expect.arrayContaining([noPlan, noProject]));
+      expect(cardsOn(handle, 'blacksmith')).toEqual(expect.arrayContaining([noPlan, noProject]));
     } finally {
       handle.sqlite.close();
       await rm(specsDir, { recursive: true, force: true });
