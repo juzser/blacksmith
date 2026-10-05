@@ -31,3 +31,25 @@ describe('WaveTaskCard.vue — task id shown (fix round 1 finding 4)', () => {
     expect(SRC).toMatch(/class="bs-kanban-card__id"/);
   });
 });
+
+// Kanban id fix (2026-10-05): WaveTaskCard reuses .bs-kanban-card__id, so
+// the Kanban card's "id takes the row's remaining space" rule must stay
+// scoped to the Kanban row — unscoped, it pushed the Roadmap title away
+// from its id toward the middle of the row.
+describe('WaveTaskCard.vue — shared id class keeps its natural width', () => {
+  const CSS = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+    'utf8',
+  );
+
+  it('the base .bs-kanban-card__id rule does not grow', () => {
+    const base = CSS.match(/\n\.bs-kanban-card__id \{[\s\S]*?\}/);
+    expect(base).not.toBeNull();
+    expect(base?.[0]).not.toMatch(/flex:/);
+  });
+
+  it('the grow rule is scoped to the Kanban card row', () => {
+    const scoped = CSS.match(/\.bs-kanban-card__row--1 \.bs-kanban-card__id \{[\s\S]*?\}/);
+    expect(scoped?.[0]).toMatch(/flex: 1 1 auto/);
+  });
+});

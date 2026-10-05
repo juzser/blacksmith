@@ -2628,15 +2628,19 @@ summary.bs-inbox__group-head {
    into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
    The id now keeps one line and takes the row's remaining space; the chip
    below gets a matching max-width so it shrinks instead of pushing the id
-   out, and the Quote icon (flex: none below) never shrinks. */
+   out, and the Quote icon (flex: none below) never shrinks. The grow rule
+   is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
+   class, and an unscoped grow pushed its title away from the id. */
 .bs-kanban-card__id {
+  white-space: nowrap;
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+.bs-kanban-card__row--1 .bs-kanban-card__id {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--bs-text-subtle);
-  font-size: var(--bs-text-xs);
 }
 .bs-kanban-card__row--1 .bs-agent-chip {
   flex: 0 1 auto;
