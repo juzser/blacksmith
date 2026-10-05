@@ -2631,9 +2631,15 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
-.bs-kanban-card__row--1 {
-  justify-content: space-between;
-}
+/* Review follow-up (S4, 2026-10-05): space-between stretched row 1 across
+   the card's full width, so on a card whose AgentChip renders nothing (it
+   emits no element at all, not an empty one — see AgentChip.vue's `v-if`)
+   the copy IconButton — the only element left between the id and the Quote
+   trigger — floated to the middle of the card instead of sitting right
+   after the id. The row's own gap (from .bs-kanban-card__row) already keeps
+   id and copy button adjacent; the Quote trigger below gets margin-left:
+   auto instead, so it still pins to the right edge whether or not a chip
+   renders. */
 /* Operator fix 2026-10-05: a long AgentChip label used to squeeze the id
    into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
    The id now keeps one line and takes the row's remaining space; the chip
@@ -2683,6 +2689,7 @@ summary.bs-inbox__group-head {
 }
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;
+  margin-left: auto;
 }
 .bs-kanban-card__title {
   margin: 0;

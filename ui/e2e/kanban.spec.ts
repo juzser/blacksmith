@@ -227,7 +227,7 @@ test.describe('Kanban', () => {
   // because the new copy-id button and a long AgentChip label left it
   // almost no room. The id must stay fully readable when it is short; the
   // AgentChip label is the thing allowed to ellipsise first (id now
-  // `flex: 0 1 auto; max-width: 50%`, chip `flex: 1 1 auto`).
+  // `flex: 0 0 auto; max-width: 50%`, chip `flex: 1 1 auto`).
   test('desktop: a short task id is never truncated at a 280px column', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockBoard(
@@ -251,6 +251,32 @@ test.describe('Kanban', () => {
       clientWidth: el.clientWidth,
     }));
     expect(overflowMetrics.scrollWidth).toBeLessThanOrEqual(overflowMetrics.clientWidth);
+  });
+
+  // Review follow-up (S4, 2026-10-05): row 1 used `justify-content:
+  // space-between`, so a card whose AgentChip renders nothing (no
+  // agentRole yet — a fresh Todo card, like the fixtures' default `task()`)
+  // left only the id and the copy-id button in the row, and space-between
+  // floated the button to the middle of the card instead of right after
+  // the id.
+  test('desktop: the copy-id button sits right after the id on a card with no AgentChip', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
+    await expect(idEl).toBeVisible();
+    await expect(copyIdButton).toBeVisible();
+    const idBox = await idEl.boundingBox();
+    const copyIdButtonBox = await copyIdButton.boundingBox();
+    expect(idBox).not.toBeNull();
+    expect(copyIdButtonBox).not.toBeNull();
+    const gap = (copyIdButtonBox?.x ?? 0) - ((idBox?.x ?? 0) + (idBox?.width ?? 0));
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(12);
   });
 
   // Review follow-up (S2), narrowed after the first attempt (operator report

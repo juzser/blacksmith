@@ -91,6 +91,27 @@ describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-1
   });
 });
 
+describe('KanbanTaskCard.vue — row 1 copy button sits next to the id with no chip (review follow-up S4, 2026-10-05)', () => {
+  // AgentChip renders no element at all when it has nothing to show (its
+  // template root is a `v-if="chip && text"` Tag — see AgentChip.vue), so a
+  // chip-less row 1 only has the id, the copy button and the Quote
+  // trigger. Whether that leaves the copy button ~12px from the id — a
+  // layout computation this `environment: 'node'` suite has no DOM for —
+  // is proved by ui/e2e/kanban.spec.ts "desktop: the copy-id button sits
+  // right after the id on a card with no AgentChip". This only pins the
+  // source rules that make that possible.
+  it('does not stretch row 1 with justify-content: space-between', () => {
+    expect(PRIMITIVES_CSS).not.toMatch(
+      /\.bs-kanban-card__row--1\s*\{\s*justify-content:\s*space-between;/,
+    );
+  });
+
+  it('pins the Quote tooltip trigger to the right edge via margin-left: auto instead', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
+    expect(block).toMatch(/margin-left:\s*auto/);
+  });
+});
+
 describe('KanbanTaskCard.vue — hide duplicate role label (audit finding 5)', () => {
   it('imports agentChip to know whether an AgentChip is already carrying the role', () => {
     expect(SRC).toMatch(/import\s*\{[^}]*\bagentChip\b[^}]*\}\s*from\s*'\.\.\/lib\/kanban\.js'/);
