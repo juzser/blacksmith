@@ -37,6 +37,14 @@ than appearing in it.
 
 ### Added
 
+- **The factory's own project is `blacksmith`, not `black-smith`.** Every
+  row that falls back to the factory default, every roadmap milestone of
+  the factory, and a self-audit now read as `blacksmith`. History stays
+  immutable — event logs, committed plan files and old roadmap.md bullets
+  may still say `black-smith` — a single legacy alias
+  (`factory/orchestrator/src/projectName.ts`) normalizes it wherever a
+  project value is read, and migration `0016_milestones_project_default`
+  rewrites existing rows.
 - **0.4.0 — the merge queue stops moving your checkout, an epic can close
   past a superseded or waived-away task, and three self-audits land.**
   Twenty-eight pull requests since 0.3.0 (#177–#206; seventy-six commits
