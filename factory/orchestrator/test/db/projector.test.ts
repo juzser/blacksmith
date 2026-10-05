@@ -1421,7 +1421,12 @@ describe('db/projector.ts — an auditor axis closes on its own report', () => {
     });
   }
 
-  function judgeReported(eventId: string, taskId: string, ts: string, agentRole: string): StoredEvent {
+  function judgeReported(
+    eventId: string,
+    taskId: string,
+    ts: string,
+    agentRole: string,
+  ): StoredEvent {
     return ev({
       event_id: eventId,
       event_type: 'judge-reported',
