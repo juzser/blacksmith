@@ -8,14 +8,14 @@
 // feed (which itself stays filtered to Error rows, unchanged from PR3). The
 // old raw Errors table and its detail Dialog were already removed in an
 // earlier commit (48f2647) — there was nothing left to remove here.
-import { ArrowUp } from '@lucide/vue';
+import { ArrowUp, History } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import Banner from '../components/ds/Banner.vue';
-import EmptyState from '../components/ds/EmptyState.vue';
+import Banner from '../components/kit/Banner.vue';
 import BarChart from '../components/kit/BarChart.vue';
 import Button from '../components/kit/Button.vue';
 import Card from '../components/kit/Card.vue';
+import EmptyState from '../components/kit/EmptyState.vue';
 import LineChart from '../components/kit/LineChart.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Sparkline from '../components/kit/Sparkline.vue';
@@ -515,9 +515,12 @@ function becauseOf(promptId: string) {
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
-    <EmptyState v-else-if="canClaimEmpty(page !== null, entries.length)" icon="history">
-      No activity matches these filters.
-    </EmptyState>
+    <EmptyState
+      v-else-if="canClaimEmpty(page !== null, entries.length)"
+      :icon="History"
+      title="No activity matches these filters."
+      body=""
+    />
 
     <template v-else>
       <!-- Fix round 2 item 2 (ds-review.html `.mock` block flow): one plain

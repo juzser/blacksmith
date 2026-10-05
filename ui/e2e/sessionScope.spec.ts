@@ -70,7 +70,7 @@ test.describe('Session scope', () => {
     await expect(page.locator(WIDTH)).toBeVisible();
     // Still a page, not a 400: the scoped fetch resolved and rendered.
     await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
-    await expect(page.locator('.ds-banner')).toHaveCount(0);
+    await expect(page.locator('.bs-banner')).toHaveCount(0);
   });
 
   test('widening asks for the lineage, and the server answers it', async ({ page }) => {
@@ -86,7 +86,7 @@ test.describe('Session scope', () => {
     expect((await widened).status(), 'app.ts accepts the pair the UI emits').toBe(200);
     await expect(page).toHaveURL(/lineage=true/);
     await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
-    await expect(page.locator('.ds-banner')).toHaveCount(0);
+    await expect(page.locator('.bs-banner')).toHaveCount(0);
   });
 
   test('clearing the run takes the widening with it', async ({ page }) => {
@@ -112,6 +112,6 @@ test.describe('Session scope', () => {
     await expect(page.locator(PICKER)).toHaveValue(session);
     await expect(page.locator(WIDTH)).toHaveValue('lineage');
     await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
-    await expect(page.locator('.ds-banner')).toHaveCount(0);
+    await expect(page.locator('.bs-banner')).toHaveCount(0);
   });
 });

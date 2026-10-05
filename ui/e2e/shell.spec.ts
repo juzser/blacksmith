@@ -41,7 +41,7 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     // it stayed exactly as stale. usePoll's global signal is what makes the
     // claim true, and this is the only layer that can see it.
     await page.goto('/timeline');
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
     // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
     await page.getByRole('button', { name: 'Pause updates' }).click();
@@ -230,8 +230,9 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Activity');
   });
 
-  // Operator decision 2026-10-05: Work carries two always-visible level-2
-  // items on desktop (ds-spec.md §3) — no fly-out, both visible at once.
+  // Operator decision 2026-10-05: Work's two level-2 items render on desktop
+  // (ds-spec.md §3) while Work's own section is current — no fly-out, both
+  // visible at once, gone again once the operator leaves /work.
   test('Work shows Kanban and Roadmap as level-2 items, and clicking Roadmap navigates there', async ({
     page,
   }) => {

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Roadmap — DS4 S2/S3. Replaces the VueFlow canvas with a plain horizontal
 // swimlane (RoadmapSwimlane.vue) plus a goal/epics card (EpicBlock.vue),
-// in phase mode or epic mode. `@vue-flow/core` stays listed in package.json
-// but no page imports it anymore (DS8 PR3 moved SessionsPage off it too;
-// the retired FlowPage was its other consumer).
+// in phase mode or epic mode. `@vue-flow/core` is gone from package.json
+// (DS8 PR3 moved SessionsPage off it too; the retired FlowPage was its
+// other consumer).
 //
 // DS4 S4 — below 640px (`isPhoneWidth`) the swimlane is hidden entirely and
 // replaced by a phase-picker Select (R4) feeding the same EpicBlock, whose

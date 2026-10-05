@@ -4,14 +4,24 @@
    block that must land after the tailwindcss import so a repo base layer
    would still win if one existed.
 
-   The BS kit (bs-tokens.css, bs-primitives.css) comes last: tokens before
-   the primitives that read them, and both after the old kit because DS1's
-   shell classes (.app-shell, .app-topbar, .app-scroll, .app-projection and
-   their __main/__session/__lines elements) are defined in both component
-   files — the shell now runs on the BS kit, so its
+   bs-base.css imports BEFORE ds-tokens.css on purpose (DS9 part A): both
+   files declare the same `@layer base`, which CSS merges into one layer
+   where the rule appearing LATER in source order wins at equal
+   specificity. Importing bs-base.css first keeps ds-tokens.css's own
+   base-layer rules winning today, so the live cascade is unchanged while
+   both kits coexist. DS9 part B deletes ds-tokens.css; once it is gone
+   bs-base.css is the only base-layer source left and its bs-* values take
+   over with no edit needed here.
+
+   The rest of the BS kit (bs-tokens.css, bs-primitives.css) comes last:
+   tokens before the primitives that read them, and both after the old kit
+   because DS1's shell classes (.app-shell, .app-topbar, .app-scroll,
+   .app-projection and their __main/__session/__lines elements) are defined
+   in both component files — the shell now runs on the BS kit, so its
    bs-* version has to win the equal-specificity tie. The two kits share no
    other selector, so the old pages still read ds-components.css unchanged. */
 @import "tailwindcss";
+@import "./bs-base.css";
 @import "./ds-tokens.css";
 @import "./ds-components.css";
 @import "./bs-tokens.css";
@@ -28,18 +38,18 @@
 /* Skip-to-content link — visually hidden until :focus-visible (design-spec §7). */
 .skip-link {
   position: absolute;
-  left: var(--ds-space-2);
+  left: var(--bs-space-2);
   top: -100%;
   z-index: 100;
-  padding: var(--ds-space-2) var(--ds-space-3);
-  background: var(--ds-primary);
-  color: var(--ds-text-on-primary);
-  border-radius: var(--ds-radius-control);
-  font-size: var(--ds-text-sm);
-  transition: top var(--ds-motion-fast) var(--ds-ease-out);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  background: var(--bs-accent);
+  color: var(--bs-text-on-accent);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-sm);
+  transition: top var(--bs-duration-fast) var(--bs-ease-standard);
 }
 .skip-link:focus-visible {
-  top: var(--ds-space-2);
+  top: var(--bs-space-2);
 }
 
 /* Visually-hidden but screen-reader-visible (chart sr-only data tables,
@@ -57,7 +67,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ds-skeleton {
+  .bs-skeleton {
     animation: none !important;
     opacity: 0.7;
   }

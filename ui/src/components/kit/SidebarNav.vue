@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // App shell's primary nav (ds-spec.md §2.2 `SidebarNav`, §3). One list of
-// top-level items, no categories/badges; an item may carry always-visible
-// level-2 `children` (Work -> Kanban, Roadmap, operator 2026-10-05). Collapsible rail (≥1024px, driven by useViewport.ts from
+// top-level items, no categories/badges; an item may carry on-demand
+// level-2 `children` (Work -> Kanban, Roadmap, operator 2026-10-05) that
+// render only while that item's own section is current. Collapsible rail (≥1024px, driven by useViewport.ts from
 // App.vue) shows icon-only buttons with a right-placed label Tooltip, since
 // there is no visible text left to carry the accessible name. The brand mark
 // carries over from the old ds/SidebarNav.vue unchanged — collapsing the
@@ -57,6 +58,10 @@ function toggleCollapsed() {
 // page; the parent reads "true" (current section) and bs-primitives.css
 // gives it bold text with no fill, so the two never fuse into one block.
 // The collapsed rail hides the children, so there the parent is the page.
+// Also drives the sublist's own visibility below (template `v-if`): a
+// truthy result from this is "this item's section is current", so the
+// sublist only renders while the operator is already inside that section --
+// every other page keeps the rail to one flat row per item.
 function currentFor(it: NavItem): 'page' | 'true' | undefined {
   if (it.id === props.activeId) return 'page';
   if (it.children?.some((c) => c.id === props.activeId))
@@ -103,7 +108,10 @@ function currentFor(it: NavItem): 'page' | 'true' | undefined {
           <Icon :icon="it.icon" :size="16" />
           <span class="bs-side__label">{{ it.label }}</span>
         </button>
-        <ul v-if="!effectiveCollapsed && it.children?.length" class="bs-side__sublist">
+        <ul
+          v-if="!effectiveCollapsed && it.children?.length && currentFor(it)"
+          class="bs-side__sublist"
+        >
           <li v-for="child in it.children" :key="child.id">
             <button
               type="button"
