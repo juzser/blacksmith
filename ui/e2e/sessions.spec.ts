@@ -139,7 +139,68 @@ async function serveSessions(page: import('@playwright/test').Page) {
   );
 }
 
+// PR1 (ds8 active-sessions spec §3 "Sessions"): the unscoped running list
+// groups by project, newest group first, newest row first within a group.
+const GROUPED_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'grp-newest',
+    lastEventAt: minutesAgo(1),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-a'],
+    title: 'Newest in proj-a',
+  }),
+  session({
+    sessionId: 'grp-middle',
+    lastEventAt: minutesAgo(2),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-b'],
+    title: 'Only one in proj-b',
+  }),
+  session({
+    sessionId: 'grp-older',
+    lastEventAt: minutesAgo(3),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-a'],
+    title: 'Older in proj-a',
+  }),
+];
+
+// A session whose agents are all `live` but dispatched well outside the 4h
+// staleness window: liveAgentCount > 0, workingAgentCount 0 -- the ghost
+// case the running/finished split must now treat as quiet.
+const STALE_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'stale-only',
+    liveAgentCount: 2,
+    workingAgentCount: 0,
+    projects: ['proj-a'],
+    title: 'Stale ghost run',
+  }),
+];
+
 test.describe('Sessions', () => {
+  test('groups the unscoped running list by project, newest group and row first', async ({
+    page,
+  }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: GROUPED_SESSIONS }));
+    await page.goto('/sessions');
+    await expect(page.getByRole('heading', { level: 3 })).toHaveText(['proj-a', 'proj-b']);
+    const titles = await page.locator('.bs-sessionrow__title').allTextContents();
+    expect(titles).toEqual(['Newest in proj-a', 'Older in proj-a', 'Only one in proj-b']);
+  });
+
+  test('a session with live-but-stale agents lands in finished, not running', async ({ page }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: STALE_SESSIONS }));
+    await page.goto('/sessions');
+    await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Show 1 finished run' })).toBeVisible();
+    await page.getByRole('button', { name: 'Show 1 finished run' }).click();
+    await expect(page.getByText('Stale ghost run')).toBeVisible();
+  });
+
   test('lists running sessions and offers a count of finished ones', async ({ page }) => {
     await serveSessions(page);
     await page.goto('/sessions');

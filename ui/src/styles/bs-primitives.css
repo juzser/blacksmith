@@ -1268,6 +1268,13 @@ a:hover {
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
+/* Project group header above an unscoped Sessions' running list (ds8 PR1).
+   margin-top gives each group some breathing room from whatever sits above
+   it; the link inside reuses .bs-btn--link's own 44px phone tap target, so
+   the header needs no touch-target rule of its own. */
+.bs-sessions__group-title {
+  margin-top: var(--bs-space-3);
+}
 .bs-sessions__detail {
   display: flex;
   flex-direction: column;
