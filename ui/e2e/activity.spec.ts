@@ -376,21 +376,112 @@ test.describe('Activity', () => {
   // an unconditional padding-left sized for the rail variant's dot track, so
   // on phone the (non-rail) Activity row's meta/time line started at x≈67
   // instead of aligning with the title above it. Fails on 86af027.
-  test("phone: the meta line starts at the row's content start, same as the kind chip", async ({
+  //
+  // Fix round 4 item 4: round 3 compared this to the kind chip's x, because
+  // the chip used to lead the row's first line. Round 4 item 1 moves the
+  // title to lead instead (mock `.mrow.tlrow`), so this now compares to the
+  // title's x, which is the one that stays at the row's content start.
+  test("phone: the meta line starts at the row's content start, same as the title", async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
     await page.goto('/activity');
     const row = page.locator('.bs-timeline-row').first();
     await expect(row).toBeVisible();
-    const chip = row.locator('.bs-event-kind-tag').first();
+    const title = row.locator('.bs-timeline-row__title').first();
     // The padding lives on `.bs-timeline-row__meta` itself, a full-width flex
     // container -- its own box always starts at the row's content edge, so
     // the x that moves with the indent is its first child's, not its own.
     const metaContent = row.locator('.bs-timeline-row__meta > *').first();
-    const chipBox = await chip.boundingBox();
+    const titleBox = await title.boundingBox();
     const metaBox = await metaContent.boundingBox();
-    expect(Math.abs((metaBox?.x ?? -999) - (chipBox?.x ?? 0))).toBeLessThanOrEqual(2);
+    expect(Math.abs((metaBox?.x ?? -999) - (titleBox?.x ?? 0))).toBeLessThanOrEqual(2);
+  });
+
+  // Fix round 4 item 1 (ds-review.html `.mrow.tlrow`): the mock's title
+  // leads the row's first line, the kind chip sits at the row's content
+  // right edge, just before the chevron column. Round 3 had it backwards
+  // (chip leading). The swap is visual only (flex `order`); DOM keeps the
+  // kind tag before the title for screen readers.
+  test('phone: the title leads the row, the kind chip sits at the content right edge', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const title = row.locator('.bs-timeline-row__title').first();
+    const chip = row.locator('.bs-event-kind-tag').first();
+    const chevron = row
+      .locator('.bs-timeline-row__chevron, .bs-timeline-row__chevron-placeholder')
+      .first();
+    const titleBox = await title.boundingBox();
+    const chipBox = await chip.boundingBox();
+    const chevronBox = await chevron.boundingBox();
+    expect(chipBox?.x ?? 0).toBeGreaterThan(titleBox?.x ?? 0);
+    expect((chipBox?.x ?? 0) + (chipBox?.width ?? 0)).toBeLessThanOrEqual(
+      (chevronBox?.x ?? 999) + 1,
+    );
+  });
+
+  // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
+  // is one line, ellipsised -- the app used to wrap a long title to 2-3
+  // lines in bold. The full title stays reachable: it is still the
+  // element's whole text content (a screen reader reads it unclamped) and
+  // the row's own details (`dl` "Title") repeat it verbatim.
+  test('phone: a long Finding title stays one line with ellipsis', async ({ page }) => {
+    const longFinding = {
+      ...synthEntry('phone-finding-1', 0),
+      eventType: 'finding-raised',
+      payload: {
+        summary: 'settings panel does not persist the theme toggle after a reload of the page',
+      },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longFinding], nextBefore: null, newestId: longFinding.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    await expect(title).toBeVisible();
+    const box = await title.boundingBox();
+    // One line of this title's font sits well under 24px; the pre-fix wrap
+    // measured 50-66px for a title this long.
+    expect(box?.height ?? 0).toBeLessThanOrEqual(24);
+  });
+
+  // Fix round 4 item 3 (ds-review.html `.mrow.tlrow .mq`): a prompt row's
+  // title is the verbatim prompt text (titleFor), which plays the mock's
+  // `.mq` role, not `.mt` -- so on phone it clamps to 2 lines, not 1, in the
+  // Activity feed (unlike Home's compact "Recent activity", whose mock has
+  // no `.mq`: ds-review.html:1092's prompt row is a single truncated line).
+  test('phone: a long prompt row title clamps to 2 lines, not 1', async ({ page }) => {
+    const longPrompt = {
+      ...synthEntry('phone-prompt-1', 0),
+      eventType: 'user_prompt',
+      payload: {
+        prompt:
+          'redo the cart page to be cleaner, drop the extra confirm step and show the shipping fee clearly before checkout',
+      },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longPrompt], nextBefore: null, newestId: longPrompt.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    await expect(title).toBeVisible();
+    const box = await title.boundingBox();
+    // 2 clamped lines of this title's font sit around 36-40px; 1 line is
+    // under 24px, 3+ unclamped lines run past 50px.
+    expect(box?.height ?? 0).toBeGreaterThan(24);
+    expect(box?.height ?? 0).toBeLessThanOrEqual(42);
   });
 
   // Fix round 3 item 3 (ds-review.html `.mrow.tlrow .etog`): the chevron's

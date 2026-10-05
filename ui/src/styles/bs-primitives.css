@@ -566,6 +566,59 @@ a:hover {
     white-space: nowrap;
   }
 }
+/* Fix round 4 item 1 (ds-review.html `.mrow.tlrow`): the mock puts the
+   title first on the row's first line and the kind chip at its content
+   right end; the DOM keeps the kind tag before the title everywhere (a
+   screen reader hears what kind of event this is before its title), so the
+   phone-only swap is done with flex `order` on the existing children, not a
+   markup change. */
+@media (max-width: 640px) {
+  .bs-timeline-row__head .bs-event-kind-tag {
+    order: 2;
+  }
+  .bs-timeline-row__head .bs-timeline-row__title {
+    order: 1;
+  }
+}
+/* Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title is
+   one line, ellipsised -- the app used to wrap a long title to 2-3 lines.
+   The full title stays reachable: it is still the element's whole text
+   content (unaffected by the truncation, so a screen reader reads it
+   whole) and the row's own details (`dl` "Title") repeat it verbatim. The
+   link variant has no single text node to truncate (it is `inline-flex`,
+   round 3 item 1), so its inner label span is the one that gets the
+   ellipsis instead. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bs-timeline-row__title-label {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* Fix round 4 item 3 (ds-review.html `.mrow.tlrow .mq`): a prompt row's
+   title is the verbatim prompt text (titleFor), which plays the mock's
+   `.mq` role, not `.mt` -- so on phone it clamps to 2 lines instead of 1,
+   same as the mock's own Activity frame. Home's compact "Recent activity"
+   row has no `.mq` in the mock (ds-review.html:1092's prompt row is a
+   single truncated line), so it keeps the 1-line rule above. */
+@media (max-width: 640px) {
+  .bs-timeline-row[data-kind='prompt']:not(.bs-timeline-row--compact) .bs-timeline-row__title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    font-size: var(--bs-text-sm);
+    font-weight: var(--bs-font-weight-normal);
+  }
+}
 .bs-timeline-row__because-of {
   background: none;
   border: none;
