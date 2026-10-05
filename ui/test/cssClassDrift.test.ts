@@ -77,6 +77,30 @@ function staticClassSites(): Array<{ file: string; token: string }> {
   return sites;
 }
 
+describe(".app-page keeps the old kit's page rhythm", () => {
+  // The DS9 part B port read `.app-page`'s padding/gap off the matching
+  // digit, --bs-space-6 (32px), instead of the old kit's --ds-space-6
+  // (24px), whose actual bs- equivalent is --bs-space-5 (24px) -- the two
+  // token scales don't share an index. That silently grew the gap above
+  // the Activity page's first day label by 8px per step and failed
+  // activity.spec.ts's "first day label" spacing assertion.
+  let css = '';
+  for (const name of readdirSync(STYLES).sort()) {
+    if (name.endsWith('.css')) css += readFileSync(join(STYLES, name), 'utf8');
+  }
+  const rule = css.match(/\.app-page\s*\{[^}]*\}/)?.[0] ?? '';
+
+  it('finds the rule at all, so a rename cannot make this vacuous', () => {
+    expect(rule).not.toBe('');
+  });
+
+  it('reads padding and gap off --bs-space-5, not --bs-space-6', () => {
+    expect(rule).toContain('padding: var(--bs-space-5)');
+    expect(rule).toContain('gap: var(--bs-space-5)');
+    expect(rule).not.toContain('--bs-space-6');
+  });
+});
+
 describe('every class a template writes resolves to a rule', () => {
   const defined = definedClasses();
   const sites = staticClassSites();
