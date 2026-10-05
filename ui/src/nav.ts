@@ -13,9 +13,11 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Kanban,
     route: '/work/kanban',
     matchPrefix: '/work',
-    // Operator decision 2026-10-05: Work gets two always-visible level-2
-    // items on desktop (ds-spec.md §3) -- MobileTabBar never reads
-    // `children`, so the phone stays a single flat "Work" tab.
+    // Operator decision 2026-10-05: Work gets two level-2 items on desktop
+    // (ds-spec.md §3), shown only while the Work section is current
+    // (SidebarNav gates the sublist on `currentFor`); clicking Work lands on
+    // the first child via `navRoute`. MobileTabBar never reads `children`,
+    // so the phone stays a single flat "Work" tab.
     children: [
       { id: 'work-kanban', label: 'Kanban', route: '/work/kanban' },
       { id: 'work-roadmap', label: 'Roadmap', route: '/work/roadmap' },
