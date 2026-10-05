@@ -237,9 +237,11 @@
   --bs-tooltip-text: var(--bs-text);
   --bs-tooltip-border: var(--bs-border-bold);
   /* Light plate behind the sidebar brand mark (dark-haired artwork is
-     unreadable directly on --bs-surface-sunken in dark mode). Light theme
-     has no equivalent rule -- the mark sits on its own transparent ground. */
-  --bs-side-mark-backing: #e3e4e6;
+     unreadable directly on --bs-surface-sunken in dark mode). White at 30%,
+     so the plate lifts the hair without reading as an opaque sticker
+     (operator 2026-10-05). Light theme has no equivalent rule -- the mark
+     sits on its own transparent ground. */
+  --bs-side-mark-backing: rgb(255 255 255 / 0.3);
 
   --bs-tone-done-text: #7bc990;
   --bs-tone-done-subtle: #17291b;
