@@ -171,8 +171,9 @@ export const tasks = sqliteTable(
      * reopening the task — so it is the wrong column for "when did this
      * finish" (db/queries.ts's taskDateRange). Written once by
      * db/projector.ts's foldTasks() and left alone after that, with one
-     * named exception: a later auditor dispatch_decision for the same id (an
-     * audit axis re-run) resets this to null, since the row is open again.
+     * named exception: a later auditor dispatch_decision for a completed id
+     * (an audit axis re-run) resets this to null, since the row is open
+     * again.
      */
     terminalAt: text('terminal_at'),
   },

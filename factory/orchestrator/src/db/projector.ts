@@ -866,15 +866,17 @@ export function foldTasks(
         const terminal = TERMINAL_TASK_STATUSES.has(row.taskStatus);
         if (!terminal) {
           row.taskStatus = 'in-progress';
-        } else if (isAuditorTurn(record)) {
-          // An audit axis never joins a wave, so the only way its row ever
-          // reached a terminal status is the judge-reported/task-result-recorded
-          // close below — a later auditor dispatch for the same id is a
-          // re-run of that axis, not a stray dispatch against a shipped plan
-          // task (those always move through wave-merged/task-superseded/
+        } else if (isAuditorTurn(record) && row.taskStatus === 'completed') {
+          // An audit axis never joins a wave, so a `completed` row only ever
+          // got there via the judge-reported/task-result-recorded close
+          // below — a later auditor dispatch for the same id is a re-run of
+          // that axis, not a stray dispatch against a shipped plan task
+          // (those always move through wave-merged/task-superseded/
           // error-logged instead, never this role). terminalAt resets to
           // null — schema.ts's comment on tasks.terminalAt ("null while the
-          // task is still open") describes this row again, exactly.
+          // task is still open") describes this row again, exactly. Any
+          // other terminal status (escalated, failed, waived, superseded…)
+          // is held open for the operator and must not be reopened here.
           row.taskStatus = 'in-progress';
           row.terminalAt = null;
         }

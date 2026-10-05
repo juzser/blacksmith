@@ -1521,6 +1521,30 @@ describe('db/projector.ts — an auditor axis closes on its own report', () => {
     expect(row?.taskStatus).toBe('in-progress');
     expect(row?.terminalAt).toBeNull();
   });
+
+  it('an auditor axis escalated by a coordination.* error-logged (non-note severity) stays escalated after a later auditor dispatch_decision', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      ev({
+        event_id: 'e3',
+        event_type: 'error-logged',
+        task_id: AUDIT_TASK,
+        ts: '2026-09-21T00:02:00.000Z',
+        payload: {
+          agent: 'auditor',
+          agent_role: 'auditor',
+          task_ref: AUDIT_TASK,
+          error: 'coordination.starvation',
+          severity: 'S2-major',
+        },
+      }),
+      dispatchAuditor('e4', AUDIT_TASK, '2026-09-28T00:00:00.000Z'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('escalated');
+    expect(row?.terminalAt).toBe('2026-09-21T00:02:00.000Z');
+  });
 });
 
 describe('db/projector.ts — an error-logged moves a task only when its severity says so', () => {
