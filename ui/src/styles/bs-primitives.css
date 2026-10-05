@@ -388,7 +388,7 @@ a:hover {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: start;
   gap: var(--bs-space-1) var(--bs-space-2);
-  padding: var(--bs-space-2) var(--bs-space-3);
+  padding: var(--bs-space-3) var(--bs-space-4) var(--bs-space-3) 13px;
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
 }
@@ -455,6 +455,14 @@ a:hover {
   flex: 1;
   font-weight: var(--bs-font-weight-title);
   color: var(--bs-text);
+}
+/* Fix round 5 item 1 (ds-review.html `.mrow .mt`): the phone row's title
+   weighs 500, not the desktop row's 550 -- the desktop weight already
+   matches the mock's `.ev .ehead` (550), so only the phone rule changes. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title {
+    font-weight: var(--bs-font-weight-medium);
+  }
 }
 /* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
    rest — a non-link title (plain span, no --link class) never underlines. */
