@@ -1,6 +1,34 @@
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
+// DS6 PR4b round 3: fixture builder for the live-updates / session-divider
+// e2e tests below. Shape matches TimelineEntry (api.ts) — sessionId/Title are
+// mandatory there since DS6 PR4b, unlike home.spec.ts's older synthetic rows.
+function synthEntry(
+  id: string,
+  minsAgo: number,
+  overrides: Partial<{
+    sessionId: string;
+    sessionTitle: string;
+    payload: Record<string, unknown>;
+  }> = {},
+) {
+  return {
+    eventId: id,
+    ts: new Date(Date.now() - minsAgo * 60_000).toISOString(),
+    eventType: 'user_prompt',
+    taskId: null as string | null,
+    agentId: null,
+    planVersion: 1,
+    causalParent: null,
+    payload: overrides.payload ?? { prompt: `Synthetic row ${id}` },
+    project: 'black-smith',
+    actor: 'operator',
+    sessionId: overrides.sessionId ?? 'sess-synth',
+    sessionTitle: overrides.sessionTitle ?? 'Synthetic session',
+  };
+}
+
 // DS6 PR3 (ds-spec.md §4.3 / ds-review.html #p-activity): Timeline and
 // Errors fold into one flat, day-grouped feed. Replaces timeline.spec.ts and
 // errors.spec.ts — the search box, "Decisions" lens, causal dispatch-group
@@ -125,6 +153,435 @@ test.describe('Activity', () => {
     await page.goto('/activity');
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
     await expect(page.getByText('No activity matches these filters.')).toHaveCount(0);
+  });
+
+  // DS6 PR4b round 3 item 1 (ds-spec.md §4.3 "Live"): spec-local route
+  // overrides, per the brief, so these don't touch the shared fixture or its
+  // screenshot baselines above.
+  test('a new-events pill appears while scrolled away, and clicking it prepends and scrolls to top', async ({
+    page,
+  }) => {
+    const initial = Array.from({ length: 30 }, (_, i) => synthEntry(`init-${i}`, i));
+    const fresh = synthEntry('fresh-1', -1, { payload: { prompt: 'Brand new row' } });
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        route.fulfill({ json: { entries: [fresh], nextBefore: null, newestId: fresh.eventId } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: initial, nextBefore: null, newestId: initial[0]?.eventId ?? null },
+      });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+
+    // Scroll away from the top so the pill buffers instead of merging live.
+    // The feed scrolls inside .app-scroll (the app shell's own container),
+    // not the window/body -- window.scrollTo is a no-op here.
+    await page.evaluate(() => {
+      const el = document.querySelector('.app-scroll');
+      el?.scrollTo(0, el.scrollHeight);
+    });
+    await page.waitForTimeout(200);
+
+    // Refresh now is aria-disabled while live (ds-spec.md §2.2) -- pause
+    // first, same as shell.spec.ts. Its signal still fires poll() regardless
+    // of the paused state (usePoll.ts), no real 15s wait needed.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+
+    const pill = page.locator('.activity-newpill');
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveText('1 new event');
+    // Not merged into the list while scrolled away: a reader paged back
+    // never has rows re-sort under them.
+    await expect(page.getByText('Brand new row')).toHaveCount(0);
+
+    await pill.getByRole('button').click();
+    await expect(pill).toHaveCount(0);
+    await expect(page.locator('.bs-timeline-row__title').first()).toHaveText('Brand new row');
+    await expect
+      .poll(() => page.evaluate(() => document.querySelector('.app-scroll')?.scrollTop))
+      .toBe(0);
+  });
+
+  test('Pause live updates stops the incremental poll from firing', async ({ page }) => {
+    test.setTimeout(45_000);
+    let afterRequests = 0;
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        afterRequests += 1;
+        route.fulfill({ json: { entries: [], nextBefore: null, newestId: null } });
+        return;
+      }
+      route.continue();
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await expect(page.getByRole('button', { name: 'Resume updates' })).toBeVisible();
+
+    // Activity's poll cadence is 15s (design-spec.md §8); a window
+    // comfortably longer than one tick with zero after= requests proves
+    // Pause stands the new incremental poll() down, not just usePoll's
+    // pre-existing full-reload callers.
+    await page.waitForTimeout(17_000);
+    expect(afterRequests).toBe(0);
+  });
+
+  test('the bottom sentinel loads older rows without touching the newer page', async ({ page }) => {
+    const first = Array.from({ length: 50 }, (_, i) => synthEntry(`first-${i}`, i));
+    const older = [synthEntry('older-1', 100, { payload: { prompt: 'Much older row' } })];
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('before')) {
+        route.fulfill({ json: { entries: older, nextBefore: null, newestId: null } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: first, nextBefore: 'cursor-1', newestId: first[0]?.eventId ?? null },
+      });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    // .bs-timeline-row__title only: the collapsed detail <dd> repeats the
+    // same text (v-show, not v-if, D-227), so an unscoped getByText matches
+    // both and trips strict mode.
+    const olderTitle = page.locator('.bs-timeline-row__title', { hasText: 'Much older row' });
+    await expect(olderTitle).toHaveCount(0);
+    await page.locator('.activity-sentinel').last().scrollIntoViewIfNeeded();
+    await expect(olderTitle).toBeVisible();
+  });
+
+  test('a session divider separates adjacent rows from different sessions, and its details link to Sessions', async ({
+    page,
+  }) => {
+    const entries = [
+      synthEntry('div-a', 0, { sessionId: 'sess-a', sessionTitle: 'Session A' }),
+      synthEntry('div-b', 1, { sessionId: 'sess-b', sessionTitle: 'Session B' }),
+    ];
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries, nextBefore: null, newestId: entries[0]?.eventId ?? null } });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-session-divider')).toHaveText('Session: Session B');
+
+    await page.getByRole('button', { name: 'Expand all' }).click();
+    const detail = page.locator('.bs-timeline-row__detail').nth(1);
+    await expect(detail).toBeVisible();
+    const link = detail.getByRole('link', { name: 'Session B' });
+    await link.click();
+    await expect(page).toHaveURL('/sessions');
+  });
+
+  // Fix round items 4, 5, 7 -- each fails without its own fix:
+  // - 4: TimelineRow always reserves the chevron's grid column, so the
+  //   time column's x-position is identical whether a row has details or
+  //   not.
+  // - 5: Tooltip.vue's two-root template dropped the class fallthrough
+  //   that hides the end-column time on phone, so it rendered beside the
+  //   title there too; fixed, the time shows exactly once, below the title.
+  // - 7: `.timeline-day--first` keeps the first day label flush against
+  //   the filter row even though a top sentinel/pill now render before it.
+  test('desktop: the time column aligns whether or not a row has details', async ({ page }) => {
+    const withDetails = synthEntry('with-details', 0, { payload: { prompt: 'Has a meta line' } });
+    const noDetails = { ...synthEntry('no-details', 1), eventType: 'session-started', payload: {} };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: {
+          entries: [withDetails, noDetails],
+          nextBefore: null,
+          newestId: withDetails.eventId,
+        },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    const times = page.locator('.bs-timeline-row__ts:not(.bs-timeline-row__ts--meta)');
+    await expect(times).toHaveCount(2);
+    const rowWithChevron = await times.nth(0).boundingBox();
+    const rowNoChevron = await times.nth(1).boundingBox();
+    expect(rowWithChevron?.x).toBeCloseTo(rowNoChevron?.x ?? -1, 0);
+  });
+
+  // Fix round 2 item 1: a row with no meta text used to render no meta
+  // line at all on phone, so it showed no time. Both a row that already has
+  // details (the old coverage) and one that has none must each show their
+  // time exactly once.
+  test('phone: every row shows its time exactly once, below the title', async ({ page }) => {
+    const withDetails = synthEntry('phone-with-details', 0, {
+      payload: { prompt: 'Phone time check' },
+    });
+    const noDetails = {
+      ...synthEntry('phone-no-details', 1),
+      eventType: 'session-started',
+      payload: {},
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: {
+          entries: [withDetails, noDetails],
+          nextBefore: null,
+          newestId: withDetails.eventId,
+        },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const rows = page.locator('.bs-timeline-row');
+    await expect(rows).toHaveCount(2);
+    for (let i = 0; i < 2; i++) {
+      const row = rows.nth(i);
+      const title = row.locator('.bs-timeline-row__title').first();
+      await expect(title).toBeVisible();
+      const visibleTimes = row.locator('.bs-timeline-row__ts:visible');
+      await expect(visibleTimes).toHaveCount(1);
+      const titleBox = await title.boundingBox();
+      const timeBox = await visibleTimes.boundingBox();
+      expect(timeBox?.y ?? 0).toBeGreaterThan(titleBox?.y ?? 0);
+    }
+  });
+
+  // Fix round 3 item 1 (ds-review.html `.mrow.tlrow`, ds-review.html:636-642):
+  // a one-line row whose title is a task link used to measure 89px tall on
+  // phone, because `.bs-timeline-row__title--link`'s own --bs-touch
+  // min-height (needed for the hit box) stacked on top of the row's own
+  // --bs-touch floor. Mock geometry: 10px top/bottom padding + a 14px title
+  // line (line-height 1.6 -> 22.4px) + 2px gap + a 12px meta line
+  // (line-height 1.6 -> 19.2px) = ~64px. Fails on 86af027 (measured 89px).
+  test('phone: a one-line linked row measures within 6px of the mock row height', async ({
+    page,
+  }) => {
+    const noMeta = {
+      ...synthEntry('phone-one-line', 0),
+      eventType: 'session-started',
+      payload: {},
+      taskId: 'demo/task-1',
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries: [noMeta], nextBefore: null, newestId: noMeta.eventId } });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row.locator('.bs-timeline-row__title--link')).toBeVisible();
+    const box = await row.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(58);
+    expect(box?.height ?? 0).toBeLessThanOrEqual(70);
+  });
+
+  // Fix round 3 item 2 (ds-review.html `.mm`): `.bs-timeline-row__meta` had
+  // an unconditional padding-left sized for the rail variant's dot track, so
+  // on phone the (non-rail) Activity row's meta/time line started at x≈67
+  // instead of aligning with the title above it. Fails on 86af027.
+  //
+  // Fix round 4 item 4: round 3 compared this to the kind chip's x, because
+  // the chip used to lead the row's first line. Round 4 item 1 moves the
+  // title to lead instead (mock `.mrow.tlrow`), so this now compares to the
+  // title's x, which is the one that stays at the row's content start.
+  test("phone: the meta line starts at the row's content start, same as the title", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const title = row.locator('.bs-timeline-row__title').first();
+    // The padding lives on `.bs-timeline-row__meta` itself, a full-width flex
+    // container -- its own box always starts at the row's content edge, so
+    // the x that moves with the indent is its first child's, not its own.
+    const metaContent = row.locator('.bs-timeline-row__meta > *').first();
+    const titleBox = await title.boundingBox();
+    const metaBox = await metaContent.boundingBox();
+    expect(Math.abs((metaBox?.x ?? -999) - (titleBox?.x ?? 0))).toBeLessThanOrEqual(2);
+  });
+
+  // Fix round 4 item 1 (ds-review.html `.mrow.tlrow`): the mock's title
+  // leads the row's first line, the kind chip sits at the row's content
+  // right edge, just before the chevron column. Round 3 had it backwards
+  // (chip leading). The swap is visual only (flex `order`); DOM keeps the
+  // kind tag before the title for screen readers.
+  test('phone: the title leads the row, the kind chip sits at the content right edge', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const title = row.locator('.bs-timeline-row__title').first();
+    const chip = row.locator('.bs-event-kind-tag').first();
+    const chevron = row
+      .locator('.bs-timeline-row__chevron, .bs-timeline-row__chevron-placeholder')
+      .first();
+    const titleBox = await title.boundingBox();
+    const chipBox = await chip.boundingBox();
+    const chevronBox = await chevron.boundingBox();
+    expect(chipBox?.x ?? 0).toBeGreaterThan(titleBox?.x ?? 0);
+    expect((chipBox?.x ?? 0) + (chipBox?.width ?? 0)).toBeLessThanOrEqual(
+      (chevronBox?.x ?? 999) + 1,
+    );
+  });
+
+  // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
+  // is one line, ellipsised -- the app used to wrap a long title to 2-3
+  // lines in bold. The full title stays reachable: it is still the
+  // element's whole text content (a screen reader reads it unclamped) and
+  // the row's own details (`dl` "Title") repeat it verbatim.
+  test('phone: a long Finding title stays one line with ellipsis', async ({ page }) => {
+    const longFinding = {
+      ...synthEntry('phone-finding-1', 0),
+      eventType: 'finding-raised',
+      payload: {
+        summary: 'settings panel does not persist the theme toggle after a reload of the page',
+      },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longFinding], nextBefore: null, newestId: longFinding.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    await expect(title).toBeVisible();
+    const box = await title.boundingBox();
+    // One line of this title's font sits well under 24px; the pre-fix wrap
+    // measured 50-66px for a title this long.
+    expect(box?.height ?? 0).toBeLessThanOrEqual(24);
+  });
+
+  // Fix round 4 item 3 (ds-review.html `.mrow.tlrow .mq`): a prompt row's
+  // title is the verbatim prompt text (titleFor), which plays the mock's
+  // `.mq` role, not `.mt` -- so on phone it clamps to 2 lines, not 1, in the
+  // Activity feed (unlike Home's compact "Recent activity", whose mock has
+  // no `.mq`: ds-review.html:1092's prompt row is a single truncated line).
+  test('phone: a long prompt row title clamps to 2 lines, not 1', async ({ page }) => {
+    const longPrompt = {
+      ...synthEntry('phone-prompt-1', 0),
+      eventType: 'user_prompt',
+      payload: {
+        prompt:
+          'redo the cart page to be cleaner, drop the extra confirm step and show the shipping fee clearly before checkout',
+      },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longPrompt], nextBefore: null, newestId: longPrompt.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    await expect(title).toBeVisible();
+    const box = await title.boundingBox();
+    // 2 clamped lines of this title's font sit around 36-40px; 1 line is
+    // under 24px, 3+ unclamped lines run past 50px.
+    expect(box?.height ?? 0).toBeGreaterThan(24);
+    expect(box?.height ?? 0).toBeLessThanOrEqual(42);
+  });
+
+  // Fix round 3 item 3 (ds-review.html `.mrow.tlrow .etog`): the chevron's
+  // own --bs-touch floor on phone grew its box with no compensating margin,
+  // centering its glyph on the whole title+meta block instead of the title
+  // line -- ~12px low on 86af027. The mock's own `.etog` spans both text
+  // rows, aligns to the start of that span, and pulls up by the row's
+  // 10px padding-top, so its box overlaps the padding instead of pushing
+  // past the title. Fails on 86af027 (diff 12px).
+  test('phone: an Error row chevron centres on the title line, not the whole row', async ({
+    page,
+  }) => {
+    const errorEntry = {
+      ...synthEntry('phone-error-1', 0),
+      eventType: 'error-logged',
+      taskId: 'demo/task-1',
+      payload: { error: 'boom', class: 'timeout', severity: 'high' },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [errorEntry], nextBefore: null, newestId: errorEntry.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    const chevron = row.locator('.bs-timeline-row__chevron').first();
+    await expect(chevron).toBeVisible();
+    const titleBox = await title.boundingBox();
+    const chevronBox = await chevron.boundingBox();
+    const titleCenter = (titleBox?.y ?? 0) + (titleBox?.height ?? 0) / 2;
+    const chevronCenter = (chevronBox?.y ?? 0) + (chevronBox?.height ?? 0) / 2;
+    expect(Math.abs(chevronCenter - titleCenter)).toBeLessThanOrEqual(4);
+  });
+
+  // Fix round 2 item 2: app-page's flex gap used to stack on top of every
+  // sentinel/pill/day-group's own margin, leaving ~55px above "Today" and
+  // ~40px more above the first row where the mock's .day margin (24px top,
+  // 8px bottom; ds-review.html:493) collapses against the toolbar's own
+  // margin-bottom instead.
+  test('the first day label sits flush against the filter row, spacing matches the mock', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    const toolbar = page.locator('.activity-toolbar');
+    const firstDay = page.locator('.timeline-day').first();
+    const feed = page.locator('.timeline-feed').first();
+    await expect(firstDay).toBeVisible();
+    const marginTop = await firstDay.evaluate((el) => getComputedStyle(el).marginTop);
+    expect(marginTop).toBe('0px');
+    const toolbarBox = await toolbar.boundingBox();
+    const dayBox = await firstDay.boundingBox();
+    const feedBox = await feed.boundingBox();
+    const gapAboveDay = (dayBox?.y ?? 0) - ((toolbarBox?.y ?? 0) + (toolbarBox?.height ?? 0));
+    const gapAboveFeed = (feedBox?.y ?? 0) - ((dayBox?.y ?? 0) + (dayBox?.height ?? 0));
+    expect(gapAboveDay).toBeGreaterThanOrEqual(16);
+    expect(gapAboveDay).toBeLessThanOrEqual(28);
+    expect(gapAboveFeed).toBeGreaterThanOrEqual(4);
+    expect(gapAboveFeed).toBeLessThanOrEqual(12);
+  });
+
+  // Item 9: the pill and its button both clear the 44px touch floor on
+  // phone -- the generic touchTargets.spec.ts sweep never sees the pill
+  // since it only renders once a poll has buffered rows while scrolled away.
+  test('phone: the new-events pill button clears the touch target floor', async ({ page }) => {
+    const initial = Array.from({ length: 30 }, (_, i) => synthEntry(`init-${i}`, i));
+    const fresh = synthEntry('fresh-1', -1, { payload: { prompt: 'Brand new row' } });
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        route.fulfill({ json: { entries: [fresh], nextBefore: null, newestId: fresh.eventId } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: initial, nextBefore: null, newestId: initial[0]?.eventId ?? null },
+      });
+    });
+    // Pause/Refresh now only render in the desktop chip row (phone swaps to
+    // a tab row, see "phone layout ... hides chips and Refresh" above), so
+    // trigger the buffered poll at desktop width and resize down afterwards
+    // to measure the pill as phone renders it.
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await page.evaluate(() => {
+      const el = document.querySelector('.app-scroll');
+      el?.scrollTo(0, el.scrollHeight);
+    });
+    await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await expect(page.locator('.activity-newpill')).toBeVisible();
+    await page.setViewportSize(VIEWPORTS.mobile);
+
+    const pillButton = page.locator('.activity-newpill').getByRole('button');
+    await expect(pillButton).toBeVisible();
+    const box = await pillButton.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {

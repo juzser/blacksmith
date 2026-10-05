@@ -73,6 +73,22 @@ test.describe('Task detail', () => {
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
   });
 
+  // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
+  // meta text (dispatch rows have no tokens yet, so metaOverride is '') used
+  // to render no meta line at all on phone, so it showed no time.
+  test('375px: every History row shows its time exactly once, even with no meta text', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
+    await expect(rows).toHaveCount(2);
+    for (let i = 0; i < 2; i++) {
+      await expect(rows.nth(i).locator('.bs-timeline-row__ts:visible')).toHaveCount(1);
+    }
+  });
+
   // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries
   // token_usage (1300 total across both runs) and a dispatch-to-result span,
   // so tokens and elapsed render; agent time stays absent (no run writes a
@@ -85,6 +101,23 @@ test.describe('Task detail', () => {
     await expect(bar.getByText('Tokens', { exact: true })).toBeVisible();
     await expect(bar.getByText('Elapsed', { exact: true })).toBeVisible();
     await expect(bar.getByText('Agent time', { exact: true })).toHaveCount(0);
+  });
+
+  // DS6 PR4b round 3 item 5: the Elapsed cell's Tooltip (mode="describe")
+  // names the exact start-end range (format.ts's formatElapsedRange), not
+  // just the rounded duration the cell itself shows.
+  test('totals bar: Elapsed cell tooltip names the exact start-end range', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const bar = page.locator('.bs-task-totals-bar');
+    const elapsedCell = bar.locator('.bs-task-totals-bar__cell', { hasText: 'Elapsed' });
+    // Programmatic .focus() never matches :focus-visible (Tooltip.vue's own
+    // comment) -- hover is what a real pointer user does, past the 300ms
+    // HOVER_DELAY_MS (useTooltip.ts).
+    await elapsedCell.locator('.bs-tooltip-trigger').hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveText(/^\d{1,2} \w{3} \d{4}, \d{2}:\d{2} to \d{2}:\d{2}$/);
   });
 
   // A task with no runs at all (never dispatched) has nothing to sum: the

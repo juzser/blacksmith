@@ -380,13 +380,35 @@ a:hover {
 }
 
 /* TimelineRow (DS6 PR3, ds-spec.md §4.3 / ds-review.html .ev). */
+/* Row rework (DS6 PR4b round 2 item 4, ds-review.html `.ev`): body / time /
+   chevron as the row's own end columns instead of time inline with the
+   title and the chevron inline with the meta line. */
 .bs-timeline-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: var(--bs-space-1) var(--bs-space-2);
+  padding: var(--bs-space-3) var(--bs-space-4) var(--bs-space-3) 13px;
+  border-bottom: 1px solid var(--bs-border);
+  border-left: 3px solid transparent;
+}
+.bs-timeline-row__body {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-1);
+  min-width: 0;
+}
+/* DS6 PR4b item 3: the "Session: <title>" divider between adjacent rows
+   whose session differs (ActivityPage.vue only; Home's compact rows never
+   render one). */
+.bs-session-divider {
+  list-style: none;
   padding: var(--bs-space-2) var(--bs-space-3);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtlest);
+  background: var(--bs-surface-sunken);
   border-bottom: 1px solid var(--bs-border);
-  border-left: 3px solid transparent;
 }
 /* Fix round item 5 (ds-review.html `.ev:last-child`): the last row in any
    list never needs a divider against whatever comes after it. */
@@ -431,8 +453,16 @@ a:hover {
 }
 .bs-timeline-row__title {
   flex: 1;
-  font-weight: var(--bs-font-weight-medium);
+  font-weight: var(--bs-font-weight-title);
   color: var(--bs-text);
+}
+/* Fix round 5 item 1 (ds-review.html `.mrow .mt`): the phone row's title
+   weighs 500, not the desktop row's 550 -- the desktop weight already
+   matches the mock's `.ev .ehead` (550), so only the phone rule changes. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title {
+    font-weight: var(--bs-font-weight-medium);
+  }
 }
 /* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
    rest — a non-link title (plain span, no --link class) never underlines. */
@@ -450,19 +480,74 @@ a:hover {
 }
 /* ≤640px: a one-line title button's own text settles well under --bs-touch
    (touchTargets.spec.ts caught this on a short humanized title, e.g.
-   "Operator feedback resolved" on a single line) -- min-height floor only,
-   same pattern as .bs-input/.bs-select above. */
+   "Operator feedback resolved" on a single line). Fix round 3 item 1: a plain
+   min-height floor stacked its own 44px on top of the row's own 44px floor,
+   inflating a one-line System row to 89px against the mock's ~59px
+   (ds-review.html:636-642). The hit box still needs to measure --bs-touch
+   for touchTargets.spec.ts, but only as a hit box -- the padding that grows
+   it to --bs-touch is cancelled by an equal negative margin, so the row's
+   own layout height stays driven by the text line, not by this button. */
 @media (max-width: 640px) {
   .bs-timeline-row__title--link {
     display: inline-flex;
     align-items: center;
-    min-height: var(--bs-touch);
     min-width: 0;
+    padding-block: calc((var(--bs-touch) - 1lh) / 2);
+    margin-block: calc((var(--bs-touch) - 1lh) / -2);
   }
 }
 .bs-timeline-row__ts {
   color: var(--bs-text-subtlest);
   font-size: var(--bs-text-xs);
+}
+/* The meta-line copy of the time stays hidden until phone, where it
+   replaces the end column (DS6 PR4b round 2 item 4, spec §4.1 1b). */
+.bs-timeline-row__ts--meta {
+  display: none;
+}
+@media (max-width: 640px) {
+  .bs-timeline-row__ts {
+    display: none;
+  }
+  .bs-timeline-row__ts--meta {
+    display: inline;
+  }
+}
+/* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
+   on phone must match the mock's touch-sized row, not the desktop row. */
+@media (max-width: 640px) {
+  .bs-timeline-row {
+    min-height: var(--bs-touch);
+    padding: 10px var(--bs-m-card-pad);
+  }
+}
+/* Its own grid column (row rework, item 4): center it against the title
+   line rather than the row's own top edge. Touch target sizing is
+   .bs-iconbtn's, not this class's job. */
+.bs-timeline-row__chevron {
+  align-self: center;
+}
+/* Fix round 3 item 3 (ds-review.html `.mrow.tlrow .etog`): on phone the
+   chevron's own --bs-touch floor (.bs-iconbtn's media rule) grows its box
+   from 22px to 44px with no compensating margin, so centering it against
+   the whole row (title+meta) lands its glyph ~12px below the title line.
+   The mock's own `.etog` spans both text rows but aligns to the start of
+   that span and pulls up by its row's 10px padding-top (margin-top: -10px)
+   -- same padding value this row uses -- so the touch box overlaps into the
+   row's own top padding instead of pushing the glyph down past the title. */
+@media (max-width: 640px) {
+  .bs-timeline-row__chevron {
+    align-self: start;
+    margin-top: -10px;
+  }
+}
+/* Fix round item 4: a row with no details renders no chevron, but its
+   third grid column must still hold the same width or the time column
+   above/below it drifts out of alignment with rows that do have one. */
+.bs-timeline-row__chevron-placeholder {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
 }
 .bs-timeline-row__meta {
   display: flex;
@@ -470,7 +555,77 @@ a:hover {
   gap: var(--bs-space-2);
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
+}
+/* Fix round 3 item 2 (ds-review.html `.mm`/`.emeta`): the mock's meta line
+   has no extra indent, aligned with the title above it. The rail variant
+   alone needs one, to clear its own dot track (RunHistoryTimeline). */
+.bs-timeline-row--rail .bs-timeline-row__meta {
   padding-left: calc(16px + var(--bs-space-2));
+}
+/* Fix round item 6 (ds-review.html `.mrow .mm`): on phone, any row's meta
+   line (not just --compact's) fits one line with ellipsis, same reason as
+   item 5 -- long meta text (e.g. an error's message) must not wrap into
+   three or four lines. */
+@media (max-width: 640px) {
+  .bs-timeline-row__meta > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* Fix round 4 item 1 (ds-review.html `.mrow.tlrow`): the mock puts the
+   title first on the row's first line and the kind chip at its content
+   right end; the DOM keeps the kind tag before the title everywhere (a
+   screen reader hears what kind of event this is before its title), so the
+   phone-only swap is done with flex `order` on the existing children, not a
+   markup change. */
+@media (max-width: 640px) {
+  .bs-timeline-row__head .bs-event-kind-tag {
+    order: 2;
+  }
+  .bs-timeline-row__head .bs-timeline-row__title {
+    order: 1;
+  }
+}
+/* Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title is
+   one line, ellipsised -- the app used to wrap a long title to 2-3 lines.
+   The full title stays reachable: it is still the element's whole text
+   content (unaffected by the truncation, so a screen reader reads it
+   whole) and the row's own details (`dl` "Title") repeat it verbatim. The
+   link variant has no single text node to truncate (it is `inline-flex`,
+   round 3 item 1), so its inner label span is the one that gets the
+   ellipsis instead. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bs-timeline-row__title-label {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* Fix round 4 item 3 (ds-review.html `.mrow.tlrow .mq`): a prompt row's
+   title is the verbatim prompt text (titleFor), which plays the mock's
+   `.mq` role, not `.mt` -- so on phone it clamps to 2 lines instead of 1,
+   same as the mock's own Activity frame. Home's compact "Recent activity"
+   row has no `.mq` in the mock (ds-review.html:1092's prompt row is a
+   single truncated line), so it keeps the 1-line rule above. */
+@media (max-width: 640px) {
+  .bs-timeline-row[data-kind='prompt']:not(.bs-timeline-row--compact) .bs-timeline-row__title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    font-size: var(--bs-text-sm);
+    font-weight: var(--bs-font-weight-normal);
+  }
 }
 .bs-timeline-row__because-of {
   background: none;
@@ -553,6 +708,43 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Fix round 2 item 2: the single wrapper around the sentinel/pill/day-group
+   body -- one plain block-flow box, so its own children's margins collapse
+   the way the mock's plain `.mock` container does, instead of each one
+   being its own flex child of `.app-page` and getting that flex gap on top
+   of its own margin. No properties of its own; the point is that it is not
+   a flex item. */
+.activity-feed {
+  display: block;
+}
+
+/* DS6 PR4b round 3 item 1 (mock ds-review.html .newpill): the "N new
+   events" pill shown above the feed once the reader has scrolled away from
+   the top and a poll has buffered rows. */
+.activity-newpill {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 var(--bs-space-3);
+}
+
+/* DS6 PR4b round 2 item 2: an invisible IntersectionObserver target (top or
+   bottom sentinel) -- not a visible element, it only has to occupy a box
+   the observer can see enter the viewport. Migrated from ds-components.css
+   (fix round item 8: ds-components.css is deleted in DS9). */
+.activity-sentinel {
+  height: 1px;
+}
+
+/* Fix round item 7 (ds-components.css's `.timeline-day`): replaces
+   `.timeline-day:first-child { margin-top: 0 }`, which stopped matching
+   once ActivityPage.vue started rendering a top sentinel and the
+   new-events pill before the first `.timeline-day` -- a class set by the
+   caller on the actual first day group is independent of DOM position.
+   Migrated here per item 8 since this PR depends on it. */
+.timeline-day--first {
+  margin-top: 0;
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */

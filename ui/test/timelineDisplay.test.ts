@@ -16,6 +16,8 @@ import {
   matchesKind,
   metaFor,
   nodesOfItem,
+  sessionDividerBefore,
+  sessionDividerLabel,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -37,6 +39,8 @@ function entry(overrides: Partial<TimelineEntry>): TimelineEntry {
     payload: {},
     project: null,
     actor: null,
+    sessionId: 'sess-1',
+    sessionTitle: 'sess-1',
     ...overrides,
   };
 }
@@ -1491,6 +1495,8 @@ describe('groupByRoleMinute', () => {
     payload: { agent_role: 'builder' },
     project: null,
     actor: null,
+    sessionId: 'sess-1',
+    sessionTitle: 'sess-1',
     kind: 'Dispatched',
   };
 
@@ -1535,5 +1541,39 @@ describe('groupByRoleMinute', () => {
       { ...base, eventId: 'e3', kind: 'Returned' as const },
     ];
     expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+});
+
+describe('lib/timelineDisplay.ts sessionDividerBefore() (DS6 PR4b)', () => {
+  const base: TimelineEntry = entry({ sessionId: 'sess-a', sessionTitle: 'alpha' });
+
+  it('marks no divider before the first row', () => {
+    expect(sessionDividerBefore([base], 0)).toBe(false);
+  });
+
+  it('marks no divider when consecutive rows share a session', () => {
+    const entries = [base, { ...base, eventId: 'e2' }];
+    expect(sessionDividerBefore(entries, 1)).toBe(false);
+  });
+
+  it('marks a divider when the session id changes', () => {
+    const entries = [base, { ...base, eventId: 'e2', sessionId: 'sess-b', sessionTitle: 'beta' }];
+    expect(sessionDividerBefore(entries, 1)).toBe(true);
+  });
+});
+
+// Fix round 5 item 3 (review): the divider must never render a bare
+// "Session: " -- the server already falls back `sessionTitle` to the raw
+// session id (joinSessionTitles), but the client-side label stays defensive
+// against an empty string reaching it by any other path.
+describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
+  it('uses the sessionTitle when present', () => {
+    expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: 'alpha' }))).toBe(
+      'alpha',
+    );
+  });
+
+  it('falls back to the session id when sessionTitle is empty', () => {
+    expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
   });
 });

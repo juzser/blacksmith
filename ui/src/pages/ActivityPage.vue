@@ -5,7 +5,8 @@
 // decision: no search box, no "Decisions" lens (decisionsOnly stays a server
 // param, just not exposed in this UI). Errors' own class cards are PR4; until
 // then `kind=errors` just filters the feed to Error rows.
-import { computed, onMounted, ref, watch } from 'vue';
+import { ArrowUp } from '@lucide/vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Banner from '../components/ds/Banner.vue';
 import EmptyState from '../components/ds/EmptyState.vue';
@@ -16,6 +17,7 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
+import { LoadOlderGate } from '../lib/activityPaging.js';
 import {
   type EventKind as ApiEventKind,
   fetchTimelinePage,
@@ -23,6 +25,8 @@ import {
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
+import { FeedGeneration } from '../lib/feedGeneration.js';
+import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../lib/liveFeed.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
 import {
@@ -32,6 +36,8 @@ import {
   type EventKind,
   groupByDay,
   groupByRoleMinute,
+  sessionDividerBefore,
+  sessionDividerLabel,
 } from '../lib/timelineDisplay.js';
 
 const route = useRoute();
@@ -58,6 +64,55 @@ const STORAGE_KEY = 'activity';
 onMounted(() => {
   expanded.value = loadExpanded(sessionStorage, STORAGE_KEY);
 });
+
+// DS6 PR4b round 2 item 2: one gate per feed, re-created whenever the feed
+// itself reloads (filters, project/session switch), guarding both the
+// sentinel and the fallback button against a double fetch.
+let loaderGate = new LoadOlderGate(null);
+const sentinelEl = ref<HTMLElement | null>(null);
+let sentinelObserver: IntersectionObserver | null = null;
+
+watch(sentinelEl, (el) => {
+  sentinelObserver?.disconnect();
+  if (!el) return;
+  sentinelObserver = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadOlder();
+  });
+  sentinelObserver.observe(el);
+});
+
+onBeforeUnmount(() => sentinelObserver?.disconnect());
+
+// DS6 PR4b round 3 item 1 (ds-spec.md §4.3 "Live"): a top sentinel decides
+// whether the reader is at the top of the feed (same IntersectionObserver
+// pattern as the "load older" sentinel). `atTop` starts true since the
+// sentinel is in view at mount, before any row has loaded.
+const atTop = ref(true);
+const topSentinelEl = ref<HTMLElement | null>(null);
+let topSentinelObserver: IntersectionObserver | null = null;
+
+watch(topSentinelEl, (el) => {
+  topSentinelObserver?.disconnect();
+  if (!el) return;
+  topSentinelObserver = new IntersectionObserver((entries) => {
+    atTop.value = entries.some((e) => e.isIntersecting);
+  });
+  topSentinelObserver.observe(el);
+});
+
+onBeforeUnmount(() => topSentinelObserver?.disconnect());
+
+let liveFeed = new LiveFeedBuffer<ActivityEntry>();
+const pendingNewCount = ref(0);
+const polling = ref(false);
+const liveAnnouncement = ref('');
+let announcer = new NewEventsAnnouncer();
+
+// Fix round items 1-2: one request-generation token, bumped by load() on
+// every fetch (including the first); poll/loadOlder/load each drop a
+// response whose generation is stale. Also gives poll() its own in-flight
+// guard (item 1), separate from the generation check.
+const feedGen = new FeedGeneration();
 
 const kindFilter = computed<EventKind | null>(() => {
   const raw = route.query.kind;
@@ -100,11 +155,12 @@ function onPhoneKindKeydown(event: KeyboardEvent) {
 }
 
 async function load() {
+  const gen = feedGen.bump();
   try {
     const kinds = kindFilter.value
       ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
       : undefined;
-    page.value = await fetchTimelinePage({
+    const fetched = await fetchTimelinePage({
       session: sessionScope.value,
       project: project.value,
       task: taskFilter.value,
@@ -112,36 +168,119 @@ async function load() {
       kinds,
       limit: 50,
     });
+    if (feedGen.isStale(gen)) return;
+    page.value = fetched;
+    loaderGate = new LoadOlderGate(page.value.nextBefore);
+    liveFeed = new LiveFeedBuffer<ActivityEntry>();
+    pendingNewCount.value = 0;
+    announcer.reset();
     error.value = null;
   } catch (e) {
+    if (feedGen.isStale(gen)) return;
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (!feedGen.isStale(gen)) loading.value = false;
   }
 }
 
 onMounted(load);
 watch([project, sessionKey, kindFilter, taskFilter, epicFilter], load);
+
+// DS6 PR4b round 3 item 1: once the feed is loaded, the same `usePoll`
+// trigger (15s fallback, stream advance, global Refresh) fetches only rows
+// newer than the newest one already held (`after=`) instead of reloading
+// the whole page, so an incremental poll cannot re-sort rows already paged
+// back. `load()` still owns the initial fetch and filter changes.
+async function poll() {
+  if (!page.value) return;
+  if (!feedGen.startPoll()) return;
+  const gen = feedGen.snapshot();
+  const cursor = page.value.newestId;
+  polling.value = true;
+  try {
+    const kinds = kindFilter.value
+      ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
+      : undefined;
+    const incoming = await fetchTimelinePage({
+      session: sessionScope.value,
+      project: project.value,
+      task: taskFilter.value,
+      epic: epicFilter.value,
+      kinds,
+      limit: 50,
+      after: cursor ?? undefined,
+    });
+    if (!page.value || feedGen.isStale(gen)) return;
+    const nextNewestId = incoming.newestId ?? cursor;
+    const merged = liveFeed.receive(incoming.entries, atTop.value);
+    if (merged) {
+      if (merged.length === 0) return;
+      page.value = {
+        entries: [...merged, ...page.value.entries],
+        nextBefore: page.value.nextBefore,
+        newestId: nextNewestId,
+      };
+      pendingNewCount.value = 0;
+      announcer.reset();
+    } else {
+      page.value = { ...page.value, newestId: nextNewestId };
+      pendingNewCount.value = liveFeed.pendingCount;
+      const announcement = announcer.next(pendingNewCount.value);
+      if (announcement) liveAnnouncement.value = announcement;
+    }
+  } catch (e) {
+    if (feedGen.isStale(gen)) return;
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    feedGen.endPoll();
+    polling.value = false;
+  }
+}
+
 // design-spec.md §8: Activity (Timeline's replacement) polls at the same
 // 15s cadence and answers the shared topbar Refresh, same as Kanban/Sessions.
-usePoll(load, 15000);
+usePoll(poll, 15000);
+
+function applyPendingNew() {
+  if (!page.value) return;
+  const flushed = liveFeed.flush();
+  pendingNewCount.value = 0;
+  announcer.reset();
+  if (flushed.length === 0) return;
+  page.value = { ...page.value, entries: [...flushed, ...page.value.entries] };
+  // The feed scrolls inside the app shell's own .app-scroll container, not
+  // the window -- window.scrollTo is a no-op here.
+  document.querySelector('.app-scroll')?.scrollTo({ top: 0 });
+}
 
 async function loadOlder() {
   if (!page.value?.nextBefore) return;
-  const older = await fetchTimelinePage({
-    session: sessionScope.value,
-    project: project.value,
-    task: taskFilter.value,
-    epic: epicFilter.value,
-    kinds: kindFilter.value ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[]) : undefined,
-    limit: 50,
-    before: page.value.nextBefore,
-  });
-  page.value = {
-    entries: [...page.value.entries, ...older.entries],
-    nextBefore: older.nextBefore,
-    newestId: page.value.newestId,
-  };
+  if (!loaderGate.start()) return;
+  const gen = feedGen.snapshot();
+  try {
+    const older = await fetchTimelinePage({
+      session: sessionScope.value,
+      project: project.value,
+      task: taskFilter.value,
+      epic: epicFilter.value,
+      kinds: kindFilter.value
+        ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
+        : undefined,
+      limit: 50,
+      before: page.value.nextBefore,
+    });
+    if (feedGen.isStale(gen)) return;
+    page.value = {
+      entries: [...page.value.entries, ...older.entries],
+      nextBefore: older.nextBefore,
+      newestId: page.value.newestId,
+    };
+    loaderGate.finish(older.nextBefore);
+  } catch (e) {
+    loaderGate.finish(page.value?.nextBefore ?? null);
+    if (feedGen.isStale(gen)) return;
+    throw e;
+  }
 }
 
 const entries = computed<ActivityEntry[]>(() => page.value?.entries ?? []);
@@ -155,6 +294,15 @@ const causedCountByPromptId = computed(() => {
 });
 
 const dayGroups = computed(() => groupByDay(entries.value, new Date().toISOString()));
+
+// DS6 PR4b item 3: a "Session: <title>" divider between adjacent rows whose
+// session differs, keyed off the whole feed's order (not per day-group), so a
+// session that spans a day boundary still only breaks once per real change.
+const indexById = computed(() => new Map(entries.value.map((e, i) => [e.eventId, i])));
+function dividerBefore(entry: ActivityEntry): boolean {
+  const idx = indexById.value.get(entry.eventId);
+  return idx !== undefined && sessionDividerBefore(entries.value, idx);
+}
 
 function ctxFor(entry: ActivityEntry) {
   const promptTs = entry.nearestPromptId
@@ -185,7 +333,8 @@ function becauseOf(promptId: string) {
 </script>
 
 <template>
-  <div class="app-page" role="feed" aria-label="Activity">
+  <div class="app-page" role="feed" aria-label="Activity" :aria-busy="loading || polling">
+    <span class="sr-only" aria-live="polite">{{ liveAnnouncement }}</span>
     <div
       v-if="isPhoneWidth"
       role="tablist"
@@ -233,29 +382,47 @@ function becauseOf(promptId: string) {
     </EmptyState>
 
     <template v-else>
-      <template v-for="(group, gi) in dayGroups" :key="gi">
-        <div class="timeline-day">{{ group.label }}</div>
-        <div class="timeline-feed">
-          <ol style="list-style: none; margin: 0; padding: 0">
-            <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
-              <li v-if="item.kind === 'group'" class="bs-timeline-row">
-                {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
-              </li>
-              <TimelineRow
-                v-else
-                :entry="item.entry!"
-                :expanded="expanded.has(item.entry!.eventId)"
-                :ctx="ctxFor(item.entry!)"
-                :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
-                @toggle="toggleRow"
-                @select-task="goToTask"
-                @because-of="becauseOf"
-              />
-            </template>
-          </ol>
+      <!-- Fix round 2 item 2 (ds-review.html `.mock` block flow): one plain
+           wrapper, not a flat run of flex children of `.app-page` -- its own
+           margins collapse the way the mock's block-flow container does,
+           instead of `.app-page`'s flex `gap` stacking on top of every
+           sentinel/pill/day-group's own margin. -->
+      <div class="activity-feed">
+        <div ref="topSentinelEl" class="activity-sentinel" aria-hidden="true"></div>
+        <div v-if="pendingNewCount > 0" class="activity-newpill">
+          <Button variant="primary" size="sm" :icon="ArrowUp" @click="applyPendingNew">
+            {{ formatNewEventsCount(pendingNewCount) }}
+          </Button>
         </div>
-      </template>
-      <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
+        <template v-for="(group, gi) in dayGroups" :key="gi">
+          <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
+          <div class="timeline-feed">
+            <ol style="list-style: none; margin: 0; padding: 0">
+              <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
+                <li v-if="item.kind === 'group'" class="bs-timeline-row">
+                  {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
+                </li>
+                <template v-else>
+                  <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
+                    Session: {{ sessionDividerLabel(item.entry!) }}
+                  </li>
+                  <TimelineRow
+                    :entry="item.entry!"
+                    :expanded="expanded.has(item.entry!.eventId)"
+                    :ctx="ctxFor(item.entry!)"
+                    :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
+                    @toggle="toggleRow"
+                    @select-task="goToTask"
+                    @because-of="becauseOf"
+                  />
+                </template>
+              </template>
+            </ol>
+          </div>
+        </template>
+        <div v-if="page?.nextBefore" ref="sentinelEl" class="activity-sentinel" aria-hidden="true"></div>
+        <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
+      </div>
     </template>
   </div>
 </template>

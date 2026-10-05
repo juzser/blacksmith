@@ -65,7 +65,7 @@ import {
   type TaskTotals,
 } from '../lib/api.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
-import { formatDurationMs, taskLabel } from '../lib/format.js';
+import { formatDurationMs, formatElapsedRange, taskLabel } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
@@ -153,7 +153,10 @@ const totalsCells = computed(() => {
       icon: Clock,
       label: 'Elapsed',
       value: formatDurationMs(t.elapsedMs),
-      exact: `${Math.round(t.elapsedMs / 1000).toLocaleString()}s elapsed`,
+      exact:
+        t.startedAt !== null && t.endedAt !== null
+          ? formatElapsedRange(t.startedAt, t.endedAt)
+          : `${Math.round(t.elapsedMs / 1000).toLocaleString()}s elapsed`,
     });
   }
   return cells;
@@ -467,7 +470,7 @@ const factsRowText = computed(() => {
               </Banner>
               <div v-else-if="history.length > 0" style="margin-top: var(--bs-space-5)">
                 <template v-for="(group, gi) in historyDayGroups" :key="gi">
-                  <div class="timeline-day">{{ group.label }}</div>
+                  <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
                   <div class="timeline-feed">
                     <ol style="list-style: none; margin: 0; padding: 0">
                       <TimelineRow

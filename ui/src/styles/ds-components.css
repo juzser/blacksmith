@@ -1271,9 +1271,10 @@
   color: var(--ds-text-subtlest);
   margin: var(--bs-space-5) 0 var(--ds-space-2);
 }
-.timeline-day:first-child {
-  margin-top: 0;
-}
+/* Fix round item 7: `.timeline-day--first` (bs-primitives.css) replaces
+   `.timeline-day:first-child` here -- ActivityPage.vue's top sentinel and
+   new-events pill render before the first `.timeline-day` now, so it is no
+   longer its parent's first element child. */
 /* Item 3: a raised card frame around a day's rows (ds-review.html's `.feed`),
    plus a 1px seam between adjacent rows (its `.ev` border-bottom), so rows on
    the same background don't merge. Used both for the top-level day group and

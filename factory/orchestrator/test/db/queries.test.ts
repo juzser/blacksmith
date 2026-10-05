@@ -758,6 +758,62 @@ describe('db/queries.ts', () => {
       }
     });
 
+    // Fix round 5 item 3: a session with no user prompt and no dispatched
+    // agent has nothing `sessionTitles()` can resolve at all, so
+    // `joinSessionTitles`'s own `?? entry.sessionId` fallback is the one
+    // that fires (not `sessionTitles()`'s own epic-id fallback, already
+    // covered by `overview()`'s "sess-title-fallback" fixture).
+    it('falls back sessionTitle to the raw session id when no prompt and no dispatch exist', async () => {
+      const bareSession = 'sess-no-title';
+      const start = await appendEvent(
+        {
+          session_id: bareSession,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+      await appendEvent(
+        {
+          session_id: bareSession,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: 'epic-no-title/task-1',
+          plan_version: 1,
+          causal_parent: start.event_id,
+          payload: {
+            epic_id: 'epic-no-title',
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Do the thing.',
+            title: 'The thing',
+            summary: 'Does the thing.',
+            claims: ['src/thing.ts'],
+            budget_tokens: 2000,
+          },
+        },
+        { stateDir },
+      );
+      const dbPath = path.join(dbDir, 'session-title-fallback.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const noTitleHandle = openDb(dbPath);
+      try {
+        const entries = timeline(noTitleHandle.db, { sessionId: bareSession });
+        expect(entries.length).toBeGreaterThan(0);
+        for (const entry of entries) {
+          expect(entry.sessionId).toBe(bareSession);
+          expect(entry.sessionTitle).toBe(bareSession);
+        }
+      } finally {
+        noTitleHandle.sqlite.close();
+      }
+    });
+
     it('expands the causal-parent chain for one event, oldest first, ending at that event', () => {
       const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_3 });
       const errorEntry = entries.find((e) => e.eventType === 'error-logged');

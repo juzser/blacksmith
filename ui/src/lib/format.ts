@@ -57,6 +57,21 @@ export function formatAbsolute(iso: string): string {
 }
 
 /**
+ * "29 Sep 2026, 14:02 to 16:12" — TaskDetailPage's Elapsed tooltip (DS6 PR4b)
+ * when both `startedAt` and `endedAt` are known: the started day/date once,
+ * then both times joined by "to". Callers fall back to the plain "Ns elapsed"
+ * text when either end is unknown — this function is only ever called with
+ * both present.
+ */
+export function formatElapsedRange(startedAt: string, endedAt: string): string {
+  const start = new Date(startedAt);
+  if (Number.isNaN(start.getTime())) return startedAt;
+  const day = start.getDate();
+  const month = SHORT_MONTHS[start.getMonth()];
+  return `${day} ${month} ${start.getFullYear()}, ${formatTime(startedAt)} to ${formatTime(endedAt)}`;
+}
+
+/**
  * "12 Sep, 09:14" — RequestQuote.vue's timestamp (ds-review.html ~1239,
  * ~1300: short month name, 24h time, no year). Scoped to RequestQuote only
  * (DS4 S5c fix round 1, fix 4) — formatDateTime() above stays put for the

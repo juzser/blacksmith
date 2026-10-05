@@ -246,6 +246,10 @@ export interface TimelineEntry {
   payload: Record<string, unknown>;
   project: string | null;
   actor: string | null;
+  /** DS6 PR4b: the session this event belongs to. */
+  sessionId: string;
+  /** DS6 PR4b: the owning session's title, falling back to its id when untitled. */
+  sessionTitle: string;
 }
 
 export interface KanbanTag {
@@ -393,6 +397,10 @@ export interface TaskTotals {
   tokens: number | null;
   agentTimeMs: number | null;
   elapsedMs: number | null;
+  /** DS6 PR4b: first dispatch's ts; null when the task has no dispatch yet. */
+  startedAt: string | null;
+  /** DS6 PR4b: last result/error's ts; null while no run has ended yet. */
+  endedAt: string | null;
 }
 
 export interface LessonRecord {

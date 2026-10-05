@@ -2176,6 +2176,16 @@ export interface TimelineEntry {
    * Present only on `Gate` rows; `null` when the counts cannot be derived.
    */
   gateCounts?: { passed: number; failed: number } | null;
+  /** DS6 PR4b (§4.1 1b, Activity section) — the row's own session id, used
+   * client-side to draw a "Session: <title>" divider between adjacent rows
+   * from different sessions. */
+  sessionId: string;
+  /**
+   * DS6 PR4b — the session's title (same resolution `sessionTitles()` gives
+   * `runningSessions()`: earliest prompt, else the earliest dispatch's epic
+   * id), falling back to the raw session id when neither exists.
+   */
+  sessionTitle: string;
 }
 
 /** DS6 PR2 — a Dispatched row's run result (§4.3 table). */
@@ -2224,6 +2234,7 @@ function toEntry(
     payload: string;
     project: string | null;
     actor: string | null;
+    sessionId: string;
   },
   nearestPromptId: string | null,
 ): TimelineEntry {
@@ -2241,6 +2252,9 @@ function toEntry(
     actor: row.actor,
     kind: eventKind(row.eventType, payload),
     nearestPromptId,
+    sessionId: row.sessionId,
+    // Filled per-page by joinSessionTitles() below, same as run/gateCounts.
+    sessionTitle: row.sessionId,
   };
 }
 
@@ -2409,7 +2423,9 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
         'timeline(): causalChainFor cannot be combined with limit, before, after or kinds — the causal chain is not pageable.',
       );
     }
-    return causalChain(db, filter.sessionId, filter.causalChainFor);
+    const chain = causalChain(db, filter.sessionId, filter.causalChainFor);
+    joinSessionTitles(db, chain);
+    return chain;
   }
 
   const eventTypes = filter.eventTypes ?? timelineEventTypes();
@@ -2454,7 +2470,24 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   }
   joinDispatchRuns(db, page);
   joinGateCounts(page);
+  joinSessionTitles(db, page);
   return page;
+}
+
+/**
+ * DS6 PR4b (§4.1 1b) — fills `sessionTitle` on every entry in `page`, one
+ * grouped lookup (`sessionTitles()`, the same logic `runningSessions()` uses
+ * for its "Now running" cards) scoped to only the session ids the page
+ * actually carries, rather than one query per row or an unscoped scan of
+ * every session this factory has ever run.
+ */
+function joinSessionTitles(db: SmithDb, page: TimelineEntry[]): void {
+  const sessionIds = [...new Set(page.map((e) => e.sessionId))];
+  if (sessionIds.length === 0) return;
+  const titles = sessionTitles(db, { sessionIds });
+  for (const entry of page) {
+    entry.sessionTitle = titles.get(entry.sessionId) ?? entry.sessionId;
+  }
 }
 
 /**
@@ -3282,6 +3315,10 @@ export interface TaskTotals {
   agentTimeMs: number | null;
   /** First `dispatch` run's ts to the last `result`/`error` run's ts; null while no run has ended yet. */
   elapsedMs: number | null;
+  /** First `dispatch` run's ts; null when the task has no dispatch yet (DS6 PR4b, Elapsed tooltip). */
+  startedAt: string | null;
+  /** Last `result`/`error` run's ts; null while no run has ended yet (DS6 PR4b, Elapsed tooltip). */
+  endedAt: string | null;
 }
 
 /**
@@ -3325,6 +3362,8 @@ export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
       startTs !== null && endTs !== null
         ? new Date(endTs).getTime() - new Date(startTs).getTime()
         : null,
+    startedAt: startTs,
+    endedAt: endTs,
   };
 }
 

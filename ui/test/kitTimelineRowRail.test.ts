@@ -37,9 +37,8 @@ describe('kit/TimelineRow.vue rail variant', () => {
     expect(TIMELINE_ROW).toMatch(/<Tag v-if="tag" :tone="tag\.tone" variant="subtle" size="sm">/);
   });
 
-  it('swaps the time column for RelativeTime only on the rail variant', () => {
-    expect(TIMELINE_ROW).toMatch(/<RelativeTime v-if="variant === 'rail'"[^>]*:iso="entry\.ts"/);
-    expect(TIMELINE_ROW).toMatch(/<time v-else[^>]*>\{\{ formatTime\(entry\.ts\) \}\}<\/time>/);
+  it('renders the time column with RelativeTime on every variant (DS6 PR4b round 2 item 4)', () => {
+    expect(TIMELINE_ROW).toMatch(/<RelativeTime class="bs-timeline-row__ts" :iso="entry\.ts" \/>/);
   });
 
   it('skips the dl "Task" row on rail rows (TaskRun carries no taskId)', () => {
