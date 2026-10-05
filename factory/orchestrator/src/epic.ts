@@ -256,6 +256,18 @@ const FOLLOW_UP_TASK_ORIGIN = 'escalation';
 const WAIVED_FINDING_STATUS = 'waived';
 
 /**
+ * The closed finding states that leave a follow-up nothing to do: waived (the
+ * operator's decision), refuted (the claim was shown false) and fix-verified
+ * (another task's fix was verified). Open, confirmed, in-flight and amend
+ * states still block.
+ */
+const FOLLOW_UP_CLEARING_FINDING_STATUSES: ReadonlySet<string> = new Set([
+  WAIVED_FINDING_STATUS,
+  'refuted',
+  'fix-verified',
+]);
+
+/**
  * Whether a follow-up task's whole reason to exist has been waived away. A
  * follow-up is minted `todo` to own findings, and no event ever moves it to
  * `waived` — the projector has no such write — so without this the operator
@@ -270,8 +282,9 @@ const WAIVED_FINDING_STATUS = 'waived';
  *     discharge;
  *   - at least one attributed finding: a follow-up that owns nothing is not
  *     "all waived", it is unexplained, and absence must not vote yes (D-126);
- *   - every attributed finding `waived`: one still open, or closed any other
- *     way (a fix verified by a gate the task never ran), still blocks.
+ *   - every attributed finding waived, refuted or fix-verified
+ *     (FOLLOW_UP_CLEARING_FINDING_STATUSES): one still open, or closed any
+ *     other way (expired, amended), still blocks.
  *
  * Attribution is `finding.task_id`. A finding routed to a follow-up is raised
  * under it (attribution.ts's `reattributeFinding` re-mints the id before the
@@ -290,7 +303,8 @@ function clearedFollowUpFindings(
   if (row.origin !== FOLLOW_UP_TASK_ORIGIN) return null;
   const bare = bareTaskId(epicId, row.taskId);
   const owned = findings.filter((f) => bareTaskId(epicId, f.task_id) === bare);
-  return owned.length > 0 && owned.every((f) => f.finding_status === WAIVED_FINDING_STATUS)
+  return owned.length > 0 &&
+    owned.every((f) => FOLLOW_UP_CLEARING_FINDING_STATUSES.has(f.finding_status))
     ? owned
     : null;
 }
@@ -1023,7 +1037,7 @@ export function summarizeEpic(
     ...nonTerminal.map((t) => {
       const row = tasks.find((r) => r.taskId === t.taskId);
       if (row?.origin === FOLLOW_UP_TASK_ORIGIN && t.taskStatus !== SUPERSEDED_TASK_STATUS)
-        return `Task "${t.taskId}" is a follow-up (origin: escalation) and is not terminal-OK (status: ${t.taskStatus}). Complete it, or waive every finding attributed to it — it clears once it owns at least one finding and all of them are waived.`;
+        return `Task "${t.taskId}" is a follow-up (origin: escalation) and is not terminal-OK (status: ${t.taskStatus}). Complete it, or close every finding attributed to it — it clears once it owns at least one finding and all of them are fixed, refuted or waived.`;
       if (t.taskStatus !== SUPERSEDED_TASK_STATUS)
         return `Task "${t.taskId}" is not terminal-OK (status: ${t.taskStatus}).`;
       const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);
@@ -1183,7 +1197,7 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
             return cleared === undefined
               ? `  ${t.taskId}: ${t.taskStatus}`
               : `  ${t.taskId}: ${t.taskStatus} — follow-up (origin: escalation) cleared by rule: ` +
-                  `every attributed finding waived (${cleared.waivedFindingIds.join(', ')}); counted terminal-OK`;
+                  `every attributed finding closed — fixed, refuted or waived (${cleared.waivedFindingIds.join(', ')}); counted terminal-OK`;
           })
           .join('\n')
       : '  (no tasks)';
