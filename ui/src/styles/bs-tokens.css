@@ -133,7 +133,7 @@
 
   /* ---- Type scale (§1.4) ---- */
   --bs-font-sans: -apple-system, 'Segoe UI', Inter, sans-serif;
-  --bs-font-mono: ui-monospace, SFMono-Regular, monospace;
+  --bs-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --bs-text-xs: 12px;
   --bs-leading-xs: 16px;
   --bs-text-sm: 13px;
