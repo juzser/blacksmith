@@ -472,14 +472,20 @@ a:hover {
 }
 /* ≤640px: a one-line title button's own text settles well under --bs-touch
    (touchTargets.spec.ts caught this on a short humanized title, e.g.
-   "Operator feedback resolved" on a single line) -- min-height floor only,
-   same pattern as .bs-input/.bs-select above. */
+   "Operator feedback resolved" on a single line). Fix round 3 item 1: a plain
+   min-height floor stacked its own 44px on top of the row's own 44px floor,
+   inflating a one-line System row to 89px against the mock's ~59px
+   (ds-review.html:636-642). The hit box still needs to measure --bs-touch
+   for touchTargets.spec.ts, but only as a hit box -- the padding that grows
+   it to --bs-touch is cancelled by an equal negative margin, so the row's
+   own layout height stays driven by the text line, not by this button. */
 @media (max-width: 640px) {
   .bs-timeline-row__title--link {
     display: inline-flex;
     align-items: center;
-    min-height: var(--bs-touch);
     min-width: 0;
+    padding-block: calc((var(--bs-touch) - 1lh) / 2);
+    margin-block: calc((var(--bs-touch) - 1lh) / -2);
   }
 }
 .bs-timeline-row__ts {
@@ -527,6 +533,11 @@ a:hover {
   gap: var(--bs-space-2);
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
+}
+/* Fix round 3 item 2 (ds-review.html `.mm`/`.emeta`): the mock's meta line
+   has no extra indent, aligned with the title above it. The rail variant
+   alone needs one, to clear its own dot track (RunHistoryTimeline). */
+.bs-timeline-row--rail .bs-timeline-row__meta {
   padding-left: calc(16px + var(--bs-space-2));
 }
 /* Fix round item 6 (ds-review.html `.mrow .mm`): on phone, any row's meta

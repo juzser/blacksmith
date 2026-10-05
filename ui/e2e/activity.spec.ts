@@ -344,6 +344,34 @@ test.describe('Activity', () => {
     }
   });
 
+  // Fix round 3 item 1 (ds-review.html `.mrow.tlrow`, ds-review.html:636-642):
+  // a one-line row whose title is a task link used to measure 89px tall on
+  // phone, because `.bs-timeline-row__title--link`'s own --bs-touch
+  // min-height (needed for the hit box) stacked on top of the row's own
+  // --bs-touch floor. Mock geometry: 10px top/bottom padding + a 14px title
+  // line (line-height 1.6 -> 22.4px) + 2px gap + a 12px meta line
+  // (line-height 1.6 -> 19.2px) = ~64px. Fails on 86af027 (measured 89px).
+  test('phone: a one-line linked row measures within 6px of the mock row height', async ({
+    page,
+  }) => {
+    const noMeta = {
+      ...synthEntry('phone-one-line', 0),
+      eventType: 'session-started',
+      payload: {},
+      taskId: 'demo/task-1',
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries: [noMeta], nextBefore: null, newestId: noMeta.eventId } });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row.locator('.bs-timeline-row__title--link')).toBeVisible();
+    const box = await row.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(58);
+    expect(box?.height ?? 0).toBeLessThanOrEqual(70);
+  });
+
   // Fix round 2 item 2: app-page's flex gap used to stack on top of every
   // sentinel/pill/day-group's own margin, leaving ~55px above "Today" and
   // ~40px more above the first row where the mock's .day margin (24px top,
