@@ -914,8 +914,8 @@ export function createApp(opts: AppOpts): AppHandle {
     const sessionId = c.req.param('sessionId');
     const project = c.req.query('project');
     if (project) {
-      const session = overview(handle.db, { sessionId }, clock).runningSessions[0];
-      if (!session || !session.projects.includes(project)) {
+      const session = overview(handle.db, { sessionId, project }, clock).runningSessions[0];
+      if (!session) {
         throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
       }
     }

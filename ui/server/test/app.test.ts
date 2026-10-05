@@ -724,6 +724,26 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  // The legacy spelling still lives in old bookmarks and URLs; the project
+  // query param has to normalize the same way every other scoped route does.
+  it('GET /api/sessions/:sessionId/agents 200s for the legacy project spelling', async () => {
+    const handle = app();
+    const legacy = await handle.app.request(
+      `/api/sessions/${SESSION_ID}/agents?project=black-smith`,
+    );
+    expect(legacy.status).toBe(200);
+    const legacyBody = await json(legacy);
+
+    const normalized = await handle.app.request(
+      `/api/sessions/${SESSION_ID}/agents?project=blacksmith`,
+    );
+    expect(normalized.status).toBe(200);
+    const normalizedBody = await json(normalized);
+
+    expect(legacyBody).toEqual(normalizedBody);
+    closeApp(handle);
+  });
+
   it('GET /api/tasks/:taskId 200s for a known task, 404s for an unknown one', async () => {
     const handle = app();
     const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}`);
