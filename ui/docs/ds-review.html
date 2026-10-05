@@ -48,6 +48,7 @@
   --bs-ease-standard: cubic-bezier(.2,0,0,1);
   --bs-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   --bs-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bs-side-mark-backing: rgb(255 255 255 / 0.3);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -79,6 +80,13 @@
     --bs-chart-1: #86a4e2; --bs-chart-2: #7bc990; --bs-chart-3: #d9b56b;
     --bs-chart-4: #b6add9; --bs-chart-5: #e18d8a; --bs-chart-6: #7cc2cb;
     color-scheme: dark;
+  }
+  :root:not([data-theme="light"]) .side-mark {
+    width: calc(20px + 2 * var(--bs-space-1));
+    height: calc(20px + 2 * var(--bs-space-1));
+    padding: var(--bs-space-1);
+    margin: calc(-1 * var(--bs-space-1));
+    background: var(--bs-side-mark-backing);
   }
 }
 :root[data-theme="dark"] {
@@ -334,6 +342,28 @@ td.r, th.r { text-align: right; }
 .side.collapsed { padding: var(--bs-space-3) var(--bs-space-2); width: max-content; border-right: 1px solid var(--bs-border); }
 .side.collapsed li { padding: 6px; justify-content: center; }
 .side.collapsed a { color: inherit; display: inline-flex; }
+/* Logo mark: a plain swatch stands in for the real artwork. Light theme
+   stays transparent; dark theme sits the mark on a backing plate that grows
+   outward (negative margin) so the artwork keeps the same position. */
+.side-mark { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--bs-radius-full); flex-shrink: 0; box-sizing: border-box; }
+.side-mark-art { width: 100%; height: 100%; border-radius: var(--bs-radius-full); background: var(--bs-accent); }
+:root[data-theme="dark"] .side-mark {
+  width: calc(20px + 2 * var(--bs-space-1));
+  height: calc(20px + 2 * var(--bs-space-1));
+  padding: var(--bs-space-1);
+  margin: calc(-1 * var(--bs-space-1));
+  background: var(--bs-side-mark-backing);
+}
+/* Work's level-2 children (Kanban, Roadmap): always visible while the rail
+   is expanded, indented under the parent's label. A child page gets the
+   filled active style; its parent then reads bold with no fill so the two
+   never look like one block. */
+.side li.haschild { display: block; padding: 0; }
+.side li.haschild > .row { display: flex; align-items: center; gap: var(--bs-space-2); padding: 6px 8px; border-radius: var(--bs-radius-sm); border-left: 2px solid transparent; margin-bottom: 2px; color: var(--bs-text-subtle); }
+.side li.haschild > .row.cur { color: var(--bs-text); font-weight: 500; }
+.side .sub { list-style: none; margin: 0 0 2px 26px; padding: 0; }
+.side .sub li { display: flex; align-items: center; height: 2rem; box-sizing: border-box; padding: 0 8px; border-radius: var(--bs-radius-sm); border-left: 2px solid transparent; margin-bottom: 2px; color: var(--bs-text-subtle); }
+.side .sub li.on { background: var(--bs-surface-selected); color: var(--bs-text); border-left-color: var(--bs-text); font-weight: 500; }
 .content { padding: var(--bs-space-5); }
 .content h4 { margin: 0 0 var(--bs-space-4); font-size: 16px; font-weight: 600; color: var(--bs-text); }
 @media (max-width: 640px) {
@@ -424,6 +454,23 @@ td.r, th.r { text-align: right; }
 .chart-box { background: var(--bs-surface-raised); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: var(--bs-space-4); }
 .chart-box + .chart-box { margin-top: var(--bs-space-5); }
 .chart-box h5 { margin: 0 0 var(--bs-space-3); font-size: 13px; font-weight: 600; }
+
+/* Activity "Errors" view: two takeaway charts, then one card per error class */
+.err-charts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bs-space-4); }
+.err-line { display: block; width: 100%; height: 80px; margin: var(--bs-space-3) 0 4px; }
+.err-line polyline { fill: none; stroke: var(--bs-chart-1); stroke-width: 2; }
+.err-line circle { fill: var(--bs-chart-1); }
+.err-bars { margin-top: var(--bs-space-3); }
+.err-bars .vcol { background: var(--bs-surface-sunken); border-radius: var(--bs-radius-sm); }
+.err-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--bs-space-3); margin: var(--bs-space-4) 0; }
+.err-charts > .chart-box + .chart-box, .err-cards > .card + .card { margin-top: 0; }
+.err-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--bs-space-2); font-size: 11px; color: var(--bs-text-subtlest); margin-top: var(--bs-space-2); }
+.err-card-foot .spark { display: inline-flex; align-items: center; gap: 4px; }
+.err-card-foot .spark svg { width: 44px; height: 16px; flex: none; }
+.err-card-foot .spark polyline { fill: none; stroke: var(--bs-chart-1); stroke-width: 1.5; }
+@media (max-width: 640px) {
+  .err-charts { grid-template-columns: 1fr; }
+}
 
 .wave { background: var(--bs-surface-raised); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: var(--bs-space-3) var(--bs-space-4); }
 .wave + .wave { margin-top: var(--bs-space-3); }
@@ -904,15 +951,15 @@ a.mrow:hover { background: var(--bs-surface-selected); }
 
 <section aria-labelledby="h-shell" id="shell">
   <h2 id="h-shell">Page shell</h2>
-  <p>The sidebar is down to 5 items, no submenu; each item carries an icon and a label. The open item has a grey background and a colour stripe on the left text, not blue. The top bar has a single "Live" light, replacing today's two clocks and two refresh buttons. Beside the light are four icon-only buttons: pause, refresh (disabled while auto-updating), switch theme, and settings. Hovering or tabbing to any button shows a tooltip with its name.</p>
+  <p>The sidebar is down to 5 items; each item carries an icon and a label. "Work" is the one exception: it always shows two indented children, "Kanban" and "Roadmap", below it. The open item (or open child) has a grey background and a colour stripe on the left text, not blue; when a child is open, "Work" itself turns bold with no fill, so the section and the page inside it never look like one block. In dark theme, the sidebar's logo mark sits on a faint white backing plate that grows outward around it; in light theme there is no plate. The top bar has a single "Live" light, replacing today's two clocks and two refresh buttons. Beside the light are four icon-only buttons: pause, refresh (disabled while auto-updating), switch theme, and settings. Hovering or tabbing to any button shows a tooltip with its name.</p>
   <span class="mock-label">Example</span>
   <div class="mock" aria-label="Page shell (example)">
     <div class="shell">
       <div class="side">
-        <div class="logo"><span>Blacksmith</span><span class="has-tip"><button class="icon-btn sm" type="button" aria-label="Collapse sidebar"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-panel-left-close"/></svg></button><span class="tooltip start" aria-hidden="true">Collapse sidebar</span></span></div>
+        <div class="logo"><span class="side-mark" aria-hidden="true"><span class="side-mark-art"></span></span><span>Blacksmith</span><span class="has-tip"><button class="icon-btn sm" type="button" aria-label="Collapse sidebar"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-panel-left-close"/></svg></button><span class="tooltip start" aria-hidden="true">Collapse sidebar</span></span></div>
         <ul>
           <li class="on" aria-current="page"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-house"/></svg><span>Home</span></li>
-          <li><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-kanban"/></svg><span>Work</span></li>
+          <li class="haschild"><span class="row"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-kanban"/></svg><span>Work</span></span><ul class="sub"><li><span>Kanban</span></li><li><span>Roadmap</span></li></ul></li>
           <li><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-activity"/></svg><span>Activity</span></li>
           <li><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-coins"/></svg><span>Cost &amp; quality</span></li>
           <li><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-lightbulb"/></svg><span>Lessons</span></li>
@@ -957,6 +1004,7 @@ a.mrow:hover { background: var(--bs-surface-selected); }
     <li><span class="has-tip"><a href="#shell" aria-label="Cost &amp; quality"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-coins"/></svg></a><span class="tooltip right" aria-hidden="true">Cost &amp; quality</span></span></li>
     <li><span class="has-tip"><a href="#p-lessons" aria-label="Lessons"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-lightbulb"/></svg></a><span class="tooltip right" aria-hidden="true">Lessons</span></span></li>
   </ul></div></div>
+  <p class="small muted">Collapsed, the rail drops "Work"'s children entirely; when the open page is Kanban or Roadmap, "Work" itself shows as the active item instead.</p>
   <p class="small muted">Text inside the mocks is kept in English, matching what the dashboard will show: every piece of interface copy is English; the explanation around it is in plain prose. The figures come from the design draft (read from the running dashboard on 30 Sep). An "agent" is an AI session playing one role (coder, tester, ...). A "token" is the unit that measures model usage, i.e. cost.</p>
 
   <h3>Three shared states for every page</h3>
@@ -1427,6 +1475,89 @@ a.mrow:hover { background: var(--bs-surface-selected); }
   <span class="mock-label">Example: phone 375px</span>
   <div class="phone" role="group" aria-label="Activity on a 375px phone (example)"><div class="ph-top"><span class="ph-title">Activity</span><button class="ph-proj" type="button" aria-label="Project: shop-api. Change project">shop-api<svg class="ic s14" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="live" role="img" aria-label="Live, updated 8 s ago"><span class="dot" aria-hidden="true"></span></span><span class="has-tip"><button class="icon-btn touch" type="button" aria-label="More actions"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-ellipsis"/></svg></button><span class="tooltip end" aria-hidden="true">More actions</span></span></div><div class="ph-body"><nav class="mtabs" aria-label="Filter"><a href="#p-activity" aria-current="page">All</a><a href="#p-activity">Prompts</a><a href="#p-activity">Dispatches</a><a href="#p-activity">Reviews</a><a href="#p-activity">Gates</a><a href="#p-activity">Errors</a></nav><div class="ph-sec" role="group" aria-labelledby="mh-today"><h5 class="ph-h" id="mh-today">Today</h5><div class="mlist" role="list"><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder on Show shipping fee before payment</span><span class="tag ktag">Dispatched</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-1" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Round 2 &middot; running 12 s &middot; just now</span><dl class="edet" id="ap-1" hidden><div><dt>Reason</dt><dd>The reviewer asked for the fee to show before the pay button.</dd></div><div><dt>Task</dt><dd><a href="#p-task">Show shipping fee before payment &rarr;</a></dd></div><div><dt>Model &middot; Effort</dt><dd>Sonnet &middot; High</dd></div><div><dt>Because of</dt><dd><a href="#p-activity">your prompt at 10:05</a></dd></div></dl></div><div role="listitem" class="mrow tlrow k-gate"><span class="mt">Gate failed on Drop the extra confirm step</span><span class="tag ktag">Gate</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="true" aria-controls="ap-2" aria-label="Hide details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Hide details</span></span><span class="mm num">Unit tests &middot; 3 of 212 failed &middot; 10:40</span><dl class="edet" id="ap-2"><div><dt>Checks</dt><dd>Unit tests failed &middot; Typecheck passed &middot; Lint passed</dd></div><div><dt>Failed tests</dt><dd>3 in <span class="mono">cart/confirm.spec.ts</span></dd></div><div><dt>Reason</dt><dd>The confirm step still shows when the cart has one item.</dd></div><div><dt>Task</dt><dd><a href="#p-task">Drop the extra confirm step &rarr;</a></dd></div></dl></div><div role="listitem" class="mrow tlrow k-merge"><span class="mt">Cart summary merged into shop-ux-1</span><span class="tag ktag">Merge</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-3" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">task/cart-summary &middot; 6 files &middot; 10:31</span><dl class="edet" id="ap-3" hidden><div><dt>Branch</dt><dd><span class="mono">task/cart-summary</span> into <span class="mono">shop-ux-1</span></dd></div><div><dt>Commit</dt><dd><span class="mono">4f2a9c1</span></dd></div><div><dt>Changes</dt><dd>6 files &middot; 148 lines</dd></div><div><dt>Task</dt><dd><a href="#p-task">Cart summary &rarr;</a></dd></div></dl></div><div role="listitem" class="mrow tlrow k-prompt"><span class="mt">You</span><span class="tag ktag">Prompt</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-4" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mq" >redo the cart page to be cleaner, drop the extra confirm step and show the shipping fee clearly before checkout</span><span class="mm num">Caused 2 dispatches &middot; 10:05</span><dl class="edet" id="ap-4" hidden><div><dt>Caused</dt><dd><a href="#p-activity">Builder on Show shipping fee</a>, <a href="#p-activity">Tester on Cart summary</a></dd></div><div><dt>Session</dt><dd><span class="mono">shop-ux-1-w4</span></dd></div></dl></div><div role="listitem" class="mrow tlrow k-error"><span class="mt">Builder ran out of context window</span><span class="tag ktag">Error</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-5" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Context window &middot; Minor &middot; retried &middot; 09:58</span><dl class="edet" id="ap-5" hidden><div><dt>Kind</dt><dd>Ran out of context window</dd></div><div><dt>Severity</dt><dd>Minor</dd></div><div><dt>Detail</dt><dd>The diff and the test log together passed the context limit.</dd></div><div><dt>Agent</dt><dd>Builder &middot; attempt 1</dd></div><div><dt>What happened next</dt><dd>The factory retried it with a fresh context (attempt 2).</dd></div><div><dt>Task</dt><dd><a href="#p-task">Drop the extra confirm step &rarr;</a></dd></div></dl></div><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder &times;4 in wave 3</span><span class="tag ktag">Dispatched</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="true" aria-controls="ap-g" aria-label="Hide details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Hide details</span></span><span class="mm num">1.3M tokens &middot; longest 52 min &middot; 09:20</span><div class="emembers" id="ap-g" role="list"><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder on Cart summary</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-g1" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Round 1 &middot; 380K tokens &middot; 48 min</span><dl class="edet" id="ap-g1" hidden><div><dt>Task</dt><dd><a href="#p-task">Cart summary &rarr;</a></dd></div><div><dt>Result</dt><dd>Done</dd></div></dl></div><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder on Drop the extra confirm step</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-g2" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Round 1 &middot; 310K tokens &middot; 52 min</span><dl class="edet" id="ap-g2" hidden><div><dt>Task</dt><dd><a href="#p-task">Drop the extra confirm step &rarr;</a></dd></div><div><dt>Result</dt><dd>Done</dd></div></dl></div><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder on Show shipping fee before payment</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-g3" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Round 1 &middot; 290K tokens &middot; 35 min</span><dl class="edet" id="ap-g3" hidden><div><dt>Task</dt><dd><a href="#p-task">Show shipping fee before payment &rarr;</a></dd></div><div><dt>Result</dt><dd>Done</dd></div></dl></div><div role="listitem" class="mrow tlrow k-dispatch"><span class="mt">Builder on Coupon field on checkout</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="ap-g4" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">Round 1 &middot; 320K tokens &middot; 41 min</span><dl class="edet" id="ap-g4" hidden><div><dt>Task</dt><dd><a href="#p-task">Coupon field on checkout &rarr;</a></dd></div><div><dt>Result</dt><dd>Done</dd></div></dl></div></div></div></div></div><button class="btn touch" type="button">Load older</button></div><nav class="ph-tabs" aria-label="Main"><a href="#p-home"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-house"/></svg><span>Home</span></a><a href="#p-kanban"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-kanban"/></svg><span>Work</span></a><a href="#p-activity" aria-current="page"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-activity"/></svg><span>Activity</span></a><a href="#p-cost"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-coins"/></svg><span>Cost</span></a><a href="#p-lessons"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-lightbulb"/></svg><span>Lessons</span></a></nav></div>
   <p class="small muted">The phone version of Activity: the kind filter becomes one tab row, scrolling horizontally in its own frame; filtering by task and epic moves into "More actions". Each event is one row with a kind label and a muted detail line ending in a time; a 44px arrow at the end of the row expands detail in place (the "Gate" row and the "Builder ×4" group are expanded). "because of" moves into the detail section. The prompt text stays verbatim but is clamped to 2 lines. There is no hover highlight (phones have no hover); tap the row to see detail. The pause button moves into "More actions"; the "Live" dot stays on the top bar.</p>
+
+  <span class="mock-label">Example: Errors view (kind filter = Error)</span>
+  <div class="mock">
+    <div class="feedbar">
+      <span class="tb-right"><span class="live"><span class="dot" aria-hidden="true"></span>Live &middot; last activity 11 min ago</span><span class="has-tip"><button class="icon-btn" type="button" aria-label="Refresh"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-refresh-cw"/></svg></button><span class="tooltip start" aria-hidden="true">Refresh</span></span><span class="has-tip"><button class="icon-btn" type="button" aria-label="Pause live updates"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-pause"/></svg></button><span class="tooltip start" aria-hidden="true">Pause live updates</span></span></span>
+      <span class="mono small">/activity?kind=error</span>
+    </div>
+    <div class="filters" role="group" aria-label="Filters">
+      <span class="fchip">Prompt</span><span class="fchip">Dispatched</span><span class="fchip">Returned</span><span class="fchip">Finding</span><span class="fchip">Gate</span><span class="fchip">Merge</span><span class="fchip on">Error</span><span class="fchip">Feedback</span><span class="fchip">System</span>
+      <span class="tb-right"><button class="btn sm" type="button">Expand all</button></span>
+    </div>
+    <div class="err-charts">
+      <div class="chart-box">
+        <h5>Errors over time</h5>
+        <p class="card-sum small">Errors rose by about 150% over the last 2 days, mostly Economy.</p>
+        <svg class="err-line" viewBox="0 0 200 80" preserveAspectRatio="none" aria-hidden="true"><polyline points="4,70 196,10"/><circle cx="4" cy="70" r="3"></circle><circle cx="196" cy="10" r="3"></circle></svg>
+        <div class="xaxis"><span>2026-09-29</span><span>2026-09-30</span></div>
+        <div class="xaxis"><span>min 0</span><span>max 5</span></div>
+      </div>
+      <div class="chart-box">
+        <h5>Errors by group</h5>
+        <p class="card-sum small">Economy is the most common error, 71% of the total.</p>
+        <div class="vchart err-bars">
+          <div class="vcol" style="height:120px"><span class="c1" style="height:100%" aria-hidden="true"></span></div>
+          <div class="vcol" style="height:120px"><span class="c1" style="height:40%" aria-hidden="true"></span></div>
+        </div>
+        <div class="xaxis"><span>Economy &middot; 5</span><span>Spec &middot; 2</span></div>
+        <div class="xaxis"><span>0</span><span>5</span></div>
+      </div>
+    </div>
+    <div class="err-cards">
+      <div class="card">
+        <p class="card-title" style="font-size:13px;margin-bottom:6px">Context overrun, 5 times, mostly minor</p>
+        <div class="tags"><span class="tag t-warning">minor</span></div>
+        <div class="err-card-foot"><span>Last seen just now</span><span class="spark" role="img" aria-label="7-day trend: rising"><svg viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,14 10,8 20,12 30,6 40,10 50,3 60,2"></polyline></svg>Rising over the last 7 days.</span></div>
+      </div>
+      <div class="card">
+        <p class="card-title" style="font-size:13px;margin-bottom:6px">Wrong criterion, 2 times, mostly nit</p>
+        <div class="tags"><span class="tag t-todo">nit</span></div>
+        <div class="err-card-foot"><span>Last seen just now</span><span class="spark" role="img" aria-label="7-day trend: steady"><svg viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,10 10,4 20,16 30,6 40,14 50,4 60,10"></polyline></svg>Steady over the last 7 days.</span></div>
+      </div>
+    </div>
+    <div class="day">Today</div>
+    <div class="feed">
+      <div class="ev k-error">
+        <div class="ebody"><div class="ehead"><span class="tag ktag">Error</span><span>Error: coordination.deadlock on <a href="#p-task">S1-stop-the-line</a></span></div><div class="emeta">S1-stop-the-line</div></div>
+        <span class="etime num">11 min ago</span><span class="has-tip etog"><button class="icon-btn sm" type="button" aria-expanded="false" aria-controls="ae-1" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span>
+      </div>
+    </div>
+  </div>
+  <p class="small muted">The Error filter selected: two chart cards side by side, each with a one-sentence takeaway computed from the data, never a bare chart. Below, one card per error class, grouping all its occurrences: a headline naming the class, its count and the dominant severity ("Context overrun, 5 times, mostly minor"), a severity pill (just the label when the class has one severity, "label: count" when it has several), "Last seen ...", and a 7-day sparkline with a trend caption ("Rising" / "Falling" / "Steady over the last 7 days.", or "None in the last 7 days." when nothing happened). The normal feed continues underneath, filtered to Error rows.</p>
+  <span class="mock-label">Example: phone 375px</span>
+  <div class="phone" role="group" aria-label="Errors view on a 375px phone (example)"><div class="ph-top"><span class="ph-title">Activity</span><button class="ph-proj" type="button" aria-label="Project: all projects. Change project">All proje&hellip;<svg class="ic s14" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="live" role="img" aria-label="Live, last activity 11 min ago"><span class="dot" aria-hidden="true"></span></span><span class="has-tip"><button class="icon-btn touch" type="button" aria-label="More actions"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-ellipsis"/></svg></button><span class="tooltip end" aria-hidden="true">More actions</span></span></div><div class="ph-body"><nav class="mtabs" aria-label="Filter"><a href="#p-activity">Returned</a><a href="#p-activity">Finding</a><a href="#p-activity">Gate</a><a href="#p-activity">Merge</a><a href="#p-activity" aria-current="page">Error</a></nav>
+    <div class="chart-box">
+      <h5>Errors over time</h5>
+      <p class="card-sum small">Errors rose by about 150% over the last 2 days, mostly Economy.</p>
+      <svg class="err-line" viewBox="0 0 200 80" preserveAspectRatio="none" aria-hidden="true"><polyline points="4,70 196,10"></polyline><circle cx="4" cy="70" r="3"></circle><circle cx="196" cy="10" r="3"></circle></svg>
+      <div class="xaxis"><span>2026-09-29</span><span>2026-09-30</span></div>
+      <div class="xaxis"><span>min 0</span><span>max 5</span></div>
+    </div>
+    <div class="chart-box" style="margin-top:var(--bs-space-4)">
+      <h5>Errors by group</h5>
+      <p class="card-sum small">Economy is the most common error, 71% of the total.</p>
+      <div class="vchart err-bars">
+        <div class="vcol" style="height:120px"><span class="c1" style="height:100%" aria-hidden="true"></span></div>
+        <div class="vcol" style="height:120px"><span class="c1" style="height:40%" aria-hidden="true"></span></div>
+      </div>
+      <div class="xaxis"><span>Economy &middot; 5</span><span>Spec &middot; 2</span></div>
+      <div class="xaxis"><span>0</span><span>5</span></div>
+    </div>
+    <div class="card" style="margin-top:var(--bs-space-4)">
+      <p class="card-title" style="font-size:13px;margin-bottom:6px">Context overrun, 5 times, mostly minor</p>
+      <div class="tags"><span class="tag t-warning">minor</span></div>
+      <div class="err-card-foot"><span>Last seen just now</span><span class="spark" role="img" aria-label="7-day trend: rising"><svg viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,14 10,8 20,12 30,6 40,10 50,3 60,2"></polyline></svg>Rising over the last 7 days.</span></div>
+    </div>
+    <div class="card" style="margin-top:var(--bs-space-3)">
+      <p class="card-title" style="font-size:13px;margin-bottom:6px">Wrong criterion, 2 times, mostly nit</p>
+      <div class="tags"><span class="tag t-todo">nit</span></div>
+      <div class="err-card-foot"><span>Last seen just now</span><span class="spark" role="img" aria-label="7-day trend: steady"><svg viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,10 10,4 20,16 30,6 40,14 50,4 60,10"></polyline></svg>Steady over the last 7 days.</span></div>
+    </div>
+    <div class="ph-sec" role="group" aria-labelledby="mh-err-today"><h5 class="ph-h" id="mh-err-today">Today</h5><div class="mlist" role="list"><div role="listitem" class="mrow tlrow k-error"><span class="mt">Error: coordination.deadlock</span><span class="tag ktag">Error</span><span class="has-tip etog"><button class="icon-btn touch" type="button" aria-expanded="false" aria-controls="aep-1" aria-label="Show details"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-chevron-down"/></svg></button><span class="tooltip end" aria-hidden="true">Show details</span></span><span class="mm num">S1-stop-the-line &middot; 11 min ago</span><dl class="edet" id="aep-1" hidden><div><dt>Task</dt><dd><a href="#p-task">S1-stop-the-line &rarr;</a></dd></div></dl></div></div></div>
+  </div><nav class="ph-tabs" aria-label="Main"><a href="#p-home"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-house"/></svg><span>Home</span></a><a href="#p-kanban"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-kanban"/></svg><span>Work</span></a><a href="#p-activity" aria-current="page"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-activity"/></svg><span>Activity</span></a><a href="#p-cost"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-coins"/></svg><span>Cost</span></a><a href="#p-lessons"><svg class="ic s20" aria-hidden="true" focusable="false"><use href="#i-lightbulb"/></svg><span>Lessons</span></a></nav></div>
+  <p class="small muted">On phone, both chart cards and every error-class card stack in one column, in the same order as desktop; the kind filter reuses the scrolling tab row already shown above, with "Error" selected.</p>
 
   <h3 id="p-cost">Cost &amp; quality</h3>
   <div class="ba">
