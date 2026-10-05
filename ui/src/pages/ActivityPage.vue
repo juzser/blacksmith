@@ -3,14 +3,23 @@
 // day-grouped feed replacing Timeline + Errors. Operator overrides (beat the
 // mock): topbar carries the title alone — no PageHeader here. Operator
 // decision: no search box, no "Decisions" lens (decisionsOnly stays a server
-// param, just not exposed in this UI). Errors' own class cards are PR4; until
-// then `kind=errors` just filters the feed to Error rows.
+// param, just not exposed in this UI). DS6 PR4c: when `kind=errors` is
+// active, the class-summary cards and their two charts render above the
+// feed (which itself stays filtered to Error rows, unchanged from PR3). The
+// old raw Errors table and its detail Dialog were already removed in an
+// earlier commit (48f2647) — there was nothing left to remove here.
 import { ArrowUp } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Banner from '../components/ds/Banner.vue';
 import EmptyState from '../components/ds/EmptyState.vue';
+import BarChart from '../components/kit/BarChart.vue';
 import Button from '../components/kit/Button.vue';
+import Card from '../components/kit/Card.vue';
+import LineChart from '../components/kit/LineChart.vue';
+import RelativeTime from '../components/kit/RelativeTime.vue';
+import Sparkline from '../components/kit/Sparkline.vue';
+import Tag from '../components/kit/Tag.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
@@ -20,15 +29,20 @@ import { useViewport } from '../composables/useViewport.js';
 import { LoadOlderGate } from '../lib/activityPaging.js';
 import {
   type EventKind as ApiEventKind,
+  type ErrorsResult,
+  fetchErrors,
   fetchTimelinePage,
   type TimelinePage,
 } from '../lib/api.js';
+import { errorsByGroupTakeaway, errorsOverTimeTakeaway } from '../lib/chartTakeaways.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { errorClassCardView, humanizeClass } from '../lib/errorClassCards.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { FeedGeneration } from '../lib/feedGeneration.js';
 import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../lib/liveFeed.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
+import { severityKitTone } from '../lib/taxonomy.js';
 import {
   type ActivityEntry,
   EVENT_KIND_LABEL,
@@ -127,6 +141,63 @@ const epicFilter = computed(() =>
   typeof route.query.epic === 'string' ? route.query.epic : undefined,
 );
 
+// DS6 PR4c: the class-summary cards and their two charts only need data
+// while the Errors kind is selected, fetched separately from the main feed
+// since `fetchErrors` returns a different shape (class/day/group buckets,
+// not timeline entries).
+const errorsData = ref<ErrorsResult | null>(null);
+const errorsLoading = ref(false);
+
+async function loadErrorsData() {
+  errorsLoading.value = true;
+  try {
+    errorsData.value = await fetchErrors(sessionScope.value, project.value);
+  } finally {
+    errorsLoading.value = false;
+  }
+}
+
+watch(
+  [kindFilter, project, sessionKey],
+  () => {
+    if (kindFilter.value === 'error') loadErrorsData();
+  },
+  { immediate: true },
+);
+
+const errorsByDayPoints = computed(
+  () => errorsData.value?.byDay.map((d) => ({ label: d.day, value: d.count })) ?? [],
+);
+
+const errorsByGroupTotals = computed(() => {
+  const totals = new Map<string, number>();
+  for (const row of errorsData.value?.byClass ?? []) {
+    totals.set(row.errorGroup, (totals.get(row.errorGroup) ?? 0) + row.count);
+  }
+  return [...totals.entries()].map(([group, count]) => ({
+    label: humanizeClass(group),
+    count,
+  }));
+});
+
+const errorsByGroupBars = computed(() =>
+  errorsByGroupTotals.value.map((g) => ({ label: g.label, value: g.count })),
+);
+
+const dominantGroupLabel = computed(() => {
+  const sorted = [...errorsByGroupTotals.value].sort((a, b) => b.count - a.count);
+  return sorted[0]?.label;
+});
+
+const errorsOverTimeText = computed(() =>
+  errorsOverTimeTakeaway(errorsData.value?.byDay ?? [], dominantGroupLabel.value),
+);
+const errorsByGroupText = computed(() => errorsByGroupTakeaway(errorsByGroupTotals.value));
+
+const errorClassCards = computed(
+  () => errorsData.value?.classSummary.map((s) => errorClassCardView(s)) ?? [],
+);
+
 function setQuery(patch: Record<string, string | undefined>) {
   const next = { ...route.query, ...patch };
   for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
@@ -153,6 +224,25 @@ function onPhoneKindKeydown(event: KeyboardEvent) {
   selectPhoneKind(nextId as (typeof PHONE_KIND_TABS)[number]);
   document.getElementById(`activity-kind-tab-${nextId}`)?.focus();
 }
+
+// S2: the tab strip scrolls horizontally (`.bs-tabs__list`, overflow-x:
+// auto) and the active tab can land past the right edge on mount or after a
+// filter change from elsewhere (e.g. the URL), leaving no on-screen signal
+// of which kind is selected. Scroll it back into view every time the
+// selection changes, once the DOM has the new `aria-selected` state.
+watch(
+  [kindFilter, isPhoneWidth],
+  async () => {
+    if (!isPhoneWidth.value) return;
+    await nextTick();
+    const id = kindFilter.value ?? 'all';
+    document.getElementById(`activity-kind-tab-${id}`)?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  },
+  { immediate: true },
+);
 
 async function load() {
   const gen = feedGen.bump();
@@ -372,6 +462,54 @@ function becauseOf(promptId: string) {
       <div style="display: flex; gap: var(--bs-space-1)">
         <Button class="activity-toolbar__expand-all" variant="ghost" size="sm" @click="expandAll">Expand all</Button>
         <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
+      </div>
+    </div>
+
+    <div v-if="kindFilter === 'error'" class="bs-activity-errors">
+      <div class="bs-activity-errors__charts">
+        <Card title="Errors over time">
+          <LineChart
+            v-if="errorsByDayPoints.length > 0"
+            :points="errorsByDayPoints"
+            label="Errors by day"
+            :takeaway="errorsOverTimeText"
+          />
+          <p v-else class="bs-chart__takeaway">{{ errorsOverTimeText }}</p>
+        </Card>
+        <Card title="Errors by group">
+          <BarChart
+            v-if="errorsByGroupBars.length > 0"
+            :bars="errorsByGroupBars"
+            label="Errors by group"
+            :takeaway="errorsByGroupText"
+          />
+          <p v-else class="bs-chart__takeaway">{{ errorsByGroupText }}</p>
+        </Card>
+      </div>
+      <div v-if="errorClassCards.length > 0" class="bs-activity-errors__cards">
+        <Card v-for="card in errorClassCards" :key="card.id">
+          <p class="bs-activity-errors__card-headline">{{ card.headline }}</p>
+          <div class="bs-activity-errors__card-mix">
+            <Tag
+              v-for="mix in card.severityMix"
+              :key="mix.severity"
+              :tone="severityKitTone(mix.severity).tone"
+              :variant="severityKitTone(mix.severity).variant"
+              size="sm"
+            >
+              {{ mix.pillLabel }}
+            </Tag>
+          </div>
+          <div class="bs-activity-errors__card-footer">
+            <span>Last seen <RelativeTime :iso="card.lastSeen" /></span>
+            <Sparkline
+              v-if="card.trend7d.length > 0"
+              :values="card.trend7d"
+              label="7-day trend"
+              :takeaway="card.trendCaption"
+            />
+          </div>
+        </Card>
       </div>
     </div>
 

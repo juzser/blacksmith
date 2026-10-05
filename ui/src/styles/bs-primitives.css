@@ -3924,3 +3924,46 @@ summary.bs-inbox__group-head {
     transparent 3px 6px
   );
 }
+
+/* Activity's Errors-kind view (DS6 PR4c, ds-spec.md §4.3): the class-summary
+   card grid shown above the feed, plus the two charts' wrapper spacing.
+   Cards have no interactive controls (no expand/detail buttons), so none of
+   them need a --bs-touch minimum. */
+.bs-activity-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+  margin-bottom: var(--bs-space-4);
+}
+.bs-activity-errors__charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--bs-space-4);
+}
+.bs-activity-errors__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--bs-space-3);
+}
+.bs-activity-errors__card-headline {
+  margin: 0 0 var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+}
+.bs-activity-errors__card-mix {
+  display: flex;
+  gap: var(--bs-space-1);
+  flex-wrap: wrap;
+  margin-bottom: var(--bs-space-2);
+}
+.bs-activity-errors__card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+}
+@media (max-width: 640px) {
+  .bs-activity-errors__charts {
+    grid-template-columns: 1fr;
+  }
+}
