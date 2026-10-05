@@ -340,6 +340,30 @@ describe('project dimension (Phase 6b)', () => {
     }
   });
 
+  it('kanban() accepts the legacy project spelling "black-smith" in the scope, same rows as "blacksmith"', () => {
+    const legacy = kanban(db, undefined, { project: 'black-smith' });
+    const current = kanban(db, undefined, { project: 'blacksmith' });
+    const taskIds = (page: typeof legacy) => page.flatMap((c) => c.tasks.map((t) => t.taskId));
+    expect(taskIds(legacy)).toEqual(taskIds(current));
+    expect(taskIds(legacy)).toEqual(['epic-a/task-1']);
+  });
+
+  it('analytics() accepts the legacy project spelling "black-smith" in the scope (event predicate helper)', () => {
+    const legacy = analytics(db, { project: 'black-smith' });
+    const current = analytics(db, { project: 'blacksmith' });
+    expect(legacy.costByModelTierAndProvider).toEqual(current.costByModelTierAndProvider);
+    expect(legacy.costByModelTierAndProvider).toEqual([
+      {
+        modelTier: 'mid',
+        provider: 'claude',
+        taskCount: 1,
+        totalTokens: 1000,
+        avgTokensPerTask: 1000,
+        unmeasuredTaskCount: 0,
+      },
+    ]);
+  });
+
   it('kanban() supports an epicId-less "all epics" mode, still scoped by project', () => {
     const columnsB = kanban(db, undefined, { project: 'demo-hub' });
     const allTaskIds = columnsB.flatMap((c) => c.tasks.map((t) => t.taskId));

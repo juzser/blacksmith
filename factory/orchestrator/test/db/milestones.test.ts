@@ -209,6 +209,19 @@ describe('milestones projection + roadmap queries', () => {
       expect(phaseB?.epics).toEqual([]);
     });
 
+    it('accepts the legacy project spelling "black-smith" in scope — same rows as "blacksmith"', async () => {
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+
+      const legacy = roadmapPage(handle.db, { project: 'black-smith' });
+      const current = roadmapPage(handle.db, { project: 'blacksmith' });
+      handle.sqlite.close();
+
+      expect(legacy.map((m) => m.milestoneId)).toEqual(current.map((m) => m.milestoneId));
+      expect(legacy.map((m) => m.milestoneId)).toEqual(['phase-a', 'phase-b']);
+    });
+
     it("sums statusCounts' five buckets to tasksTotal, at both the milestone and the epic level", async () => {
       const dbPath = path.join(dbDir, 'smith.db');
       await rebuild(dbPath, 'all', { stateDir, roadmapPath });

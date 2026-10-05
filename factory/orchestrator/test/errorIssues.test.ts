@@ -622,6 +622,32 @@ describe('foldErrorEvents', () => {
       expect(report?.project).toBe('example-app');
     });
 
+    it("normalizes a legacy 'black-smith' project stamp to 'blacksmith', and treats both spellings as the same session stamp", () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', {
+          session_id: 'session-legacy',
+          project: 'black-smith',
+        }),
+        gateBlocked('epic-1/task-b', 'tests-failed', {
+          session_id: 'session-legacy',
+          project: 'blacksmith',
+        }),
+        gateBlocked('epic-1/task-c', 'tests-failed', { session_id: 'session-legacy' }),
+      ];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      // The stamped row's own candidate: the legacy spelling reads back current.
+      const legacy = result.reports.find((r) => r.task_ref === 'epic-1/task-a');
+      expect(legacy?.project).toBe('blacksmith');
+
+      // The two spellings are the SAME session stamp -- not a conflict -- so
+      // the unstamped row resolves instead of landing in the "stamps
+      // disagree" unresolved bucket (S2-a).
+      const unstamped = result.reports.find((r) => r.task_ref === 'epic-1/task-c');
+      expect(unstamped?.project).toBe('blacksmith');
+    });
+
     it('answers null -- not the first stamp seen -- when a session carries conflicting origin stamps (S2-a)', () => {
       const events: StoredEvent[] = [
         gateBlocked('epic-1/task-a', 'tests-failed', {
