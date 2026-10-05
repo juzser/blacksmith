@@ -4,7 +4,7 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -3199,7 +3199,15 @@ export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): T
     };
   });
   const findingRows = db.select().from(findings).where(eq(findings.taskId, taskId)).all();
-  const artifactRows = db.select().from(artifacts).where(eq(artifacts.taskId, taskId)).all();
+  // Outputs tab, newest first (same operator request as taskRuns() above):
+  // ts desc, tie-broken on id desc (`${eventId}#${index}`) so artifacts from
+  // one task-result-recorded event keep a stable, deterministic order.
+  const artifactRows = db
+    .select()
+    .from(artifacts)
+    .where(eq(artifacts.taskId, taskId))
+    .orderBy(desc(artifacts.ts), desc(artifacts.id))
+    .all();
   const feedbackRows = db
     .select()
     .from(operatorFeedback)
@@ -3262,6 +3270,11 @@ function outcomeFromPayload(eventType: string, payload: Record<string, unknown>)
  * DS3 §4.7 — one entry per dispatch attempt, judge round, result, or error for
  * `taskId`, for `RunHistoryTimeline` (pattern 2). A scoped read on the
  * existing event-log projection: no new event type, no new writer.
+ *
+ * Newest first (operator request: "Output và history trong task detail nên
+ * xếp ngược lại, recent lên trên" — this page's own run history, not the
+ * Activity feed, which was already newest-first). `taskRuns()` feeds only
+ * this one read path, so the reorder happens here rather than in the page.
  */
 export interface TaskRun {
   eventId: string;
@@ -3287,7 +3300,10 @@ function fetchTaskRunRows(db: SmithDb, taskId: string): EventsRawRow[] {
 }
 
 export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
-  const rows = fetchTaskRunRows(db, taskId);
+  // `fetchTaskRunRows` stays oldest-first (shared with `taskTotals()`, which
+  // reads "first dispatch" / "last result" off that order); newest-first is
+  // this function's own output shape, so the rows are reversed here, once.
+  const rows = fetchTaskRunRows(db, taskId).slice().reverse();
   return rows.flatMap((r) => {
     const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
     if (!kind) return [];

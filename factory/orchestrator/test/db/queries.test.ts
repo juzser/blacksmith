@@ -1404,7 +1404,7 @@ describe('db/queries.ts', () => {
   });
 
   describe('taskRuns() (DS3 §4.7)', () => {
-    it('scopes dispatch/judge-report/result/error rows to one task, in log order', async () => {
+    it('scopes dispatch/judge-report/result/error rows to one task, newest first', async () => {
       const session = 'sess-runs';
       const task = 'epic-runs/task-1';
       const other = 'epic-runs/task-2';
@@ -1452,7 +1452,7 @@ describe('db/queries.ts', () => {
       const runsHandle = openDb(dbPath);
       try {
         const runs = taskRuns(runsHandle.db, task);
-        expect(runs.map((r) => r.kind)).toEqual(['dispatch', 'judge-report', 'result']);
+        expect(runs.map((r) => r.kind)).toEqual(['result', 'judge-report', 'dispatch']);
         const judgeRun = runs.find((r) => r.kind === 'judge-report');
         expect(judgeRun).toMatchObject({
           agentRole: 'spec-reviewer',
@@ -1461,6 +1461,82 @@ describe('db/queries.ts', () => {
         });
       } finally {
         runsHandle.sqlite.close();
+      }
+    });
+
+    it('orders by ts desc when timestamps differ, not just the tied-ts log-order fallback', async () => {
+      const session = 'sess-runs-ts';
+      const task = 'epic-runs-ts/task-1';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', '2029-06-01T00:00:00.000Z', { task_id: task }, session) +
+          tiedLine(
+            'dispatch_decision',
+            '2029-06-01T00:01:00.000Z',
+            { task_id: task, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            '2029-06-01T00:05:00.000Z',
+            { task_id: task, run_status: 'done', token_usage: { measured: false } },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'runs-ts.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const runsHandle = openDb(dbPath);
+      try {
+        const runs = taskRuns(runsHandle.db, task);
+        expect(runs.map((r) => r.kind)).toEqual(['result', 'dispatch']);
+      } finally {
+        runsHandle.sqlite.close();
+      }
+    });
+  });
+
+  describe('taskDetail() artifacts order (newest first, task detail Outputs tab)', () => {
+    it('orders artifacts newest first, across two task-result-recorded events', async () => {
+      const session = 'sess-artifacts-order';
+      const task = 'epic-art/task-1';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', '2029-06-01T00:00:00.000Z', { task_id: task }, session) +
+          tiedLine(
+            'task-result-recorded',
+            '2029-06-01T00:01:00.000Z',
+            {
+              task_id: task,
+              run_status: 'done',
+              artifacts: [{ type: 'screenshot', path: 'older.png' }],
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            '2029-06-01T00:05:00.000Z',
+            {
+              task_id: task,
+              run_status: 'done',
+              artifacts: [{ type: 'screenshot', path: 'newer.png' }],
+            },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'artifacts-order.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const artHandle = openDb(dbPath);
+      try {
+        const detail = taskDetail(artHandle.db, task);
+        expect(detail?.artifacts.map((a) => a.path)).toEqual(['newer.png', 'older.png']);
+      } finally {
+        artHandle.sqlite.close();
       }
     });
   });
