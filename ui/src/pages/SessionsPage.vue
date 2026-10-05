@@ -116,6 +116,35 @@ function setRowRef(id: string, el: Element | null) {
   else rowRefs.delete(id);
 }
 
+// The unscoped running list repeats a session under every project it
+// belongs to, so its <li> renders once per group and each one binds its own
+// ref callback for the SAME session id. A plain id-keyed setRowRef (above)
+// lets whichever group renders last overwrite the one rendered first, so a
+// deep link's scroll/focus target becomes non-deterministic. groupRowRef
+// gives each (group, session) slot its own stable closure — reused across
+// re-renders via groupRowSetters — that remembers the element IT mounted, so
+// the first group to mount a given session wins rowRefs and a later
+// group's own unmount can never evict an earlier group's live entry.
+const groupRowSetters = new Map<string, (el: Element | null) => void>();
+function groupRowRef(groupKey: string, id: string): (el: Element | null) => void {
+  const compositeKey = `${groupKey}\u0000${id}`;
+  const existing = groupRowSetters.get(compositeKey);
+  if (existing) return existing;
+  let mine: HTMLElement | null = null;
+  const setter = (el: Element | null) => {
+    if (el instanceof HTMLElement) {
+      mine = el;
+      if (!rowRefs.has(id)) rowRefs.set(id, el);
+    } else {
+      if (mine && rowRefs.get(id) === mine) rowRefs.delete(id);
+      mine = null;
+      groupRowSetters.delete(compositeKey);
+    }
+  };
+  groupRowSetters.set(compositeKey, setter);
+  return setter;
+}
+
 function selectSession(id: string) {
   if (selectedId.value === id) return;
   selectedId.value = id;
@@ -193,7 +222,7 @@ function refresh() {
     <template v-else>
       <template v-if="project === undefined">
         <template v-for="group in runningGroups()" :key="group.project">
-          <h3 class="bs-section-title bs-sessions__group-title">
+          <h2 class="bs-section-title bs-sessions__group-title">
             <RouterLink
               v-if="group.project"
               :to="{ query: { ...route.query, project: group.project } }"
@@ -202,12 +231,12 @@ function refresh() {
               {{ group.project }}
             </RouterLink>
             <template v-else>No project</template>
-          </h3>
+          </h2>
           <ul class="bs-sessions__list" role="list">
             <li
               v-for="s in group.sessions"
               :key="s.sessionId"
-              :ref="(el) => setRowRef(s.sessionId, el as Element | null)"
+              :ref="(el) => groupRowRef(group.project, s.sessionId)(el as Element | null)"
             >
               <SessionRow
                 :session="s"
