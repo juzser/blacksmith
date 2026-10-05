@@ -1025,6 +1025,17 @@ export function sessionDividerBefore(entries: readonly TimelineEntry[], index: n
   );
 }
 
+/**
+ * The divider's own "Session: <label>" text (fix round 5 item 3). The
+ * server (`joinSessionTitles`) already falls `sessionTitle` back to the raw
+ * session id when no prompt or dispatch names the session, but this stays
+ * defensive against an empty string reaching the client any other way, so
+ * the divider never reads a bare "Session: ".
+ */
+export function sessionDividerLabel(entry: TimelineEntry): string {
+  return entry.sessionTitle || entry.sessionId;
+}
+
 export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {
   const items: RoleMinuteItem[] = [];
   let run: ActivityEntry[] = [];

@@ -17,6 +17,7 @@ import {
   metaFor,
   nodesOfItem,
   sessionDividerBefore,
+  sessionDividerLabel,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -1558,5 +1559,21 @@ describe('lib/timelineDisplay.ts sessionDividerBefore() (DS6 PR4b)', () => {
   it('marks a divider when the session id changes', () => {
     const entries = [base, { ...base, eventId: 'e2', sessionId: 'sess-b', sessionTitle: 'beta' }];
     expect(sessionDividerBefore(entries, 1)).toBe(true);
+  });
+});
+
+// Fix round 5 item 3 (review): the divider must never render a bare
+// "Session: " -- the server already falls back `sessionTitle` to the raw
+// session id (joinSessionTitles), but the client-side label stays defensive
+// against an empty string reaching it by any other path.
+describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
+  it('uses the sessionTitle when present', () => {
+    expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: 'alpha' }))).toBe(
+      'alpha',
+    );
+  });
+
+  it('falls back to the session id when sessionTitle is empty', () => {
+    expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
   });
 });

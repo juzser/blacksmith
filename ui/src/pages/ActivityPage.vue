@@ -37,6 +37,7 @@ import {
   groupByDay,
   groupByRoleMinute,
   sessionDividerBefore,
+  sessionDividerLabel,
 } from '../lib/timelineDisplay.js';
 
 const route = useRoute();
@@ -403,7 +404,7 @@ function becauseOf(promptId: string) {
                 </li>
                 <template v-else>
                   <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
-                    Session: {{ item.entry!.sessionTitle }}
+                    Session: {{ sessionDividerLabel(item.entry!) }}
                   </li>
                   <TimelineRow
                     :entry="item.entry!"
