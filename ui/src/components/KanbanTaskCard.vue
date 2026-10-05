@@ -108,7 +108,7 @@ function onKeydown(event: KeyboardEvent) {
     </div>
 
     <p class="bs-kanban-card__title">
-      {{ title }}
+      <span class="bs-kanban-card__title-text">{{ title }}</span>
       <IconButton
         :icon="Link"
         :label="copyIdLabel"

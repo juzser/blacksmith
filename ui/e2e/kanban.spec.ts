@@ -256,6 +256,57 @@ test.describe('Kanban', () => {
     await expect(copyButton).toHaveAttribute('aria-label', 'Copied');
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).toBe('epic-1/task-4');
+    // stopPropagation (S3 review fix): the click must not also bubble to the
+    // card's own @click and open the peek panel.
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+  });
+
+  // S2 review fix, 2026-10-05: a title long enough to fill both clamped
+  // lines used to push the copy icon down onto its own, third line — which
+  // also clipped it clean off the card once the title itself filled both
+  // lines on its own. The icon must stay beside the text and inside the
+  // card's bounds no matter how long the title is.
+  test('desktop: the title-line copy button stays beside a 2-line-wrapped title, never clipped or on its own line', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-4', 'todo'),
+        // <=60 chars (SHORT_TASK_LABEL_MAX, ui/src/lib/format.ts) so
+        // taskLabel() renders it verbatim instead of falling back to the
+        // task id slug.
+        title: 'Write the full directory search and indexing docs for ops',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const card = page.locator('.bs-kanban-card').first();
+    const titleText = card.locator('.bs-kanban-card__title-text');
+    const copyButton = card.locator('.bs-kanban-card__title-copy').first();
+    await expect(copyButton).toBeVisible();
+
+    const cardBox = await card.boundingBox();
+    const titleBox = await titleText.boundingBox();
+    const copyBox = await copyButton.boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(copyBox).not.toBeNull();
+
+    const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
+
+    // The title text actually wraps to 2 lines (taller than one line).
+    expect(title_.height).toBeGreaterThan(copy_.height * 1.5);
+    // The copy button sits on the title's first line, not below it.
+    expect(copy_.y).toBeLessThanOrEqual(title_.y + copy_.height);
+    // Fully inside the card's bounding box — never clipped off.
+    expect(copy_.x).toBeGreaterThanOrEqual(card_.x);
+    expect(copy_.x + copy_.width).toBeLessThanOrEqual(card_.x + card_.width);
+    expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
+    expect(copy_.y + copy_.height).toBeLessThanOrEqual(card_.y + card_.height);
   });
 
   // Review follow-up (S2), narrowed after the first attempt (operator report

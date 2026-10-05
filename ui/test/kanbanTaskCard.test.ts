@@ -54,9 +54,9 @@ describe('KanbanTaskCard.vue — row 1 drops the id text (operator fix 2026-10-0
 });
 
 describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)', () => {
-  it('renders a link IconButton right after the title text', () => {
+  it('renders the title text in its own clamped span, then a link IconButton', () => {
     expect(SRC).toMatch(
-      /class="bs-kanban-card__title">\s*\{\{ title \}\}\s*<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
+      /class="bs-kanban-card__title">\s*<span class="bs-kanban-card__title-text">\{\{ title \}\}<\/span>\s*<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
     );
   });
 
@@ -81,6 +81,28 @@ describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)'
   it('gives the title medium font-weight via the design token', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title');
     expect(block).toMatch(/font-weight:\s*var\(--bs-font-weight-medium\)/);
+  });
+});
+
+describe('KanbanTaskCard.vue — title-copy icon never clips or wraps onto its own line (S2 review fix, 2026-10-05)', () => {
+  it('lays the title out as a flex row so the icon sits beside the text, not inside the clamp box', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title');
+    expect(block).toMatch(/display:\s*flex/);
+    expect(block).toMatch(/align-items:\s*flex-start/);
+    expect(block).toMatch(/gap:\s*var\(--bs-space-1\)/);
+    expect(block).not.toMatch(/-webkit-line-clamp/);
+  });
+
+  it('clamps the title text itself to 2 lines and lets it shrink inside the flex row', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title-text');
+    expect(block).toMatch(/-webkit-line-clamp:\s*2/);
+    expect(block).toMatch(/overflow:\s*hidden/);
+    expect(block).toMatch(/min-width:\s*0/);
+  });
+
+  it('keeps the copy icon from ever shrinking or wrapping', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title-copy');
+    expect(block).toMatch(/flex:\s*none/);
   });
 });
 
