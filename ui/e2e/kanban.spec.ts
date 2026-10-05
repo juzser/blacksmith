@@ -45,6 +45,18 @@ async function mockBoard(
   await page.route('**/api/kanban*', (route) => route.fulfill({ json: columns }));
 }
 
+// A board shaped like the real one: four status columns, so each column keeps
+// its 280px desktop width. A board of one column stretches to the free width
+// (~650px at 1440), which hides any card-width overflow.
+function fourColumnBoard(card: ReturnType<typeof task>) {
+  return [
+    { taskStatus: 'todo', tasks: [card] },
+    { taskStatus: 'in-progress', tasks: [task('epic-1/task-2', 'in-progress')] },
+    { taskStatus: 'failed', tasks: [task('epic-1/task-3', 'failed')] },
+    { taskStatus: 'completed', tasks: [task('epic-1/task-4', 'completed')] },
+  ];
+}
+
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
     await page.goto('/work/kanban');
@@ -157,6 +169,167 @@ test.describe('Kanban', () => {
     await expect(skeleton).toBeVisible();
     const box = await skeleton.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThan(100);
+  });
+
+  // Operator report 2026-10-05: row 1 is a flex row with `justify-content:
+  // space-between` and the id had no truncation, so a long AgentChip label
+  // (e.g. the "waiting - a nudge may help" suffix) squeezed the id into a
+  // column one hyphen segment per line, growing the card tall and ugly on a
+  // 1440px desktop board.
+  test('desktop: a long AgentChip label does not wrap the task id onto multiple lines', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+        agentRole: 'coder',
+        agentActivity: 'stalled',
+        // Well past agentWaitingThresholdMs (4h) so the chip reads
+        // "Builder · waiting - a nudge may help" — the longest chip text
+        // the fixture can produce.
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    await expect(idEl).toBeVisible();
+    const idBox = await idEl.boundingBox();
+    const lineHeight = await idEl.evaluate((el) =>
+      parseFloat(getComputedStyle(el).lineHeight || '0'),
+    );
+    expect(idBox).not.toBeNull();
+    expect(lineHeight).toBeGreaterThan(0);
+    expect(idBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(lineHeight * 1.5);
+
+    const row1 = page.locator('.bs-kanban-card__row--1').first();
+    const chip = page.locator('.bs-agent-chip').first();
+    // Row 1's "Copy task id" IconButton (sm, 22px) is now the tallest
+    // fixed-size child — taller than the chip's own ~18px box — so it is
+    // the basis for the one-line tolerance, not the chip.
+    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
+    const row1Box = await row1.boundingBox();
+    const chipBox = await chip.boundingBox();
+    const copyIdButtonBox = await copyIdButton.boundingBox();
+    expect(row1Box).not.toBeNull();
+    expect(chipBox).not.toBeNull();
+    expect(copyIdButtonBox).not.toBeNull();
+    const tallestChild = Math.max(chipBox?.height ?? 0, copyIdButtonBox?.height ?? 0);
+    // Small tolerance for border/line-height rounding, not a second line.
+    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(tallestChild + 4);
+  });
+
+  // Operator follow-up (2026-10-05): the fix above made the id `flex: 1 1
+  // auto`, which also made it the row's "wins the space" element — at a
+  // 280px column, a *short* id ("task-3") was still clipped to "tas…"
+  // because the new copy-id button and a long AgentChip label left it
+  // almost no room. The id must stay fully readable when it is short; the
+  // AgentChip label is the thing allowed to ellipsise first (id now
+  // `flex: 0 0 auto; max-width: 50%`, chip `flex: 1 1 auto`).
+  test('desktop: a short task id is never truncated at a 280px column', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-3', 'todo'),
+        agentRole: 'security-reviewer',
+        agentActivity: 'stalled',
+        // Same longest-chip-text fixture as above, to prove the id wins
+        // over a long AgentChip label rather than the other way round.
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    await expect(idEl).toBeVisible();
+    await expect(idEl).toHaveText('task-3');
+    const overflowMetrics = await idEl.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    expect(overflowMetrics.scrollWidth).toBeLessThanOrEqual(overflowMetrics.clientWidth);
+  });
+
+  // Review follow-up (S4, 2026-10-05): row 1 used `justify-content:
+  // space-between`, so a card whose AgentChip renders nothing (no
+  // agentRole yet — a fresh Todo card, like the fixtures' default `task()`)
+  // left only the id and the copy-id button in the row, and space-between
+  // floated the button to the middle of the card instead of right after
+  // the id.
+  test('desktop: the copy-id button sits right after the id on a card with no AgentChip', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
+    await expect(idEl).toBeVisible();
+    await expect(copyIdButton).toBeVisible();
+    const idBox = await idEl.boundingBox();
+    const copyIdButtonBox = await copyIdButton.boundingBox();
+    expect(idBox).not.toBeNull();
+    expect(copyIdButtonBox).not.toBeNull();
+    const gap = (copyIdButtonBox?.x ?? 0) - ((idBox?.x ?? 0) + (idBox?.width ?? 0));
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(12);
+  });
+
+  // Review follow-up (S2), narrowed after the first attempt (operator report
+  // 2026-10-05): the label itself is truncated with an ellipsis, not just
+  // boxed to one line's height, and the raw role is still reachable through
+  // the chip's title.
+  //
+  // Every column is `flex: 0 0 280px` above the 640px phone breakpoint, so the
+  // chip's available width (row 1 minus the id's up-to-50% share, the
+  // copy-id button and the Quote icon) is the same at 768px and 1440px.
+  // "Security reviewer · waiting - a nudge may help" (roleLabels.ts) is wider
+  // than that, so it must clip. The board has four columns, as the real one
+  // does: a single column stretches to the free width and leaves room for
+  // the label.
+  test('desktop: a long AgentChip label is ellipsised, not just boxed to one line', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+        agentRole: 'security-reviewer',
+        agentActivity: 'stalled',
+        // Well past agentWaitingThresholdMs (4h) so the chip reads
+        // "Security reviewer · waiting - a nudge may help".
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const chip = page.locator('.bs-agent-chip').first();
+    const chipText = chip.locator('.bs-agent-chip__text');
+    // A column's automatic min-width is its min-content width, so before
+    // `.bs-kanban-col { min-width: 0 }` this one card stretched the Todo
+    // column to ~650px and the label fitted without clipping.
+    const colWidth = await chip.evaluate(
+      (el) => el.closest('.bs-kanban-col')?.getBoundingClientRect().width ?? 0,
+    );
+    expect(Math.round(colWidth)).toBe(280);
+    const overflowMetrics = await chipText.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      textOverflow: getComputedStyle(el).textOverflow,
+    }));
+    expect(overflowMetrics.scrollWidth).toBeGreaterThan(overflowMetrics.clientWidth);
+    expect(overflowMetrics.textOverflow).toBe('ellipsis');
+    // AgentChip.vue binds the Tag's native `title` to `chip.title`
+    // (kanban.ts's agentChip()) — the raw `agentRole`(+tier) taxonomy
+    // string, not the rendered "<role> · <state>" label. No
+    // `agentModelTier` is set on this fixture, so that raw string is exactly
+    // the role.
+    await expect(chip).toHaveAttribute('title', 'security-reviewer');
   });
 
   // UI audit finding (S3): the desktop toolbar used to read as two

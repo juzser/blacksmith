@@ -13,9 +13,9 @@ import { describe, expect, it } from 'vitest';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
 
-// Both kits' accent tokens (bs-tokens.css / ds-tokens.css) — the two colours
-// the product's primary actions get, never a link.
-const ACCENT_TOKEN = /var\(--(?:bs-accent|ds-primary)(?:-hover|-pressed)?\b/;
+// The bs- kit's accent token — the colour the product's primary actions
+// get, never a link.
+const ACCENT_TOKEN = /var\(--bs-accent(?:-hover|-pressed)?\b/;
 
 interface Rule {
   file: string;

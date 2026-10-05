@@ -385,8 +385,8 @@ playbooks are written to prevent.
     - `wave-merged` records: `payload.task_ids` and the event id.
     - `epic-closed` from step 16: its event id, `machine_verdict`, and
       `payload.summary.tasks` — each task's `task_status`, read from the log
-      at close. A follow-up cleared by waiving all its findings still reads
-      `todo` there; cross-check it against the grants and never publish it
+      at close. A follow-up cleared by closing all its findings (fixed, refuted
+      or waived) still reads `todo` there; cross-check it against the findings and never publish it
       as an open task.
     - `audit-resolved`, for an epic cut by `/bs audit`: every record whose
       `payload.epic` is this epic — one epic can resolve more than once, and

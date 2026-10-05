@@ -1967,6 +1967,24 @@ than appearing in it.
 
 ### Fixed
 
+- **An audit axis closes when its auditor is done, not never.** `db/projector.ts`'s
+  `foldTasks()` knew exactly two terminal transitions for a task row —
+  `wave-merged` and `task-superseded` — and an audit axis (`/bs audit`) never
+  joins a wave, so its row (declared the moment a note-only `error-logged`
+  names it, e.g. a capped-and-resumed axis) sat `in-progress` on the Kanban
+  board forever, even once its auditor `judge-reported` had delivered the
+  report. A `judge-reported` or `task-result-recorded` (`run_status: done`)
+  naming `agent_role`/`agent: auditor` now completes the row, `terminalAt`
+  set to that event's `ts`; a coder/reviewer/grader/spec-reviewer turn on a
+  plan task is unaffected — those still complete only on `wave-merged` — read
+  through one predicate (`closingTurnRole`/`isAuditorTurn`) so the two
+  payload spellings (`agent_role` vs. results.ts's `agent`) never drift apart.
+  A later auditor `dispatch_decision` for an id closed this way (an audit
+  axis re-run) reopens it instead of leaving it `completed`, resetting
+  `terminalAt` to null — the one named exception to `tasks.terminalAt`'s
+  "written once" invariant, documented where that invariant lives
+  (`db/schema.ts`).
+
 - **The key was where the runbook said to put it, and the runbook was half a
   procedure (D-270).** `docs/runbooks/providers.md` tells you to set
   `DEEPSEEK_API_KEY` in `.env`; `apiKeyPresent` reads `process.env`; nothing

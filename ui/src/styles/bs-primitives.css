@@ -1,10 +1,9 @@
 /* Component CSS for the kit under ui/src/components/kit/ (ds-spec.md §2.1,
-   §2.5) — same two-file shape as the HDS-derived kit it sits beside
-   (ui/src/components/ds/ + ds-components.css) while that kit is still in
-   use by the old pages (§0/§5, "DS0 ... additive and inert"): bs-* class
-   names, bs-* tokens only, one stylesheet per kit so `lint_hardcodes.py`
-   and `check_tokens.py` can point at each independently. No page imports
-   ui/src/components/kit/ yet — see ui/docs/DESIGN.md, "Provenance". */
+   §2.5) — same two-file shape as the old HDS-derived kit it replaced
+   (ui/src/components/ds/ + ds-components.css, retired in DS9 part B):
+   bs-* class names, bs-* tokens only, one stylesheet per kit so
+   `lint_hardcodes.py` and `check_tokens.py` can point at it independently.
+   See ui/docs/DESIGN.md, "Provenance". */
 
 /* Dense-UI link default (ds-spec.md §1.1 line 131): this bare `a` selector
    applies to every anchor in the app, not just dense-UI ones — it underlines
@@ -732,11 +731,51 @@ a:hover {
 /* DS6 PR4b round 2 item 2: an invisible IntersectionObserver target (top or
    bottom sentinel) -- not a visible element, it only has to occupy a box
    the observer can see enter the viewport. Migrated from ds-components.css
-   (fix round item 8: ds-components.css is deleted in DS9). */
+   (fix round item 8: ds-components.css was deleted in DS9 part B). */
 .activity-sentinel {
   height: 1px;
 }
 
+/* Activity toolbar (DS6 PR3 r2, items 3-4; ds-review.html's .fchip/.fchip.on):
+   the kind filter is a row of pill-shaped toggles, not bare ghost text.
+   Page-scoped classes on the Button rather than a Button variant change, so
+   no other Button consumer's look shifts. aria-pressed is already set on
+   these buttons (ActivityPage.vue). Migrated from ds-components.css (fix
+   round item 8: ds-components.css was deleted in DS9 part B). */
+.activity-kind-filter .bs-btn {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-surface-raised);
+  color: var(--bs-text-subtle);
+}
+.activity-kind-filter .bs-btn[aria-pressed='true'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+  border-color: var(--bs-border-bold);
+  font-weight: var(--bs-font-weight-medium);
+}
+/* "Expand all" is a desktop-only convenience (Refresh stays, same as every
+   other page's phone toolbar); and the chip row must not wrap into
+   one-chip-per-line columns fighting the button group beside it. */
+@media (max-width: 640px) {
+  .activity-toolbar {
+    flex-wrap: wrap;
+  }
+  .activity-toolbar__expand-all.bs-btn {
+    display: none;
+  }
+}
+
+/* Causal timeline (gap component §6.2.1). Day separator above a day's rows
+   (ds-review.html's `.day`), flush with the feed's own left edge -- no left
+   margin. Migrated from ds-components.css (fix round item 8: ds-components.css
+   was deleted in DS9 part B). */
+.timeline-day {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtlest);
+  margin: var(--bs-space-5) 0 var(--bs-space-2);
+}
 /* Fix round item 7 (ds-components.css's `.timeline-day`): replaces
    `.timeline-day:first-child { margin-top: 0 }`, which stopped matching
    once ActivityPage.vue started rendering a top sentinel and the
@@ -745,6 +784,16 @@ a:hover {
    Migrated here per item 8 since this PR depends on it. */
 .timeline-day--first {
   margin-top: 0;
+}
+/* A raised card frame around a day's rows (ds-review.html's `.feed`). The
+   row-to-row seam (old `.ev` border-bottom) is NOT ported here --
+   `.bs-timeline-row` already carries its own `border-bottom` plus a
+   `:last-child` override (above), so the old seam rule would be redundant. */
+.timeline-feed {
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  overflow: hidden;
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
@@ -1942,6 +1991,29 @@ a:hover {
   min-height: 0;
   overflow: auto;
 }
+/* Per-page content frame: side gutter, vertical rhythm between a page's own
+   sections, and a width cap so a wide viewport doesn't stretch text-heavy
+   pages edge to edge. 1400px matches the old kit's --ds-content-max; no bs-
+   token names it yet (.bs-home, the only other page-width cap today, is its
+   own narrower 960px for a different reason -- see its own comment). The
+   full-bleed modifier is for pages (Flow/Roadmap canvases) that need the
+   whole viewport width. Migrated from ds-components.css (fix round item 8:
+   ds-components.css was deleted in DS9 part B). Fix round 4: the old kit's
+   --ds-space-6 was 24px, not the same index as --bs-space-6 (32px) -- its
+   closest bs- equivalent is --bs-space-5 (24px), so the port must read
+   that token, not the matching digit. */
+.app-page {
+  padding: var(--bs-space-5);
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-5);
+}
+.app-page--full-bleed {
+  max-width: none;
+}
 
 /* ---- SidebarNav (§2.2), collapsible rail + off-canvas Sheet ---- */
 .bs-side {
@@ -2601,6 +2673,16 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-1);
 }
+/* Review follow-up (S2, 2026-10-05): text-overflow does not apply to text
+   sitting directly inside a flex container (.bs-tag/.bs-agent-chip are
+   display: inline-flex), so the label was hard-clipped with no "…". Wrap
+   the label in its own span so the ellipsis actually renders. */
+.bs-agent-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .bs-kanban-card {
   display: flex;
@@ -2621,12 +2703,70 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
-.bs-kanban-card__row--1 {
-  justify-content: space-between;
-}
+/* Review follow-up (S4, 2026-10-05): space-between stretched row 1 across
+   the card's full width, so on a card whose AgentChip renders nothing (it
+   emits no element at all, not an empty one — see AgentChip.vue's `v-if`)
+   the copy IconButton — the only element left between the id and the Quote
+   trigger — floated to the middle of the card instead of sitting right
+   after the id. The row's own gap (from .bs-kanban-card__row) already keeps
+   id and copy button adjacent; the Quote trigger below gets margin-left:
+   auto instead, so it still pins to the right edge whether or not a chip
+   renders. */
+/* Operator fix 2026-10-05: a long AgentChip label used to squeeze the id
+   into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
+   The id now keeps one line and takes the row's remaining space; the chip
+   below shrinks (min-width: 0) and ellipsises its label instead of pushing
+   the id out, and the Quote icon (flex: none below) never shrinks. The grow rule
+   is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
+   class, and an unscoped grow pushed its title away from the id.
+   Operator follow-up fix 2026-10-05: that grow rule then made the id the
+   row's "wins the space" element, so a *short* id ("task-3") still got
+   clipped to "tas…" once the new copy-id button left row 1 even less
+   room. The id must stay readable in full for a short id; the AgentChip
+   label is the thing allowed to ellipsise first. Id and chip swap
+   flex-grow roles: the id caps at 50% and only shrinks past its content's
+   natural width (a short id never reaches that cap); the chip takes
+   whatever the id/buttons leave and ellipsises via its own
+   .bs-agent-chip__text rule. Copy button and Quote icon (flex: none)
+   never shrink either way. */
 .bs-kanban-card__id {
+  white-space: nowrap;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
+}
+.bs-kanban-card__row--1 .bs-kanban-card__id {
+  /* flex-shrink: 0, not 1 — the flexbox shrink algorithm distributes the
+     deficit proportionally to each shrinkable item's flex-basis, so with
+     shrink:1 the id (small basis) was still losing width to the chip (huge
+     basis once its label includes "- a nudge may help") even though the
+     chip is the one meant to give way. An inflexible item's rendered size
+     is its flex-basis clamped to max-width regardless of its siblings, so
+     a short id renders at its full content width (well under the 50% cap)
+     and a long id still clips at the cap — only the chip shrinks. */
+  flex: 0 0 auto;
+  max-width: 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* ds-review.html mock's `.mono` row-1 id: mono font, faintest text
+     colour. Scoped to row 1 rather than the shared `.bs-kanban-card__id`
+     base rule, which WaveTaskCard also uses and is out of this slice's
+     claim. */
+  color: var(--bs-text-subtlest);
+  font-family: var(--bs-font-mono);
+}
+.bs-kanban-card__row--1 .bs-agent-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bs-kanban-card__row--1 .bs-tooltip-trigger {
+  flex: none;
+}
+/* Only the Quote trigger is pushed to the right edge: IconButton wraps the
+   copy button in a Tooltip too, so the shared trigger class must not carry
+   the auto margin or the copy button leaves the id's side. */
+.bs-kanban-card__row--1 .bs-kanban-card__quote {
+  margin-left: auto;
 }
 .bs-kanban-card__title {
   margin: 0;
@@ -2745,6 +2885,10 @@ summary.bs-inbox__group-head {
 }
 .bs-kanban-col {
   flex: 0 0 280px;
+  /* A flex item's automatic min-width is its min-content width, so one
+     card's nowrap id or AgentChip label would stretch the whole column past
+     280px. Zero lets the card's own ellipsis rules do the clipping. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-2);
