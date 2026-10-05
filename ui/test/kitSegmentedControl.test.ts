@@ -45,16 +45,33 @@ describe('.bs-segctl CSS (uiux spec §1)', () => {
     expect(CSS).toMatch(/@media \(max-width: 640px\) \{\s*\.bs-segctl \{\s*display: none;/);
   });
 
-  it('gives items the --bs-touch minimum height even while hidden on phone', () => {
-    const match = CSS.match(/\.bs-segctl__item \{[\s\S]*?\}/);
-    expect(match?.[0]).toMatch(/min-height: var\(--bs-touch\)/);
-  });
-
-  it('the control itself is at least as tall as the item min-height, so the selected fill cannot overflow the border', () => {
+  // Fix round (operator report 2026-10-05): the switch rendered at the
+  // --bs-touch (44px) floor, much taller than the toolbar's other small
+  // controls (Button sm / Select). ds-spec.md §3.1 scopes the 44px touch
+  // floor to <=640px, and .bs-segctl already hides there (above), so
+  // dropping it on desktop/tablet is not a touch-target regression.
+  it('does not carry the --bs-touch floor on the control or its items', () => {
     const controlMatch = CSS.match(/\.bs-segctl \{[\s\S]*?\}/);
     const itemMatch = CSS.match(/\.bs-segctl__item \{[\s\S]*?\}/);
-    expect(controlMatch?.[0]).toMatch(/height: var\(--bs-touch\)/);
-    expect(itemMatch?.[0]).toMatch(/min-height: var\(--bs-touch\)/);
+    expect(controlMatch?.[0]).not.toMatch(/--bs-touch/);
+    expect(itemMatch?.[0]).not.toMatch(/--bs-touch/);
+  });
+
+  it('sizes items off the mock (ds-review.html .seg): xs text, compact padding', () => {
+    const itemMatch = CSS.match(/\.bs-segctl__item \{[\s\S]*?\}/);
+    expect(itemMatch?.[0]).toMatch(/font-size: var\(--bs-text-xs\)/);
+    expect(itemMatch?.[0]).toMatch(/padding: 2px calc\(var\(--bs-space-2\) \+ 1px\)/);
+    expect(itemMatch?.[0]).toMatch(/border-right: 1px solid var\(--bs-border\)/);
+    expect(itemMatch?.[0]).toMatch(/font-weight: var\(--bs-font-weight-normal\)/);
+  });
+
+  it('matches the mock frame: raised surface, clipped corners, weight 500 only when selected', () => {
+    const controlMatch = CSS.match(/\.bs-segctl \{[\s\S]*?\}/);
+    expect(controlMatch?.[0]).toMatch(/background: var\(--bs-surface-raised\)/);
+    expect(controlMatch?.[0]).toMatch(/overflow: hidden/);
+    expect(CSS).toMatch(/\.bs-segctl__item:last-child \{\s*border-right: 0;/);
+    const selected = CSS.match(/\.bs-segctl__item\[aria-current='page'\][\s\S]*?\}/);
+    expect(selected?.[0]).toMatch(/font-weight: var\(--bs-font-weight-medium\)/);
   });
 
   it('uses the kit default focus-visible ring, not a component-scoped override', () => {
