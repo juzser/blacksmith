@@ -40,6 +40,10 @@ can't classify correctly:
     command directly after a coordinate literally reads as "...1s...").
     The px/ms/time regexes below have no way to distinguish SVG path
     syntax from a CSS value; this is vector data, not styling.
+  - ui/src/styles/bs-base.css — ported element reset (DS9 part A), same
+    exception as bs-tokens.css/ds-tokens.css above: a vendored base-layer
+    block, not hand-authored app code. Its one non-var literal
+    (`outline: 2px solid …`) is a focus-ring width, not a drifted color.
 Every other file in ui/src is scanned normally — the two apps this repo
 actually authors (ui/src/pages, ui/src/components minus ds/, composables,
 lib) have zero violations as of this commit; new ones fail the gate.
@@ -56,6 +60,7 @@ EXCLUDE_FILES = {
     "ds-components.css",
     "bs-tokens.css",
     "bs-primitives.css",
+    "bs-base.css",
     "icons.ts",
 }
 

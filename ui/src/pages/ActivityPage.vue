@@ -11,8 +11,8 @@
 import { ArrowUp, History } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import BarChart from '../components/kit/BarChart.vue';
 import Banner from '../components/kit/Banner.vue';
+import BarChart from '../components/kit/BarChart.vue';
 import Button from '../components/kit/Button.vue';
 import Card from '../components/kit/Card.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
