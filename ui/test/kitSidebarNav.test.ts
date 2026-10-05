@@ -62,13 +62,13 @@ describe('kit/SidebarNav.vue', () => {
     expect((SIDEBAR.match(/catch/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 
-  // Operator decision 2026-10-05: Work gets two always-visible level-2
-  // items (Kanban, Roadmap) on desktop — no fly-out, indented under the
-  // parent, hidden only when the rail itself is collapsed.
+  // Operator decision 2026-10-05: Work's level-2 items (Kanban, Roadmap)
+  // render on demand -- only while Work's own section is current -- rather
+  // than on every page.
   describe('level-2 items under a parent (operator decision 2026-10-05)', () => {
-    it('renders a child list only when the rail is not collapsed', () => {
+    it('renders a child list only when the rail is not collapsed and the section is current', () => {
       expect(SIDEBAR).toMatch(
-        /<ul\s+v-if="!effectiveCollapsed && it\.children\?\.length"\s+class="bs-side__sublist"/,
+        /<ul\s+v-if="!effectiveCollapsed && it\.children\?\.length && currentFor\(it\)"\s+class="bs-side__sublist"/,
       );
     });
 

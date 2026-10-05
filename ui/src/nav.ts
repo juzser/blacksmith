@@ -35,3 +35,12 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, route: '/lessons' },
 ];
+
+// A parent with level-2 `children` has no page of its own to land on --
+// clicking it should go straight to the first child's page (operator
+// decision 2026-10-05), derived here rather than duplicated at every call
+// site so Work's `route` and `children[0].route` cannot drift apart.
+export function navRoute(item: NavItem): string {
+  const firstChild = item.children?.[0];
+  return firstChild ? firstChild.route : item.route;
+}
