@@ -2643,8 +2643,8 @@ summary.bs-inbox__group-head {
 /* Operator fix 2026-10-05: a long AgentChip label used to squeeze the id
    into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
    The id now keeps one line and takes the row's remaining space; the chip
-   below gets a matching max-width so it shrinks instead of pushing the id
-   out, and the Quote icon (flex: none below) never shrinks. The grow rule
+   below shrinks (min-width: 0) and ellipsises its label instead of pushing
+   the id out, and the Quote icon (flex: none below) never shrinks. The grow rule
    is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
    class, and an unscoped grow pushed its title away from the id.
    Operator follow-up fix 2026-10-05: that grow rule then made the id the
