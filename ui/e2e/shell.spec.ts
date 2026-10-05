@@ -41,7 +41,7 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     // it stayed exactly as stale. usePoll's global signal is what makes the
     // claim true, and this is the only layer that can see it.
     await page.goto('/timeline');
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
     // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
     await page.getByRole('button', { name: 'Pause updates' }).click();

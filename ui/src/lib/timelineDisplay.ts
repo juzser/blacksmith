@@ -95,9 +95,9 @@ function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
     : `${counts.passed} of ${total} passed`;
 }
 
-/** CausalTimelineList's pre-built causal-parent tree node (moved here, not
- * exported from a .vue SFC — see components/ds/types.ts's header comment
- * for why: ui/tsconfig.json doesn't type-check .vue files). */
+/** ActivityPage/kit/TimelineRow.vue's pre-built causal-parent tree node
+ * (moved here, not exported from a .vue SFC — see components/kit/types.ts's
+ * header comment for why: ui/tsconfig.json doesn't type-check .vue files). */
 export interface TimelineNode {
   entry: TimelineEntry;
   children: TimelineNode[];
@@ -112,7 +112,7 @@ export interface TimelineNode {
  * event-type filter dropped it and its children were roots by accident. */
 const NON_ADOPTING_EVENT_TYPES = new Set(['session-start']);
 
-/** Builds CausalTimelineList's disclosure tree from a *filtered* entry set:
+/** Builds ActivityPage's disclosure tree from a *filtered* entry set:
  * an entry whose causal parent isn't in the set is promoted to a root, so the
  * tree always spans exactly what the operator asked to see. */
 export function buildCausalTree(entries: TimelineEntry[]): TimelineNode[] {

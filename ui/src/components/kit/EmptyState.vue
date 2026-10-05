@@ -13,7 +13,7 @@ defineProps<{ icon: Component; title: string; body: string }>();
   <div class="bs-empty">
     <Icon class="bs-empty__icon" :icon="icon" :size="24" />
     <p class="bs-empty__title">{{ title }}</p>
-    <p class="bs-empty__body">{{ body }}</p>
+    <p v-if="body" class="bs-empty__body">{{ body }}</p>
     <slot name="action" />
   </div>
 </template>
