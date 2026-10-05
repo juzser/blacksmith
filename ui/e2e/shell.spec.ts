@@ -124,6 +124,13 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
     const darkSide = await side.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(darkMark).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
     expect(darkMark).not.toBe(darkSide);
+    // Operator 2026-10-05: an opaque white disc read as a sticker on the dark
+    // sidebar. The plate is white at 30% so the surface shows through, and it
+    // is wider than the artwork so the edge no longer touches the hair.
+    expect(darkMark).toBe('rgba(255, 255, 255, 0.3)');
+    const plate = await mark.boundingBox();
+    const art = await page.locator('.bs-side__mark img').boundingBox();
+    expect(plate && art && plate.width - art.width).toBeGreaterThanOrEqual(8);
   });
 });
 

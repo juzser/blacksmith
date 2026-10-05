@@ -1960,14 +1960,17 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  /* 24px artwork plus --bs-space-1 on each side: the dark-mode plate
+     keeps a ring of air around the hair instead of touching it. */
+  width: 32px;
+  height: 32px;
+  padding: var(--bs-space-1);
+  box-sizing: border-box;
   flex-shrink: 0;
   border-radius: var(--bs-radius-full);
 }
-/* Dark-mode-only plate: the mark's dark-haired artwork has transparent
-   margin inside its 24x24 box, so this shows through without resizing the
-   image. Light mode defines no rule here, so it stays transparent. */
+/* Dark-mode-only plate. Light mode defines no rule here, so it stays
+   transparent. */
 :root.dark .bs-side__mark {
   background: var(--bs-side-mark-backing);
 }
