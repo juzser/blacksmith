@@ -117,6 +117,9 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
     const lightMark = await mark.evaluate((el) => getComputedStyle(el).backgroundColor);
     // No rule touches .bs-side__mark in light mode: transparent, same as before.
     expect(lightMark).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    const lightArt = await page.locator('.bs-side__mark img').boundingBox();
+    // No plate, no ring of air: the light-mode box is the artwork itself.
+    expect((await mark.boundingBox())?.width).toBe(lightArt?.width);
 
     await setTheme(page, 'dark');
     await page.reload();
@@ -131,6 +134,11 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
     const plate = await mark.boundingBox();
     const art = await page.locator('.bs-side__mark img').boundingBox();
     expect(plate && art && plate.width - art.width).toBeGreaterThanOrEqual(8);
+    // The plate grows outward: the artwork itself does not move between
+    // themes, so light mode keeps its pre-plate position (visual pass D1).
+    expect(art?.x).toBe(lightArt?.x);
+    expect(art?.y).toBe(lightArt?.y);
+    expect(art?.width).toBe(lightArt?.width);
   });
 });
 
