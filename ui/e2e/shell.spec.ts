@@ -149,7 +149,12 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     for (const label of ['Home', 'Work', 'Activity', 'Cost & quality', 'Lessons']) {
       await expect(nav.getByRole('button', { name: label })).toBeVisible();
     }
-    await expect(nav.getByRole('button', { name: 'Work' })).toHaveAttribute('aria-current', 'page');
+    // On a Work child the child is the page; Work is only the current section.
+    await expect(nav.getByRole('button', { name: 'Work' })).toHaveAttribute('aria-current', 'true');
+    await expect(nav.getByRole('button', { name: 'Kanban', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   test('at 375px the shell swaps to MobileTopBar + MobileTabBar with the same 5 items', async ({
@@ -223,5 +228,31 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
       .getByRole('button', { name: 'Activity' })
       .click();
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Activity');
+  });
+
+  // Operator decision 2026-10-05: Work carries two always-visible level-2
+  // items on desktop (ds-spec.md §3) — no fly-out, both visible at once.
+  test('Work shows Kanban and Roadmap as level-2 items, and clicking Roadmap navigates there', async ({
+    page,
+  }) => {
+    await page.goto('/work/kanban');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    const kanbanChild = nav.getByRole('button', { name: 'Kanban', exact: true });
+    const roadmapChild = nav.getByRole('button', { name: 'Roadmap', exact: true });
+    await expect(kanbanChild).toBeVisible();
+    await expect(roadmapChild).toBeVisible();
+
+    // Visual pass 2026-10-05: only the active child carries the fill; the
+    // Work parent stays unfilled so the two rows never read as one block.
+    const bg = (l: typeof kanbanChild) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const work = nav.getByRole('button', { name: 'Work' });
+    expect(await bg(work)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(await bg(kanbanChild)).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    // Same row height as the parent (no smaller tap target in the Sheet).
+    expect((await kanbanChild.boundingBox())?.height).toBe((await work.boundingBox())?.height);
+
+    await roadmapChild.click();
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+    await expect(roadmapChild).toHaveAttribute('aria-current', 'page');
   });
 });

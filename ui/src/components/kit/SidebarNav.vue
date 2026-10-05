@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// App shell's primary nav (ds-spec.md §2.2 `SidebarNav`, §3). Flat 5-item
-// list, no categories/badges — DS1's shell scope has neither in the spec's
-// prop table. Collapsible rail (≥1024px, driven by useViewport.ts from
+// App shell's primary nav (ds-spec.md §2.2 `SidebarNav`, §3). One list of
+// top-level items, no categories/badges; an item may carry always-visible
+// level-2 `children` (Work -> Kanban, Roadmap, operator 2026-10-05). Collapsible rail (≥1024px, driven by useViewport.ts from
 // App.vue) shows icon-only buttons with a right-placed label Tooltip, since
 // there is no visible text left to carry the accessible name. The brand mark
 // carries over from the old ds/SidebarNav.vue unchanged — collapsing the
@@ -50,6 +50,19 @@ function toggleCollapsed() {
     // Storage unavailable -- the toggle still works for this session.
   }
 }
+
+// Operator decision 2026-10-05: a parent with level-2 `children` (Work ->
+// Kanban, Roadmap) stays marked while either child is -- the parent names
+// the section, the child names which page inside it. Only the child is the
+// page; the parent reads "true" (current section) and bs-primitives.css
+// gives it bold text with no fill, so the two never fuse into one block.
+// The collapsed rail hides the children, so there the parent is the page.
+function currentFor(it: NavItem): 'page' | 'true' | undefined {
+  if (it.id === props.activeId) return 'page';
+  if (it.children?.some((c) => c.id === props.activeId))
+    return effectiveCollapsed.value ? 'page' : 'true';
+  return undefined;
+}
 </script>
 
 <template>
@@ -73,7 +86,7 @@ function toggleCollapsed() {
           <button
             type="button"
             class="bs-side__item"
-            :aria-current="it.id === activeId ? 'page' : undefined"
+            :aria-current="currentFor(it)"
             :aria-label="it.label"
             @click="emit('select', it.id)"
           >
@@ -84,12 +97,24 @@ function toggleCollapsed() {
           v-else
           type="button"
           class="bs-side__item"
-          :aria-current="it.id === activeId ? 'page' : undefined"
+          :aria-current="currentFor(it)"
           @click="emit('select', it.id)"
         >
           <Icon :icon="it.icon" :size="16" />
           <span class="bs-side__label">{{ it.label }}</span>
         </button>
+        <ul v-if="!effectiveCollapsed && it.children?.length" class="bs-side__sublist">
+          <li v-for="child in it.children" :key="child.id">
+            <button
+              type="button"
+              class="bs-side__subitem"
+              :aria-current="child.id === activeId ? 'page' : undefined"
+              @click="emit('select', child.id)"
+            >
+              {{ child.label }}
+            </button>
+          </li>
+        </ul>
       </li>
     </ul>
   </nav>

@@ -42,14 +42,20 @@ const sheetOpen = ref(false);
 const activeId = computed(() => {
   // /p/:project/overview and /overview both highlight "home"; task-detail
   // highlights "work" (it is reached from Work, not listed in NAV_ITEMS of
-  // its own); every other page matches by its matchPrefix (Work's two child
-  // routes) or its route exactly (query params ignored either way).
+  // its own); every other page matches a level-2 child exactly first (Work
+  // -> Kanban/Roadmap, so SidebarNav can give the right one aria-current),
+  // then its own matchPrefix (Work's two child routes) or its route exactly
+  // (query params ignored either way).
   if (route.name === 'overview-global' || route.name === 'overview-project') return 'home';
   if (route.name === 'task-detail') return 'work';
-  const found = NAV_ITEMS.find(
-    (it) => it.route === route.path || (it.matchPrefix && route.path.startsWith(it.matchPrefix)),
-  );
-  return found?.id;
+  for (const it of NAV_ITEMS) {
+    const child = it.children?.find((c) => c.route === route.path);
+    if (child) return child.id;
+    if (it.route === route.path || (it.matchPrefix && route.path.startsWith(it.matchPrefix))) {
+      return it.id;
+    }
+  }
+  return undefined;
 });
 
 // The topbar Breadcrumb (ds-spec.md §3, DS1): derived from route meta so it
@@ -130,7 +136,9 @@ async function loadSessionOptions() {
 const showScopeWidth = computed(() => showSessionPicker.value && sessionScope.value !== undefined);
 
 function selectNav(id: string) {
-  const item = NAV_ITEMS.find((it) => it.id === id);
+  const item =
+    NAV_ITEMS.find((it) => it.id === id) ??
+    NAV_ITEMS.flatMap((it) => it.children ?? []).find((c) => c.id === id);
   if (item?.route) router.push(item.route);
   sheetOpen.value = false;
 }

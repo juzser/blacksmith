@@ -17,6 +17,14 @@ describe('KanbanTaskCard.vue — card chip variant (audit finding 2)', () => {
   });
 });
 
+describe('KanbanTaskCard.vue — footer dependency line (operator fix 2026-10-05)', () => {
+  it('clamps the footer dependency text to one line with a native title tooltip', () => {
+    expect(SRC).toMatch(
+      /<span class="bs-kanban-card__footer-dep" :title="footerDependency">\{\{ footerDependency \}\}<\/span>/,
+    );
+  });
+});
+
 describe('KanbanTaskCard.vue — hide duplicate role label (audit finding 5)', () => {
   it('imports agentChip to know whether an AgentChip is already carrying the role', () => {
     expect(SRC).toMatch(/import\s*\{[^}]*\bagentChip\b[^}]*\}\s*from\s*'\.\.\/lib\/kanban\.js'/);

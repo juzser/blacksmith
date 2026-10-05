@@ -15,7 +15,8 @@ describe('kit/SidebarNav.vue', () => {
   });
 
   it('marks the active item aria-current="page"', () => {
-    expect(SIDEBAR).toMatch(/:aria-current="it\.id === activeId \? 'page' : undefined"/);
+    expect(SIDEBAR).toMatch(/:aria-current="currentFor\(it\)"/);
+    expect(SIDEBAR).toMatch(/if \(it\.id === props\.activeId\) return 'page';/);
   });
 
   it('gives every collapsed item an aria-label since no text remains visible', () => {
@@ -59,5 +60,31 @@ describe('kit/SidebarNav.vue', () => {
     expect(SIDEBAR).toMatch(/try\s*\{[^}]*localStorage\.getItem/);
     // Both reachable code paths land in a catch, not an unguarded throw.
     expect((SIDEBAR.match(/catch/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  // Operator decision 2026-10-05: Work gets two always-visible level-2
+  // items (Kanban, Roadmap) on desktop — no fly-out, indented under the
+  // parent, hidden only when the rail itself is collapsed.
+  describe('level-2 items under a parent (operator decision 2026-10-05)', () => {
+    it('renders a child list only when the rail is not collapsed', () => {
+      expect(SIDEBAR).toMatch(
+        /<ul\s+v-if="!effectiveCollapsed && it\.children\?\.length"\s+class="bs-side__sublist"/,
+      );
+    });
+
+    it('gives each child its own aria-current and a select emit', () => {
+      expect(SIDEBAR).toMatch(/:aria-current="child\.id === activeId \? 'page' : undefined"/);
+      expect(SIDEBAR).toMatch(/@click="emit\('select', child\.id\)"/);
+      expect(SIDEBAR).toMatch(/class="bs-side__subitem"/);
+    });
+
+    // Visual pass 2026-10-05: parent and child both at aria-current="page"
+    // drew one fused highlight. The child is the page; the parent is only
+    // the current section, so it reads "true" and gets no fill.
+    it('the parent reads aria-current="true", not "page", while a child is active', () => {
+      expect(SIDEBAR).toMatch(
+        /function currentFor\(it: NavItem\)[\s\S]*?it\.children\?\.some\(\(c\) => c\.id === props\.activeId\)\)\s*return effectiveCollapsed\.value \? 'page' : 'true';/,
+      );
+    });
   });
 });

@@ -19,10 +19,16 @@ export interface NavItem {
   label: string;
   /** MobileTabBar's 375px label when it differs from `label` (ds-spec.md §3). */
   shortLabel?: string;
-  icon: Component;
+  /** Required on every top-level item; level-2 `children` render as plain
+   * text rows (no icon column to fill, matching ds-review.html's indent). */
+  icon?: Component;
   route: string;
   /** Highlights this item for any route whose path starts with this prefix,
    * in addition to an exact match on `route` (Work: /work/kanban,
    * /work/roadmap and the legacy /kanban, /roadmap redirects). */
   matchPrefix?: string;
+  /** Operator decision 2026-10-05: always-visible level-2 items under this
+   * item on desktop SidebarNav (Work -> Kanban, Roadmap). MobileTabBar never
+   * reads this — the phone stays flat. */
+  children?: NavItem[];
 }
