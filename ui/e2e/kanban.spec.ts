@@ -194,7 +194,7 @@ test.describe('Kanban', () => {
     );
     expect(idBox).not.toBeNull();
     expect(lineHeight).toBeGreaterThan(0);
-    expect(idBox!.height).toBeLessThanOrEqual(lineHeight * 1.5);
+    expect(idBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(lineHeight * 1.5);
 
     const row1 = page.locator('.bs-kanban-card__row--1').first();
     const chip = page.locator('.bs-agent-chip').first();
@@ -203,11 +203,55 @@ test.describe('Kanban', () => {
     expect(row1Box).not.toBeNull();
     expect(chipBox).not.toBeNull();
     // Small tolerance for border/line-height rounding, not a second line.
-    expect(row1Box!.height).toBeLessThanOrEqual(chipBox!.height + 4);
+    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      (chipBox?.height ?? 0) + 4,
+    );
+  });
 
-    // Review follow-up (S2): the label itself is actually truncated with an
-    // ellipsis, not just boxed to one line's height, and the full label is
-    // still reachable through the chip's title.
+  // Review follow-up (S2), narrowed after the first attempt (operator report
+  // 2026-10-05): the label itself is truncated with an ellipsis, not just
+  // boxed to one line's height, and the raw role is still reachable through
+  // the chip's title.
+  //
+  // .bs-kanban-col is a fixed `flex: 0 0 280px` (bs-primitives.css) on every
+  // viewport wider than the 640px phone breakpoint (useViewport.ts's
+  // isPhoneWidth, same threshold KanbanBoard.vue switches layouts on), so the
+  // row's available width — and therefore the chip's `max-width: 60%` cap —
+  // does not change between 768px and 1440px; a narrower *desktop* viewport
+  // gives this no more room to fail in than 1440px already had. "Builder ·
+  // waiting - a nudge may help" (36 chars) rendered at exactly 207px with
+  // zero spare room (scrollWidth === clientWidth) at 1440px, which means that
+  // cap is already saturated at 207px of text — the chip was sized to its
+  // full natural content, not clamped below it. A label with meaningfully
+  // more characters pushes the *same* fixed cap into clamping: "security-
+  // reviewer" maps to "Security reviewer" (roleLabels.ts) vs "Builder",
+  // producing "Security reviewer · waiting - a nudge may help" (46 chars,
+  // ~28% more than the 36 that already left no slack) — at roughly the same
+  // ~5.75px/char this measures near 264px against an ~207px slot, so it must
+  // overflow regardless of the exact cap value. Viewport stays 1440px: it is
+  // the label, not the width, that is now constrained.
+  test('desktop: a long AgentChip label is ellipsised, not just boxed to one line', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, [
+      {
+        taskStatus: 'todo',
+        tasks: [
+          {
+            ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+            agentRole: 'security-reviewer',
+            agentActivity: 'stalled',
+            // Well past agentWaitingThresholdMs (4h) so the chip reads
+            // "Security reviewer · waiting - a nudge may help".
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ]);
+    await page.goto('/work/kanban');
+
+    const chip = page.locator('.bs-agent-chip').first();
     const chipText = chip.locator('.bs-agent-chip__text');
     const overflowMetrics = await chipText.evaluate((el) => ({
       scrollWidth: el.scrollWidth,
@@ -216,7 +260,12 @@ test.describe('Kanban', () => {
     }));
     expect(overflowMetrics.scrollWidth).toBeGreaterThan(overflowMetrics.clientWidth);
     expect(overflowMetrics.textOverflow).toBe('ellipsis');
-    await expect(chip).toHaveAttribute('title', /.+/);
+    // AgentChip.vue binds the Tag's native `title` to `chip.title`
+    // (kanban.ts's agentChip()) — the raw `agentRole`(+tier) taxonomy
+    // string, not the rendered "<role> · <state>" label. No
+    // `agentModelTier` is set on this fixture, so that raw string is exactly
+    // the role.
+    await expect(chip).toHaveAttribute('title', 'security-reviewer');
   });
 
   // UI audit finding (S3): the desktop toolbar used to read as two
