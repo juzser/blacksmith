@@ -677,8 +677,10 @@ each with `aria-label` and a right-placed tooltip of the same text.
 Operator decision (2026-10-05): Work carries two always-visible level-2 items on
 desktop — Kanban and Roadmap — indented under it, no fly-out (both render whenever the
 rail itself is not collapsed; collapsing the rail hides them along with every other
-label). Each level-2 item gets its own `aria-current="page"` on its own route, and Work
-stays active while either child is. Collapsing the rail still sends Work to
+label). Each level-2 item gets its own `aria-current="page"` and the active fill on its own
+route, at the same 2rem row height as a top-level item. While either child is active, Work
+reads `aria-current="true"` (the current section, not the page): bold text, no fill, so
+parent and child never fuse into one highlighted block. Collapsing the rail still sends Work to
 `/work/kanban`. The phone tab bar is unaffected: Work stays a single flat tab among the
 6 (see the phone list above), and the page's own Kanban/Roadmap `SegmentedControl`
 switcher still does the job there.

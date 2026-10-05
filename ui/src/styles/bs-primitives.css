@@ -2023,6 +2023,12 @@ a:hover {
   color: var(--bs-text);
   font-weight: var(--bs-font-weight-medium);
 }
+/* The section a level-2 child belongs to (SidebarNav currentFor): bold text,
+   no fill, so only the child -- the actual page -- carries the surface. */
+.bs-side__item[aria-current='true'] {
+  color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
+}
 .bs-side__item:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
@@ -2047,7 +2053,9 @@ a:hover {
   display: flex;
   align-items: center;
   width: 100%;
-  height: 1.75rem;
+  /* Same row height as .bs-side__item: the Sheet shows these at tablet
+     widths, where a shorter row is a smaller tap target than its parent. */
+  height: 2rem;
   padding: 0 var(--bs-space-2) 0 var(--bs-space-6);
   border: 0;
   background: transparent;

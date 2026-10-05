@@ -428,7 +428,8 @@ export function dependencyChainText(dependencies: DependencyLike[]): string {
   const first = waiting[0];
   if (!first) return 'Waits for: nothing';
   const label = taskLabel(first.taskId, first.title ?? undefined);
-  const status = first.status ? ` (${first.status})` : '';
+  // Plain words, not the raw task_status slug: "in-progress" -> "in progress".
+  const status = first.status ? ` (${first.status.replace(/[-_]/g, ' ')})` : '';
   const rest = waiting.length - 1;
   const extra = rest > 0 ? ` +${rest} more` : '';
   return `Waits for: ${label}${status}${extra}`;

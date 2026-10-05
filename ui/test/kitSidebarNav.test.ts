@@ -15,7 +15,8 @@ describe('kit/SidebarNav.vue', () => {
   });
 
   it('marks the active item aria-current="page"', () => {
-    expect(SIDEBAR).toMatch(/:aria-current="isActive\(it\) \? 'page' : undefined"/);
+    expect(SIDEBAR).toMatch(/:aria-current="currentFor\(it\)"/);
+    expect(SIDEBAR).toMatch(/if \(it\.id === props\.activeId\) return 'page';/);
   });
 
   it('gives every collapsed item an aria-label since no text remains visible', () => {
@@ -77,9 +78,12 @@ describe('kit/SidebarNav.vue', () => {
       expect(SIDEBAR).toMatch(/class="bs-side__subitem"/);
     });
 
-    it("the parent's own active state also lights up while a child is active", () => {
+    // Visual pass 2026-10-05: parent and child both at aria-current="page"
+    // drew one fused highlight. The child is the page; the parent is only
+    // the current section, so it reads "true" and gets no fill.
+    it('the parent reads aria-current="true", not "page", while a child is active', () => {
       expect(SIDEBAR).toMatch(
-        /function isActive\(it: NavItem\): boolean \{[\s\S]*?it\.children\?\.some/,
+        /function currentFor\(it: NavItem\)[\s\S]*?it\.children\?\.some\(\(c\) => c\.id === props\.activeId\)\)\s*return effectiveCollapsed\.value \? 'page' : 'true';/,
       );
     });
   });

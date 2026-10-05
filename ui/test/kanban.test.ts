@@ -596,7 +596,7 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   it('names the first dependency with its status', () => {
     expect(
       dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }]),
-    ).toBe('Waits for: Add login form (in-progress)');
+    ).toBe('Waits for: Add login form (in progress)');
   });
 
   it('falls back to the taskId (via taskLabel()) when the dependency has no title', () => {
@@ -655,7 +655,7 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
       dependencyChainText([
         { taskId: 'epic/task-3-add-login-form', title: longObjective, status: 'in-progress' },
       ]),
-    ).toBe('Waits for: Add login form (in-progress)');
+    ).toBe('Waits for: Add login form (in progress)');
   });
 });
 
