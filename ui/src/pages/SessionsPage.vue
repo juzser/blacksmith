@@ -221,8 +221,13 @@ function refresh() {
 
     <template v-else>
       <template v-if="project === undefined">
-        <template v-for="group in runningGroups()" :key="group.project">
-          <h2 class="bs-section-title bs-sessions__group-title">
+        <section
+          v-for="(group, i) in runningGroups()"
+          :key="group.project"
+          class="bs-sessions__group"
+          :aria-labelledby="`sessions-group-title-${i}`"
+        >
+          <h2 :id="`sessions-group-title-${i}`" class="bs-section-title bs-sessions__group-title">
             <RouterLink
               v-if="group.project"
               :to="{ query: { ...route.query, project: group.project } }"
@@ -246,7 +251,7 @@ function refresh() {
               />
             </li>
           </ul>
-        </template>
+        </section>
       </template>
       <ul v-else class="bs-sessions__list" role="list">
         <li v-for="s in running()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
