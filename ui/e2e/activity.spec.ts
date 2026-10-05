@@ -1,5 +1,5 @@
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 // DS6 PR4b round 3: fixture builder for the live-updates / session-divider
 // e2e tests below. Shape matches TimelineEntry (api.ts) — sessionId/Title are
@@ -32,8 +32,9 @@ function synthEntry(
 // DS6 PR3 (ds-spec.md §4.3 / ds-review.html #p-activity): Timeline and
 // Errors fold into one flat, day-grouped feed. Replaces timeline.spec.ts and
 // errors.spec.ts — the search box, "Decisions" lens, causal dispatch-group
-// fold, and Errors' own charts/table/Dialog all retired with those pages
-// (operator decisions; Errors' own class cards are a PR4 follow-up).
+// fold, and the old Errors table/Dialog all retired with those pages
+// (operator decisions). DS6 PR4c adds the Errors kind's own class cards and
+// chart takeaways back, above the feed, as their own section below.
 
 test.describe('Activity', () => {
   test('renders the seeded event log and a11y basics', async ({ page }) => {
@@ -118,6 +119,26 @@ test.describe('Activity', () => {
 
     await allTab.click();
     await expect(page).not.toHaveURL(/kind=/);
+  });
+
+  // S2 fix: 'error' is the 7th of 10 phone tabs, past the tab strip's
+  // visible width at 390px — scrolling it into view on mount is the only
+  // way the screen says which filter is active.
+  test('phone layout scrolls the active "Error" tab into view on load', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity?kind=error');
+    const tablist = page.getByRole('tablist', { name: 'Filter' });
+    const errorTab = tablist.getByRole('tab', { name: 'Error', exact: true });
+    await expect(errorTab).toHaveAttribute('aria-selected', 'true');
+
+    const listBox = await tablist.boundingBox();
+    const tabBox = await errorTab.boundingBox();
+    expect(listBox).not.toBeNull();
+    expect(tabBox).not.toBeNull();
+    if (listBox && tabBox) {
+      expect(tabBox.x).toBeGreaterThanOrEqual(listBox.x - 1);
+      expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1);
+    }
   });
 
   test('desktop layout keeps the chip row and Refresh, no tablist', async ({ page }) => {
@@ -638,6 +659,81 @@ test.describe('Activity', () => {
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
+  // DS6 PR4c (ds-spec.md §4.3): the class-summary cards and their two
+  // charts' takeaway sentences render only while the Error kind is active,
+  // never on the unfiltered "All" feed.
+  test('error class cards and chart takeaways show only for kind=error, not for All', async ({
+    page,
+  }) => {
+    const errorsResult = {
+      byClass: [
+        {
+          id: 'economy.context-overrun|S3-minor',
+          errorGroup: 'economy',
+          errorClass: 'context-overrun',
+          severity: 'S3-minor',
+          count: 5,
+        },
+      ],
+      byDay: [
+        { day: '2026-09-29', count: 2 },
+        { day: '2026-09-30', count: 3 },
+      ],
+      classSummary: [
+        {
+          id: 'economy.context-overrun',
+          errorGroup: 'economy',
+          errorClass: 'context-overrun',
+          count: 5,
+          severityMix: { 'S3-minor': 5 },
+          lastSeen: '2026-09-30T10:00:00.000Z',
+          projects: ['demo'],
+          trend7d: [0, 1, 0, 2, 1, 1, 0],
+        },
+      ],
+    };
+    await page.route('**/api/errors*', (route) => route.fulfill({ json: errorsResult }));
+    await page.goto('/activity?session=sess-fixture');
+    await expect(page.locator('.bs-activity-errors')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Error', exact: true }).click();
+    await expect(page).toHaveURL(/kind=error/);
+    const section = page.locator('.bs-activity-errors');
+    await expect(section).toBeVisible();
+    const cards = section.locator('.bs-activity-errors__cards .bs-card');
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText('Context overrun, 5 times, mostly minor');
+    await expect(section.locator('.bs-chart__takeaway').first()).toBeVisible();
+  });
+
+  // The old raw Errors table and its detail Dialog were dropped before this
+  // PR (48f2647); the redirect into Activity's own Error-kind view is the
+  // whole surface left to prove for /errors.
+  test('/errors redirect lands on the Error-kind view with its class cards', async ({ page }) => {
+    const errorsResult = {
+      byClass: [],
+      byDay: [],
+      classSummary: [
+        {
+          id: 'spec.wrong-criterion',
+          errorGroup: 'spec',
+          errorClass: 'wrong-criterion',
+          count: 1,
+          severityMix: { 'S4-nit': 1 },
+          lastSeen: '2026-09-30T10:00:00.000Z',
+          projects: ['demo'],
+          trend7d: [],
+        },
+      ],
+    };
+    await page.route('**/api/errors*', (route) => route.fulfill({ json: errorsResult }));
+    await page.goto('/errors');
+    await expect(page).toHaveURL(/\/activity\?kind=errors/);
+    const cards = page.locator('.bs-activity-errors__cards .bs-card');
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText('Wrong criterion, 1 time, mostly nit');
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
@@ -646,6 +742,69 @@ test.describe('Activity', () => {
         await page.goto('/activity');
         await settleForShot(page, page.getByRole('feed', { name: 'Activity' }));
         await shoot(page, `activity-${vpName}-${theme}`);
+      });
+    }
+  }
+
+  const errorsShotFixture = {
+    byClass: [
+      {
+        id: 'economy.context-overrun|S3-minor',
+        errorGroup: 'economy',
+        errorClass: 'context-overrun',
+        severity: 'S3-minor',
+        count: 5,
+      },
+      {
+        id: 'spec.wrong-criterion|S4-nit',
+        errorGroup: 'spec',
+        errorClass: 'wrong-criterion',
+        severity: 'S4-nit',
+        count: 2,
+      },
+    ],
+    byDay: [
+      { day: '2026-09-29', count: 2 },
+      { day: '2026-09-30', count: 5 },
+    ],
+    classSummary: [
+      {
+        id: 'economy.context-overrun',
+        errorGroup: 'economy',
+        errorClass: 'context-overrun',
+        count: 5,
+        severityMix: { 'S3-minor': 5 },
+        lastSeen: '2026-09-30T10:00:00.000Z',
+        projects: ['demo'],
+        trend7d: [0, 1, 0, 2, 1, 1, 0],
+      },
+      {
+        id: 'spec.wrong-criterion',
+        errorGroup: 'spec',
+        errorClass: 'wrong-criterion',
+        count: 2,
+        severityMix: { 'S4-nit': 2 },
+        lastSeen: '2026-09-29T08:00:00.000Z',
+        projects: ['demo'],
+        trend7d: [0, 0, 1, 0, 0, 1, 0],
+      },
+    ],
+  };
+
+  for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+    for (const theme of ['light', 'dark'] as const) {
+      test(`screenshot errors ${vpName}/${theme}`, async ({ page }) => {
+        await page.route('**/api/errors*', (route) => route.fulfill({ json: errorsShotFixture }));
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/activity?kind=errors');
+        await expect(page.locator('.bs-activity-errors')).toBeVisible();
+        await settleForShot(page, page.locator('.bs-activity-errors'));
+        // Mobile's fixed viewport only fits the two charts — grow it to the
+        // page's real height first, so the class cards and feed below them
+        // land in the PNG too (S3: they were never captured on phone).
+        if (vpName === 'mobile') await growToPageHeight(page);
+        await shoot(page, `activity-errors-${vpName}-${theme}`);
       });
     }
   }
