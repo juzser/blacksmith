@@ -159,6 +159,53 @@ test.describe('Kanban', () => {
     expect(box?.height ?? 0).toBeGreaterThan(100);
   });
 
+  // Operator report 2026-10-05: row 1 is a flex row with `justify-content:
+  // space-between` and the id had no truncation, so a long AgentChip label
+  // (e.g. the "waiting - a nudge may help" suffix) squeezed the id into a
+  // column one hyphen segment per line, growing the card tall and ugly on a
+  // 1440px desktop board.
+  test('desktop: a long AgentChip label does not wrap the task id onto multiple lines', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, [
+      {
+        taskStatus: 'todo',
+        tasks: [
+          {
+            ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+            agentRole: 'coder',
+            agentActivity: 'stalled',
+            // Well past agentWaitingThresholdMs (4h) so the chip reads
+            // "Builder · waiting - a nudge may help" — the longest chip text
+            // the fixture can produce.
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    ]);
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    await expect(idEl).toBeVisible();
+    const idBox = await idEl.boundingBox();
+    const lineHeight = await idEl.evaluate((el) =>
+      parseFloat(getComputedStyle(el).lineHeight || '0'),
+    );
+    expect(idBox).not.toBeNull();
+    expect(lineHeight).toBeGreaterThan(0);
+    expect(idBox!.height).toBeLessThanOrEqual(lineHeight * 1.5);
+
+    const row1 = page.locator('.bs-kanban-card__row--1').first();
+    const chip = page.locator('.bs-agent-chip').first();
+    const row1Box = await row1.boundingBox();
+    const chipBox = await chip.boundingBox();
+    expect(row1Box).not.toBeNull();
+    expect(chipBox).not.toBeNull();
+    // Small tolerance for border/line-height rounding, not a second line.
+    expect(row1Box!.height).toBeLessThanOrEqual(chipBox!.height + 4);
+  });
+
   // UI audit finding (S3): the desktop toolbar used to read as two
   // single-control rows — the page toolbar (Epic, count, Refresh) and
   // KanbanBoard's own row holding only the display-options trigger. The

@@ -25,6 +25,12 @@ describe('KanbanTaskCard.vue — footer dependency line (operator fix 2026-10-05
   });
 });
 
+describe('KanbanTaskCard.vue — row 1 id stays on one line (operator fix 2026-10-05)', () => {
+  it('carries the full task id as a title tooltip on the id element', () => {
+    expect(SRC).toMatch(/<span class="bs-kanban-card__id" :title="task\.taskId">\{\{ shortId \}\}<\/span>/);
+  });
+});
+
 describe('KanbanTaskCard.vue — hide duplicate role label (audit finding 5)', () => {
   it('imports agentChip to know whether an AgentChip is already carrying the role', () => {
     expect(SRC).toMatch(/import\s*\{[^}]*\bagentChip\b[^}]*\}\s*from\s*'\.\.\/lib\/kanban\.js'/);

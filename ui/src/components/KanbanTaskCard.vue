@@ -84,7 +84,7 @@ function onKeydown(event: KeyboardEvent) {
     @keydown="onKeydown"
   >
     <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
-      <span class="bs-kanban-card__id">{{ shortId }}</span>
+      <span class="bs-kanban-card__id" :title="task.taskId">{{ shortId }}</span>
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
       <Tooltip v-if="task.hasRequest" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
         <Icon :icon="Quote" :size="14" label="Has a linked request" />
