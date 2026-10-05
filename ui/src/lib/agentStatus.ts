@@ -86,5 +86,7 @@ export function lastStepLabel(lastEventType: string | null): string {
     payload: {},
     project: null,
     actor: null,
+    sessionId: '',
+    sessionTitle: '',
   });
 }
