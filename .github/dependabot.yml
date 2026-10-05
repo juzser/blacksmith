@@ -22,7 +22,7 @@ updates:
       typescript-toolchain:
         patterns: ['typescript', '@biomejs/*', '@types/*']
       vue-stack:
-        patterns: ['vue', 'vue-router', '@vue-flow/*', '@vitejs/*', 'vite', 'tailwindcss', '@tailwindcss/*']
+        patterns: ['vue', 'vue-router', '@vitejs/*', 'vite', 'tailwindcss', '@tailwindcss/*']
       test-stack:
         patterns: ['vitest', '@vitest/*', '@playwright/*']
     ignore:

@@ -92,7 +92,6 @@
     "@types/node": "26.6.3",
     "@vitejs/plugin-vue": "6.0.9",
     "@vitest/coverage-v8": "5.0.2",
-    "@vue-flow/core": "1.48.2",
     "drizzle-kit": "0.31.10",
     "hono": "4.13.9",
     "tailwindcss": "4.3.3",

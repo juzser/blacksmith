@@ -138,12 +138,3 @@ verified rather than what it is built with:
   the proxy this repo was built against. That field is the one place a stack
   answer (`hosting`) is not honoured: the rule is universal, the field name is
   not, and generalizing it is owed work rather than a decision already taken.
-
-## Dashboard-specific dependencies
-
-This repo's own dashboard, not a rule for scaffolded projects:
-**@vue-flow/core** (MIT, bcakmakoglu/vue-flow) for the Flow page's plan-DAG
-visualization. Nodes are DOM elements, so design tokens and a11y semantics
-apply directly. Graph layout is computed from the orchestrator's own
-topological utilities (layered by longest-path depth) — no separate layout
-library.
