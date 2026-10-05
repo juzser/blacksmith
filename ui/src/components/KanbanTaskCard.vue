@@ -124,7 +124,7 @@ function onKeydown(event: KeyboardEvent) {
       v-if="!compact && (task.dependencies.length > 0 || task.commentCount > 0 || task.prUrl)"
       class="bs-kanban-card__footer"
     >
-      <span>{{ footerDependency }}</span>
+      <span class="bs-kanban-card__footer-dep" :title="footerDependency">{{ footerDependency }}</span>
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>
       <a v-if="task.prUrl" :href="task.prUrl" target="_blank" rel="noopener" @click.stop>Open PR</a>
     </div>

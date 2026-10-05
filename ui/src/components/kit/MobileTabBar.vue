@@ -6,8 +6,17 @@
 import Icon from './Icon.vue';
 import type { NavItem } from './types.js';
 
-defineProps<{ items: NavItem[]; activeId?: string }>();
+const props = defineProps<{ items: NavItem[]; activeId?: string }>();
 const emit = defineEmits<{ select: [id: string] }>();
+
+// Operator decision 2026-10-05: App.vue's activeId resolves to a level-2
+// child's own id on its exact route (Work -> Kanban/Roadmap), so Work's
+// single phone tab needs to light up for either child's id too -- this
+// component never renders the children themselves, the page's own switcher
+// still does that job on the phone.
+function isActive(it: NavItem): boolean {
+  return it.id === props.activeId || !!it.children?.some((c) => c.id === props.activeId);
+}
 </script>
 
 <template>
@@ -17,7 +26,7 @@ const emit = defineEmits<{ select: [id: string] }>();
       :key="it.id"
       type="button"
       class="bs-tabbar__item"
-      :aria-current="it.id === activeId ? 'page' : undefined"
+      :aria-current="isActive(it) ? 'page' : undefined"
       @click="emit('select', it.id)"
     >
       <Icon :icon="it.icon" :size="20" />

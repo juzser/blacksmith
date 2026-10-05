@@ -13,7 +13,17 @@ describe('kit/MobileTabBar.vue', () => {
   });
 
   it('marks the active tab aria-current="page"', () => {
-    expect(TABBAR).toMatch(/:aria-current="it\.id === activeId \? 'page' : undefined"/);
+    expect(TABBAR).toMatch(/:aria-current="isActive\(it\) \? 'page' : undefined"/);
+  });
+
+  // App.vue's activeId resolves to a level-2 child's own id when on its exact
+  // route (Work -> Kanban/Roadmap, operator decision 2026-10-05), so Work's
+  // single phone tab must still light up for either of its children's ids,
+  // not only its own -- MobileTabBar never renders the children themselves.
+  it("stays active for its own id or a child's id, since it never renders children", () => {
+    expect(TABBAR).toMatch(
+      /function isActive\(it: NavItem\): boolean \{[\s\S]*?it\.children\?\.some/,
+    );
   });
 
   it('renders icon above label, not an accent colour', () => {
