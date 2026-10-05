@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Fail if any `var(--ds-...)` reference in ui/src points at a token that is
+"""Fail if any `var(--bs-...)` reference in ui/src points at a token that is
 never actually declared — the "same mistake twice" bug class (Phase 6b round 4's
 milestone-block padding, round 6's Roadmap SectionHeading gap: both referenced
-`--ds-space-5`, which does not exist in ds-tokens.css's 4/6/8 spacing scale — an
+`--ds-space-5`, which did not exist in the old kit's 4/6/8 spacing scale — an
 invalid custom property silently computes to the CSS property's initial value,
 NOT a build error, so both shipped as "the padding/gap is just... gone" instead
 of a loud failure).
@@ -11,32 +11,30 @@ Repo-specific, small, and vendored the same way scripts/design/lint_hardcodes.py
 and check_no_emoji.py are (this repo's own gate scripts, not a
 knowledge/design-system runtime reference) — there is no generic version of
 this check in the design-system pack to copy from; it is authored directly
-against this repo's own two-file token layout.
+against this repo's own token layout.
 
 Usage:
   python3 scripts/design/check_tokens.py [ui/src]   # defaults to ui/src
 
 Definitions come from two places, BOTH count as "defined" (component-scoped
 definitions are not second-class):
-  1. Any `--ds-<name>: <value>;` CSS declaration anywhere in
-     ui/src/styles/ds-tokens.css or ui/src/styles/ds-components.css — not
+  1. Any `--bs-<name>: <value>;` CSS declaration anywhere in
+     ui/src/styles/bs-tokens.css or ui/src/styles/bs-primitives.css — not
      just `:root` blocks, so a token declared inside a specific class rule
      still counts.
-  2. Any `'--ds-<name>':` / `"--ds-<name>":` quoted object key in a .vue
+  2. Any `'--bs-<name>':` / `"--bs-<name>":` quoted object key in a .vue
      file's <script> — a component setting a custom property at runtime via
-     an inline `:style` object (e.g. Highlight.vue's `tint` prop picking a
-     bold/on-bold pair and injecting `--ds-btn-fg`/`--ds-btn-ground`, read
-     by `.ds-btn--inverse` in ds-components.css). This is a real,
-     intentional definition — just not a CSS one — so it is NOT an
-     exception needing an escape comment; it is scanned into the same
-     `defined` set as the CSS declarations, same as design-spec.md's
-     "component-scoped token" language already covers.
+     an inline `:style` object. This is a real, intentional definition —
+     just not a CSS one — so it is NOT an exception needing an escape
+     comment; it is scanned into the same `defined` set as the CSS
+     declarations, same as design-spec.md's "component-scoped token"
+     language already covers.
 
-References are every `var(--ds-<name>...)` found in ui/src/**/*.vue and
-ui/src/**/*.css (nested var() fallbacks, e.g. `var(--ds-a, var(--ds-b))`,
+References are every `var(--bs-<name>...)` found in ui/src/**/*.vue and
+ui/src/**/*.css (nested var() fallbacks, e.g. `var(--bs-a, var(--bs-b))`,
 are two separate references, each checked independently). A reference whose
 token name is built dynamically (a template-literal interpolation, e.g.
-`` `var(--ds-tint-${tint})` `` — StatCard.vue's tint prop picks one of
+`` `var(--bs-tint-${tint})` `` — StatCard.vue's tint prop picks one of
 several REAL, concretely-declared tint tokens at runtime) can't be resolved
 by a static text scan; these are detected (the captured name is cut short
 by the `${`) and skipped, not flagged — this script only catches
@@ -48,12 +46,11 @@ A reference to a token that is genuinely never assigned a value ANYWHERE
 explicit `ds-allow-undefined-token` comment on the same line, or a
 `ds-allow-undefined-token:start` / `ds-allow-undefined-token:end` block
 around it — same escape-hatch shape as lint_hardcodes.py's own
-`ds-allow-hardcode`. None of this repo's current code needs it (the one
-candidate case, `--ds-btn-fg`/`--ds-btn-ground`, is resolved by the
-component-scoped JS scan above instead) — it exists for a future genuinely
-unresolvable case, not as this script's normal escape valve.
+`ds-allow-hardcode` (name kept as `ds-` for both escape hatches, a gate-
+authoring convention rather than a token prefix — see DESIGN.md's "Gates
+wired" table). None of this repo's current code needs it.
 
-Exit 0 = every var(--ds-...) reference resolves to a real declaration.
+Exit 0 = every var(--bs-...) reference resolves to a real declaration.
 Exit 1 otherwise (prints file:line for each undefined reference).
 """
 import re
@@ -61,10 +58,9 @@ import sys
 from pathlib import Path
 
 SCAN_EXTS = {".vue", ".css"}
-# Both the old HDS-derived kit and the new BS kit (ds-spec.md §0): the old
-# pages still import ds-tokens.css/ds-components.css until DS9 drops them,
-# so this PR scans both pairs rather than swapping one for the other.
-TOKEN_FILES = ("ds-tokens.css", "ds-components.css", "bs-tokens.css", "bs-primitives.css")
+# DS9 part B dropped the old HDS-derived kit (ds-tokens.css/ds-components.css);
+# the BS kit's token files are the only ones left to scan.
+TOKEN_FILES = ("bs-tokens.css", "bs-primitives.css")
 
 DEFINE_RE = re.compile(r"(--(?:ds|bs)-[\w-]+)\s*:")
 JS_DEFINE_RE = re.compile(r"""['"](--(?:ds|bs)-[\w-]+)['"]\s*:""")

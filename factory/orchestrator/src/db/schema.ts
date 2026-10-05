@@ -163,13 +163,17 @@ export const tasks = sqliteTable(
     /**
      * DS4 S5a round 2 — the `ts` of the event that FIRST moved this task into
      * `TERMINAL_TASK_STATUSES` (wave-merged / task-superseded / an
-     * `error-logged` naming it `escalated`), null while the task is still
-     * open. `updatedAt` keeps moving after a task is done — a later
-     * `error-logged` naming an already-terminal task (e.g. from a following
-     * lessons/audit flow) rewrites it via `touch()` without reopening the
-     * task — so it is the wrong column for "when did this finish"
-     * (db/queries.ts's taskDateRange). This one is written once, by
-     * db/projector.ts's foldTasks(), and never again.
+     * `error-logged` naming it `escalated` / an auditor's judge-reported or
+     * task-result-recorded, since an audit axis never joins a wave), null
+     * while the task is still open. `updatedAt` keeps moving after a task is
+     * done — a later `error-logged` naming an already-terminal task (e.g.
+     * from a following lessons/audit flow) rewrites it via `touch()` without
+     * reopening the task — so it is the wrong column for "when did this
+     * finish" (db/queries.ts's taskDateRange). Written once by
+     * db/projector.ts's foldTasks() and left alone after that, with one
+     * named exception: a later auditor dispatch_decision for a completed id
+     * (an audit axis re-run) resets this to null, since the row is open
+     * again.
      */
     terminalAt: text('terminal_at'),
   },
