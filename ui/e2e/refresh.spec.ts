@@ -119,7 +119,7 @@ test.describe('Manual refresh (design-spec §8)', () => {
 test.describe('Topbar Refresh reaches Home (D-243)', () => {
   test('Home: topbar Refresh re-fetches the overview', async ({ page }) => {
     await page.goto('/overview');
-    await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
 
     const refetched = page.waitForResponse((r) => r.url().includes('/api/overview'), {
       timeout: 5000,
@@ -134,7 +134,7 @@ test.describe('Topbar Refresh reaches Home (D-243)', () => {
     page,
   }) => {
     await page.goto('/overview');
-    await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
     await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
     await page.route('**/api/overview*', async (route) => {
@@ -150,7 +150,7 @@ test.describe('Topbar Refresh reaches Home (D-243)', () => {
     // Read synchronously, inside the route's hold — see the manual-refresh
     // block above for why a retrying matcher would prove nothing here.
     expect(await page.locator('.bs-skeleton').count()).toBe(0);
-    expect(await page.getByRole('link', { name: 'View black-smith in Work' }).count()).toBe(1);
+    expect(await page.getByRole('link', { name: 'View blacksmith in Work' }).count()).toBe(1);
   });
 });
 

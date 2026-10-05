@@ -549,8 +549,8 @@ test.describe('Kanban', () => {
     // Proof the population is not empty before anything is claimed absent.
     expect(await epicOptions()).toEqual(expect.arrayContaining(['epic-1', 'epic-9']));
 
-    await projectSwitcher.selectOption('black-smith');
-    await expect(page).toHaveURL(/[?&]project=black-smith/);
+    await projectSwitcher.selectOption('blacksmith');
+    await expect(page).toHaveURL(/[?&]project=blacksmith/);
     await expect.poll(epicOptions).not.toContain('epic-9');
     expect(await epicOptions()).toContain('epic-1');
   });

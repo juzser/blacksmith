@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { SmithError } from './errors.js';
 import { roadmapReadPath } from './paths.js';
+import { FACTORY_PROJECT_NAME, normalizeProjectName } from './projectName.js';
 
 export class RoadmapError extends SmithError {}
 
@@ -26,11 +27,12 @@ export class RoadmapError extends SmithError {}
  * clone's parent holds a `black-smith` sibling that is a DIFFERENT repository,
  * so the factory's own checkout is `REPO_ROOT` and never a name lookup.
  *
- * Deliberately not imported from `db/queries.ts`'s `DEFAULT_PROJECT`, which
- * says the same word: that module reaches drizzle, and `test/cliBoot.test.ts`
- * pins that the CLI's module graph never does.
+ * Sourced from `projectName.ts`, not `db/queries.ts`'s `DEFAULT_PROJECT`,
+ * which says the same word: that module reaches drizzle, and
+ * `test/cliBoot.test.ts` pins that the CLI's module graph never does.
+ * `projectName.ts` has no dependency of its own, so both may import it.
  */
-export const FACTORY_PROJECT = 'black-smith';
+export const FACTORY_PROJECT = FACTORY_PROJECT_NAME;
 
 export type MilestoneStatus = 'planned' | 'in-progress' | 'completed';
 
@@ -93,7 +95,7 @@ export interface MilestoneDef {
   epicIds: string[];
   /**
    * Phase 6b: plain-string project identifier (architecture §8 note — not a
-   * taxonomy.yml value). Defaults to 'black-smith' when the `- project:`
+   * taxonomy.yml value). Defaults to 'blacksmith' when the `- project:`
    * bullet is absent, so every pre-6b roadmap.md still parses unchanged.
    */
   project: string;
@@ -338,7 +340,10 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
       }
       const projectVal = bulletValue(line, 'project');
       if (projectVal !== null && projectVal !== '') {
-        project = projectVal;
+        // Old roadmap.md bullets may still spell the factory's own project
+        // the old way (history is immutable); normalized here so the
+        // projection built from it never stores the legacy name.
+        project = normalizeProjectName(projectVal);
         continue;
       }
       // An empty `- kind:` is absent, not invalid -- the same reading

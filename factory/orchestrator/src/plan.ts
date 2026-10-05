@@ -53,7 +53,7 @@ export interface PlanFile {
    * Phase 6b: optional plain-string project identifier (architecture §8 —
    * NOT a closed taxonomy.yml vocabulary value, same rationale as
    * task-spec.schema.json's `project` field). A plan with no `project`
-   * belongs to the default 'black-smith' project.
+   * belongs to the default 'blacksmith' project.
    */
   project?: string;
   /**

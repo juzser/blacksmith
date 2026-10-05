@@ -198,7 +198,7 @@ describe('ui/server app.ts', () => {
       liveAgentCount: 2,
       workingAgentCount: 0,
     });
-    expect(overviewBody.projects.find((p) => p.project === 'black-smith')).toMatchObject({
+    expect(overviewBody.projects.find((p) => p.project === 'blacksmith')).toMatchObject({
       liveAgentCount: 2,
       workingAgentCount: 0,
     });
@@ -211,7 +211,7 @@ describe('ui/server app.ts', () => {
     const projectsBody = await json<Array<{ project: string; workingAgentCount: number }>>(
       await pinned.app.request('/api/projects'),
     );
-    expect(projectsBody.find((p) => p.project === 'black-smith')).toMatchObject({
+    expect(projectsBody.find((p) => p.project === 'blacksmith')).toMatchObject({
       workingAgentCount: 0,
     });
 
@@ -650,7 +650,7 @@ describe('ui/server app.ts', () => {
     const res = await handle.app.request('/api/projects');
     expect(res.status).toBe(200);
     const body = await json<Array<{ project: string }>>(res);
-    expect(body.map((p) => p.project)).toEqual(['black-smith']);
+    expect(body.map((p) => p.project)).toEqual(['blacksmith']);
     closeApp(handle);
   });
 
@@ -677,7 +677,7 @@ describe('ui/server app.ts', () => {
   it('GET /api/sessions narrows to a project', async () => {
     const handle = app();
     const mine = await json<Array<{ sessionId: string }>>(
-      await handle.app.request('/api/sessions?project=black-smith'),
+      await handle.app.request('/api/sessions?project=blacksmith'),
     );
     expect(mine.map((s) => s.sessionId)).toContain(SESSION_ID);
 
@@ -714,13 +714,33 @@ describe('ui/server app.ts', () => {
 
   it('GET /api/sessions/:sessionId/agents 404s when the project does not match the session', async () => {
     const handle = app();
-    const mine = await handle.app.request(`/api/sessions/${SESSION_ID}/agents?project=black-smith`);
+    const mine = await handle.app.request(`/api/sessions/${SESSION_ID}/agents?project=blacksmith`);
     expect(mine.status).toBe(200);
 
     const elsewhere = await handle.app.request(
       `/api/sessions/${SESSION_ID}/agents?project=no-such-project`,
     );
     expect(elsewhere.status).toBe(404);
+    closeApp(handle);
+  });
+
+  // The legacy spelling still lives in old bookmarks and URLs; the project
+  // query param has to normalize the same way every other scoped route does.
+  it('GET /api/sessions/:sessionId/agents 200s for the legacy project spelling', async () => {
+    const handle = app();
+    const legacy = await handle.app.request(
+      `/api/sessions/${SESSION_ID}/agents?project=black-smith`,
+    );
+    expect(legacy.status).toBe(200);
+    const legacyBody = await json(legacy);
+
+    const normalized = await handle.app.request(
+      `/api/sessions/${SESSION_ID}/agents?project=blacksmith`,
+    );
+    expect(normalized.status).toBe(200);
+    const normalizedBody = await json(normalized);
+
+    expect(legacyBody).toEqual(normalizedBody);
     closeApp(handle);
   });
 
@@ -1024,7 +1044,7 @@ describe('ui/server app.ts', () => {
         finishedAt: null,
         statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0, superseded: 0 },
         status: 'in_progress',
-        project: 'black-smith',
+        project: 'blacksmith',
         prUrl: null,
         sourcePrompt: phaseA?.epics[0]?.sourcePrompt,
       },

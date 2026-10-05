@@ -26,6 +26,7 @@ import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '..
 import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { JUDGE_ROLES } from '../judgeRoles.js';
+import { FACTORY_PROJECT_NAME, normalizeProjectName } from '../projectName.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
@@ -56,7 +57,7 @@ import {
 } from './schema.js';
 
 /** Phase 6b default: every event/task/etc. logged before the project dimension existed. */
-export const DEFAULT_PROJECT = 'black-smith';
+export const DEFAULT_PROJECT = FACTORY_PROJECT_NAME;
 
 export interface Scope {
   sessionId?: string;
@@ -112,7 +113,7 @@ export interface Scope {
  * array — one filter step ahead of the aggregation, not a SQL rewrite).
  */
 function projectOf(value: string | null): string {
-  return value ?? DEFAULT_PROJECT;
+  return normalizeProjectName(value ?? DEFAULT_PROJECT);
 }
 
 /**
@@ -288,11 +289,20 @@ function projectedContinuations(db: SmithDb, sessionId: string): string[] {
   return out;
 }
 
+/**
+ * `scope.project`, normalized through `normalizeProjectName` -- the one place
+ * a caller's REQUESTED project value (an old bookmark, a CLI `--project
+ * black-smith`) is read, so every comparison against it sees today's
+ * spelling without every call site having to remember to normalize first.
+ */
+function scopeProject(scope: Scope): string | undefined {
+  return scope.project === undefined ? undefined : normalizeProjectName(scope.project);
+}
+
 /** Filters an already-fetched row array to `scope.project`; a no-op in global mode (project omitted). */
 function filterByProject<T extends { project: string | null }>(rows: T[], scope: Scope): T[] {
-  return scope.project !== undefined
-    ? rows.filter((r) => projectOf(r.project) === scope.project)
-    : rows;
+  const project = scopeProject(scope);
+  return project !== undefined ? rows.filter((r) => projectOf(r.project) === project) : rows;
 }
 
 /** Rows in the order the log wrote them, oldest first. Never mutates the input. */
@@ -415,7 +425,7 @@ export interface MilestoneProgress {
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
   unmeasured: number;
-  /** Phase 6b — the milestone's own project (roadmap.md's `- project:` bullet, defaults 'black-smith'). */
+  /** Phase 6b — the milestone's own project (roadmap.md's `- project:` bullet, defaults 'blacksmith'). */
   project: string;
   /**
    * Phase 10 — `factory` | `dogfood` | `product` (roadmap.ts's MilestoneKind),
@@ -938,9 +948,10 @@ function milestoneProgressRows(
   opts: { includeTaskRefs?: boolean } = {},
 ): MilestoneProgress[] {
   const allMilestoneRows = db.select().from(milestones).orderBy(milestones.sequence).all();
+  const project = scopeProject(scope);
   const milestoneRows =
-    scope.project !== undefined
-      ? allMilestoneRows.filter((m) => m.project === scope.project)
+    project !== undefined
+      ? allMilestoneRows.filter((m) => m.project === project)
       : allMilestoneRows;
   if (milestoneRows.length === 0) return [];
 
