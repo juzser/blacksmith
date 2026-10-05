@@ -52,8 +52,9 @@ describe('WaveTaskCard.vue — shared id class keeps its natural width', () => {
     const scoped = CSS.match(/\.bs-kanban-card__row--1 \.bs-kanban-card__id \{[\s\S]*?\}/);
     // Operator follow-up (2026-10-05): the id no longer grows to win row
     // 1's space (that made a short id lose it to the copy-id button and a
-    // long AgentChip label) — it caps at 50% instead, so this just pins
-    // the rule as still scoped to row 1, not to the base selector.
-    expect(scoped?.[0]).toMatch(/flex: 0 1 auto/);
+    // long AgentChip label) — it caps at 50% with flex-shrink 0 instead, so
+    // this just pins the rule as still scoped to row 1, not to the base
+    // selector.
+    expect(scoped?.[0]).toMatch(/flex: 0 0 auto/);
   });
 });

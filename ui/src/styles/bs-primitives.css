@@ -2657,7 +2657,15 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-xs);
 }
 .bs-kanban-card__row--1 .bs-kanban-card__id {
-  flex: 0 1 auto;
+  /* flex-shrink: 0, not 1 — the flexbox shrink algorithm distributes the
+     deficit proportionally to each shrinkable item's flex-basis, so with
+     shrink:1 the id (small basis) was still losing width to the chip (huge
+     basis once its label includes "- a nudge may help") even though the
+     chip is the one meant to give way. An inflexible item's rendered size
+     is its flex-basis clamped to max-width regardless of its siblings, so
+     a short id renders at its full content width (well under the 50% cap)
+     and a long id still clips at the cap — only the chip shrinks. */
+  flex: 0 0 auto;
   max-width: 50%;
   min-width: 0;
   overflow: hidden;

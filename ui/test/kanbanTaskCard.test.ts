@@ -72,9 +72,9 @@ describe('KanbanTaskCard.vue — row 1 copy-id button (ds-review.html mock, ds-s
 });
 
 describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-10-05)', () => {
-  it('caps the id at 50% so a short id never shrinks past its content, only ellipsises past that cap', () => {
+  it('caps the id at 50% with flex-shrink 0, so it never loses width to the chip', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__id');
-    expect(block).toMatch(/flex:\s*0 1 auto/);
+    expect(block).toMatch(/flex:\s*0 0 auto/);
     expect(block).toMatch(/max-width:\s*50%/);
   });
 
