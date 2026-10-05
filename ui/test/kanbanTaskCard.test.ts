@@ -106,9 +106,15 @@ describe('KanbanTaskCard.vue — row 1 copy button sits next to the id with no c
     );
   });
 
-  it('pins the Quote tooltip trigger to the right edge via margin-left: auto instead', () => {
-    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
-    expect(block).toMatch(/margin-left:\s*auto/);
+  // IconButton wraps its button in a Tooltip, so the copy button is a
+  // `.bs-tooltip-trigger` too: margin-left: auto on that shared class pushed
+  // the copy button to the right edge. Only the Quote trigger may carry it.
+  it('pins only the Quote tooltip trigger to the right edge via margin-left: auto', () => {
+    expect(SRC).toMatch(/<Tooltip[^>]*class="bs-kanban-card__quote"/);
+    const quote = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__quote');
+    expect(quote).toMatch(/margin-left:\s*auto/);
+    const shared = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
+    expect(shared).not.toMatch(/margin-left/);
   });
 });
 

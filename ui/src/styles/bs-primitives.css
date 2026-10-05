@@ -2689,6 +2689,11 @@ summary.bs-inbox__group-head {
 }
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;
+}
+/* Only the Quote trigger is pushed to the right edge: IconButton wraps the
+   copy button in a Tooltip too, so the shared trigger class must not carry
+   the auto margin or the copy button leaves the id's side. */
+.bs-kanban-card__row--1 .bs-kanban-card__quote {
   margin-left: auto;
 }
 .bs-kanban-card__title {
