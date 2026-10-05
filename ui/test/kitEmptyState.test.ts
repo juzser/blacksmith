@@ -30,6 +30,10 @@ describe('kit/EmptyState.vue', () => {
     expect(EMPTY_STATE).toMatch(/\{\{\s*body\s*\}\}/);
   });
 
+  it('skips the body paragraph when body is empty, so no blank line sits under the title', () => {
+    expect(EMPTY_STATE).toMatch(/<p v-if="body" class="bs-empty__body">/);
+  });
+
   it('exposes an optional named "action" slot for a call-to-action button', () => {
     expect(EMPTY_STATE).toMatch(/<slot name="action"/);
   });
