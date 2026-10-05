@@ -45,6 +45,18 @@ async function mockBoard(
   await page.route('**/api/kanban*', (route) => route.fulfill({ json: columns }));
 }
 
+// A board shaped like the real one: four status columns, so each column keeps
+// its 280px desktop width. A board of one column stretches to the free width
+// (~650px at 1440), which hides any card-width overflow.
+function fourColumnBoard(card: ReturnType<typeof task>) {
+  return [
+    { taskStatus: 'todo', tasks: [card] },
+    { taskStatus: 'in-progress', tasks: [task('epic-1/task-2', 'in-progress')] },
+    { taskStatus: 'failed', tasks: [task('epic-1/task-3', 'failed')] },
+    { taskStatus: 'completed', tasks: [task('epic-1/task-4', 'completed')] },
+  ];
+}
+
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
     await page.goto('/work/kanban');
@@ -168,22 +180,18 @@ test.describe('Kanban', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await mockBoard(page, [
-      {
-        taskStatus: 'todo',
-        tasks: [
-          {
-            ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
-            agentRole: 'coder',
-            agentActivity: 'stalled',
-            // Well past agentWaitingThresholdMs (4h) so the chip reads
-            // "Builder · waiting - a nudge may help" — the longest chip text
-            // the fixture can produce.
-            updatedAt: '2026-01-01T00:00:00.000Z',
-          },
-        ],
-      },
-    ]);
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+        agentRole: 'coder',
+        agentActivity: 'stalled',
+        // Well past agentWaitingThresholdMs (4h) so the chip reads
+        // "Builder · waiting - a nudge may help" — the longest chip text
+        // the fixture can produce.
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
     await page.goto('/work/kanban');
 
     const idEl = page.locator('.bs-kanban-card__id').first();
@@ -213,46 +221,37 @@ test.describe('Kanban', () => {
   // boxed to one line's height, and the raw role is still reachable through
   // the chip's title.
   //
-  // .bs-kanban-col is a fixed `flex: 0 0 280px` (bs-primitives.css) on every
-  // viewport wider than the 640px phone breakpoint (useViewport.ts's
-  // isPhoneWidth, same threshold KanbanBoard.vue switches layouts on), so the
-  // row's available width — and therefore the chip's `max-width: 60%` cap —
-  // does not change between 768px and 1440px; a narrower *desktop* viewport
-  // gives this no more room to fail in than 1440px already had. "Builder ·
-  // waiting - a nudge may help" (36 chars) rendered at exactly 207px with
-  // zero spare room (scrollWidth === clientWidth) at 1440px, which means that
-  // cap is already saturated at 207px of text — the chip was sized to its
-  // full natural content, not clamped below it. A label with meaningfully
-  // more characters pushes the *same* fixed cap into clamping: "security-
-  // reviewer" maps to "Security reviewer" (roleLabels.ts) vs "Builder",
-  // producing "Security reviewer · waiting - a nudge may help" (46 chars,
-  // ~28% more than the 36 that already left no slack) — at roughly the same
-  // ~5.75px/char this measures near 264px against an ~207px slot, so it must
-  // overflow regardless of the exact cap value. Viewport stays 1440px: it is
-  // the label, not the width, that is now constrained.
+  // Every column is `flex: 0 0 280px` above the 640px phone breakpoint, so the
+  // chip's `max-width: 60%` cap is the same at 768px and 1440px. "Security
+  // reviewer · waiting - a nudge may help" (roleLabels.ts) is wider than that
+  // cap, so it must clip. The board has four columns, as the real one does: a
+  // single column stretches to the free width and leaves room for the label.
   test('desktop: a long AgentChip label is ellipsised, not just boxed to one line', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await mockBoard(page, [
-      {
-        taskStatus: 'todo',
-        tasks: [
-          {
-            ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
-            agentRole: 'security-reviewer',
-            agentActivity: 'stalled',
-            // Well past agentWaitingThresholdMs (4h) so the chip reads
-            // "Security reviewer · waiting - a nudge may help".
-            updatedAt: '2026-01-01T00:00:00.000Z',
-          },
-        ],
-      },
-    ]);
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-with-a-very-long-skill-install-cli-command-id', 'todo'),
+        agentRole: 'security-reviewer',
+        agentActivity: 'stalled',
+        // Well past agentWaitingThresholdMs (4h) so the chip reads
+        // "Security reviewer · waiting - a nudge may help".
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
     await page.goto('/work/kanban');
 
     const chip = page.locator('.bs-agent-chip').first();
     const chipText = chip.locator('.bs-agent-chip__text');
+    // A column's automatic min-width is its min-content width, so before
+    // `.bs-kanban-col { min-width: 0 }` this one card stretched the Todo
+    // column to ~650px and the label fitted without clipping.
+    const colWidth = await chip.evaluate(
+      (el) => el.closest('.bs-kanban-col')?.getBoundingClientRect().width ?? 0,
+    );
+    expect(Math.round(colWidth)).toBe(280);
     const overflowMetrics = await chipText.evaluate((el) => ({
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,

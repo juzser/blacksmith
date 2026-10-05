@@ -2761,6 +2761,10 @@ summary.bs-inbox__group-head {
 }
 .bs-kanban-col {
   flex: 0 0 280px;
+  /* A flex item's automatic min-width is its min-content width, so one
+     card's nowrap id or AgentChip label would stretch the whole column past
+     280px. Zero lets the card's own ellipsis rules do the clipping. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-2);
