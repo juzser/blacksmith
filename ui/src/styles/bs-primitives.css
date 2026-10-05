@@ -1552,19 +1552,25 @@ a:hover {
   display: flex;
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
-  background: var(--bs-surface);
+  overflow: hidden;
+  background: var(--bs-surface-raised);
 }
 .bs-segctl__item {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px var(--bs-space-2);
+  /* ds-review.html `.seg span`: 2px 9px, a 1px divider between items */
+  padding: 2px calc(var(--bs-space-2) + 1px);
+  border-right: 1px solid var(--bs-border);
   color: var(--bs-text-subtle);
   text-decoration: none;
   font-size: var(--bs-text-xs);
   line-height: var(--bs-leading-xs);
-  font-weight: var(--bs-font-weight-medium);
+  font-weight: var(--bs-font-weight-normal);
+}
+.bs-segctl__item:last-child {
+  border-right: 0;
 }
 .bs-segctl__item:hover {
   background: var(--bs-surface-sunken);
@@ -1573,6 +1579,7 @@ a:hover {
 .bs-segctl__item[aria-current='page'] {
   background: var(--bs-surface-selected);
   color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
 }
 .bs-segctl__item:focus-visible {
   outline: none;

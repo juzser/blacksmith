@@ -60,7 +60,18 @@ describe('.bs-segctl CSS (uiux spec §1)', () => {
   it('sizes items off the mock (ds-review.html .seg): xs text, compact padding', () => {
     const itemMatch = CSS.match(/\.bs-segctl__item \{[\s\S]*?\}/);
     expect(itemMatch?.[0]).toMatch(/font-size: var\(--bs-text-xs\)/);
-    expect(itemMatch?.[0]).toMatch(/padding: 2px var\(--bs-space-2\)/);
+    expect(itemMatch?.[0]).toMatch(/padding: 2px calc\(var\(--bs-space-2\) \+ 1px\)/);
+    expect(itemMatch?.[0]).toMatch(/border-right: 1px solid var\(--bs-border\)/);
+    expect(itemMatch?.[0]).toMatch(/font-weight: var\(--bs-font-weight-normal\)/);
+  });
+
+  it('matches the mock frame: raised surface, clipped corners, weight 500 only when selected', () => {
+    const controlMatch = CSS.match(/\.bs-segctl \{[\s\S]*?\}/);
+    expect(controlMatch?.[0]).toMatch(/background: var\(--bs-surface-raised\)/);
+    expect(controlMatch?.[0]).toMatch(/overflow: hidden/);
+    expect(CSS).toMatch(/\.bs-segctl__item:last-child \{\s*border-right: 0;/);
+    const selected = CSS.match(/\.bs-segctl__item\[aria-current='page'\][\s\S]*?\}/);
+    expect(selected?.[0]).toMatch(/font-weight: var\(--bs-font-weight-medium\)/);
   });
 
   it('uses the kit default focus-visible ring, not a component-scoped override', () => {
