@@ -53,6 +53,16 @@ export async function shoot(page: Page, name: string): Promise<void> {
   });
 }
 
+// Same capture, scoped to one element rather than the viewport -- for a
+// card that needs proving in full when the page around it is taller than
+// any fixed viewport (DS8 PR3 fix round 2, item 3: the Running now card).
+export async function shootElement(locator: Locator, name: string): Promise<void> {
+  await locator.screenshot({
+    path: path.join(SCREENSHOT_DIR, `${name}.png`),
+    animations: 'disabled',
+  });
+}
+
 // `fullPage: true` scrolls the outer document, but the shell's own scroll
 // container is the inner `.app-scroll` div (App.vue) — the outer document
 // never grows, so a full-page capture of a tall page was just the viewport's

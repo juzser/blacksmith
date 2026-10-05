@@ -153,6 +153,14 @@ function workLink(p: string) {
   return { path: '/work/kanban', query: { project: p } };
 }
 
+// DS8 PR3 item 5: a "Running now" card is per-project, with no single
+// session id of its own (a project can have zero, one, or several runs at
+// once) - so this links to the project's own Sessions history rather than
+// to any one run.
+function sessionsLink(p: string) {
+  return { path: '/sessions', query: { project: p } };
+}
+
 function goToTask(taskId: string) {
   router.push(`/tasks/${encodeURIComponent(taskId)}`);
 }
@@ -224,6 +232,13 @@ function becauseOf(promptId: string) {
                 :aria-label="`View ${c.project} in Work`"
               >
                 View
+              </RouterLink>
+              <RouterLink
+                class="bs-btn bs-btn--link bs-btn--sm"
+                :to="sessionsLink(c.project)"
+                :aria-label="`View ${c.project} in Sessions`"
+              >
+                Sessions
               </RouterLink>
             </template>
             <div class="bs-home__card-body">

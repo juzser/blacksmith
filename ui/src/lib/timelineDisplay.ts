@@ -142,10 +142,10 @@ export function buildCausalTree(entries: TimelineEntry[]): TimelineNode[] {
  * The timeline carries two kinds of prompt: the ones a person wrote, and the
  * ones agents handed each other. A planner fanning out eight coders writes
  * eight dispatch rows that differ only in a role and a sentence, and they push
- * the operator's own words off the screen. This is the sessions-canvas band
- * idiom applied to a list — the agents under a session collapse into one node
- * carrying a count, so a run of dispatches collapses into one row carrying the
- * count and the roles, with the rows themselves one click away.
+ * the operator's own words off the screen. This folds the same way a crowded
+ * band of agents does elsewhere in the app: a run of dispatches collapses
+ * into one row carrying the count and the roles, with the rows themselves
+ * one click away.
  */
 export interface DispatchGroup {
   id: string;
