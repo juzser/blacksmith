@@ -206,14 +206,19 @@ test.describe('Kanban', () => {
 
     const row1 = page.locator('.bs-kanban-card__row--1').first();
     const chip = page.locator('.bs-agent-chip').first();
+    // Row 1's "Copy task id" IconButton (sm, 22px) is now the tallest
+    // fixed-size child — taller than the chip's own ~18px box — so it is
+    // the basis for the one-line tolerance, not the chip.
+    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
     const row1Box = await row1.boundingBox();
     const chipBox = await chip.boundingBox();
+    const copyIdButtonBox = await copyIdButton.boundingBox();
     expect(row1Box).not.toBeNull();
     expect(chipBox).not.toBeNull();
+    expect(copyIdButtonBox).not.toBeNull();
+    const tallestChild = Math.max(chipBox?.height ?? 0, copyIdButtonBox?.height ?? 0);
     // Small tolerance for border/line-height rounding, not a second line.
-    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-      (chipBox?.height ?? 0) + 4,
-    );
+    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(tallestChild + 4);
   });
 
   // Review follow-up (S2), narrowed after the first attempt (operator report

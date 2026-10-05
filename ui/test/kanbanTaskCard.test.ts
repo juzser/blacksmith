@@ -33,6 +33,32 @@ describe('KanbanTaskCard.vue — row 1 id stays on one line (operator fix 2026-1
   });
 });
 
+describe('KanbanTaskCard.vue — row 1 copy-id button (ds-review.html mock, ds-spec.md §2.2 TaskCard)', () => {
+  it('renders a sm IconButton labelled "Copy task id" right after the id, before the AgentChip', () => {
+    expect(SRC).toMatch(
+      /<span class="bs-kanban-card__id"[^>]*>\{\{ shortId \}\}<\/span>\s*<IconButton\s+:icon="Copy"\s+:label="copyIdLabel"\s+size="sm"\s+@click="onCopyTaskId"\s*\/>\s*<AgentChip/,
+    );
+  });
+
+  it('copies the full task.taskId to the clipboard via the shared clipboard helper', () => {
+    expect(SRC).toMatch(/import\s*\{\s*copyToClipboard\s*\}\s*from\s*'\.\.\/lib\/clipboard\.js'/);
+    expect(SRC).toMatch(/copyToClipboard\(props\.task\.taskId\)/);
+  });
+
+  it('uses useCopyFeedback for the idle/"Copied" label, seeded with "Copy task id"', () => {
+    expect(SRC).toMatch(
+      /import\s*\{\s*useCopyFeedback\s*\}\s*from\s*'\.\.\/composables\/useCopyFeedback\.js'/,
+    );
+    expect(SRC).toMatch(/useCopyFeedback\('Copy task id'\)/);
+  });
+
+  it('stops the click from propagating to the card, so it never opens the peek panel', () => {
+    expect(SRC).toMatch(
+      /function onCopyTaskId\(event: MouseEvent\) \{\s*event\.stopPropagation\(\);/,
+    );
+  });
+});
+
 describe('KanbanTaskCard.vue — hide duplicate role label (audit finding 5)', () => {
   it('imports agentChip to know whether an AgentChip is already carrying the role', () => {
     expect(SRC).toMatch(/import\s*\{[^}]*\bagentChip\b[^}]*\}\s*from\s*'\.\.\/lib\/kanban\.js'/);

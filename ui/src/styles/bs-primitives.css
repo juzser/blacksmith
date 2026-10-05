@@ -2651,6 +2651,12 @@ summary.bs-inbox__group-head {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* ds-review.html mock's `.mono` row-1 id: mono font, faintest text
+     colour. Scoped to row 1 rather than the shared `.bs-kanban-card__id`
+     base rule, which WaveTaskCard also uses and is out of this slice's
+     claim. */
+  color: var(--bs-text-subtlest);
+  font-family: var(--bs-font-mono);
 }
 .bs-kanban-card__row--1 .bs-agent-chip {
   flex: 0 1 auto;
