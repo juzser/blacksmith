@@ -1539,6 +1539,87 @@ describe('db/queries.ts', () => {
         artHandle.sqlite.close();
       }
     });
+
+    it('keeps the agent-listed order within one task-result-recorded event, ties and all', async () => {
+      const session = 'sess-artifacts-order-burst';
+      const task = 'epic-art/task-2';
+      const artifactPayloads = Array.from({ length: 12 }, (_, i) => ({
+        type: 'screenshot',
+        path: `shot-${i}.png`,
+      }));
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', '2029-06-01T00:00:00.000Z', { task_id: task }, session) +
+          tiedLine(
+            'task-result-recorded',
+            '2029-06-01T00:01:00.000Z',
+            { task_id: task, run_status: 'done', artifacts: artifactPayloads },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'artifacts-order-burst.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const burstHandle = openDb(dbPath);
+      try {
+        const detail = taskDetail(burstHandle.db, task);
+        expect(detail?.artifacts.map((a) => a.path)).toEqual(artifactPayloads.map((a) => a.path));
+      } finally {
+        burstHandle.sqlite.close();
+      }
+    });
+
+    it('orders by log index, not by the artifact id as text, when two events tie on ts', async () => {
+      const session = 'sess-artifacts-order-tied-ts';
+      const task = 'epic-art/task-3';
+      // Nine operator-notes (indices 1..9) pad the log so the later
+      // task-result-recorded event lands at index 10 — a string compare of
+      // the artifact id (`${eventId}#0`) would put `#9` after `#10`.
+      let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+      body += tiedLine('task-added', '2029-06-01T00:00:00.000Z', { task_id: task }, session);
+      const sharedTs = '2029-06-01T00:01:00.000Z';
+      for (let i = 1; i <= 7; i += 1) {
+        body += tiedLine(
+          'operator-note',
+          sharedTs,
+          { note_kind: 'scope-check', note: `note ${i}` },
+          session,
+        );
+      }
+      body += tiedLine(
+        'task-result-recorded',
+        sharedTs,
+        {
+          task_id: task,
+          run_status: 'done',
+          artifacts: [{ type: 'screenshot', path: 'event-9.png' }],
+        },
+        session,
+      );
+      body += tiedLine(
+        'task-result-recorded',
+        sharedTs,
+        {
+          task_id: task,
+          run_status: 'done',
+          artifacts: [{ type: 'screenshot', path: 'event-10.png' }],
+        },
+        session,
+      );
+      await appendFile(path.join(stateDir, `${session}.jsonl`), body, 'utf8');
+
+      const dbPath = path.join(dbDir, 'artifacts-order-tied-ts.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const tiedHandle = openDb(dbPath);
+      try {
+        const detail = taskDetail(tiedHandle.db, task);
+        expect(detail?.artifacts.map((a) => a.path)).toEqual(['event-10.png', 'event-9.png']);
+      } finally {
+        tiedHandle.sqlite.close();
+      }
+    });
   });
 
   describe('sessionAgents() (DS8 plan F)', () => {

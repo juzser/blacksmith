@@ -4,7 +4,7 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, desc, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -3164,6 +3164,18 @@ export interface TaskDetail {
   agentActivity: KanbanAgentActivity | null;
 }
 
+/**
+ * The per-event position of an artifact row, parsed off its own id
+ * (`${eventId}#${index}`, projector.ts). Splitting on the LAST `#` keeps an
+ * event id that itself contains one (every event id does: `<session>#<n>`)
+ * from being cut in the wrong place.
+ */
+function artifactIndexOf(id: string): number {
+  const cut = id.lastIndexOf('#');
+  const index = Number(id.slice(cut + 1));
+  return cut === -1 || Number.isNaN(index) ? 0 : index;
+}
+
 export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): TaskDetail | null {
   const nowIso = opts.nowIso ?? new Date().toISOString();
   const task = db.select().from(tasks).where(eq(tasks.taskId, taskId)).get();
@@ -3200,14 +3212,21 @@ export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): T
   });
   const findingRows = db.select().from(findings).where(eq(findings.taskId, taskId)).all();
   // Outputs tab, newest first (same operator request as taskRuns() above):
-  // ts desc, tie-broken on id desc (`${eventId}#${index}`) so artifacts from
-  // one task-result-recorded event keep a stable, deterministic order.
+  // newest event first (`compareLogOrder`, the same log-order comparator the
+  // rest of the log uses — plain `id desc` breaks because the index on
+  // `${eventId}#${index}` is unpadded text, so `#10` sorts between `#1` and
+  // `#2`), and within one event, the order the agent listed the artifacts in
+  // (index ascending).
   const artifactRows = db
     .select()
     .from(artifacts)
     .where(eq(artifacts.taskId, taskId))
-    .orderBy(desc(artifacts.ts), desc(artifacts.id))
-    .all();
+    .all()
+    .sort((a, b) => {
+      const logCmp = compareLogOrder(b, a);
+      if (logCmp !== 0) return logCmp;
+      return artifactIndexOf(a.id) - artifactIndexOf(b.id);
+    });
   const feedbackRows = db
     .select()
     .from(operatorFeedback)
