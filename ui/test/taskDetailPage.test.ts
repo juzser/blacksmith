@@ -32,11 +32,36 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
     expect(SFC).toMatch(/IMAGE_EXTENSIONS\.test\(a\.path\)/);
   });
 
+  // Operator request: "Output và history trong task detail nên xếp ngược
+  // lại, recent lên trên" — Outputs newest first. The order comes from the
+  // server (`taskDetail()`'s artifact query, queries.ts), not a client sort:
+  // `imageArtifacts`/`otherArtifacts` must only `filter`, which preserves
+  // whatever order `detail.artifacts` already carries, never re-sort it.
+  it('derives imageArtifacts/otherArtifacts with a filter only, preserving the server order', () => {
+    expect(SFC).toMatch(
+      /const imageArtifacts = computed\(\(\) => detail\.value\?\.artifacts\.filter\(isImageArtifact\) \?\? \[\]\);/,
+    );
+    expect(SFC).toMatch(
+      /const otherArtifacts = computed\(\s*\(\) => detail\.value\?\.artifacts\.filter\(\(a\) => !isImageArtifact\(a\)\) \?\? \[\],?\s*\);/,
+    );
+  });
+
   // Operator fix: the crumb reads the plain taskId, but PageHeader's title
   // is taskLabel() (the task name when there is one) — not a pure
   // duplicate, so this page opts out of the default sr-only title.
   it('keeps its PageHeader title visible, since it differs from the crumb', () => {
     expect(SFC).toMatch(/<PageHeader[\s\S]{0,200}title-visible/);
+  });
+
+  // Operator request: History newest first, day groups newest day on top.
+  // `fetchTimelinePage({ task, limit: 200 })` already returns newest-first
+  // (`timeline()`'s paged mode, queries.ts), and `groupByDay` only
+  // partitions a list into same-day runs in the order it is given — so
+  // `historyDayGroups` must feed it `history.value` untouched, no
+  // `.slice().reverse()` or `.sort()` of its own.
+  it('groups History by day straight off history.value, no client-side re-sort', () => {
+    expect(SFC).toMatch(/groupByDay\(history\.value, new Date\(\)\.toISOString\(\)\)/);
+    expect(SFC).not.toMatch(/history\.value\s*\.(slice\(\)\.reverse|sort)\(/);
   });
 });
 
