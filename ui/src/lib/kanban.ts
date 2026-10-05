@@ -423,8 +423,21 @@ export interface DependencyLike {
  * paragraph. taskLabel() shortens it the same way the card's own title is
  * shortened, rather than this footer line printing that paragraph whole.
  */
+function waitingDependencies(dependencies: DependencyLike[]): DependencyLike[] {
+  return dependencies.filter((d) => !d.status || !isDoneStatus(d.status));
+}
+
+/**
+ * Whether any dependency is still open (or has no status yet). The card
+ * footer drops its "Waits for" line when this is false: with nothing to
+ * wait on there is nothing to say (operator fix 2026-10-05).
+ */
+export function hasWaitingDependency(dependencies: DependencyLike[]): boolean {
+  return waitingDependencies(dependencies).length > 0;
+}
+
 export function dependencyChainText(dependencies: DependencyLike[]): string {
-  const waiting = dependencies.filter((d) => !d.status || !isDoneStatus(d.status));
+  const waiting = waitingDependencies(dependencies);
   const first = waiting[0];
   if (!first) return 'Waits for: nothing';
   const label = taskLabel(first.taskId, first.title ?? undefined);

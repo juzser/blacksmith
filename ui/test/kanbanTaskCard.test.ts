@@ -32,7 +32,7 @@ describe('KanbanTaskCard.vue — card chip variant (audit finding 2)', () => {
 describe('KanbanTaskCard.vue — footer dependency line (operator fix 2026-10-05)', () => {
   it('clamps the footer dependency text to one line with a native title tooltip', () => {
     expect(SRC).toMatch(
-      /<span\s+v-if="task\.dependencies\.length > 0"\s+class="bs-kanban-card__footer-dep"\s+:title="footerDependency"\s*>\{\{ footerDependency \}\}<\/span\s*>/,
+      /<span\s+v-if="hasWaiting"\s+class="bs-kanban-card__footer-dep"\s+:title="footerDependency"\s*>\{\{ footerDependency \}\}<\/span\s*>/,
     );
   });
 });
@@ -85,10 +85,12 @@ describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)'
 });
 
 describe('KanbanTaskCard.vue — footer hides "Waits for: nothing" with no dependencies (operator fix 2026-10-05)', () => {
-  it('gates the footer-dep span on task.dependencies.length > 0', () => {
+  it('gates the footer-dep span on a dependency still being waited on, not on the raw array length', () => {
     expect(SRC).toMatch(
-      /<span\s+v-if="task\.dependencies\.length > 0"\s+class="bs-kanban-card__footer-dep"/,
+      /const hasWaiting = computed\(\(\) => hasWaitingDependency\(props\.task\.dependencies\)\)/,
     );
+    expect(SRC).toMatch(/<span\s+v-if="hasWaiting"\s+class="bs-kanban-card__footer-dep"/);
+    expect(SRC).not.toMatch(/task\.dependencies\.length > 0/);
   });
 });
 

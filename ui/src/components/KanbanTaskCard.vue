@@ -23,6 +23,7 @@ import {
   attemptLabel,
   cardChips,
   dependencyChainText,
+  hasWaitingDependency,
   isInteractiveDescendant,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
@@ -54,6 +55,7 @@ const showRoleLabel = computed(
   () => props.groupBy !== 'role' && !!props.task.agentRole && !chip.value,
 );
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
+const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
 
@@ -144,11 +146,11 @@ function onKeydown(event: KeyboardEvent) {
     </div>
 
     <div
-      v-if="!compact && (task.dependencies.length > 0 || task.commentCount > 0 || task.prUrl)"
+      v-if="!compact && (hasWaiting || task.commentCount > 0 || task.prUrl)"
       class="bs-kanban-card__footer"
     >
       <span
-        v-if="task.dependencies.length > 0"
+        v-if="hasWaiting"
         class="bs-kanban-card__footer-dep"
         :title="footerDependency"
         >{{ footerDependency }}</span
