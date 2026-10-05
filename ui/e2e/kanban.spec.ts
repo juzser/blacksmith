@@ -75,10 +75,17 @@ test.describe('Kanban', () => {
     await page.goto('/work/kanban');
     const firstCard = page.locator('.bs-kanban-card').first();
     await expect(firstCard).toBeVisible();
-    // `.bs-kanban-card__id` is the shortId (taskId.split('/').pop()) — enough
-    // to confirm the URL names the clicked card's task without needing the
-    // full `<epic>/<id>` taskId, which the card never actually renders.
-    const shortId = await firstCard.locator('.bs-kanban-card__id').innerText();
+    // Row 1 no longer renders the id at all (operator fix 2026-10-05); the
+    // title-line copy-id IconButton's accessible name is
+    // `<full taskId> (click to copy)` — enough to recover the shortId
+    // (taskId.split('/').pop()) to confirm the URL names the clicked card's
+    // task without needing the full `<epic>/<id>` taskId, which the card
+    // never actually renders as plain text.
+    const titleCopyLabel = await firstCard
+      .locator('.bs-kanban-card__title-copy button')
+      .getAttribute('aria-label');
+    const fullId = titleCopyLabel?.replace(/ \(click to copy\)$/, '') ?? '';
+    const shortId = fullId.split('/').pop();
     await firstCard.click();
 
     const peek = page.getByRole('dialog');
@@ -94,7 +101,8 @@ test.describe('Kanban', () => {
   // switch, and the epic-9 card the proof that widening the picker widened
   // the board's task list rather than only its heading.
   test('"All epics" option boards tasks across every epic', async ({ page }) => {
-    // `.bs-kanban-card__id` renders only the shortId (taskId.split('/').pop()),
+    // The card renders no id text at all (row 1 lost it on 2026-10-05; the
+    // full id lives only in the title-line copy button's accessible name),
     // so the proof a wider scope boarded more tasks is the toolbar's own task
     // count growing, not a per-card epic prefix the card never renders.
     const taskCountText = () => page.getByText(/^\d+ tasks$/).innerText();
@@ -171,14 +179,14 @@ test.describe('Kanban', () => {
     expect(box?.height ?? 0).toBeGreaterThan(100);
   });
 
-  // Operator report 2026-10-05: row 1 is a flex row with `justify-content:
-  // space-between` and the id had no truncation, so a long AgentChip label
-  // (e.g. the "waiting - a nudge may help" suffix) squeezed the id into a
-  // column one hyphen segment per line, growing the card tall and ugly on a
-  // 1440px desktop board.
-  test('desktop: a long AgentChip label does not wrap the task id onto multiple lines', async ({
-    page,
-  }) => {
+  // Operator fix 2026-10-05 removed the id (and its row-1 "Copy task id"
+  // button) from row 1 entirely — row 1 is now just the AgentChip and the
+  // Quote trigger, `justify-content` replaced by the chip's own `flex: 1 1
+  // auto` and the Quote trigger's `margin-left: auto`. Re-pointed from the
+  // old "does the id wrap" question (there is no id text left to wrap) to
+  // the same underlying risk: a long chip label must still keep row 1 a
+  // single line tall, not grow the card.
+  test('desktop: row 1 stays one line tall even with a long AgentChip label', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockBoard(
       page,
@@ -194,89 +202,60 @@ test.describe('Kanban', () => {
     );
     await page.goto('/work/kanban');
 
-    const idEl = page.locator('.bs-kanban-card__id').first();
-    await expect(idEl).toBeVisible();
-    const idBox = await idEl.boundingBox();
-    const lineHeight = await idEl.evaluate((el) =>
-      parseFloat(getComputedStyle(el).lineHeight || '0'),
-    );
-    expect(idBox).not.toBeNull();
-    expect(lineHeight).toBeGreaterThan(0);
-    expect(idBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(lineHeight * 1.5);
-
     const row1 = page.locator('.bs-kanban-card__row--1').first();
     const chip = page.locator('.bs-agent-chip').first();
-    // Row 1's "Copy task id" IconButton (sm, 22px) is now the tallest
-    // fixed-size child — taller than the chip's own ~18px box — so it is
-    // the basis for the one-line tolerance, not the chip.
-    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
+    await expect(chip).toBeVisible();
     const row1Box = await row1.boundingBox();
     const chipBox = await chip.boundingBox();
-    const copyIdButtonBox = await copyIdButton.boundingBox();
     expect(row1Box).not.toBeNull();
     expect(chipBox).not.toBeNull();
-    expect(copyIdButtonBox).not.toBeNull();
-    const tallestChild = Math.max(chipBox?.height ?? 0, copyIdButtonBox?.height ?? 0);
     // Small tolerance for border/line-height rounding, not a second line.
-    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(tallestChild + 4);
-  });
-
-  // Operator follow-up (2026-10-05): the fix above made the id `flex: 1 1
-  // auto`, which also made it the row's "wins the space" element — at a
-  // 280px column, a *short* id ("task-3") was still clipped to "tas…"
-  // because the new copy-id button and a long AgentChip label left it
-  // almost no room. The id must stay fully readable when it is short; the
-  // AgentChip label is the thing allowed to ellipsise first (id now
-  // `flex: 0 0 auto; max-width: 50%`, chip `flex: 1 1 auto`).
-  test('desktop: a short task id is never truncated at a 280px column', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await mockBoard(
-      page,
-      fourColumnBoard({
-        ...task('epic-1/task-3', 'todo'),
-        agentRole: 'security-reviewer',
-        agentActivity: 'stalled',
-        // Same longest-chip-text fixture as above, to prove the id wins
-        // over a long AgentChip label rather than the other way round.
-        updatedAt: '2026-01-01T00:00:00.000Z',
-      }),
+    expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      (chipBox?.height ?? 0) + 4,
     );
-    await page.goto('/work/kanban');
-
-    const idEl = page.locator('.bs-kanban-card__id').first();
-    await expect(idEl).toBeVisible();
-    await expect(idEl).toHaveText('task-3');
-    const overflowMetrics = await idEl.evaluate((el) => ({
-      scrollWidth: el.scrollWidth,
-      clientWidth: el.clientWidth,
-    }));
-    expect(overflowMetrics.scrollWidth).toBeLessThanOrEqual(overflowMetrics.clientWidth);
   });
 
-  // Review follow-up (S4, 2026-10-05): row 1 used `justify-content:
-  // space-between`, so a card whose AgentChip renders nothing (no
-  // agentRole yet — a fresh Todo card, like the fixtures' default `task()`)
-  // left only the id and the copy-id button in the row, and space-between
-  // floated the button to the middle of the card instead of right after
-  // the id.
-  test('desktop: the copy-id button sits right after the id on a card with no AgentChip', async ({
+  // Deleted: "desktop: a short task id is never truncated at a 280px
+  // column". Its whole intent — the id text winning space inside row 1 so a
+  // short id ("task-3") stays unclipped at a 280px column — no longer
+  // applies: 86285af removed the id text from row 1 outright (it now lives
+  // only in the title-line copy button's accessible name, which has no
+  // column-width-driven truncation to test).
+
+  // Deleted: "desktop: the copy-id button sits right after the id on a card
+  // with no AgentChip". Its whole intent — row 1's `justify-content:
+  // space-between` floating the copy-id button to the row's middle when the
+  // id was its only sibling — no longer applies: the copy button moved out
+  // of row 1 onto the title line (`.bs-kanban-card__title-copy`), where it
+  // always sits immediately after the title text regardless of whether
+  // row 1's AgentChip renders anything.
+
+  // Same intent as both deleted tests above, retargeted to where the id
+  // actually lives now: reachable (an accessible name naming the full id)
+  // and copyable (click writes it to the clipboard), on a card with no
+  // AgentChip — the layout context the deleted "sits right after" test used
+  // — so an empty row 1 is also covered here.
+  test('desktop: the title-line copy button makes the full task id reachable and copyable', async ({
     page,
+    context,
   }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
     await page.goto('/work/kanban');
 
-    const idEl = page.locator('.bs-kanban-card__id').first();
-    const copyIdButton = page.locator('.bs-kanban-card__row--1 .bs-iconbtn').first();
-    await expect(idEl).toBeVisible();
-    await expect(copyIdButton).toBeVisible();
-    const idBox = await idEl.boundingBox();
-    const copyIdButtonBox = await copyIdButton.boundingBox();
-    expect(idBox).not.toBeNull();
-    expect(copyIdButtonBox).not.toBeNull();
-    const gap = (copyIdButtonBox?.x ?? 0) - ((idBox?.x ?? 0) + (idBox?.width ?? 0));
-    expect(gap).toBeGreaterThanOrEqual(0);
-    expect(gap).toBeLessThanOrEqual(12);
+    // `.bs-kanban-card__title-copy` lands on Tooltip's own wrapper span
+    // (IconButton.vue: two root nodes, so Vue's attr fallthrough has
+    // nowhere single to land) — the accessible name is on the inner
+    // `<button>`.
+    const copyButton = page.locator('.bs-kanban-card__title-copy button').first();
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toHaveAttribute('aria-label', 'epic-1/task-4 (click to copy)');
+
+    await copyButton.click();
+    await expect(copyButton).toHaveAttribute('aria-label', 'Copied');
+    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clipboardText).toBe('epic-1/task-4');
   });
 
   // Review follow-up (S2), narrowed after the first attempt (operator report
@@ -284,13 +263,13 @@ test.describe('Kanban', () => {
   // boxed to one line's height, and the raw role is still reachable through
   // the chip's title.
   //
-  // Every column is `flex: 0 0 280px` above the 640px phone breakpoint, so the
-  // chip's available width (row 1 minus the id's up-to-50% share, the
-  // copy-id button and the Quote icon) is the same at 768px and 1440px.
-  // "Security reviewer · waiting - a nudge may help" (roleLabels.ts) is wider
-  // than that, so it must clip. The board has four columns, as the real one
-  // does: a single column stretches to the free width and leaves room for
-  // the label.
+  // Every column is `flex: 0 0 280px` above the 640px phone breakpoint, so
+  // the chip's available width (row 1 minus the Quote icon — the id and its
+  // copy button both moved off row 1 on 2026-10-05) is the same at 768px
+  // and 1440px. "Security reviewer · waiting - a nudge may help"
+  // (roleLabels.ts) is wider than that, so it must clip. The board has four
+  // columns, as the real one does: a single column stretches to the free
+  // width and leaves room for the label.
   test('desktop: a long AgentChip label is ellipsised, not just boxed to one line', async ({
     page,
   }) => {
@@ -464,6 +443,28 @@ test.describe('Kanban', () => {
     await page.getByLabel('Show summary', { exact: true }).uncheck();
 
     await expect(page.getByText('Fix the login button alignment')).toHaveCount(0);
+  });
+
+  // Operator fix 2026-10-05: dependencyChainText() still returns the
+  // literal string "Waits for: nothing" for a dependency-free task
+  // (kanban.ts), but KanbanTaskCard.vue now gates the footer-dep span on
+  // `task.dependencies.length > 0`, so that string never reaches the DOM —
+  // a no-deps card shows no "Waits for" line at all (the footer itself only
+  // appears at all when comments or a PR link still warrant it).
+  test('a card with no dependencies never shows a "Waits for" line', async ({ page }) => {
+    await mockBoard(page, [
+      {
+        taskStatus: 'todo',
+        tasks: [{ ...task('epic-1/task-1', 'todo'), commentCount: 2 }],
+      },
+    ]);
+    await page.goto('/work/kanban');
+
+    const card = page.locator('.bs-kanban-card').first();
+    await expect(card).toBeVisible();
+    await expect(card.locator('.bs-kanban-card__footer')).toBeVisible();
+    await expect(card.locator('.bs-kanban-card__footer-dep')).toHaveCount(0);
+    await expect(page.getByText(/Waits for/)).toHaveCount(0);
   });
 
   // The 375px board must not widen the page itself — the toolbar/columns
