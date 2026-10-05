@@ -2640,14 +2640,25 @@ summary.bs-inbox__group-head {
    below gets a matching max-width so it shrinks instead of pushing the id
    out, and the Quote icon (flex: none below) never shrinks. The grow rule
    is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
-   class, and an unscoped grow pushed its title away from the id. */
+   class, and an unscoped grow pushed its title away from the id.
+   Operator follow-up fix 2026-10-05: that grow rule then made the id the
+   row's "wins the space" element, so a *short* id ("task-3") still got
+   clipped to "tas…" once the new copy-id button left row 1 even less
+   room. The id must stay readable in full for a short id; the AgentChip
+   label is the thing allowed to ellipsise first. Id and chip swap
+   flex-grow roles: the id caps at 50% and only shrinks past its content's
+   natural width (a short id never reaches that cap); the chip takes
+   whatever the id/buttons leave and ellipsises via its own
+   .bs-agent-chip__text rule. Copy button and Quote icon (flex: none)
+   never shrink either way. */
 .bs-kanban-card__id {
   white-space: nowrap;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
 .bs-kanban-card__row--1 .bs-kanban-card__id {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  max-width: 50%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2659,9 +2670,8 @@ summary.bs-inbox__group-head {
   font-family: var(--bs-font-mono);
 }
 .bs-kanban-card__row--1 .bs-agent-chip {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: 60%;
 }
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;

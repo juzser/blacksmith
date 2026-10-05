@@ -221,16 +221,50 @@ test.describe('Kanban', () => {
     expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(tallestChild + 4);
   });
 
+  // Operator follow-up (2026-10-05): the fix above made the id `flex: 1 1
+  // auto`, which also made it the row's "wins the space" element — at a
+  // 280px column, a *short* id ("task-3") was still clipped to "tas…"
+  // because the new copy-id button and a long AgentChip label left it
+  // almost no room. The id must stay fully readable when it is short; the
+  // AgentChip label is the thing allowed to ellipsise first (id now
+  // `flex: 0 1 auto; max-width: 50%`, chip `flex: 1 1 auto`).
+  test('desktop: a short task id is never truncated at a 280px column', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-3', 'todo'),
+        agentRole: 'security-reviewer',
+        agentActivity: 'stalled',
+        // Same longest-chip-text fixture as above, to prove the id wins
+        // over a long AgentChip label rather than the other way round.
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const idEl = page.locator('.bs-kanban-card__id').first();
+    await expect(idEl).toBeVisible();
+    await expect(idEl).toHaveText('task-3');
+    const overflowMetrics = await idEl.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    expect(overflowMetrics.scrollWidth).toBeLessThanOrEqual(overflowMetrics.clientWidth);
+  });
+
   // Review follow-up (S2), narrowed after the first attempt (operator report
   // 2026-10-05): the label itself is truncated with an ellipsis, not just
   // boxed to one line's height, and the raw role is still reachable through
   // the chip's title.
   //
   // Every column is `flex: 0 0 280px` above the 640px phone breakpoint, so the
-  // chip's `max-width: 60%` cap is the same at 768px and 1440px. "Security
-  // reviewer · waiting - a nudge may help" (roleLabels.ts) is wider than that
-  // cap, so it must clip. The board has four columns, as the real one does: a
-  // single column stretches to the free width and leaves room for the label.
+  // chip's available width (row 1 minus the id's up-to-50% share, the
+  // copy-id button and the Quote icon) is the same at 768px and 1440px.
+  // "Security reviewer · waiting - a nudge may help" (roleLabels.ts) is wider
+  // than that, so it must clip. The board has four columns, as the real one
+  // does: a single column stretches to the free width and leaves room for
+  // the label.
   test('desktop: a long AgentChip label is ellipsised, not just boxed to one line', async ({
     page,
   }) => {

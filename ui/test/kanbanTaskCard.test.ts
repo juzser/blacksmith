@@ -10,6 +10,18 @@ const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'KanbanTaskCard.vue'),
   'utf8',
 );
+const PRIMITIVES_CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
+
+function rule(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+  const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`);
+  const match = css.match(re)?.[1];
+  expect(match).toBeTruthy();
+  return match ?? '';
+}
 
 describe('KanbanTaskCard.vue — card chip variant (audit finding 2)', () => {
   it('does not hardcode variant="outline" on the card chips, so Tag renders its subtle default', () => {
@@ -56,6 +68,26 @@ describe('KanbanTaskCard.vue — row 1 copy-id button (ds-review.html mock, ds-s
     expect(SRC).toMatch(
       /function onCopyTaskId\(event: MouseEvent\) \{\s*event\.stopPropagation\(\);/,
     );
+  });
+});
+
+describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-10-05)', () => {
+  it('caps the id at 50% so a short id never shrinks past its content, only ellipsises past that cap', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__id');
+    expect(block).toMatch(/flex:\s*0 1 auto/);
+    expect(block).toMatch(/max-width:\s*50%/);
+  });
+
+  it('makes the AgentChip the element that grows and ellipsises first, not the id', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-agent-chip');
+    expect(block).toMatch(/flex:\s*1 1 auto/);
+    expect(block).toMatch(/min-width:\s*0/);
+    expect(block).not.toMatch(/max-width/);
+  });
+
+  it('keeps the copy-id button and Quote icon from ever shrinking', () => {
+    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
+    expect(block).toMatch(/flex:\s*none/);
   });
 });
 
