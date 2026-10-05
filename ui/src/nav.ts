@@ -13,9 +13,11 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Kanban,
     route: '/work/kanban',
     matchPrefix: '/work',
-    // Operator decision 2026-10-05: Work gets two always-visible level-2
-    // items on desktop (ds-spec.md §3) -- MobileTabBar never reads
-    // `children`, so the phone stays a single flat "Work" tab.
+    // Operator decision 2026-10-05: Work gets two level-2 items on desktop
+    // (ds-spec.md §3), shown only while the Work section is current
+    // (SidebarNav gates the sublist on `currentFor`); clicking Work lands on
+    // the first child via `navRoute`. MobileTabBar never reads `children`,
+    // so the phone stays a single flat "Work" tab.
     children: [
       { id: 'work-kanban', label: 'Kanban', route: '/work/kanban' },
       { id: 'work-roadmap', label: 'Roadmap', route: '/work/roadmap' },
@@ -35,3 +37,12 @@ export const NAV_ITEMS: NavItem[] = [
   },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, route: '/lessons' },
 ];
+
+// A parent with level-2 `children` has no page of its own to land on --
+// clicking it should go straight to the first child's page (operator
+// decision 2026-10-05), derived here rather than duplicated at every call
+// site so Work's `route` and `children[0].route` cannot drift apart.
+export function navRoute(item: NavItem): string {
+  const firstChild = item.children?.[0];
+  return firstChild ? firstChild.route : item.route;
+}

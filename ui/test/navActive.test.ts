@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { NAV_ITEMS, navRoute } from '../src/nav.js';
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const APP_SRC = readFileSync(join(SRC_DIR, 'App.vue'), 'utf8');
@@ -61,5 +62,27 @@ describe('App.vue selectNav (nav highlighting)', () => {
     expect(APP_SRC).toMatch(
       /NAV_ITEMS\.flatMap\(\(it\) => it\.children \?\? \[\]\)\.find\(\(c\) => c\.id === id\)/,
     );
+  });
+
+  it('resolves a clicked item through navRoute rather than reading .route directly', () => {
+    expect(APP_SRC).toMatch(/if \(item\) router\.push\(navRoute\(item\)\);/);
+  });
+});
+
+describe('nav.ts navRoute (operator decision 2026-10-05: on-demand level-2 items)', () => {
+  const work = NAV_ITEMS.find((it) => it.id === 'work');
+  const home = NAV_ITEMS.find((it) => it.id === 'home');
+
+  it("resolves a parent with children to that parent's first child route", () => {
+    expect(work?.children?.length).toBeGreaterThan(0);
+    expect(work && navRoute(work)).toBe(work?.children?.[0]?.route);
+  });
+
+  it('pins Work itself to its first child route, so the two cannot drift apart', () => {
+    expect(work && navRoute(work)).toBe('/work/kanban');
+  });
+
+  it('resolves a leaf item (no children) to its own route unchanged', () => {
+    expect(home && navRoute(home)).toBe(home?.route);
   });
 });
