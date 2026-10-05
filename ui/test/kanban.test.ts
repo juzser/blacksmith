@@ -599,9 +599,9 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
     ).toBe('Waits for: Add login form (in-progress)');
   });
 
-  it('falls back to the taskId when the dependency has no title', () => {
+  it('falls back to the taskId (via taskLabel()) when the dependency has no title', () => {
     expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe(
-      'Waits for: t1',
+      'Waits for: T1',
     );
   });
 
@@ -641,6 +641,21 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
         { taskId: 't3', title: 'Add session', status: 'todo' },
       ]),
     ).toBe('Waits for: Add logout (todo) +1 more');
+  });
+
+  it('shortens a long objective via taskLabel() instead of printing the whole paragraph', () => {
+    // The server sets a dependency's title to the dependency task's full
+    // `objective` (queries.ts ~:3096), which can run to a multi-sentence
+    // paragraph. The footer line stays one short label, same as the card's
+    // own title, with the raw objective dropped rather than printed whole.
+    const longObjective =
+      'This is a very long multi-sentence objective describing the task in ' +
+      'extensive detail, well past the point a one-line footer can carry it.';
+    expect(
+      dependencyChainText([
+        { taskId: 'epic/task-3-add-login-form', title: longObjective, status: 'in-progress' },
+      ]),
+    ).toBe('Waits for: Add login form (in-progress)');
   });
 });
 

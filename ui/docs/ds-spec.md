@@ -668,11 +668,20 @@ anything on touch-only paths.
 ## 3. App shell
 
 **Sidebar** (`SidebarNav`, collapsible rail >=1024px, off-canvas `Sheet` <768px): Home,
-Work, Activity, Sessions, Cost & quality, Lessons — exactly the 6 items, each a single route, no
-nested fly-out menus. Each item is a 16px Lucide icon + label (§2.5). Active item:
+Work, Activity, Sessions, Cost & quality, Lessons — exactly the 6 top-level items, no
+fly-out menus. Each item is a 16px Lucide icon + label (§2.5). Active item:
 `--bs-surface-selected` background, `--bs-text` label at `--bs-font-weight-medium`,
 `aria-current="page"`; no accent fill, no accent border (§1.9). Collapsed: icons only,
 each with `aria-label` and a right-placed tooltip of the same text.
+
+Operator decision (2026-10-05): Work carries two always-visible level-2 items on
+desktop — Kanban and Roadmap — indented under it, no fly-out (both render whenever the
+rail itself is not collapsed; collapsing the rail hides them along with every other
+label). Each level-2 item gets its own `aria-current="page"` on its own route, and Work
+stays active while either child is. Collapsing the rail still sends Work to
+`/work/kanban`. The phone tab bar is unaffected: Work stays a single flat tab among the
+6 (see the phone list above), and the page's own Kanban/Roadmap `SegmentedControl`
+switcher still does the job there.
 
 **Topbar**: left = `Breadcrumb` (updates on route change immediately — fixes audit item
 13's stale-breadcrumb-during-load); center = nothing (no page title duplication, the H1

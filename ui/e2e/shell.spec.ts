@@ -209,4 +209,21 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
       .click();
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Activity');
   });
+
+  // Operator decision 2026-10-05: Work carries two always-visible level-2
+  // items on desktop (ds-spec.md §3) — no fly-out, both visible at once.
+  test('Work shows Kanban and Roadmap as level-2 items, and clicking Roadmap navigates there', async ({
+    page,
+  }) => {
+    await page.goto('/work/kanban');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    const kanbanChild = nav.getByRole('button', { name: 'Kanban', exact: true });
+    const roadmapChild = nav.getByRole('button', { name: 'Roadmap', exact: true });
+    await expect(kanbanChild).toBeVisible();
+    await expect(roadmapChild).toBeVisible();
+
+    await roadmapChild.click();
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+    await expect(roadmapChild).toHaveAttribute('aria-current', 'page');
+  });
 });

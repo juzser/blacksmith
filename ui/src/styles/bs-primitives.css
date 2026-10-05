@@ -2031,6 +2031,49 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Operator decision 2026-10-05: Work's two always-visible level-2 items
+   (Kanban, Roadmap), indented to align under the parent's label text (icon
+   16px + the item's own two gaps = --bs-space-6). No fly-out -- always
+   rendered while the rail itself is not collapsed. */
+.bs-side__sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bs-side__subitem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 1.75rem;
+  padding: 0 var(--bs-space-2) 0 var(--bs-space-6);
+  border: 0;
+  background: transparent;
+  border-radius: var(--bs-radius-md);
+  font-family: inherit;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bs-side__subitem:hover {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+}
+.bs-side__subitem[aria-current='page'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
+}
+.bs-side__subitem:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
 
 /* ---- Off-canvas Sheet (SidebarNav <768px), ported from ds/Sheet.vue ---- */
 .bs-sheet-overlay {
@@ -2605,6 +2648,16 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-xs);
   border-top: 1px solid var(--bs-border);
   padding-top: var(--bs-space-2);
+}
+/* Operator fix 2026-10-05: the dependency line can still run long even
+   after taskLabel() shortens its text — clamp to one line, full text in
+   the native `title` tooltip instead of wrapping the card taller. */
+.bs-kanban-card__footer-dep {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .bs-kanban-page__toolbar {

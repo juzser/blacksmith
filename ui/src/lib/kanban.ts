@@ -2,6 +2,7 @@
 // task_status against §10's 5-column board. `failed`/`superseded` are
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
 import { agentWaitingThresholdMs } from './constants.js';
+import { taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
 
@@ -416,12 +417,17 @@ export interface DependencyLike {
  * is still waiting on, so it is filtered out before picking which one to
  * name and before counting the "+N more" tail. "Waits for: nothing" now
  * also covers the case where every dependency is already done.
+ *
+ * Operator fix 2026-10-05: the server sets `title` to the dependency task's
+ * full `objective` (db/queries.ts ~:3096), which can run to a multi-sentence
+ * paragraph. taskLabel() shortens it the same way the card's own title is
+ * shortened, rather than this footer line printing that paragraph whole.
  */
 export function dependencyChainText(dependencies: DependencyLike[]): string {
   const waiting = dependencies.filter((d) => !d.status || !isDoneStatus(d.status));
   const first = waiting[0];
   if (!first) return 'Waits for: nothing';
-  const label = first.title ?? first.taskId;
+  const label = taskLabel(first.taskId, first.title ?? undefined);
   const status = first.status ? ` (${first.status})` : '';
   const rest = waiting.length - 1;
   const extra = rest > 0 ? ` +${rest} more` : '';

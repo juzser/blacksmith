@@ -50,6 +50,13 @@ function toggleCollapsed() {
     // Storage unavailable -- the toggle still works for this session.
   }
 }
+
+// Operator decision 2026-10-05: a parent with level-2 `children` (Work ->
+// Kanban, Roadmap) stays visually active while either child is -- the
+// parent names the section, the child names which page inside it.
+function isActive(it: NavItem): boolean {
+  return it.id === props.activeId || !!it.children?.some((c) => c.id === props.activeId);
+}
 </script>
 
 <template>
@@ -73,7 +80,7 @@ function toggleCollapsed() {
           <button
             type="button"
             class="bs-side__item"
-            :aria-current="it.id === activeId ? 'page' : undefined"
+            :aria-current="isActive(it) ? 'page' : undefined"
             :aria-label="it.label"
             @click="emit('select', it.id)"
           >
@@ -84,12 +91,24 @@ function toggleCollapsed() {
           v-else
           type="button"
           class="bs-side__item"
-          :aria-current="it.id === activeId ? 'page' : undefined"
+          :aria-current="isActive(it) ? 'page' : undefined"
           @click="emit('select', it.id)"
         >
           <Icon :icon="it.icon" :size="16" />
           <span class="bs-side__label">{{ it.label }}</span>
         </button>
+        <ul v-if="!effectiveCollapsed && it.children?.length" class="bs-side__sublist">
+          <li v-for="child in it.children" :key="child.id">
+            <button
+              type="button"
+              class="bs-side__subitem"
+              :aria-current="child.id === activeId ? 'page' : undefined"
+              @click="emit('select', child.id)"
+            >
+              {{ child.label }}
+            </button>
+          </li>
+        </ul>
       </li>
     </ul>
   </nav>

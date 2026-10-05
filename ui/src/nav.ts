@@ -7,7 +7,20 @@ import type { NavItem } from './components/kit/types.js';
 // pages until their own DS replaces them.
 export const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: House, route: '/overview' },
-  { id: 'work', label: 'Work', icon: Kanban, route: '/work/kanban', matchPrefix: '/work' },
+  {
+    id: 'work',
+    label: 'Work',
+    icon: Kanban,
+    route: '/work/kanban',
+    matchPrefix: '/work',
+    // Operator decision 2026-10-05: Work gets two always-visible level-2
+    // items on desktop (ds-spec.md §3) -- MobileTabBar never reads
+    // `children`, so the phone stays a single flat "Work" tab.
+    children: [
+      { id: 'work-kanban', label: 'Kanban', route: '/work/kanban' },
+      { id: 'work-roadmap', label: 'Roadmap', route: '/work/roadmap' },
+    ],
+  },
   { id: 'activity', label: 'Activity', icon: Activity, route: '/activity' },
   // Sessions (DS8 PR3 item 5): right after Activity, the other place that
   // shows a run in progress - History reads as "past runs" the same way
