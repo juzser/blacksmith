@@ -1552,9 +1552,65 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
     // The blocker names the way out, since no verb writes a task to `waived`.
     expect(
       summary.blockers.some(
-        (b) => b.includes('epic-1/followup-9a8f6ac7') && b.includes('waive every finding'),
+        (b) => b.includes('epic-1/followup-9a8f6ac7') && b.includes('fixed, refuted or waived'),
       ),
     ).toBe(true);
+  });
+
+  it.each([
+    ['refuted-only', ['refuted']],
+    ['fixed-only', ['fix-verified']],
+    ['mixed fixed and waived', ['fix-verified', 'waived']],
+  ])('clears a follow-up whose findings are %s', (_label, statuses) => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      statuses.map((s, i) =>
+        findingFixture({
+          finding_id: `f-closed-${i}`,
+          task_id: 'epic-1/followup-9a8f6ac7',
+          fingerprint: `fp-closed-${i}`,
+          severity: 'S3-minor',
+          finding_status: s,
+        }),
+      ),
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      alwaysEffort(),
+    );
+    expect(summary.nonTerminalTaskCount).toBe(0);
+    expect(summary.mechanicallyReady).toBe(true);
+  });
+
+  it('still blocks a follow-up with a fixed finding and a still-open one', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      [
+        findingFixture({
+          finding_id: 'f-a',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          severity: 'S3-minor',
+          finding_status: 'fix-verified',
+        }),
+        findingFixture({
+          finding_id: 'f-b',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          fingerprint: 'fp-2',
+          severity: 'S3-minor',
+          finding_status: 'confirmed',
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      alwaysEffort(),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.nonTerminalTaskCount).toBe(1);
   });
 
   it('still blocks a planned (non-escalation) todo task whose findings are all waived', () => {
@@ -4560,7 +4616,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       );
       expect(prompt).toContain(
         '  epic-1/followup-9a8f6ac7: todo — follow-up (origin: escalation) cleared by rule: ' +
-          'every attributed finding waived (f-epic-1/followup-9a8f6ac7-9a8f6ac7); counted terminal-OK',
+          'every attributed finding closed — fixed, refuted or waived (f-epic-1/followup-9a8f6ac7-9a8f6ac7); counted terminal-OK',
       );
       expect(prompt).toMatch(/Discretionary closures/i);
       const discretionarySection = prompt.slice(prompt.indexOf('Discretionary closures'));

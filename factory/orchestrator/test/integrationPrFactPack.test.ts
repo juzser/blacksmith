@@ -109,8 +109,8 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
     expect(prose).toMatch(/never a local path/i);
   });
 
-  it('does not publish a follow-up cleared by waivers as open', () => {
-    expect(prose).toMatch(/cleared by waiving/i);
+  it('does not publish a follow-up cleared by its closed findings as open', () => {
+    expect(prose).toMatch(/cleared by closing all its findings/i);
   });
 
   it('keeps the pack to filtered facts and states the word-cap rule', () => {
