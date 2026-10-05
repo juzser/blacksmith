@@ -1540,27 +1540,30 @@ a:hover {
 /* SegmentedControl (Work's Kanban/Roadmap switch): two
    RouterLinks, no accent fill on the selected item (§1.9 accent budget) —
    --bs-surface-selected + aria-current="page" is the cue instead, same as
-   the rest of this kit's non-accent active states. One size (md): the row
-   is exactly --bs-touch (44px) tall so the item's own --bs-touch min-height
-   never exceeds it — a shorter row let the selected item's fill poke past
-   the 1px border (visual pass, DS4 S1 round 2, S2-major finding 1). */
+   the rest of this kit's non-accent active states. Fix round (operator
+   report 2026-10-05): this used to render at the --bs-touch (44px) floor,
+   much taller than the toolbar's other small controls (Button sm / Select
+   beside it on both KanbanPage and RoadmapPage). ds-review.html's `.seg`
+   mock sizes it off 12px text and 2px padding, not the touch floor, and
+   ds-spec.md §3.1 scopes --bs-touch to <=640px — .bs-segctl already hides
+   there (below), so dropping the floor above that breakpoint is not a
+   touch-target regression. */
 .bs-segctl {
   display: flex;
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
   background: var(--bs-surface);
-  height: var(--bs-touch);
 }
 .bs-segctl__item {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: var(--bs-touch);
-  padding: 0 var(--bs-space-3);
+  padding: 2px var(--bs-space-2);
   color: var(--bs-text-subtle);
   text-decoration: none;
-  font-size: var(--bs-text-sm);
+  font-size: var(--bs-text-xs);
+  line-height: var(--bs-leading-xs);
   font-weight: var(--bs-font-weight-medium);
 }
 .bs-segctl__item:hover {
@@ -2675,12 +2678,17 @@ summary.bs-inbox__group-head {
   min-width: 0;
 }
 
+/* Fix round (operator report 2026-10-05): no space sat between this row and
+   the board below it, so the view switch's bottom border touched the first
+   column (and, on Roadmap, the swimlane's time axis) — ds-review.html's
+   `.feedbar` (its own toolbar row) carries the same margin-bottom. */
 .bs-kanban-page__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--bs-space-2);
   flex-wrap: wrap;
+  margin-bottom: var(--bs-space-4);
 }
 .bs-kanban-page__toolbar-field {
   display: flex;
@@ -2706,6 +2714,7 @@ summary.bs-inbox__group-head {
   align-items: center;
   justify-content: flex-end;
   gap: var(--bs-space-2);
+  margin-bottom: var(--bs-space-4);
 }
 .bs-roadmap-page__toolbar-actions {
   display: flex;

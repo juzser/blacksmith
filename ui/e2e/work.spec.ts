@@ -302,6 +302,57 @@ test.describe('Work switcher', () => {
     });
   }
 
+  // Operator report 2026-10-05: the switch rendered at the 44px touch floor
+  // (much taller than the toolbar's other small controls) and sat flush
+  // against the content below it (see
+  // ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-light.png).
+  test.describe('view switch sizing and spacing (operator report 2026-10-05)', () => {
+    test('desktop: the switch is no taller than the Kanban toolbar\'s Refresh button', async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/work/kanban');
+      const segctl = page.locator('.bs-segctl');
+      const refresh = page.getByRole('button', { name: 'Refresh' });
+      await expect(segctl).toBeVisible();
+      await expect(refresh).toBeVisible();
+
+      const segBox = await segctl.boundingBox();
+      const refreshBox = await refresh.boundingBox();
+      if (!segBox || !refreshBox) throw new Error('the switch or Refresh button has no box');
+      expect(segBox.height).toBeLessThanOrEqual(refreshBox.height);
+    });
+
+    for (const [path, toolbarClass, contentSelector] of [
+      ['/work/kanban', '.bs-kanban-page__toolbar', '.bs-kanban-board'],
+      ['/work/roadmap', '.bs-roadmap-page__toolbar', '.rm-stack'],
+    ] as const) {
+      test(`desktop: clears the spacing-token gap below the toolbar (${path})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto(path);
+        const toolbar = page.locator(toolbarClass);
+        const content = page.locator(contentSelector).first();
+        await expect(toolbar).toBeVisible();
+        await expect(content).toBeVisible();
+
+        // Read the gap token from the page rather than hard-coding its px
+        // value, same pattern as touchTargets.spec.ts reads --bs-touch.
+        const spaceToken = await page.evaluate(() =>
+          parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bs-space-4')),
+        );
+        expect(spaceToken).toBeGreaterThan(0);
+
+        const toolbarBox = await toolbar.boundingBox();
+        const contentBox = await content.boundingBox();
+        if (!toolbarBox || !contentBox) throw new Error('the toolbar or content has no box');
+        const gap = contentBox.y - (toolbarBox.y + toolbarBox.height);
+        expect(gap).toBeGreaterThanOrEqual(spaceToken - 1);
+      });
+    }
+  });
+
   test('no horizontal scroll at 375px on either view', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     for (const path of ['/work/kanban', '/work/roadmap']) {
