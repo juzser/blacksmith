@@ -286,6 +286,9 @@ interface ResultPayload {
   // as a list let the projector call `.forEach` on it and roll back the
   // whole session.
   artifacts?: unknown;
+  /** results.ts's `ResultEnvelope.agent` — the role the dispatcher sent the work to. */
+  agent?: string;
+  run_status?: string;
 }
 
 /**
@@ -687,6 +690,28 @@ function assertedTaskIds(record: EventRecord): string[] {
   }
 }
 
+/**
+ * The agent role an event names, read the one place both spellings live.
+ * `dispatch_decision` and `judge-reported` carry it as `agent_role`
+ * (DispatchPayload; events.ts's PAYLOAD_TAG_MAP); `task-result-recorded`
+ * carries the same fact as `agent` (results.ts's `ResultEnvelope.agent` —
+ * the role the dispatcher sent the work to). One reader for both spellings,
+ * so the auditor-close/reopen checks below never grow a second string
+ * compare that could disagree with this one.
+ */
+function closingTurnRole(record: EventRecord): string | null {
+  const p = record.payload as { agent_role?: string; agent?: string } | undefined;
+  if (record.event_type === 'task-result-recorded') return p?.agent ?? null;
+  return p?.agent_role ?? null;
+}
+
+/** Whether an event names an auditor turn — the only role that closes or
+ * reopens a task row outside wave-merged/task-superseded/error-logged (an
+ * audit axis never joins a wave, so these are the only signals it gets). */
+function isAuditorTurn(record: EventRecord): boolean {
+  return closingTurnRole(record) === 'auditor';
+}
+
 export function foldTasks(
   events: readonly StoredEvent[],
   opts: Pick<DbOpts, 'specsDir'> = {},
@@ -838,8 +863,39 @@ export function foldTasks(
       case 'dispatch_decision': {
         if (!eventTask) break;
         const row = touch(eventTask, record.ts, record.session_id);
-        if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) row.taskStatus = 'in-progress';
+        const terminal = TERMINAL_TASK_STATUSES.has(row.taskStatus);
+        if (!terminal) {
+          row.taskStatus = 'in-progress';
+        } else if (isAuditorTurn(record) && row.taskStatus === 'completed') {
+          // An audit axis never joins a wave, so a `completed` row only ever
+          // got there via the judge-reported/task-result-recorded close
+          // below — a later auditor dispatch for the same id is a re-run of
+          // that axis, not a stray dispatch against a shipped plan task
+          // (those always move through wave-merged/task-superseded/
+          // error-logged instead, never this role). terminalAt resets to
+          // null — schema.ts's comment on tasks.terminalAt ("null while the
+          // task is still open") describes this row again, exactly. Any
+          // other terminal status (escalated, failed, waived, superseded…)
+          // is held open for the operator and must not be reopened here.
+          row.taskStatus = 'in-progress';
+          row.terminalAt = null;
+        }
         row.project = record.project ?? row.project;
+        break;
+      }
+      case 'judge-reported':
+      case 'task-result-recorded': {
+        if (!eventTask) break;
+        if (!isAuditorTurn(record)) break;
+        if (record.event_type === 'task-result-recorded') {
+          const p = record.payload as ResultPayload;
+          if (p.run_status !== 'done') break;
+        }
+        const row = touch(eventTask, record.ts, record.session_id);
+        // First terminal transition wins — see schema.ts's terminalAt comment.
+        if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
+        row.terminalAt = record.ts;
+        row.taskStatus = 'completed';
         break;
       }
       case 'gate-outcome': {

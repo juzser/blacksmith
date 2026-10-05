@@ -4,10 +4,10 @@ import path from 'node:path';
 import { getTableColumns, is } from 'drizzle-orm';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { apply, openDb, rebuild } from '../../src/db/projector.js';
+import { apply, foldTasks, openDb, rebuild } from '../../src/db/projector.js';
 import { kanban, lessonsPage } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
-import { appendEvent, readEvents } from '../../src/events.js';
+import { appendEvent, readEvents, type StoredEvent } from '../../src/events.js';
 import {
   type EventContext,
   foldFindingsDetailed,
@@ -1364,6 +1364,186 @@ describe('db/projector.ts — a merged task is done, whatever the log says about
       );
       expect(await statusOf(TASK_1)).toBe('completed');
     }
+  });
+});
+
+describe('db/projector.ts — an auditor axis closes on its own report', () => {
+  // An audit axis (`/bs audit`) never joins a wave and never merges, so the
+  // only terminal transitions foldTasks() knew (wave-merged, task-superseded)
+  // never reach it. Its row is declared not by a task-added but by the
+  // note-only error-logged a capped/resumed axis writes (real production
+  // shape: S4-nit, agent_role auditor) -- so these fixtures mirror that.
+  const AUDIT_TASK = '20260921-40a35af9.performance';
+
+  function ev(overrides: Partial<StoredEvent['record']> & { event_id: string }): StoredEvent {
+    const { event_id, ...record } = overrides;
+    return {
+      event_id,
+      record: {
+        session_id: 's1',
+        actor: 'system',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+        ts: '2026-09-21T00:00:00.000Z',
+        event_type: 'note',
+        ...record,
+      },
+    };
+  }
+
+  function dispatchAuditor(eventId: string, taskId: string, ts: string): StoredEvent {
+    return ev({
+      event_id: eventId,
+      event_type: 'dispatch_decision',
+      task_id: taskId,
+      ts,
+      payload: { agent_role: 'auditor', provider: 'anthropic', model_tier: 'mid' },
+    });
+  }
+
+  // The note-only error-logged a real audit axis writes (budget cap, no
+  // report yet) -- the event that currently declares the row (assertedTaskIds'
+  // error-logged case), well before any close signal exists.
+  function declareViaNoteOnlyError(eventId: string, taskId: string, ts: string): StoredEvent {
+    return ev({
+      event_id: eventId,
+      event_type: 'error-logged',
+      task_id: taskId,
+      ts,
+      payload: {
+        agent: 'auditor',
+        agent_role: 'auditor',
+        task_ref: taskId,
+        error: 'economy.budget-exceeded',
+        severity: 'S4-nit',
+      },
+    });
+  }
+
+  function judgeReported(
+    eventId: string,
+    taskId: string,
+    ts: string,
+    agentRole: string,
+  ): StoredEvent {
+    return ev({
+      event_id: eventId,
+      event_type: 'judge-reported',
+      task_id: taskId,
+      ts,
+      payload: { agent_role: agentRole },
+    });
+  }
+
+  function resultRecorded(
+    eventId: string,
+    taskId: string,
+    ts: string,
+    agent: string,
+    runStatus: string,
+  ): StoredEvent {
+    return ev({
+      event_id: eventId,
+      event_type: 'task-result-recorded',
+      task_id: taskId,
+      ts,
+      payload: { task_id: taskId, agent, run_status: runStatus },
+    });
+  }
+
+  it('a dispatched auditor axis closes when its judge-reported lands', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      judgeReported('e3', AUDIT_TASK, '2026-09-21T00:05:00.000Z', 'auditor'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('completed');
+    expect(row?.terminalAt).toBe('2026-09-21T00:05:00.000Z');
+  });
+
+  it('a task-result-recorded alone (agent auditor, run_status done) closes the axis', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      resultRecorded('e3', AUDIT_TASK, '2026-09-21T00:06:00.000Z', 'auditor', 'done'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('completed');
+    expect(row?.terminalAt).toBe('2026-09-21T00:06:00.000Z');
+  });
+
+  it('the first terminal signal wins when both a judge-reported and a task-result-recorded land', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      judgeReported('e3', AUDIT_TASK, '2026-09-21T00:05:00.000Z', 'auditor'),
+      resultRecorded('e4', AUDIT_TASK, '2026-09-21T00:06:00.000Z', 'auditor', 'done'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('completed');
+    expect(row?.terminalAt).toBe('2026-09-21T00:05:00.000Z');
+  });
+
+  it('a coder judge-reported or task-result-recorded never completes a plan task (wave-merged still owns that)', () => {
+    const rows = foldTasks([
+      ev({
+        event_id: 'e0',
+        event_type: 'task-added',
+        task_id: TASK_1,
+        ts: '2026-09-21T00:00:00.000Z',
+        payload: { epic_id: EPIC_ID },
+      }),
+      ev({
+        event_id: 'e1',
+        event_type: 'dispatch_decision',
+        task_id: TASK_1,
+        ts: '2026-09-21T00:01:00.000Z',
+        payload: { agent_role: 'coder', provider: 'anthropic', model_tier: 'mid' },
+      }),
+      judgeReported('e2', TASK_1, '2026-09-21T00:05:00.000Z', 'coder'),
+      resultRecorded('e3', TASK_1, '2026-09-21T00:06:00.000Z', 'coder', 'done'),
+    ]);
+    const row = rows.find((r) => r.taskId === TASK_1);
+    expect(row?.taskStatus).toBe('in-progress');
+    expect(row?.terminalAt).toBeNull();
+  });
+
+  it('a re-dispatched auditor axis (an audit re-run) reopens a closed row instead of staying completed', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      judgeReported('e3', AUDIT_TASK, '2026-09-21T00:05:00.000Z', 'auditor'),
+      dispatchAuditor('e4', AUDIT_TASK, '2026-09-28T00:00:00.000Z'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('in-progress');
+    expect(row?.terminalAt).toBeNull();
+  });
+
+  it('an auditor axis escalated by a coordination.* error-logged (non-note severity) stays escalated after a later auditor dispatch_decision', () => {
+    const rows = foldTasks([
+      dispatchAuditor('e1', AUDIT_TASK, '2026-09-21T00:00:00.000Z'),
+      declareViaNoteOnlyError('e2', AUDIT_TASK, '2026-09-21T00:01:00.000Z'),
+      ev({
+        event_id: 'e3',
+        event_type: 'error-logged',
+        task_id: AUDIT_TASK,
+        ts: '2026-09-21T00:02:00.000Z',
+        payload: {
+          agent: 'auditor',
+          agent_role: 'auditor',
+          task_ref: AUDIT_TASK,
+          error: 'coordination.starvation',
+          severity: 'S2-major',
+        },
+      }),
+      dispatchAuditor('e4', AUDIT_TASK, '2026-09-28T00:00:00.000Z'),
+    ]);
+    const row = rows.find((r) => r.taskId === AUDIT_TASK);
+    expect(row?.taskStatus).toBe('escalated');
+    expect(row?.terminalAt).toBe('2026-09-21T00:02:00.000Z');
   });
 });
 
