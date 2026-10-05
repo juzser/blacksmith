@@ -59,7 +59,8 @@ function toggleCollapsed() {
 // The collapsed rail hides the children, so there the parent is the page.
 function currentFor(it: NavItem): 'page' | 'true' | undefined {
   if (it.id === props.activeId) return 'page';
-  if (it.children?.some((c) => c.id === props.activeId)) return effectiveCollapsed.value ? 'page' : 'true';
+  if (it.children?.some((c) => c.id === props.activeId))
+    return effectiveCollapsed.value ? 'page' : 'true';
   return undefined;
 }
 </script>
