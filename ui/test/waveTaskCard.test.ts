@@ -31,3 +31,30 @@ describe('WaveTaskCard.vue — task id shown (fix round 1 finding 4)', () => {
     expect(SRC).toMatch(/class="bs-kanban-card__id"/);
   });
 });
+
+// Kanban id fix (2026-10-05): WaveTaskCard reuses .bs-kanban-card__id, so
+// the Kanban card's "id takes the row's remaining space" rule must stay
+// scoped to the Kanban row — unscoped, it pushed the Roadmap title away
+// from its id toward the middle of the row.
+describe('WaveTaskCard.vue — shared id class keeps its natural width', () => {
+  const CSS = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+    'utf8',
+  );
+
+  it('the base .bs-kanban-card__id rule does not grow', () => {
+    const base = CSS.match(/\n\.bs-kanban-card__id \{[\s\S]*?\}/);
+    expect(base).not.toBeNull();
+    expect(base?.[0]).not.toMatch(/flex:/);
+  });
+
+  it('the row-1-scoped rule is scoped to the Kanban card row', () => {
+    const scoped = CSS.match(/\.bs-kanban-card__row--1 \.bs-kanban-card__id \{[\s\S]*?\}/);
+    // Operator follow-up (2026-10-05): the id no longer grows to win row
+    // 1's space (that made a short id lose it to the copy-id button and a
+    // long AgentChip label) — it caps at 50% with flex-shrink 0 instead, so
+    // this just pins the rule as still scoped to row 1, not to the base
+    // selector.
+    expect(scoped?.[0]).toMatch(/flex: 0 0 auto/);
+  });
+});

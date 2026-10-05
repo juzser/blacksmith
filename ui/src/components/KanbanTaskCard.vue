@@ -12,9 +12,11 @@
 // Wired to that rather than removed, gated behind `summaryEnabled` so the
 // toolbar's "Show summary" option actually does something again.
 
-import { Clock, Quote } from '@lucide/vue';
+import { Clock, Copy, Quote } from '@lucide/vue';
 import { computed } from 'vue';
+import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
+import { copyToClipboard } from '../lib/clipboard.js';
 import { shortTaskId, taskLabel } from '../lib/format.js';
 import {
   agentChip,
@@ -27,6 +29,7 @@ import {
 import { roleLabel } from '../lib/roleLabels.js';
 import AgentChip from './AgentChip.vue';
 import Icon from './kit/Icon.vue';
+import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
 import Tooltip from './kit/Tooltip.vue';
@@ -54,6 +57,18 @@ const showRoleLabel = computed(
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
+
+// ds-review.html's mock + ds-spec.md §2.2 TaskCard: row 1 carries a sm
+// IconButton "Copy task id" right after the id, before the AgentChip.
+// stopPropagation keeps the click from also bubbling to the card's own
+// @click, which would open the peek panel.
+const { label: copyIdLabel, flash: flashIdCopied } = useCopyFeedback('Copy task id');
+async function onCopyTaskId(event: MouseEvent) {
+  event.stopPropagation();
+  const ok = await copyToClipboard(props.task.taskId);
+  if (!ok) return;
+  flashIdCopied();
+}
 
 function onSelect() {
   emit('select', props.task.taskId);
@@ -84,9 +99,10 @@ function onKeydown(event: KeyboardEvent) {
     @keydown="onKeydown"
   >
     <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
-      <span class="bs-kanban-card__id">{{ shortId }}</span>
+      <span class="bs-kanban-card__id" :title="task.taskId">{{ shortId }}</span>
+      <IconButton :icon="Copy" :label="copyIdLabel" size="sm" @click="onCopyTaskId" />
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
-      <Tooltip v-if="task.hasRequest" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
+      <Tooltip v-if="task.hasRequest" class="bs-kanban-card__quote" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
         <Icon :icon="Quote" :size="14" label="Has a linked request" />
       </Tooltip>
     </div>

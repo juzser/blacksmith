@@ -45,6 +45,6 @@ const text = computed(() => {
 <template>
   <Tag v-if="chip && text" class="bs-agent-chip" :tone="tone" variant="subtle" size="sm" :title="chip.title">
     <Icon :icon="Bot" :size="14" />
-    {{ text }}
+    <span class="bs-agent-chip__text">{{ text }}</span>
   </Tag>
 </template>
