@@ -15,6 +15,7 @@ import {
   epicKeyForTask,
   foldIntoColumns,
   groupByKanban,
+  hasWaitingDependency,
   isDoneStatus,
   isInteractiveDescendant,
   KANBAN_COLUMNS,
@@ -585,6 +586,31 @@ describe('lib/kanban.ts — COLUMN_FOR_STATUS agrees with the orchestrator Roadm
       }
       expect(statusBucketForTaskStatus(status), status).toBe(expectedBucket);
     }
+  });
+});
+
+describe('lib/kanban.ts — hasWaitingDependency() (operator fix 2026-10-05: no "Waits for" line when nothing is waited on)', () => {
+  it('is false with no dependencies', () => {
+    expect(hasWaitingDependency([])).toBe(false);
+  });
+
+  it('is false when every dependency is done', () => {
+    expect(
+      hasWaitingDependency([
+        { taskId: 't1', title: null, status: 'completed' },
+        { taskId: 't2', title: null, status: 'waived' },
+      ]),
+    ).toBe(false);
+  });
+
+  it('is true when one dependency is still open, or has no status yet', () => {
+    expect(
+      hasWaitingDependency([
+        { taskId: 't1', title: null, status: 'completed' },
+        { taskId: 't2', title: null, status: 'in-progress' },
+      ]),
+    ).toBe(true);
+    expect(hasWaitingDependency([{ taskId: 't3', title: null, status: null }])).toBe(true);
   });
 });
 

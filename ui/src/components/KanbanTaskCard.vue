@@ -12,17 +12,18 @@
 // Wired to that rather than removed, gated behind `summaryEnabled` so the
 // toolbar's "Show summary" option actually does something again.
 
-import { Clock, Copy, Quote } from '@lucide/vue';
+import { Clock, Link, Quote } from '@lucide/vue';
 import { computed } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
-import { shortTaskId, taskLabel } from '../lib/format.js';
+import { taskLabel } from '../lib/format.js';
 import {
   agentChip,
   attemptLabel,
   cardChips,
   dependencyChainText,
+  hasWaitingDependency,
   isInteractiveDescendant,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
@@ -43,7 +44,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-const shortId = computed(() => shortTaskId(props.task.taskId));
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
 const chips = computed(() => cardChips(props.task, props.groupBy));
 // Audit finding 5: the meta-row role label duplicated the same role
@@ -55,14 +55,16 @@ const showRoleLabel = computed(
   () => props.groupBy !== 'role' && !!props.task.agentRole && !chip.value,
 );
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
+const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
 
-// ds-review.html's mock + ds-spec.md §2.2 TaskCard: row 1 carries a sm
-// IconButton "Copy task id" right after the id, before the AgentChip.
-// stopPropagation keeps the click from also bubbling to the card's own
-// @click, which would open the peek panel.
-const { label: copyIdLabel, flash: flashIdCopied } = useCopyFeedback('Copy task id');
+// Operator fix 2026-10-05: row 1's id text + copy button are gone (the full
+// id is unreadable there anyway); a link icon right after the title copies
+// it instead. stopPropagation keeps the click from also bubbling to the
+// card's own @click, which would open the peek panel.
+const copyIdTooltip = computed(() => `${props.task.taskId} (click to copy)`);
+const { label: copyIdLabel, flash: flashIdCopied } = useCopyFeedback(copyIdTooltip.value, 'Copied');
 async function onCopyTaskId(event: MouseEvent) {
   event.stopPropagation();
   const ok = await copyToClipboard(props.task.taskId);
@@ -99,15 +101,22 @@ function onKeydown(event: KeyboardEvent) {
     @keydown="onKeydown"
   >
     <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
-      <span class="bs-kanban-card__id" :title="task.taskId">{{ shortId }}</span>
-      <IconButton :icon="Copy" :label="copyIdLabel" size="sm" @click="onCopyTaskId" />
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
       <Tooltip v-if="task.hasRequest" class="bs-kanban-card__quote" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
         <Icon :icon="Quote" :size="14" label="Has a linked request" />
       </Tooltip>
     </div>
 
-    <p class="bs-kanban-card__title">{{ title }}</p>
+    <p class="bs-kanban-card__title">
+      <span class="bs-kanban-card__title-text">{{ title }}</span>
+      <IconButton
+        :icon="Link"
+        :label="copyIdLabel"
+        size="sm"
+        class="bs-kanban-card__title-copy"
+        @click="onCopyTaskId"
+      />
+    </p>
 
     <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 
@@ -137,10 +146,15 @@ function onKeydown(event: KeyboardEvent) {
     </div>
 
     <div
-      v-if="!compact && (task.dependencies.length > 0 || task.commentCount > 0 || task.prUrl)"
+      v-if="!compact && (hasWaiting || task.commentCount > 0 || task.prUrl)"
       class="bs-kanban-card__footer"
     >
-      <span class="bs-kanban-card__footer-dep" :title="footerDependency">{{ footerDependency }}</span>
+      <span
+        v-if="hasWaiting"
+        class="bs-kanban-card__footer-dep"
+        :title="footerDependency"
+        >{{ footerDependency }}</span
+      >
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>
       <a v-if="task.prUrl" :href="task.prUrl" target="_blank" rel="noopener" @click.stop>Open PR</a>
     </div>

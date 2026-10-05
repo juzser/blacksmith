@@ -23,7 +23,7 @@ describe('KanbanTaskCard.vue — compact prop (§3.1 Work/Kanban row)', () => {
 
   it('hides the footer (dependencies, comments, PR link — the card menu surface) in compact mode', () => {
     expect(SRC).toMatch(
-      /v-if="!compact[\s\S]*?task\.dependencies\.length > 0[\s\S]*?"\s+class="bs-kanban-card__footer"/,
+      /v-if="!compact[\s\S]*?hasWaiting[\s\S]*?"\s+class="bs-kanban-card__footer"/,
     );
   });
 
