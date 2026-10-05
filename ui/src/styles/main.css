@@ -28,18 +28,18 @@
 /* Skip-to-content link — visually hidden until :focus-visible (design-spec §7). */
 .skip-link {
   position: absolute;
-  left: var(--ds-space-2);
+  left: var(--bs-space-2);
   top: -100%;
   z-index: 100;
-  padding: var(--ds-space-2) var(--ds-space-3);
-  background: var(--ds-primary);
-  color: var(--ds-text-on-primary);
-  border-radius: var(--ds-radius-control);
-  font-size: var(--ds-text-sm);
-  transition: top var(--ds-motion-fast) var(--ds-ease-out);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  background: var(--bs-accent);
+  color: var(--bs-text-on-accent);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-sm);
+  transition: top var(--bs-duration-fast) var(--bs-ease-standard);
 }
 .skip-link:focus-visible {
-  top: var(--ds-space-2);
+  top: var(--bs-space-2);
 }
 
 /* Visually-hidden but screen-reader-visible (chart sr-only data tables,
@@ -57,7 +57,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ds-skeleton {
+  .bs-skeleton {
     animation: none !important;
     opacity: 0.7;
   }
