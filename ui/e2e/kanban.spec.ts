@@ -204,6 +204,19 @@ test.describe('Kanban', () => {
     expect(chipBox).not.toBeNull();
     // Small tolerance for border/line-height rounding, not a second line.
     expect(row1Box!.height).toBeLessThanOrEqual(chipBox!.height + 4);
+
+    // Review follow-up (S2): the label itself is actually truncated with an
+    // ellipsis, not just boxed to one line's height, and the full label is
+    // still reachable through the chip's title.
+    const chipText = chip.locator('.bs-agent-chip__text');
+    const overflowMetrics = await chipText.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      textOverflow: getComputedStyle(el).textOverflow,
+    }));
+    expect(overflowMetrics.scrollWidth).toBeGreaterThan(overflowMetrics.clientWidth);
+    expect(overflowMetrics.textOverflow).toBe('ellipsis');
+    await expect(chip).toHaveAttribute('title', /.+/);
   });
 
   // UI audit finding (S3): the desktop toolbar used to read as two

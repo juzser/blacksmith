@@ -2591,6 +2591,16 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-1);
 }
+/* Review follow-up (S2, 2026-10-05): text-overflow does not apply to text
+   sitting directly inside a flex container (.bs-tag/.bs-agent-chip are
+   display: inline-flex), so the label was hard-clipped with no "…". Wrap
+   the label in its own span so the ellipsis actually renders. */
+.bs-agent-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .bs-kanban-card {
   display: flex;
@@ -2632,7 +2642,6 @@ summary.bs-inbox__group-head {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 60%;
-  text-overflow: ellipsis;
 }
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;
