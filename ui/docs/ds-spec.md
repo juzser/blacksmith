@@ -419,7 +419,7 @@ stacked `ProgressBar` + the % number).
 | `IdentityChip` | Ported concept, restyled to the new 6-slot `--bs-chart-N` palette (was 8); deterministic hash unchanged (`ui/src/lib/identityColor.ts`, only the palette array changes length) |
 | `LiveIndicator` | Single instance in the topbar: one dot + "Live — last activity 5 min ago" text, replacing the two clocks / two Refresh audit finding (top 14). Owns the one Refresh action too (rendered as an icon button beside it, disabled while `live` is on). The "5 min ago" part is a `RelativeTime` with the absolute time in its tooltip. Beside it, `IconButton`s: `Pause` "Pause live updates", `RefreshCw` "Refresh" (`aria-disabled` while live, tooltip still shows), `Moon`/`Sun` "Switch to dark theme"/"Switch to light theme", `Settings` "Settings". |
 | `ProjectSwitcher` | Topbar project select; unchanged contract, restyled |
-| `SidebarNav` | 5 items: Home (`House`), Work (`Kanban`), Activity (`Activity`), Cost & quality (`Coins`), Lessons (`Lightbulb`), each a 16px icon + label; `aria-current="page"` on the active one. A sm `IconButton` `PanelLeftClose` "Collapse sidebar" in the header. Collapsed rail: icon only, each link keeps its name as `aria-label` and shows it in a label-mode `Tooltip` placed right. Ported contract (collapsed rail + Sheet off-canvas below 768px), content changed per §3. |
+| `SidebarNav` | 6 items: Home (`House`), Work (`Kanban`), Activity (`Activity`), Sessions (`History`), Cost & quality (`Coins`), Lessons (`Lightbulb`), each a 16px icon + label; `aria-current="page"` on the active one. A sm `IconButton` `PanelLeftClose` "Collapse sidebar" in the header. Collapsed rail: icon only, each link keeps its name as `aria-label` and shows it in a label-mode `Tooltip` placed right. Ported contract (collapsed rail + Sheet off-canvas below 768px), content changed per §3. |
 | `NeedsYouInbox` | One filterable list on Home combining pending waivers, escalations, stop points and lesson candidates into a single row shape (`kind`, `title`, `description`, `project`, `RelativeTime`, action). Row anatomy: unread dot, then a two-line text column (short `title` naming the decision; below it one `description` line in `--bs-text-subtle` 12px saying why the factory stopped and what happens when you act, ellipsis-truncated, full text in a describe-mode `Tooltip`), then the meta column (project/task, time; hidden below 480px), then the action. Filter chips: All / Waivers / Escalations / Stop points / Lesson candidates. **Grouped by project**: one group header per project, name + count ("shop-api · 2", 12px/500 `--bs-text-subtle`); the group holding the most urgent item comes first (escalation > waiver > stop point > lesson candidate, then oldest); projects with nothing pending are not shown; items with no project (lesson candidates that apply to all projects) go in a last group "All projects". When the topbar `ProjectSwitcher` has a project selected, only that project's group is shown, header kept; "All projects" is hidden then. Title weight: 600 unread, 500 read (§1.4). Own idea, grounded in the same "what needs a person" job the old "Needs you" rail already did — widened from a rail to the page-first list per pattern 1 below (deviation flagged in §4.1). |
 | `AgentChip` | Small chip showing a task's current role + activity state (working / reviewing / **waiting** / idle), reusing `--bs-tone-*` for the state dot. Used on `TaskCard` and the task-detail header (pattern 3 below). Not a port — no old-kit equivalent (deviation flagged in §2.4). |
 | `RunHistoryTimeline` | Small vertical timeline on the task-detail page: one entry per dispatch attempt, judge round, or result, each a `TimelineRow` (`rail` variant) with a humanized label, `RelativeTime`, outcome `Tag`, meta line and chevron. Rail dot + tag only, no leading icon; geometry in §1.5. Own idea (pattern 2 below); no old-kit equivalent. |
@@ -451,7 +451,7 @@ stacked `ProgressBar` + the % number).
 | Select | Kanban, Flow | `Select` (ported); Flow's plan-version picker moves into `EpicBlock` on Work -> Roadmap (§4.2) |
 | Separator | none currently | `Separator` (ported, still available) |
 | Sheet | none currently (mobile sidebar only, via SidebarNav) | `Sheet` (ported) |
-| SidebarNav | shell only | `SidebarNav` (ported, 5-item content) |
+| SidebarNav | shell only | `SidebarNav` (ported, 6-item content) |
 | Skeleton | 11 pages | `Skeleton` (ported, now load-bearing for audit item 13) |
 | Sparkline | none currently | `Sparkline` (ported, available for Cost & quality's trend cells) |
 | StatCard | Analytics, Overview | `StatCard` (ported); Overview's stat-card links go to their matching page instead of all `/flow` (audit item 8) |
@@ -668,7 +668,7 @@ anything on touch-only paths.
 ## 3. App shell
 
 **Sidebar** (`SidebarNav`, collapsible rail >=1024px, off-canvas `Sheet` <768px): Home,
-Work, Activity, Cost & quality, Lessons — exactly the 5 items, each a single route, no
+Work, Activity, Sessions, Cost & quality, Lessons — exactly the 6 items, each a single route, no
 nested fly-out menus. Each item is a 16px Lucide icon + label (§2.5). Active item:
 `--bs-surface-selected` background, `--bs-text` label at `--bs-font-weight-medium`,
 `aria-current="page"`; no accent fill, no accent border (§1.9). Collapsed: icons only,
@@ -730,14 +730,15 @@ No horizontal page scroll at 375px. The only horizontal scroller is a tab/filter
 which scrolls within itself.
 
 **Navigation: bottom tab bar** (`MobileTabBar`). It replaces the sidebar and the sidebar `Sheet`:
-- exactly the 5 destinations from §3: Home, Work, Activity, Cost, Lessons ("Cost & quality" is
-  shortened to "Cost" because of width);
+- exactly the 6 destinations from §3: Home, Work, Activity, Sessions, Cost, Lessons ("Cost &
+  quality" is shortened to "Cost" because of width). Sessions was added in DS8 on operator
+  decision, so a run in progress is one tap away;
 - icon above a label, fixed to the bottom, `--bs-tabbar-h` tall;
 - active tab: `--bs-text` label with a 2px top rule in `--bs-text` and `aria-current="page"`.
   Following §1.9, there is no accent fill and no accent colour.
 
 Why not a top hamburger menu:
-- the IA has exactly 5 flat destinations, which fits a tab bar without a "More" tab;
+- the IA has exactly 6 flat destinations, which still fits a tab bar without a "More" tab;
 - the operator mostly switches between Home and Activity, and a tab bar makes that one tap in
   thumb reach instead of two taps at the top edge;
 - the current page stays visible at all times, where a hamburger hides it.
