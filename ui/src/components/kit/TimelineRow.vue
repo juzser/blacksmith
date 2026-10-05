@@ -98,6 +98,16 @@ const hasPromptLink = computed(
 // case, so an empty meta is also the signal that there is nothing to expand.
 const hasDetails = computed(() => meta.value !== '');
 
+// Deep-links into SessionsPage's own `?session=<id>` marker
+// (sessionsSelection.ts) when the entry carries one; a plain string route
+// when it does not, so a stray entry with no sessionId still lands on the
+// list rather than on `/sessions?session=`.
+const sessionLink = computed(() =>
+  props.entry.sessionId
+    ? { path: '/sessions', query: { session: props.entry.sessionId } }
+    : '/sessions',
+);
+
 function onBecauseOf() {
   const promptId = props.entry.nearestPromptId;
   if (promptId) emit('becauseOf', promptId);
@@ -164,10 +174,10 @@ function onBecauseOf() {
           <dd>{{ entry.taskId ?? 'not measured' }}</dd>
           <dt>Session</dt>
           <dd>
-            <!-- SessionsPage has no deep-link query param to open a specific
-                 session, so this links to the plain list rather than a session
-                 it cannot actually scroll to (DS6 PR4b). -->
-            <RouterLink to="/sessions">{{ entry.sessionTitle }}</RouterLink>
+            <!-- SessionsPage's `?session=<id>` deep link (sessionsSelection.ts)
+                 opens and scrolls to the exact run; fall back to the plain
+                 list only when the entry carries no sessionId at all. -->
+            <RouterLink :to="sessionLink">{{ entry.sessionTitle }}</RouterLink>
           </dd>
         </template>
       </dl>
