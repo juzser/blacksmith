@@ -519,6 +519,20 @@ a:hover {
 .bs-timeline-row__chevron {
   align-self: center;
 }
+/* Fix round 3 item 3 (ds-review.html `.mrow.tlrow .etog`): on phone the
+   chevron's own --bs-touch floor (.bs-iconbtn's media rule) grows its box
+   from 22px to 44px with no compensating margin, so centering it against
+   the whole row (title+meta) lands its glyph ~12px below the title line.
+   The mock's own `.etog` spans both text rows but aligns to the start of
+   that span and pulls up by its row's 10px padding-top (margin-top: -10px)
+   -- same padding value this row uses -- so the touch box overlaps into the
+   row's own top padding instead of pushing the glyph down past the title. */
+@media (max-width: 640px) {
+  .bs-timeline-row__chevron {
+    align-self: start;
+    margin-top: -10px;
+  }
+}
 /* Fix round item 4: a row with no details renders no chevron, but its
    third grid column must still hold the same width or the time column
    above/below it drifts out of alignment with rows that do have one. */

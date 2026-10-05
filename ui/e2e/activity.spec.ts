@@ -393,6 +393,40 @@ test.describe('Activity', () => {
     expect(Math.abs((metaBox?.x ?? -999) - (chipBox?.x ?? 0))).toBeLessThanOrEqual(2);
   });
 
+  // Fix round 3 item 3 (ds-review.html `.mrow.tlrow .etog`): the chevron's
+  // own --bs-touch floor on phone grew its box with no compensating margin,
+  // centering its glyph on the whole title+meta block instead of the title
+  // line -- ~12px low on 86af027. The mock's own `.etog` spans both text
+  // rows, aligns to the start of that span, and pulls up by the row's
+  // 10px padding-top, so its box overlaps the padding instead of pushing
+  // past the title. Fails on 86af027 (diff 12px).
+  test('phone: an Error row chevron centres on the title line, not the whole row', async ({
+    page,
+  }) => {
+    const errorEntry = {
+      ...synthEntry('phone-error-1', 0),
+      eventType: 'error-logged',
+      taskId: 'demo/task-1',
+      payload: { error: 'boom', class: 'timeout', severity: 'high' },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [errorEntry], nextBefore: null, newestId: errorEntry.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title').first();
+    const chevron = row.locator('.bs-timeline-row__chevron').first();
+    await expect(chevron).toBeVisible();
+    const titleBox = await title.boundingBox();
+    const chevronBox = await chevron.boundingBox();
+    const titleCenter = (titleBox?.y ?? 0) + (titleBox?.height ?? 0) / 2;
+    const chevronCenter = (chevronBox?.y ?? 0) + (chevronBox?.height ?? 0) / 2;
+    expect(Math.abs(chevronCenter - titleCenter)).toBeLessThanOrEqual(4);
+  });
+
   // Fix round 2 item 2: app-page's flex gap used to stack on top of every
   // sentinel/pill/day-group's own margin, leaving ~55px above "Today" and
   // ~40px more above the first row where the mock's .day margin (24px top,
