@@ -252,6 +252,19 @@ test.describe('Kanban', () => {
     await expect(copyButton).toBeVisible();
     await expect(copyButton).toHaveAttribute('aria-label', 'epic-1/task-4 (click to copy)');
 
+    // S3 review fix companion check (desktop never grows the hit box past
+    // its glyph, so the icon is already level with the title here): the
+    // same centre check the phone test below enforces after the fix.
+    const titleTextDesktop = page.locator('.bs-kanban-card__title-text').first();
+    const iconDesktop = copyButton.locator('svg');
+    const titleBoxDesktop = await titleTextDesktop.boundingBox();
+    const iconBoxDesktop = await iconDesktop.boundingBox();
+    expect(titleBoxDesktop).not.toBeNull();
+    expect(iconBoxDesktop).not.toBeNull();
+    const titleCenterDesktop = (titleBoxDesktop?.y ?? 0) + (titleBoxDesktop?.height ?? 0) / 2;
+    const iconCenterDesktop = (iconBoxDesktop?.y ?? 0) + (iconBoxDesktop?.height ?? 0) / 2;
+    expect(Math.abs(iconCenterDesktop - titleCenterDesktop)).toBeLessThanOrEqual(3);
+
     await copyButton.click();
     await expect(copyButton).toHaveAttribute('aria-label', 'Copied');
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
@@ -307,6 +320,68 @@ test.describe('Kanban', () => {
     expect(copy_.x + copy_.width).toBeLessThanOrEqual(card_.x + card_.width);
     expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
     expect(copy_.y + copy_.height).toBeLessThanOrEqual(card_.y + card_.height);
+  });
+
+  // S3 review fix (visual pass, 2026-10-05): below 640px .bs-iconbtn grows
+  // to the 44px --bs-touch floor (bs-primitives.css ~133-138) while the
+  // title keeps align-items: flex-start, so the icon — centred in that
+  // taller box — sat visibly below the title's first text line
+  // (work-kanban-mobile-dark.png: title glyph centre y~223, icon centre
+  // y~234). The icon must come back level with the title without losing
+  // the 44px hit area or spilling into the row above.
+  test("phone: the title-line copy button's icon aligns with the title's first line and keeps its 44px hit area", async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
+    await page.goto('/work/kanban');
+
+    const card = page.locator('.bs-kanban-card').first();
+    const titleText = card.locator('.bs-kanban-card__title-text');
+    const copyButton = card.locator('.bs-kanban-card__title-copy').first();
+    const icon = copyButton.locator('svg');
+    await expect(copyButton).toBeVisible();
+
+    const cardBox = await card.boundingBox();
+    const titleBox = await titleText.boundingBox();
+    const copyBox = await copyButton.boundingBox();
+    const iconBox = await icon.boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(copyBox).not.toBeNull();
+    expect(iconBox).not.toBeNull();
+
+    const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const icon_ = iconBox ?? { x: 0, y: 0, width: 0, height: 0 };
+
+    // The title text is one line here, so its own box is the first line.
+    const titleLineCenter = title_.y + title_.height / 2;
+    const iconCenter = icon_.y + icon_.height / 2;
+    expect(Math.abs(iconCenter - titleLineCenter)).toBeLessThanOrEqual(3);
+
+    // The 44px --bs-touch hit area is still intact.
+    expect(copy_.width).toBeGreaterThanOrEqual(44);
+    expect(copy_.height).toBeGreaterThanOrEqual(44);
+
+    // The grown hit box stays inside the card...
+    expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
+    expect(copy_.y + copy_.height).toBeLessThanOrEqual(card_.y + card_.height);
+    // ...and never overlaps the AgentChip row above it (bs-kanban-card__row--1,
+    // the only row that renders above the title — the other `.bs-kanban-card__row`
+    // matches, chips and the footer meta row, sit below the title and would give
+    // a false "below itself" reading if picked up by a bare first-row selector).
+    // This task fixture may render without that row (v-if="!compact"), so count()
+    // first rather than boundingBox(), which would otherwise wait out the full
+    // timeout for a locator that never resolves.
+    const rowAbove = card.locator('.bs-kanban-card__row--1').first();
+    if ((await rowAbove.count()) > 0) {
+      const rowAboveBox = await rowAbove.boundingBox();
+      if (rowAboveBox) {
+        expect(copy_.y).toBeGreaterThanOrEqual(rowAboveBox.y + rowAboveBox.height);
+      }
+    }
   });
 
   // Review follow-up (S2), narrowed after the first attempt (operator report

@@ -2748,6 +2748,30 @@ summary.bs-inbox__group-head {
 .bs-kanban-card__title-copy {
   flex: none;
 }
+/* S3 review fix (visual pass, 2026-10-05): below 640px .bs-iconbtn grows to
+   the 44px --bs-touch floor (above, ~133-138) while this button's Icon
+   (16px, Icon.vue) stays centred in that taller box via .bs-iconbtn's own
+   align-items: center — but .bs-kanban-card__title keeps align-items:
+   flex-start, so the text's first line sits at the TOP of the row, not its
+   middle. The glyph dropped ~(44-1lh)/2 below the title's first-line centre.
+   The selector below targets .bs-iconbtn itself, not .bs-kanban-card__title-
+   copy: IconButton.vue's single template root is Tooltip, whose own trigger
+   span is what actually receives a passed-through class (Tooltip.vue's
+   v-bind="$attrs" comment) — .bs-kanban-card__title-copy lands on that
+   wrapper span, never on the real <button class="bs-iconbtn">, so an
+   override on .bs-kanban-card__title-copy itself cannot touch the button's
+   own align-items/flex layout. Overriding align-items to flex-start on the
+   real button and nudging the icon down by only (1lh - 16px)/2 keeps the
+   glyph inside the SAME 44px box (no change to the button's own position or
+   size), so there is no risk of spilling into the AgentChip row above or
+   the row below — only where the icon sits inside its own, unmoved hit
+   box. */
+@media (max-width: 640px) {
+  .bs-kanban-card__title-copy .bs-iconbtn {
+    align-items: flex-start;
+    padding-top: calc((1lh - 16px) / 2);
+  }
+}
 .bs-kanban-card__summary {
   margin: 0;
   color: var(--bs-text-subtle);
