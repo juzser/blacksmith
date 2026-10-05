@@ -255,7 +255,7 @@ test.describe('Activity', () => {
     await expect(olderTitle).toBeVisible();
   });
 
-  test('a session divider separates adjacent rows from different sessions, and its details link to Sessions', async ({
+  test('a session divider separates adjacent rows from different sessions, and its details link opens that session on Sessions', async ({
     page,
   }) => {
     const entries = [
@@ -265,6 +265,57 @@ test.describe('Activity', () => {
     await page.route('**/api/timeline?*', (route) => {
       route.fulfill({ json: { entries, nextBefore: null, newestId: entries[0]?.eventId ?? null } });
     });
+    // Fixture for the Sessions page the link lands on -- enough for
+    // SessionsPage's deep-link read (selectedSessionFromQuery) to recognize
+    // sess-b as a run it already knows about and load its agents.
+    await page.route('**/api/sessions*', (route) => {
+      route.fulfill({
+        json: [
+          {
+            sessionId: 'sess-b',
+            startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+            lastEventAt: new Date().toISOString(),
+            eventCount: 2,
+            liveAgentCount: 1,
+            workingAgentCount: 1,
+            lastEventType: 'task-created',
+            projects: ['black-smith'],
+            title: 'Session B',
+          },
+        ],
+      });
+    });
+    await page.route('**/api/sessions/sess-b/agents*', (route) => {
+      route.fulfill({
+        json: {
+          sessionId: 'sess-b',
+          roles: [
+            {
+              agentRole: 'coder',
+              agents: [
+                {
+                  id: 'agent-sess-b',
+                  agentRole: 'coder',
+                  provider: 'anthropic',
+                  modelTier: 'sonnet',
+                  taskId: 'task-sess-b',
+                  taskTitle: null,
+                  epicId: 'epic-1',
+                  round: 1,
+                  dispatchedAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+                  terminalAt: null,
+                  terminalType: null,
+                  status: 'live',
+                  tokens: { state: 'pending' },
+                  lastEventType: 'task-created',
+                  lastEventAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+                },
+              ],
+            },
+          ],
+        },
+      });
+    });
     await page.goto('/activity');
     await expect(page.locator('.bs-session-divider')).toHaveText('Session: Session B');
 
@@ -273,7 +324,10 @@ test.describe('Activity', () => {
     await expect(detail).toBeVisible();
     const link = detail.getByRole('link', { name: 'Session B' });
     await link.click();
-    await expect(page).toHaveURL('/sessions');
+    await expect(page).toHaveURL('/sessions?session=sess-b');
+    // Proof the deep link actually opened sess-b, not merely that the URL
+    // carries its id: its agent roster renders without a further click.
+    await expect(page.locator('.bs-agentblock')).toBeVisible();
   });
 
   // Fix round items 4, 5, 7 -- each fails without its own fix:
