@@ -56,7 +56,8 @@ describe('isSessionActive', () => {
     // liveAgentCount > 0 but workingAgentCount 0: a ghost run whose agents
     // dispatched outside the 4h staleness window -- counts as quiet, not
     // running (operator directive: workingAgentCount, never liveAgentCount).
-    expect(isSessionActive({ workingAgentCount: 0, liveAgentCount: 3 })).toBe(false);
+    const ghost = { workingAgentCount: 0, liveAgentCount: 3 };
+    expect(isSessionActive(ghost)).toBe(false);
   });
 });
 
@@ -71,8 +72,8 @@ describe('sessionsByProject', () => {
     const c = s({ sessionId: 'c', lastEventAt: '2026-01-01T01:00:00.000Z', projects: ['proj-a'] });
     const groups = sessionsByProject([a, b, c]);
     expect(groups.map((g) => g.project)).toEqual(['proj-a', 'proj-b']);
-    expect(groups[0].sessions.map((x) => x.sessionId)).toEqual(['a', 'c']);
-    expect(groups[1].sessions.map((x) => x.sessionId)).toEqual(['b']);
+    expect(groups[0]?.sessions.map((x) => x.sessionId)).toEqual(['a', 'c']);
+    expect(groups[1]?.sessions.map((x) => x.sessionId)).toEqual(['b']);
   });
 
   it('sorts newest-first within a group regardless of input order', () => {
@@ -87,7 +88,7 @@ describe('sessionsByProject', () => {
       projects: ['p'],
     });
     const groups = sessionsByProject([older, newer]);
-    expect(groups[0].sessions.map((x) => x.sessionId)).toEqual(['newer', 'older']);
+    expect(groups[0]?.sessions.map((x) => x.sessionId)).toEqual(['newer', 'older']);
   });
 
   it('puts a session with no project under the "" group so it is never dropped', () => {
@@ -112,7 +113,7 @@ describe('sessionsByProject', () => {
     });
     const groups = sessionsByProject([multi]);
     expect(groups.map((g) => g.project)).toEqual(['proj-a', 'proj-b']);
-    expect(groups[0].sessions).toEqual([multi]);
-    expect(groups[1].sessions).toEqual([multi]);
+    expect(groups[0]?.sessions).toEqual([multi]);
+    expect(groups[1]?.sessions).toEqual([multi]);
   });
 });
