@@ -81,8 +81,8 @@ test.describe('Home', () => {
     page,
   }) => {
     await page.goto('/overview');
-    const view = page.getByRole('link', { name: 'View black-smith in Work' });
-    await expect(view).toHaveAttribute('href', '/work/kanban?project=black-smith');
+    const view = page.getByRole('link', { name: 'View blacksmith in Work' });
+    await expect(view).toHaveAttribute('href', '/work/kanban?project=blacksmith');
     await expect(page.getByText('2 epics in flight')).toBeVisible();
     await expect(page.getByText('epic in flights')).toHaveCount(0);
     // envkit is declared but has nothing running: no card for it.
@@ -202,7 +202,7 @@ test.describe('Home', () => {
         await page.setViewportSize(viewport);
         await page.goto('/overview');
         await expect(page.locator('h1')).toHaveText('Home');
-        await settleForShot(page, page.getByRole('link', { name: 'View black-smith in Work' }));
+        await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
         await shoot(page, `home-${vpName}-${theme}`);
       });
     }
@@ -217,7 +217,7 @@ test.describe('Home', () => {
       await setTheme(page, 'light');
       await page.setViewportSize(viewport);
       await page.goto('/overview');
-      const card = page.locator('.bs-card').filter({ hasText: 'black-smith' }).first();
+      const card = page.locator('.bs-card').filter({ hasText: 'blacksmith' }).first();
       await settleForShot(page, card);
       await shootElement(card, `home-running-now-${vpName}-light`);
     });
