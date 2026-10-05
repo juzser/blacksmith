@@ -2161,11 +2161,11 @@ describe('cli.ts (built binary)', () => {
    * Both db verbs rebuild the ENTIRE milestones table from a roadmap file
    * (projector.ts's projectMilestones deletes and re-inserts), and
    * dbOptsFromFlags dropped `--roadmap-path` — so `db rebuild --db
-   * <other-project>.db` replaced that project's milestones with black-smith's
+   * <other-project>.db` replaced that project's milestones with blacksmith's
    * own factory/specs/roadmap.md. Same defect `ui serve` had on the read path;
    * this is the write path, and here the wrong rows are persisted.
    */
-  it('db rebuild --roadmap-path projects that roadmap, never black-smith own', () => {
+  it('db rebuild --roadmap-path projects that roadmap, never blacksmith own', () => {
     const sessionId = `cli-db-roadmap-${Date.now()}`;
     const eventsDir = path.join(scratchDir, 'db-roadmap-events');
     const dbPath = path.join(scratchDir, `${sessionId}.db`);
@@ -2343,7 +2343,7 @@ describe('cli.ts (built binary)', () => {
       const json = runCli(['projects', 'list', '--roadmap', roadmapPath, '--json']);
       const result = JSON.parse(json.stdout);
       expect(result.projects).toEqual([
-        expect.objectContaining({ name: 'black-smith', self: true }),
+        expect.objectContaining({ name: 'blacksmith', self: true }),
         expect.objectContaining({ name: 'cli-projects-present-xyz', self: false }),
       ]);
       expect(result.missing).toEqual([
@@ -11850,7 +11850,7 @@ describe('cli.ts (built binary)', () => {
         expect(status).toBe(0);
         const [record] = JSON.parse(stdout);
         expect(record.task_ref).toBe('task-bare');
-        expect(record.project).toBe('black-smith');
+        expect(record.project).toBe('blacksmith');
         expect(record.outcome).not.toBe('skipped-unresolved-project');
       });
 

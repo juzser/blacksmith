@@ -184,7 +184,7 @@ describe('milestones projection + roadmap queries', () => {
           finishedAt: null,
           statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0, superseded: 0 },
           status: 'in_progress',
-          project: 'black-smith',
+          project: 'blacksmith',
           prUrl: null,
         },
       ]);
@@ -624,7 +624,7 @@ describe('milestones projection + roadmap queries', () => {
           finishedAt: null,
           statusCounts: { done: 0, review: 0, inProgress: 0, todo: 1 },
           status: 'todo',
-          project: 'black-smith',
+          project: 'blacksmith',
           prUrl: null,
         },
       ]);
@@ -671,7 +671,7 @@ describe('milestones projection + roadmap queries', () => {
           finishedAt: mergedTs,
           statusCounts: { done: 1, review: 0, inProgress: 0, todo: 0 },
           status: 'done',
-          project: 'black-smith',
+          project: 'blacksmith',
           prUrl: null,
         },
       ]);
@@ -702,7 +702,7 @@ describe('milestones projection + roadmap queries', () => {
           finishedAt: null,
           statusCounts: { done: 1, review: 0, inProgress: 1, todo: 0 },
           status: 'in_progress',
-          project: 'black-smith',
+          project: 'blacksmith',
           prUrl: null,
         },
       ]);

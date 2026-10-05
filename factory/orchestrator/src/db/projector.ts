@@ -668,7 +668,7 @@ function errorTaskRefIds(record: EventRecord): string[] {
  * row, so an old event stamped `project: 'black-smith'` never lands in the
  * projection under that name.
  */
-function recordProject(record: StoredEvent): string | undefined {
+function recordProject(record: EventRecord): string | undefined {
   return record.project === undefined ? undefined : normalizeProjectName(record.project);
 }
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isLaterEvent } from './eventOrder.js';
 import type { StoredEvent } from './events.js';
+import { normalizeProjectName } from './projectName.js';
 
 /**
  * Pure core of the factory-error-log mechanism: fold the event log into
@@ -279,8 +280,9 @@ function sessionProjectStamps(events: readonly StoredEvent[]): ReadonlyMap<strin
   const bySession = new Map<string, Set<string>>();
   for (const { record } of events) {
     if (!ORIGIN_STAMP_EVENT_TYPES.has(record.event_type)) continue;
-    const project = asString(record.project);
-    if (project === undefined) continue;
+    const stamped = asString(record.project);
+    if (stamped === undefined) continue;
+    const project = normalizeProjectName(stamped);
     const seen = bySession.get(record.session_id);
     if (seen) seen.add(project);
     else bySession.set(record.session_id, new Set([project]));
@@ -379,7 +381,8 @@ function toCandidate(
   const stamped = asString(record.project);
   const taskRef = candidateTaskRef(record);
   const sessionId = asString(record.session_id);
-  const project = stamped ?? resolveRow(taskRef, sessionId);
+  const project =
+    stamped === undefined ? resolveRow(taskRef, sessionId) : normalizeProjectName(stamped);
   return read(event, {
     payload: record.payload ?? {},
     project,
