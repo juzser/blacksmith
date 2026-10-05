@@ -3271,8 +3271,8 @@ function outcomeFromPayload(eventType: string, payload: Record<string, unknown>)
  * `taskId`, for `RunHistoryTimeline` (pattern 2). A scoped read on the
  * existing event-log projection: no new event type, no new writer.
  *
- * Newest first (operator request: "Output và history trong task detail nên
- * xếp ngược lại, recent lên trên" — this page's own run history, not the
+ * Newest first (operator request: the task detail's Outputs and History
+ * list the most recent entry on top — this page's own run history, not the
  * Activity feed, which was already newest-first). `taskRuns()` feeds only
  * this one read path, so the reorder happens here rather than in the page.
  */

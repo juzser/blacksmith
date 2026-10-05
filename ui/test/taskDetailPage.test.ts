@@ -32,8 +32,8 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
     expect(SFC).toMatch(/IMAGE_EXTENSIONS\.test\(a\.path\)/);
   });
 
-  // Operator request: "Output và history trong task detail nên xếp ngược
-  // lại, recent lên trên" — Outputs newest first. The order comes from the
+  // Operator request: Outputs and History list the most recent entry on
+  // top — Outputs newest first. The order comes from the
   // server (`taskDetail()`'s artifact query, queries.ts), not a client sort:
   // `imageArtifacts`/`otherArtifacts` must only `filter`, which preserves
   // whatever order `detail.artifacts` already carries, never re-sort it.
