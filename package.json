@@ -91,13 +91,13 @@
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.3",
     "@vitejs/plugin-vue": "6.0.9",
-    "@vitest/coverage-v8": "5.0.2",
+    "@vitest/coverage-v8": "5.0.3",
     "drizzle-kit": "0.31.10",
     "hono": "4.13.9",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.2",
-    "vitest": "5.0.2",
+    "vitest": "5.0.3",
     "vue": "3.5.43",
     "vue-router": "5.3.1"
   }
