@@ -337,21 +337,32 @@ test.describe('Kanban', () => {
     await page.goto('/work/kanban');
 
     const card = page.locator('.bs-kanban-card').first();
+    const titleRow = card.locator('.bs-kanban-card__title');
     const titleText = card.locator('.bs-kanban-card__title-text');
-    const copyButton = card.locator('.bs-kanban-card__title-copy').first();
+    // The real hit box (what touchTargets.spec.ts's selector measures) is
+    // the <button> itself, not Tooltip's non-interactive trigger span
+    // (.bs-kanban-card__title-copy) wrapping it -- the span's own auto
+    // height tracks the collapsed title line, while the button inside it
+    // keeps its full 44px border box (CSS align-items: stretch resolves the
+    // button's cross size against the line, independent of the wrapper's
+    // own determined size).
+    const copyButton = card.locator('.bs-kanban-card__title-copy button').first();
     const icon = copyButton.locator('svg');
     await expect(copyButton).toBeVisible();
 
     const cardBox = await card.boundingBox();
+    const titleRowBox = await titleRow.boundingBox();
     const titleBox = await titleText.boundingBox();
     const copyBox = await copyButton.boundingBox();
     const iconBox = await icon.boundingBox();
     expect(cardBox).not.toBeNull();
+    expect(titleRowBox).not.toBeNull();
     expect(titleBox).not.toBeNull();
     expect(copyBox).not.toBeNull();
     expect(iconBox).not.toBeNull();
 
     const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const titleRow_ = titleRowBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const icon_ = iconBox ?? { x: 0, y: 0, width: 0, height: 0 };
@@ -364,6 +375,12 @@ test.describe('Kanban', () => {
     // The 44px --bs-touch hit area is still intact.
     expect(copy_.width).toBeGreaterThanOrEqual(44);
     expect(copy_.height).toBeGreaterThanOrEqual(44);
+
+    // Review follow-up (phone gap): the title row's own layout height must
+    // track the one-line title text, not the button's 44px hit box — else a
+    // one-line title leaves an empty band before the next row (origin/main's
+    // work-kanban-mobile-tab2-light.png has none).
+    expect(Math.abs(titleRow_.height - title_.height)).toBeLessThanOrEqual(2);
 
     // The grown hit box stays inside the card...
     expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
@@ -380,6 +397,22 @@ test.describe('Kanban', () => {
       const rowAboveBox = await rowAbove.boundingBox();
       if (rowAboveBox) {
         expect(copy_.y).toBeGreaterThanOrEqual(rowAboveBox.y + rowAboveBox.height);
+      }
+    }
+
+    // The row below (chips, `.bs-kanban-card__chips`) sits right after the
+    // title with only the card's own flex gap (--bs-space-2, 8px) between
+    // them — no extra band from the button's hit box. Tag.vue renders a
+    // plain <span>, never interactive, so the 44px hit box is free to
+    // overlap into that gap/row the same way it overlaps the title line.
+    const chipsRow = card.locator('.bs-kanban-card__chips').first();
+    if ((await chipsRow.count()) > 0) {
+      const hasInteractive = (await chipsRow.locator('button, a, input, [tabindex]').count()) > 0;
+      expect(hasInteractive).toBe(false);
+      const chipsBox = await chipsRow.boundingBox();
+      if (chipsBox) {
+        const gap = chipsBox.y - (title_.y + title_.height);
+        expect(gap).toBeLessThanOrEqual(10); // --bs-space-2 (8px) + 2px tolerance
       }
     }
   });
