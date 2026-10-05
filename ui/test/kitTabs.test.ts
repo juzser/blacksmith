@@ -10,8 +10,10 @@ const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const ROVING_TABS = readFileSync(join(LIB, 'rovingTabs.ts'), 'utf8');
 
 describe('kit/Tabs.vue', () => {
-  it('exports a TabItem { id, label } interface', () => {
-    expect(TABS).toMatch(/export interface TabItem\s*\{\s*id:\s*string;\s*label:\s*string;\s*\}/);
+  it('exports a TabItem { id, label, count? } interface', () => {
+    expect(TABS).toMatch(
+      /export interface TabItem\s*\{\s*id:\s*string;\s*label:\s*string;[\s\S]*?count\?:\s*number;\s*\}/,
+    );
   });
 
   it('declares modelValue/tabs/ariaLabel props and an update:modelValue emit', () => {
@@ -19,6 +21,13 @@ describe('kit/Tabs.vue', () => {
     expect(TABS).toMatch(/tabs:\s*TabItem\[\]/);
     expect(TABS).toMatch(/ariaLabel:\s*string/);
     expect(TABS).toMatch(/'update:modelValue':\s*\[id:\s*string\]/);
+  });
+
+  // DS8 PR2: LessonsPage's "Pending review (0)" / "Closed (28)" tabs need a
+  // count next to the label, optional so every other Tabs caller (none of
+  // which carries one) renders unchanged.
+  it('renders the count next to the label when one is present', () => {
+    expect(TABS).toMatch(/v-if="tab\.count !== undefined"/);
   });
 
   // Round 5 item 3: the Left/Right/Home/End key math now lives in

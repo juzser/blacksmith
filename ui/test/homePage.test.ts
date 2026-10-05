@@ -78,4 +78,9 @@ describe('HomePage.vue', () => {
   it('is built on the BS kit only', () => {
     expect(SRC).not.toMatch(/components\/ds\//);
   });
+
+  it('links each running card to its project Sessions history (DS8 PR3 item 5)', () => {
+    expect(SRC).toMatch(/path: '\/sessions', query: \{ project: p \}/);
+    expect(TEMPLATE).toMatch(/:to="sessionsLink\(c\.project\)"[\s\S]*?Sessions/);
+  });
 });

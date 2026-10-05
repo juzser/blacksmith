@@ -1,6 +1,6 @@
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { setTheme, settleForShot, shoot, shootElement, VIEWPORTS } from './helpers.js';
 
 // Home (ds-spec.md §4.1): Overview and Projects merged into one page. The
 // numbers and sentences are unit-tested in ui/test/homeView.test.ts and the
@@ -206,6 +206,21 @@ test.describe('Home', () => {
         await shoot(page, `home-${vpName}-${theme}`);
       });
     }
+  }
+
+  // Fix round 2 item 3: the home-desktop-*/home-mobile-* baselines above are
+  // viewport-sized and cut off at the "Running now" heading, so the card
+  // itself -- now linking into Sessions too -- was never actually shown.
+  // An element screenshot proves it in full regardless of page height.
+  for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+    test(`screenshot running-now card ${vpName}/light`, async ({ page }) => {
+      await setTheme(page, 'light');
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      const card = page.locator('.bs-card').filter({ hasText: 'black-smith' }).first();
+      await settleForShot(page, card);
+      await shootElement(card, `home-running-now-${vpName}-light`);
+    });
   }
 
   // Blast radius: MobileTopBar renders on every page, so its vertical

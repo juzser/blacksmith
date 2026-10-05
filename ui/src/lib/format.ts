@@ -88,6 +88,20 @@ export function formatShortDateTime(iso: string): string {
 }
 
 /**
+ * "7 Sep" — LessonCard's "learned from <session> on <date>" (ds-review.html
+ * ~1510: day + short month, no year, no leading zero). Scoped to LessonCard
+ * only; formatDate() above stays put for the pages that already render its
+ * DD/MM/YYYY shape.
+ */
+export function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.getDate();
+  const month = SHORT_MONTHS[d.getMonth()];
+  return `${day} ${month}`;
+}
+
+/**
  * `[how many of this unit make the next one, the suffix it renders as]`.
  *
  * The suffix is spelled out rather than taken from a unit word's first

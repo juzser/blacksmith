@@ -6,6 +6,8 @@ import { nextRovingTabId } from '../../lib/rovingTabs.js';
 export interface TabItem {
   id: string;
   label: string;
+  /** DS8 PR2: Lessons' "Pending review (0)" / "Closed (28)" tabs. */
+  count?: number;
 }
 
 const props = defineProps<{ modelValue: string; tabs: TabItem[]; ariaLabel: string }>();
@@ -41,6 +43,7 @@ function onKeydown(e: KeyboardEvent) {
         @click="select(tab.id)"
       >
         {{ tab.label }}
+        <span v-if="tab.count !== undefined" class="bs-tabs__count">{{ tab.count }}</span>
       </button>
     </div>
     <div

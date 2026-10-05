@@ -978,6 +978,245 @@ a:hover {
   padding: 0 var(--bs-space-5) var(--bs-space-5);
 }
 
+/* LessonCard (ds-spec.md §4.5): the full card (desktop/tablet list and the
+   review Dialog body) sits on top of .bs-card; the compact variant (phone
+   shell table: "one-line lesson rows") is a flat row instead, so it carries
+   its own layout rather than Card's header/body/footer padding. */
+.bs-lessoncard {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.bs-lessoncard--clickable {
+  cursor: pointer;
+}
+.bs-lessoncard--clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+  border-radius: var(--bs-radius-lg);
+}
+.bs-lessoncard .bs-card {
+  gap: var(--bs-space-2);
+}
+.bs-lessoncard__statement {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-lessoncard__meta {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-lessoncard--compact {
+  /* Two-line grid (ds-review.html .mrow): title + scope tag share the first
+     row, the muted meta spans both columns underneath. A one-line flex row
+     gave the title no fixed share of the width, so a long scope tag crowded
+     it down to a few characters ("Run...", "A...", "CI r..."). */
+  /* A grid track's percentage max competes for leftover space the same way
+     an fr track does (CSS Grid "Maximize Tracks" step), so capping the tag's
+     column at minmax(0,50%) grew it to that cap even for a short tag's
+     content, stealing the width the title needed. Flexbox's max-width has
+     no such step: it resolves against the (well-defined) flex container,
+     with none of the leftover-space fight, so the title keeps the tag's
+     unused share. The meta line's flex-basis:100% forces it past what's
+     left on the title+tag line, wrapping it onto its own row below. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--bs-space-2);
+  row-gap: 2px;
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-3) var(--bs-space-2);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-lessoncard--compact .bs-lessoncard__statement {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-lessoncard--compact .bs-tag {
+  /* Capped so a long claim-path scope tag cannot shrink below half the row
+     and still read the title it sits beside. */
+  flex: 0 1 auto;
+  max-width: 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-lessoncard--compact .bs-lessoncard__meta {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+}
+/* LessonsPage.vue's per-tab list: a plain <ul> wrapping one LessonCard per
+   row, so the list reads as a list to assistive tech without pulling in a
+   Table (there is no tabular data left to line up into columns). */
+.bs-lessoncard-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* Phone rows (ds-review.html .mlist): one bordered box instead of a gap
+   between cards, since each row is now a flat line rather than a card. */
+.bs-lessoncard-list--compact {
+  gap: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  overflow: hidden;
+}
+.bs-lessoncard-list--compact li:last-child .bs-lessoncard--compact {
+  border-bottom: none;
+}
+
+/* SessionRow (ds-spec.md §4.6): a history-list row, same clickable-button
+   switch as .bs-lessoncard. */
+.bs-sessionrow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  width: 100%;
+  min-height: var(--bs-touch);
+  text-align: left;
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  padding: var(--bs-space-3);
+  font: inherit;
+  color: inherit;
+}
+.bs-sessionrow--clickable {
+  cursor: pointer;
+}
+.bs-sessionrow--clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+/* Same non-accent selected cue as SegmentedControl's aria-current='page'
+   (§1.9 accent budget): --bs-surface-selected, no accent fill. aria-current
+   here is the boolean "true" form, not "page" — this is a list of buttons
+   that open a detail section below, not a set of page links. */
+.bs-sessionrow--selected {
+  background: var(--bs-surface-selected);
+}
+.bs-sessionrow__title {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-sessionrow__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-sessionrow__laststep {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* AgentBlock (ds-spec.md §4.6): one block per role in the session detail
+   view, replacing the old VueFlow canvas node entirely. */
+.bs-agentblock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-agentblock__role {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+  margin: 0;
+}
+.bs-agentblock__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* Fixed column layout (title, then one meta line) rather than a single
+   flex-wrap row: width-dependent wrapping put the badge on a second line
+   for some rows and not others, depending on how long the token text
+   happened to be at that width. A column has only one place for each part
+   to land, at any width. */
+.bs-agentblock__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+}
+.bs-agentblock__doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-agentblock__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-width: 0;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+/* Only the token text gives up width: time and the badge keep their own
+   size, whatever the token text's length. */
+.bs-agentblock__meta > :not(.bs-agentblock__tokens) {
+  flex-shrink: 0;
+}
+.bs-agentblock__tokens {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* SessionsPage (ds-spec.md §4.6): the history list and the selected run's
+   detail section. */
+.bs-sessions__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bs-sessions__quiet {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-sessions__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */
@@ -1266,6 +1505,13 @@ a:hover {
 .bs-tabs__tab[aria-selected='true'] {
   color: var(--bs-text);
   border-bottom-color: var(--bs-accent);
+}
+/* DS8 PR2: "Pending review (0)" / "Closed (28)" — the count rides the tab
+   label itself rather than a separate Tag, so it keeps the tab's own
+   selected/unselected colour instead of acquiring a tone of its own. */
+.bs-tabs__count {
+  margin-left: var(--bs-space-1);
+  font-weight: var(--bs-font-weight-normal);
 }
 .bs-tabs__tab:focus-visible {
   outline: none;

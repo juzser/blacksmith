@@ -11,6 +11,7 @@ import {
   formatMeasuredTokens,
   formatRelative,
   formatRelativeVerbose,
+  formatShortDate,
   formatShortDateTime,
   pluralize,
   shortTaskId,
@@ -377,6 +378,23 @@ describe('lib/format.ts formatShortDateTime()', () => {
 
   it('returns the raw input for an unparseable date', () => {
     expect(formatShortDateTime('not-a-date')).toBe('not-a-date');
+  });
+});
+
+// LessonCard's "learned from <session> on <date>" (ds-review.html ~1510:
+// "7 Sep" -- day + short month, no year, no leading zero). Scoped to
+// LessonCard only; formatDate() keeps its DD/MM/YYYY shape for other pages.
+describe('lib/format.ts formatShortDate()', () => {
+  it('renders day (no leading zero) and short month, no year', () => {
+    expect(formatShortDate('2026-09-07T00:00:00.000Z')).toBe('7 Sep');
+  });
+
+  it('does not zero-pad a single-digit day', () => {
+    expect(formatShortDate('2026-01-05T03:07:00')).toBe('5 Jan');
+  });
+
+  it('returns the raw input for an unparseable date', () => {
+    expect(formatShortDate('not-a-date')).toBe('not-a-date');
   });
 });
 
