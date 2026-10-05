@@ -37,7 +37,7 @@ export function errorsOverTimeTakeaway(days: DayCount[], dominantGroupLabel?: st
   const suffix = dominantGroupLabel ? `, mostly ${dominantGroupLabel}` : '';
 
   if (measured.length === 1) {
-    const only = measured[0];
+    const only = measured[0] as DayCount;
     return `${only.count} error${only.count === 1 ? '' : 's'} on ${only.day}${suffix}.`;
   }
 
@@ -68,7 +68,7 @@ export function errorsByGroupTakeaway(groups: GroupCount[]): string {
   if (measured.length === 0 || total === 0) return 'No errors recorded in this window.';
 
   const sorted = [...measured].sort((a, b) => b.count - a.count);
-  const top = sorted[0];
+  const top = sorted[0] as GroupCount;
   if (sorted.length === 1) return `All errors are ${top.label}.`;
 
   const pct = Math.round((top.count / total) * 100);

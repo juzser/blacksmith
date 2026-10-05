@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ErrorClassSummary } from '../src/lib/api.js';
-import { errorClassCardView, severityShortLabel } from '../src/lib/errorClassCards.js';
+import {
+  errorClassCardView,
+  humanizeClass,
+  severityShortLabel,
+} from '../src/lib/errorClassCards.js';
 
 function summary(overrides: Partial<ErrorClassSummary> = {}): ErrorClassSummary {
   return {
@@ -22,6 +26,14 @@ describe('severityShortLabel', () => {
     expect(severityShortLabel('S1-stop-the-line')).toBe('stop the line');
     expect(severityShortLabel('S2-major')).toBe('major');
     expect(severityShortLabel('S4-nit')).toBe('nit');
+  });
+});
+
+describe('humanizeClass', () => {
+  it('reads dashes as spaces and capitalizes the first word only, also used for group ids', () => {
+    expect(humanizeClass('context-overrun')).toBe('Context overrun');
+    expect(humanizeClass('economy')).toBe('Economy');
+    expect(humanizeClass('')).toBe('');
   });
 });
 

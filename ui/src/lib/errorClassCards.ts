@@ -17,7 +17,8 @@ export function severityShortLabel(severity: string): string {
   return severity.replace(/^S\d-/, '').split('-').join(' ');
 }
 
-function humanizeClass(kebab: string): string {
+/** "context-overrun" -> "Context overrun" (also used for error group ids). */
+export function humanizeClass(kebab: string): string {
   if (!kebab) return kebab;
   const words = kebab.split('-').join(' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
