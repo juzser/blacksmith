@@ -98,8 +98,9 @@ const historyLoading = ref(true);
 const historyError = ref<string | null>(null);
 // Item 3: day headers over the History tab's flat event list, same rule as
 // Activity's CausalTimelineList — the list is already in the server's own
-// order (D-243 keeps this page from re-sorting under the operator), so
-// grouping only partitions it into calendar days, it never reorders it.
+// newest-first order (`timeline()`'s paged mode, queries.ts; D-243 keeps
+// this page from re-sorting under the operator), so grouping only
+// partitions it into calendar days, it never reorders it: newest day first.
 const historyDayGroups = computed(() => groupByDay(history.value, new Date().toISOString()));
 
 // DS6 PR3: this tab now renders the same kit TimelineRow as Activity, so it
@@ -266,6 +267,9 @@ function isImageArtifact(a: TaskDetail['artifacts'][number]): boolean {
 function artifactUrl(a: TaskDetail['artifacts'][number]): string {
   return `/api/artifacts/${encodeURIComponent(a.id)}`;
 }
+// `detail.value.artifacts` already comes back newest-first (`taskDetail()`'s
+// `orderBy(desc(artifacts.ts), desc(artifacts.id))`, queries.ts) — a `filter`
+// preserves that order, so neither list needs a sort of its own here.
 const imageArtifacts = computed(() => detail.value?.artifacts.filter(isImageArtifact) ?? []);
 const otherArtifacts = computed(
   () => detail.value?.artifacts.filter((a) => !isImageArtifact(a)) ?? [],

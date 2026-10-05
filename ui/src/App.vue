@@ -29,7 +29,7 @@ import {
   type SessionOption,
   sessionOptions,
 } from './lib/sessionScope.js';
-import { NAV_ITEMS } from './nav.js';
+import { NAV_ITEMS, navRoute } from './nav.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -139,7 +139,10 @@ function selectNav(id: string) {
   const item =
     NAV_ITEMS.find((it) => it.id === id) ??
     NAV_ITEMS.flatMap((it) => it.children ?? []).find((c) => c.id === id);
-  if (item?.route) router.push(item.route);
+  // A parent with children has no page of its own -- navRoute resolves it to
+  // the first child's route (operator decision 2026-10-05) instead of
+  // duplicating that fallback here.
+  if (item) router.push(navRoute(item));
   sheetOpen.value = false;
 }
 
