@@ -307,13 +307,15 @@ test.describe('Work switcher', () => {
   // against the content below it (see
   // ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-light.png).
   test.describe('view switch sizing and spacing (operator report 2026-10-05)', () => {
-    test('desktop: the switch is no taller than the Kanban toolbar\'s Refresh button', async ({
+    test("desktop: the switch is no taller than the Kanban toolbar's Refresh button", async ({
       page,
     }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto('/work/kanban');
       const segctl = page.locator('.bs-segctl');
-      const refresh = page.getByRole('button', { name: 'Refresh' });
+      const refresh = page
+        .locator('.bs-kanban-page__toolbar')
+        .getByRole('button', { name: 'Refresh', exact: true });
       await expect(segctl).toBeVisible();
       await expect(refresh).toBeVisible();
 
