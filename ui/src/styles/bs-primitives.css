@@ -2601,6 +2601,16 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-1);
 }
+/* Review follow-up (S2, 2026-10-05): text-overflow does not apply to text
+   sitting directly inside a flex container (.bs-tag/.bs-agent-chip are
+   display: inline-flex), so the label was hard-clipped with no "…". Wrap
+   the label in its own span so the ellipsis actually renders. */
+.bs-agent-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .bs-kanban-card {
   display: flex;
@@ -2621,12 +2631,70 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
-.bs-kanban-card__row--1 {
-  justify-content: space-between;
-}
+/* Review follow-up (S4, 2026-10-05): space-between stretched row 1 across
+   the card's full width, so on a card whose AgentChip renders nothing (it
+   emits no element at all, not an empty one — see AgentChip.vue's `v-if`)
+   the copy IconButton — the only element left between the id and the Quote
+   trigger — floated to the middle of the card instead of sitting right
+   after the id. The row's own gap (from .bs-kanban-card__row) already keeps
+   id and copy button adjacent; the Quote trigger below gets margin-left:
+   auto instead, so it still pins to the right edge whether or not a chip
+   renders. */
+/* Operator fix 2026-10-05: a long AgentChip label used to squeeze the id
+   into a column one hyphen segment wide ("task-" / "a-" / "skill-" / …).
+   The id now keeps one line and takes the row's remaining space; the chip
+   below shrinks (min-width: 0) and ellipsises its label instead of pushing
+   the id out, and the Quote icon (flex: none below) never shrinks. The grow rule
+   is scoped to the Kanban row: WaveTaskCard on Roadmap shares the id
+   class, and an unscoped grow pushed its title away from the id.
+   Operator follow-up fix 2026-10-05: that grow rule then made the id the
+   row's "wins the space" element, so a *short* id ("task-3") still got
+   clipped to "tas…" once the new copy-id button left row 1 even less
+   room. The id must stay readable in full for a short id; the AgentChip
+   label is the thing allowed to ellipsise first. Id and chip swap
+   flex-grow roles: the id caps at 50% and only shrinks past its content's
+   natural width (a short id never reaches that cap); the chip takes
+   whatever the id/buttons leave and ellipsises via its own
+   .bs-agent-chip__text rule. Copy button and Quote icon (flex: none)
+   never shrink either way. */
 .bs-kanban-card__id {
+  white-space: nowrap;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
+}
+.bs-kanban-card__row--1 .bs-kanban-card__id {
+  /* flex-shrink: 0, not 1 — the flexbox shrink algorithm distributes the
+     deficit proportionally to each shrinkable item's flex-basis, so with
+     shrink:1 the id (small basis) was still losing width to the chip (huge
+     basis once its label includes "- a nudge may help") even though the
+     chip is the one meant to give way. An inflexible item's rendered size
+     is its flex-basis clamped to max-width regardless of its siblings, so
+     a short id renders at its full content width (well under the 50% cap)
+     and a long id still clips at the cap — only the chip shrinks. */
+  flex: 0 0 auto;
+  max-width: 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* ds-review.html mock's `.mono` row-1 id: mono font, faintest text
+     colour. Scoped to row 1 rather than the shared `.bs-kanban-card__id`
+     base rule, which WaveTaskCard also uses and is out of this slice's
+     claim. */
+  color: var(--bs-text-subtlest);
+  font-family: var(--bs-font-mono);
+}
+.bs-kanban-card__row--1 .bs-agent-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.bs-kanban-card__row--1 .bs-tooltip-trigger {
+  flex: none;
+}
+/* Only the Quote trigger is pushed to the right edge: IconButton wraps the
+   copy button in a Tooltip too, so the shared trigger class must not carry
+   the auto margin or the copy button leaves the id's side. */
+.bs-kanban-card__row--1 .bs-kanban-card__quote {
+  margin-left: auto;
 }
 .bs-kanban-card__title {
   margin: 0;
@@ -2745,6 +2813,10 @@ summary.bs-inbox__group-head {
 }
 .bs-kanban-col {
   flex: 0 0 280px;
+  /* A flex item's automatic min-width is its min-content width, so one
+     card's nowrap id or AgentChip label would stretch the whole column past
+     280px. Zero lets the card's own ellipsis rules do the clipping. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-2);
