@@ -1,5 +1,5 @@
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 // DS6 PR4b round 3: fixture builder for the live-updates / session-divider
 // e2e tests below. Shape matches TimelineEntry (api.ts) — sessionId/Title are
@@ -119,6 +119,26 @@ test.describe('Activity', () => {
 
     await allTab.click();
     await expect(page).not.toHaveURL(/kind=/);
+  });
+
+  // S2 fix: 'error' is the 7th of 10 phone tabs, past the tab strip's
+  // visible width at 390px — scrolling it into view on mount is the only
+  // way the screen says which filter is active.
+  test('phone layout scrolls the active "Error" tab into view on load', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity?kind=error');
+    const tablist = page.getByRole('tablist', { name: 'Filter' });
+    const errorTab = tablist.getByRole('tab', { name: 'Error', exact: true });
+    await expect(errorTab).toHaveAttribute('aria-selected', 'true');
+
+    const listBox = await tablist.boundingBox();
+    const tabBox = await errorTab.boundingBox();
+    expect(listBox).not.toBeNull();
+    expect(tabBox).not.toBeNull();
+    if (listBox && tabBox) {
+      expect(tabBox.x).toBeGreaterThanOrEqual(listBox.x - 1);
+      expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1);
+    }
   });
 
   test('desktop layout keeps the chip row and Refresh, no tablist', async ({ page }) => {
@@ -780,6 +800,10 @@ test.describe('Activity', () => {
         await page.goto('/activity?kind=errors');
         await expect(page.locator('.bs-activity-errors')).toBeVisible();
         await settleForShot(page, page.locator('.bs-activity-errors'));
+        // Mobile's fixed viewport only fits the two charts — grow it to the
+        // page's real height first, so the class cards and feed below them
+        // land in the PNG too (S3: they were never captured on phone).
+        if (vpName === 'mobile') await growToPageHeight(page);
         await shoot(page, `activity-errors-${vpName}-${theme}`);
       });
     }

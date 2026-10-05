@@ -23,6 +23,24 @@ function sum(ns: number[]): number {
   return ns.reduce((a, b) => a + b, 0);
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Inclusive day span between the first and last `day` of the series — the
+ * window the chart actually covers, not an assumed one. */
+function spanDays(days: DayCount[]): number {
+  if (days.length < 2) return days.length;
+  const first = days[0] as DayCount;
+  const last = days[days.length - 1] as DayCount;
+  const diff = Math.round((Date.parse(last.day) - Date.parse(first.day)) / MS_PER_DAY);
+  return diff + 1;
+}
+
+/** "this week" only for an actual 7-day span, the real count otherwise. */
+function spanLabel(days: DayCount[]): string {
+  const span = spanDays(days);
+  return span === 7 ? 'this week' : `over the last ${span} days`;
+}
+
 /**
  * One sentence for the errors-over-time chart: describes the trend across
  * the window (rising, falling, flat) and, when a dominant error group is
@@ -41,10 +59,11 @@ export function errorsOverTimeTakeaway(days: DayCount[], dominantGroupLabel?: st
     return `${only.count} error${only.count === 1 ? '' : 's'} on ${only.day}${suffix}.`;
   }
 
+  const span = spanLabel(days);
   const mid = Math.floor(measured.length / 2);
   const firstHalf = sum(measured.slice(0, mid).map((d) => d.count));
   const secondHalf = sum(measured.slice(mid).map((d) => d.count));
-  if (firstHalf === secondHalf) return `Errors held steady this week${suffix}.`;
+  if (firstHalf === secondHalf) return `Errors held steady ${span}${suffix}.`;
 
   const direction = secondHalf < firstHalf ? 'fell' : 'rose';
   const ratio = firstHalf === 0 ? null : Math.abs(secondHalf - firstHalf) / firstHalf;
@@ -54,7 +73,7 @@ export function errorsOverTimeTakeaway(days: DayCount[], dominantGroupLabel?: st
       : ratio !== null
         ? `by about ${Math.round(ratio * 100)}%`
         : `to ${secondHalf}`;
-  return `Errors ${direction} ${amount} this week${suffix}.`;
+  return `Errors ${direction} ${amount} ${span}${suffix}.`;
 }
 
 /**

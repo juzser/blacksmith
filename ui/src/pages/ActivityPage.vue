@@ -9,7 +9,7 @@
 // old raw Errors table and its detail Dialog were already removed in an
 // earlier commit (48f2647) — there was nothing left to remove here.
 import { ArrowUp } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Banner from '../components/ds/Banner.vue';
 import EmptyState from '../components/ds/EmptyState.vue';
@@ -224,6 +224,25 @@ function onPhoneKindKeydown(event: KeyboardEvent) {
   selectPhoneKind(nextId as (typeof PHONE_KIND_TABS)[number]);
   document.getElementById(`activity-kind-tab-${nextId}`)?.focus();
 }
+
+// S2: the tab strip scrolls horizontally (`.bs-tabs__list`, overflow-x:
+// auto) and the active tab can land past the right edge on mount or after a
+// filter change from elsewhere (e.g. the URL), leaving no on-screen signal
+// of which kind is selected. Scroll it back into view every time the
+// selection changes, once the DOM has the new `aria-selected` state.
+watch(
+  [kindFilter, isPhoneWidth],
+  async () => {
+    if (!isPhoneWidth.value) return;
+    await nextTick();
+    const id = kindFilter.value ?? 'all';
+    document.getElementById(`activity-kind-tab-${id}`)?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  },
+  { immediate: true },
+);
 
 async function load() {
   const gen = feedGen.bump();
@@ -478,7 +497,7 @@ function becauseOf(promptId: string) {
               :variant="severityKitTone(mix.severity).variant"
               size="sm"
             >
-              {{ mix.label }}: {{ mix.count }}
+              {{ mix.pillLabel }}
             </Tag>
           </div>
           <div class="bs-activity-errors__card-footer">
@@ -487,7 +506,7 @@ function becauseOf(promptId: string) {
               v-if="card.trend7d.length > 0"
               :values="card.trend7d"
               label="7-day trend"
-              :takeaway="`${card.trend7d.reduce((a, b) => a + b, 0)} errors in the last 7 days.`"
+              :takeaway="card.trendCaption"
             />
           </div>
         </Card>

@@ -24,31 +24,31 @@ describe('errorsOverTimeTakeaway', () => {
     );
   });
 
-  it('reads a flat trend as steady', () => {
+  it('reads a flat trend over a span other than 7 days by that span', () => {
     expect(
       errorsOverTimeTakeaway([
         { day: '2026-10-01', count: 3 },
         { day: '2026-10-02', count: 3 },
       ]),
-    ).toBe('Errors held steady this week.');
+    ).toBe('Errors held steady over the last 2 days.');
   });
 
-  it('describes a roughly halved count as "fell by half"', () => {
+  it('describes a roughly halved count as "fell by half" over its real span', () => {
     const days = [
       { day: '2026-09-29', count: 10 },
       { day: '2026-09-30', count: 10 },
       { day: '2026-10-01', count: 5 },
       { day: '2026-10-02', count: 5 },
     ];
-    expect(errorsOverTimeTakeaway(days)).toBe('Errors fell by half this week.');
+    expect(errorsOverTimeTakeaway(days)).toBe('Errors fell by half over the last 4 days.');
   });
 
-  it('describes a rise with a rounded percentage', () => {
+  it('describes a rise with a rounded percentage over its real span', () => {
     const days = [
       { day: '2026-09-29', count: 10 },
       { day: '2026-10-01', count: 20 },
     ];
-    expect(errorsOverTimeTakeaway(days)).toBe('Errors rose by about 100% this week.');
+    expect(errorsOverTimeTakeaway(days)).toBe('Errors rose by about 100% over the last 3 days.');
   });
 
   it('appends the dominant group when one is given', () => {
@@ -57,8 +57,38 @@ describe('errorsOverTimeTakeaway', () => {
       { day: '2026-10-01', count: 5 },
     ];
     expect(errorsOverTimeTakeaway(days, 'context window runs')).toBe(
-      'Errors fell by half this week, mostly context window runs.',
+      'Errors fell by half over the last 3 days, mostly context window runs.',
     );
+  });
+
+  it('says "this week" only when the span is exactly 7 days', () => {
+    const sevenDays = [
+      { day: '2026-09-25', count: 10 },
+      { day: '2026-09-26', count: 10 },
+      { day: '2026-09-27', count: 10 },
+      { day: '2026-09-28', count: 2 },
+      { day: '2026-09-29', count: 2 },
+      { day: '2026-09-30', count: 2 },
+      { day: '2026-10-01', count: 2 },
+    ];
+    expect(errorsOverTimeTakeaway(sevenDays)).toMatch(/this week\.$/);
+  });
+
+  it('says "over the last N days" for a 2-day series', () => {
+    expect(
+      errorsOverTimeTakeaway([
+        { day: '2026-10-01', count: 1 },
+        { day: '2026-10-02', count: 5 },
+      ]),
+    ).toMatch(/over the last 2 days\.$/);
+  });
+
+  it('says "over the last 30 days" for a 30-day series', () => {
+    const days = [
+      { day: '2026-09-01', count: 10 },
+      { day: '2026-09-30', count: 20 },
+    ];
+    expect(errorsOverTimeTakeaway(days)).toMatch(/over the last 30 days\.$/);
   });
 
   it('excludes an unmeasured (non-finite) count from the trend instead of reading it as zero', () => {
