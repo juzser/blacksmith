@@ -1,10 +1,9 @@
 /* Component CSS for the kit under ui/src/components/kit/ (ds-spec.md §2.1,
-   §2.5) — same two-file shape as the HDS-derived kit it sits beside
-   (ui/src/components/ds/ + ds-components.css) while that kit is still in
-   use by the old pages (§0/§5, "DS0 ... additive and inert"): bs-* class
-   names, bs-* tokens only, one stylesheet per kit so `lint_hardcodes.py`
-   and `check_tokens.py` can point at each independently. No page imports
-   ui/src/components/kit/ yet — see ui/docs/DESIGN.md, "Provenance". */
+   §2.5) — same two-file shape as the old HDS-derived kit it replaced
+   (ui/src/components/ds/ + ds-components.css, retired in DS9 part B):
+   bs-* class names, bs-* tokens only, one stylesheet per kit so
+   `lint_hardcodes.py` and `check_tokens.py` can point at it independently.
+   See ui/docs/DESIGN.md, "Provenance". */
 
 /* Dense-UI link default (ds-spec.md §1.1 line 131): this bare `a` selector
    applies to every anchor in the app, not just dense-UI ones — it underlines
@@ -732,11 +731,51 @@ a:hover {
 /* DS6 PR4b round 2 item 2: an invisible IntersectionObserver target (top or
    bottom sentinel) -- not a visible element, it only has to occupy a box
    the observer can see enter the viewport. Migrated from ds-components.css
-   (fix round item 8: ds-components.css is deleted in DS9). */
+   (fix round item 8: ds-components.css was deleted in DS9 part B). */
 .activity-sentinel {
   height: 1px;
 }
 
+/* Activity toolbar (DS6 PR3 r2, items 3-4; ds-review.html's .fchip/.fchip.on):
+   the kind filter is a row of pill-shaped toggles, not bare ghost text.
+   Page-scoped classes on the Button rather than a Button variant change, so
+   no other Button consumer's look shifts. aria-pressed is already set on
+   these buttons (ActivityPage.vue). Migrated from ds-components.css (fix
+   round item 8: ds-components.css was deleted in DS9 part B). */
+.activity-kind-filter .bs-btn {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-surface-raised);
+  color: var(--bs-text-subtle);
+}
+.activity-kind-filter .bs-btn[aria-pressed='true'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+  border-color: var(--bs-border-bold);
+  font-weight: var(--bs-font-weight-medium);
+}
+/* "Expand all" is a desktop-only convenience (Refresh stays, same as every
+   other page's phone toolbar); and the chip row must not wrap into
+   one-chip-per-line columns fighting the button group beside it. */
+@media (max-width: 640px) {
+  .activity-toolbar {
+    flex-wrap: wrap;
+  }
+  .activity-toolbar__expand-all.bs-btn {
+    display: none;
+  }
+}
+
+/* Causal timeline (gap component §6.2.1). Day separator above a day's rows
+   (ds-review.html's `.day`), flush with the feed's own left edge -- no left
+   margin. Migrated from ds-components.css (fix round item 8: ds-components.css
+   was deleted in DS9 part B). */
+.timeline-day {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtlest);
+  margin: var(--bs-space-5) 0 var(--bs-space-2);
+}
 /* Fix round item 7 (ds-components.css's `.timeline-day`): replaces
    `.timeline-day:first-child { margin-top: 0 }`, which stopped matching
    once ActivityPage.vue started rendering a top sentinel and the
@@ -745,6 +784,16 @@ a:hover {
    Migrated here per item 8 since this PR depends on it. */
 .timeline-day--first {
   margin-top: 0;
+}
+/* A raised card frame around a day's rows (ds-review.html's `.feed`). The
+   row-to-row seam (old `.ev` border-bottom) is NOT ported here --
+   `.bs-timeline-row` already carries its own `border-bottom` plus a
+   `:last-child` override (above), so the old seam rule would be redundant. */
+.timeline-feed {
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  overflow: hidden;
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
@@ -1941,6 +1990,26 @@ a:hover {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+/* Per-page content frame: side gutter, vertical rhythm between a page's own
+   sections, and a width cap so a wide viewport doesn't stretch text-heavy
+   pages edge to edge. 1400px matches the old kit's --ds-content-max; no bs-
+   token names it yet (.bs-home, the only other page-width cap today, is its
+   own narrower 960px for a different reason -- see its own comment). The
+   full-bleed modifier is for pages (Flow/Roadmap canvases) that need the
+   whole viewport width. Migrated from ds-components.css (fix round item 8:
+   ds-components.css was deleted in DS9 part B). */
+.app-page {
+  padding: var(--bs-space-6);
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-6);
+}
+.app-page--full-bleed {
+  max-width: none;
 }
 
 /* ---- SidebarNav (§2.2), collapsible rail + off-canvas Sheet ---- */

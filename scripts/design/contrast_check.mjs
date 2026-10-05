@@ -2,76 +2,19 @@
 // Phase 6b fix-round (uiux S2 #1, #4 + code review #14): a small, repo-
 // specific contrast gate — pulled forward from the four generic design-
 // system gate scripts (none wired yet, ui/docs/DESIGN.md's "Gates wired"
-// table) because it would have auto-caught both #1 (IdentityChip text
-// contrast) and #4 (Flow edge stroke contrast) before they shipped.
+// table) because it would have auto-caught #1 (IdentityChip text contrast)
+// and #4 (Flow edge stroke contrast) before they shipped, back when the
+// dashboard still ran the old `ds-` kit. DS9 part B retired that kit
+// (ui/src/styles/ds-tokens.css, ui/src/components/ds/) along with the
+// pages it checked (IdentityChip/FlowPage/LiveStatus), so the ds- side of
+// this gate is gone with them — only the bs- kit's pairs below remain.
 //
 // Same WCAG 2.2 relative-luminance formula as
 // knowledge/design-system/pack/scripts/contrast.py (re-implemented here in
 // JS, not shelled out to Python, so this repo's gate has no runtime
 // dependency outside its own toolchain — the READING is still verbatim
-// from ui/src/styles/ds-tokens.css, never a second hardcoded copy of the
+// from ui/src/styles/bs-tokens.css, never a second hardcoded copy of the
 // hex values, so this script can't silently drift from the real tokens).
-//
-// Checks:
-//   1. IdentityChip.vue: each of the 8 --ds-chart-N tokens, used ONLY as a
-//      border/dot colour (a UI graphic, 3:1 floor) against --ds-surface,
-//      in both themes.
-//   2. FlowPage.vue: --ds-text-subtlest (the edge stroke colour) against
-//      --ds-surface-sunken (the canvas background), a UI graphic, 3:1
-//      floor, in both themes.
-//   3. Operator directive 1 (Phase 6b round 3): FlowPage.vue's new
-//      .flow-node__live-dot (running-task pulsing indicator) — --ds-info-
-//      bold as a UI graphic against --ds-surface-sunken, both themes.
-//      Not the identity-accent chart palette (it's the existing semantic
-//      "info" tone already used for the live node border), included here
-//      because it's a new colour-against-canvas pairing this round.
-//   4. Phase 6b round 4: OverviewPage.vue's Live-agents compact grid reuses
-//      the same --ds-info-bold pulsing-dot pattern, but against
-//      --ds-surface-raised (a Card's own background), not
-//      --ds-surface-sunken (Flow's canvas) — a new background pairing.
-//   5. Phase 6b round 5: OverviewPage.vue's "Needs you" Highlight switched
-//      from tint="amber" to tint="lilac" (--ds-discovery-bold background,
-//      --ds-text-on-bold eyebrow/title text) — real body TEXT, not a UI
-//      graphic, so this one check uses the 4.5:1 AA normal-text floor
-//      instead of the 3:1 UI-graphics floor the rest of this file checks.
-//   6. Phase 6b round 7: LiveStatus.vue's freshness dot — three new
-//      semantic colours as UI graphics against --ds-surface (the page
-//      background, since the indicator sits in the PageHeader's actions
-//      slot, not on a Card or a canvas): success-bold (live),
-//      warning-bold (lagging), danger-bold (stale). Colour is never the
-//      only channel there (the state word is in the adjacent label), but
-//      the dot still has to be perceivable on its own.
-//      RoadmapPage.vue's new VueFlow canvas needs no new pair: its edge
-//      stroke and background are the exact --ds-text-subtlest on
-//      --ds-surface-sunken pairing check 2 already covers.
-//   7. Phase 6b round 8: .roadmap-node--live's border and its new pulsing
-//      ring are --ds-info-bold. The OUTWARD side (ring over the canvas) is
-//      already check 3's --ds-info-bold on --ds-surface-sunken, but the
-//      INWARD side — that same border against the node's own --ds-surface —
-//      has never been measured, on Roadmap or on Flow (.flow-node--live has
-//      carried it since round 3). Added here because round 8 makes that
-//      border the static, reduced-motion-safe half of a state signal, so it
-//      has to be perceivable on its own rather than propped up by the pulse.
-//   8. Phase 6b round 11: FlowPage.vue's node moved onto --ds-surface-raised
-//      and gained a mono task-id line, and its wave band became a label node
-//      sitting directly on --ds-surface-sunken. Checks 2 and 4 cover those
-//      same token pairs only at the 3:1 UI-graphics floor, which is not the
-//      floor that applies to text — so all three are re-checked here at
-//      4.5:1. They pass, but that is a measurement, not an assumption.
-//   9. Shell liveness round: SidebarNav.vue gained arrival badges
-//      (ui/src/lib/navBadges.ts). Two new pairings — the expanded pill's
-//      --ds-text-on-bold count on --ds-info-bold, which is real TEXT and so
-//      takes the 4.5:1 floor; and the collapsed rail's dot, --ds-info-bold as
-//      a UI graphic against --ds-surface-sunken. The dot's ring is painted in
-//      that same sunken surface precisely so this is the pair that applies:
-//      the dot can sit on an active item, whose --ds-primary-subtle tint puts
-//      info-bold at 2.84:1 in dark theme, under the floor. --ds-info-bold is
-//      also why the badge is not --ds-primary: identical in light theme, but
-//      --ds-primary lightens in dark and takes white text to 3.68:1.
-//      The same round put the factory-pulse readout in the topbar
-//      (--ds-text-subtle on --ds-surface, App.vue). It is small text that
-//      reports a real fact, so it is measured at the text floor rather than
-//      waved through as decoration.
 //
 // Exit 0 = every pair clears its floor. Exit 1 otherwise (prints the
 // failing pair so it's actionable, not just "gate failed").
@@ -81,46 +24,13 @@ import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
-const TOKENS_PATH = path.join(REPO_ROOT, 'ui/src/styles/ds-tokens.css');
-// DS0 (ds-spec.md §0/§5): both kits are checked in this PR — old pages still
-// import ds-tokens.css until DS9 drops it, so this file gains a second,
-// independent parser/check-list for the new bs- palette rather than
-// replacing the ds- one.
 const BS_TOKENS_PATH = path.join(REPO_ROOT, 'ui/src/styles/bs-tokens.css');
-
-function parseThemeBlocks(css) {
-  // ":root { ... }" = light theme; ".dark { ... }" = dark theme. Chart
-  // tokens live in a ":root,\n.dark { ... }" shared block (same values both
-  // themes) — parsed once and reused for both theme lookups below.
-  const light = {};
-  const dark = {};
-  const shared = {};
-
-  const blockRe = /(:root(?:,\s*\.dark)?|\.dark)\s*\{([^}]*)\}/gs;
-  let m = blockRe.exec(css);
-  while (m) {
-    const selector = m[1];
-    const body = m[2];
-    const varRe = /--ds-([\w-]+):\s*(#[0-9a-fA-F]{3,8})\s*;/g;
-    const target = selector.includes(',') ? shared : selector === '.dark' ? dark : light;
-    let vm = varRe.exec(body);
-    while (vm) {
-      target[vm[1]] = vm[2];
-      vm = varRe.exec(body);
-    }
-    m = blockRe.exec(css);
-  }
-  return {
-    light: { ...shared, ...light },
-    dark: { ...shared, ...dark },
-  };
-}
 
 function parseBsThemeBlocks(css) {
   // bs-tokens.css keys its dark palette on `:root.dark` — the class
-  // useTheme.ts actually toggles on <html>, the same mechanism ds-tokens.css
-  // uses (`.dark {}`, no OS media-query fallback, no `data-theme` attribute;
-  // see that file's own header comment). One block, single source of truth.
+  // useTheme.ts actually toggles on <html>, the same mechanism the old
+  // kit's ds-tokens.css used (`.dark {}`, no OS media-query fallback, no
+  // `data-theme` attribute). One block, single source of truth.
   function parseBlock(blockRe) {
     const m = blockRe.exec(css);
     if (!m) return {};
@@ -174,8 +84,6 @@ function contrast(fgHex, bgHex) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-const css = readFileSync(TOKENS_PATH, 'utf8');
-const { light, dark } = parseThemeBlocks(css);
 const bsCss = readFileSync(BS_TOKENS_PATH, 'utf8');
 const { light: bsLight, dark: bsDark } = parseBsThemeBlocks(bsCss);
 
@@ -184,61 +92,23 @@ const TEXT_FLOOR = 4.5;
 let failures = 0;
 const rows = [];
 
-function check(label, fgKey, bgKey, theme, tokens, floor = UI_GRAPHIC_FLOOR, kind = 'UI graphic', prefix = 'ds') {
+function checkBs(label, fgKey, bgKey, theme, tokens, floor = UI_GRAPHIC_FLOOR, kind = 'UI graphic') {
   const fg = tokens[fgKey];
   const bg = tokens[bgKey];
   if (!fg || !bg) {
     failures += 1;
-    rows.push(`FAIL ${label} (${theme}): token not found (--${prefix}-${fgKey} or --${prefix}-${bgKey})`);
+    rows.push(`FAIL ${label} (${theme}): token not found (--bs-${fgKey} or --bs-${bgKey})`);
     return;
   }
   const ratio = contrast(fg, bg);
   const pass = ratio >= floor;
   if (!pass) failures += 1;
   rows.push(
-    `${pass ? 'PASS' : 'FAIL'} ${label} (${theme}): --${prefix}-${fgKey} ${fg} on --${prefix}-${bgKey} ${bg} = ${ratio.toFixed(2)}:1 (need ${floor}:1 ${kind})`,
+    `${pass ? 'PASS' : 'FAIL'} ${label} (${theme}): --bs-${fgKey} ${fg} on --bs-${bgKey} ${bg} = ${ratio.toFixed(2)}:1 (need ${floor}:1 ${kind})`,
   );
 }
 
-function checkBs(label, fgKey, bgKey, theme, tokens, floor = UI_GRAPHIC_FLOOR, kind = 'UI graphic') {
-  check(label, fgKey, bgKey, theme, tokens, floor, kind, 'bs');
-}
-
-for (const [theme, tokens] of [
-  ['light', light],
-  ['dark', dark],
-]) {
-  for (let i = 1; i <= 8; i++) {
-    check(`IdentityChip slot ${i} border/dot`, `chart-${i}`, 'surface', theme, tokens);
-  }
-  check('Flow edge stroke', 'text-subtlest', 'surface-sunken', theme, tokens);
-  check('Flow live-indicator dot', 'info-bold', 'surface-sunken', theme, tokens);
-  // Round 11: the Flow node moved onto --ds-surface-raised and gained a mono
-  // task-id line, and the wave band became a label node sitting directly on
-  // the canvas. All three are TEXT, so 3:1 is not the floor that applies —
-  // --ds-text-subtlest passes both backgrounds at 4.5:1, but only because it
-  // was measured, not assumed.
-  check('Flow node task id', 'text-subtlest', 'surface-raised', theme, tokens, TEXT_FLOOR, 'AA normal text');
-  check('Flow wave label', 'text-subtle', 'surface-sunken', theme, tokens, TEXT_FLOOR, 'AA normal text');
-  check('Flow wave label count', 'text-subtlest', 'surface-sunken', theme, tokens, TEXT_FLOOR, 'AA normal text');
-  check('Overview live-agent dot', 'info-bold', 'surface-raised', theme, tokens);
-  // Round 9: the dot now has three states (lib/liveness.ts agentActivity()),
-  // and the two non-default ones carry meaning by colour, so both need the
-  // 3:1 UI-graphic floor against the card they sit on.
-  check('Overview live-agent dot — stalled', 'warning-bold', 'surface-raised', theme, tokens);
-  check('Overview live-agent dot — unknown', 'text-subtlest', 'surface-raised', theme, tokens);
-  check('Highlight lilac tint text', 'text-on-bold', 'discovery-bold', theme, tokens, TEXT_FLOOR, 'AA normal text');
-  check('LiveStatus dot — live', 'success-bold', 'surface', theme, tokens);
-  check('LiveStatus dot — lagging', 'warning-bold', 'surface', theme, tokens);
-  check('LiveStatus dot — stale', 'danger-bold', 'surface', theme, tokens);
-  check('Live node border/ring (inward)', 'info-bold', 'surface', theme, tokens);
-  check('Nav badge count', 'text-on-bold', 'info-bold', theme, tokens, TEXT_FLOOR, 'AA normal text');
-  check('Nav badge dot (collapsed)', 'info-bold', 'surface-sunken', theme, tokens);
-  check('Topbar factory pulse', 'text-subtle', 'surface', theme, tokens, TEXT_FLOOR, 'AA normal text');
-}
-
-// BS kit (ds-spec.md §1.3's measured-contrast table, DS0 scope). Additive:
-// the ds- loop above is untouched, old pages still use that kit until DS9.
+// BS kit (ds-spec.md §1.3's measured-contrast table, DS0 scope).
 // 'info' is not one of §1.1's 7 status tones — it exists only because
 // Banner's tone prop is info|warning|danger (§2.1) and reuses progress's
 // blue values (bs-tokens.css's own comment on --bs-tone-info-text explains

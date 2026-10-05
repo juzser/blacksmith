@@ -15,12 +15,12 @@
      2. `:root.dark`                     dark theme, one block. Keyed on the
         `.dark` class the app actually toggles (useTheme.ts sets/clears
         `.dark` on <html>, no `data-theme` attribute exists anywhere in this
-        app) — the same mechanism ds-tokens.css uses (`.dark {}`, no OS
-        media-query fallback there either). ds-spec.md §1.2 contradicts
-        itself (heading says `.dark`, body says `data-theme`); `.dark` is
-        chosen because it is what useTheme.ts actually sets, and one block
-        keeps this file and ds-tokens.css from drifting apart the way two
-        near-duplicate blocks in one file already had.
+        app) — the same mechanism the old kit's ds-tokens.css used (`.dark
+        {}`, no OS media-query fallback there either). ds-spec.md §1.2
+        contradicts itself (heading says `.dark`, body says `data-theme`);
+        `.dark` is chosen because it is what useTheme.ts actually sets, and
+        one block avoids the drift two near-duplicate blocks in one file
+        already had.
      3. `prefers-reduced-motion` reset (§1.8).
 
    Every hex value here is deliberately hardcoded — this file is the one

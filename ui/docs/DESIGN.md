@@ -127,16 +127,15 @@ see its own header comment for the rationale).
 
 | Gate | Command | Wired |
 |---|---|---|
-| Hardcode lint | `python3 scripts/design/lint_hardcodes.py ui/src` | yes — `EXCLUDE_FILES` covers both kits' token/component CSS (`ds-tokens.css`/`ds-components.css`/`bs-tokens.css`/`bs-primitives.css`) plus `icons.ts`; escape hatch `ds-allow-hardcode` (unchanged name — a gate-authoring convention, not a token, kept the same for both kits) |
-| Contrast | `node scripts/design/contrast_check.mjs` | yes — reads both `ds-tokens.css` and `bs-tokens.css` and checks pairs from each; the DS0 pairing set covers status-tag text/subtle × 7 tones × 2 themes, the live-indicator dot, roadmap now-line/pulsing dot, the Kanban assignee-chip text, 9 event-kind text/subtle pairs, event stripe/icon vs `--bs-surface-raised` at the 3:1 UI-graphic floor, and Prompt-row text/subtle/link vs `--bs-surface-sunken`, alongside the old kit's still-passing pairs |
+| Hardcode lint | `python3 scripts/design/lint_hardcodes.py ui/src` | yes — `EXCLUDE_FILES` covers the BS kit's token/component CSS (`bs-tokens.css`/`bs-primitives.css`/`bs-base.css`) plus `icons.ts`; escape hatch `ds-allow-hardcode` (unchanged name — a gate-authoring convention, not a token prefix) |
+| Contrast | `node scripts/design/contrast_check.mjs` | yes — reads `bs-tokens.css` and checks pairs from it; the DS0 pairing set covers status-tag text/subtle × 7 tones × 2 themes, the live-indicator dot, roadmap now-line/pulsing dot, the Kanban assignee-chip text, 9 event-kind text/subtle pairs, event stripe/icon vs `--bs-surface-raised` at the 3:1 UI-graphic floor, and Prompt-row text/subtle/link vs `--bs-surface-sunken` |
 | No-emoji | `python3 scripts/design/check_no_emoji.py ui/src` | yes — unchanged; scans by path, not by token/file name, so no bs- adaptation was needed |
-| Token existence | `python3 scripts/design/check_tokens.py ui/src` | yes — `TOKEN_FILES`/`DEFINE_RE`/`JS_DEFINE_RE` accept both `ds-` and `bs-` prefixed tokens; escape hatch `ds-allow-undefined-token` (unchanged name, same convention as above) |
+| Token existence | `python3 scripts/design/check_tokens.py ui/src` | yes — `TOKEN_FILES`/`DEFINE_RE`/`JS_DEFINE_RE` accept `bs-` prefixed tokens; escape hatch `ds-allow-undefined-token` (unchanged name, same convention as above) |
 | Icon-only-control lint | `python3 scripts/design/lint_icon_only.py ui/src` | yes, new in DS0 — flags an `IconButton` call site without a `label`/`:label` and any icon-only `<button>`/`<a>` (rendering a single `<Icon>` and nothing else) without `aria-label`/`:aria-label` |
 | Adherence lint | none vendored | no — still a gap, unchanged from the prior kit (see git history) |
 
-All five wired gates run against **both** kits' files in the same pass —
-`bash scripts/check.sh`'s design-system block did not need to change to add
-the BS kit, only the scripts' own internals did.
+The old `ds-` kit's files were removed in DS9 part B; all five wired gates
+now run against the BS kit's files only.
 
 ## Status → Tag mapping
 
@@ -245,11 +244,10 @@ None of these composables changed for DS0 — the kit swap is presentational.
   explicit `data-theme` attribute", but the app's real toggle
   (`ui/src/composables/useTheme.ts`) sets/clears a `.dark` class on
   `<html>`; no `data-theme` attribute exists anywhere in this codebase.
-  `bs-tokens.css` declares one `:root.dark { ... }` block, matching the
-  mechanism `ds-tokens.css` already uses for the old kit (`.dark {}`, no
-  OS-preference fallback there either) — so a user's explicit light/dark
-  choice is never overridden by their OS setting, and the two kits cannot
-  drift into disagreeing about which selector means "dark".
+  `bs-tokens.css` declares one `:root.dark { ... }` block (the old kit's
+  `ds-tokens.css` used the same `.dark {}` mechanism, no OS-preference
+  fallback there either) — so a user's explicit light/dark choice is never
+  overridden by their OS setting.
 - **Button's `disabled`/`loading` use `aria-disabled` + a click guard, never
   the native `disabled` attribute** — same reasoning `IconButton` already
   documents for its own `disabled?` prop: a natively disabled button drops

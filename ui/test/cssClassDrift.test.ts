@@ -21,15 +21,12 @@ const STYLES = join(SRC, 'styles');
  * legitimately has no rule. Each one was read before being listed here; a
  * name may only join this list with the same evidence.
  *
- * - `ds-sh__left` — SectionHeading.vue. Exists to make the title and the
- *   description one flex item, so `.ds-sh`'s space-between pushes the
- *   action slot to the far edge. Grouping is the whole job.
  * - `bs-btn__label` — kit/Button.vue's label span. It inherits the button's
  *   own flex-row text styling and exists only so its `--hidden` modifier can
  *   toggle `visibility` while the loading spinner sits over it; the span
- *   itself carries no rule of its own, same shape as `ds-sh__left` above.
+ *   itself carries no rule of its own.
  */
-const WRAPPERS_WITHOUT_RULES = ['ds-sh__left', 'bs-btn__label'];
+const WRAPPERS_WITHOUT_RULES = ['bs-btn__label'];
 
 function vueFiles(dir: string): string[] {
   const out: string[] = [];
@@ -87,7 +84,7 @@ describe('every class a template writes resolves to a rule', () => {
   it('finds the rules and the call sites at all, so a rename cannot make this vacuous', () => {
     expect(defined.size).toBeGreaterThan(100);
     expect(sites.length).toBeGreaterThan(100);
-    expect(defined.has('ds-chip')).toBe(true);
+    expect(defined.has('bs-tag')).toBe(true);
   });
 
   it('has no orphan class', () => {
@@ -109,21 +106,5 @@ describe('every class a template writes resolves to a rule', () => {
         styled: false,
       });
     }
-  });
-});
-
-describe('FilterChips clears through the Button primitive', () => {
-  // The "Clear" affordance is spec'd as a ghost Button (design-spec.md §5.2),
-  // and TimelinePage — the one call site — already renders exactly that for
-  // its own "Clear filters". A bare <button> here reached the operator with
-  // no border, no padding, no pointer cursor and the inherited body font,
-  // sitting in a row of small subtle pills (D-229).
-  const src = readFileSync(join(SRC, 'components', 'ds', 'FilterChips.vue'), 'utf8');
-
-  it('renders a Button, not a bare element with an invented class', () => {
-    expect(src).toContain("import Button from './Button.vue'");
-    // `[^>]*` would stop at the `>` inside `v-if="modelValue.length > 0"`.
-    expect(src).toMatch(/<Button[\s\S]{0,160}?@click="emit\('clear'\)"/);
-    expect(src).not.toMatch(/<button[\s\S]{0,160}?@click="emit\('clear'\)"/);
   });
 });

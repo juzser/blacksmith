@@ -1,24 +1,17 @@
 /* ============================================================
-   Blacksmith dashboard — BS kit base layer, ported from ds-tokens.css's
-   own @layer base block so that block can be deleted once every page runs
-   on this kit (DS9 part B) without losing the resets it alone was
-   providing: element-level rules that neither Tailwind's preflight nor
-   bs-primitives.css's class-scoped selectors cover. `a`/`a:hover` are
-   deliberately left out — bs-primitives.css already carries its own
-   unlayered (and intentionally different: underline-on-hover-only,
-   operator 2026-10-02) version, which outranks anything written here
-   regardless of layer order.
+   Blacksmith dashboard — BS kit base layer, ported from the old ds-
+   kit's ds-tokens.css @layer base block so that block could be deleted
+   once every page ran on this kit (DS9 part B) without losing the resets
+   it alone was providing: element-level rules that neither Tailwind's
+   preflight nor bs-primitives.css's class-scoped selectors cover.
+   `a`/`a:hover` are deliberately left out — bs-primitives.css already
+   carries its own unlayered (and intentionally different:
+   underline-on-hover-only, operator 2026-10-02) version, which outranks
+   anything written here regardless of layer order.
 
-   Split into its own file, imported in main.css BEFORE ds-tokens.css —
-   order matters. CSS merges same-named `@layer base` blocks across files
-   into one layer, and at equal specificity the rule that appears LATER in
-   that merged layer wins. Importing this file first means ds-tokens.css's
-   own `@layer base` block (still present, DS9 part A leaves it in place)
-   comes later and wins today, so the live cascade is unchanged while both
-   kits coexist. DS9 part B deletes ds-tokens.css; once it is gone this
-   block is the only one left in the `base` layer and these bs-* values
-   take effect automatically, with no edit needed here — that cascade flip
-   is part B's own visible change, not this one's.
+   DS9 part B deleted ds-tokens.css — this is now the only `@layer base`
+   block left in main.css's import chain, so these bs-* values take
+   effect with no further edit needed here.
    ============================================================ */
 @layer base {
   html {

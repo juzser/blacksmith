@@ -28,10 +28,10 @@ Copied verbatim from the design-system pack this repo ported its kit from
 repo at neither build nor run time. One repo-
 specific addition: EXCLUDE_FILES below, for files this generic scanner
 can't classify correctly:
-  - ui/src/styles/ds-tokens.css   — the vendored TOKEN DEFINITION file
+  - ui/src/styles/bs-tokens.css   — the vendored TOKEN DEFINITION file
     itself (this repo's naming for what the docstring above calls
     "tokens/*.json" — same exception, different filename convention).
-  - ui/src/styles/ds-components.css — the vendored kit's component CSS
+  - ui/src/styles/bs-primitives.css — the vendored kit's component CSS
     (ui/docs/
     DESIGN.md's "Tokens copy"/primitive-inventory declarations), not
     hand-authored app code; auditing its pre-existing token-purity is
@@ -41,12 +41,12 @@ can't classify correctly:
     The px/ms/time regexes below have no way to distinguish SVG path
     syntax from a CSS value; this is vector data, not styling.
   - ui/src/styles/bs-base.css — ported element reset (DS9 part A), same
-    exception as bs-tokens.css/ds-tokens.css above: a vendored base-layer
-    block, not hand-authored app code. Its one non-var literal
+    exception as bs-tokens.css above: a vendored base-layer block, not
+    hand-authored app code. Its one non-var literal
     (`outline: 2px solid …`) is a focus-ring width, not a drifted color.
 Every other file in ui/src is scanned normally — the two apps this repo
-actually authors (ui/src/pages, ui/src/components minus ds/, composables,
-lib) have zero violations as of this commit; new ones fail the gate.
+actually authors (ui/src/pages, ui/src/components, composables, lib) have
+zero violations as of this commit; new ones fail the gate.
 """
 import re
 import sys
@@ -56,8 +56,6 @@ CODE_EXT = {".css", ".scss", ".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte",
             ".swift", ".kt", ".dart", ".html"}
 
 EXCLUDE_FILES = {
-    "ds-tokens.css",
-    "ds-components.css",
     "bs-tokens.css",
     "bs-primitives.css",
     "bs-base.css",
