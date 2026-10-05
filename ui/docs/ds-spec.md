@@ -266,8 +266,8 @@ and the selected chip are 500, never 600; an unread inbox title is 600 and a rea
 500, so unread is the only thing in the row that is bold. Inline `<b>` inside a
 description is not used.
 
-System font stack (`-apple-system, "Segoe UI", Inter, sans-serif`), one mono stack for
-ids/paths in "Details" affordances (`ui-monospace, SFMono-Regular, monospace`).
+System font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif`),
+one mono stack for ids/paths in "Details" affordances (`ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`).
 
 ### 1.5 Spacing (4px base)
 

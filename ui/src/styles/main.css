@@ -1,29 +1,15 @@
 /* Entry stylesheet: Tailwind base first, then the kit's tokens @theme
    inline blocks (design-spec.md section 9 - tokens copy path), then the
-   ported kit component CSS. Order matters: ds-tokens.css has a base layer
-   block that must land after the tailwindcss import so a repo base layer
-   would still win if one existed.
+   kit component CSS. Order matters: bs-base.css has a base layer block
+   that must land after the tailwindcss import so a repo base layer would
+   still win if one existed.
 
-   bs-base.css imports BEFORE ds-tokens.css on purpose (DS9 part A): both
-   files declare the same `@layer base`, which CSS merges into one layer
-   where the rule appearing LATER in source order wins at equal
-   specificity. Importing bs-base.css first keeps ds-tokens.css's own
-   base-layer rules winning today, so the live cascade is unchanged while
-   both kits coexist. DS9 part B deletes ds-tokens.css; once it is gone
-   bs-base.css is the only base-layer source left and its bs-* values take
-   over with no edit needed here.
-
-   The rest of the BS kit (bs-tokens.css, bs-primitives.css) comes last:
-   tokens before the primitives that read them, and both after the old kit
-   because DS1's shell classes (.app-shell, .app-topbar, .app-scroll,
-   .app-projection and their __main/__session/__lines elements) are defined
-   in both component files — the shell now runs on the BS kit, so its
-   bs-* version has to win the equal-specificity tie. The two kits share no
-   other selector, so the old pages still read ds-components.css unchanged. */
+   DS9 part B deleted the old `ds-` kit (ds-tokens.css, ds-components.css,
+   ui/src/components/ds/): bs-base.css is now the only base-layer source,
+   so its bs-* values take over with no further edit here. bs-tokens.css
+   then bs-primitives.css: tokens before the primitives that read them. */
 @import "tailwindcss";
 @import "./bs-base.css";
-@import "./ds-tokens.css";
-@import "./ds-components.css";
 @import "./bs-tokens.css";
 @import "./bs-primitives.css";
 
