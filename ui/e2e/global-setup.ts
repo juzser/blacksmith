@@ -121,6 +121,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     'utf8',
   );
 
+  // The event writer also stamps every line with CLAUDE_CODE_SESSION_ID when
+  // it is set, and this suite is run from inside Claude Code as often as not.
+  // Left alone, the fixture logs -- and anything the server below appends --
+  // would carry the runner's own CLI session, so the seeded corpus would
+  // depend on where it was launched from. Scrubbed here, before the first
+  // write, and kept out of the server's env as well.
+  delete process.env.CLAUDE_CODE_SESSION_ID;
+
   await buildFixture({ stateDir });
   await buildMultiProjectFixture({ stateDir });
   // Between writing the logs and projecting them: the builders go through the
@@ -159,7 +167,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       '--now-iso',
       FIXTURE_NOW_ISO,
     ],
-    { stdio: 'pipe', env: process.env },
+    // Kept out of the server's env explicitly, rather than trusting the scrub
+    // above to still hold when it starts. spawn() drops an undefined entry.
+    { stdio: 'pipe', env: { ...process.env, CLAUDE_CODE_SESSION_ID: undefined } },
   );
   serverProcess.stdout?.on('data', () => {});
   serverProcess.stderr?.on('data', (chunk) => process.stderr.write(chunk));

@@ -1563,6 +1563,56 @@ describe('cli.ts (built binary)', () => {
       expect(JSON.parse(tail.stdout)).toHaveLength(1);
     });
 
+    // A write from inside a Claude Code session logs which CLI session made
+    // it; the same write from a plain shell logs no such key. The plain run
+    // inherits this worker's env, so it also proves test/setup.ts scrubbed
+    // the runner's own CLAUDE_CODE_SESSION_ID before any child saw it.
+    it('stamps cli_session_id from CLAUDE_CODE_SESSION_ID, and only when it is set', async () => {
+      const cliId = '0f3c9a52-6b1e-4d7a-9c2f-5e8d1a2b3c4d';
+      const inside = `cli-stamp-inside-${Date.now()}`;
+      const outside = `cli-stamp-outside-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'session-cli-stamp-events');
+      const linesOf = async (sessionId: string) =>
+        (await readFile(path.join(eventsDir, `${sessionId}.jsonl`), 'utf8'))
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      const env = { CLAUDE_CODE_SESSION_ID: cliId };
+      const started = runCli(['session', 'start', inside, '--state-dir', eventsDir], env);
+      expect(started.status).toBe(0);
+      expect(JSON.parse(started.stdout).record.cli_session_id).toBe(cliId);
+      const recorded = runCli(
+        [
+          'prompt',
+          'record',
+          '-',
+          '--session',
+          inside,
+          '--causal-parent',
+          `${inside}#0`,
+          '--state-dir',
+          eventsDir,
+        ],
+        env,
+        'a prompt typed inside the CLI session',
+      );
+      expect(recorded.status).toBe(0);
+      expect((await linesOf(inside)).map((line) => line.cli_session_id)).toEqual([cliId, cliId]);
+
+      expect(runCli(['session', 'start', outside, '--state-dir', eventsDir]).status).toBe(0);
+      const [plain] = await linesOf(outside);
+      expect(plain).not.toHaveProperty('cli_session_id');
+
+      // A malformed value never breaks the write; it is simply not recorded.
+      const odd = `cli-stamp-odd-${Date.now()}`;
+      const malformed = runCli(['session', 'start', odd, '--state-dir', eventsDir], {
+        CLAUDE_CODE_SESSION_ID: 'not a session id',
+      });
+      expect(malformed.status).toBe(0);
+      expect((await linesOf(odd))[0]).not.toHaveProperty('cli_session_id');
+    });
+
     it('continues another session in one flag (§5b)', () => {
       const first = `cli-session-a-${Date.now()}`;
       const second = `cli-session-b-${Date.now()}`;

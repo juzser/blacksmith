@@ -179,6 +179,158 @@ describe('events.ts', () => {
     });
   });
 
+  // test/setup.ts deletes the variable in every worker. This suite is run
+  // from inside Claude Code as often as not, and a worker that kept it would
+  // stamp every fixture event with the developer's own CLI session -- so the
+  // scrub is asserted, not assumed.
+  it('runs with CLAUDE_CODE_SESSION_ID scrubbed, so a plain append is unstamped', async () => {
+    expect(process.env.CLAUDE_CODE_SESSION_ID).toBeUndefined();
+    const { record } = await appendEvent(
+      {
+        session_id: 'sess-scrubbed',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    expect(record).not.toHaveProperty('cli_session_id');
+  });
+
+  // Which CLI session wrote an event, so a live CLI session can be linked to
+  // the factory sessions it drives. Stamped at the one place every write
+  // passes through; never envelope, never evidence (architecture §7).
+  describe('cli_session_id: the CLI session that wrote the event', () => {
+    const ENV = 'CLAUDE_CODE_SESSION_ID';
+    const CLI_A = '0f3c9a52-6b1e-4d7a-9c2f-5e8d1a2b3c4d';
+    const CLI_B = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+    let saved: string | undefined;
+
+    beforeEach(() => {
+      saved = process.env[ENV];
+      delete process.env[ENV];
+    });
+
+    afterEach(() => {
+      if (saved === undefined) delete process.env[ENV];
+      else process.env[ENV] = saved;
+    });
+
+    function root(session_id: string, extra: Record<string, unknown> = {}) {
+      return {
+        session_id,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+        ...extra,
+      } as unknown as Parameters<typeof appendEvent>[0];
+    }
+
+    /** What actually reached the log, not what the writer handed back. */
+    async function lineOnDisk(session_id: string): Promise<Record<string, unknown>> {
+      const [stored] = await readEvents(session_id, { stateDir });
+      if (stored === undefined) throw new Error(`${session_id} has no line on disk`);
+      return stored.record as unknown as Record<string, unknown>;
+    }
+
+    it('stamps opts.cliSessionId onto the record and the line on disk', async () => {
+      const { record } = await appendEvent(root('sess-opt'), { stateDir, cliSessionId: CLI_A });
+      expect(record.cli_session_id).toBe(CLI_A);
+      expect((await lineOnDisk('sess-opt')).cli_session_id).toBe(CLI_A);
+    });
+
+    it('stamps the CLAUDE_CODE_SESSION_ID env when opts names none', async () => {
+      process.env[ENV] = CLI_A;
+      await appendEvent(root('sess-env'), { stateDir });
+      expect((await lineOnDisk('sess-env')).cli_session_id).toBe(CLI_A);
+    });
+
+    it('lets opts.cliSessionId override the env', async () => {
+      process.env[ENV] = CLI_A;
+      await appendEvent(root('sess-override'), { stateDir, cliSessionId: CLI_B });
+      expect((await lineOnDisk('sess-override')).cli_session_id).toBe(CLI_B);
+    });
+
+    it('opts out with opts.cliSessionId null even when the env is set', async () => {
+      process.env[ENV] = CLI_A;
+      await appendEvent(root('sess-optout'), { stateDir, cliSessionId: null });
+      expect(await lineOnDisk('sess-optout')).not.toHaveProperty('cli_session_id');
+    });
+
+    it.each([
+      ['unset', undefined],
+      ['empty', ''],
+      ['too short', 'abc1234'],
+      ['too long', 'a'.repeat(65)],
+      ['not hex', 'zzzzzzzz-zzzz'],
+      ['a path', '../../etc/passwd'],
+      ['padded', ` ${CLI_A}`],
+    ])('omits the key, and still writes, when the env is %s', async (_label, value) => {
+      if (value !== undefined) process.env[ENV] = value;
+      const { event_id } = await appendEvent(root('sess-bad-env'), { stateDir });
+      expect(event_id).toBe('sess-bad-env#0');
+      expect(await lineOnDisk('sess-bad-env')).not.toHaveProperty('cli_session_id');
+    });
+
+    it('omits a malformed opts.cliSessionId rather than throwing or falling back to the env', async () => {
+      process.env[ENV] = CLI_A;
+      await appendEvent(root('sess-bad-opt'), { stateDir, cliSessionId: 'not an id' });
+      expect(await lineOnDisk('sess-bad-opt')).not.toHaveProperty('cli_session_id');
+    });
+
+    it('accepts upper-case hex and the 64-character bound', async () => {
+      const upper = CLI_A.toUpperCase();
+      await appendEvent(root('sess-upper'), { stateDir, cliSessionId: upper });
+      expect((await lineOnDisk('sess-upper')).cli_session_id).toBe(upper);
+      const longest = 'f'.repeat(64);
+      await appendEvent(root('sess-longest'), { stateDir, cliSessionId: longest });
+      expect((await lineOnDisk('sess-longest')).cli_session_id).toBe(longest);
+    });
+
+    it('keeps an explicit input.cli_session_id over both opts and the env', async () => {
+      process.env[ENV] = CLI_A;
+      await appendEvent(root('sess-explicit', { cli_session_id: CLI_B }), {
+        stateDir,
+        cliSessionId: CLI_A,
+      });
+      expect((await lineOnDisk('sess-explicit')).cli_session_id).toBe(CLI_B);
+    });
+
+    it.each([
+      ['empty', ''],
+      ['over-long', 'a'.repeat(65)],
+      ['not hex', 'not-a-session'],
+    ])('refuses an explicit input.cli_session_id that is %s', async (_label, value) => {
+      await expect(
+        appendEvent(root('sess-explicit-bad', { cli_session_id: value }), { stateDir }),
+      ).rejects.toMatchObject({ code: 'events.invalid-record' });
+      expect(await readEvents('sess-explicit-bad', { stateDir })).toEqual([]);
+    });
+
+    it('stamps every writer: startSession and appendEdge pass through the same place', async () => {
+      process.env[ENV] = CLI_A;
+      await startSession('sess-start', { stateDir });
+      expect((await lineOnDisk('sess-start')).cli_session_id).toBe(CLI_A);
+      await appendEdge(
+        {
+          session_id: 'sess-start',
+          actor: 'system',
+          plan_version: 1,
+          causal_parent: 'sess-start#0',
+          payload: {},
+        },
+        { edge_type: 'artifact', edge_provenance: 'observed' },
+        { stateDir },
+      );
+      const events = await readEvents('sess-start', { stateDir });
+      expect(events[1]?.record.cli_session_id).toBe(CLI_A);
+    });
+  });
+
   it('rejects a null causal_parent on a non-root event', async () => {
     await expect(
       appendEvent(

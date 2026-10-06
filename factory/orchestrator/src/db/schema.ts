@@ -43,6 +43,12 @@ export const eventsRaw = sqliteTable(
     // agent one of the same event_type. Nullable for migration safety —
     // events logged before this column existed simply can't be attributed.
     actor: text('actor'),
+    // The CLI session that wrote the event (EventRecord.cli_session_id,
+    // architecture §7), so a live CLI session can be linked to the factory
+    // sessions it drives. Nullable: absent outside a CLI session and on every
+    // event logged before the stamp existed. A link, never evidence -- see
+    // events.ts's cliStamp.
+    cliSessionId: text('cli_session_id'),
   },
   (t) => [
     index('events_raw_session_idx').on(t.sessionId),
@@ -50,6 +56,7 @@ export const eventsRaw = sqliteTable(
     index('events_raw_type_idx').on(t.eventType),
     index('events_raw_ts_idx').on(t.ts),
     index('events_raw_project_idx').on(t.project),
+    index('events_raw_cli_session_idx').on(t.cliSessionId),
   ],
 );
 
