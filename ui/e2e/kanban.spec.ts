@@ -181,11 +181,12 @@ test.describe('Kanban', () => {
 
   // Operator fix 2026-10-05 removed the id (and its row-1 "Copy task id"
   // button) from row 1 entirely — row 1 is now just the AgentChip and the
-  // Quote trigger, `justify-content` replaced by the chip's own `flex: 1 1
-  // auto` and the Quote trigger's `margin-left: auto`. Re-pointed from the
-  // old "does the id wrap" question (there is no id text left to wrap) to
-  // the same underlying risk: a long chip label must still keep row 1 a
-  // single line tall, not grow the card.
+  // Quote trigger, `justify-content` replaced by the chip's own
+  // `flex: 0 1 auto` (2026-10-06: no longer `1 1 auto` — the chip no longer
+  // stretches, see the content-width test below) and the Quote trigger's
+  // `margin-left: auto`. Re-pointed from the old "does the id wrap" question
+  // (there is no id text left to wrap) to the same underlying risk: a long
+  // chip label must still keep row 1 a single line tall, not grow the card.
   test('desktop: row 1 stays one line tall even with a long AgentChip label', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await mockBoard(
@@ -213,6 +214,45 @@ test.describe('Kanban', () => {
     expect(row1Box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       (chipBox?.height ?? 0) + 4,
     );
+  });
+
+  // Operator fix 2026-10-06: the chip no longer stretches across row 1
+  // (`flex: 1 1 auto` -> `flex: 0 1 auto`) — on a short label it must stop
+  // at its own content width, well short of the room row 1 has left after
+  // the Quote trigger.
+  test('desktop: a short AgentChip label sits at its own content width, not stretched', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-1', 'todo'),
+        agentRole: 'coder',
+        hasRequest: true,
+        requestFirstLine: 'Linked request',
+      }),
+    );
+    await page.goto('/work/kanban');
+
+    const row1 = page.locator('.bs-kanban-card__row--1').first();
+    const chip = page.locator('.bs-agent-chip').first();
+    const quote = page.locator('.bs-kanban-card__quote').first();
+    await expect(chip).toBeVisible();
+    await expect(quote).toBeVisible();
+    const row1Box = await row1.boundingBox();
+    const chipBox = await chip.boundingBox();
+    const quoteBox = await quote.boundingBox();
+    expect(row1Box).not.toBeNull();
+    expect(chipBox).not.toBeNull();
+    expect(quoteBox).not.toBeNull();
+    // A stretched chip ends exactly one row-1 gap (space-2, 8px) before the
+    // Quote trigger, so "narrower than row 1 minus the trigger" would still
+    // pass on the old rule. Require clear free space instead: a short label
+    // leaves far more than three gaps' worth between chip and trigger.
+    const chipRight = (chipBox?.x ?? 0) + (chipBox?.width ?? 0);
+    const freeSpace = (quoteBox?.x ?? 0) - chipRight;
+    expect(freeSpace).toBeGreaterThan(24);
   });
 
   // Deleted: "desktop: a short task id is never truncated at a 280px
