@@ -172,6 +172,65 @@ describe('overview() idle epics', () => {
     expect(summary?.epicsIdle).toEqual([{ epicId: 'epic-old', idleDays: 9 }]);
   });
 
+  // project-a and project-b each run an in-flight `epic-a`; only project-b's
+  // has had an event lately.
+  function twoProjectEvents(): StoredEvent[] {
+    return [
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(9) }),
+      {
+        ...taskAdded('epic-a', daysBefore(8)),
+        record: { ...taskAdded('epic-a', daysBefore(8)).record, project: 'project-a' },
+      },
+      {
+        ...taskAdded('epic-a', daysBefore(8)),
+        record: {
+          ...taskAdded('epic-a', daysBefore(8)).record,
+          task_id: 'epic-a/task-2',
+          project: 'project-b',
+        },
+      },
+      event({
+        event_type: 'spec-review-completed',
+        ts: daysBefore(0, 60 * 60 * 1000),
+        project: 'project-b',
+        payload: { epic_id: 'epic-a' },
+      } as never),
+    ];
+  }
+
+  it("does not let another project's event bump an epic of the same id in a project summary", () => {
+    const result = run(twoProjectEvents());
+    const byProject = new Map(result.projects?.map((p) => [p.project, p]));
+    expect(byProject.get('project-a')?.epicsIdle.map((e) => e.epicId)).toEqual(['epic-a']);
+    expect(byProject.get('project-b')?.epicsIdle).toEqual([]);
+  });
+
+  it('scopes the activity to scope.project on a project-scoped overview', () => {
+    projectSession(handle, SESSION_ID, twoProjectEvents());
+    projectTasks(handle, twoProjectEvents());
+    const result = overview(
+      handle.db,
+      { sessionId: SESSION_ID, project: 'project-a' },
+      { nowIso: NOW },
+    );
+    expect(result.epicsIdle.map((e) => e.epicId)).toEqual(['epic-a']);
+  });
+
+  it('survives an events_raw row whose payload is not JSON', () => {
+    const events = [
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(9) }),
+      taskAdded('epic-a', daysBefore(8)),
+      event({ event_type: 'note', task_id: 'epic-a/task-1', ts: daysBefore(0, 1000) }),
+    ];
+    projectSession(handle, SESSION_ID, events);
+    projectTasks(handle, events);
+    handle.sqlite
+      .prepare("update events_raw set payload = '{not json' where event_type = 'note'")
+      .run();
+    const result = overview(handle.db, { sessionId: SESSION_ID }, { nowIso: NOW });
+    expect(result.epicsActivelyRunning).toEqual(['epic-a']);
+  });
+
   it('computes the 1-hour budget delta over the running epics only', () => {
     const justAfterCutoff = '2026-08-20T11:00:01.000Z';
     const result = run([

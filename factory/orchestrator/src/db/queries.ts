@@ -1623,15 +1623,17 @@ function activeEpics(
 /** An epic with no activity for longer than this is idle (7 x 24 h; exactly 7 days is not). */
 const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** One group of `events_raw` rows: the newest `ts` per (task id, payload epic id). */
+/** One group of `events_raw` rows: the newest `ts` per (task id, payload epic id, project). */
 interface ActivityRow {
   taskId: string | null;
   payloadEpic: string | null;
+  /** The event's project, `projectOf()`-normalised. */
+  project: string;
   last: string;
 }
 
 /**
- * The newest event per (task id, payload `epic_id`), session-scoped. Read once
+ * The newest event per (task id, payload `epic_id`, project), session-scoped. Read once
  * per `overview()` and shared with every per-project summary, so a dashboard
  * poll scans `events_raw` once rather than once per project plus once overall.
  * Rows without a task id are kept: goal-check, spec-review and plan-amend
@@ -1639,12 +1641,21 @@ interface ActivityRow {
  */
 function epicActivityRows(db: SmithDb, scope: Scope): ActivityRow[] {
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  const payloadEpic = sql<string | null>`json_extract(${eventsRaw.payload}, '$.epic_id')`;
+  // json_valid() first: json_extract() throws on a non-JSON payload, and one
+  // bad row must not fail the whole overview.
+  const payloadEpic = sql<
+    string | null
+  >`CASE WHEN json_valid(${eventsRaw.payload}) THEN json_extract(${eventsRaw.payload}, '$.epic_id') END`;
   const query = db
-    .select({ taskId: eventsRaw.taskId, payloadEpic, last: max(eventsRaw.ts) })
+    .select({
+      taskId: eventsRaw.taskId,
+      payloadEpic,
+      project: eventsRaw.project,
+      last: max(eventsRaw.ts),
+    })
     .from(eventsRaw);
   const rows = (sessionCond ? query.where(sessionCond) : query)
-    .groupBy(eventsRaw.taskId, payloadEpic)
+    .groupBy(eventsRaw.taskId, payloadEpic, eventsRaw.project)
     .all();
   return rows.flatMap((r) =>
     r.last === null
@@ -1653,6 +1664,7 @@ function epicActivityRows(db: SmithDb, scope: Scope): ActivityRow[] {
           {
             taskId: r.taskId,
             payloadEpic: typeof r.payloadEpic === 'string' ? r.payloadEpic : null,
+            project: projectOf(r.project),
             last: r.last,
           },
         ],
@@ -1672,12 +1684,14 @@ function epicActivityRows(db: SmithDb, scope: Scope): ActivityRow[] {
  * is how a plan ref (`<epic>/plan-rN`, `<epic>/spec-review-rN`) names its
  * epic. Timestamps compare as instants, not strings. An idle epic stays in
  * `inFlightEpics()` (it is still pickable) and only leaves `activeEpics()`.
+ * With `project` set, only that project's events count (an unset one spans all).
  */
 function idleEpics(
   taskRows: readonly (typeof tasks.$inferSelect)[],
   activity: readonly ActivityRow[],
   inFlight: readonly string[],
   nowIso: string,
+  project?: string,
 ): IdleEpic[] {
   const lastByEpic = new Map<string, number>();
   const bump = (epicId: string | undefined, ts: string) => {
@@ -1695,6 +1709,7 @@ function idleEpics(
   }
   const epicOf = epicResolver(epicByTask);
   for (const r of activity) {
+    if (project !== undefined && r.project !== project) continue;
     const slash = r.taskId?.lastIndexOf('/') ?? -1;
     const prefix = r.taskId && slash > 0 ? r.taskId.slice(0, slash) : undefined;
     bump(r.payloadEpic ?? epicOf(r.taskId ?? undefined) ?? prefix, r.last);
@@ -1921,7 +1936,7 @@ function projectSummary(
   const taskRows = allTasksForScope(db, scope);
   const closedEpicsHere = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso);
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, project);
   const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
   const tokenMaps = epicTokenMaps(db, scope, taskRows);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
@@ -2145,7 +2160,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
   const activity = epicActivityRows(db, scope);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso);
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scope.project);
   const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
