@@ -235,25 +235,96 @@ test.describe('Kanban', () => {
     );
     await page.goto('/work/kanban');
 
-    const row1 = page.locator('.bs-kanban-card__row--1').first();
+    const card = page.locator('.bs-kanban-card').first();
     const chip = page.locator('.bs-agent-chip').first();
-    const quote = page.locator('.bs-kanban-card__quote').first();
     await expect(chip).toBeVisible();
-    await expect(quote).toBeVisible();
-    const row1Box = await row1.boundingBox();
+    const cardBox = await card.boundingBox();
     const chipBox = await chip.boundingBox();
-    const quoteBox = await quote.boundingBox();
-    expect(row1Box).not.toBeNull();
+    expect(cardBox).not.toBeNull();
     expect(chipBox).not.toBeNull();
-    expect(quoteBox).not.toBeNull();
-    // A stretched chip ends exactly one row-1 gap (space-2, 8px) before the
-    // Quote trigger, so "narrower than row 1 minus the trigger" would still
-    // pass on the old rule. Require clear free space instead: a short label
-    // leaves far more than three gaps' worth between chip and trigger.
+    // Measured against the card's content box (border 1px + --bs-space-3
+    // 12px padding each side), now that nothing else shares row 1. A
+    // stretched chip (`flex: 1 1 auto`) would fill it to the right edge; a
+    // short label leaves far more than three gaps' worth free.
+    const contentRight = (cardBox?.x ?? 0) + (cardBox?.width ?? 0) - 13;
     const chipRight = (chipBox?.x ?? 0) + (chipBox?.width ?? 0);
-    const freeSpace = (quoteBox?.x ?? 0) - chipRight;
-    expect(freeSpace).toBeGreaterThan(24);
+    expect(contentRight - chipRight).toBeGreaterThan(24);
   });
+
+  // Operator fix 2026-10-06: the "Has a linked request" Quote icon is gone
+  // from every card (the request's first line still feeds the summary row).
+  test('desktop: no Quote icon on a card, even one with a linked request', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(
+      page,
+      fourColumnBoard({
+        ...task('epic-1/task-1', 'todo'),
+        agentRole: 'coder',
+        hasRequest: true,
+        requestFirstLine: 'Linked request',
+      }),
+    );
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await expect(page.locator('.bs-kanban-card__quote')).toHaveCount(0);
+    await expect(page.getByLabel('Has a linked request', { exact: true })).toHaveCount(0);
+  });
+
+  // A chip-less task renders no row 1 at all: no empty band above the title.
+  test('desktop: a card with no AgentChip has no empty row 1 band', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await mockBoard(page, fourColumnBoard(task('epic-1/task-4', 'todo')));
+    await page.goto('/work/kanban');
+    const card = page.locator('.bs-kanban-card').first();
+    await expect(card).toBeVisible();
+    await expect(card.locator('.bs-kanban-card__row--1')).toHaveCount(0);
+  });
+
+  // Operator fix 2026-10-06: the copy control is inline, right after the
+  // title's last word, on the title's last line; short and wrapped titles.
+  for (const [name, title, viewport] of [
+    ['short title', 'Fix login', { width: 1440, height: 900 }],
+    [
+      'wrapped 2-line title',
+      'Write the full directory search and indexing docs for ops',
+      { width: 1440, height: 900 },
+    ],
+    ['phone short title', 'Fix login', VIEWPORTS.mobile],
+    [
+      'phone wrapped title',
+      'Write the full directory search and indexing docs for ops',
+      VIEWPORTS.mobile,
+    ],
+  ] as const) {
+    test(`${name}: the copy icon sits inline right after the last word`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await mockBoard(page, fourColumnBoard({ ...task('epic-1/task-4', 'todo'), title }));
+      await page.goto('/work/kanban');
+      const card = page.locator('.bs-kanban-card').first();
+      const icon = card.locator('.bs-kanban-card__title-copy svg');
+      await expect(icon).toBeVisible();
+      // Geometry of the title's last word (the text node glued to the icon in
+      // `.bs-kanban-card__title-tail`), via a Range over it.
+      const text = await card.locator('.bs-kanban-card__title-tail').evaluate((tail) => {
+        const range = document.createRange();
+        const node = tail.firstChild;
+        if (!node) throw new Error('title tail has no text node');
+        range.selectNodeContents(node);
+        const r = range.getBoundingClientRect();
+        return { right: r.right, top: r.top, bottom: r.bottom };
+      });
+      const iconBox = await icon.boundingBox();
+      expect(iconBox).not.toBeNull();
+      const iconY = (iconBox?.y ?? 0) + (iconBox?.height ?? 0) / 2;
+      // Same line as the last word, to its right, within a small gap.
+      expect(iconY).toBeGreaterThan(text.top - 1);
+      expect(iconY).toBeLessThan(text.bottom + 1);
+      expect((iconBox?.x ?? 0) - text.right).toBeGreaterThanOrEqual(0);
+      expect((iconBox?.x ?? 0) - text.right).toBeLessThan(12);
+      // Small: the glyph is 12px.
+      expect(iconBox?.width ?? 99).toBeLessThanOrEqual(13);
+    });
+  }
 
   // Deleted: "desktop: a short task id is never truncated at a 280px
   // column". Its whole intent — the id text winning space inside row 1 so a
@@ -295,7 +366,7 @@ test.describe('Kanban', () => {
     // S3 review fix companion check (desktop never grows the hit box past
     // its glyph, so the icon is already level with the title here): the
     // same centre check the phone test below enforces after the fix.
-    const titleTextDesktop = page.locator('.bs-kanban-card__title-text').first();
+    const titleTextDesktop = page.locator('.bs-kanban-card__title').first();
     const iconDesktop = copyButton.locator('svg');
     const titleBoxDesktop = await titleTextDesktop.boundingBox();
     const iconBoxDesktop = await iconDesktop.boundingBox();
@@ -345,62 +416,98 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
   });
 
-  // S2 review fix, 2026-10-05: a title long enough to fill both clamped
-  // lines used to push the copy icon down onto its own, third line — which
-  // also clipped it clean off the card once the title itself filled both
-  // lines on its own. The icon must stay beside the text and inside the
-  // card's bounds no matter how long the title is.
-  test('desktop: the title-line copy button stays beside a 2-line-wrapped title, never clipped or on its own line', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await mockBoard(
+  // Operator override 2026-10-06 (ds-spec.md §2.2 TaskCard): the title is
+  // clamped to 2 lines AND the inline copy icon stays visible after the last
+  // shown word, after an ellipsis when the text was cut. Lines are counted
+  // from the text's own line boxes (a Range over the text nodes), never the
+  // <p> rect, which the phone 44px hit area could inflate.
+  const SLUG_ID =
+    'epic-1/task-9-write-the-full-directory-search-and-indexing-docs-for-ops-and-then-keep-going-until-it-is-far-too-long-to-read-on-a-card';
+  for (const [name, title, viewport] of [
+    [
+      'desktop 60-char title',
+      'Implement comprehensive middleware migration for MWM modules',
+      { width: 1440, height: 900 },
+    ],
+    ['desktop 120+ char slug fallback', null, { width: 1440, height: 900 }],
+    [
+      'phone 60-char title',
+      'Implement comprehensive middleware migration for MWM modules',
+      VIEWPORTS.mobile,
+    ],
+    ['phone 120+ char slug fallback', null, VIEWPORTS.mobile],
+  ] as const) {
+    test(`${name}: the title is clamped to 2 lines and the copy icon follows the ellipsis`, async ({
       page,
-      fourColumnBoard({
-        ...task('epic-1/task-4', 'todo'),
-        // <=60 chars (SHORT_TASK_LABEL_MAX, ui/src/lib/format.ts) so
-        // taskLabel() renders it verbatim instead of falling back to the
-        // task id slug.
-        title: 'Write the full directory search and indexing docs for ops',
-      }),
-    );
-    await page.goto('/work/kanban');
+    }) => {
+      await page.setViewportSize(viewport);
+      await mockBoard(
+        page,
+        fourColumnBoard({
+          ...task(title === null ? SLUG_ID : 'epic-1/task-4', 'todo'),
+          title,
+        }),
+      );
+      await page.goto('/work/kanban');
+      const card = page.locator('.bs-kanban-card').first();
+      const icon = card.locator('.bs-kanban-card__title-copy svg');
+      await expect(icon).toBeVisible();
+      const para = card.locator('.bs-kanban-card__title');
+      // A title that cannot fit 2 lines at this width must end in an ellipsis
+      // (the phone column is wide enough for a 60-char title, so it may not).
+      const mustCut = title === null || viewport.width > 640;
+      if (mustCut) await expect(para).toHaveText(/…$/);
+      const text = await para.evaluate((p) => {
+        // Only text rects: the button/svg boxes are not text lines.
+        const textRects: DOMRect[] = [];
+        const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const r = document.createRange();
+          r.selectNodeContents(n);
+          for (const rect of r.getClientRects()) if (rect.width > 0) textRects.push(rect);
+        }
+        const tops = [...new Set(textRects.map((r) => Math.round(r.top)))];
+        const lastTop = Math.max(...textRects.map((r) => r.top));
+        const last = textRects.filter((r) => r.top >= lastTop - 1);
+        return {
+          lines: tops.length,
+          right: Math.max(...last.map((r) => r.right)),
+          top: Math.min(...last.map((r) => r.top)),
+          bottom: Math.max(...last.map((r) => r.bottom)),
+          text: p.textContent ?? '',
+          titleAttr: p.getAttribute('title'),
+        };
+      });
+      expect(text.lines).toBeLessThanOrEqual(2);
+      // Ellipsis iff cut, and the full title is on the tooltip only when cut.
+      expect(text.text.endsWith('…')).toBe(text.titleAttr !== null);
+      if (mustCut) expect(text.titleAttr).toBeTruthy();
+      const cardBox = await card.boundingBox();
+      const iconBox = await icon.boundingBox();
+      expect(cardBox).not.toBeNull();
+      expect(iconBox).not.toBeNull();
+      const c = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
+      const i = iconBox ?? { x: 0, y: 0, width: 0, height: 0 };
+      // Inside the card.
+      expect(i.x).toBeGreaterThanOrEqual(c.x);
+      expect(i.x + i.width).toBeLessThanOrEqual(c.x + c.width);
+      expect(i.y).toBeGreaterThanOrEqual(c.y);
+      expect(i.y + i.height).toBeLessThanOrEqual(c.y + c.height);
+      // On the last text line, right of the text end.
+      const iconY = i.y + i.height / 2;
+      expect(iconY).toBeGreaterThan(text.top - 1);
+      expect(iconY).toBeLessThan(text.bottom + 1);
+      expect(i.x - text.right).toBeGreaterThanOrEqual(0);
+      expect(i.x - text.right).toBeLessThan(12);
+    });
+  }
 
-    const card = page.locator('.bs-kanban-card').first();
-    const titleText = card.locator('.bs-kanban-card__title-text');
-    const copyButton = card.locator('.bs-kanban-card__title-copy').first();
-    await expect(copyButton).toBeVisible();
-
-    const cardBox = await card.boundingBox();
-    const titleBox = await titleText.boundingBox();
-    const copyBox = await copyButton.boundingBox();
-    expect(cardBox).not.toBeNull();
-    expect(titleBox).not.toBeNull();
-    expect(copyBox).not.toBeNull();
-
-    const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
-    const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
-    const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
-
-    // The title text actually wraps to 2 lines (taller than one line).
-    expect(title_.height).toBeGreaterThan(copy_.height * 1.5);
-    // The copy button sits on the title's first line, not below it.
-    expect(copy_.y).toBeLessThanOrEqual(title_.y + copy_.height);
-    // Fully inside the card's bounding box — never clipped off.
-    expect(copy_.x).toBeGreaterThanOrEqual(card_.x);
-    expect(copy_.x + copy_.width).toBeLessThanOrEqual(card_.x + card_.width);
-    expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
-    expect(copy_.y + copy_.height).toBeLessThanOrEqual(card_.y + card_.height);
-  });
-
-  // S3 review fix (visual pass, 2026-10-05): below 640px .bs-iconbtn grows
-  // to the 44px --bs-touch floor (bs-primitives.css ~133-138) while the
-  // title keeps align-items: flex-start, so the icon — centred in that
-  // taller box — sat visibly below the title's first text line
-  // (work-kanban-mobile-dark.png: title glyph centre y~223, icon centre
-  // y~234). The icon must come back level with the title without losing
-  // the 44px hit area or spilling into the row above.
-  test("phone: the title-line copy button's icon aligns with the title's first line and keeps its 44px hit area", async ({
+  // Below 640px .bs-iconbtn grows to the 44px --bs-touch floor
+  // (bs-primitives.css ~133-138). The copy button is inline in the title text,
+  // so negative margins must keep that hit box out of the line layout: the
+  // icon stays level with the title's first line, the title stays one line
+  // tall, and the 44px hit area stays inside the card.
+  test('phone: the title copy button keeps its 44px hit area without growing the title line', async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
@@ -409,37 +516,30 @@ test.describe('Kanban', () => {
 
     const card = page.locator('.bs-kanban-card').first();
     const titleRow = card.locator('.bs-kanban-card__title');
-    const titleText = card.locator('.bs-kanban-card__title-text');
     // The real hit box (what touchTargets.spec.ts's selector measures) is
     // the <button> itself, not Tooltip's non-interactive trigger span
-    // (.bs-kanban-card__title-copy) wrapping it -- the span's own auto
-    // height tracks the collapsed title line, while the button inside it
-    // keeps its full 44px border box (CSS align-items: stretch resolves the
-    // button's cross size against the line, independent of the wrapper's
-    // own determined size).
+    // (.bs-kanban-card__title-copy) wrapping it: the button keeps its full
+    // 44px border box while negative margins keep it out of the line height.
     const copyButton = card.locator('.bs-kanban-card__title-copy button').first();
     const icon = copyButton.locator('svg');
     await expect(copyButton).toBeVisible();
 
     const cardBox = await card.boundingBox();
     const titleRowBox = await titleRow.boundingBox();
-    const titleBox = await titleText.boundingBox();
     const copyBox = await copyButton.boundingBox();
     const iconBox = await icon.boundingBox();
     expect(cardBox).not.toBeNull();
     expect(titleRowBox).not.toBeNull();
-    expect(titleBox).not.toBeNull();
     expect(copyBox).not.toBeNull();
     expect(iconBox).not.toBeNull();
 
     const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const titleRow_ = titleRowBox ?? { x: 0, y: 0, width: 0, height: 0 };
-    const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const icon_ = iconBox ?? { x: 0, y: 0, width: 0, height: 0 };
 
     // The title text is one line here, so its own box is the first line.
-    const titleLineCenter = title_.y + title_.height / 2;
+    const titleLineCenter = titleRow_.y + titleRow_.height / 2;
     const iconCenter = icon_.y + icon_.height / 2;
     expect(Math.abs(iconCenter - titleLineCenter)).toBeLessThanOrEqual(3);
 
@@ -447,11 +547,10 @@ test.describe('Kanban', () => {
     expect(copy_.width).toBeGreaterThanOrEqual(44);
     expect(copy_.height).toBeGreaterThanOrEqual(44);
 
-    // Review follow-up (phone gap): the title row's own layout height must
-    // track the one-line title text, not the button's 44px hit box — else a
-    // one-line title leaves an empty band before the next row (origin/main's
-    // work-kanban-mobile-tab2-light.png has none).
-    expect(Math.abs(titleRow_.height - title_.height)).toBeLessThanOrEqual(2);
+    // The title is one text line tall (the title's line-height, ~24px), not
+    // 44px: the negative margins keep the hit box out of the layout, so no
+    // empty band opens before the next row.
+    expect(titleRow_.height).toBeLessThan(32);
 
     // The grown hit box stays inside the card...
     expect(copy_.y).toBeGreaterThanOrEqual(card_.y);
@@ -473,7 +572,7 @@ test.describe('Kanban', () => {
       expect(hasInteractive).toBe(false);
       const chipsBox = await chipsRow.boundingBox();
       if (chipsBox) {
-        const gap = chipsBox.y - (title_.y + title_.height);
+        const gap = chipsBox.y - (titleRow_.y + titleRow_.height);
         expect(gap).toBeLessThanOrEqual(10); // --bs-space-2 (8px) + 2px tolerance
       }
     }

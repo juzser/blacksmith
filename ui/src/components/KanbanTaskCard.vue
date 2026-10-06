@@ -6,14 +6,14 @@
 //
 // Row 3 (review round 2, S3 "dead control" fix): `KanbanTask` still carries
 // no planner-written `summary` field, but it does carry `requestFirstLine` —
-// the same linked-request first line already shown in the row-1 Quote
-// tooltip — which reads as a summary-like field per the spec's own
+// the same linked-request first line (the row-1 request icon is gone, operator
+// fix 2026-10-06) — which reads as a summary-like field per the spec's own
 // alternative ("or the planner-written `summary` field once it exists").
 // Wired to that rather than removed, gated behind `summaryEnabled` so the
 // toolbar's "Show summary" option actually does something again.
 
-import { Clock, Link, Quote } from '@lucide/vue';
-import { computed } from 'vue';
+import { Clock, Link } from '@lucide/vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
@@ -23,6 +23,7 @@ import {
   attemptLabel,
   cardChips,
   dependencyChainText,
+  fitTitleText,
   hasWaitingDependency,
   isInteractiveDescendant,
   type KanbanGroupBy,
@@ -33,7 +34,6 @@ import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
-import Tooltip from './kit/Tooltip.vue';
 
 const props = defineProps<{
   task: KanbanTask;
@@ -45,6 +45,80 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
+// A CSS line clamp would cut the inline copy icon along with the text, so the
+// title is fitted by measurement instead: when it renders taller than
+// TITLE_LINES lines, binary-search the longest prefix that still fits with a
+// trailing "…" (the icon stays glued after it). Trial strings are written
+// straight to the two text nodes, so only the final result is set on a ref.
+const TITLE_LINES = 2;
+const WORD_CUT_SLACK = 8;
+const fitted = ref<string | null>(null);
+const shownTitle = computed(() => fitted.value ?? title.value);
+// The last word travels with the copy icon in one nowrap span, so the icon can
+// never wrap onto a line of its own: it always sits right after the last word.
+// A token too long to keep unbroken (it would overflow the card) is not glued.
+const GLUE_MAX = 24;
+function splitTitle(text: string): { head: string; tail: string } {
+  const m = /^(.*?)(\S+)$/s.exec(text);
+  return m && m[2].length <= GLUE_MAX ? { head: m[1], tail: m[2] } : { head: text, tail: '' };
+}
+const titleSplit = computed(() => splitTitle(shownTitle.value));
+const titleHead = computed(() => titleSplit.value.head);
+const titleTail = computed(() => titleSplit.value.tail);
+
+const titleEl = ref<HTMLElement | null>(null);
+let titleObserver: ResizeObserver | null = null;
+let lastWidth = 0;
+function fitTitle() {
+  const el = titleEl.value;
+  const headNode = el?.firstChild;
+  const tailNode = el?.querySelector('.bs-kanban-card__title-tail')?.firstChild;
+  if (!el || !headNode || !tailNode) return;
+  const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+  if (el.clientWidth === 0 || !Number.isFinite(lineHeight)) return;
+  const full = title.value;
+  // `current` is what the DOM shows now: the full title unless a cut is applied.
+  // Writing only on change keeps the first measurement free of layout thrash.
+  let current = fitted.value ?? full;
+  const show = (text: string) => {
+    if (text === current) return;
+    current = text;
+    const { head, tail } = splitTitle(text);
+    headNode.textContent = head;
+    tailNode.textContent = tail;
+  };
+  const result = fitTitleText(
+    full,
+    (text) => {
+      show(text);
+      return el.getBoundingClientRect().height <= TITLE_LINES * lineHeight + 1;
+    },
+    WORD_CUT_SLACK,
+  );
+  show(result ?? full);
+  fitted.value = result;
+}
+function onTitleResize() {
+  const width = titleEl.value?.clientWidth ?? 0;
+  if (width === lastWidth) return;
+  lastWidth = width;
+  fitTitle();
+}
+onMounted(() => {
+  const el = titleEl.value;
+  if (!el) return;
+  lastWidth = el.clientWidth;
+  fitTitle();
+  if (typeof ResizeObserver === 'undefined') return;
+  titleObserver = new ResizeObserver(onTitleResize);
+  titleObserver.observe(el);
+});
+onBeforeUnmount(() => titleObserver?.disconnect());
+watch(title, async () => {
+  fitted.value = null;
+  await nextTick();
+  fitTitle();
+});
 const chips = computed(() => cardChips(props.task, props.groupBy));
 // Audit finding 5: the meta-row role label duplicated the same role
 // AgentChip already shows ("Finding checker" next to "Finding checker ·
@@ -100,23 +174,17 @@ function onKeydown(event: KeyboardEvent) {
     @click="onSelect"
     @keydown="onKeydown"
   >
-    <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
+    <div v-if="!compact && chip" class="bs-kanban-card__row bs-kanban-card__row--1">
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
-      <Tooltip v-if="task.hasRequest" class="bs-kanban-card__quote" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
-        <Icon :icon="Quote" :size="14" label="Has a linked request" />
-      </Tooltip>
     </div>
 
-    <p class="bs-kanban-card__title">
-      <span class="bs-kanban-card__title-text">{{ title }}</span>
-      <IconButton
+    <p ref="titleEl" class="bs-kanban-card__title" :title="fitted ? title : undefined">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
         :icon="Link"
         :label="copyIdLabel"
         size="sm"
         class="bs-kanban-card__title-copy"
         @click="onCopyTaskId"
-      />
-    </p>
+      /></span></p>
 
     <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 

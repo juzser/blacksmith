@@ -16,8 +16,10 @@ describe('KanbanTaskCard.vue — compact prop (§3.1 Work/Kanban row)', () => {
     expect(SRC).toMatch(/compact\?:\s*boolean/);
   });
 
-  it('hides row 1 (id, agent chip, quote icon) and the summary paragraph in compact mode', () => {
-    expect(SRC).toMatch(/v-if="!compact"\s+class="bs-kanban-card__row bs-kanban-card__row--1"/);
+  it('hides row 1 (agent chip) and the summary paragraph in compact mode', () => {
+    expect(SRC).toMatch(
+      /v-if="!compact && chip"\s+class="bs-kanban-card__row bs-kanban-card__row--1"/,
+    );
     expect(SRC).toMatch(/v-if="showSummary && !compact"/);
   });
 
