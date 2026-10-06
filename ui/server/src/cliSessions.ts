@@ -30,6 +30,7 @@
 // chars with control characters stripped; no absolute path, socket path or
 // process start time is ever put in the response.
 import { execFile } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import * as fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -47,6 +48,8 @@ import {
 export interface CliFs {
   readdir(p: string): Promise<string[]>;
   stat(p: string): Promise<{ size: number; mtimeMs: number }>;
+  /** Does not follow a symlink: only a regular file is ever opened. */
+  lstat(p: string): Promise<{ isFile(): boolean }>;
   open(p: string): Promise<Pick<FileHandle, 'read' | 'close'>>;
   realpath(p: string): Promise<string>;
 }
@@ -54,7 +57,11 @@ export interface CliFs {
 const nodeFs: CliFs = {
   readdir: (p) => fsp.readdir(p),
   stat: (p) => fsp.stat(p),
-  open: (p) => fsp.open(p, 'r'),
+  lstat: (p) => fsp.lstat(p),
+  // Non-blocking and no-follow, so a file swapped for a FIFO or a symlink
+  // after the lstat check can neither block the read nor redirect it.
+  open: (p) =>
+    fsp.open(p, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | (fsConstants.O_NOFOLLOW ?? 0)),
   realpath: (p) => fsp.realpath(p),
 };
 
@@ -115,6 +122,8 @@ export interface CliSessionsDeps {
   listWorktrees?: () => Promise<string[]>;
   /** Response cache window, 1 s by default. */
   cacheMs?: number;
+  /** Compare paths case-insensitively; true on darwin and win32 by default. */
+  foldCase?: boolean;
 }
 
 const SESSION_FILE_MAX = 64 * 1024;
@@ -122,6 +131,7 @@ const TAIL_BYTES = 256 * 1024;
 const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
 const TEXT_MAX = 280;
+const VERSION_MAX = 32;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
 const WORKTREES_TTL_MS = 5 * 60 * 1000;
 const FOLD_CASE = process.platform === 'darwin' || process.platform === 'win32';
@@ -149,13 +159,19 @@ function gitWorktrees(cwd: string): Promise<string[]> {
   });
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]+/g;
+
 function clean(value: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
-  const flat = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return flat.length > TEXT_MAX ? flat.slice(0, TEXT_MAX) : flat;
+  const flat = value.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
+  // Cut on code points, so a surrogate pair is never split.
+  const points = Array.from(flat);
+  return points.length > TEXT_MAX ? points.slice(0, TEXT_MAX).join('') : flat;
 }
 
 async function readSlice(fs: CliFs, file: string, pos: number, len: number): Promise<Buffer> {
+  // A FIFO, device, directory or symlink is refused before any open.
+  if (!(await fs.lstat(file)).isFile()) throw new Error('not a regular file');
   const fh = await fs.open(file);
   try {
     const buf = Buffer.alloc(len);
@@ -223,7 +239,14 @@ function operatorText(raw: string): string | null {
     return clean(`${name[1] ?? ''} ${args?.[1] ?? ''}`) || null;
   }
   const trimmed = raw.trim();
-  if (trimmed === '' || /^<(system-reminder|local-command|command-message)/.test(trimmed)) {
+  // Harness-injected records (reminders, local and shell command echoes,
+  // task notifications, memory input) are not something the operator typed.
+  if (
+    trimmed === '' ||
+    /^<(system-reminder|local-command|command-message|bash-input|bash-stdout|bash-stderr|task-notification|user-memory-input)/.test(
+      trimmed,
+    )
+  ) {
     return null;
   }
   return clean(trimmed) || null;
@@ -252,7 +275,7 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     bsMention: mentionsBs(entries),
   };
   for (const e of entries) {
-    if (e.isSidechain === true || e.isMeta === true) continue;
+    if (e.isSidechain === true || e.isMeta === true || e.isCompactSummary === true) continue;
     if (e.type === 'user') {
       const blocks = blocksOf(e);
       if (blocks.some((b) => b.type === 'tool_result')) {
@@ -307,11 +330,17 @@ interface RegistryEntry {
   status: CliSessionStatus;
   statusSince: string | null;
   version: string | null;
+  /** One `<field>: invalid` per registry field that was present but dropped. */
+  parseIssues: string[];
 }
 
+// 8.64e15 ms is the largest instant a Date can hold; past it toISOString throws.
 const isoOrNull = (v: unknown): string | null =>
-  typeof v === 'number' && Number.isFinite(v) && v > 0 ? new Date(v).toISOString() : null;
-const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? clean(v) : null);
+  typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 8.64e15
+    ? new Date(v).toISOString()
+    : null;
+const strOrNull = (v: unknown): string | null =>
+  typeof v === 'string' && v !== '' ? clean(v) : null;
 
 function parseRegistry(
   filePid: number,
@@ -328,21 +357,39 @@ function parseRegistry(
   if (j.pid !== filePid) return null;
   if (typeof j.sessionId !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(j.sessionId)) return null;
   if (typeof j.cwd !== 'string' || !path.isAbsolute(j.cwd)) return null;
-  const status: CliSessionStatus = j.status === 'busy' ? 'working' : j.status === 'idle' ? 'idle' : 'unknown';
-  return {
-    kind: typeof j.kind === 'string' ? j.kind : null,
-    entry: {
-      pid: filePid,
-      cliSessionId: j.sessionId,
-      cwd: j.cwd,
-      name: strOrNull(j.name),
-      nameSource: strOrNull(j.nameSource),
-      startedAt: isoOrNull(j.startedAt),
-      status,
-      statusSince: isoOrNull(j.statusUpdatedAt),
-      version: typeof j.version === 'string' ? j.version : null,
-    },
+  const status: CliSessionStatus =
+    j.status === 'busy' ? 'working' : j.status === 'idle' ? 'idle' : 'unknown';
+  const version =
+    typeof j.version === 'string'
+      ? Array.from(clean(j.version)).slice(0, VERSION_MAX).join('') || null
+      : null;
+  const entry: RegistryEntry = {
+    pid: filePid,
+    cliSessionId: j.sessionId,
+    cwd: j.cwd,
+    name: strOrNull(j.name),
+    nameSource: strOrNull(j.nameSource),
+    startedAt: isoOrNull(j.startedAt),
+    status,
+    statusSince: isoOrNull(j.statusUpdatedAt),
+    version,
+    parseIssues: [],
   };
+  // A field that is absent is not an issue; one that is present and was
+  // dropped is, named by field only, never by value.
+  const dropped: [string, boolean][] = [
+    ['name', typeof j.name !== 'string'],
+    ['nameSource', typeof j.nameSource !== 'string'],
+    ['startedAt', entry.startedAt === null],
+    ['status', status === 'unknown'],
+    ['statusUpdatedAt', entry.statusSince === null],
+    ['version', entry.version === null],
+  ];
+  for (const [field, lost] of dropped) {
+    if (lost && j[field] !== undefined && j[field] !== null)
+      entry.parseIssues.push(`${field}: invalid`);
+  }
+  return { kind: typeof j.kind === 'string' ? j.kind : null, entry };
 }
 
 interface TranscriptRead {
@@ -361,11 +408,15 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
 
   const sticky = new Map<string, CliSessionCard['inScopeBy']>();
   const transcriptPaths = new Map<string, string>();
-  const transcriptCache = new Map<string, { size: number; mtimeMs: number; read: TranscriptRead }>();
+  const transcriptCache = new Map<
+    string,
+    { size: number; mtimeMs: number; read: TranscriptRead }
+  >();
   let worktrees: { at: number; dirs: string[] } | null = null;
   let memo: { at: number; value: Promise<CliSessionsResponse> } | null = null;
 
-  const norm = (p: string): string => (FOLD_CASE ? p.toLowerCase() : p);
+  const foldCase = deps.foldCase ?? FOLD_CASE;
+  const norm = (p: string): string => (foldCase ? p.toLowerCase() : p);
   const real = async (p: string): Promise<string> => {
     try {
       return await fs.realpath(p);
@@ -403,12 +454,21 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   function labelFor(cwd: string, hit: { root: string } | null): string {
     if (hit === null) return path.basename(cwd) || '.';
     const rel = path.relative(hit.root, cwd);
-    return rel === '' ? path.basename(hit.root) : rel;
+    if (rel === '') return path.basename(hit.root) || '.';
+    // A case-folded match is not one to path.relative, which then climbs out
+    // of the root: never an absolute or `..` label, the basename instead.
+    if (path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) return path.basename(cwd) || '.';
+    return rel;
   }
 
   async function findTranscript(configDir: string, e: RegistryEntry): Promise<string | null> {
     const cached = transcriptPaths.get(e.cliSessionId);
-    const primary = path.join(configDir, 'projects', e.cwd.replace(/\//g, '-'), `${e.cliSessionId}.jsonl`);
+    const primary = path.join(
+      configDir,
+      'projects',
+      e.cwd.replace(/\//g, '-'),
+      `${e.cliSessionId}.jsonl`,
+    );
     for (const candidate of [cached, primary]) {
       if (candidate === undefined) continue;
       try {
@@ -483,11 +543,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return 'idle';
   }
 
-  function linkEpics(
-    handle: DbHandle,
-    factoryIds: string[],
-    scopeNow: string,
-  ): LinkedEpic[] {
+  function linkEpics(handle: DbHandle, factoryIds: string[], scopeNow: string): LinkedEpic[] {
     const groups = new Map<string, { lineage: string[]; ids: string[] }>();
     for (const id of factoryIds) {
       const lineage = projectedLineage(handle.db, id);
@@ -512,7 +568,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             {
               sessionId: r.session_id,
               epicId: typeof p.epic_id === 'string' ? p.epic_id : null,
-              taskIds: Array.isArray(p.task_ids) ? p.task_ids.filter((t): t is string => typeof t === 'string') : [],
+              taskIds: Array.isArray(p.task_ids)
+                ? p.task_ids.filter((t): t is string => typeof t === 'string')
+                : [],
             },
           ];
         } catch {
@@ -520,7 +578,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         }
       });
       const pick = (sql: string): string | null => {
-        const row = handle.sqlite.prepare(sql).get(...g.lineage) as { e: string | null } | undefined;
+        const row = handle.sqlite.prepare(sql).get(...g.lineage) as
+          | { e: string | null }
+          | undefined;
         return row?.e ?? null;
       };
       const epicId =
@@ -536,7 +596,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       let project: string | null = null;
       let currentWave: LinkedEpic['currentWave'] = null;
       if (epicId !== null) {
-        const taskRows = kanban(handle.db, epicId, {}, { nowIso: scopeNow }).flatMap((c) => c.tasks);
+        const taskRows = kanban(handle.db, epicId, {}, { nowIso: scopeNow }).flatMap(
+          (c) => c.tasks,
+        );
         const fold = (rows: { taskStatus: string }[]): StatusCounts => {
           const c: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
           for (const r of rows) c[statusBucketForTaskStatus(r.taskStatus)] += 1;
@@ -554,7 +616,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           ).flatMap((r) => {
             try {
               const ids = (JSON.parse(r.payload) as { task_ids?: unknown }).task_ids;
-              return Array.isArray(ids) ? ids.filter((t): t is string => typeof t === 'string') : [];
+              return Array.isArray(ids)
+                ? ids.filter((t): t is string => typeof t === 'string')
+                : [];
             } catch {
               return [];
             }
@@ -577,7 +641,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       for (const sid of g.lineage) {
         for (const role of sessionAgents(handle.db, sid, { nowIso: scopeNow }).roles) {
           for (const ag of role.agents) {
-            if (ag.status === 'live') workingAgents.push({ role: role.agentRole, taskId: ag.taskId });
+            if (ag.status === 'live')
+              workingAgents.push({ role: role.agentRole, taskId: ag.taskId });
           }
         }
       }
@@ -586,7 +651,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         rootSessionId: rootId,
         epicId,
         project,
-        title: overview(handle.db, { sessionId: rootId }, { nowIso: scopeNow }).runningSessions[0]?.title ?? null,
+        title:
+          overview(handle.db, { sessionId: rootId }, { nowIso: scopeNow }).runningSessions[0]
+            ?.title ?? null,
         factorySessionIds: [...new Set(g.ids)].sort(),
         currentWave,
         progress,
@@ -599,7 +666,13 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   async function compute(handle?: DbHandle): Promise<CliSessionsResponse> {
     const readAt = deps.nowIso();
     const hidden = { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 };
-    const base = { configSource: deps.configSource, readAt, formatWarning: null, hidden, sessions: [] };
+    const base = {
+      configSource: deps.configSource,
+      readAt,
+      formatWarning: null,
+      hidden,
+      sessions: [],
+    };
     if (deps.configDir === undefined) return { state: 'absent', ...base };
     const sessionsDir = path.join(deps.configDir, 'sessions');
     let names: string[];
@@ -645,9 +718,15 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         : `Unrecognised Claude Code version ${(odd.version ?? '').split('.').slice(0, 2).join('.')}; session data may be incomplete.`;
 
     const roots = await scopeRoots();
-    const links = handle ? cliSessionLinks(handle.db, entries.map((e) => e.cliSessionId)) : [];
+    const links = handle
+      ? cliSessionLinks(
+          handle.db,
+          entries.map((e) => e.cliSessionId),
+        )
+      : [];
     const factoryBy = new Map<string, string[]>();
-    for (const l of links) factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l.sessionId]);
+    for (const l of links)
+      factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l.sessionId]);
 
     const cards: CliSessionCard[] = [];
     for (const e of entries) {
@@ -679,11 +758,18 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         next: a?.next ?? null,
         transcript: t.state,
         linked: handle && ids ? { epics: linkEpics(handle, ids, readAt) } : null,
-        parseIssues: [],
+        parseIssues: e.parseIssues,
       });
     }
     cards.sort((x, y) => (x.startedAt ?? '').localeCompare(y.startedAt ?? '') || x.pid - y.pid);
-    return { state: 'ok', configSource: deps.configSource, readAt, formatWarning, hidden, sessions: cards };
+    return {
+      state: 'ok',
+      configSource: deps.configSource,
+      readAt,
+      formatWarning,
+      hidden,
+      sessions: cards,
+    };
   }
 
   return {
