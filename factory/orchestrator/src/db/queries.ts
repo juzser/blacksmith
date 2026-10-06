@@ -2160,7 +2160,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
   const activity = epicActivityRows(db, scope);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scope.project);
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
   const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);

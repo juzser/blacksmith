@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type DbHandle, openDb, projectSession, projectTasks } from '../../src/db/projector.js';
 import { overview } from '../../src/db/queries.js';
 import type { StoredEvent } from '../../src/events.js';
+import { FACTORY_PROJECT_NAME, LEGACY_FACTORY_PROJECT } from '../../src/projectName.js';
 
 const SESSION_ID = 'sess-idle-fixture';
 const NOW = '2026-08-20T12:00:00.000Z';
@@ -220,14 +221,43 @@ describe('overview() idle epics', () => {
     const events = [
       event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(9) }),
       taskAdded('epic-a', daysBefore(8)),
+      taskAdded('epic-b', daysBefore(8)),
       event({ event_type: 'note', task_id: 'epic-a/task-1', ts: daysBefore(0, 1000) }),
     ];
     projectSession(handle, SESSION_ID, events);
     projectTasks(handle, events);
     handle.sqlite
-      .prepare("update events_raw set payload = '{not json' where event_type = 'note'")
-      .run();
+      .prepare("update events_raw set payload = ? where event_type = 'note'")
+      .run('{"epic_id":"epic-b"');
     const result = overview(handle.db, { sessionId: SESSION_ID }, { nowIso: NOW });
+    // epic-a is counted by its task id; the truncated payload names epic-b but
+    // is unreadable, so it must not bump epic-b.
+    expect(result.epicsActivelyRunning).toEqual(['epic-a']);
+    expect(result.epicsIdle.map((e) => e.epicId)).toEqual(['epic-b']);
+  });
+
+  it('reads a legacy project spelling in scope.project as the current one', () => {
+    const events = [
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(9) }),
+      {
+        ...taskAdded('epic-a', daysBefore(8)),
+        record: { ...taskAdded('epic-a', daysBefore(8)).record, project: FACTORY_PROJECT_NAME },
+      },
+      event({
+        event_type: 'spec-review-completed',
+        ts: daysBefore(0, 60 * 60 * 1000),
+        project: FACTORY_PROJECT_NAME,
+        payload: { epic_id: 'epic-a' },
+      } as never),
+    ];
+    projectSession(handle, SESSION_ID, events);
+    projectTasks(handle, events);
+    const result = overview(
+      handle.db,
+      { sessionId: SESSION_ID, project: LEGACY_FACTORY_PROJECT },
+      { nowIso: NOW },
+    );
+    expect(result.epicsIdle).toEqual([]);
     expect(result.epicsActivelyRunning).toEqual(['epic-a']);
   });
 
