@@ -1557,6 +1557,25 @@ function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): b
 }
 
 /**
+ * The task row a finding's task id names: exact key first, then taskIdsMatch,
+ * the way projectResolver (projector.ts) does it. The log spells one task both
+ * bare ("task-1") and qualified ("epic-a/task-1"), and findings keep whichever
+ * spelling they were raised with. A bare id matches the same-named task of
+ * every epic, so the finding's own epic, when it names one, picks among them.
+ */
+function taskResolver<T extends { taskId: string; epicId: string | null }>(
+  taskRows: readonly T[],
+): (taskId: string, epicId: string | null) => T | undefined {
+  const exact = new Map(taskRows.map((t) => [t.taskId, t]));
+  return (taskId, epicId) => {
+    const hit = exact.get(taskId);
+    if (hit) return hit;
+    const matches = taskRows.filter((t) => taskIdsMatch(taskId, t.taskId));
+    return matches.find((t) => epicId !== null && t.epicId === epicId) ?? matches[0];
+  };
+}
+
+/**
  * An undecided waivable finding the factory will no longer act on, so only the
  * operator can: its task shipped, or it is epic-level (no task row, such as
  * `<epic>/integration`) and its epic is closed. A task still open is in the
@@ -1566,19 +1585,6 @@ function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): b
  * also holds `waived`, which is decided — so `completed` is spelled out. The
  * inbox and both pendingWaivers counts read this one rule, so they agree.
  */
-/**
- * The task row a finding's task id names: exact key first, then taskIdsMatch,
- * the way projectResolver (projector.ts) does it. The log spells one task both
- * bare ("task-1") and qualified ("epic-a/task-1"), and findings keep whichever
- * spelling they were raised with.
- */
-function taskResolver<T extends { taskId: string }>(
-  taskRows: readonly T[],
-): (taskId: string) => T | undefined {
-  const exact = new Map(taskRows.map((t) => [t.taskId, t]));
-  return (taskId) => exact.get(taskId) ?? taskRows.find((t) => taskIdsMatch(taskId, t.taskId));
-}
-
 function needsOperatorWaiver(
   f: {
     severity: string;
@@ -1587,11 +1593,11 @@ function needsOperatorWaiver(
     taskId: string;
     epicId: string | null;
   },
-  resolveTask: (taskId: string) => { taskStatus: string } | undefined,
+  resolveTask: (taskId: string, epicId: string | null) => { taskStatus: string } | undefined,
   closedEpicIds: ReadonlySet<string>,
 ): boolean {
   if (!awaitsWaiverDecision(f) || f.waiverId !== null) return false;
-  const t = resolveTask(f.taskId);
+  const t = resolveTask(f.taskId, f.epicId);
   if (t) return t.taskStatus === 'completed';
   return f.epicId !== null && closedEpicIds.has(f.epicId);
 }
@@ -1674,15 +1680,18 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   const pendingFindings = allFindingsForScope(db, scope).filter((f) =>
     needsOperatorWaiver(f, resolveTask, closedEpicIds),
   );
-  const pendingByTask = new Map<string, (typeof pendingFindings)[number][]>();
+  const pendingByTask = new Map<
+    string,
+    { t: ReturnType<typeof resolveTask>; findingRows: (typeof pendingFindings)[number][] }
+  >();
   for (const f of pendingFindings) {
-    const key = resolveTask(f.taskId)?.taskId ?? f.taskId;
-    const list = pendingByTask.get(key) ?? [];
-    list.push(f);
-    pendingByTask.set(key, list);
+    const t = resolveTask(f.taskId, f.epicId);
+    const key = t?.taskId ?? f.taskId;
+    const group = pendingByTask.get(key) ?? { t, findingRows: [] };
+    group.findingRows.push(f);
+    pendingByTask.set(key, group);
   }
-  for (const [taskId, findingRows] of pendingByTask) {
-    const t = resolveTask(taskId);
+  for (const [taskId, { t, findingRows }] of pendingByTask) {
     const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
     const count = findingRows.length;
     rows.push({

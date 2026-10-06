@@ -2761,14 +2761,19 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
 
   describe('which pending waivers reach the inbox', () => {
     /** Park a task row at `status`, copied from a fixture row so every
-     * required column is filled; the epic is the fixture's own. */
-    function seedTask(taskId: string, status: string): void {
+     * required column is filled; the epic is the fixture's own unless `over`
+     * names another. */
+    function seedTask(
+      taskId: string,
+      status: string,
+      over: Partial<typeof tasks.$inferInsert> = {},
+    ): void {
       const [base] = handle.db.select().from(tasks).where(eq(tasks.taskId, TASK_1)).all();
       if (!base) throw new Error('fixture task missing');
       handle.db.delete(tasks).where(eq(tasks.taskId, taskId)).run();
       handle.db
         .insert(tasks)
-        .values({ ...base, taskId, taskStatus: status })
+        .values({ ...base, taskId, taskStatus: status, ...over })
         .run();
     }
 
@@ -2885,6 +2890,18 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
       seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
       expect(waiverRows().filter((r) => r.taskId?.endsWith('task-9'))).toEqual([]);
       expect(counts()).toEqual(base);
+    });
+
+    it('resolves a bare-id finding to the task row of its own epic', () => {
+      seedTask('epic-a/task-7', 'completed', { epicId: 'epic-a' });
+      seedTask('epic-b/task-7', 'todo', { epicId: 'epic-b' });
+      seedFinding('f-b7', 'task-7', { epicId: 'epic-b' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toEqual([]);
+      handle.db.delete(findings).where(eq(findings.findingId, 'f-b7')).run();
+      seedFinding('f-a7', 'task-7', { epicId: 'epic-a' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toMatchObject([
+        { taskId: 'epic-a/task-7' },
+      ]);
     });
 
     it('folds a qualified and a bare spelling of one task into one titled row', () => {
