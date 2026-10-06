@@ -1428,6 +1428,9 @@ export function projectSession(
           payload: JSON.stringify(record.payload),
           project: recordProject(record) ?? projectForRef(eventTask),
           actor: record.actor,
+          // Copied, never derived: absent on a log written outside a CLI
+          // session or before the stamp existed, and NULL here for both.
+          cliSessionId: record.cli_session_id ?? null,
         })
         .run();
 

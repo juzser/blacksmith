@@ -24,3 +24,11 @@ assertRuntimeSupported();
 // ambient default unreachable, and the network stays out of the unit suite.
 // Inherited by children, which is what the CLI tests' subprocesses need.
 process.env.SMITH_CROSSCHECK_OFFLINE = '1';
+
+// And the same again for the developer's own terminal. events.ts stamps every
+// write with CLAUDE_CODE_SESSION_ID when it is set, and this suite is run from
+// inside Claude Code as often as not: left alone, every fixture event -- and
+// every event a CLI-test child writes -- would carry the runner's own CLI
+// session, and a test about an unstamped log would pass or fail by where it
+// was launched from. Tests that want the stamp set it themselves.
+delete process.env.CLAUDE_CODE_SESSION_ID;

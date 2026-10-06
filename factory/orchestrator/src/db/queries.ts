@@ -1385,6 +1385,61 @@ export function runningSessions(
   );
 }
 
+/** One CLI session's footprint in one factory session (see cliSessionLinks). */
+export interface CliSessionLink {
+  cliSessionId: string;
+  sessionId: string;
+  /** The newest event in `sessionId` that this CLI session wrote. */
+  lastEventAt: string;
+}
+
+/**
+ * Which factory sessions each of `cliIds` wrote into: one row per
+ * (CLI session, factory session) pair, ordered by CLI id then session id.
+ *
+ * The answer is read off `events_raw.cli_session_id`, the stamp events.ts
+ * puts on every write made inside a CLI session. It is a link and nothing
+ * more: a session continued by a second CLI session answers to both, an
+ * unstamped event (written outside one, or before the stamp existed) answers
+ * to neither, and since an epic session and its subagents can share one CLI
+ * session the pair says nothing about which agent wrote what -- so it is
+ * never turn or delegation evidence (architecture §18 rule 4).
+ */
+export function cliSessionLinks(db: SmithDb, cliIds: readonly string[]): CliSessionLink[] {
+  // No ids, no question -- and no `inArray(col, [])` either; see
+  // scopedToSessions for why this file never builds one.
+  if (cliIds.length === 0) return [];
+  const rows = db
+    .select({
+      cliSessionId: eventsRaw.cliSessionId,
+      sessionId: eventsRaw.sessionId,
+      ts: eventsRaw.ts,
+    })
+    .from(eventsRaw)
+    .where(inArray(eventsRaw.cliSessionId, [...new Set(cliIds)]))
+    .all();
+
+  const links = new Map<string, CliSessionLink>();
+  for (const row of rows) {
+    if (row.cliSessionId === null) continue;
+    const key = `${row.cliSessionId}\u0000${row.sessionId}`;
+    const seen = links.get(key);
+    if (seen === undefined) {
+      links.set(key, {
+        cliSessionId: row.cliSessionId,
+        sessionId: row.sessionId,
+        lastEventAt: row.ts,
+      });
+    } else if (row.ts > seen.lastEventAt) {
+      seen.lastEventAt = row.ts;
+    }
+  }
+  const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return [...links.values()].sort(
+    (a, b) => byCodePoint(a.cliSessionId, b.cliSessionId) || byCodePoint(a.sessionId, b.sessionId),
+  );
+}
+
 function groupLiveAgents(rows: (typeof agents.$inferSelect)[]): LiveAgentGroup[] {
   const grouped = new Map<string, LiveAgentGroup>();
   for (const row of rows) {

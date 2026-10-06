@@ -324,7 +324,7 @@ Two storage layers, one source of truth:
 
 - **`state/events/*.jsonl`** — append-only event log (NDJSON). Every record:
   `{ts, session_id, actor, event_type, task_id?, agent_id?, plan_version,
-  causal_parent, payload, project?}`. The `causal_parent` chain + `plan_version` mean
+  causal_parent, payload, project?, cli_session_id?}`. The `causal_parent` chain + `plan_version` mean
   any failure renders as a **path through the task graph**, not grep
   archaeology. Durability invariant: **any component can crash and be
   reconstructed from the log alone** — the log is the factory's durable
@@ -362,6 +362,18 @@ Two storage layers, one source of truth:
   row) — never its lineage's, since a continuation may start from another project's
   epic. A ref nothing answers for, or a bare id two projects share, adds no
   project rather than the default one.
+  **`cli_session_id`**: optional, the CLI session that wrote the event.
+  `events.ts`'s `appendEventLocked` — the one place every write passes
+  through — stamps it from `CLAUDE_CODE_SESSION_ID` when that is set and
+  well-formed, and leaves it absent otherwise (outside a CLI session, and on
+  every event logged before the stamp existed); a malformed value is
+  dropped, never thrown. It is **not envelope**: it never stands in for
+  `session_id` or `causal_parent`, which every write still carries
+  explicitly (§18 rule 8). And it is **never turn or delegation evidence**:
+  an epic session and the subagents it runs can share one CLI session, so
+  two events with the same stamp say nothing about who wrote them (§18 rule
+  4). It only links a live CLI session to the factory sessions it drove —
+  `events_raw.cli_session_id`, read by `db/queries.ts`'s `cliSessionLinks`.
 - **`task_id` is `<epic>/<task>`, and the epic is a field, not a parse**
   (D-49/P9-10). The plan mints qualified ids and `bs/<epic>/<task>` branch
   names are cut from them, so a qualified id *is* an epic assertion. But an id
