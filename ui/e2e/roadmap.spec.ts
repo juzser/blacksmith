@@ -1,5 +1,7 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { stubWindowRoadmap } from './roadmapWindowFixture.js';
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {
@@ -69,6 +71,56 @@ test.describe('Roadmap', () => {
     expect(pastStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
     expect(pastStyle.opacity).toBeLessThan(1);
   });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the empty track stays distinct on a selected and a hovered row (${theme})`, async ({
+      page,
+    }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto('/work/roadmap?phase=phase-7');
+      const selected = page.locator('.lrow.sel').first();
+      await expect(selected).toBeVisible();
+      const fills = (row: ReturnType<Page['locator']>) =>
+        row.evaluate((el) => {
+          const track = el.querySelector('.track');
+          if (!track) throw new Error('row has no .track');
+          return {
+            row: getComputedStyle(el).backgroundColor,
+            track: getComputedStyle(track).backgroundColor,
+          };
+        });
+      // Summed per-channel distance; the unfixed light selected row (#f4f4f5
+      // vs #f7f7f8) sits at 9, which the eye cannot tell apart.
+      const gap = (a: string, b: string) => {
+        const rgb = (c: string) => (c.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+        const [x, y] = [rgb(a), rgb(b)];
+        return x.reduce((n, v, i) => n + Math.abs(v - (y[i] ?? 0)), 0);
+      };
+      const sel = await fills(selected);
+      expect(
+        gap(sel.track, sel.row),
+        `selected row fill ${sel.row}, track ${sel.track}`,
+      ).toBeGreaterThanOrEqual(10);
+
+      const other = page.locator('.lrow:not(.sel)').first();
+      await other.hover();
+      await page.waitForTimeout(200);
+      const hov = await fills(other);
+      expect(
+        gap(hov.track, hov.row),
+        `hovered row fill ${hov.row}, track ${hov.track}`,
+      ).toBeGreaterThanOrEqual(10);
+
+      await selected.hover();
+      await page.waitForTimeout(200);
+      const both = await fills(selected);
+      expect(
+        gap(both.track, both.row),
+        `selected+hovered row fill ${both.row}, track ${both.track}`,
+      ).toBeGreaterThanOrEqual(10);
+    });
+  }
 
   test('no sideways page scroll at 390px on /work/roadmap', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -365,5 +417,291 @@ test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2,
     // epic-9 (In progress) defaults open; epic-10 (Done) defaults closed.
     await settleForShot(page, page.locator('.esec', { hasText: 'epic-9' }).locator('.wave-list'));
     await shoot(page, 'work-roadmap-phase-waves-desktop-light');
+  });
+});
+
+// UI spec Part 2 — one section per project, each windowed to 1 lane before
+// the current one, the current one, and 2 after. roadmapWindowFixture.ts
+// stubs project-a (8 phases, phase-4 current) and project-b (2 phases).
+test.describe('Roadmap window (spec Part 2)', () => {
+  const sectionFor = (page: Page, project: string) =>
+    page
+      .locator('.rm-section')
+      .filter({ has: page.locator('.rm-section__head', { hasText: project }) });
+  const earlierToggle = (page: Page) =>
+    page.locator('button[aria-controls="rm-window-project-a-earlier"]');
+  const laterToggle = (page: Page) =>
+    page.locator('button[aria-controls="rm-window-project-a-later"]');
+  const phaseNames = (page: Page, project: string) =>
+    sectionFor(page, project).locator('.lrow:not(.sub) .lname');
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubWindowRoadmap(page);
+  });
+
+  test('one section per project, newest activity first, each with its done count', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap');
+    const heads = page.locator('.rm-section__head');
+    await expect(heads).toHaveCount(2);
+    await expect(heads.nth(0)).toContainText('project-a');
+    await expect(heads.nth(0)).toContainText('3 of 8 phases done');
+    await expect(heads.nth(1)).toContainText('project-b');
+    await expect(heads.nth(1)).toContainText('1 of 2 phases done');
+    await expect(page.locator('h2.rm-section__head')).toHaveCount(2);
+  });
+
+  test('the disclosure buttons clear 24px on desktop', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    const box = await earlierToggle(page).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+  });
+
+  test('only the window is in the DOM, with the current lane tagged', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+    ]);
+    const current = sectionFor(page, 'project-a').locator('[aria-current="step"]');
+    await expect(current).toHaveCount(1);
+    await expect(current).toContainText('Phase 4');
+    await expect(current.locator('.bs-tag')).toHaveText('Current');
+
+    // project-b: phase-9 done, phase-10 current, nothing hidden either side.
+    await expect(phaseNames(page, 'project-b')).toHaveText(['Phase 9', 'Phase 10']);
+    await expect(sectionFor(page, 'project-b').locator('[aria-current="step"]')).toContainText(
+      'Phase 10',
+    );
+    await expect(sectionFor(page, 'project-b').locator('.rm-window__more')).toHaveCount(0);
+  });
+
+  test('the earlier and later disclosures expand in place and flip to "Show fewer"', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap');
+    const earlier = earlierToggle(page);
+    const later = laterToggle(page);
+    await expect(earlier).toHaveText('Show 2 earlier lanes');
+    await expect(earlier).toHaveAttribute('aria-expanded', 'false');
+    await expect(later).toHaveText('Show 2 later lanes');
+    await expect(later).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#rm-window-project-a-earlier .lrow')).toHaveCount(0);
+
+    await earlier.click();
+    await expect(earlier).toHaveAttribute('aria-expanded', 'true');
+    await expect(earlier).toHaveText('Show fewer earlier lanes');
+    await expect(earlier).toBeFocused();
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 1',
+      'Phase 2',
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+    ]);
+    await expect(page.locator('#rm-window-project-a-earlier .lrow')).toHaveCount(2);
+
+    await later.click();
+    await expect(later).toHaveAttribute('aria-expanded', 'true');
+    await expect(later).toHaveText('Show fewer later lanes');
+    await expect(phaseNames(page, 'project-a')).toHaveCount(8);
+
+    await earlier.click();
+    await expect(earlier).toHaveText('Show 2 earlier lanes');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+      'Phase 7',
+      'Phase 8',
+    ]);
+  });
+
+  test('the expand state survives a reload in the same tab', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    await laterToggle(page).click();
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'true');
+
+    await page.reload();
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+      'Phase 7',
+      'Phase 8',
+    ]);
+  });
+
+  test('a ?phase= deep link into a hidden lane opens that side and shows the row', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    const row = sectionFor(page, 'project-a').locator('.lrow[aria-current="true"]');
+    await expect(row).toContainText('Phase 1');
+    await expect(row).toBeInViewport();
+    await expect(row).toBeFocused();
+    // Selecting a lane never moves the Current marker.
+    await expect(sectionFor(page, 'project-a').locator('[aria-current="step"]')).toContainText(
+      'Phase 4',
+    );
+  });
+
+  test('a reload of the data does not reopen a side the user collapsed after a deep link', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await earlierToggle(page).click();
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+
+    // Re-run load() without touching ?phase=: a project scope change does it.
+    const reloaded = page.waitForResponse(
+      (r) => r.url().includes('/api/roadmap') && r.url().includes('project=project-a'),
+    );
+    await page.evaluate(() => {
+      type Host = {
+        __vue_app__: { config: { globalProperties: { $router: { push(l: unknown): void } } } };
+      };
+      const host = document.querySelector('#app') as unknown as Host;
+      host.__vue_app__.config.globalProperties.$router.push({
+        path: '/work/roadmap',
+        query: { phase: 'phase-1', project: 'project-a' },
+      });
+    });
+    await reloaded;
+    await expect(page).toHaveURL(/project=project-a/);
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.lname', { hasText: /^Phase 1$/ })).toHaveCount(0);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot window desktop/${theme}: earlier side expanded`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.goto('/work/roadmap');
+      await earlierToggle(page).click();
+      await settleForShot(page, page.locator('#rm-window-project-a-earlier .lrow').first());
+      await shoot(page, `work-roadmap-window-desktop-${theme}`);
+    });
+  }
+});
+
+// Roadmap label and axis geometry (visual fix round 2): the fixture's long
+// "Phase 6b — Remaining pages" lane is the current one, so its name sits beside
+// the "Current" Tag. Every track column must start at the same x as the axis.
+test.describe('Roadmap: label column and shared track column', () => {
+  for (const width of [1280, 768]) {
+    test.describe(`at ${width}px`, () => {
+      test.beforeEach(async ({ page }) => {
+        await page.setViewportSize({ width, height: 1024 });
+        await page.goto('/work/roadmap');
+        await expect(page.locator('.lrow').first()).toBeVisible();
+      });
+
+      test('the current lane name is not truncated beside its Tag', async ({ page }) => {
+        const head = page
+          .locator('.lrow:not(.sub) .lhead')
+          .filter({ has: page.locator('.bs-tag', { hasText: 'Current' }) })
+          .first();
+        const name = head.locator('.lname');
+        await expect(name).toContainText('Remaining pages');
+        await expect(head.locator('.bs-tag')).toBeVisible();
+        const fit = await name.evaluate((el) => ({
+          sw: el.scrollWidth,
+          cw: el.clientWidth,
+          sh: el.scrollHeight,
+          ch: el.clientHeight,
+        }));
+        expect(fit.sw).toBeLessThanOrEqual(fit.cw);
+        expect(fit.sh).toBeLessThanOrEqual(fit.ch);
+        const lhead = await head.boundingBox();
+        const tag = await head.locator('.bs-tag').boundingBox();
+        expect((tag?.x ?? 0) + (tag?.width ?? 0)).toBeLessThanOrEqual(
+          (lhead?.x ?? 0) + (lhead?.width ?? 0) + 1,
+        );
+      });
+
+      test('every track starts at the axis and now-line column x', async ({ page }) => {
+        const axis = await page.locator('.months-row').first().boundingBox();
+        const nowCol = await page.locator('.now-track__col').first().boundingBox();
+        expect(axis).not.toBeNull();
+        const tracks = await page.locator('.lrow .track').all();
+        expect(tracks.length).toBeGreaterThan(1);
+        expect(await page.locator('.lrow.sub').count()).toBeGreaterThan(0);
+        for (const t of tracks) {
+          const box = await t.boundingBox();
+          expect(Math.abs((box?.x ?? 0) - (axis?.x ?? 0))).toBeLessThanOrEqual(1);
+        }
+        expect(Math.abs((nowCol?.x ?? 0) - (axis?.x ?? 0))).toBeLessThanOrEqual(1);
+      });
+
+      test('the epic row name is indented, regular weight and subtle (mock .lrow.sub .lname)', async ({
+        page,
+      }) => {
+        test.skip(width !== 1280, 'desktop width only');
+        const name = (sel: string) => page.locator(sel).first().locator('.lname').first();
+        const read = (loc: ReturnType<Page['locator']>) =>
+          loc.evaluate((el) => {
+            const s = getComputedStyle(el);
+            const root = getComputedStyle(document.documentElement);
+            return {
+              pad: s.paddingLeft,
+              weight: s.fontWeight,
+              color: s.color,
+              text: root.getPropertyValue('--bs-text').trim(),
+              subtle: root.getPropertyValue('--bs-text-subtle').trim(),
+            };
+          });
+        const resolve = (v: string) =>
+          page.evaluate((c) => {
+            const d = document.createElement('div');
+            d.style.color = c;
+            document.body.append(d);
+            const out = getComputedStyle(d).color;
+            d.remove();
+            return out;
+          }, v);
+        const epic = await read(name('.lrow.sub:not(.sel)'));
+        expect(epic.pad).toBe('14px');
+        expect(epic.weight).toBe('400');
+        expect(epic.color).toBe(await resolve(epic.subtle));
+        const phase = await read(name('.lrow:not(.sub)'));
+        expect(phase.pad).toBe('0px');
+        expect(phase.color).not.toBe(await resolve(phase.subtle));
+        await page.goto('/work/roadmap?epic=epic-9');
+        const selEpic = await read(name('.lrow.sub.sel'));
+        expect(selEpic.color).toBe(await resolve(selEpic.text));
+      });
+
+      test('every axis label stays inside the track column', async ({ page }) => {
+        const axis = await page.locator('.months-row').first().boundingBox();
+        const marks = await page.locator('.months-row').first().locator('.months-mark').all();
+        expect(marks.length).toBeGreaterThan(1);
+        for (const m of marks) {
+          const box = await m.boundingBox();
+          expect(box?.x ?? 0).toBeGreaterThanOrEqual((axis?.x ?? 0) - 1);
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+            (axis?.x ?? 0) + (axis?.width ?? 0) + 1,
+          );
+        }
+      });
+    });
+  }
+
+  test('at 768px the track column is at least 430px wide', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto('/work/roadmap');
+    const box = await page.locator('.lrow:not(.sub) .track').first().boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(430);
   });
 });

@@ -1,0 +1,150 @@
+<script setup lang="ts">
+// UI spec Part 2 — one project's slice of the Roadmap: an h2 head (the
+// NeedsYouInbox group-head look, one level up) with the muted done count, the
+// windowed swimlane (1 lane before the current one, the current one, 2 after)
+// and the "Show N earlier/later lanes" disclosures. The window and the
+// current-lane rule are roadmapWindow.ts; the expand state is the page's
+// (expandedRows.ts, sessionStorage), so a deep link can open a side too. The
+// page sets the selection's EpicBlock right after the section holding it.
+//
+// Below 640px the section is a <details> with a 44px <summary> (the page opens
+// the running one and the one holding the selection), the swimlane gives way
+// to a picker over the shown lanes, and the disclosures widen that picker's
+// options, so on phone they name the picker in `aria-controls`.
+import { computed } from 'vue';
+import { useViewport } from '../composables/useViewport.js';
+import {
+  disclosureLabel,
+  laneOptions,
+  type RoadmapSection,
+  sectionSwimlane,
+  type WindowSide,
+  windowPickerId,
+  windowRegionId,
+} from '../lib/roadmapWindow.js';
+import Select from './kit/Select.vue';
+import RoadmapSwimlane from './RoadmapSwimlane.vue';
+
+const props = defineProps<{
+  section: RoadmapSection;
+  /** False when the page is scoped to one project: the topbar names it already. */
+  showHeading: boolean;
+  expanded: { earlier: boolean; later: boolean };
+  selectedPhase: string | null;
+  selectedEpic: string | null;
+  /** The selection's lane is in this section, shown or hidden: open on phone. */
+  hostsSelection: boolean;
+  pickerLabel: string;
+}>();
+
+const emit = defineEmits<{
+  toggle: [WindowSide];
+  selectPhase: [string];
+  selectEpic: [string];
+}>();
+
+const { isPhoneWidth } = useViewport();
+
+const view = computed(() => sectionSwimlane(props.section, props.expanded, new Date()));
+
+// DS4 S4 R4 — phase mode only: with an epic of this section selected, the
+// EpicBlock's back link stands in for the picker. A phase-less section's
+// lanes are epics, so its picker stays.
+const showPicker = computed(
+  () => props.section.kind === 'epic' || !(props.hostsSelection && props.selectedEpic !== null),
+);
+const pickerValue = computed(
+  () => (props.section.kind === 'phase' ? props.selectedPhase : props.selectedEpic) ?? '',
+);
+const pickerOptions = computed(() => {
+  const options = laneOptions(view.value.regions, view.value.currentLane);
+  if (options.some((o) => o.value === pickerValue.value)) return options;
+  // The selection lives in another section (or nowhere): a placeholder, so
+  // the select never silently shows a lane that is not selected.
+  return [
+    { value: '', label: props.section.kind === 'phase' ? 'Pick a phase' : 'Pick an epic' },
+    ...options,
+  ];
+});
+
+function onPick(value: string) {
+  if (value === '') return;
+  if (props.section.kind === 'phase') emit('selectPhase', value);
+  else emit('selectEpic', value);
+}
+
+/** A side's disclosure, absent when that side hides nothing (or the picker is out). */
+function disclosure(side: WindowSide) {
+  const hidden = props.section.window[side].length;
+  if (hidden === 0 || (isPhoneWidth.value && !showPicker.value)) return null;
+  return {
+    expanded: props.expanded[side],
+    controls: isPhoneWidth.value
+      ? windowPickerId(props.section.project)
+      : windowRegionId(props.section.project, side),
+    label: disclosureLabel(side, hidden, props.expanded[side]),
+  };
+}
+const earlier = computed(() => disclosure('earlier'));
+const later = computed(() => disclosure('later'));
+</script>
+
+<template>
+  <component
+    :is="isPhoneWidth && showHeading ? 'details' : 'section'"
+    class="bs-inbox__group rm-section"
+    :open="isPhoneWidth && showHeading ? section.running || hostsSelection : undefined"
+  >
+    <component
+      :is="isPhoneWidth ? 'summary' : 'h2'"
+      v-if="showHeading"
+      class="bs-inbox__group-head rm-section__head"
+    >
+      {{ section.title }}
+      <span v-if="section.countLabel" class="rm-section__count">{{ section.countLabel }}</span>
+    </component>
+
+    <button
+      v-if="earlier"
+      type="button"
+      class="bs-kanban-col__more rm-window__more"
+      :aria-expanded="earlier.expanded"
+      :aria-controls="earlier.controls"
+      @click="emit('toggle', 'earlier')"
+    >
+      {{ earlier.label }}
+    </button>
+
+    <RoadmapSwimlane
+      v-if="!isPhoneWidth"
+      :swimlane="view.swimlane"
+      :regions="view.regions"
+      :current-lane="view.currentLane"
+      :project="showHeading ? section.title : undefined"
+      :selected-phase="selectedPhase"
+      :selected-epic="selectedEpic"
+      @select-phase="(id) => emit('selectPhase', id)"
+      @select-epic="(id) => emit('selectEpic', id)"
+    />
+    <Select
+      v-else-if="showPicker"
+      :id="windowPickerId(section.project)"
+      class="bs-roadmap-mobile__phase-select"
+      :model-value="pickerValue"
+      :options="pickerOptions"
+      :aria-label="pickerLabel"
+      @update:model-value="onPick"
+    />
+
+    <button
+      v-if="later"
+      type="button"
+      class="bs-kanban-col__more rm-window__more"
+      :aria-expanded="later.expanded"
+      :aria-controls="later.controls"
+      @click="emit('toggle', 'later')"
+    >
+      {{ later.label }}
+    </button>
+  </component>
+</template>
