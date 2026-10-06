@@ -7,6 +7,7 @@ import {
 } from './events.js';
 import type { EventContext } from './findings.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
+import { taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { BRANCH_PREFIX, epicBranchPrefix, taskBranchName } from './worktree.js';
 
@@ -643,6 +644,27 @@ export interface FollowUpTaskInput {
   objective: string;
   /** The file the finding is anchored to — the only claim a follow-up starts with. */
   claims: string[];
+  /**
+   * The task whose finding this follow-up was raised for. When `ctx.project`
+   * names no project, the follow-up inherits the one the log stamped on this
+   * task — bare or epic-qualified, either spelling.
+   */
+  fromTaskId?: string;
+}
+
+/** The one project the lineage stamped on `fromTaskId`'s events, or undefined. */
+function fromTaskProject(
+  lineage: readonly StoredEvent[],
+  fromTaskId: string | undefined,
+): string | undefined {
+  if (fromTaskId === undefined) return undefined;
+  const stamped = new Set<string>();
+  for (const { record } of lineage) {
+    if (record.project && record.task_id && taskIdsMatch(record.task_id, fromTaskId)) {
+      stamped.add(record.project);
+    }
+  }
+  return stamped.size === 1 ? [...stamped][0] : undefined;
 }
 
 /**
@@ -666,12 +688,26 @@ export async function emitFollowUpTask(
   ctx: TaskEventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent | null> {
-  const added = await idsAlreadyEmitted('task-added', ctx, opts);
-  if (added.has(input.taskId)) return null;
+  const lineage = await readLineageEvents(ctx.sessionId, opts);
+  if (
+    lineage.some(
+      ({ record }) => record.event_type === 'task-added' && record.task_id === input.taskId,
+    )
+  ) {
+    return null;
+  }
+
+  // A follow-up is minted inside a wave, where no plan is at hand and the
+  // wave-runner stamps nothing. So the caller's project wins (a caller holding
+  // the plan passes its project here, planScoped's fallback), then the one
+  // the log already holds for the task the finding came from. Two different
+  // stamps on that task settle nothing: the envelope stays absent rather
+  // than picking one.
+  const project = ctx.project ?? fromTaskProject(lineage, input.fromTaskId);
 
   return appendEvent(
     envelope(
-      ctx,
+      project === undefined ? ctx : { ...ctx, project },
       'task-added',
       {
         epic_id: input.epicId,

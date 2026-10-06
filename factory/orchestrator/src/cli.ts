@@ -4392,7 +4392,14 @@ async function main(): Promise<number> {
       // can hold the fix, because the fix is a plan amendment.
       const isSpec = !result.suppressed && findingScope(result.finding) === SPEC_FINDING_SCOPE;
       if (!result.suppressed && !isSpec) {
-        await recordReattribution(routing, result.finding, ctx, opts);
+        // The plan, when given, says which project a follow-up belongs to --
+        // the same fallback the plan-driven task writers take (planScoped).
+        await recordReattribution(
+          routing,
+          result.finding,
+          plan?.project ? { ...ctx, project: plan.project } : ctx,
+          opts,
+        );
       }
       raised.push({
         findingId: result.suppressed ? null : result.finding.finding_id,

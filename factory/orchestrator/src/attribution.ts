@@ -13,7 +13,7 @@ import {
   type RaiseFindingInput,
   reattributeFinding,
 } from './findings.js';
-import { emitFollowUpTask, followUpTaskId } from './taskEvents.js';
+import { emitFollowUpTask, followUpTaskId, type TaskEventContext } from './taskEvents.js';
 import { requireEpicOfTaskId } from './taskId.js';
 
 /**
@@ -223,11 +223,14 @@ export async function routeFindings(
  * Call this only once the finding has survived intake. A waived or refuted
  * finding minting a `todo` follow-up would block the epic verdict on a bug the
  * team already settled.
+ *
+ * `ctx.project`, when set, is stamped on the follow-up; without it the
+ * follow-up inherits the project the log holds for `routed.fromTaskId`.
  */
 export async function recordReattribution(
   routed: RoutedFinding,
   finding: Finding,
-  ctx: EventContext,
+  ctx: TaskEventContext,
   opts: EventOpts = {},
 ): Promise<void> {
   if (routed.attribution === 'gated') return;
@@ -239,6 +242,7 @@ export async function recordReattribution(
         taskId: routed.taskId,
         objective: `Fix: ${finding.summary}`,
         claims: routed.claims,
+        fromTaskId: routed.fromTaskId,
       },
       ctx,
       opts,
