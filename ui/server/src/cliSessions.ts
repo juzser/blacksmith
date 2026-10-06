@@ -626,7 +626,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   /** Session id -> until when a full search for its transcript is not repeated. */
   const missUntil = new Map<string, number>();
   let worktrees: { at: number; dirs: string[] } | null = null;
-  let memo: { at: number; key: string; value: Promise<CliSessionsResponse> } | null = null;
+  const memo = new Map<string, { at: number; value: Promise<CliSessionsResponse> }>();
+  const MEMO_MAX = 8;
 
   const foldCase = deps.foldCase ?? FOLD_CASE;
   const norm = (p: string): string => (foldCase ? p.toLowerCase() : p);
@@ -1126,8 +1127,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         // and a re-run `<epic>-w<N>r-<date>`, so the newest such session that
         // started with (or after) the newest open wave's admission gives N,
         // re-runs included. An admission ordinal would drift: every re-run is
-        // another admission. No such session (a wave run inline): the position
-        // of the newest open wave, else of the newest admission.
+        // another admission. No such session (a wave run inline): 1 when the
+        // epic has a single admission, else unknown (null).
         const newestOpen = openWaves[0];
         const namePattern = new RegExp(
           `^${epicId.replace(/[.*+?^${'$'}{}()|[\]\\]/g, '\\$&')}-w(\\d+)r?-`,
@@ -1149,18 +1150,18 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               r.id === newestOpen.sessionId,
           )
           .sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id))[0];
-        const position = newestOpen
-          ? epicWaves.findIndex((w) => w.admittedEventId === newestOpen.admittedEventId) + 1
-          : epicWaves.length;
-        const wave = named?.n ?? (position > 0 ? position : null);
+        // Without a named session the position is a guess, certain only when
+        // the epic has a single admission.
+        const wave = named?.n ?? (epicWaves.length === 1 ? 1 : null);
 
         const busy = (t: string): boolean =>
           workingAgents.some((a) => a.taskId !== null && taskIdsMatch(a.taskId, t));
         let nextTask: { taskId: string; taskTitle: string } | null = null;
         for (const t of newestOpen?.taskIds ?? []) {
+          if (isClosed(t) || busy(t)) continue;
+          // The first remaining task is next; unnamed means unknown, never a later one.
           const label = row(t)?.label;
-          if (isClosed(t) || busy(t) || !label) continue;
-          nextTask = { taskId: row(t)?.taskId ?? t, taskTitle: label };
+          if (label) nextTask = { taskId: row(t)?.taskId ?? t, taskTitle: label };
           break;
         }
         focusParts = {
@@ -1201,15 +1202,22 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     );
   }
 
-  function focusOf(epics: readonly LinkedEpic[], status: CliSessionStatus): CliSessionFocus | null {
+  function focusOf(
+    epics: readonly LinkedEpic[],
+    status: CliSessionStatus,
+    registryWaiting: boolean,
+  ): CliSessionFocus | null {
     const epic = epics.find((x) => x.epicId !== null);
     if (epic === undefined || epic.epicId === null) return null;
     const { wave, nowTitles, nextTask, remaining } = epic.focusParts;
     const now = epic.workingAgents.map((a, i) => ({ ...a, taskTitle: nowTitles[i] ?? null }));
+    // Blocked on the operator (a permission/question prompt or a pending ask),
+    // or nothing is working and the turn is over. An idle session whose
+    // transcript ends in text while an agent works is just waiting for it.
     const waiting =
+      registryWaiting ||
       status === 'waiting_answer' ||
-      status === 'waiting_operator' ||
-      (status === 'idle' && now.length === 0);
+      (now.length === 0 && (status === 'idle' || status === 'waiting_operator'));
     const next: CliSessionFocus['next'] = waiting
       ? { kind: 'waiting_on_you' }
       : nextTask
@@ -1370,7 +1378,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               }
             : null,
         next: a?.next ?? null,
-        focus: focusOf(epics, status),
+        focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
         linked,
         parseIssues: e.parseIssues,
@@ -1396,12 +1404,15 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           : [];
       const now = Date.now();
       const key = stores.map((s) => s.id).join(',');
-      if (memo !== null && memo.key === key && now - memo.at < cacheMs) return memo.value;
+      for (const [k, m] of memo) if (now - m.at >= cacheMs) memo.delete(k);
+      const hit = memo.get(key);
+      if (hit !== undefined) return hit.value;
       const value = compute(stores);
-      memo = { at: now, key, value };
+      while (memo.size >= MEMO_MAX) memo.delete(memo.keys().next().value as string);
+      memo.set(key, { at: now, value });
       // A failed read must not be served again for the next second.
       value.catch(() => {
-        if (memo?.value === value) memo = null;
+        if (memo.get(key)?.value === value) memo.delete(key);
       });
       return value;
     },

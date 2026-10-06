@@ -70,8 +70,9 @@ shows its working folder and name only.
 
 The wave number comes from the newest session named `<epic>-w<N>-…` (a re-run,
 `<epic>-w<N>r-…`, is still wave N) that is not older than the newest open wave; when
-the epic has no such session it is the open wave's position among the epic's
-admissions. Each live session is matched against every discovered store, so a session
+the epic has no such session it is 1 when the epic has a single admission, else the
+title omits the wave. **Next** is the first open task of the current wave, in the
+wave's order; a task with no name shows nothing rather than a later task. Each live session is matched against every discovered store, so a session
 driving another project's own Blacksmith home shows its epic too; those homes are
 only read, never written (a `?session` query still reads the served home alone).
 
