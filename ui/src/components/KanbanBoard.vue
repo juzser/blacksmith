@@ -308,9 +308,9 @@ function onGroupKeydown(event: KeyboardEvent) {
   if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
   moveFocus(event, event.target as HTMLElement);
 }
-// A fix row is a role="link" stop like a card. Its own keydown handler runs
-// first and Vue skips the handlers of ancestor elements for that event, so the
-// row hands arrows to the board itself instead of bubbling to the group.
+// A fix row is a role="link" stop like a card. onGroupKeydown skips it (a
+// role-bearing target counts as interactive), so the row hands arrows to the
+// board itself through its `navigate` event.
 function onRowNavigate(event: KeyboardEvent) {
   moveFocus(event, event.target as HTMLElement);
 }
