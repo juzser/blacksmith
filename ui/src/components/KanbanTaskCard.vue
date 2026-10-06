@@ -6,13 +6,13 @@
 //
 // Row 3 (review round 2, S3 "dead control" fix): `KanbanTask` still carries
 // no planner-written `summary` field, but it does carry `requestFirstLine` —
-// the same linked-request first line already shown in the row-1 Quote
-// tooltip — which reads as a summary-like field per the spec's own
+// the same linked-request first line (the row-1 request icon is gone, operator
+// fix 2026-10-06) — which reads as a summary-like field per the spec's own
 // alternative ("or the planner-written `summary` field once it exists").
 // Wired to that rather than removed, gated behind `summaryEnabled` so the
 // toolbar's "Show summary" option actually does something again.
 
-import { Clock, Link, Quote } from '@lucide/vue';
+import { Clock, Link } from '@lucide/vue';
 import { computed } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
@@ -33,7 +33,6 @@ import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
-import Tooltip from './kit/Tooltip.vue';
 
 const props = defineProps<{
   task: KanbanTask;
@@ -44,7 +43,27 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
+// The title is no longer line-clamped: a clamp box would clip the inline copy
+// control whenever the text overflowed it. taskLabel() already caps a real
+// title at 60 chars; only the id-slug fallback is unbounded, so cap what is
+// rendered here instead (the full title stays on the card's aria-label).
+const TITLE_MAX = 80;
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
+const shownTitle = computed(() =>
+  title.value.length > TITLE_MAX ? `${title.value.slice(0, TITLE_MAX - 1)}…` : title.value,
+);
+// The last word travels with the copy icon in one nowrap span, so the icon can
+// never wrap onto a line of its own: it always sits right after the last word.
+// A token too long to keep unbroken (it would overflow the card) is not glued.
+const GLUE_MAX = 24;
+const titleSplit = computed(() => {
+  const m = /^(.*?)(\S+)$/s.exec(shownTitle.value);
+  return m && m[2].length <= GLUE_MAX
+    ? { head: m[1], tail: m[2] }
+    : { head: shownTitle.value, tail: '' };
+});
+const titleHead = computed(() => titleSplit.value.head);
+const titleTail = computed(() => titleSplit.value.tail);
 const chips = computed(() => cardChips(props.task, props.groupBy));
 // Audit finding 5: the meta-row role label duplicated the same role
 // AgentChip already shows ("Finding checker" next to "Finding checker ·
@@ -100,23 +119,17 @@ function onKeydown(event: KeyboardEvent) {
     @click="onSelect"
     @keydown="onKeydown"
   >
-    <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
+    <div v-if="!compact && chip" class="bs-kanban-card__row bs-kanban-card__row--1">
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
-      <Tooltip v-if="task.hasRequest" class="bs-kanban-card__quote" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
-        <Icon :icon="Quote" :size="14" label="Has a linked request" />
-      </Tooltip>
     </div>
 
-    <p class="bs-kanban-card__title">
-      <span class="bs-kanban-card__title-text">{{ title }}</span>
-      <IconButton
+    <p class="bs-kanban-card__title">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
         :icon="Link"
         :label="copyIdLabel"
         size="sm"
         class="bs-kanban-card__title-copy"
         @click="onCopyTaskId"
-      />
-    </p>
+      /></span></p>
 
     <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 

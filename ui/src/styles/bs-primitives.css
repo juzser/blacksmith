@@ -2747,12 +2747,9 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
-/* Operator fix 2026-10-05: row 1's id text + copy button moved to a link
-   icon right after the title (below), so row 1 now only carries the
-   AgentChip and the Quote trigger. The Quote trigger (flex: none) stays
-   pinned to the right edge via margin-left: auto so it does not float
-   mid-row on a card whose AgentChip renders nothing at all (see
-   AgentChip.vue's own `v-if`). `.bs-kanban-card__id` itself stays —
+/* Row 1 only carries the AgentChip now (the id text, its copy button and the
+   Quote icon are gone) and is not rendered at all for a chip-less task, so no
+   empty band sits above the title. `.bs-kanban-card__id` itself stays —
    WaveTaskCard on Roadmap still renders it and is out of this slice's
    claim. */
 .bs-kanban-card__id {
@@ -2770,43 +2767,48 @@ summary.bs-inbox__group-head {
   min-width: 0;
   max-width: 100%;
 }
-.bs-kanban-card__row--1 .bs-tooltip-trigger {
-  flex: none;
-}
-.bs-kanban-card__row--1 .bs-kanban-card__quote {
-  margin-left: auto;
-}
+/* Operator fix 2026-10-06: the title is plain inline flow and the copy icon
+   an inline-flex box at the end of it, so it wraps with the text and sits
+   right after the last word on whichever line that falls. No line clamp:
+   a clamp box would clip the icon whenever the text overflowed it, so the
+   length is bounded in KanbanTaskCard.vue instead (TITLE_MAX) and
+   overflow-wrap: anywhere lets an unbroken token wrap rather than spill. */
 .bs-kanban-card__title {
   margin: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--bs-space-1);
   font-weight: var(--bs-font-weight-medium);
+  overflow-wrap: anywhere;
 }
-.bs-kanban-card__title-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-width: 0;
+/* The last word + the icon never separate (see titleSplit in the SFC). */
+.bs-kanban-card__title-tail {
+  white-space: nowrap;
 }
-/* The copy-id link icon sits to the right of the title text (ds-review.html
-   has no equivalent; this is the operator's row-1 replacement), outside the
-   title's clamp box so it is never clipped by a 2-line title and never
-   shrinks or wraps onto its own line (S2 review fix, 2026-10-05). */
+/* Copy-id control: 16px box, 12px glyph, no chrome at rest (the .bs-iconbtn
+   hover/focus-visible states still apply and stay visible). `.bs-iconbtn
+   .bs-kanban-card__title-copy` is the Tooltip wrapper span the class lands
+   on; the button is its child, hence the descendant selectors. */
 .bs-kanban-card__title-copy {
-  flex: none;
+  display: inline-flex;
+  vertical-align: middle;
+  margin-inline-start: var(--bs-space-1);
 }
-/* Follow-up (2026-10-05): 77d2cee levelled the icon but left the button's
-   min-height: --bs-touch inflating the title row itself to 44px, leaving an
-   empty band under a one-line title. A negative block margin (same pattern
-   as .bs-timeline-row__title--link above) collapses the button's layout
-   contribution back to one line while its border box — what touch-target
-   checks measure — stays 44px, centred on that line. Selector still targets
-   .bs-iconbtn, not .bs-kanban-card__title-copy, per 77d2cee's comment. */
+.bs-kanban-card__title-copy .bs-iconbtn {
+  width: 16px;
+  height: 16px;
+}
+.bs-kanban-card__title-copy .bs-icon {
+  width: 12px;
+  height: 12px;
+}
+/* Phone: the button itself must still measure >= --bs-touch (the touch-target
+   e2e reads its border box). Negative margins collapse its layout footprint
+   back to the 16px icon box on both axes, so the 44px box overlaps the
+   surrounding line/gap instead of growing the line height or pushing the
+   text. Selector still targets .bs-iconbtn per 77d2cee's comment. */
 @media (max-width: 640px) {
   .bs-kanban-card__title-copy .bs-iconbtn {
-    margin-block: calc((1lh - var(--bs-touch)) / 2);
+    min-width: var(--bs-touch);
+    min-height: var(--bs-touch);
+    margin: calc((16px - var(--bs-touch)) / 2);
   }
 }
 .bs-kanban-card__summary {

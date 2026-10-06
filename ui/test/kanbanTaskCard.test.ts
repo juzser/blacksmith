@@ -46,17 +46,29 @@ describe('KanbanTaskCard.vue — row 1 drops the id text (operator fix 2026-10-0
     expect(SRC).not.toMatch(/:icon="Copy"/);
   });
 
-  it('row 1 starts with the AgentChip, then the Quote trigger', () => {
+  it('row 1 holds only the AgentChip and renders only when there is a chip (no empty band)', () => {
     expect(SRC).toMatch(
-      /class="bs-kanban-card__row bs-kanban-card__row--1">\s*<AgentChip[\s\S]*?<Tooltip[^>]*class="bs-kanban-card__quote"/,
+      /v-if="!compact && chip"\s+class="bs-kanban-card__row bs-kanban-card__row--1">\s*<AgentChip[^>]*\/>\s*<\/div>/,
     );
+  });
+
+  it('no longer renders the Quote icon, its tooltip, or imports them', () => {
+    expect(SRC).not.toMatch(/Quote/);
+    expect(SRC).not.toMatch(/<Tooltip/);
+    expect(SRC).not.toMatch(/Has a linked request/);
+    expect(PRIMITIVES_CSS).not.toMatch(/bs-kanban-card__quote/);
+  });
+
+  it('keeps the linked-request first line as the optional summary', () => {
+    expect(SRC).toMatch(/showSummary\s*=\s*computed/);
+    expect(SRC).toMatch(/task\.requestFirstLine/);
   });
 });
 
 describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)', () => {
-  it('renders the title text in its own clamped span, then a link IconButton', () => {
+  it('renders the copy IconButton inline inside the title, glued to the last word', () => {
     expect(SRC).toMatch(
-      /class="bs-kanban-card__title">\s*<span class="bs-kanban-card__title-text">\{\{ title \}\}<\/span>\s*<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
+      /class="bs-kanban-card__title">\{\{ titleHead \}\}<span class="bs-kanban-card__title-tail">\{\{ titleTail \}\}<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
     );
   });
 
@@ -84,25 +96,33 @@ describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)'
   });
 });
 
-describe('KanbanTaskCard.vue — title-copy icon never clips or wraps onto its own line (S2 review fix, 2026-10-05)', () => {
-  it('lays the title out as a flex row so the icon sits beside the text, not inside the clamp box', () => {
+describe('KanbanTaskCard.vue — title-copy icon flows inline with the title text (operator fix 2026-10-06)', () => {
+  it('lays the title out as normal inline flow, not a flex row, and does not clamp it', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title');
-    expect(block).toMatch(/display:\s*flex/);
-    expect(block).toMatch(/align-items:\s*flex-start/);
-    expect(block).toMatch(/gap:\s*var\(--bs-space-1\)/);
+    expect(block).not.toMatch(/display:\s*flex/);
     expect(block).not.toMatch(/-webkit-line-clamp/);
+    expect(block).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
-  it('clamps the title text itself to 2 lines and lets it shrink inside the flex row', () => {
-    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title-text');
-    expect(block).toMatch(/-webkit-line-clamp:\s*2/);
-    expect(block).toMatch(/overflow:\s*hidden/);
-    expect(block).toMatch(/min-width:\s*0/);
+  it('keeps the last word and the icon together so the icon never wraps alone', () => {
+    expect(rule(PRIMITIVES_CSS, '.bs-kanban-card__title-tail')).toMatch(/white-space:\s*nowrap/);
   });
 
-  it('keeps the copy icon from ever shrinking or wrapping', () => {
-    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__title-copy');
-    expect(block).toMatch(/flex:\s*none/);
+  it('shrinks the icon to 12px with no resting chrome', () => {
+    const btn = rule(PRIMITIVES_CSS, '.bs-kanban-card__title-copy .bs-iconbtn');
+    expect(btn).toMatch(/width:\s*16px/);
+    expect(btn).toMatch(/height:\s*16px/);
+    expect(rule(PRIMITIVES_CSS, '.bs-kanban-card__title-copy .bs-icon')).toMatch(/width:\s*12px/);
+  });
+
+  it('keeps the 44px phone hit area without growing the line (negative margin)', () => {
+    expect(PRIMITIVES_CSS).toMatch(
+      /@media \(max-width: 640px\) \{\s*\.bs-kanban-card__title-copy \.bs-iconbtn \{[^}]*min-width:\s*var\(--bs-touch\)[^}]*margin:/,
+    );
+  });
+
+  it('caps a very long derived label so the title cannot run away', () => {
+    expect(SRC).toMatch(/TITLE_MAX/);
   });
 });
 
@@ -123,30 +143,6 @@ describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-1
     expect(block).toMatch(/min-width:\s*0/);
     expect(block).toMatch(/max-width:\s*100%/);
     expect(block).not.toMatch(/flex:\s*1 1 auto/);
-  });
-
-  it('keeps the Quote icon from ever shrinking', () => {
-    const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
-    expect(block).toMatch(/flex:\s*none/);
-  });
-});
-
-describe('KanbanTaskCard.vue — row 1 Quote icon sits at the right edge with no chip (review follow-up S4, 2026-10-05)', () => {
-  // AgentChip renders no element at all when it has nothing to show (its
-  // template root is a `v-if="chip && text"` Tag — see AgentChip.vue), so a
-  // chip-less row 1 only has the Quote trigger left in it.
-  it('does not stretch row 1 with justify-content: space-between', () => {
-    expect(PRIMITIVES_CSS).not.toMatch(
-      /\.bs-kanban-card__row--1\s*\{\s*justify-content:\s*space-between;/,
-    );
-  });
-
-  it('pins the Quote tooltip trigger to the right edge via margin-left: auto', () => {
-    expect(SRC).toMatch(/<Tooltip[^>]*class="bs-kanban-card__quote"/);
-    const quote = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-kanban-card__quote');
-    expect(quote).toMatch(/margin-left:\s*auto/);
-    const shared = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-tooltip-trigger');
-    expect(shared).not.toMatch(/margin-left/);
   });
 });
 
