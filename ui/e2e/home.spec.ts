@@ -616,6 +616,132 @@ async function expectCardsAligned(page: Page, indicators: number): Promise<void>
   await expect(page.locator('.bs-live')).toHaveCount(indicators);
 }
 
+const LONG_TITLE =
+  'Reconcile the ledger exports across every regional storefront before the quarterly close so finance can sign off without manual spreadsheet patches';
+const LONG_CARD = liveCard({
+  cliSessionId: 'cli-4',
+  focus: {
+    store: HOME_STORE,
+    project: 'project-d',
+    epicId: 'epic-d',
+    epicTitle: 'Ledger close',
+    wave: 1,
+    now: [{ role: 'coder', taskId: 'task-d1', taskTitle: LONG_TITLE, since: minutesAgo(3) }],
+    next: { kind: 'task', taskId: 'task-d2', taskTitle: 'Short next task' },
+  },
+});
+
+// Phone rhythm and hit boxes (visual pass): rows stay one text line tall, the
+// title-to-status gap is the same linked or not, every target measures
+// --bs-touch the way touchTargets.spec.ts does (getBoundingClientRect), no
+// clamped ancestor clips that hit box, and a long linked title wraps inline
+// after its role text inside the 2-line clamp.
+async function measureLiveCards(page: Page): Promise<{
+  rows: {
+    text: string;
+    oneLine: boolean;
+    rowH: number;
+    lineH: number;
+    kTop: number;
+    vTop: number;
+  }[];
+  titles: { linked: boolean; h: number; lines: number }[];
+  targets: { name: string; h: number; clipped: string | null }[];
+  long: { firstTop: number; vTop: number; lineTops: number[]; clipBottom: number; lineH: number };
+}> {
+  return page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
+    const rows: {
+      text: string;
+      oneLine: boolean;
+      rowH: number;
+      lineH: number;
+      kTop: number;
+      vTop: number;
+    }[] = [];
+    const titles: { linked: boolean; h: number; lines: number }[] = [];
+    const targets: { name: string; h: number; clipped: string | null }[] = [];
+    for (const card of cards) {
+      const t = card.querySelector('.bs-live-card__title') as HTMLElement;
+      const lh = parseFloat(getComputedStyle(t).lineHeight);
+      const tcs = getComputedStyle(t);
+      const th = t.getBoundingClientRect().height;
+      const content = th - parseFloat(tcs.paddingTop) - parseFloat(tcs.paddingBottom);
+      titles.push({ linked: !!t.querySelector('a'), h: th, lines: Math.round(content / lh) });
+      for (const row of Array.from(card.querySelectorAll('.bs-live-card__line'))) {
+        const k = row.querySelector('.bs-live-card__k') as HTMLElement;
+        const v = row.querySelector('.bs-live-card__v, .bs-live-card__more') as HTMLElement;
+        const vlh = parseFloat(getComputedStyle(v).lineHeight) || 0;
+        const textRange = document.createRange();
+        textRange.selectNodeContents(v);
+        const tops = new Set(Array.from(textRange.getClientRects()).map((r) => Math.round(r.top)));
+        rows.push({
+          text: (v.textContent ?? '').trim().slice(0, 30),
+          oneLine: tops.size <= 1,
+          rowH: row.getBoundingClientRect().height,
+          lineH: vlh,
+          kTop: k.getBoundingClientRect().top,
+          vTop: v.classList.contains('bs-live-card__more')
+            ? v.getBoundingClientRect().top + (v.getBoundingClientRect().height - vlh) / 2
+            : v.getBoundingClientRect().top + parseFloat(getComputedStyle(v).paddingTop),
+        });
+      }
+      const els = Array.from(card.querySelectorAll('a[href], button'));
+      for (const el of els) {
+        // A wrapped link has one hit box per line box; a line the clamp hides
+        // (its glyphs start past the clamped box's content edge) is not a target.
+        const pad = parseFloat(getComputedStyle(el).paddingTop);
+        const rects = Array.from(el.getClientRects());
+        let clipped: string | null = null;
+        let h = Number.POSITIVE_INFINITY;
+        for (const r of rects) {
+          let hidden = false;
+          let why: string | null = null;
+          for (let p = el.parentElement; p && p !== card.parentElement; p = p.parentElement) {
+            const cs = getComputedStyle(p);
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+            const pr = p.getBoundingClientRect();
+            const top = pr.top + parseFloat(cs.borderTopWidth);
+            const bottom = pr.bottom - parseFloat(cs.borderBottomWidth);
+            if (r.top + pad >= bottom - parseFloat(cs.paddingBottom) - 0.5) {
+              hidden = true;
+              break;
+            }
+            if (!why && (r.top < top - 0.5 || r.bottom > bottom + 0.5)) {
+              why = `${p.className} [${top.toFixed(1)}, ${bottom.toFixed(1)}] vs hit [${r.top.toFixed(1)}, ${r.bottom.toFixed(1)}]`;
+            }
+          }
+          if (hidden) continue;
+          h = Math.min(h, r.height);
+          if (why && !clipped) clipped = why;
+        }
+        targets.push({ name: (el.textContent ?? '').trim().slice(0, 30), h, clipped });
+      }
+    }
+    const longCard = cards[cards.length - 1];
+    const v = longCard.querySelector('.bs-live-card__v') as HTMLElement;
+    const a = v.querySelector('a') as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(a);
+    const rects = Array.from(range.getClientRects());
+    const vr = v.getBoundingClientRect();
+    const lineH = parseFloat(getComputedStyle(v).lineHeight);
+    const cs = getComputedStyle(v);
+    return {
+      rows,
+      titles,
+      targets,
+      long: {
+        firstTop: rects[0].top,
+        vTop: vr.top + parseFloat(cs.paddingTop),
+        lineTops: rects.map((r) => r.top),
+        clipBottom: vr.bottom - parseFloat(cs.borderBottomWidth),
+        lineH,
+      },
+    };
+  });
+}
+
 test.describe('Home: Live sessions', () => {
   test('desktop: one labelled card per session with title, status, Now and Next', async ({
     page,
@@ -686,6 +812,45 @@ test.describe('Home: Live sessions', () => {
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
     );
     expect(overflow).toBe(false);
+  });
+
+  test('375px: tight rows, one title rhythm, 44px unclipped targets, long title clamps inline', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    await expect(page.locator('.bs-live-card')).toHaveCount(4);
+    const m = await measureLiveCards(page);
+    // a. one text line per row, key top-aligned with the value
+    expect(m.rows.some((r) => r.oneLine)).toBe(true);
+    for (const r of m.rows) {
+      if (!r.oneLine) continue;
+      expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+      expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
+    }
+    // b. linked and unlinked one-line titles share one height
+    const one = m.titles.filter((t) => t.lines === 1);
+    const linked = one.find((t) => t.linked);
+    const unlinked = one.find((t) => !t.linked);
+    expect(linked && unlinked).toBeTruthy();
+    expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
+    // c + d. every target measures >= 44 and no clamped ancestor clips it
+    expect(m.targets.length).toBeGreaterThanOrEqual(8);
+    for (const t of m.targets) {
+      expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(43.5);
+      expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
+    }
+    // e. long title: first line shares the role text's line, at most 2 lines show
+    expect(Math.abs(m.long.firstTop - m.long.vTop)).toBeLessThanOrEqual(2);
+    // The link wraps to 3+ lines; the 2-line clamp hides the rest. Line tops
+    // are measured from the value's content top; any line from the 3rd on that
+    // starts above the clip edge (the box's padding edge) would show through.
+    expect(m.long.lineTops.length).toBeGreaterThanOrEqual(3);
+    const below = m.long.lineTops.filter(
+      (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
+    );
+    expect(below).toEqual([]);
   });
 
   test('empty: says so, with how many sessions were hidden', async ({ page }) => {

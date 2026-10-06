@@ -2785,13 +2785,25 @@ summary.bs-inbox__group-head {
     flex-direction: column;
     gap: var(--bs-space-1);
   }
+  /* 44px hit boxes without growing the layout. The links stay inline (they
+     must wrap and clamp), so vertical padding on them leaves line layout
+     alone. The clamped boxes carry the same padding cancelled by an equal
+     negative margin, so their clip edge clears the links' padding. Nearly
+     all of it sits above the text: the box's clip edge is its padding edge,
+     and padding below the 2nd line would show the first glyphs of a clamped
+     3rd line. */
+  .bs-live-card__title,
+  .bs-live-card__v {
+    padding-block: calc(var(--bs-touch) - 1.1em) 0.1em;
+    margin-block: calc(1.1em - var(--bs-touch)) -0.1em;
+  }
   .bs-live-card__link {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--bs-touch);
+    padding-block: calc(var(--bs-touch) - 1.1em) 0.1em;
   }
   .bs-live-card__more {
+    align-self: start;
     min-height: var(--bs-touch);
+    margin-block: calc((1lh - var(--bs-touch)) / 2);
   }
 }
 
