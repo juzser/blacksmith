@@ -452,16 +452,12 @@ a:hover {
 }
 .bs-timeline-row__title {
   flex: 1;
-  font-weight: var(--bs-font-weight-title);
+  /* Operator override (2026-10-06): ds-review.html `.ev .ehead` weighs 550,
+     but the operator found the Activity/Home timeline row titles too bold
+     at that weight. Use the same medium weight as the Kanban card title and
+     the phone row, on every breakpoint -- this beats the mock. */
+  font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
-}
-/* Fix round 5 item 1 (ds-review.html `.mrow .mt`): the phone row's title
-   weighs 500, not the desktop row's 550 -- the desktop weight already
-   matches the mock's `.ev .ehead` (550), so only the phone rule changes. */
-@media (max-width: 640px) {
-  .bs-timeline-row__title {
-    font-weight: var(--bs-font-weight-medium);
-  }
 }
 /* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
    rest — a non-link title (plain span, no --link class) never underlines. */
