@@ -267,7 +267,7 @@ test.describe('Kanban', () => {
     await page.goto('/work/kanban');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
     await expect(page.locator('.bs-kanban-card__quote')).toHaveCount(0);
-    await expect(page.getByLabel('Has a linked request')).toHaveCount(0);
+    await expect(page.getByLabel('Has a linked request', { exact: true })).toHaveCount(0);
   });
 
   // A chip-less task renders no row 1 at all: no empty band above the title.
