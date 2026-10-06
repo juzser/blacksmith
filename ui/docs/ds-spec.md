@@ -378,6 +378,7 @@ Blue means one thing: "this is the action" or "this is you". Everything else is 
 | `EmptyState` | `icon`, `title`, `body`, `action?` | ported; every empty state gets a specific `body` sentence per page (§4), never a generic "No data" |
 | `Banner` | `tone: info\|warning\|danger`, `collapsible?` | ported; used for the projection-issue banner (§3) |
 | `PageHeader` / `Breadcrumb` / `SectionHeading` / `Separator` | ported, re-styled | unchanged |
+| `SegmentedControl` | `items: {label, to}[]`, `current?` (an item label: the control marks that item `aria-current="page"` itself, for query-only links where vue-router's exact-active cannot tell items apart), `touch?` (stays visible on phone with 44px items; the default control is hidden at <=640px) | default, hover (no underline), current (selected fill), focus-visible (inset 2px `--bs-focus-ring`; the container clips overflow). Default output with no `current` is unchanged. `ActivityScopeToggle` (Active/All, `aria-label="Activity scope"`) is its first `current` + `touch` use |
 | `ProgressBar` | `segments: [{tone, value}]` (stacked, replaces the single-fill bar) | used by Epic detail's "13 of 25 tasks done" stacked bar and Roadmap's sprint fill; the overall % sits to its right as a `ProgressBarMini`-style number (12px, 400) |
 | `ProgressRing` | `value`, `max?` (default 100), `tone?` (auto when omitted), `label` (required, plain sentence, e.g. "71% of token budget used") | 20px inline SVG ring (`r=8`, `pathLength=100`, 2.5px stroke): track `--bs-border`, fill in the tone colour; the % number sits to its right at 14px/400 `--bs-text`. Wrapper is `role="img"` + `aria-label`=`label`; hover/focus shows a `Tooltip` with the exact values ("127,402,118 of 180,000,000 tokens (71%)"). CSS class `.pring` |
 | `ProgressBarMini` | same props as `ProgressRing` | 56×6px rounded track (`--bs-border`) with a tone fill, number to the right at 12px/400. Same a11y contract. CSS class `.pmini`, number `.pnum` |
@@ -1186,10 +1187,16 @@ yet" replacing the raw `rule`/`principle`/`provenanceEventIds` JSON dump.
 
 ### 4.6 Sessions (history list, reachable from Home/Activity, not in the nav)
 
-`SessionRow` list ("75 finished runs" toggle collapsing old sessions instead of two
-separate "75 idle sessions not shown" / "47 stalled agents not shown" messages, audit
-Sessions-2), each row humanized (derived title, humanized last-event, humanized task
-slug, audit Sessions-3). Selecting a row opens the per-role agent view: one `AgentBlock`
+`SessionRow` list scoped by the shared Active/All toggle (`?scope=`, Active by default and
+never written to the URL) beside Refresh. Active lists sessions with an agent working in
+the last 4h and a muted "N quiet sessions · Show all" line (the link is a default
+`--bs-link-text` link: no underline at rest, underline on hover/focus; the line is hidden at
+0); All adds the quiet sessions, muted by title colour only, after the active ones. A
+selected session that turns quiet while Active stays listed (muted, not counted in the quiet
+line) until another row is selected or the scope changes; narrowing All to Active with a
+quiet session open clears the selection and `?session=`. Browser back/forward restores the
+selection from `?session=`. Each row is humanized (derived title, humanized last-event,
+humanized task slug, audit Sessions-3). Selecting a row opens the per-role agent view: one `AgentBlock`
 per role (e.g. "Testers" block listing its 16 live agents from `/api/overview`'s
 `liveAgents` breakdown, each with task title, duration via `RelativeTime`, in/out tokens
 via `CompactNumber` or "not measured"). No canvas, no zoom controls, ever (audit

@@ -44,6 +44,7 @@ import {
   isStaleResponse,
   selectedSessionFromQuery,
   sessionsByProject,
+  sessionsInScope,
 } from '../lib/sessionsSelection.js';
 
 const router = useRouter();
@@ -65,13 +66,13 @@ const agents = ref<SessionAgentsResult | null>(null);
 const agentsLoadedFor = ref<string | null>(null);
 const agentsError = ref<string | null>(null);
 
-const quietSessions = () => sessions.value.filter((s) => !isSessionActive(s));
-const activeCount = () => sessions.value.length - quietSessions().length;
+const activeCount = () => sessions.value.filter(isSessionActive).length;
 
-// Active shows only running sessions; All also reveals the quiet ones
-// (nothing working), which render muted after the active ones.
-const visible = () =>
-  scope.value === 'all' ? sessions.value : sessions.value.filter(isSessionActive);
+// Active shows only running sessions (plus a quiet selection, pinned); All
+// also reveals the quiet ones, which render muted after the active ones.
+const visible = () => sessionsInScope(sessions.value, scope.value, selectedId.value);
+// Quiet sessions Active leaves out: a pinned selection is shown, so not counted.
+const hiddenQuietCount = () => sessions.value.length - visible().length;
 
 // Unscoped (no project in context, SessionsPage never pre-selects one):
 // group the visible list by project, newest group first, active rows ahead of
@@ -193,6 +194,21 @@ onMounted(async () => {
   }
 });
 
+// Browser back/forward (or any outside query change) moves `?session=`;
+// re-derive the selection from it. selectSession's own replace already set
+// selectedId, so the equal case is a no-op and nothing loops.
+watch(
+  () => route.query.session,
+  () => {
+    const id = selectedSessionFromQuery(route.query, sessions.value);
+    if (id === selectedId.value) return;
+    selectedId.value = id;
+    agents.value = null;
+    agentsLoadedFor.value = null;
+    void loadAgents();
+  },
+);
+
 // Narrowing to Active hides a quiet selection's row, so the selection (and
 // its `?session=`) goes with it rather than leaving a detail with no row.
 watch(scope, (next) => {
@@ -300,8 +316,8 @@ function refresh() {
       <p v-if="scope === 'active' && activeCount() === 0" class="bs-sessions__quiet">
         Nothing is active right now.
       </p>
-      <p v-if="scope === 'active' && quietSessions().length > 0" class="bs-sessions__quiet">
-        {{ pluralize(quietSessions().length, 'quiet session') }} ·
+      <p v-if="scope === 'active' && hiddenQuietCount() > 0" class="bs-sessions__quiet">
+        {{ pluralize(hiddenQuietCount(), 'quiet session') }} ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
 

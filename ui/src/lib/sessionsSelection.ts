@@ -1,3 +1,5 @@
+import type { ActivityScope } from './activityScope.js';
+
 // SessionsPage's deep link (DS8 PR3 item 4): `?session=<id>` is this page's
 // own "which run is open" marker, read and written only here -- unlike
 // lib/sessionScope.ts's `?session`, which widens or narrows every OTHER
@@ -14,6 +16,20 @@ export function selectedSessionFromQuery(
   return null;
 }
 
+/**
+ * The list a scope shows: Active keeps working sessions plus the selected one
+ * (pinned, so a session that turns quiet under an open detail does not lose
+ * its row); All keeps everything. A selected id not in the list adds nothing.
+ */
+export function sessionsInScope<T extends { sessionId: string; workingAgentCount: number }>(
+  sessions: readonly T[],
+  scope: ActivityScope,
+  selectedId: string | null,
+): T[] {
+  if (scope === 'all') return [...sessions];
+  return sessions.filter((s) => isSessionActive(s) || s.sessionId === selectedId);
+}
+
 // SessionsPage.loadAgents() runs for both the poll path and the click path.
 // A fetch started for run A can still be in flight when the user clicks run
 // B; A's response must not overwrite B's agents once it finally lands. Both
@@ -22,14 +38,13 @@ export function isStaleResponse(responseId: string, currentSelectedId: string | 
   return responseId !== currentSelectedId;
 }
 
-// The running/finished split, as its own helper rather than inlined in
+// The active/quiet split, as its own helper rather than inlined in
 // SessionsPage.vue: `liveAgentCount > 0` includes stale ghosts (an agent row
 // still `live` because its run crashed before a terminal event landed), the
 // exact trap documented at api.ts's RunningSession.workingAgentCount and the
-// design spec §2. `workingAgentCount` narrows to agents dispatched within
-// the factory's own 4h staleness window, so a session with live-but-stale
-// agents (liveAgentCount > 0, workingAgentCount 0) now lands in finished/
-// quiet rather than running.
+// design spec §2. A session is active only while an agent is working within
+// the factory's own 4h staleness window (`workingAgentCount`), so one with
+// live-but-stale agents (liveAgentCount > 0, workingAgentCount 0) is quiet.
 export function isSessionActive(session: { workingAgentCount: number }): boolean {
   return session.workingAgentCount > 0;
 }

@@ -16,5 +16,5 @@ const current = computed(() => (scope.value === 'all' ? 'All' : 'Active'));
 </script>
 
 <template>
-  <SegmentedControl :items="items" :current="current" touch aria-label="Session scope" />
+  <SegmentedControl :items="items" :current="current" touch aria-label="Activity scope" />
 </template>

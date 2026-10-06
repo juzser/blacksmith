@@ -85,10 +85,13 @@ describe('.bs-segctl CSS (uiux spec §1)', () => {
     expect(selected?.[0]).toMatch(/font-weight: var\(--bs-font-weight-medium\)/);
   });
 
-  it('uses the kit default focus-visible ring, not a component-scoped override', () => {
+  it('draws an inset solid focus ring, since .bs-segctl clips overflow', () => {
     const match = CSS.match(/\.bs-segctl__item:focus-visible \{[\s\S]*?\}/);
-    expect(match?.[0]).toMatch(
-      /box-shadow: 0 0 0 2px color-mix\(in srgb, var\(--bs-focus-ring\) 50%, transparent\);/,
-    );
+    expect(match?.[0]).toMatch(/box-shadow: inset 0 0 0 2px var\(--bs-focus-ring\);/);
+  });
+
+  it('keeps the hover label un-underlined against the global a:hover', () => {
+    const match = CSS.match(/\.bs-segctl__item:hover \{[\s\S]*?\}/);
+    expect(match?.[0]).toMatch(/text-decoration: none;/);
   });
 });

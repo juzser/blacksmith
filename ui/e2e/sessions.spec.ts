@@ -382,7 +382,7 @@ test.describe('Sessions', () => {
     );
   }
   const toggle = (page: import('@playwright/test').Page) =>
-    page.getByRole('navigation', { name: 'Session scope' });
+    page.getByRole('navigation', { name: 'Activity scope' });
   const titles = (page: import('@playwright/test').Page) =>
     page.locator('.bs-sessionrow__title').allTextContents();
 
@@ -443,6 +443,70 @@ test.describe('Sessions', () => {
     await expect(page).toHaveURL(/scope=all/);
     await expect(page).toHaveURL(/session=sc-quiet-only/);
     await expect(page.locator('.bs-sessionrow--selected')).toContainText('Quiet only in proj-b');
+  });
+
+  test('narrowing All to Active clears a quiet selection and its ?session=, keeping other keys', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await page.goto('/sessions?project=proj-a&scope=all');
+    await page.getByText('Quiet newer in proj-a').click();
+    await expect(page).toHaveURL(/session=sc-quiet-newer/);
+    await toggle(page).getByRole('link', { name: 'Active' }).click();
+    await expect(page).not.toHaveURL(/session=/);
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect(page).toHaveURL(/project=proj-a/);
+    await expect(page.locator('.bs-sessionrow--selected')).toHaveCount(0);
+    await expect(page.locator('.bs-sessions__detail')).toHaveCount(0);
+  });
+
+  test('browser back and forward restore the matching selection', async ({ page }) => {
+    await serveScope(page);
+    await page.goto('/sessions');
+    await page.getByText('Active in proj-a').click();
+    await expect(page).toHaveURL(/session=sc-active/);
+    // The scope link pushes a history entry; selecting a row only replaces.
+    await toggle(page).getByRole('link', { name: 'All' }).click();
+    await page.getByText('Quiet only in proj-b').click();
+    await expect(page).toHaveURL(/session=sc-quiet-only/);
+    const selected = page.locator('.bs-sessionrow--selected');
+    await expect(selected).toContainText('Quiet only in proj-b');
+
+    await page.goBack();
+    await expect(page).toHaveURL(/session=sc-active/);
+    await expect(selected).toContainText('Active in proj-a');
+    await page.goForward();
+    await expect(page).toHaveURL(/session=sc-quiet-only/);
+    await expect(selected).toContainText('Quiet only in proj-b');
+  });
+
+  test('a selected session that turns quiet on a refresh stays listed, muted, uncounted', async ({
+    page,
+  }) => {
+    let quiet = false;
+    await page.route('**/api/sessions*', (route) =>
+      route.fulfill({
+        json: SCOPE_SESSIONS.map((x) =>
+          x.sessionId === 'sc-active' && quiet ? { ...x, workingAgentCount: 0 } : x,
+        ),
+      }),
+    );
+    await page.route('**/api/sessions/*/agents*', (route) =>
+      route.fulfill({ json: { sessionId: 'sc', roles: [] } }),
+    );
+    await page.goto('/sessions?project=proj-a');
+    await page.getByText('Active in proj-a').click();
+    quiet = true;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible();
+    // proj-a holds one other quiet session; the pinned one is not counted.
+    await expect(page.getByText('1 quiet session · Show all')).toBeVisible();
+  });
+
+  test('All with no sessions at all shows the empty state', async ({ page }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: [] }));
+    await page.goto('/sessions?scope=all');
+    await expect(page.getByText('No sessions yet')).toBeVisible();
   });
 
   test('phone: the scope toggle stays visible with 44px targets', async ({ page }) => {
