@@ -34,7 +34,9 @@ const NOT_MEASURED = 'not measured';
 
 function tokensItem(run: DispatchRun | undefined): string | null {
   if (!run) return null;
-  if (run.tokensIn == null && run.tokensOut == null) return NOT_MEASURED;
+  // No token numbers is not a failed measurement worth a label (ds-spec §4.3:
+  // "Only fields that exist are rendered"), so the item is left out.
+  if (run.tokensIn == null && run.tokensOut == null) return null;
   const total = (run.tokensIn ?? 0) + (run.tokensOut ?? 0);
   return `${formatCompactNumber(total)} tokens`;
 }
@@ -883,9 +885,27 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'returned': {
-      parts.push(tokensItem(entry.run));
-      parts.push(durationItem(entry.run?.durationMs));
-      parts.push(entry.run?.runStatus == null ? NOT_MEASURED : String(entry.run.runStatus));
+      // The row's own `task-result-recorded` payload; `entry.run` is joined
+      // for Dispatched rows only, so it stays a fallback. Unmeasured items
+      // are left out. The title already names `run_status`, so the result
+      // shows here only when the payload lacks it and a run supplies one.
+      const usage = p.token_usage as Record<string, unknown> | null | undefined;
+      const inT = usage?.input_tokens;
+      const outT = usage?.output_tokens;
+      if (typeof inT === 'number' || typeof outT === 'number') {
+        const total = (typeof inT === 'number' ? inT : 0) + (typeof outT === 'number' ? outT : 0);
+        parts.push(`${formatCompactNumber(total)} tokens`);
+      } else if (typeof usage?.total_tokens === 'number') {
+        parts.push(`${formatCompactNumber(usage.total_tokens)} tokens`);
+      } else {
+        parts.push(tokensItem(entry.run));
+      }
+      parts.push(
+        durationItem(typeof p.duration_ms === 'number' ? p.duration_ms : entry.run?.durationMs),
+      );
+      if (p.run_status == null && entry.run?.runStatus != null) {
+        parts.push(String(entry.run.runStatus));
+      }
       break;
     }
     case 'finding': {

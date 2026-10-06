@@ -1136,6 +1136,50 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     expect(metaFor(e, { promptTs: null })).toBe('round 1 · 1.5K tokens · 1 min');
   });
 
+  it('leaves tokens out of a finished dispatch when the run measured none', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 3 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: null,
+      tokensOut: null,
+      durationMs: null,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 3,
+    };
+    expect(metaFor(e)).toBe('round 3');
+  });
+
+  describe("Returned meta reads the row's own payload", () => {
+    const returned = (payload: Record<string, unknown>) =>
+      entry({ eventType: 'task-result-recorded', payload });
+
+    it('uses total_tokens when it is the only number', () => {
+      expect(metaFor(returned({ run_status: 'done', token_usage: { total_tokens: 1500 } }))).toBe(
+        '1.5K tokens',
+      );
+    });
+
+    it('sums input and output tokens, plus a measured duration', () => {
+      expect(
+        metaFor(
+          returned({
+            run_status: 'done',
+            token_usage: { input_tokens: 1000, output_tokens: 500 },
+            duration_ms: 65_000,
+          }),
+        ),
+      ).toBe('1.5K tokens · 1 min');
+    });
+
+    it('leaves out {measured:false} tokens, never "not measured" or 0', () => {
+      expect(metaFor(returned({ run_status: 'done', token_usage: { measured: false } }))).toBe('');
+    });
+
+    it('is empty when nothing is measured and the title already shows the status', () => {
+      expect(metaFor(returned({ run_status: 'done' }))).toBe('');
+    });
+  });
+
   // ds-review.html #p-activity's own Prompt row meta: "You · caused 2
   // dispatches". titleFor() already renders the verbatim prompt text as the
   // title (see the 'maps user_prompt to the prompt kind' test above) — the
@@ -1347,7 +1391,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       user_prompt: ['', 'You · not measured'],
       'operator-note': ['Operator note', 'You · not measured'],
       dispatch_decision: ['Dispatched Agent', 'Running for 0 s'],
-      'task-result-recorded': ['Task result: ', 'not measured'],
+      'task-result-recorded': ['Task result: ', ''],
       'session-start': ['Session started', ''],
       'judge-reported': ['Judge reported: 0 findings (round )', ''],
       'judge-verdict': ['Judge verdict:  (/)', 'Judge verdict'],
