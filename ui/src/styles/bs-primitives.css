@@ -3538,9 +3538,9 @@ h2.rm-section__head {
      and `.now-track` all read this instead of repeating — or deriving pixel
      math from — the literal 160px. `.months` and `.lane` are siblings here,
      so it lives on their shared parent, not on `.lane` alone. */
-  /* 160px of name plus the "Current" Tag (about 56px) and its gap, so the Tag
+  /* 160px of name plus the "Current" Tag (about 62px) and its gap, so the Tag
      never takes width from the name. */
-  --rm-label-col: 224px;
+  --rm-label-col: 232px;
 }
 .lane {
   position: relative;
