@@ -2786,6 +2786,10 @@ summary.bs-inbox__group-head {
   padding-inline: 0;
 }
 @media (max-width: 640px) {
+  /* The mock's `.phone .ls-card`: 12px, one step under the desktop card. */
+  .bs-live-card .bs-card__body {
+    padding: var(--bs-space-3);
+  }
   .bs-live-card__head {
     flex-direction: column;
     /* Wider than the usual 4px: the status row's time is a focusable
@@ -2816,22 +2820,25 @@ summary.bs-inbox__group-head {
     padding-block: var(--bs-live-above) var(--bs-live-below);
   }
   /* The Next link is the last row: its extra height goes mostly below, into
-     the card's own padding. */
+     the card's own padding (12px on phone): 14px of its box above the text,
+     the rest, 13px, below, inside the card. */
   .bs-live-card__v--solo {
-    --bs-live-above: calc(var(--bs-space-2) + 2px);
+    --bs-live-above: calc(var(--bs-space-2) + 6px);
     --bs-live-below: calc(var(--bs-touch) - 1.2em - var(--bs-live-above));
   }
   /* The button's extra height: its text starts at the row's top, 8px of box
-     above it (the row gap) and the rest below. That leaves 16px of added gap
-     under this one row (the only added gap), so its box and the Next link's
-     box below never overlap: 28px row pitch cannot hold two 44px boxes. */
+     above it (the row gap) and the rest below. That leaves 20px of added gap
+     under this one row (the only added gap: 16px for the box, plus 4px
+     because the 12px card padding leaves the Next link's box less room below,
+     so more of its height sits above it), so its box and the Next link's box
+     below never overlap: 28px row pitch cannot hold two 44px boxes. */
   .bs-live-card__more {
     align-self: start;
     align-items: flex-start;
     height: auto;
     min-height: var(--bs-touch);
     padding-block: calc(var(--bs-space-2) - 1px) 0;
-    margin-block: calc(-1 * var(--bs-space-2)) 0;
+    margin-block: calc(-1 * var(--bs-space-2)) var(--bs-space-1);
   }
 }
 

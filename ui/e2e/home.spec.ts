@@ -955,7 +955,7 @@ test.describe('Home: Live sessions', () => {
     expect(m.rows.some((r) => r.oneLine)).toBe(true);
     for (const r of m.rows) {
       if (!r.oneLine) continue;
-      // The "+ N more" row is the one row that carries added gap (16px, so its
+      // The "+ N more" row is the one row that carries added gap (20px, so its
       // 44px box and the Next link's box below never overlap), so it is exempt.
       if (!r.text.startsWith('+')) {
         expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
@@ -990,6 +990,36 @@ test.describe('Home: Live sessions', () => {
       (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
     );
     expect(below).toEqual([]);
+  });
+
+  test('card body padding is space-3 at 375px and space-4 on desktop, on all four sides', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    for (const [size, token] of [
+      [null, '--bs-space-4'],
+      [PHONE, '--bs-space-3'],
+    ] as const) {
+      if (size) await page.setViewportSize(size);
+      await page.goto('/overview');
+      await expect(page.locator('.bs-live-card')).toHaveCount(3);
+      const r = await page.evaluate((t) => {
+        const probe = document.createElement('div');
+        probe.style.padding = `var(${t})`;
+        document.body.appendChild(probe);
+        const want = getComputedStyle(probe).paddingTop;
+        probe.remove();
+        const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
+        return {
+          want,
+          got: [...document.querySelectorAll('.bs-live-card .bs-card__body')].map((b) =>
+            sides.map((s) => getComputedStyle(b)[`padding${s}`]),
+          ),
+        };
+      }, token);
+      expect(r.got.length).toBe(3);
+      for (const g of r.got) expect(g, `${token} on every side`).toEqual(Array(4).fill(r.want));
+    }
   });
 
   test('375px expanded: two Now links above the next task link still never overlap', async ({
