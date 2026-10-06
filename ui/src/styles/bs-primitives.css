@@ -3392,6 +3392,35 @@ summary.bs-inbox__group-head {
   gap: var(--bs-space-4);
 }
 
+/* UI spec Part 2 — one section per project (RoadmapProjectSection.vue). The
+   head reuses NeedsYouInbox's `.bs-inbox__group-head` one level up (an h2,
+   or the phone's 44px <summary>), the done count muted after the name. */
+.rm-section {
+  gap: var(--bs-space-2);
+}
+h2.rm-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--bs-space-2);
+}
+.rm-section__count {
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtlest);
+}
+/* §2.2 — "Show N earlier/later lanes" in `.bs-kanban-col__more`'s
+   link-button look; a full-width 44px row on phone. */
+.rm-window__more {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--bs-text-sm);
+}
+@media (max-width: 640px) {
+  .rm-window__more {
+    align-self: stretch;
+    min-height: var(--bs-touch);
+  }
+}
+
 /* DS4 S2 — Roadmap swimlane (RoadmapSwimlane.vue). Class names match
    ui/docs/ds-review.html's #p-roadmap mock so the app renders pixel-for-pixel
    against the signed-off reference. `.rm-scroll` is the only region that
@@ -3477,6 +3506,27 @@ summary.bs-inbox__group-head {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* UI spec Part 2 — rows come grouped: a region per window side, a
+   `role="group"` per lane. Both stack like `.lane`, so the rows lay out as
+   before. `.lhead` is the label cell: the name, then the current lane's
+   "Current" Tag, which never shrinks — the name ellipsizes first. */
+.lane-region,
+.lane-group {
+  display: flex;
+  flex-direction: column;
+}
+.lhead {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-width: 0;
+}
+.lhead > .lname {
+  min-width: 0;
+}
+.lhead > .bs-tag {
+  flex-shrink: 0;
 }
 .track {
   position: relative;

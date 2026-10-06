@@ -35,22 +35,54 @@ describe('defaultSelection', () => {
     expect(result).toEqual({ phaseId: 'phase-2', epicId: null });
   });
 
-  it('falls back to the most recent phase by startedAt when nothing is running', () => {
+  it('falls back to the first declared phase that is not completed, not the most recent', () => {
     const milestones = [
-      milestone({ milestoneId: 'phase-1', sequence: 1, startedAt: '2026-01-01T00:00:00.000Z' }),
-      milestone({ milestoneId: 'phase-2', sequence: 2, startedAt: '2026-02-01T00:00:00.000Z' }),
+      milestone({
+        milestoneId: 'phase-1',
+        sequence: 1,
+        status: 'completed',
+        startedAt: '2026-01-01T00:00:00.000Z',
+      }),
+      milestone({
+        milestoneId: 'phase-3',
+        sequence: 3,
+        status: 'planned',
+        startedAt: '2026-03-01T00:00:00.000Z',
+      }),
+      milestone({ milestoneId: 'phase-2', sequence: 2, status: 'planned', startedAt: null }),
     ];
     const result = defaultSelection(milestones, [], [], {});
     expect(result).toEqual({ phaseId: 'phase-2', epicId: null });
   });
 
-  it('breaks startedAt ties by sequence', () => {
+  it('falls back to the last phase when every phase is completed', () => {
     const milestones = [
-      milestone({ milestoneId: 'phase-1', sequence: 1, startedAt: null }),
-      milestone({ milestoneId: 'phase-2', sequence: 2, startedAt: null }),
+      milestone({ milestoneId: 'phase-1', sequence: 1, status: 'completed' }),
+      milestone({ milestoneId: 'phase-2', sequence: 2, status: 'completed' }),
     ];
     const result = defaultSelection(milestones, [], [], {});
     expect(result).toEqual({ phaseId: 'phase-2', epicId: null });
+  });
+
+  it("picks the running project's current phase when several projects declare phases", () => {
+    const milestones = [
+      milestone({ milestoneId: 'phase-1', sequence: 1, status: 'planned', project: 'project-a' }),
+      milestone({ milestoneId: 'phase-8', sequence: 1, status: 'completed', project: 'project-b' }),
+      milestone({
+        milestoneId: 'phase-9',
+        sequence: 2,
+        status: 'planned',
+        project: 'project-b',
+        epicIds: ['epic-b'],
+      }),
+    ];
+    const result = defaultSelection(milestones, ['epic-b'], ['epic-b'], {});
+    expect(result).toEqual({ phaseId: 'phase-9', epicId: null });
+  });
+
+  it('defaults a no-phase project to its actively running epic', () => {
+    const result = defaultSelection([], ['epic-b'], ['epic-a', 'epic-b'], {});
+    expect(result).toEqual({ phaseId: null, epicId: 'epic-b' });
   });
 
   it('defaults to the first selectable epic when the project has no phases', () => {

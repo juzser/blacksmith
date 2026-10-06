@@ -1,5 +1,6 @@
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot } from './helpers.js';
+import { stubWindowRoadmap } from './roadmapWindowFixture.js';
 
 // DS4 S4 — the phone Roadmap (<=640px). phase-6b (demo-hub: epic-9/10/11,
 // global-setup.ts) is the phase-mode fixture; epic-9 is the epic-mode
@@ -51,7 +52,10 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/work/roadmap?phase=phase-6b');
     await expect(page.locator('.rm-scroll')).toHaveCount(0);
-    const select = page.getByLabel('Phase', { exact: true });
+    // UI spec Part 2: one collapsible section per project, each with its own
+    // picker over its window; envkit's section is closed until tapped open.
+    await page.locator('summary.rm-section__head', { hasText: 'envkit' }).click();
+    const select = page.getByLabel('envkit phase', { exact: true });
     await expect(select).toBeVisible();
     await select.selectOption('phase-7');
 
@@ -79,7 +83,7 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
   }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/work/roadmap?phase=phase-6b');
-    const phaseSelect = page.getByLabel('Phase', { exact: true });
+    const phaseSelect = page.getByLabel('demo-hub phase', { exact: true });
     await expect(phaseSelect).toBeVisible();
     const phaseSelectBox = await phaseSelect.boundingBox();
     expect(phaseSelectBox?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -269,6 +273,79 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
       await page.goto('/work/roadmap?epic=epic-9');
       await settleForShot(page, page.locator('.wave-list'));
       await shoot(page, `work-roadmap-mobile-epic-${theme}`);
+    });
+  }
+});
+
+// UI spec Part 2 §2.4 — on phone each project is a <details> section whose
+// picker lists the window's lanes, with the same two disclosure rows.
+// roadmapWindowFixture.ts: project-a (8 phases, phase-4 current), project-b.
+test.describe('Roadmap window mobile (spec Part 2)', () => {
+  const PHONE = { width: 390, height: 844 };
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await stubWindowRoadmap(page);
+  });
+
+  test('project sections are <details> with 44px summaries, the current one open', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap');
+    const summaries = page.locator('summary.rm-section__head');
+    await expect(summaries).toHaveCount(2);
+    await expect(summaries.nth(0)).toContainText('project-a');
+    await expect(summaries.nth(1)).toContainText('project-b');
+    for (const summary of await summaries.all()) {
+      const box = await summary.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    // project-a holds the default selection (its current lane, phase-4).
+    await expect(page.locator('details.rm-section').nth(0)).toHaveAttribute('open', '');
+    await expect(page.locator('details.rm-section').nth(1)).not.toHaveAttribute('open', '');
+  });
+
+  test('the picker lists the window, and the 44px disclosure rows widen it', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    const picker = page.getByLabel('project-a phase', { exact: true });
+    await expect(picker).toHaveValue('phase-4');
+    await expect(picker.locator('option')).toHaveText(['Phase 3', 'Phase 4', 'Phase 5', 'Phase 6']);
+
+    // On phone the disclosures widen the picker's options, so they name it.
+    const section = page.locator('details.rm-section').nth(0);
+    const earlier = section.locator('.rm-window__more', { hasText: 'earlier' });
+    const later = section.locator('.rm-window__more', { hasText: 'later' });
+    await expect(earlier).toHaveText('Show 2 earlier lanes');
+    await expect(later).toHaveText('Show 2 later lanes');
+    await expect(picker).toHaveAttribute('id', 'rm-window-project-a-picker');
+    for (const button of [earlier, later]) {
+      await expect(button).toHaveAttribute('aria-controls', 'rm-window-project-a-picker');
+      await expect(button).toHaveAttribute('aria-expanded', 'false');
+    }
+    for (const button of [earlier, later]) {
+      const box = await button.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
+    await earlier.click();
+    await expect(earlier).toHaveAttribute('aria-expanded', 'true');
+    await expect(earlier).toHaveText('Show fewer earlier lanes');
+    await expect(picker.locator('option')).toHaveText([
+      'Phase 1',
+      'Phase 2',
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+    ]);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot window phone 390/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.goto('/work/roadmap');
+      await settleForShot(page, page.getByLabel('project-a phase', { exact: true }));
+      await shoot(page, `work-roadmap-window-mobile-390-${theme}`);
     });
   }
 });

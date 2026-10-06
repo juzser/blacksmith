@@ -1,5 +1,7 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { stubWindowRoadmap } from './roadmapWindowFixture.js';
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {
@@ -366,4 +368,146 @@ test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2,
     await settleForShot(page, page.locator('.esec', { hasText: 'epic-9' }).locator('.wave-list'));
     await shoot(page, 'work-roadmap-phase-waves-desktop-light');
   });
+});
+
+// UI spec Part 2 — one section per project, each windowed to 1 lane before
+// the current one, the current one, and 2 after. roadmapWindowFixture.ts
+// stubs project-a (8 phases, phase-4 current) and project-b (2 phases).
+test.describe('Roadmap window (spec Part 2)', () => {
+  const sectionFor = (page: Page, project: string) =>
+    page
+      .locator('.rm-section')
+      .filter({ has: page.locator('.rm-section__head', { hasText: project }) });
+  const earlierToggle = (page: Page) =>
+    page.locator('button[aria-controls="rm-window-project-a-earlier"]');
+  const laterToggle = (page: Page) =>
+    page.locator('button[aria-controls="rm-window-project-a-later"]');
+  const phaseNames = (page: Page, project: string) =>
+    sectionFor(page, project).locator('.lrow:not(.sub) .lname');
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubWindowRoadmap(page);
+  });
+
+  test('one section per project, newest activity first, each with its done count', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap');
+    const heads = page.locator('.rm-section__head');
+    await expect(heads).toHaveCount(2);
+    await expect(heads.nth(0)).toContainText('project-a');
+    await expect(heads.nth(0)).toContainText('3 of 8 phases done');
+    await expect(heads.nth(1)).toContainText('project-b');
+    await expect(heads.nth(1)).toContainText('1 of 2 phases done');
+    await expect(page.locator('h2.rm-section__head')).toHaveCount(2);
+  });
+
+  test('only the window is in the DOM, with the current lane tagged', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+    ]);
+    const current = sectionFor(page, 'project-a').locator('[aria-current="step"]');
+    await expect(current).toHaveCount(1);
+    await expect(current).toContainText('Phase 4');
+    await expect(current.locator('.bs-tag')).toHaveText('Current');
+
+    // project-b: phase-9 done, phase-10 current, nothing hidden either side.
+    await expect(phaseNames(page, 'project-b')).toHaveText(['Phase 9', 'Phase 10']);
+    await expect(sectionFor(page, 'project-b').locator('[aria-current="step"]')).toContainText(
+      'Phase 10',
+    );
+    await expect(sectionFor(page, 'project-b').locator('.rm-window__more')).toHaveCount(0);
+  });
+
+  test('the earlier and later disclosures expand in place and flip to "Show fewer"', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap');
+    const earlier = earlierToggle(page);
+    const later = laterToggle(page);
+    await expect(earlier).toHaveText('Show 2 earlier lanes');
+    await expect(earlier).toHaveAttribute('aria-expanded', 'false');
+    await expect(later).toHaveText('Show 2 later lanes');
+    await expect(later).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#rm-window-project-a-earlier .lrow')).toHaveCount(0);
+
+    await earlier.click();
+    await expect(earlier).toHaveAttribute('aria-expanded', 'true');
+    await expect(earlier).toHaveText('Show fewer earlier lanes');
+    await expect(earlier).toBeFocused();
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 1',
+      'Phase 2',
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+    ]);
+    await expect(page.locator('#rm-window-project-a-earlier .lrow')).toHaveCount(2);
+
+    await later.click();
+    await expect(later).toHaveAttribute('aria-expanded', 'true');
+    await expect(later).toHaveText('Show fewer later lanes');
+    await expect(phaseNames(page, 'project-a')).toHaveCount(8);
+
+    await earlier.click();
+    await expect(earlier).toHaveText('Show 2 earlier lanes');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+      'Phase 7',
+      'Phase 8',
+    ]);
+  });
+
+  test('the expand state survives a reload in the same tab', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    await laterToggle(page).click();
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'true');
+
+    await page.reload();
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(phaseNames(page, 'project-a')).toHaveText([
+      'Phase 3',
+      'Phase 4',
+      'Phase 5',
+      'Phase 6',
+      'Phase 7',
+      'Phase 8',
+    ]);
+  });
+
+  test('a ?phase= deep link into a hidden lane opens that side and shows the row', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(laterToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    const row = sectionFor(page, 'project-a').locator('.lrow[aria-current="true"]');
+    await expect(row).toContainText('Phase 1');
+    await expect(row).toBeInViewport();
+    await expect(row).toBeFocused();
+    // Selecting a lane never moves the Current marker.
+    await expect(sectionFor(page, 'project-a').locator('[aria-current="step"]')).toContainText(
+      'Phase 4',
+    );
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot window desktop/${theme}: earlier side expanded`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.goto('/work/roadmap');
+      await earlierToggle(page).click();
+      await settleForShot(page, page.locator('#rm-window-project-a-earlier .lrow').first());
+      await shoot(page, `work-roadmap-window-desktop-${theme}`);
+    });
+  }
 });

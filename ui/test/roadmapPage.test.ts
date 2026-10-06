@@ -7,6 +7,7 @@ const pagesDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pag
 const componentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components');
 const SFC = readFileSync(join(pagesDir, 'RoadmapPage.vue'), 'utf8');
 const EPIC_BLOCK = readFileSync(join(componentsDir, 'EpicBlock.vue'), 'utf8');
+const SECTION = readFileSync(join(componentsDir, 'RoadmapProjectSection.vue'), 'utf8');
 
 // Fix round 4 #1: an epic-only project (no milestones) fell through to a
 // fabricated `taskCountLabel(0, 0)` for its default-selected epic, reading
@@ -43,16 +44,20 @@ describe('RoadmapPage.vue — standalone-epic task count (fix round 4 #1)', () =
 // DS4 S4 — phone Roadmap (<=640px), gated on isPhoneWidth throughout (spec
 // "Gate" line). Source-text scrape, same convention as the block above: no
 // DOM harness in this vitest config, so the actual rendering is exercised by
-// ui/e2e/roadmapMobile.spec.ts instead.
+// ui/e2e/roadmapMobile.spec.ts instead. UI spec Part 2 moved the swimlane
+// and the picker into one RoadmapProjectSection.vue per project.
 describe('RoadmapPage.vue — phone branch (DS4 S4)', () => {
   it('imports useViewport and hides the swimlane on phone', () => {
     expect(SFC).toMatch(/useViewport/);
-    expect(SFC).toMatch(/<RoadmapSwimlane\s+v-if="!isPhoneWidth"/);
+    expect(SECTION).toMatch(/useViewport/);
+    expect(SECTION).toMatch(/<RoadmapSwimlane\s+v-if="!isPhoneWidth"/);
   });
 
-  it("shows a phase-picker Select on phone, over the swimlane's own phase rows (R4)", () => {
-    expect(SFC).toMatch(/phaseOptions/);
-    expect(SFC).toMatch(/isPhoneWidth && !selectedEpicData/);
+  it("shows a phase-picker Select on phone, over the swimlane's own shown lanes (R4)", () => {
+    expect(SECTION).toMatch(/laneOptions\(view\.value\.regions\)/);
+    expect(SECTION).toMatch(/<Select\s+v-else-if="showPicker"/);
+    // Phase mode only: an epic selected in this section shows EpicBlock's back link instead.
+    expect(SECTION).toMatch(/!\(props\.hostsSelection && props\.selectedEpic !== null\)/);
   });
 
   it("derives each selected epic's phase for the back link (R1)", () => {

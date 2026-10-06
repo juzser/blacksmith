@@ -8,15 +8,20 @@
 // DS4 S4 — below 640px (`isPhoneWidth`) the swimlane is hidden entirely and
 // replaced by a phase-picker Select (R4) feeding the same EpicBlock, whose
 // own phone branch (phase list / epic back-link) is gated the same way.
+//
+// UI spec Part 2 — one RoadmapProjectSection per project, each windowed to
+// its recent lanes (roadmapWindow.ts). The page owns the per-side expand
+// state (expandedRows.ts, sessionStorage) so a deep link to a hidden lane can
+// open its side, and drops the EpicBlock into the section holding the
+// selection.
 import { Map as MapIcon } from '@lucide/vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import EpicBlock from '../components/EpicBlock.vue';
 import Banner from '../components/kit/Banner.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
-import Select from '../components/kit/Select.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
-import RoadmapSwimlane from '../components/RoadmapSwimlane.vue';
+import RoadmapProjectSection from '../components/RoadmapProjectSection.vue';
 import TaskPeekPanel from '../components/TaskPeekPanel.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
@@ -29,11 +34,22 @@ import {
   fetchOverview,
   fetchRoadmap,
   type MilestoneProgress,
+  type ProjectOverviewSummary,
   selectableEpics,
 } from '../lib/api.js';
+import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { planVersionOptions } from '../lib/planVersion.js';
 import { defaultSelection } from '../lib/roadmapSelection.js';
-import { buildEpicOnlySwimlane, buildSwimlane, hasRoadmapContent } from '../lib/roadmapSwimlane.js';
+import { hasRoadmapContent } from '../lib/roadmapSwimlane.js';
+import {
+  buildRoadmapSections,
+  ROADMAP_WINDOW_SCOPE,
+  type RoadmapSection,
+  sectionHolds,
+  selectionSide,
+  type WindowSide,
+  windowExpandId,
+} from '../lib/roadmapWindow.js';
 import {
   isTaskOver,
   type KitTone,
@@ -60,6 +76,8 @@ const { isPhoneWidth } = useViewport();
 const milestones = ref<MilestoneProgress[] | null>(null);
 const epics = ref<string[]>([]);
 const activeEpics = ref<string[]>([]);
+/** Unscoped only: a project with epics in flight but no declared phase gets an epic section. */
+const overviewProjects = ref<ProjectOverviewSummary[]>([]);
 const error = ref<string | null>(null);
 const loading = ref(true);
 
@@ -150,6 +168,7 @@ async function load() {
     milestones.value = roadmap;
     epics.value = selectableEpics(overview);
     activeEpics.value = overview.epicsActivelyRunning;
+    overviewProjects.value = overview.projects ?? [];
     error.value = null;
 
     const fromQuery = {
@@ -166,6 +185,9 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  // Only once `loading` drops: until then the render reads nothing else, so
+  // no flush is queued and nextTick would resolve before the rows exist.
+  if (error.value === null) await revealSelection();
 }
 
 onMounted(load);
@@ -192,19 +214,90 @@ function setEpicPlanVersion(value: string) {
   loadEpicModeFlow();
 }
 
-const swimlane = computed(() => {
-  if (!milestones.value) return { rows: [], nowOffset: 50, months: [] };
-  if (milestones.value.length === 0) return buildEpicOnlySwimlane(epics.value);
-  return buildSwimlane(milestones.value, new Date());
+// UI spec Part 2 — the sections, in liveness order. Scoped to one project the
+// heading goes (the topbar names the project) and so do other projects'
+// phase-less epic sections.
+const sections = computed(() =>
+  buildRoadmapSections(
+    milestones.value ?? [],
+    epics.value,
+    activeEpics.value,
+    project.value ? undefined : overviewProjects.value,
+    project.value ?? null,
+  ),
+);
+const showHeadings = computed(() => !project.value);
+
+/** The section whose lanes hold the selection; null when it sits in none. */
+const hostSection = computed(
+  () =>
+    sections.value.find((s) =>
+      sectionHolds(s, { phaseId: selectedPhase.value, epicId: selectedEpic.value }),
+    ) ?? null,
+);
+
+/**
+ * The page's stack: every section, with the selection's EpicBlock right
+ * after the section holding it (last when none does), so the detail reads
+ * under the lane that was picked rather than below every project.
+ */
+const stackItems = computed(() => {
+  const items: Array<{ key: string; section: RoadmapSection | null }> = sections.value.map(
+    (section) => ({ key: `${section.kind}:${section.project}`, section }),
+  );
+  const host = hostSection.value;
+  const at = host === null ? items.length : items.findIndex((item) => item.section === host) + 1;
+  items.splice(at, 0, { key: 'selection', section: null });
+  return items;
 });
 
-// DS4 S4 R4 — the phone phase picker, over the same phase data the swimlane
-// uses (not a hand-rolled dropdown).
-const phaseOptions = computed(() =>
-  swimlane.value.rows
-    .filter((row) => row.kind === 'phase')
-    .map((row) => ({ value: row.id, label: row.label })),
-);
+// DS4 S4 R4 — the phone picker's name; with several sections each picker
+// names its project, as two selects both called "Phase" could not be told apart.
+function pickerLabel(section: RoadmapSection): string {
+  const noun = section.kind === 'phase' ? 'phase' : 'epic';
+  if (sections.value.length === 1) return noun === 'phase' ? 'Phase' : 'Epic';
+  return `${section.title} ${noun}`;
+}
+
+// §2.3 — per-side expand state, per tab session, keyed by project so it
+// survives load()'s reload on a project/session switch.
+const expandedWindows = ref(loadExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE));
+
+function windowExpanded(section: RoadmapSection) {
+  return {
+    earlier: expandedWindows.value.has(windowExpandId(section.project, 'earlier')),
+    later: expandedWindows.value.has(windowExpandId(section.project, 'later')),
+  };
+}
+
+function toggleWindow(section: RoadmapSection, side: WindowSide) {
+  expandedWindows.value = toggleExpanded(
+    expandedWindows.value,
+    windowExpandId(section.project, side),
+  );
+  saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
+}
+
+/**
+ * §2.3 — a deep link to a lane outside the window opens the side it is on
+ * (stored, so "Show fewer" closes it again), then scrolls the selected row
+ * into view and focuses it. A selection already on screen is left alone.
+ */
+async function revealSelection() {
+  const host = hostSection.value;
+  if (!host) return;
+  const side = selectionSide(host, { phaseId: selectedPhase.value, epicId: selectedEpic.value });
+  if (side === null) return;
+  const id = windowExpandId(host.project, side);
+  if (!expandedWindows.value.has(id)) {
+    expandedWindows.value = toggleExpanded(expandedWindows.value, id);
+    saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
+  }
+  await nextTick();
+  const row = document.querySelector<HTMLElement>('.lrow[aria-current="true"]');
+  row?.scrollIntoView({ block: 'nearest' });
+  row?.focus();
+}
 
 const selectedPhaseData = computed(
   () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
@@ -356,44 +449,42 @@ async function closePeek() {
     />
 
     <div v-else class="rm-stack">
-      <RoadmapSwimlane
-        v-if="!isPhoneWidth"
-        :swimlane="swimlane"
-        :selected-phase="selectedPhase"
-        :selected-epic="selectedEpic"
-        @select-phase="selectPhase"
-        @select-epic="selectEpic"
-      />
-      <!-- DS4 S4 R4 — phone phase picker, phase mode only (epic mode shows
-           the back link instead, EpicBlock.vue R1). -->
-      <Select
-        v-if="isPhoneWidth && !selectedEpicData"
-        class="bs-roadmap-mobile__phase-select"
-        :model-value="selectedPhase ?? ''"
-        :options="phaseOptions"
-        aria-label="Phase"
-        @update:model-value="selectPhase"
-      />
-
-      <EpicBlock
-        v-if="selectedPhaseData"
-        :name="selectedPhaseData.name"
-        :status-tone="milestoneStatusKitTone(selectedPhaseData.status)"
-        :status-label="milestoneStatusLabel(selectedPhaseData.status)"
-        :tasks-total="selectedPhaseData.tasksTotal"
-        :tasks-completed="selectedPhaseData.tasksCompleted"
-        :status-counts="selectedPhaseData.statusCounts"
-        :epics="epicSections"
-        @select="openPeek"
-        @select-epic="selectEpic"
-      />
-      <EpicBlock
-        v-else-if="selectedEpicData"
-        :epic="selectedEpicData"
-        @select="openPeek"
-        @update:plan-version="setEpicPlanVersion"
-        @back-to-phase="selectPhase"
-      />
+      <!-- UI spec Part 2 — one section per project, the EpicBlock right after
+           the section holding the selection (stackItems). -->
+      <template v-for="item in stackItems" :key="item.key">
+        <RoadmapProjectSection
+          v-if="item.section"
+          :section="item.section"
+          :show-heading="showHeadings"
+          :expanded="windowExpanded(item.section)"
+          :selected-phase="selectedPhase"
+          :selected-epic="selectedEpic"
+          :hosts-selection="item.section === hostSection"
+          :picker-label="pickerLabel(item.section)"
+          @toggle="(side) => item.section && toggleWindow(item.section, side)"
+          @select-phase="selectPhase"
+          @select-epic="selectEpic"
+        />
+        <EpicBlock
+          v-else-if="selectedPhaseData"
+          :name="selectedPhaseData.name"
+          :status-tone="milestoneStatusKitTone(selectedPhaseData.status)"
+          :status-label="milestoneStatusLabel(selectedPhaseData.status)"
+          :tasks-total="selectedPhaseData.tasksTotal"
+          :tasks-completed="selectedPhaseData.tasksCompleted"
+          :status-counts="selectedPhaseData.statusCounts"
+          :epics="epicSections"
+          @select="openPeek"
+          @select-epic="selectEpic"
+        />
+        <EpicBlock
+          v-else-if="selectedEpicData"
+          :epic="selectedEpicData"
+          @select="openPeek"
+          @update:plan-version="setEpicPlanVersion"
+          @back-to-phase="selectPhase"
+        />
+      </template>
     </div>
 
     <TaskPeekPanel

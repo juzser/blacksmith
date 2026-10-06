@@ -1,20 +1,16 @@
 // DS4 S2 — the swimlane's default-selection rule (signed-off spec §2), pure
-// so RoadmapPage.vue is just wiring. Order: (1) the phase holding an actively
-// running epic, (2) the most recent phase otherwise, (3) a no-phase project's
-// in-progress epic (else its most recent), with the URL's own `?phase=`/
-// `?epic=` always overriding the computed default.
+// so RoadmapPage.vue is just wiring. The URL's own `?phase=`/`?epic=` always
+// overrides the computed default. Otherwise (UI spec Part 2): the current
+// lane of the first project section (`buildRoadmapSections` order, running
+// first) — the phase holding an actively running epic, else the first
+// declared phase by `sequence` that is not completed, else the last phase;
+// and a no-phase project's actively running epic, else its first selectable.
 import type { MilestoneProgress } from './api.js';
+import { buildRoadmapSections } from './roadmapWindow.js';
 
 export interface RoadmapSelection {
   phaseId: string | null;
   epicId: string | null;
-}
-
-function byRecency(a: MilestoneProgress, b: MilestoneProgress): number {
-  const at = a.startedAt !== null ? Date.parse(a.startedAt) : -Infinity;
-  const bt = b.startedAt !== null ? Date.parse(b.startedAt) : -Infinity;
-  if (at !== bt) return bt - at;
-  return b.sequence - a.sequence;
 }
 
 export function defaultSelection(
@@ -29,10 +25,11 @@ export function defaultSelection(
   if (routeQuery.epic) return { phaseId: null, epicId: routeQuery.epic };
 
   if (milestones.length > 0) {
-    const running = milestones.find((m) => m.epicIds.some((e) => activeEpics.includes(e)));
-    const chosen = running ?? [...milestones].sort(byRecency)[0];
-    return { phaseId: chosen ? chosen.milestoneId : null, epicId: null };
+    const first = buildRoadmapSections(milestones, [], activeEpics, undefined, null)[0];
+    const current = first?.kind === 'phase' ? first.window.current : null;
+    return { phaseId: current ? current.milestoneId : null, epicId: null };
   }
 
-  return { phaseId: null, epicId: selectableEpics[0] ?? null };
+  const running = selectableEpics.find((e) => activeEpics.includes(e));
+  return { phaseId: null, epicId: running ?? selectableEpics[0] ?? null };
 }
