@@ -169,19 +169,39 @@ const RELATIVE_VERBOSE_UNITS: Array<[number, string]> = [
  * additive one.
  */
 export function formatRelativeVerbose(iso: string, nowIso?: string): string {
+  const parts = relativeVerboseParts(iso, nowIso);
+  if (parts === null) return iso;
+  return parts === 'now' ? 'just now' : `${parts.n} ${parts.suffix} ago`;
+}
+
+function relativeVerboseParts(
+  iso: string,
+  nowIso?: string,
+): { n: number; suffix: string } | 'now' | null {
   const then = new Date(iso).getTime();
   const now = nowIso ? new Date(nowIso).getTime() : Date.now();
-  if (Number.isNaN(then)) return iso;
+  if (Number.isNaN(then)) return null;
   let diff = Math.max(0, (now - then) / 1000);
-  if (diff < 5) return 'just now';
+  if (diff < 5) return 'now';
   for (const [size, suffix] of RELATIVE_VERBOSE_UNITS) {
-    if (diff < size) {
-      const n = Math.floor(diff);
-      return `${n} ${suffix} ago`;
-    }
+    if (diff < size) return { n: Math.floor(diff), suffix };
     diff /= size;
   }
-  return iso;
+  return null;
+}
+
+/**
+ * "for 12 min" / "for 2 h" / "for 3 d": how long something has been in its
+ * current state (LiveSessionCard's status time, ds-spec.md §2.1/§4.1), same
+ * units and rounding as formatRelativeVerbose. Under a minute, or a time in
+ * the future (clock skew), reads "just now" rather than "for 0 min"; an
+ * invalid ISO string reads as no text.
+ */
+export function formatSinceVerbose(iso: string, nowIso?: string): string {
+  const parts = relativeVerboseParts(iso, nowIso);
+  if (parts === null) return '';
+  if (parts === 'now' || parts.suffix === 's') return 'just now';
+  return `for ${parts.n} ${parts.suffix}`;
 }
 
 /**

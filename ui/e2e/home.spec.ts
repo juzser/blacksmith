@@ -70,6 +70,7 @@ test.describe('Home', () => {
     await page.goto('/overview');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText([
       'Needs you',
+      'Live sessions',
       'Recent activity',
       'Running now',
       'What the factory decided recently',
@@ -504,5 +505,608 @@ test.describe('Home: Recent activity', () => {
       await expect(section.getByText('Nothing has happened yet.')).toBeVisible();
       await expect(section.locator('.bs-home__recent-activity')).toHaveCount(0);
     });
+  }
+});
+
+// Live sessions (ds-spec.md §4.1 item 1a): the e2e server runs with an empty
+// CLI registry, so the card data is served from a fixture instead. The
+// wording and link targets are unit-tested in ui/test/liveSessions.test.ts;
+// this layer proves the template renders them and that the section fits.
+const FOREIGN = { id: 'abcd1234', label: 'project-b' };
+const HOME_STORE = { id: 'home', label: 'home' };
+
+function liveCard(over: Record<string, unknown>): Record<string, unknown> {
+  return {
+    cliSessionId: 'cli-x',
+    name: null,
+    cwdLabel: 'workspace-c',
+    status: 'working',
+    statusSince: minutesAgo(12),
+    focus: null,
+    ...over,
+  };
+}
+
+const LIVE_CARDS = [
+  liveCard({
+    cliSessionId: 'cli-1',
+    focus: {
+      store: HOME_STORE,
+      project: 'project-a',
+      epicId: 'epic-a',
+      epicTitle: 'Checkout redesign',
+      wave: 6,
+      now: [
+        {
+          role: 'coder',
+          taskId: 'task-a1',
+          taskTitle: 'Show shipping fee before payment',
+          since: minutesAgo(9),
+        },
+        {
+          role: 'tester',
+          taskId: 'task-a2',
+          taskTitle: 'Drop the extra confirm step',
+          since: minutesAgo(8),
+        },
+        {
+          role: 'reviewer',
+          taskId: 'task-a3',
+          taskTitle: 'Check the cart total',
+          since: minutesAgo(7),
+        },
+      ],
+      next: { kind: 'task', taskId: 'task-a4', taskTitle: 'Cart summary' },
+    },
+  }),
+  liveCard({
+    cliSessionId: 'cli-2',
+    status: 'waiting_operator',
+    statusSince: minutesAgo(5),
+    focus: {
+      store: FOREIGN,
+      project: 'project-b',
+      epicId: 'epic-b',
+      epicTitle: 'Billing retries',
+      wave: 2,
+      now: [
+        {
+          role: 'reviewer',
+          taskId: 'task-b1',
+          taskTitle: 'Retry failed invoices',
+          since: minutesAgo(6),
+        },
+      ],
+      next: { kind: 'waiting_on_you' },
+    },
+  }),
+  liveCard({ cliSessionId: 'cli-3', status: 'idle', statusSince: null, name: 'session-c' }),
+];
+
+function liveResponse(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    state: 'ok',
+    configSource: 'default',
+    readAt: FIXTURE_NOW_ISO,
+    formatWarning: null,
+    hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+    sessions: LIVE_CARDS,
+    ...over,
+  };
+}
+
+async function serveLive(page: Page, body: Record<string, unknown>): Promise<void> {
+  await page.route('**/api/cli-sessions*', (route) => route.fulfill({ json: body }));
+}
+
+async function expectCardsAligned(page: Page, indicators: number): Promise<void> {
+  const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
+  const n = await items.count();
+  const lefts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const card = await items.nth(i).boundingBox();
+    const title = await items.nth(i).locator('[class*="__title"]').first().boundingBox();
+    expect(card).not.toBeNull();
+    expect(title).not.toBeNull();
+    expect((title?.x ?? 0) - (card?.x ?? 0)).toBeLessThan(24);
+    lefts.push(title?.x ?? 0);
+  }
+  const firstLeft = lefts[0];
+  if (firstLeft === undefined) throw new Error('no title left edge was measured');
+  for (const x of lefts) expect(Math.abs(x - firstLeft)).toBeLessThanOrEqual(1);
+  // Only the shell's LiveIndicator may wear .bs-live; the phone shell has none.
+  await expect(page.locator('.bs-live')).toHaveCount(indicators);
+}
+
+const LONG_TITLE =
+  'Reconcile the ledger exports across every regional storefront before the quarterly close so finance can sign off without manual spreadsheet patches';
+const LONG_CARD = liveCard({
+  cliSessionId: 'cli-4',
+  focus: {
+    store: HOME_STORE,
+    project: 'project-d',
+    epicId: 'epic-d',
+    epicTitle: 'Ledger close',
+    wave: 1,
+    now: [{ role: 'coder', taskId: 'task-d1', taskTitle: LONG_TITLE, since: minutesAgo(3) }],
+    next: { kind: 'task', taskId: 'task-d2', taskTitle: 'Short next task' },
+  },
+});
+
+// Phone rhythm and hit boxes (visual pass): rows stay one text line tall, the
+// title-to-status gap is the same linked or not, every target measures
+// --bs-touch the way touchTargets.spec.ts does (getBoundingClientRect), no
+// clamped ancestor clips that hit box, and a long linked title wraps inline
+// after its role text inside the 2-line clamp.
+async function measureLiveCards(page: Page): Promise<{
+  rows: {
+    text: string;
+    oneLine: boolean;
+    rowH: number;
+    lineH: number;
+    kTop: number;
+    vTop: number;
+  }[];
+  titles: { linked: boolean; h: number; lines: number }[];
+  targets: { name: string; h: number; clipped: string | null; inline: boolean }[];
+  long: { firstTop: number; vTop: number; lineTops: number[]; clipBottom: number; lineH: number };
+}> {
+  return page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
+    const rows: {
+      text: string;
+      oneLine: boolean;
+      rowH: number;
+      lineH: number;
+      kTop: number;
+      vTop: number;
+    }[] = [];
+    const titles: { linked: boolean; h: number; lines: number }[] = [];
+    const targets: { name: string; h: number; clipped: string | null; inline: boolean }[] = [];
+    // Same definition as touchTargets.spec.ts: an <a> left display:inline whose
+    // parent has real text beside it is an inline link inside prose.
+    const isInlineProseLink = (el: Element): boolean => {
+      if (el.tagName.toLowerCase() !== 'a') return false;
+      if (getComputedStyle(el).display !== 'inline') return false;
+      const parent = el.parentElement;
+      if (!parent) return false;
+      return Array.from(parent.childNodes).some(
+        (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0,
+      );
+    };
+    for (const card of cards) {
+      const t = card.querySelector('.bs-live-card__title') as HTMLElement;
+      const lh = parseFloat(getComputedStyle(t).lineHeight);
+      const tcs = getComputedStyle(t);
+      const th = t.getBoundingClientRect().height;
+      const content = th - parseFloat(tcs.paddingTop) - parseFloat(tcs.paddingBottom);
+      titles.push({ linked: !!t.querySelector('a'), h: th, lines: Math.round(content / lh) });
+      for (const row of Array.from(card.querySelectorAll('.bs-live-card__line'))) {
+        const k = row.querySelector('.bs-live-card__k') as HTMLElement;
+        const v = row.querySelector('.bs-live-card__v, .bs-live-card__more') as HTMLElement;
+        const vlh = parseFloat(getComputedStyle(v).lineHeight) || 0;
+        const textRange = document.createRange();
+        textRange.selectNodeContents(v);
+        const tops = new Set(Array.from(textRange.getClientRects()).map((r) => Math.round(r.top)));
+        rows.push({
+          text: (v.textContent ?? '').trim().slice(0, 30),
+          oneLine: tops.size <= 1,
+          rowH: row.getBoundingClientRect().height,
+          lineH: vlh,
+          kTop: k.getBoundingClientRect().top,
+          vTop: v.classList.contains('bs-live-card__more')
+            ? v.getBoundingClientRect().top +
+              parseFloat(getComputedStyle(v).borderTopWidth) +
+              parseFloat(getComputedStyle(v).paddingTop)
+            : v.getBoundingClientRect().top + parseFloat(getComputedStyle(v).paddingTop),
+        });
+      }
+      const els = Array.from(card.querySelectorAll('a[href], button'));
+      for (const el of els) {
+        // A wrapped link has one hit box per line box; a line the clamp hides
+        // (its glyphs start past the clamped box's content edge) is not a target.
+        const pad = parseFloat(getComputedStyle(el).paddingTop);
+        const rects = Array.from(el.getClientRects());
+        let clipped: string | null = null;
+        let h = Number.POSITIVE_INFINITY;
+        for (const r of rects) {
+          let hidden = false;
+          let why: string | null = null;
+          for (let p = el.parentElement; p && p !== card.parentElement; p = p.parentElement) {
+            const cs = getComputedStyle(p);
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+            const pr = p.getBoundingClientRect();
+            const top = pr.top + parseFloat(cs.borderTopWidth);
+            const bottom = pr.bottom - parseFloat(cs.borderBottomWidth);
+            if (r.top + pad >= bottom - parseFloat(cs.paddingBottom) - 0.5) {
+              hidden = true;
+              break;
+            }
+            if (!why && (r.top < top - 0.5 || r.bottom > bottom + 0.5)) {
+              why = `${p.className} [${top.toFixed(1)}, ${bottom.toFixed(1)}] vs hit [${r.top.toFixed(1)}, ${r.bottom.toFixed(1)}]`;
+            }
+          }
+          if (hidden) continue;
+          h = Math.min(h, r.height);
+          if (why && !clipped) clipped = why;
+        }
+        targets.push({
+          name: (el.textContent ?? '').trim().slice(0, 30),
+          h,
+          clipped,
+          inline: isInlineProseLink(el),
+        });
+      }
+    }
+    const longCard = cards[cards.length - 1];
+    if (!longCard) throw new Error('no live-session card rendered');
+    const v = longCard.querySelector('.bs-live-card__v') as HTMLElement;
+    const a = v.querySelector('a') as HTMLElement;
+    const range = document.createRange();
+    range.selectNodeContents(a);
+    const rects = Array.from(range.getClientRects());
+    const vr = v.getBoundingClientRect();
+    const lineH = parseFloat(getComputedStyle(v).lineHeight);
+    const cs = getComputedStyle(v);
+    return {
+      rows,
+      titles,
+      targets,
+      long: {
+        firstTop: (
+          rects[0] ??
+          (() => {
+            throw new Error('long link has no client rects');
+          })()
+        ).top,
+        vTop: vr.top + parseFloat(cs.paddingTop),
+        lineTops: rects.map((r) => r.top),
+        clipBottom: vr.bottom - parseFloat(cs.borderBottomWidth),
+        lineH,
+      },
+    };
+  });
+}
+
+// Hit-box soundness (kanban.spec.ts precedent: a grown hit box may overlap
+// plain text and gaps, never another interactive element, and stays inside its
+// card). A hit box is the element's client rects, each clipped to the padding
+// box of every ancestor whose overflow is not visible.
+async function expectHitBoxesSound(page: Page): Promise<void> {
+  const r = await page.evaluate(() => {
+    type Box = { l: number; t: number; r: number; b: number };
+    const out = {
+      overlaps: [] as string[],
+      misses: [] as string[],
+      outside: [] as string[],
+      count: 0,
+    };
+    const boxesOf = (el: Element): Box[] => {
+      const res: Box[] = [];
+      for (const rc of Array.from(el.getClientRects())) {
+        let box: Box = { l: rc.left, t: rc.top, r: rc.right, b: rc.bottom };
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const cs = getComputedStyle(p);
+          if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+          const pr = p.getBoundingClientRect();
+          box = {
+            l: Math.max(box.l, pr.left + parseFloat(cs.borderLeftWidth)),
+            t: Math.max(box.t, pr.top + parseFloat(cs.borderTopWidth)),
+            r: Math.min(box.r, pr.right - parseFloat(cs.borderRightWidth)),
+            b: Math.min(box.b, pr.bottom - parseFloat(cs.borderBottomWidth)),
+          };
+        }
+        if (box.r > box.l && box.b > box.t) res.push(box);
+      }
+      return res;
+    };
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
+    const all: { el: Element; label: string; boxes: Box[] }[] = [];
+    for (const card of cards) {
+      const cr = card.getBoundingClientRect();
+      for (const el of Array.from(
+        card.querySelectorAll('a[href], button, [tabindex]:not([tabindex="-1"])'),
+      )) {
+        const label = (el.textContent ?? '').trim().slice(0, 30);
+        const boxes = boxesOf(el);
+        all.push({ el, label, boxes });
+        for (const b of boxes) {
+          if (
+            b.l < cr.left - 0.5 ||
+            b.r > cr.right + 0.5 ||
+            b.t < cr.top - 0.5 ||
+            b.b > cr.bottom + 0.5
+          ) {
+            out.outside.push(
+              `"${label}" [${b.t.toFixed(1)}, ${b.b.toFixed(1)}] vs card [${cr.top.toFixed(1)}, ${cr.bottom.toFixed(1)}]`,
+            );
+          }
+        }
+        // g. the centre of each visible text line hits this element
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        for (const lr of Array.from(range.getClientRects())) {
+          if (lr.width === 0 || lr.height === 0) continue;
+          const x = lr.left + lr.width / 2;
+          const y = lr.top + lr.height / 2;
+          if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b)) continue;
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || !(hit === el || el.contains(hit))) {
+            out.misses.push(
+              `"${label}" line at y=${y.toFixed(1)} lands on ${hit?.className || hit?.tagName}`,
+            );
+          }
+        }
+      }
+    }
+    out.count = all.length;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const ai = all[i];
+        const aj = all[j];
+        if (!ai || !aj) throw new Error('overlap index out of range');
+        for (const a of ai.boxes) {
+          for (const b of aj.boxes) {
+            const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+            const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+            if (w > 0.5 && h > 0.5) {
+              out.overlaps.push(
+                `"${ai.label}" x "${aj.label}" overlap ${w.toFixed(1)}x${h.toFixed(1)}`,
+              );
+            }
+          }
+        }
+      }
+    }
+    return out;
+  });
+  expect(r.count).toBeGreaterThanOrEqual(8);
+  expect.soft(r.overlaps, 'f. hit boxes overlapping each other').toEqual([]);
+  expect.soft(r.misses, 'g. taps on the text land elsewhere').toEqual([]);
+  expect.soft(r.outside, 'h. hit box outside its card').toEqual([]);
+}
+
+const FONT_VARIANTS: { label: string; css: string | null }[] = [
+  { label: '', css: null },
+  { label: ' (Arial metrics)', css: ':root { --bs-font-sans: Arial, sans-serif; }' },
+];
+
+test.describe('Home: Live sessions', () => {
+  test('desktop: one labelled card per session with title, status, Now and Next', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const list = page.getByRole('list', { name: 'Live sessions' });
+    await expect(list.getByRole('listitem')).toHaveCount(3);
+    const first = list.getByRole('listitem').nth(0);
+    await expectCardsAligned(page, 1);
+    await expect(first).toContainText('project-a · epic-a · wave 6');
+    await expect(first).toContainText('Working');
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).toContainText('Tester on Drop the extra confirm step');
+    await expect(first.getByRole('button', { name: '+ 1 more' })).toBeVisible();
+    await expect(first.getByRole('link', { name: 'Open epic Checkout redesign' })).toHaveAttribute(
+      'href',
+      '/work/kanban?epic=epic-a',
+    );
+    await expect(first.getByRole('link', { name: 'Open task Cart summary' })).toHaveAttribute(
+      'href',
+      '/tasks/task-a4',
+    );
+    await first.getByRole('button', { name: '+ 1 more' }).click();
+    await expect(first).toContainText('Code reviewer on Check the cart total');
+    await expect(first.getByRole('button', { name: /more/ })).toHaveCount(0);
+  });
+
+  test('the status time reads "for N min", not "N min ago", on desktop and at 375px', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    for (const size of [null, PHONE]) {
+      if (size) await page.setViewportSize(size);
+      await page.goto('/overview');
+      const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
+      const t = items.nth(0).locator('.bs-live-card__status time');
+      await expect(t).toHaveText('for 12 min');
+      await expect(t).toHaveAttribute('datetime', minutesAgo(12));
+      await expect(items.nth(1).locator('.bs-live-card__status time')).toHaveText('for 5 min');
+      await expect(items.nth(0)).not.toContainText(' ago');
+    }
+  });
+
+  test('a foreign store task links with ?store=, and waiting on you reads in words', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const second = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(1);
+    await expect(second).toContainText('Waiting for you');
+    await expect(second).toContainText('Waiting on you');
+    await expect(
+      second.getByRole('link', { name: 'Open task Retry failed invoices' }),
+    ).toHaveAttribute('href', '/tasks/task-b1?store=abcd1234');
+  });
+
+  test('an unlinked session shows its folder, name and no Now or Next', async ({ page }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const third = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(2);
+    await expect(third).toContainText('workspace-c · session-c');
+    await expect(third).toContainText('Idle');
+    await expect(third).toContainText('Not linked to a Blacksmith epic');
+    await expect(third).not.toContainText('Now');
+    await expect(third).not.toContainText('Next');
+    await expect(third.getByRole('link')).toHaveCount(0);
+  });
+
+  test('375px: one Now line, the rest behind "+ N more", and no sideways scroll', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).not.toContainText('Tester on');
+    await expect(first.getByRole('button', { name: '+ 2 more' })).toBeVisible();
+    await expectCardsAligned(page, 0);
+    const box = await first.getByRole('button', { name: '+ 2 more' }).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(false);
+  });
+
+  // The 44px floor must hold for any font, not just the macOS system one: the
+  // CI runner resolves the stack to an Arial-metric font, whose inline content
+  // area is shorter than the line height.
+  for (const font of FONT_VARIANTS) {
+    test(`375px: tight rows, one title rhythm, 44px unclipped targets, long title clamps inline${font.label}`, async ({
+      page,
+    }) => {
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+      await page.setViewportSize(PHONE);
+      await page.goto('/overview');
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await expect(page.locator('.bs-live-card')).toHaveCount(4);
+      const m = await measureLiveCards(page);
+      // a. one text line per row, key top-aligned with the value
+      expect(m.rows.some((r) => r.oneLine)).toBe(true);
+      for (const r of m.rows) {
+        if (!r.oneLine) continue;
+        // The "+ N more" row is the one row that carries added gap (20px, so its
+        // 44px box and the Next link's box below never overlap), so it is exempt.
+        if (!r.text.startsWith('+')) {
+          expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+        }
+        expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
+      }
+      // b. linked and unlinked one-line titles share one height
+      const one = m.titles.filter((t) => t.lines === 1);
+      const linked = one.find((t) => t.linked);
+      const unlinked = one.find((t) => !t.linked);
+      expect(linked && unlinked).toBeTruthy();
+      expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
+      // c + d. every target the inline-link-in-prose exemption (WCAG 2.2 SC
+      // 2.5.8) does not cover measures >= 44, and no clamped ancestor clips any
+      // target. The Now task links read "Builder on <link>", so they are exempt.
+      expect(m.targets.length).toBeGreaterThanOrEqual(8);
+      expect(m.targets.some((t) => t.inline)).toBe(true);
+      expect(m.targets.some((t) => !t.inline)).toBe(true);
+      for (const t of m.targets) {
+        if (!t.inline) expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(44 - 1 / 64);
+        expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
+      }
+      // f + g + h. hit boxes never overlap, taps land on the text, cards contain them
+      await expectHitBoxesSound(page);
+      // e. long title: first line shares the role text's line, at most 2 lines show
+      expect(Math.abs(m.long.firstTop - m.long.vTop)).toBeLessThanOrEqual(2);
+      // The link wraps to 3+ lines; the 2-line clamp hides the rest. Line tops
+      // are measured from the value's content top; any line from the 3rd on that
+      // starts above the clip edge (the box's padding edge) would show through.
+      expect(m.long.lineTops.length).toBeGreaterThanOrEqual(3);
+      const below = m.long.lineTops.filter(
+        (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
+      );
+      expect(below).toEqual([]);
+    });
+  }
+
+  test('card body padding is space-3 at 375px and space-4 on desktop, on all four sides', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    for (const [size, token] of [
+      [null, '--bs-space-4'],
+      [PHONE, '--bs-space-3'],
+    ] as const) {
+      if (size) await page.setViewportSize(size);
+      await page.goto('/overview');
+      await expect(page.locator('.bs-live-card')).toHaveCount(3);
+      const r = await page.evaluate((t) => {
+        const probe = document.createElement('div');
+        probe.style.padding = `var(${t})`;
+        document.body.appendChild(probe);
+        const want = getComputedStyle(probe).paddingTop;
+        probe.remove();
+        const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
+        return {
+          want,
+          got: [...document.querySelectorAll('.bs-live-card .bs-card__body')].map((b) =>
+            sides.map((s) => getComputedStyle(b)[`padding${s}`]),
+          ),
+        };
+      }, token);
+      expect(r.got.length).toBe(3);
+      for (const g of r.got) expect(g, `${token} on every side`).toEqual(Array(4).fill(r.want));
+    }
+  });
+
+  for (const font of FONT_VARIANTS) {
+    test(`375px expanded: two Now links above the next task link still never overlap${font.label}`, async ({
+      page,
+    }) => {
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+      await page.setViewportSize(PHONE);
+      await page.goto('/overview');
+      const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await first.getByRole('button', { name: '+ 2 more' }).click();
+      await expect(first).toContainText('Code reviewer on Check the cart total');
+      await expectHitBoxesSound(page);
+    });
+  }
+
+  test('empty: says so, with how many sessions were hidden', async ({ page }) => {
+    await serveLive(
+      page,
+      liveResponse({
+        sessions: [],
+        hidden: { outOfScope: 2, dead: 1, unparsed: 0, nonInteractive: 0 },
+      }),
+    );
+    await page.goto('/overview');
+    await expect(page.getByText('No live Blacksmith sessions')).toBeVisible();
+    await expect(page.getByText('3 other sessions hidden')).toBeVisible();
+  });
+
+  test('absent: says tracking is not set up, with no count', async ({ page }) => {
+    await serveLive(page, liveResponse({ state: 'absent', sessions: [] }));
+    await page.goto('/overview');
+    await expect(page.getByText('Session tracking is not set up on this machine.')).toBeVisible();
+    await expect(page.getByText(/hidden/)).toHaveCount(0);
+  });
+
+  test('unreadable and a failed fetch each show their own banner, never an empty list', async ({
+    page,
+  }) => {
+    await serveLive(
+      page,
+      liveResponse({ state: 'unreadable', sessions: [], formatWarning: 'unknown format' }),
+    );
+    await page.goto('/overview');
+    await expect(page.getByText('Could not read the live sessions: unknown format')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
+    await page.unroute('**/api/cli-sessions*');
+    await page.route('**/api/cli-sessions*', (route) => route.fulfill({ status: 500, json: {} }));
+    await page.reload();
+    await expect(page.getByText('Could not load live sessions')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+      test(`screenshot live sessions ${vpName}/${theme}`, async ({ page }) => {
+        await serveLive(page, liveResponse());
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/overview');
+        const section = page.locator('section[aria-labelledby="live-sessions-heading"]');
+        await settleForShot(page, section.getByRole('listitem').first());
+        await shootElement(section, `home-live-sessions-${vpName}-${theme}`);
+      });
+    }
   }
 });

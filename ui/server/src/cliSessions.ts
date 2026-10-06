@@ -80,7 +80,21 @@ export type CliSessionStatus =
   | 'idle'
   | 'unknown';
 
+export interface StoreRef {
+  id: string;
+  label: string;
+}
+
+/** One projection the reader links sessions in: the served clone's, or a foreign project's. */
+export interface CliStore extends StoreRef {
+  handle: DbHandle;
+}
+
+/** The id the served clone's own store carries (see stores.ts). */
+const HOME_STORE_ID = 'home';
+
 export interface LinkedEpic {
+  store: StoreRef;
   rootSessionId: string;
   epicId: string | null;
   project: string | null;
@@ -105,6 +119,34 @@ export interface LinkedEpic {
   /** Escalation tasks of the epic that are neither done nor superseded; null with no epic. */
   followUps: number | null;
   workingAgents: { role: string; taskId: string | null; since: string }[];
+  /** What the card's `focus` is made of; see `CliSessionCard.focus`. */
+  focusParts: {
+    /** The epic's current wave number; null when no wave was ever admitted. */
+    wave: number | null;
+    /** One task title per `workingAgents` entry, in the same order. */
+    nowTitles: (string | null)[];
+    /** The first open task of the newest open wave that no agent works on. */
+    nextTask: { taskId: string; taskTitle: string } | null;
+    /** Whether a todo or in-flight task remains on the newest plan; null with no epic. */
+    remaining: boolean | null;
+  };
+}
+
+/** The newest linked epic of a session, shaped for the Home "Live sessions" card. */
+export interface CliSessionFocus {
+  store: StoreRef;
+  project: string | null;
+  epicId: string;
+  epicTitle: string | null;
+  wave: number | null;
+  /** Raw role keys, newest first; the UI humanizes them. */
+  now: { role: string; taskId: string | null; taskTitle: string | null; since: string }[];
+  /** null = unknown, never to be shown as "none". */
+  next:
+    | { kind: 'task'; taskId: string; taskTitle: string }
+    | { kind: 'waiting_on_you' }
+    | { kind: 'none' }
+    | null;
 }
 
 export interface CliSessionCard {
@@ -129,6 +171,7 @@ export interface CliSessionCard {
     lastTool: string | null;
   } | null;
   next: string | null;
+  focus: CliSessionFocus | null;
   transcript: 'ok' | 'missing' | 'tail-empty' | 'unreadable';
   linked: { epics: LinkedEpic[] } | null;
   parseIssues: string[];
@@ -169,6 +212,7 @@ const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
 const HISTORY_BYTES = 1024 * 1024;
 const TEXT_MAX = 280;
+const FOCUS_TITLE_MAX = 90;
 const VERSION_MAX = 32;
 const WAITING_FOR_MAX = 64;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
@@ -550,8 +594,21 @@ export async function liveSessionCwds(
   return [...cwds];
 }
 
+/** A task's label on a card: its title, else the first line of its objective, never an id. */
+function taskLabel(title: string | null, objective: string | null): string | null {
+  const t = title?.replace(/\s+/g, ' ').trim();
+  if (t) return t;
+  const line = (objective ?? '')
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .find((l) => l !== '');
+  if (line === undefined) return null;
+  return line.length > FOCUS_TITLE_MAX ? `${line.slice(0, FOCUS_TITLE_MAX - 1).trimEnd()}…` : line;
+}
+
 export function createCliSessionsReader(deps: CliSessionsDeps): {
-  read(handle?: DbHandle): Promise<CliSessionsResponse>;
+  /** One store (a bare handle is the served clone's) or every store to link in. */
+  read(source?: DbHandle | readonly CliStore[]): Promise<CliSessionsResponse>;
 } {
   const fs = deps.fs ?? nodeFs;
   const isAlive = deps.isAlive ?? defaultIsAlive;
@@ -569,7 +626,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   /** Session id -> until when a full search for its transcript is not repeated. */
   const missUntil = new Map<string, number>();
   let worktrees: { at: number; dirs: string[] } | null = null;
-  let memo: { at: number; value: Promise<CliSessionsResponse> } | null = null;
+  const memo = new Map<string, { at: number; value: Promise<CliSessionsResponse> }>();
+  const MEMO_MAX = 8;
 
   const foldCase = deps.foldCase ?? FOLD_CASE;
   const norm = (p: string): string => (foldCase ? p.toLowerCase() : p);
@@ -763,10 +821,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   }
 
   function linkEpics(
-    handle: DbHandle,
+    store: CliStore,
     links: readonly CliSessionLink[],
     scopeNow: string,
   ): LinkedEpic[] {
+    const handle = store.handle;
     // Grouped by epic root, and each group read through the ROOT's lineage:
     // a wave's own lineage stops at that wave, so its sibling waves -- and
     // their admissions, merges and agents -- would be missed.
@@ -841,6 +900,12 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       let progress: StatusCounts | null = null;
       let followUps: number | null = null;
       let project: string | null = null;
+      let focusParts: LinkedEpic['focusParts'] = {
+        wave: null,
+        nowTitles: [],
+        nextTask: null,
+        remaining: null,
+      };
       const openWaves: LinkedEpic['openWaves'] = [];
       const workingAgents: LinkedEpic['workingAgents'] = [];
       // The epic's own session: the earliest one in the lineage that belongs
@@ -851,7 +916,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const taskRows = (
           handle.sqlite
             .prepare(
-              'select task_id, task_status, plan_version, origin, project, terminal_at from tasks where epic_id = ?',
+              'select task_id, task_status, plan_version, origin, project, terminal_at, title, objective from tasks where epic_id = ?',
             )
             .all(epicId) as {
             task_id: string;
@@ -860,6 +925,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             origin: string | null;
             project: string | null;
             terminal_at: string | null;
+            title: string | null;
+            objective: string | null;
           }[]
         ).map((r) => ({
           taskId: r.task_id,
@@ -868,6 +935,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           origin: r.origin,
           project: r.project,
           terminalAt: typeof r.terminal_at === 'string' ? r.terminal_at : null,
+          label: taskLabel(r.title, r.objective),
         }));
         const fold = (rows: { taskStatus: string }[]): StatusCounts => {
           const c: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
@@ -1054,9 +1122,63 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         workingAgents.push(
           ...[...newestAgent.values()].sort((a, b) => b.since.localeCompare(a.since)),
         );
+
+        // The wave number. The operator names wave sessions `<epic>-w<N>-<date>`
+        // and a re-run `<epic>-w<N>r-<date>`, so the newest such session that
+        // started with (or after) the newest open wave's admission gives N,
+        // re-runs included. An admission ordinal would drift: every re-run is
+        // another admission. No such session (a wave run inline): 1 when the
+        // epic has a single admission, else unknown (null).
+        const newestOpen = openWaves[0];
+        const namePattern = new RegExp(
+          `^${epicId.replace(/[.*+?^${'$'}{}()|[\]\\]/g, '\\$&')}-w(\\d+)r?-`,
+        );
+        const starts = handle.sqlite
+          .prepare(
+            `select session_id, ts from events_raw where event_type = 'session-start' and session_id in (${marks})`,
+          )
+          .all(...g.lineage) as { session_id: string; ts: string }[];
+        const named = starts
+          .flatMap((r) => {
+            const n = namePattern.exec(r.session_id)?.[1];
+            return n === undefined ? [] : [{ id: r.session_id, ts: r.ts, n: Number(n) }];
+          })
+          .filter(
+            (r) =>
+              newestOpen === undefined ||
+              r.ts >= newestOpen.admittedAt ||
+              r.id === newestOpen.sessionId,
+          )
+          .sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id))[0];
+        // Without a named session the position is a guess, certain only when
+        // the epic has a single admission.
+        const wave = named?.n ?? (epicWaves.length === 1 ? 1 : null);
+
+        const busy = (t: string): boolean =>
+          workingAgents.some((a) => a.taskId !== null && taskIdsMatch(a.taskId, t));
+        let nextTask: { taskId: string; taskTitle: string } | null = null;
+        for (const t of newestOpen?.taskIds ?? []) {
+          if (isClosed(t) || busy(t)) continue;
+          // The first remaining task is next; unnamed means unknown, never a later one.
+          const label = row(t)?.label;
+          if (label) nextTask = { taskId: row(t)?.taskId ?? t, taskTitle: label };
+          break;
+        }
+        focusParts = {
+          wave,
+          nowTitles: workingAgents.map((a) =>
+            a.taskId === null ? null : (row(a.taskId)?.label ?? null),
+          ),
+          nextTask,
+          remaining: planTasks.some((t) => {
+            const b = statusBucketForTaskStatus(t.taskStatus);
+            return b === 'todo' || b === 'inProgress';
+          }),
+        };
       }
 
       out.push({
+        store: { id: store.id, label: store.label },
         rootSessionId: ownerId,
         epicId,
         project,
@@ -1069,6 +1191,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         progress,
         followUps,
         workingAgents,
+        focusParts,
       });
     }
     // Newest first: the epic this CLI session wrote into last leads.
@@ -1079,7 +1202,41 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     );
   }
 
-  async function compute(handle?: DbHandle): Promise<CliSessionsResponse> {
+  function focusOf(
+    epics: readonly LinkedEpic[],
+    status: CliSessionStatus,
+    registryWaiting: boolean,
+  ): CliSessionFocus | null {
+    const epic = epics.find((x) => x.epicId !== null);
+    if (epic === undefined || epic.epicId === null) return null;
+    const { wave, nowTitles, nextTask, remaining } = epic.focusParts;
+    const now = epic.workingAgents.map((a, i) => ({ ...a, taskTitle: nowTitles[i] ?? null }));
+    // Blocked on the operator (a permission/question prompt or a pending ask),
+    // or nothing is working and the turn is over. An idle session whose
+    // transcript ends in text while an agent works is just waiting for it.
+    const waiting =
+      registryWaiting ||
+      status === 'waiting_answer' ||
+      (now.length === 0 && (status === 'idle' || status === 'waiting_operator'));
+    const next: CliSessionFocus['next'] = waiting
+      ? { kind: 'waiting_on_you' }
+      : nextTask
+        ? { kind: 'task', ...nextTask }
+        : remaining === false
+          ? { kind: 'none' }
+          : null;
+    return {
+      store: epic.store,
+      project: epic.project ?? (epic.store.id === HOME_STORE_ID ? null : epic.store.label),
+      epicId: epic.epicId,
+      epicTitle: epic.title,
+      wave,
+      now,
+      next,
+    };
+  }
+
+  async function compute(stores: readonly CliStore[]): Promise<CliSessionsResponse> {
     const readAt = deps.nowIso();
     const hidden = { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 };
     const base = {
@@ -1141,15 +1298,24 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         : `Unrecognised Claude Code version ${(odd.version ?? '').split('.').slice(0, 2).join('.')}; session data may be incomplete.`;
 
     const roots = await scopeRoots();
-    const links = handle
-      ? cliSessionLinks(
-          handle.db,
+    // Per store, so a session driving another project's own Blacksmith home is
+    // linked too. One store that cannot be read leaves the others standing.
+    const factoryBy = new Map<string, { store: CliStore; links: CliSessionLink[] }[]>();
+    for (const store of stores) {
+      let links: CliSessionLink[];
+      try {
+        links = cliSessionLinks(
+          store.handle.db,
           entries.map((e) => e.cliSessionId),
-        )
-      : [];
-    const factoryBy = new Map<string, CliSessionLink[]>();
-    for (const l of links)
-      factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l]);
+        );
+      } catch {
+        continue;
+      }
+      const by = new Map<string, CliSessionLink[]>();
+      for (const l of links) by.set(l.cliSessionId, [...(by.get(l.cliSessionId) ?? []), l]);
+      for (const [id, ls] of by)
+        factoryBy.set(id, [...(factoryBy.get(id) ?? []), { store, links: ls }]);
+    }
 
     const history = await readHistory(deps.configDir);
     const cards: CliSessionCard[] = [];
@@ -1168,7 +1334,21 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       }
       const a = t.state === 'ok' ? t.analysis : null;
       const ids = factoryBy.get(e.cliSessionId);
-      const linked = handle && ids ? { epics: linkEpics(handle, ids, readAt) } : null;
+      const epics = (ids ?? [])
+        .flatMap(({ store, links }) => {
+          try {
+            return linkEpics(store, links, readAt);
+          } catch {
+            return [];
+          }
+        })
+        .sort(
+          (x, y) =>
+            y.lastEventAt.localeCompare(x.lastEventAt) ||
+            x.rootSessionId.localeCompare(y.rootSessionId),
+        );
+      const linked = ids ? { epics } : null;
+      const status = statusOf(e, t);
       const hist = history.get(e.cliSessionId);
       const prompt: Prompt | null = hist
         ? hist
@@ -1185,7 +1365,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         cwdLabel: labelFor(cwd, hit),
         project: linked?.epics[0]?.project ?? null,
         inScopeBy: by,
-        status: statusOf(e, t),
+        status,
         statusSince: e.statusSince,
         waitingFor: e.waitingFor,
         doingNow:
@@ -1198,6 +1378,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               }
             : null,
         next: a?.next ?? null,
+        focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
         linked,
         parseIssues: e.parseIssues,
@@ -1215,14 +1396,23 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   }
 
   return {
-    read(handle) {
+    read(source) {
+      const stores: readonly CliStore[] = Array.isArray(source)
+        ? source
+        : source
+          ? [{ id: HOME_STORE_ID, label: HOME_STORE_ID, handle: source as DbHandle }]
+          : [];
       const now = Date.now();
-      if (memo !== null && now - memo.at < cacheMs) return memo.value;
-      const value = compute(handle);
-      memo = { at: now, value };
+      const key = stores.map((s) => s.id).join(',');
+      for (const [k, m] of memo) if (now - m.at >= cacheMs) memo.delete(k);
+      const hit = memo.get(key);
+      if (hit !== undefined) return hit.value;
+      const value = compute(stores);
+      while (memo.size >= MEMO_MAX) memo.delete(memo.keys().next().value as string);
+      memo.set(key, { at: now, value });
       // A failed read must not be served again for the next second.
       value.catch(() => {
-        if (memo?.value === value) memo = null;
+        if (memo.get(key)?.value === value) memo.delete(key);
       });
       return value;
     },

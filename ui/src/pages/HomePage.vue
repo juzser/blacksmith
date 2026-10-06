@@ -11,9 +11,10 @@ const seenInFlight = new Set<string>();
 // activity" (point 1b, DS6 PR4), what the factory decided recently, Budget.
 // Numbers and sentences come from lib/homeView.ts; this file only lays
 // them out.
-import { Activity } from '@lucide/vue';
+import { Activity, MonitorPlay } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import LiveSessionCard from '../components/LiveSessionCard.vue';
 import NeedsYouInbox from '../components/NeedsYouInbox.vue';
 import Banner from '../components/kit/Banner.vue';
 import Card from '../components/kit/Card.vue';
@@ -29,6 +30,7 @@ import { useSessionContext } from '../composables/useSessionContext.js';
 import {
   type ActivityEntry,
   type ClosedEpic,
+  fetchCliSessions,
   fetchInbox,
   fetchOverview,
   fetchTimelinePage,
@@ -38,6 +40,7 @@ import {
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { toggleExpanded } from '../lib/expandedRows.js';
 import { pluralize } from '../lib/format.js';
+import { hiddenCount, type LiveSessionsResult } from '../lib/liveSessions.js';
 import {
   budgetRingLabel,
   budgetView,
@@ -69,6 +72,9 @@ const justFinished = ref<ClosedEpic[]>([]);
 const recentActivity = ref<ActivityEntry[] | null>(null);
 const recentActivityFailed = ref(false);
 const recentActivityExpanded = ref<Set<string>>(new Set());
+const live = ref<LiveSessionsResult | null>(null);
+const liveFailed = ref(false);
+const liveHidden = computed(() => (live.value ? hiddenCount(live.value.hidden) : 0));
 
 function toggleRecentActivity(eventId: string) {
   recentActivityExpanded.value = toggleExpanded(recentActivityExpanded.value, eventId);
@@ -110,8 +116,17 @@ async function loadRecentActivity() {
   }
 }
 
+async function loadLive() {
+  try {
+    live.value = await fetchCliSessions();
+    liveFailed.value = false;
+  } catch {
+    liveFailed.value = true;
+  }
+}
+
 async function load() {
-  await Promise.all([loadOverview(), loadInbox(), loadRecentActivity()]);
+  await Promise.all([loadOverview(), loadInbox(), loadRecentActivity(), loadLive()]);
 }
 
 onMounted(load);
@@ -181,6 +196,40 @@ function becauseOf(promptId: string) {
     <PageHeader title="Home" description="What needs you, what is running, and what it costs." />
 
     <NeedsYouInbox :rows="inbox" :failed="inboxFailed" :project="project" @retry="loadInbox" />
+
+    <!-- ds-spec.md §4.1 item 1a: directly under the inbox, one card per live,
+         in-scope CLI session (GET /api/cli-sessions). -->
+    <section class="bs-home__section" aria-labelledby="live-sessions-heading">
+      <div class="bs-home__section-head">
+        <h2 id="live-sessions-heading" class="bs-section-title">Live sessions</h2>
+        <RouterLink to="/sessions" class="bs-btn bs-btn--link bs-btn--sm">All sessions</RouterLink>
+      </div>
+      <Banner v-if="liveFailed" show-retry @retry="loadLive">Could not load live sessions</Banner>
+      <template v-else-if="live === null">
+        <Skeleton shape="block" :height="96" />
+        <Skeleton shape="block" :height="96" />
+      </template>
+      <Banner v-else-if="live.state === 'unreadable'" tone="warning">
+        Could not read the live sessions<template v-if="live.formatWarning">: {{ live.formatWarning }}</template>
+      </Banner>
+      <EmptyState
+        v-else-if="live.state === 'absent'"
+        :icon="MonitorPlay"
+        title="No live Blacksmith sessions"
+        body="Session tracking is not set up on this machine."
+      />
+      <EmptyState
+        v-else-if="canClaimEmpty(live !== null, live.sessions.length)"
+        :icon="MonitorPlay"
+        title="No live Blacksmith sessions"
+        :body="liveHidden > 0 ? `${pluralize(liveHidden, 'other session')} hidden` : ''"
+      />
+      <ul v-else class="bs-live-list" aria-labelledby="live-sessions-heading">
+        <li v-for="s in live.sessions" :key="storeKey(s.focus ?? {}, s.cliSessionId)">
+          <LiveSessionCard :card="s" />
+        </li>
+      </ul>
+    </section>
 
     <!-- ds-spec.md §4.1 point 1b: directly under the inbox, 8 newest TimelineRows
          (compact), no Expand-all, no filters, link to Activity. -->

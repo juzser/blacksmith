@@ -59,6 +59,23 @@ From a Claude Code session, `/bs ui` does the same and prints the URL.
 It binds to `127.0.0.1` and ships no auth, because it is a local tool showing
 you your own event log. Do not put it on a public interface.
 
+## Live sessions
+
+Home lists one card per live, in-scope Claude Code CLI session, from
+`GET /api/cli-sessions`. A session that drives a Blacksmith epic reads
+`<project> · <epic> · wave N`, with a status tag, a **Now** line per working agent
+(role and task title) and a **Next** line (the next task's title, or "Waiting on
+you"). The title links to the epic on the Kanban board. A session linked to no epic
+shows its working folder and name only.
+
+The wave number comes from the newest session named `<epic>-w<N>-…` (a re-run,
+`<epic>-w<N>r-…`, is still wave N) that is not older than the newest open wave; when
+the epic has no such session it is 1 when the epic has a single admission, else the
+title omits the wave. **Next** is the first open task of the current wave, in the
+wave's order; a task with no name shows nothing rather than a later task. Each live session is matched against every discovered store, so a session
+driving another project's own Blacksmith home shows its epic too; those homes are
+only read, never written (a `?session` query still reads the served home alone).
+
 ## The pages
 
 <table>

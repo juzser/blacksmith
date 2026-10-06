@@ -1012,7 +1012,7 @@ export function createApp(opts: AppOpts): AppHandle {
     ...(opts.cliIsAlive ? { isAlive: opts.cliIsAlive } : {}),
     ...(opts.cliListWorktrees ? { listWorktrees: opts.cliListWorktrees } : {}),
   });
-  app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(handle)));
+  app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(readable(c))));
 
   app.get('/api/projects', (c) => {
     const scope = sessionScope(c);

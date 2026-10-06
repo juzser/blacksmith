@@ -51,6 +51,11 @@ const toolResult = (id: string) => ({
   type: 'user',
   message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] },
 });
+/** Narrows a value a test needs; fails loudly instead of asserting with `!`. */
+function must<T>(x: T | null | undefined): T {
+  if (x === null || x === undefined) throw new Error('expected a value');
+  return x;
+}
 /** The CLI's name for a cwd's transcript directory. */
 const slug = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '-');
 const jsonl = (entries: unknown[]) => `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`;
@@ -145,7 +150,7 @@ describe('cliSessions reader', () => {
       expect(r.state).toBe('ok');
       expect(r.configSource).toBe('flag');
       expect(r.sessions).toHaveLength(1);
-      const s = r.sessions[0]!;
+      const s = must(r.sessions[0]);
       expect(s).toMatchObject({
         cliSessionId: SID_A,
         pid: 101,
@@ -177,7 +182,7 @@ describe('cliSessions reader', () => {
           asst(text('Done.\n\nShall I open the PR?')),
         ]),
       );
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.status).toBe('waiting_operator');
       expect(s.doingNow).toEqual({
         prompt: 'fix the bug',
@@ -191,19 +196,19 @@ describe('cliSessions reader', () => {
     it('maps idle + pending AskUserQuestion to waiting_answer, answered one to idle', async () => {
       await session(103, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('AskUserQuestion', 'q1'))]));
-      expect((await read()).sessions[0]!.status).toBe('waiting_answer');
+      expect(must((await read()).sessions[0]).status).toBe('waiting_answer');
       await transcript(
         root,
         SID_A,
         jsonl([user('go'), asst(toolUse('AskUserQuestion', 'q1')), toolResult('q1')]),
       );
-      expect((await read()).sessions[0]!.status).toBe('idle');
+      expect(must((await read()).sessions[0]).status).toBe('idle');
     });
 
     it('maps registry waiting + pending AskUserQuestion to waiting_answer with waitingFor', async () => {
       await session(140, { status: 'waiting', waitingFor: 'input needed' });
       await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('AskUserQuestion', 'q1'))]));
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.status).toBe('waiting_answer');
       expect(s.waitingFor).toBe('input needed');
       expect(s.parseIssues).toEqual([]);
@@ -212,7 +217,7 @@ describe('cliSessions reader', () => {
     it('maps registry waiting without a pending ask to waiting_operator', async () => {
       await session(141, { status: 'waiting', waitingFor: 'dialog open' });
       await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('Bash', 't1'))]));
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.status).toBe('waiting_operator');
       expect(s.waitingFor).toBe('dialog open');
       expect(s.parseIssues).toEqual([]);
@@ -220,36 +225,36 @@ describe('cliSessions reader', () => {
 
     it('keeps registry waiting a waiting status when waitingFor is absent or not a string', async () => {
       await session(142, { status: 'waiting' });
-      let s = (await read()).sessions[0]!;
+      let s = must((await read()).sessions[0]);
       expect(s.status).toBe('waiting_operator');
       expect(s.waitingFor).toBeNull();
       expect(s.parseIssues).toEqual([]);
       await session(142, { status: 'waiting', waitingFor: 7 });
-      s = (await read()).sessions[0]!;
+      s = must((await read()).sessions[0]);
       expect(s.status).toBe('waiting_operator');
       expect(s.waitingFor).toBeNull();
       expect(s.parseIssues).toEqual([]);
       await session(142, { status: 'waiting', waitingFor: ' \n ' });
-      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+      expect(must((await read()).sessions[0]).waitingFor).toBeNull();
     });
 
     it('cleans and bounds waitingFor', async () => {
       await session(143, { status: 'waiting', waitingFor: `a\nb${'x'.repeat(500)}` });
-      const w = (await read()).sessions[0]!.waitingFor!;
+      const w = must(must((await read()).sessions[0]).waitingFor);
       expect(w.startsWith('a b')).toBe(true);
       expect(w.length).toBeLessThanOrEqual(64);
     });
 
     it('carries no waitingFor on busy or idle sessions, even with a stray one', async () => {
       await session(144, { status: 'busy', waitingFor: 'input needed' });
-      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+      expect(must((await read()).sessions[0]).waitingFor).toBeNull();
       await session(144, { status: 'idle', waitingFor: 'input needed' });
-      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+      expect(must((await read()).sessions[0]).waitingFor).toBeNull();
     });
 
     it('maps idle with no transcript to idle and transcript missing', async () => {
       await session(104, { status: 'idle' });
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.status).toBe('idle');
       expect(s.transcript).toBe('missing');
       expect(s.doingNow).toBeNull();
@@ -257,9 +262,9 @@ describe('cliSessions reader', () => {
 
     it('treats a missing status as unknown, never coerced', async () => {
       await session(105, { status: undefined });
-      expect((await read()).sessions[0]!.status).toBe('unknown');
+      expect(must((await read()).sessions[0]).status).toBe('unknown');
       await session(105, { status: 'sleeping' });
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.status).toBe('unknown');
       expect(s.statusSince).toBe('2026-10-06T11:30:00.000Z');
     });
@@ -287,7 +292,7 @@ describe('cliSessions reader', () => {
       await session(113, { status: 'idle' });
       const long = `${'x'.repeat(400)}\u0007bell`;
       await transcript(root, SID_A, jsonl([user(long), asst(text(long))]));
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.doingNow?.prompt?.length).toBeLessThanOrEqual(280);
       expect(s.doingNow?.assistant?.length).toBeLessThanOrEqual(280);
       expect(JSON.stringify(s)).not.toContain('\\u0007');
@@ -307,11 +312,26 @@ describe('cliSessions reader', () => {
       await writeFile(decoy, SENTINEL);
       const touched: string[] = [];
       const spy: CliFs = {
-        readdir: async (p) => (touched.push(p), readdir(p)),
-        stat: async (p) => (touched.push(p), stat(p)),
-        lstat: async (p) => (touched.push(p), lstat(p)),
-        open: async (p) => (touched.push(p), open(p, 'r')),
-        realpath: async (p) => (touched.push(p), realpath(p)),
+        readdir: async (p) => {
+          touched.push(p);
+          return readdir(p);
+        },
+        stat: async (p) => {
+          touched.push(p);
+          return stat(p);
+        },
+        lstat: async (p) => {
+          touched.push(p);
+          return lstat(p);
+        },
+        open: async (p) => {
+          touched.push(p);
+          return open(p, 'r');
+        },
+        realpath: async (p) => {
+          touched.push(p);
+          return realpath(p);
+        },
       };
       const r = await read({ fs: spy });
       expect(r.sessions).toHaveLength(1);
@@ -353,7 +373,7 @@ describe('cliSessions reader', () => {
         SID_A,
         `${filler}${jsonl([user('the real ask'), asst(text('the answer'))])}`,
       );
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.transcript).toBe('ok');
       expect(s.doingNow).toMatchObject({ prompt: 'the real ask', assistant: 'the answer' });
     });
@@ -364,12 +384,12 @@ describe('cliSessions reader', () => {
         Array.from({ length: 80 }, () => ({ type: 'system', note: 'n'.repeat(5000) })),
       );
       await transcript(root, SID_A, `${jsonl([user('early ask')])}${meta}`);
-      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('early ask');
+      expect(must((await read()).sessions[0]).doingNow?.prompt).toBe('early ask');
       const big = jsonl(
         Array.from({ length: 300 }, () => ({ type: 'system', note: 'n'.repeat(5000) })),
       );
       await transcript(root, SID_A, `${jsonl([user('lost ask')])}${big}`);
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.transcript).toBe('tail-empty');
       expect(s.doingNow).toBeNull();
     });
@@ -388,7 +408,7 @@ describe('cliSessions reader', () => {
           toolResult('x'),
         ]),
       );
-      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('/bs run');
+      expect(must((await read()).sessions[0]).doingNow?.prompt).toBe('/bs run');
     });
 
     it('treats an interrupt as idle', async () => {
@@ -398,13 +418,13 @@ describe('cliSessions reader', () => {
         SID_A,
         jsonl([asst(text('working')), user('[Request interrupted by user]')]),
       );
-      expect((await read()).sessions[0]!.status).toBe('idle');
+      expect(must((await read()).sessions[0]).status).toBe('idle');
     });
 
     it('finds a transcript under a differently encoded project dir via the sessionId fallback', async () => {
       await session(124, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('hi'), asst(text('hello'))]), false);
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.transcript).toBe('ok');
       expect(s.doingNow?.assistant).toBe('hello');
     });
@@ -417,7 +437,10 @@ describe('cliSessions reader', () => {
         readdir,
         stat,
         lstat,
-        open: async (p) => (opened.push(p), open(p, 'r')),
+        open: async (p) => {
+          opened.push(p);
+          return open(p, 'r');
+        },
         realpath,
       };
       const r = reader({ fs: spy });
@@ -436,7 +459,10 @@ describe('cliSessions reader', () => {
         readdir,
         stat,
         lstat,
-        open: async (p) => (opened.push(p), open(p, 'r')),
+        open: async (p) => {
+          opened.push(p);
+          return open(p, 'r');
+        },
         realpath,
       };
       const r = reader({ fs: spy });
@@ -515,7 +541,7 @@ describe('cliSessions reader', () => {
         SID_A,
         jsonl([user('<command-name>/bs</command-name>'), asst(text('ok'))]),
       );
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s).toMatchObject({ inScopeBy: 'heuristic', linked: null, cwdLabel: 'elsewhere' });
     });
 
@@ -526,7 +552,7 @@ describe('cliSessions reader', () => {
         SID_A,
         jsonl([asst(toolUse('Bash', 'b', { command: 'cd x && bs plan status' }))]),
       );
-      expect((await read()).sessions[0]!.inScopeBy).toBe('heuristic');
+      expect(must((await read()).sessions[0]).inScopeBy).toBe('heuristic');
     });
 
     it('finds the /bs command in the transcript head of a long session', async () => {
@@ -539,7 +565,7 @@ describe('cliSessions reader', () => {
         SID_A,
         `${jsonl([user('<command-name>/bs</command-name>')])}${filler}`,
       );
-      expect((await read()).sessions[0]!.inScopeBy).toBe('heuristic');
+      expect(must((await read()).sessions[0]).inScopeBy).toBe('heuristic');
     });
 
     it('keeps a session in scope once admitted (sticky), even after the evidence scrolls away', async () => {
@@ -550,7 +576,7 @@ describe('cliSessions reader', () => {
       await transcript(outside, SID_A, jsonl([user('just chatting')]));
       const again = await r.read();
       expect(again.sessions).toHaveLength(1);
-      expect(again.sessions[0]!.inScopeBy).toBe('heuristic');
+      expect(must(again.sessions[0]).inScopeBy).toBe('heuristic');
       expect(again.hidden.outOfScope).toBe(0);
       // A fresh reader has no memory of it.
       expect((await reader().read()).sessions).toHaveLength(0);
@@ -591,7 +617,7 @@ describe('cliSessions reader', () => {
       await session(131, { cwd: outside });
       const back = await r.read();
       expect(back.sessions).toHaveLength(1);
-      expect(back.sessions[0]!.inScopeBy).toBe('heuristic');
+      expect(must(back.sessions[0]).inScopeBy).toBe('heuristic');
     });
 
     it('forgets a session whose pid died while its file stays listed', async () => {
@@ -631,7 +657,7 @@ describe('cliSessions reader', () => {
       await session(155, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('the real ask'), asst(text('ok')), record]));
       const r = await read();
-      expect(r.sessions[0]!.doingNow?.prompt).toBe('the real ask');
+      expect(must(r.sessions[0]).doingNow?.prompt).toBe('the real ask');
       expect(JSON.stringify(r)).not.toContain(LEAK);
     });
 
@@ -642,10 +668,10 @@ describe('cliSessions reader', () => {
       const r = await read();
       const by = new Map(r.sessions.map((s) => [s.pid, s]));
       expect([...by.keys()].sort()).toEqual([160, 161, 162]);
-      expect(by.get(160)!.startedAt).toBeNull();
-      expect(by.get(160)!.statusSince).toBe('2026-10-06T11:30:00.000Z');
-      expect(by.get(161)!.statusSince).toBeNull();
-      expect(by.get(161)!.startedAt).toBe('2026-10-06T10:00:00.000Z');
+      expect(must(by.get(160)).startedAt).toBeNull();
+      expect(must(by.get(160)).statusSince).toBe('2026-10-06T11:30:00.000Z');
+      expect(must(by.get(161)).statusSince).toBeNull();
+      expect(must(by.get(161)).startedAt).toBe('2026-10-06T10:00:00.000Z');
     });
 
     it.skipIf(process.platform === 'win32')(
@@ -735,11 +761,11 @@ describe('cliSessions reader', () => {
       await session(174, { status: 'idle' });
       const body = `${'a'.repeat(279)}\u{1F600}${'b'.repeat(10)}`;
       await transcript(root, SID_A, jsonl([user(body), asst(text(body))]));
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       for (const v of [s.doingNow?.prompt, s.doingNow?.assistant, s.next]) {
         expect(typeof v).toBe('string');
-        expect(LONE_SURROGATE.test(v!)).toBe(false);
-        expect(Array.from(v!).length).toBeLessThanOrEqual(280);
+        expect(LONE_SURROGATE.test(must(v))).toBe(false);
+        expect(Array.from(must(v)).length).toBeLessThanOrEqual(280);
       }
     });
 
@@ -749,12 +775,12 @@ describe('cliSessions reader', () => {
       expect(w).toMatch(/3\.0/);
       // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting they are gone
       expect(w).not.toMatch(/[\u0000-\u001f\u007f]/);
-      expect(w!.length).toBeLessThan(200);
+      expect(must(w).length).toBeLessThan(200);
     });
 
     it('labels a cwd that matches its root only by case with a plain name', async () => {
       await session(176, { cwd: path.join(tmp, 'proj', 'REPO', 'gone') });
-      const s = (await read({ foldCase: true })).sessions[0]!;
+      const s = must((await read({ foldCase: true })).sessions[0]);
       expect(s.inScopeBy).toBe('cwd');
       expect(s.cwdLabel.split(/[\\/]/)).not.toContain('..');
       expect(s.cwdLabel.startsWith('/')).toBe(false);
@@ -764,7 +790,7 @@ describe('cliSessions reader', () => {
     it('lists each registry field that failed validation, by name only', async () => {
       await session(177, { startedAt: 'RAWVALUE-ONE', status: 'RAWVALUE-TWO' });
       const r = await read();
-      const s = r.sessions[0]!;
+      const s = must(r.sessions[0]);
       expect(s.parseIssues).toEqual(
         expect.arrayContaining(['startedAt: invalid', 'status: invalid']),
       );
@@ -789,7 +815,7 @@ describe('cliSessions reader', () => {
       const handle = openDb(dbPath, {});
       try {
         const r: CliSessionsResponse = await reader().read(handle);
-        const s = r.sessions[0]!;
+        const s = must(r.sessions[0]);
         expect(s.inScopeBy).toBe('stamped');
         const epic = s.linked?.epics[0];
         expect(epic).toMatchObject({ epicId: EPIC_ID, factorySessionIds: [SESSION_ID] });
@@ -801,7 +827,7 @@ describe('cliSessions reader', () => {
           done: expect.any(Number),
           todo: expect.any(Number),
         });
-        const total = Object.values(epic!.progress!).reduce((a, b) => a + b, 0);
+        const total = Object.values(must(must(epic).progress)).reduce((a, b) => a + b, 0);
         expect(total).toBeGreaterThanOrEqual(4);
         expect(JSON.stringify(r)).not.toContain(tmp);
       } finally {
@@ -813,7 +839,7 @@ describe('cliSessions reader', () => {
       await session(141, { sessionId: SID_B });
       const handle = openDb(dbPath, {});
       try {
-        const s = (await reader().read(handle)).sessions[0]!;
+        const s = must((await reader().read(handle)).sessions[0]);
         expect(s.linked).toBeNull();
       } finally {
         handle.sqlite.close();
@@ -1017,7 +1043,7 @@ describe('cliSessions reader', () => {
         ['epic-4/task-1', 'epic-4/task-2'],
       ]);
       const [newest, older] = epic?.openWaves ?? [];
-      expect(newest!.admittedAt > older!.admittedAt).toBe(true);
+      expect(must(newest).admittedAt > must(older).admittedAt).toBe(true);
       expect(total(older?.counts)).toBe(2);
     });
 
@@ -1376,13 +1402,350 @@ describe('cliSessions reader', () => {
       const current = epics.find((e) => e.epicId === 'epic-new');
       expect(current?.rootSessionId).toBe('sess-second');
     });
+    describe('focus (Now / Next)', () => {
+      const pause = () => new Promise((r) => setTimeout(r, 3));
+      const none = () => path.join(tmp, 'none.md');
+
+      async function cardOf(
+        pid: number,
+        over: Record<string, unknown> = {},
+        transcriptFor = false,
+      ) {
+        await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+        await session(pid, { sessionId: SID_B, cwd: outside, ...over });
+        if (transcriptFor) await transcript(outside, SID_B, jsonl([user('go')]));
+        const handle = openDb(dbPath, {});
+        try {
+          const nowIso = () => new Date().toISOString();
+          return must((await reader({ nowIso }).read(handle)).sessions[0]);
+        } finally {
+          handle.sqlite.close();
+        }
+      }
+
+      /**
+       * One epic whose admissions are made by the root session. After each
+       * admission the next id of `waveSessions` (full factory session ids)
+       * starts, as a wave runner does; the first `merged` waves are merged.
+       */
+      async function epicWithWaves(
+        admissions: number,
+        waveSessions: string[],
+        merged: number,
+        project?: string,
+      ) {
+        const root = await factorySession('sess-root', SID_B);
+        for (let k = 1; k <= admissions; k++)
+          await root.addTask('epic-a', `epic-a/task-${k}`, { title: `Task ${k}` }, project);
+        for (let k = 1; k <= admissions; k++) {
+          await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: [`epic-a/task-${k}`] });
+          const sid = waveSessions[k - 1];
+          if (sid) {
+            await pause();
+            await factorySession(sid, null, root.last());
+            await pause();
+          }
+          if (k <= merged)
+            await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [`epic-a/task-${k}`] });
+        }
+        return root;
+      }
+
+      it('is null for a session that links to no epic', async () => {
+        const card = await cardOf(190, { sessionId: SID_C, cwd: root });
+        expect(card.focus).toBeNull();
+      });
+
+      it('names the epic, its project and the store it came from', async () => {
+        await epicWithWaves(1, [], 0, 'app-a');
+        const card = await cardOf(191);
+        expect(card.focus).toMatchObject({
+          store: { id: 'home', label: 'home' },
+          project: 'app-a',
+          epicId: 'epic-a',
+          wave: 1,
+        });
+      });
+
+      it('reads wave 6 from the newest wave session among w1, w1r and w2..w6 with 7 admissions', async () => {
+        const ids = ['w1', 'w1r', 'w2', 'w3', 'w4', 'w5', 'w6'].map((w) => `epic-a-${w}-d`);
+        await epicWithWaves(7, ids, 6);
+        expect((await cardOf(192)).focus?.wave).toBe(6);
+      });
+
+      it('keeps the wave number of a newest re-run', async () => {
+        const ids = ['w1', 'w2', 'w3', 'w3r'].map((w) => `epic-a-${w}-d`);
+        await epicWithWaves(4, ids, 3);
+        expect((await cardOf(193)).focus?.wave).toBe(3);
+      });
+
+      it('does not read a wave number out of a session that only contains the epic id', async () => {
+        await epicWithWaves(1, ['my-epic-a-w9-d'], 0);
+        expect((await cardOf(194)).focus?.wave).toBe(1);
+      });
+
+      it('has no wave number when no wave session exists and the epic has two admissions', async () => {
+        await epicWithWaves(2, [], 1);
+        expect((await cardOf(195)).focus?.wave).toBeNull();
+      });
+
+      it('is wave 1 when no wave session exists and the epic has a single admission', async () => {
+        await epicWithWaves(1, [], 0);
+        expect((await cardOf(195)).focus?.wave).toBe(1);
+      });
+
+      it('has no wave number without an admission', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1');
+        const card = await cardOf(196);
+        expect(card.focus).toMatchObject({ epicId: 'epic-a', wave: null });
+      });
+
+      it('lists each working agent with its task title, newest first, never a task id', async () => {
+        const root = await epicWithWaves(1, [], 0);
+        await root.addTask('epic-a', 'epic-a/task-x', {
+          title: undefined,
+          objective: `${'Wire the retry button to the queue and '.repeat(5)}\nsecond line`,
+        });
+        await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+        await pause();
+        await root.dispatch('epic-a/task-x', { agent_role: 'tester' });
+        const now = (await cardOf(197)).focus?.now ?? [];
+        expect(now.map((n) => n.role)).toEqual(['tester', 'coder']);
+        expect(now[1]).toMatchObject({ taskId: 'epic-a/task-1', taskTitle: 'Task 1' });
+        const long = now[0]?.taskTitle ?? '';
+        expect(long.startsWith('Wire the retry button')).toBe(true);
+        expect(long.length).toBeLessThanOrEqual(90);
+        expect(long.endsWith('…')).toBe(true);
+        expect(long).not.toContain('second line');
+      });
+
+      it('gives an agent with no task a null title', async () => {
+        const root = await epicWithWaves(1, [], 0);
+        await root.dispatch(null, { agent_role: 'planner', epic_id: 'epic-a' });
+        const now = (await cardOf(198)).focus?.now ?? [];
+        expect(now).toEqual([
+          { role: 'planner', taskId: null, taskTitle: null, since: expect.any(String) },
+        ]);
+      });
+
+      it('says waiting on you while the session waits for the operator', async () => {
+        await epicWithWaves(2, [], 0);
+        const card = await cardOf(199, { status: 'waiting', waitingFor: 'input needed' });
+        expect(card.status).toBe('waiting_operator');
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('says waiting on you for an idle session with nothing working', async () => {
+        await epicWithWaves(2, [], 0);
+        const card = await cardOf(200, { status: 'idle' }, true);
+        expect(card.focus?.now).toEqual([]);
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('picks the first open task of the newest open wave that no agent works on', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        for (const n of [1, 2, 3, 4])
+          await root.addTask('epic-a', `epic-a/task-${n}`, { title: `Task ${n}` });
+        const all = [1, 2, 3, 4].map((n) => `epic-a/task-${n}`);
+        await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: all });
+        await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [all[0]] });
+        await root.dispatch('epic-a/task-2', { agent_role: 'coder' });
+        const card = await cardOf(201);
+        expect(card.focus?.next).toEqual({
+          kind: 'task',
+          taskId: 'epic-a/task-3',
+          taskTitle: 'Task 3',
+        });
+      });
+
+      it('keeps Next on a task while the idle CLI waits for a working agent', async () => {
+        const root = await epicWithWaves(2, [], 0);
+        await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+        await transcript(outside, SID_B, jsonl([user('go'), asst(text('Dispatched the coder.'))]));
+        const card = await cardOf(204, { status: 'idle' });
+        expect(card.status).toBe('waiting_operator');
+        expect(card.focus?.now).toHaveLength(1);
+        expect(card.focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-2' });
+      });
+
+      it('says waiting on you when the registry waits even with an agent working', async () => {
+        const root = await epicWithWaves(2, [], 0);
+        await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+        const card = await cardOf(205, { status: 'waiting', waitingFor: 'permission' });
+        expect(card.focus?.now).toHaveLength(1);
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('says waiting on you for a pending ask even with an agent working', async () => {
+        const root = await epicWithWaves(2, [], 0);
+        await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+        await transcript(
+          outside,
+          SID_B,
+          jsonl([user('go'), asst(toolUse('AskUserQuestion', 'q1'))]),
+        );
+        const card = await cardOf(206, { status: 'idle' });
+        expect(card.status).toBe('waiting_answer');
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('leaves Next unknown when the first open task has no label, never a later one', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1', { title: undefined, objective: undefined });
+        await root.addTask('epic-a', 'epic-a/task-2', { title: 'Task 2' });
+        await root.add('wave-admitted', {
+          epic_id: 'epic-a',
+          task_ids: ['epic-a/task-1', 'epic-a/task-2'],
+        });
+        const card = await cardOf(207);
+        expect(card.focus?.next).toBeNull();
+      });
+
+      it('skips closed and busy tasks to the first labelled open one', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        for (const n of [1, 2, 3])
+          await root.addTask('epic-a', `epic-a/task-${n}`, { title: `Task ${n}` });
+        const all = [1, 2, 3].map((n) => `epic-a/task-${n}`);
+        await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: all });
+        await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [all[0]] });
+        await root.dispatch('epic-a/task-2', { agent_role: 'coder' });
+        const card = await cardOf(208);
+        expect(card.focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-3' });
+      });
+
+      it('says none when no task is left to do or in flight on the newest plan', async () => {
+        await epicWithWaves(2, [], 2);
+        const card = await cardOf(202);
+        expect(card.status).toBe('working');
+        expect(card.focus?.next).toEqual({ kind: 'none' });
+      });
+
+      it('leaves next unknown when tasks remain but no open wave names one', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1');
+        const card = await cardOf(203);
+        expect(card.focus?.next).toBeNull();
+      });
+
+      describe('read cache', () => {
+        it('serves two alternating store sets from the cache inside the TTL', async () => {
+          await session(220, { sessionId: SID_B, cwd: outside });
+          await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(tmp, 'none.md') });
+          const handle = openDb(dbPath, {});
+          try {
+            let computes = 0;
+            const r = reader({
+              cacheMs: 60_000,
+              isAlive: (pid) => {
+                computes++;
+                return alive.has(pid);
+              },
+            });
+            const a = [{ id: 'a', label: 'a', handle }];
+            const b = [{ id: 'b', label: 'b', handle }];
+            await r.read(a);
+            await r.read(b);
+            await r.read(a);
+            await r.read(b);
+            expect(computes).toBe(2);
+          } finally {
+            handle.sqlite.close();
+          }
+        });
+      });
+
+      describe('across stores', () => {
+        let foreignDir: string;
+        let foreignDb: string;
+
+        /** A foreign project's epic, written to its own event dir and projection. */
+        async function foreignEpic(epic: string, project?: string) {
+          const homeDir = stateDir;
+          stateDir = foreignDir;
+          try {
+            const f = await factorySession('sess-foreign', SID_B);
+            await f.addTask(epic, `${epic}/task-1`, { title: 'Foreign task' }, project);
+            await f.add('wave-admitted', { epic_id: epic, task_ids: [`${epic}/task-1`] });
+            await f.dispatch(`${epic}/task-1`, { agent_role: 'coder' });
+          } finally {
+            stateDir = homeDir;
+          }
+          await rebuild(foreignDb, 'all', { stateDir: foreignDir, roadmapPath: none() });
+        }
+        async function homeEpic(epic: string) {
+          const h = await factorySession('sess-home', SID_B);
+          await h.addTask(epic, `${epic}/task-1`, { title: 'Home task' });
+          await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+        }
+        async function readStores(closeForeign = false) {
+          await session(210, { sessionId: SID_B, cwd: outside });
+          const home = openDb(dbPath, {});
+          const foreign = openDb(foreignDb, {});
+          if (closeForeign) foreign.sqlite.close();
+          try {
+            const stores = [
+              { id: 'home', label: 'home', handle: home },
+              { id: 'abcd1234', label: 'project-b', handle: foreign },
+            ];
+            const res = await reader({ nowIso: () => new Date().toISOString() }).read(stores);
+            return must(res.sessions[0]);
+          } finally {
+            home.sqlite.close();
+            if (!closeForeign) foreign.sqlite.close();
+          }
+        }
+
+        beforeEach(async () => {
+          foreignDir = path.join(tmp, 'events-b');
+          foreignDb = path.join(tmp, 'smith-b.db');
+          await mkdir(foreignDir, { recursive: true });
+        });
+
+        it('links a session that only wrote into a foreign store, labelled by that store', async () => {
+          await foreignEpic('epic-f');
+          await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+          const card = await readStores();
+          expect(card.focus).toMatchObject({
+            store: { id: 'abcd1234', label: 'project-b' },
+            project: 'project-b',
+            epicId: 'epic-f',
+          });
+          expect(card.focus?.now[0]).toMatchObject({ role: 'coder', taskTitle: 'Foreign task' });
+        });
+
+        it('takes the newer epic when the session wrote into both stores', async () => {
+          await homeEpic('epic-h');
+          await pause();
+          await foreignEpic('epic-f', 'app-f');
+          const card = await readStores();
+          expect(card.focus).toMatchObject({
+            store: { id: 'abcd1234' },
+            project: 'app-f',
+            epicId: 'epic-f',
+          });
+          expect(card.linked?.epics.map((e) => [e.store.id, e.epicId])).toEqual([
+            ['abcd1234', 'epic-f'],
+            ['home', 'epic-h'],
+          ]);
+          expect(card.project).toBe('app-f');
+        });
+
+        it('keeps the other stores when one store cannot be read', async () => {
+          await homeEpic('epic-h');
+          await foreignEpic('epic-f');
+          const card = await readStores(true);
+          expect(card.focus).toMatchObject({ store: { id: 'home' }, epicId: 'epic-h' });
+        });
+      });
+    });
   });
 
   describe('next', () => {
     const nextOf = async (body: string) => {
       await session(180, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('go'), asst(text(body))]));
-      return (await read()).sessions[0]!.next;
+      return must((await read()).sessions[0]).next;
     };
 
     it('skips a trailing list, heading, table, quote and bold-only label', async () => {
@@ -1493,7 +1856,7 @@ describe('cliSessions reader', () => {
         entry(SID_A, 'latest ask', Date.parse('2026-10-06T09:00:00Z')),
       );
       const r = await read();
-      expect(r.sessions[0]!.doingNow).toMatchObject({
+      expect(must(r.sessions[0]).doingNow).toMatchObject({
         prompt: 'latest ask',
         promptAt: '2026-10-06T09:00:00.000Z',
         assistant: 'ok',
@@ -1506,7 +1869,7 @@ describe('cliSessions reader', () => {
     it('is enough for a non-null doingNow when the transcript is missing', async () => {
       await session(191, { status: 'idle' });
       await history(entry(SID_A, 'only in history', Date.parse('2026-10-06T09:00:00Z')));
-      const s = (await read()).sessions[0]!;
+      const s = must((await read()).sessions[0]);
       expect(s.transcript).toBe('missing');
       expect(s.doingNow).toEqual({
         prompt: 'only in history',
@@ -1526,9 +1889,9 @@ describe('cliSessions reader', () => {
         ...filler,
         entry(SID_A, 'near the end', 2_000_000),
       );
-      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('near the end');
+      expect(must((await read()).sessions[0]).doingNow?.prompt).toBe('near the end');
       await history(entry(SID_A, 'scrolled away', 1_000_000), ...filler);
-      expect((await read()).sessions[0]!.doingNow).toBeNull();
+      expect(must((await read()).sessions[0]).doingNow).toBeNull();
     });
 
     it('reads nothing from a tail read that holds no complete line', async () => {
@@ -1543,35 +1906,35 @@ describe('cliSessions reader', () => {
       });
       expect(Buffer.byteLength(tail)).toBe(1024 * 1024);
       await writeFile(path.join(config, 'history.jsonl'), `{"display":"head ${tail}`);
-      expect((await read()).sessions[0]!.doingNow).toBeNull();
+      expect(must((await read()).sessions[0]).doingNow).toBeNull();
     });
 
     it('falls back to the transcript prompt, then to the last prompt seen, and forgets it with the session', async () => {
       await session(193, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('tail prompt'), asst(text('ok'))]));
       const r = reader();
-      expect((await r.read()).sessions[0]!.doingNow).toMatchObject({
+      expect(must((await r.read()).sessions[0]).doingNow).toMatchObject({
         prompt: 'tail prompt',
         promptAt: null,
       });
       // The prompt scrolls out of the tail: the server still remembers it.
       await transcript(root, SID_A, jsonl([asst(text('still going'))]));
-      expect((await r.read()).sessions[0]!.doingNow).toMatchObject({
+      expect(must((await r.read()).sessions[0]).doingNow).toMatchObject({
         prompt: 'tail prompt',
         assistant: 'still going',
       });
       await rm(path.join(config, 'sessions', '193.json'));
       await r.read();
       await session(193, { status: 'idle' });
-      expect((await r.read()).sessions[0]!.doingNow?.prompt).toBeNull();
+      expect(must((await r.read()).sessions[0]).doingNow?.prompt).toBeNull();
     });
 
     it('treats a missing or unreadable history as no history', async () => {
       await session(194, { status: 'idle' });
       await transcript(root, SID_A, jsonl([user('tail prompt'), asst(text('ok'))]));
-      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('tail prompt');
+      expect(must((await read()).sessions[0]).doingNow?.prompt).toBe('tail prompt');
       await mkdir(path.join(config, 'history.jsonl'));
-      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('tail prompt');
+      expect(must((await read()).sessions[0]).doingNow?.prompt).toBe('tail prompt');
     });
   });
 

@@ -14,6 +14,7 @@ import {
   formatRelativeVerbose,
   formatShortDate,
   formatShortDateTime,
+  formatSinceVerbose,
   parentLabel,
   pluralize,
   shortTaskId,
@@ -424,6 +425,26 @@ describe('lib/format.ts formatRelativeVerbose()', () => {
   it('renders hours and days with a space before the unit', () => {
     expect(formatRelativeVerbose('2026-08-04T10:00:00.000Z', now)).toBe('2 h ago');
     expect(formatRelativeVerbose('2026-08-02T12:00:00.000Z', now)).toBe('2 d ago');
+  });
+});
+
+describe('lib/format.ts formatSinceVerbose()', () => {
+  const now = '2026-08-04T12:00:00.000Z';
+
+  it('reads a duration with the same units as formatRelativeVerbose', () => {
+    expect(formatSinceVerbose('2026-08-04T11:48:00.000Z', now)).toBe('for 12 min');
+    expect(formatSinceVerbose('2026-08-04T10:00:00.000Z', now)).toBe('for 2 h');
+    expect(formatSinceVerbose('2026-08-01T12:00:00.000Z', now)).toBe('for 3 d');
+  });
+
+  it('says "just now" under a minute and for a future time, never "for 0 min"', () => {
+    expect(formatSinceVerbose('2026-08-04T11:59:30.000Z', now)).toBe('just now');
+    expect(formatSinceVerbose('2026-08-04T11:59:59.000Z', now)).toBe('just now');
+    expect(formatSinceVerbose('2026-08-04T12:05:00.000Z', now)).toBe('just now');
+  });
+
+  it('renders no text for an invalid ISO string', () => {
+    expect(formatSinceVerbose('not a date', now)).toBe('');
   });
 });
 
