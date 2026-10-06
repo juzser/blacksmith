@@ -346,6 +346,13 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
   // mean changing the projector's commit path, and over read-time mapping, which
   // would complicate every query and risk double counting.) Only the request
   // middleware calls this; the change stream's ticker scans the home store only.
+  //
+  // Trade-off, kept on purpose: a request that joins a pass already running reads
+  // data up to one pass old, and a hung store (or a hung `liveCwds`) holds every
+  // `/api/*` request with it. There is no per-store timeout: abandoning a scan
+  // leaves it folding in the background, so either the next pass starts a second
+  // scan of the same store or the reader sees a half-folded cache, the very
+  // window this pass closes. A stuck store is a bug to surface, not to mask.
   let pass: Promise<void> | null = null;
   const refresh = (): Promise<void> => {
     pass ??= refreshAll().finally(() => {

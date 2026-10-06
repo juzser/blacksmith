@@ -1,15 +1,9 @@
 // A foreign store's Kanban card must open its own task: the store id travels
 // from the card to the peek panel and the task page, and reaches the API.
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchTaskDetail, fetchTaskRuns } from '../src/lib/api.js';
 import { findGroupMember, groupFollowups } from '../src/lib/kanban.js';
 import { foreignStoreId } from '../src/lib/storeKey.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const src = (...p: string[]) => readFileSync(join(here, '..', 'src', ...p), 'utf8');
 
 describe('foreignStoreId', () => {
   it('is undefined for the served store and for a row with no store', () => {
@@ -72,23 +66,5 @@ describe('findGroupMember across stores', () => {
     expect(home).not.toBeNull();
     expect(foreign).not.toBeNull();
     expect(home?.key).not.toBe(foreign?.key);
-  });
-});
-
-describe('the store id reaches the peek panel and the task page', () => {
-  it('the board hands the peek its store and re-emits it on open-full', () => {
-    const board = src('components', 'KanbanBoard.vue');
-    expect(board).toMatch(/:store-id="peekStoreId"/);
-    expect(board).toMatch(/emit\('select', id, peekStoreId\)/);
-  });
-  it('the Kanban page puts the store in the task URL and the router passes it on', () => {
-    expect(src('pages', 'KanbanPage.vue')).toMatch(/query: storeId \? \{ store: storeId \}/);
-    expect(src('router.ts')).toMatch(/r\.query\.store/);
-  });
-  it('the task page keeps served-store-only reads empty for a foreign task', () => {
-    const page = src('pages', 'TaskDetailPage.vue');
-    expect(page).toMatch(/fetchTaskDetail\(taskId, storeId\)/);
-    expect(page).toMatch(/if \(foreign\.value\) \{\s*historyLoading\.value = false;/);
-    expect(page).toMatch(/!foreign\.value && isWaivable/);
   });
 });

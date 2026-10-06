@@ -144,6 +144,7 @@ describe('store cache lifetime', () => {
     mk('project-a', 'state', 'events');
     const cwds: string[] = [b];
     const made: string[] = [];
+    const scans = { n: 0 };
     const cacheDir = path.join(home, 'state', 'ui-stores');
     const reg = createStoreRegistry({
       home: {
@@ -159,12 +160,17 @@ describe('store cache lifetime', () => {
       liveCwds: async () => cwds,
       makeRefresher: (dbPath) => {
         made.push(dbPath);
-        return fakeRefresher();
+        return {
+          ...fakeRefresher(),
+          refresh: async () => {
+            scans.n++;
+          },
+        };
       },
       refreshMs: 0,
       ...over,
     });
-    return { reg, cwds, made, cacheDir, b };
+    return { reg, cwds, made, cacheDir, b, scans };
   }
 
   it('keeps a dropped store for the grace period, so a restarted session does not re-fold', async () => {
@@ -236,6 +242,15 @@ describe('store cache lifetime', () => {
     reg.close();
   });
 
+  it('lets overlapping callers share one pass, so a store is scanned once per pass', async () => {
+    const { reg, scans } = registry();
+    await Promise.all([reg.refresh(), reg.refresh(), reg.refresh()]);
+    expect(scans.n).toBe(1);
+    await reg.refresh();
+    expect(scans.n).toBe(2);
+    reg.close();
+  });
+
   it('never lets a caller read a foreign cache between a fold commit and its relabel', async () => {
     const home = mk('home-x');
     mk('home-x', 'state', 'events');
@@ -245,6 +260,11 @@ describe('store cache lifetime', () => {
       return path.join(tmp, n);
     });
     let releaseB = () => {};
+    let bIsScanning = () => {};
+    const bScanning = new Promise<void>((r) => {
+      bIsScanning = r;
+    });
+    let secondScanStarted = false;
     const lateScans: Array<() => void> = [];
     const scans: Record<string, number> = {};
     const reg = createStoreRegistry({
@@ -272,22 +292,30 @@ describe('store cache lifetime', () => {
             )
             .run(`t${n}-${path.basename(dbPath)}`);
           db.sqlite.close();
-          if (n > 1) await new Promise<void>((r) => lateScans.push(r));
-          else if (
+          if (n > 1) {
+            secondScanStarted = true;
+            await new Promise<void>((r) => lateScans.push(r));
+          } else if (
             dbPath.endsWith(`${storeIdOf(eventsDirOf(path.join(tops[1] ?? '', '.blacksmith')))}.db`)
-          )
-            await new Promise<void>((r) => {
+          ) {
+            const gate = new Promise<void>((r) => {
               releaseB = r;
             });
+            bIsScanning();
+            await gate;
+          }
         },
       }),
       refreshMs: 0,
     });
     const r1 = reg.refresh();
-    await sleep(30);
+    // R1 is parked inside store B's first scan, and R2 arrives while it is.
+    await bScanning;
     const r2 = reg.refresh();
-    await sleep(30);
-    // R1 still waits on store B's first scan; R2 has arrived since.
+    // Give a pass of R2's own every event-loop turn it needs to reach a second
+    // scan of store A; with a shared pass it never does, so this just runs out.
+    for (let turn = 0; turn < 100 && !secondScanStarted; turn++)
+      await new Promise<void>((r) => setImmediate(r));
     releaseB();
     await r1;
     // R1's handler would run now, while any scan R2 started is still folding.

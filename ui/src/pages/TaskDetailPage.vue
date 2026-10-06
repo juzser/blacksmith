@@ -204,14 +204,15 @@ async function loadHistory() {
   // Same rule as load() above (D-243).
   historyLoading.value = history.value.length === 0;
   historyError.value = null;
+  const { taskId, storeId } = props;
+  const stale = () => taskId !== props.taskId || storeId !== props.storeId;
   try {
-    const taskId = props.taskId;
     const page = await fetchTimelinePage({ task: taskId, limit: 200 });
-    if (taskId === props.taskId) history.value = page.entries;
+    if (!stale()) history.value = page.entries;
   } catch (e) {
-    historyError.value = e instanceof Error ? e.message : String(e);
+    if (!stale()) historyError.value = e instanceof Error ? e.message : String(e);
   } finally {
-    historyLoading.value = false;
+    if (!stale()) historyLoading.value = false;
   }
 }
 /** §8's manual refresh: the task, its runs, and its history all go stale (D-243). */
@@ -232,6 +233,9 @@ watch(
     history.value = [];
     error.value = null;
     historyError.value = null;
+    saving.value = null;
+    openPopover.value = null;
+    lightboxSrc.value = null;
     activeTab.value = 'overview';
     historyExpanded.value = loadExpanded(sessionStorage, historyStorageKey.value);
     setBreadcrumb([{ label: 'Work', to: '/work/kanban' }, { label: props.taskId }]);
@@ -273,6 +277,9 @@ function canWaive(f: TaskDetail['findings'][number]): boolean {
 async function decide(fingerprint: string, decision: 'granted' | 'denied') {
   if (saving.value) return;
   if (!detail.value) return;
+  const { taskId, storeId } = props;
+  // Once the page moves to another task, the old one's answer is not ours to show.
+  const stale = () => taskId !== props.taskId || storeId !== props.storeId;
   saving.value = fingerprint;
   openPopover.value = null;
   try {
@@ -288,11 +295,11 @@ async function decide(fingerprint: string, decision: 'granted' | 'denied') {
         ? 'Waived 1 finding.'
         : `Denied 1 waiver.${waiverDenialNote(result.findingIdsToCarry)}`,
     );
-    await load();
+    if (!stale()) await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (!stale()) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    saving.value = null;
+    if (!stale()) saving.value = null;
   }
 }
 
@@ -462,7 +469,7 @@ const factsRowText = computed(() => {
             </template>
 
             <template #artifacts>
-              <template v-if="detail.artifacts.length > 0">
+              <template v-if="imageArtifacts.length + otherArtifacts.length > 0">
                 <div v-if="imageArtifacts.length > 0" class="bs-task-detail__artifact-grid">
                   <button
                     v-for="a in imageArtifacts"
