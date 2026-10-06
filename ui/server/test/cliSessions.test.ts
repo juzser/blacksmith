@@ -1376,6 +1376,256 @@ describe('cliSessions reader', () => {
       const current = epics.find((e) => e.epicId === 'epic-new');
       expect(current?.rootSessionId).toBe('sess-second');
     });
+    describe('focus (Now / Next)', () => {
+      const pause = () => new Promise((r) => setTimeout(r, 3));
+      const none = () => path.join(tmp, 'none.md');
+
+      async function cardOf(
+        pid: number,
+        over: Record<string, unknown> = {},
+        transcriptFor = false,
+      ) {
+        await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+        await session(pid, { sessionId: SID_B, cwd: outside, ...over });
+        if (transcriptFor) await transcript(outside, SID_B, jsonl([user('go')]));
+        const handle = openDb(dbPath, {});
+        try {
+          const nowIso = () => new Date().toISOString();
+          return (await reader({ nowIso }).read(handle)).sessions[0]!;
+        } finally {
+          handle.sqlite.close();
+        }
+      }
+
+      /**
+       * One epic whose admissions are made by the root session. After each
+       * admission the next id of `waveSessions` (full factory session ids)
+       * starts, as a wave runner does; the first `merged` waves are merged.
+       */
+      async function epicWithWaves(
+        admissions: number,
+        waveSessions: string[],
+        merged: number,
+        project?: string,
+      ) {
+        const root = await factorySession('sess-root', SID_B);
+        for (let k = 1; k <= admissions; k++)
+          await root.addTask('epic-a', `epic-a/task-${k}`, { title: `Task ${k}` }, project);
+        for (let k = 1; k <= admissions; k++) {
+          await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: [`epic-a/task-${k}`] });
+          const sid = waveSessions[k - 1];
+          if (sid) {
+            await pause();
+            await factorySession(sid, null, root.last());
+            await pause();
+          }
+          if (k <= merged)
+            await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [`epic-a/task-${k}`] });
+        }
+        return root;
+      }
+
+      it('is null for a session that links to no epic', async () => {
+        const card = await cardOf(190, { sessionId: SID_C, cwd: root });
+        expect(card.focus).toBeNull();
+      });
+
+      it('names the epic, its project and the store it came from', async () => {
+        await epicWithWaves(1, [], 0, 'app-a');
+        const card = await cardOf(191);
+        expect(card.focus).toMatchObject({
+          store: { id: 'home', label: 'home' },
+          project: 'app-a',
+          epicId: 'epic-a',
+          wave: 1,
+        });
+      });
+
+      it('reads wave 6 from the newest wave session among w1, w1r and w2..w6 with 7 admissions', async () => {
+        const ids = ['w1', 'w1r', 'w2', 'w3', 'w4', 'w5', 'w6'].map((w) => `epic-a-${w}-d`);
+        await epicWithWaves(7, ids, 6);
+        expect((await cardOf(192)).focus?.wave).toBe(6);
+      });
+
+      it('keeps the wave number of a newest re-run', async () => {
+        const ids = ['w1', 'w2', 'w3', 'w3r'].map((w) => `epic-a-${w}-d`);
+        await epicWithWaves(4, ids, 3);
+        expect((await cardOf(193)).focus?.wave).toBe(3);
+      });
+
+      it('does not read a wave number out of a session that only contains the epic id', async () => {
+        await epicWithWaves(2, ['epic-a-w2-d', 'my-epic-a-w9-d'], 1);
+        expect((await cardOf(194)).focus?.wave).toBe(2);
+      });
+
+      it('falls back to the position of the newest open wave when no wave session exists', async () => {
+        await epicWithWaves(2, [], 1);
+        expect((await cardOf(195)).focus?.wave).toBe(2);
+      });
+
+      it('has no wave number without an admission', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1');
+        const card = await cardOf(196);
+        expect(card.focus).toMatchObject({ epicId: 'epic-a', wave: null });
+      });
+
+      it('lists each working agent with its task title, newest first, never a task id', async () => {
+        const root = await epicWithWaves(1, [], 0);
+        await root.addTask('epic-a', 'epic-a/task-x', {
+          title: undefined,
+          objective: `${'Wire the retry button to the queue and '.repeat(5)}\nsecond line`,
+        });
+        await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+        await pause();
+        await root.dispatch('epic-a/task-x', { agent_role: 'tester' });
+        const now = (await cardOf(197)).focus?.now ?? [];
+        expect(now.map((n) => n.role)).toEqual(['tester', 'coder']);
+        expect(now[1]).toMatchObject({ taskId: 'epic-a/task-1', taskTitle: 'Task 1' });
+        const long = now[0]?.taskTitle ?? '';
+        expect(long.startsWith('Wire the retry button')).toBe(true);
+        expect(long.length).toBeLessThanOrEqual(90);
+        expect(long.endsWith('…')).toBe(true);
+        expect(long).not.toContain('second line');
+      });
+
+      it('gives an agent with no task a null title', async () => {
+        const root = await epicWithWaves(1, [], 0);
+        await root.dispatch(null, { agent_role: 'planner', epic_id: 'epic-a' });
+        const now = (await cardOf(198)).focus?.now ?? [];
+        expect(now).toEqual([
+          { role: 'planner', taskId: null, taskTitle: null, since: expect.any(String) },
+        ]);
+      });
+
+      it('says waiting on you while the session waits for the operator', async () => {
+        await epicWithWaves(2, [], 0);
+        const card = await cardOf(199, { status: 'waiting', waitingFor: 'input needed' });
+        expect(card.status).toBe('waiting_operator');
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('says waiting on you for an idle session with nothing working', async () => {
+        await epicWithWaves(2, [], 0);
+        const card = await cardOf(200, { status: 'idle' }, true);
+        expect(card.focus?.now).toEqual([]);
+        expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('picks the first open task of the newest open wave that no agent works on', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        for (const n of [1, 2, 3, 4])
+          await root.addTask('epic-a', `epic-a/task-${n}`, { title: `Task ${n}` });
+        const all = [1, 2, 3, 4].map((n) => `epic-a/task-${n}`);
+        await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: all });
+        await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [all[0]] });
+        await root.dispatch(all[1], { agent_role: 'coder' });
+        const card = await cardOf(201);
+        expect(card.focus?.next).toEqual({
+          kind: 'task',
+          taskId: 'epic-a/task-3',
+          taskTitle: 'Task 3',
+        });
+      });
+
+      it('says none when no task is left to do or in flight on the newest plan', async () => {
+        await epicWithWaves(2, [], 2);
+        const card = await cardOf(202);
+        expect(card.status).toBe('working');
+        expect(card.focus?.next).toEqual({ kind: 'none' });
+      });
+
+      it('leaves next unknown when tasks remain but no open wave names one', async () => {
+        const root = await factorySession('sess-root', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1');
+        const card = await cardOf(203);
+        expect(card.focus?.next).toBeNull();
+      });
+
+      describe('across stores', () => {
+        let foreignDir: string;
+        let foreignDb: string;
+
+        /** A foreign project's epic, written to its own event dir and projection. */
+        async function foreignEpic(epic: string, project?: string) {
+          const homeDir = stateDir;
+          stateDir = foreignDir;
+          try {
+            const f = await factorySession('sess-foreign', SID_B);
+            await f.addTask(epic, `${epic}/task-1`, { title: 'Foreign task' }, project);
+            await f.add('wave-admitted', { epic_id: epic, task_ids: [`${epic}/task-1`] });
+            await f.dispatch(`${epic}/task-1`, { agent_role: 'coder' });
+          } finally {
+            stateDir = homeDir;
+          }
+          await rebuild(foreignDb, 'all', { stateDir: foreignDir, roadmapPath: none() });
+        }
+        async function homeEpic(epic: string) {
+          const h = await factorySession('sess-home', SID_B);
+          await h.addTask(epic, `${epic}/task-1`, { title: 'Home task' });
+          await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+        }
+        async function readStores(closeForeign = false) {
+          await session(210, { sessionId: SID_B, cwd: outside });
+          const home = openDb(dbPath, {});
+          const foreign = openDb(foreignDb, {});
+          if (closeForeign) foreign.sqlite.close();
+          try {
+            const stores = [
+              { id: 'home', label: 'home', handle: home },
+              { id: 'abcd1234', label: 'project-b', handle: foreign },
+            ];
+            return (await reader({ nowIso: () => new Date().toISOString() }).read(stores))
+              .sessions[0]!;
+          } finally {
+            home.sqlite.close();
+            if (!closeForeign) foreign.sqlite.close();
+          }
+        }
+
+        beforeEach(async () => {
+          foreignDir = path.join(tmp, 'events-b');
+          foreignDb = path.join(tmp, 'smith-b.db');
+          await mkdir(foreignDir, { recursive: true });
+        });
+
+        it('links a session that only wrote into a foreign store, labelled by that store', async () => {
+          await foreignEpic('epic-f');
+          await rebuild(dbPath, 'all', { stateDir, roadmapPath: none() });
+          const card = await readStores();
+          expect(card.focus).toMatchObject({
+            store: { id: 'abcd1234', label: 'project-b' },
+            project: 'project-b',
+            epicId: 'epic-f',
+          });
+          expect(card.focus?.now[0]).toMatchObject({ role: 'coder', taskTitle: 'Foreign task' });
+        });
+
+        it('takes the newer epic when the session wrote into both stores', async () => {
+          await homeEpic('epic-h');
+          await pause();
+          await foreignEpic('epic-f', 'app-f');
+          const card = await readStores();
+          expect(card.focus).toMatchObject({
+            store: { id: 'abcd1234' },
+            project: 'app-f',
+            epicId: 'epic-f',
+          });
+          expect(card.linked?.epics.map((e) => [e.store.id, e.epicId])).toEqual([
+            ['abcd1234', 'epic-f'],
+            ['home', 'epic-h'],
+          ]);
+          expect(card.project).toBe('app-f');
+        });
+
+        it('keeps the other stores when one store cannot be read', async () => {
+          await homeEpic('epic-h');
+          await foreignEpic('epic-f');
+          const card = await readStores(true);
+          expect(card.focus).toMatchObject({ store: { id: 'home' }, epicId: 'epic-h' });
+        });
+      });
+    });
   });
 
   describe('next', () => {
