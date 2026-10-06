@@ -332,6 +332,89 @@ describe('what an export diff proves', () => {
     expect(diff.signatureChanged).toEqual(['f']);
   });
 
+  it('does not call a body edit inside memo(function ...) a changed signature', () => {
+    const diff = diffExports(
+      'export const Foo = memo(function Foo(props: FooProps) {\n  return one();\n});',
+      'export const Foo = memo(function Foo(props: FooProps) {\n  return two();\n});',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('does not call a body edit inside forwardRef((props, ref) => ...) a changed signature', () => {
+    const diff = diffExports(
+      'export const Bar = forwardRef<HTMLDivElement, BarProps>((props, ref) => {\n  return one();\n});',
+      'export const Bar = forwardRef<HTMLDivElement, BarProps>((props, ref) => {\n  return two();\n});',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('names a changed parameter type inside memo(function ...) as a changed signature', () => {
+    const diff = diffExports(
+      'export const Foo = memo(function Foo(props: FooProps) {\n  return x;\n});',
+      'export const Foo = memo(function Foo(props: BarProps) {\n  return x;\n});',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual(['Foo']);
+  });
+
+  it('does not end a signature at an inline type literal in a parameter', () => {
+    const diff = diffExports(
+      'export const Foo = memo(function Foo(props: { a: string }) {\n  return x;\n});',
+      'export const Foo = memo(function Foo(props: { a: number }) {\n  return x;\n});',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual(['Foo']);
+  });
+
+  it('does not end a signature at an object-type return annotation', () => {
+    const arrow = diffExports(
+      'export const f = (): { a: string } => { return one(); };',
+      'export const f = (): { a: number } => { return one(); };',
+      'src/a.ts',
+    );
+    expect(arrow.signatureChanged).toEqual(['f']);
+    const decl = diffExports(
+      'export function f(): { a: string } { return one(); }',
+      'export function f(): { a: number } { return one(); }',
+      'src/a.ts',
+    );
+    expect(decl.signatureChanged).toEqual(['f']);
+    const body = diffExports(
+      'export function f(): { a: string } { return one(); }',
+      'export function f(): { a: string } { return two(); }',
+      'src/a.ts',
+    );
+    expect(body.signatureChanged).toEqual([]);
+  });
+
+  it('keeps arrow-function and plain-function signatures as they were', () => {
+    expect(
+      diffExports(
+        'export const f = (a: A) => { one(); };',
+        'export const f = (a: A) => { two(); };',
+        'src/a.ts',
+      ).signatureChanged,
+    ).toEqual([]);
+    expect(
+      diffExports(
+        'export const f = (a: A) => { one(); };',
+        'export const f = (a: B) => { one(); };',
+        'src/a.ts',
+      ).signatureChanged,
+    ).toEqual(['f']);
+  });
+
+  it('keeps a non-function initialiser whole: an object argument change is a signature change', () => {
+    const diff = diffExports(
+      'export const cfg = make({ a: 1 });',
+      'export const cfg = make({ a: 2 });',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual(['cfg']);
+  });
+
   it('refuses to answer when either side is unreadable', () => {
     const diff = diffExports("export const a = 'unterminated;", 'export const a = 1;', 'src/a.ts');
     expect(diff.unverifiable).toBe(true);

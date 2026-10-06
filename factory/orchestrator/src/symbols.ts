@@ -647,6 +647,124 @@ function normalizeSignature(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
+/** Index of the bracket closing the one opened at `open`, or -1 when unclosed. */
+function matchClose(masked: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < masked.length; i += 1) {
+    const ch = masked.charAt(i);
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Walk a return-type annotation (`from` is just past its `:`) and answer where
+ * it stops: the index of the function body's `{`, the index of the `=>`, or -1
+ * when what follows the `:` is not a return type at all (a ternary branch, say).
+ * A `{` directly after `:`, `|`, `&`, `<`, `,` or `?` is an object type.
+ */
+function skipReturnType(masked: string, from: number): number {
+  let prev = ':';
+  let angle = 0;
+  let i = from;
+  while (i < masked.length) {
+    const ch = masked.charAt(i);
+    if (/\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    if (ch === '=' && masked.charAt(i + 1) === '>') return i;
+    if (ch === '{') {
+      if (!':|&<,?'.includes(prev)) return i;
+      const close = matchClose(masked, i);
+      if (close === -1) return -1;
+      i = close + 1;
+      prev = '}';
+      continue;
+    }
+    if (ch === '(' || ch === '[') {
+      const close = matchClose(masked, i);
+      if (close === -1) return -1;
+      i = close + 1;
+      prev = ')';
+      continue;
+    }
+    if (ch === '<') angle += 1;
+    else if (ch === '>') angle -= 1;
+    else if (ch === ')' || ch === ']' || ch === '}' || ch === ';') return -1;
+    else if (ch === ',' && angle <= 0) return -1;
+    prev = ch;
+    i += 1;
+  }
+  return -1;
+}
+
+/**
+ * The index of the first function body's `{` in `masked[from, limit)`: the brace
+ * after a parameter list (and optional return type), or after `=>`. Braces that
+ * are not a body — an object literal argument, a type literal in a parameter or
+ * return type — are skipped whole. -1 when the span holds no function body.
+ */
+function findFunctionBody(masked: string, from: number, limit: number): number {
+  let i = from;
+  while (i < limit) {
+    const ch = masked.charAt(i);
+    if (ch === ';') return -1;
+    if (ch === '=' && masked.charAt(i + 1) === '>') {
+      const next = skipSpace(masked, i + 2);
+      if (masked.charAt(next) === '{') return next;
+      i = next;
+      continue;
+    }
+    if (ch === '{') {
+      const close = matchClose(masked, i);
+      if (close === -1) return -1;
+      i = close + 1;
+      continue;
+    }
+    if (ch === '(') {
+      const close = matchClose(masked, i);
+      if (close === -1) return -1;
+      const after = skipSpace(masked, close + 1);
+      const next = masked.charAt(after);
+      if (next === '{') return after;
+      if (next === '=' && masked.charAt(after + 1) === '>') {
+        i = after;
+        continue;
+      }
+      if (next === ':') {
+        const stop = skipReturnType(masked, after + 1);
+        if (stop !== -1) {
+          if (masked.charAt(stop) === '{') return stop;
+          i = stop;
+          continue;
+        }
+      }
+      // A call or a group, not a parameter list: look inside it.
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+/**
+ * Where a declaration's signature ends: at its function body, so an edit inside
+ * the body is not an edit to what importers can see. Without a function body the
+ * whole clause is the signature. A clause that stopped at a depth-0 `{` right
+ * after `:`, `|`, `&`, `<` or `,` stopped at an object type, so its body, if any,
+ * lies further on.
+ */
+function signatureEnd(masked: string, start: number, clause: Clause): number {
+  const head = masked.slice(start, clause.textEnd).trimEnd();
+  const openType = clause.stop === '{' && ':|&<,'.includes(head.charAt(head.length - 1));
+  const body = findFunctionBody(masked, start, openType ? masked.length : clause.textEnd);
+  return body === -1 ? clause.textEnd : body;
+}
+
 /**
  * Record the declaration text against every export the clause introduced.
  * Wrapping is what keeps this honest: the clause parsers below push export
@@ -663,7 +781,7 @@ function readClauseFacts(
 ): void {
   const before = facts.exports.length;
   readClauseExports(source, masked, start, clause, keyword, facts);
-  const signature = normalizeSignature(source.slice(start, clause.textEnd));
+  const signature = normalizeSignature(source.slice(start, signatureEnd(masked, start, clause)));
   for (let i = before; i < facts.exports.length; i += 1) {
     const name = facts.exports[i];
     if (name !== undefined) facts.exportSignatures.set(name, signature);
