@@ -678,13 +678,15 @@ export function titleFor(entry: TimelineEntry): string {
       return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))}${via.length ? ` (${via.join('/')})` : ''}${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
-      return gateStatusTag(entry) ? 'Schema check' : 'Schema check: no verdict recorded';
+      return gateVerdict(entry) !== 'unrecorded'
+        ? 'Schema check'
+        : 'Schema check: no verdict recorded';
     case 'deps-check-result':
       // The detail is the whole point of this row: "passed" alone cannot
       // distinguish an installed worktree from one with nothing to install.
-      // A status tag now says passed/failed, so only an untagged row spells
-      // out the missing verdict.
-      return gateStatusTag(entry) && p.detail
+      // A recorded verdict is said by the status tag (or by the meta, for an
+      // empty check), so only a row with no verdict field spells that out.
+      return gateVerdict(entry) !== 'unrecorded' && p.detail
         ? `Dependency check: ${String(p.detail)}`
         : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
     case 'budget-check-result': {
@@ -697,7 +699,7 @@ export function titleFor(entry: TimelineEntry): string {
       return 'Budget check result';
     }
     case 'testgate-result':
-      return gateStatusTag(entry) ? 'Test gate' : 'Test gate: no verdict recorded';
+      return gateVerdict(entry) !== 'unrecorded' ? 'Test gate' : 'Test gate: no verdict recorded';
     case 'gate-outcome': {
       // The outcome value itself when there is one — `blocked`,
       // `pass-with-waivers-pending` and the rest each mean something the word

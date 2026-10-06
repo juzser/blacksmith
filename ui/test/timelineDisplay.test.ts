@@ -1807,3 +1807,29 @@ describe('lib/timelineDisplay.ts budget-check-result title and meta', () => {
     expect(metaFor(budget({ status: 'checked', overruns: [] }))).toBe('');
   });
 });
+
+describe('lib/timelineDisplay.ts empty gate checks still recorded a verdict', () => {
+  const title = (eventType: string, payload: Record<string, unknown>) => {
+    const e = entry({ eventType, payload });
+    (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 0, failed: 0 };
+    return titleFor(e);
+  };
+  it('a test gate with pass:true and nothing to run is not "no verdict recorded"', () => {
+    expect(title('testgate-result', { pass: true })).toBe('Test gate');
+  });
+  it('a schema check with valid:true and nothing to run keeps its plain title', () => {
+    expect(title('schema-check-result', { valid: true })).toBe('Schema check');
+  });
+  it('a deps check with a verdict keeps its detail', () => {
+    expect(title('deps-check-result', { ok: true, detail: 'no .bin' })).toBe(
+      'Dependency check: no .bin',
+    );
+  });
+  it('still says "no verdict recorded" when the verdict field is absent', () => {
+    expect(title('testgate-result', {})).toBe('Test gate: no verdict recorded');
+    expect(title('schema-check-result', {})).toBe('Schema check: no verdict recorded');
+    expect(title('deps-check-result', { detail: 'no .bin' })).toBe(
+      'Dependency check (no verdict recorded): no .bin',
+    );
+  });
+});
