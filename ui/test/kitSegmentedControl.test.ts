@@ -28,8 +28,19 @@ describe('SegmentedControl.vue', () => {
   it('renders plain RouterLinks and relies on vue-router for aria-current', () => {
     const template = SRC.slice(SRC.indexOf('<template>'));
     expect(template).toMatch(/<RouterLink[\s\S]*class="bs-segctl__item"[\s\S]*:to="item\.to"/);
-    expect(template).not.toMatch(/aria-current=/);
+    // Without `current`, the router alone marks the item; aria-current is
+    // only ever written by the opt-in `current` branch (query-only links).
+    const routerBranch = template.slice(0, template.indexOf('<RouterLink v-else'));
+    expect(routerBranch).not.toMatch(/aria-current/);
     expect(template).not.toMatch(/tabindex/);
+  });
+});
+
+describe('SegmentedControl.vue current/touch opt-ins', () => {
+  it('marks the current item itself and offers a phone-visible touch variant', () => {
+    expect(SRC).toMatch(/current\?: string/);
+    expect(SRC).toMatch(/:aria-current="current === item\.label \? 'page' : undefined"/);
+    expect(CSS).toMatch(/\.bs-segctl\.bs-segctl--touch \{\s*display: flex;/);
   });
 });
 
@@ -74,10 +85,13 @@ describe('.bs-segctl CSS (uiux spec §1)', () => {
     expect(selected?.[0]).toMatch(/font-weight: var\(--bs-font-weight-medium\)/);
   });
 
-  it('uses the kit default focus-visible ring, not a component-scoped override', () => {
+  it('draws an inset solid focus ring, since .bs-segctl clips overflow', () => {
     const match = CSS.match(/\.bs-segctl__item:focus-visible \{[\s\S]*?\}/);
-    expect(match?.[0]).toMatch(
-      /box-shadow: 0 0 0 2px color-mix\(in srgb, var\(--bs-focus-ring\) 50%, transparent\);/,
-    );
+    expect(match?.[0]).toMatch(/box-shadow: inset 0 0 0 2px var\(--bs-focus-ring\);/);
+  });
+
+  it('keeps the hover label un-underlined against the global a:hover', () => {
+    const match = CSS.match(/\.bs-segctl__item:hover \{[\s\S]*?\}/);
+    expect(match?.[0]).toMatch(/text-decoration: none;/);
   });
 });

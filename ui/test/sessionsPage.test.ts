@@ -26,11 +26,12 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value\)/);
   });
 
-  it('separates running and finished runs behind a toggle, on workingAgentCount not liveAgentCount', () => {
-    expect(PAGE).toMatch(/showFinished/);
-    expect(PAGE).toMatch(/filter\(isSessionActive\)/);
-    expect(PAGE).toMatch(/filter\(\(s\) => !isSessionActive\(s\)\)/);
+  // The Active/All scope itself is tested as behaviour: sessionsInScope and
+  // activeFirst in sessionsSelection.test.ts, the page flows in e2e/sessions.spec.ts.
+  it('decides active on workingAgentCount, never liveAgentCount, with no finished-runs toggle left', () => {
+    expect(PAGE).toMatch(/sessionsInScope\(/);
     expect(PAGE).not.toMatch(/liveAgentCount/);
+    expect(PAGE).not.toMatch(/showFinished/);
   });
 
   it('groups the unscoped running list by project through the pure fold', () => {
@@ -59,9 +60,9 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
   });
 
-  it('marks the open run selected in the grouped, scoped and finished lists', () => {
+  it('marks the open run selected in the grouped and scoped lists', () => {
     const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
-    expect(matches?.length).toBe(3);
+    expect(matches?.length).toBe(2);
   });
 
   it('moves focus to the deep-linked row after scrolling it into view', () => {
