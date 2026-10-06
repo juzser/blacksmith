@@ -421,6 +421,7 @@ stacked `ProgressBar` + the % number).
 | `LiveIndicator` | Single instance in the topbar: one dot + "Live — last activity 5 min ago" text, replacing the two clocks / two Refresh audit finding (top 14). Owns the one Refresh action too (rendered as an icon button beside it, disabled while `live` is on). The "5 min ago" part is a `RelativeTime` with the absolute time in its tooltip. Beside it, `IconButton`s: `Pause` "Pause live updates", `RefreshCw` "Refresh" (`aria-disabled` while live, tooltip still shows), `Moon`/`Sun` "Switch to dark theme"/"Switch to light theme", `Settings` "Settings". |
 | `ProjectSwitcher` | Topbar project select; unchanged contract, restyled |
 | `SidebarNav` | 6 items: Home (`House`), Work (`Kanban`), Activity (`Activity`), Sessions (`History`), Cost & quality (`Coins`), Lessons (`Lightbulb`), each a 16px icon + label; `aria-current="page"` on the active one. A sm `IconButton` `PanelLeftClose` "Collapse sidebar" in the header. Collapsed rail: icon only, each link keeps its name as `aria-label` and shows it in a label-mode `Tooltip` placed right. Ported contract (collapsed rail + Sheet off-canvas below 768px), content changed per §3. |
+| `LiveSessionCard` | Home "Live sessions" card (§4.1 item 1a), composed of `Card` + `Tag` + `RelativeTime` with no new tokens: title line (weight 500, `<project> · <epic id> · wave N`, opens the epic on Kanban) with a status `Tag` and "for N min"; a muted "Now" label per working agent (humanized role + task title link, 2 lines then "+ N more"); a "Next" line. Deviation: no kit component covers a live-CLI card, so the pattern table gains this row; the pre-code spec linked the title to Roadmap, shipped as Kanban because Roadmap does not read other projects' stores yet. Own idea; no old-kit equivalent. |
 | `NeedsYouInbox` | One filterable list on Home combining pending waivers (only findings on completed tasks or closed epics, the ones the factory will no longer act on), escalations, stop points and lesson candidates into a single row shape (`kind`, `title`, `description`, `project`, `RelativeTime`, action). Row anatomy: unread dot, then a two-line text column (short `title` naming the decision; below it one `description` line in `--bs-text-subtle` 12px saying why the factory stopped and what happens when you act, ellipsis-truncated, full text in a describe-mode `Tooltip`), then the meta column (project/task, time; hidden below 480px), then the action. Filter chips: All / Waivers / Escalations / Stop points / Lesson candidates. **Grouped by project**: one group header per project, name + count ("shop-api · 2", 12px/500 `--bs-text-subtle`); the group holding the most urgent item comes first (escalation > waiver > stop point > lesson candidate, then oldest); projects with nothing pending are not shown; items with no project (lesson candidates that apply to all projects) go in a last group "All projects". When the topbar `ProjectSwitcher` has a project selected, only that project's group is shown, header kept; "All projects" is hidden then. Title weight: 600 unread, 500 read (§1.4). Own idea, grounded in the same "what needs a person" job the old "Needs you" rail already did — widened from a rail to the page-first list per pattern 1 below (deviation flagged in §4.1). |
 | `AgentChip` | Small chip showing a task's current role + activity state (working / reviewing / **waiting** / idle), reusing `--bs-tone-*` for the state dot. Used on `TaskCard` and the task-detail header (pattern 3 below). Not a port — no old-kit equivalent (deviation flagged in §2.4). |
 | `RunHistoryTimeline` | Small vertical timeline on the task-detail page: one entry per dispatch attempt, judge round, or result, each a `TimelineRow` (`rail` variant) with a humanized label, `RelativeTime`, outcome `Tag`, meta line and chevron. Rail dot + tag only, no leading icon; geometry in §1.5. Own idea (pattern 2 below); no old-kit equivalent. |
@@ -866,6 +867,14 @@ Sections, in order:
    escalations can take it from the task's project key; lesson candidates have no project
    column today, so they return `project: null` and land in "All projects"), plus the
    sort key (`kind` + `createdAt`) so the server returns groups in urgency order.
+1a. **"Live sessions"** - directly under the inbox, above "Recent activity". One card
+   per live, in-scope CLI session from `GET /api/cli-sessions`, titled
+   `<project> · <epic id> · wave N` (the title opens the epic's Kanban board), with a status
+   tag, a Now line per working agent (role + task title, max 2 then "+ N more"), and a Next
+   line (next task title, "Waiting on you", or omitted when unknown). Unlinked sessions fall
+   back to the working-folder label and session name. Empty state: "No live Blacksmith
+   sessions" with "N other sessions hidden" when sessions were filtered out. Needs new data:
+   a `focus` object on each card (`project`, `epicId`, `wave`, `now`, `next`).
 1b. **"Recent activity"** — directly under the inbox: the 8 newest `TimelineRow`s in
    the `compact` variant — the **same component as Activity**, so the same `EventKindTag`,
    colour, meta line, per-row chevron and per-kind expanded body (§4.3 "Meta line and
@@ -1204,6 +1213,8 @@ new lessons after it reviews its recent mistakes (runs automatically). Last chec
 yet" replacing the raw `rule`/`principle`/`provenanceEventIds` JSON dump.
 
 ### 4.6 Sessions (history list, reachable from Home/Activity, not in the nav)
+
+Live CLI sessions are shown on Home (§4.1 item 1a), not on this page.
 
 `SessionRow` list scoped by the shared Active/All toggle (`?scope=`, Active by default and
 never written to the URL) beside Refresh. Active lists sessions with an agent working in
