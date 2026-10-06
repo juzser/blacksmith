@@ -34,7 +34,9 @@ describe('kit/TimelineRow.vue rail variant', () => {
   it('binds the rail class only when variant is rail, same EventKindTag/meta/chevron markup', () => {
     expect(TIMELINE_ROW).toMatch(/'bs-timeline-row--rail': variant === 'rail'/);
     expect(TIMELINE_ROW).toMatch(/<EventKindTag :kind="kind" \/>/);
-    expect(TIMELINE_ROW).toMatch(/<Tag v-if="statusTag" :tone="statusTag\.tone" variant="subtle" size="sm"/);
+    expect(TIMELINE_ROW).toMatch(
+      /<Tag v-if="statusTag" :tone="statusTag\.tone" variant="subtle" size="sm"/,
+    );
   });
 
   it('renders the time column with RelativeTime on every variant (DS6 PR4b round 2 item 4)', () => {

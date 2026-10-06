@@ -271,8 +271,8 @@ test.describe('Unknown URL', () => {
       await expect(page.locator('#main').getByText('Nothing at this address')).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Page not found' })).toHaveCount(1);
       await expect(
-        page.getByRole('navigation', { name: 'Breadcrumb' }).getByText('Page not found'),
-      ).toBeVisible();
+        page.getByRole('banner').getByText('Page not found', { exact: true }),
+      ).toHaveCount(1);
       await page.getByRole('link', { name: 'Go to Home' }).click();
       await expect(page).toHaveURL(/\/overview/);
     });
