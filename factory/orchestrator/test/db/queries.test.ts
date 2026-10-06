@@ -1043,7 +1043,10 @@ describe('db/queries.ts', () => {
             added(`${epicId}/followup-1b2c3d4e`, 'Fix: orphan parent') +
             reattributed(`${epicId}/task-gone`, `${epicId}/followup-1b2c3d4e`) +
             auditorClose('20291231-0a1b2c3d.security') +
-            auditorClose('20291231-0a1b2c3d.performance'),
+            auditorClose('20291231-0a1b2c3d.performance') +
+            auditorClose('20291231-0a1b2c3d.performance-2') +
+            auditorClose('20291231-0a1b2c3d.security-codex') +
+            auditorClose(`${epicId}/20291231-0a1b2c3d.performance-2`),
           'utf8',
         );
         const dbPath = path.join(dbDir, 'followups.db');
@@ -1105,6 +1108,13 @@ describe('db/queries.ts', () => {
         expect(ids).not.toContain('20291231-0a1b2c3d.security');
         expect(ids).not.toContain('20291231-0a1b2c3d.performance');
         expect(ids).toContain(`${epicId}/task-1-settings`);
+      });
+
+      it('keeps suffixed audit-axis rows off the board, but not an id with a slash', async () => {
+        const ids = [...(await board()).keys()];
+        expect(ids).not.toContain('20291231-0a1b2c3d.performance-2');
+        expect(ids).not.toContain('20291231-0a1b2c3d.security-codex');
+        expect(ids).toContain(`${epicId}/20291231-0a1b2c3d.performance-2`);
       });
     });
 
