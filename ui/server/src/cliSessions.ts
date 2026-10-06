@@ -46,7 +46,6 @@ import {
   type CliSessionLink,
   cliSessionLinks,
   projectedLineage,
-  runningSessions,
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.js';
@@ -98,7 +97,6 @@ export interface LinkedEpic {
   rootSessionId: string;
   epicId: string | null;
   project: string | null;
-  title: string | null;
   factorySessionIds: string[];
   /** The newest event this CLI session wrote into any of `factorySessionIds`. */
   lastEventAt: string;
@@ -137,6 +135,7 @@ export interface CliSessionFocus {
   store: StoreRef;
   project: string | null;
   epicId: string;
+  /** Always null: the store has no epic name, and a session prompt is never one. */
   epicTitle: string | null;
   wave: number | null;
   /** Raw role keys, newest first; the UI humanizes them. */
@@ -1182,9 +1181,6 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         rootSessionId: ownerId,
         epicId,
         project,
-        title:
-          runningSessions(handle.db, { sessionId: ownerId }, { nowIso: scopeNow })[0]?.title ??
-          null,
         factorySessionIds: [...new Set(g.ids)].sort(),
         lastEventAt: g.lastEventAt,
         openWaves,
@@ -1229,7 +1225,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       store: epic.store,
       project: epic.project ?? (epic.store.id === HOME_STORE_ID ? null : epic.store.label),
       epicId: epic.epicId,
-      epicTitle: epic.title,
+      epicTitle: null,
       wave,
       now,
       next,
