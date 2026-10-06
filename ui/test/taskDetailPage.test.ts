@@ -39,10 +39,10 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
   // whatever order `detail.artifacts` already carries, never re-sort it.
   it('derives imageArtifacts/otherArtifacts with a filter only, preserving the server order', () => {
     expect(SFC).toMatch(
-      /const imageArtifacts = computed\(\(\) => detail\.value\?\.artifacts\.filter\(isImageArtifact\) \?\? \[\]\);/,
+      /const imageArtifacts = computed\(\(\) =>\s*foreign\.value \? \[\] : \(detail\.value\?\.artifacts\.filter\(isImageArtifact\) \?\? \[\]\),\s*\);/,
     );
     expect(SFC).toMatch(
-      /const otherArtifacts = computed\(\s*\(\) => detail\.value\?\.artifacts\.filter\(\(a\) => !isImageArtifact\(a\)\) \?\? \[\],?\s*\);/,
+      /const otherArtifacts = computed\(\(\) =>\s*foreign\.value \? \[\] : \(detail\.value\?\.artifacts\.filter\(\(a\) => !isImageArtifact\(a\)\) \?\? \[\]\),\s*\);/,
     );
   });
 

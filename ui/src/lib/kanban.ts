@@ -4,7 +4,7 @@
 import { agentWaitingThresholdMs } from './constants.js';
 import { taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
-import { type StoreRef, storeKey } from './storeKey.js';
+import { foreignStoreId, type StoreRef, storeKey } from './storeKey.js';
 import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
 
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
@@ -427,11 +427,14 @@ export function groupFollowups<T extends FollowupTaskLike>(
 export function findGroupMember<T extends FollowupTaskLike>(
   items: ReadonlyArray<ColumnItem<T>>,
   taskId: string | null,
+  storeId?: string,
 ): { key: string; index: number } | null {
   if (taskId === null) return null;
   for (const item of items) {
     if (item.kind !== 'group') continue;
-    const index = item.members.findIndex((m) => m.taskId === taskId);
+    const index = item.members.findIndex(
+      (m) => m.taskId === taskId && foreignStoreId(m) === storeId,
+    );
     if (index !== -1) return { key: item.key, index };
   }
   return null;

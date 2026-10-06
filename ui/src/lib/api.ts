@@ -822,15 +822,21 @@ export function fetchKanban(
   return getJson(`/api/kanban${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
-  return getJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+/** `?store=` names a foreign store; absent reads the served store. */
+function storeQuery(store?: string): string {
+  return store ? `?store=${encodeURIComponent(store)}` : '';
+}
+
+export function fetchTaskDetail(taskId: string, store?: string): Promise<TaskDetail> {
+  return getJson(`/api/tasks/${encodeURIComponent(taskId)}${storeQuery(store)}`);
 }
 
 export async function fetchTaskRuns(
   taskId: string,
+  store?: string,
 ): Promise<{ runs: TaskRun[]; totals: TaskTotals }> {
   return getJson<{ runs: TaskRun[]; totals: TaskTotals }>(
-    `/api/tasks/${encodeURIComponent(taskId)}/runs`,
+    `/api/tasks/${encodeURIComponent(taskId)}/runs${storeQuery(store)}`,
   );
 }
 

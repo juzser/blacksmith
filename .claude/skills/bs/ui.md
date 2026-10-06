@@ -14,7 +14,12 @@ Home, Kanban and the project list also read every project with a live CLI
 session: its git toplevel is a store when `<top>/.blacksmith/state/events` or
 `<top>/state/events` exists (rechecked at most every 5 s), and `--store <dir>`
 adds one by hand. Foreign stores are strictly read; their projection lives in
-`state/ui-stores/<storeId>.db` of the served clone. Details: `docs/guide/dashboard.md`.
+`state/ui-stores/<storeId>.db` of the served clone, kept for a grace period after a
+store drops and pruned at startup when stale. In a foreign store an untagged row reads
+as the store's label, any other explicit project as itself, so `?project=X` returns each
+matching row once. These routes and `/api/tasks/*` are local-only, like
+`/api/cli-sessions`. A foreign Kanban card opens through `?store=<storeId>`; its history,
+artifacts and waivers stay empty. Details: `docs/guide/dashboard.md`.
 
 **That build needs a clone.** `ui/` is not in the package's `files`, so an
 install — npm or plugin — ships no dashboard at all and `ui.not-built` is the

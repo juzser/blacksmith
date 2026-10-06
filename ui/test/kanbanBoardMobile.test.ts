@@ -49,7 +49,7 @@ describe('KanbanBoard.vue — mobile column switcher (§3.1 Work/Kanban row)', (
 
   it('navigates straight to the task on phone instead of opening the quick-look peek panel', () => {
     expect(SRC).toMatch(
-      /function onCardSelect\(taskId: string\) \{[\s\S]{0,200}if \(isPhoneWidth\.value\) \{\s*emit\('select', taskId\);\s*return;\s*\}/,
+      /function onCardSelect\(taskId: string, storeId\?: string\) \{[\s\S]{0,200}if \(isPhoneWidth\.value\) \{\s*emit\('select', taskId, storeId\);\s*return;\s*\}/,
     );
   });
 

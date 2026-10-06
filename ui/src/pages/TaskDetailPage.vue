@@ -79,7 +79,12 @@ import { type ActivityEntry, groupByDay } from '../lib/timelineDisplay.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 
-const props = defineProps<{ taskId: string }>();
+const props = defineProps<{ taskId: string; storeId?: string }>();
+// Task detail and runs read the foreign store named by `?store=`. The reads
+// below resolve ids in the served store only (history by task id, artifacts by
+// artifact id, waivers by session id), so for a foreign task they stay empty
+// or inert instead of showing another store's data.
+const foreign = computed(() => props.storeId !== undefined);
 const { setBreadcrumb } = useBreadcrumb();
 const { show: showToast } = useToast();
 const { isPhoneWidth } = useViewport();
@@ -107,7 +112,7 @@ const historyDayGroups = computed(() => groupByDay(history.value, new Date().toI
 // shares the same sessionStorage-scoped "Show details" persistence
 // (expandedRows.ts), keyed per task so two tasks' open rows don't collide.
 const historyExpanded = ref<Set<string>>(new Set());
-const historyStorageKey = computed(() => `task:${props.taskId}`);
+const historyStorageKey = computed(() => `task:${props.storeId ?? ''}:${props.taskId}`);
 onMounted(() => {
   historyExpanded.value = loadExpanded(sessionStorage, historyStorageKey.value);
 });
@@ -174,7 +179,10 @@ async function load() {
   // skeleton, because there the page really is empty (D-243).
   loading.value = detail.value === null;
   try {
-    const [d, r] = await Promise.all([fetchTaskDetail(props.taskId), fetchTaskRuns(props.taskId)]);
+    const [d, r] = await Promise.all([
+      fetchTaskDetail(props.taskId, props.storeId),
+      fetchTaskRuns(props.taskId, props.storeId),
+    ]);
     detail.value = d;
     runs.value = r.runs;
     totals.value = r.totals;
@@ -185,6 +193,10 @@ async function load() {
   }
 }
 async function loadHistory() {
+  if (foreign.value) {
+    historyLoading.value = false;
+    return;
+  }
   // Same rule as load() above (D-243).
   historyLoading.value = history.value.length === 0;
   historyError.value = null;
@@ -230,7 +242,7 @@ const openPopover = ref<string | null>(null); // fingerprint whose Popover is op
 // to a page with no control for them -- a number you cannot act on, which is
 // worse than no number. One predicate now, pinned by ui/test/waivable.test.ts.
 function canWaive(f: TaskDetail['findings'][number]): boolean {
-  return isWaivable(f);
+  return !foreign.value && isWaivable(f);
 }
 
 async function decide(fingerprint: string, decision: 'granted' | 'denied') {
@@ -270,9 +282,11 @@ function artifactUrl(a: TaskDetail['artifacts'][number]): string {
 // `detail.value.artifacts` already comes back newest-first (`taskDetail()`'s
 // `orderBy(desc(artifacts.ts), desc(artifacts.id))`, queries.ts) — a `filter`
 // preserves that order, so neither list needs a sort of its own here.
-const imageArtifacts = computed(() => detail.value?.artifacts.filter(isImageArtifact) ?? []);
-const otherArtifacts = computed(
-  () => detail.value?.artifacts.filter((a) => !isImageArtifact(a)) ?? [],
+const imageArtifacts = computed(() =>
+  foreign.value ? [] : (detail.value?.artifacts.filter(isImageArtifact) ?? []),
+);
+const otherArtifacts = computed(() =>
+  foreign.value ? [] : (detail.value?.artifacts.filter((a) => !isImageArtifact(a)) ?? []),
 );
 const tabs = [
   { id: 'overview', label: 'What was asked' },
