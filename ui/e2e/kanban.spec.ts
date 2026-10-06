@@ -246,9 +246,13 @@ test.describe('Kanban', () => {
     expect(row1Box).not.toBeNull();
     expect(chipBox).not.toBeNull();
     expect(quoteBox).not.toBeNull();
-    expect(chipBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThan(
-      (row1Box?.width ?? 0) - (quoteBox?.width ?? 0),
-    );
+    // A stretched chip ends exactly one row-1 gap (space-2, 8px) before the
+    // Quote trigger, so "narrower than row 1 minus the trigger" would still
+    // pass on the old rule. Require clear free space instead: a short label
+    // leaves far more than three gaps' worth between chip and trigger.
+    const chipRight = (chipBox?.x ?? 0) + (chipBox?.width ?? 0);
+    const freeSpace = (quoteBox?.x ?? 0) - chipRight;
+    expect(freeSpace).toBeGreaterThan(24);
   });
 
   // Deleted: "desktop: a short task id is never truncated at a 280px
