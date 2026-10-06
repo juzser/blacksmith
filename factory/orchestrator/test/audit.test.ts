@@ -14,6 +14,7 @@ import {
   DECLINE_EXPIRY_DAYS,
   type FoldedFinding,
   foldAuditStore,
+  isAuditAxisRowId,
   normalizeEvidence,
   rankClusters,
   readAuditStore,
@@ -628,5 +629,30 @@ describe('readAuditStore', () => {
     expect(readAuditStore(projectDir)).toEqual([line]);
     const text = await readFile(auditStorePath(projectDir), 'utf8');
     expect(text.endsWith('\n')).toBe(true);
+  });
+});
+
+describe('isAuditAxisRowId', () => {
+  it('matches an audit axis id with or without a suffix', () => {
+    for (const id of [
+      '20291231-0a1b2c3d.security',
+      '20291231-0a1b2c3d.performance-2',
+      '20291231-0a1b2c3d.code-quality-codex',
+      '20291231-0a1b2c3d.architecture-codex-2',
+    ]) {
+      expect(isAuditAxisRowId(id)).toBe(true);
+    }
+  });
+
+  it('rejects ordinary and near-miss ids', () => {
+    for (const id of [
+      'epic-x/20291231-0a1b2c3d.performance-2',
+      '20291231-0a1b2c3d.unknown-2',
+      '20291231-0a1b2c3d.security-',
+      '20291231-0a1b2c3d.security.2',
+      'task-1-settings',
+    ]) {
+      expect(isAuditAxisRowId(id)).toBe(false);
+    }
   });
 });
