@@ -29,8 +29,9 @@ you your own event log. Do not put it on a public interface.
 <tr valign="top">
 <td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) — the
 one screen that asks something of you. The <code>Needs you</code> inbox lists
-every pending waiver, escalated task and lesson candidate, grouped by project,
-each with one action; under it, what is running per project, what the factory
+the waivers on finished work (completed tasks, or closed epics for epic-level
+findings: the ones the factory will no longer act on), escalated tasks and
+lesson candidates, grouped by project, each with one action; under it, what is running per project, what the factory
 decided recently, and budget burn. Everything else is the factory reporting
 in.</td>
 <td><b>Flow</b> — the plan as waves. Waves are layers of the dependency graph;
