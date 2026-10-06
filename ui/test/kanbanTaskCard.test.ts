@@ -122,11 +122,23 @@ describe('KanbanTaskCard.vue — title-copy icon flows inline with the title tex
   });
 
   it('fits the title to 2 lines by measurement, keeping the icon after the ellipsis', () => {
+    // The measurement lives in the composable the follow-up group shares.
+    const FIT = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'src',
+        'composables',
+        'useFittedTitle.ts',
+      ),
+      'utf8',
+    );
     expect(SRC).not.toMatch(/TITLE_MAX/);
-    expect(SRC).toMatch(/new ResizeObserver/);
-    expect(SRC).toMatch(/\.disconnect\(\)/);
-    expect(SRC).toMatch(/TITLE_LINES\s*=\s*2/);
-    expect(SRC).toMatch(/fitTitleText\(/);
+    expect(SRC).toMatch(/useFittedTitle\(/);
+    expect(FIT).toMatch(/new ResizeObserver/);
+    expect(FIT).toMatch(/\.disconnect\(\)/);
+    expect(FIT).toMatch(/TITLE_LINES\s*=\s*2/);
+    expect(FIT).toMatch(/fitTitleText\(/);
     expect(SRC).toMatch(/:title="fitted \? title : undefined"/);
     expect(SRC).toMatch(/aria-label="`\$\{title\}, opens task detail`"/);
   });

@@ -298,6 +298,10 @@ export interface KanbanTask {
   hasRequest: boolean;
   /** DS3 — first line of the linked request's prompt, or null when `hasRequest` is false. */
   requestFirstLine: string | null;
+  /** The task a follow-up fix came from, or null for any other task. */
+  parentTaskId: string | null;
+  /** That parent's objective, or null when this is no follow-up or the parent has no task row. */
+  parentTitle: string | null;
 }
 export interface KanbanColumn {
   taskStatus: string;

@@ -13,8 +13,10 @@ import {
   defaultMobileColumnKey,
   dependencyChainText,
   epicKeyForTask,
+  findGroupMember,
   foldIntoColumns,
   groupByKanban,
+  groupFollowups,
   hasWaitingDependency,
   isDoneStatus,
   isInteractiveDescendant,
@@ -798,5 +800,122 @@ describe('lib/kanban.ts — columnTone() (ds-spec.md §2.2 column header icon)',
     expect(columnTone('project', 'some-project')).toBe('neutral');
     expect(columnTone('epic', 'some-epic')).toBe('neutral');
     expect(columnTone('role', 'coder')).toBe('neutral');
+  });
+});
+
+describe('lib/kanban.ts — groupFollowups() (one stacked card per parent, min 2)', () => {
+  const fix = (id: string, parent: string | null, updatedAt: string, taskStatus = 'todo') => ({
+    taskId: `epic-a/${id}`,
+    taskStatus,
+    parentTaskId: parent === null ? null : `epic-a/${parent}`,
+    parentTitle: parent === null ? null : `Title of ${parent}`,
+    updatedAt,
+  });
+
+  it('turns two or more follow-ups of one parent into one group, members newest first', () => {
+    const items = groupFollowups(
+      [
+        fix('followup-1', 'task-1', '2029-01-01T00:00:01Z'),
+        fix('followup-2', 'task-1', '2029-01-01T00:00:03Z'),
+        fix('followup-3', 'task-1', '2029-01-01T00:00:02Z'),
+      ],
+      'Todo',
+    );
+    expect(items).toHaveLength(1);
+    const [group] = items;
+    expect(group?.kind).toBe('group');
+    if (group?.kind !== 'group') throw new Error('expected a group');
+    expect(group.key).toBe('Todo:epic-a/task-1');
+    expect(group.parentTitle).toBe('Title of task-1');
+    expect(group.members.map((m) => m.taskId)).toEqual([
+      'epic-a/followup-2',
+      'epic-a/followup-3',
+      'epic-a/followup-1',
+    ]);
+  });
+
+  it('leaves a lone follow-up and any ordinary task as plain cards', () => {
+    const items = groupFollowups(
+      [
+        fix('followup-1', 'task-1', '2029-01-01T00:00:01Z'),
+        fix('task-2', null, '2029-01-01T00:00:02Z'),
+      ],
+      'Todo',
+    );
+    expect(items.map((i) => i.kind)).toEqual(['task', 'task']);
+  });
+
+  it('makes one group per parent and seats it where its newest member would sit', () => {
+    const items = groupFollowups(
+      [
+        fix('task-9', null, '2029-01-01T00:00:09Z'),
+        fix('followup-a1', 'task-1', '2029-01-01T00:00:08Z'),
+        fix('followup-b1', 'task-2', '2029-01-01T00:00:07Z'),
+        fix('followup-a2', 'task-1', '2029-01-01T00:00:06Z'),
+        fix('followup-b2', 'task-2', '2029-01-01T00:00:05Z'),
+        fix('task-8', null, '2029-01-01T00:00:04Z'),
+      ],
+      'Todo',
+    );
+    expect(items.map((i) => (i.kind === 'group' ? i.key : i.task.taskId))).toEqual([
+      'epic-a/task-9',
+      'Todo:epic-a/task-1',
+      'Todo:epic-a/task-2',
+      'epic-a/task-8',
+    ]);
+  });
+
+  it('seats a group at its newest member even when the input is not sorted', () => {
+    const items = groupFollowups(
+      [
+        fix('followup-a1', 'task-1', '2029-01-01T00:00:01Z'),
+        fix('task-9', null, '2029-01-01T00:00:05Z'),
+        fix('followup-a2', 'task-1', '2029-01-01T00:00:09Z'),
+      ],
+      'Todo',
+    );
+    expect(items.map((i) => i.kind)).toEqual(['task', 'group']);
+  });
+
+  it('keeps completed members in the group (the caller decides whether to pass them)', () => {
+    const items = groupFollowups(
+      [
+        fix('followup-1', 'task-1', '2029-01-01T00:00:02Z', 'completed'),
+        fix('followup-2', 'task-1', '2029-01-01T00:00:01Z', 'completed'),
+      ],
+      'Completed',
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]?.kind).toBe('group');
+  });
+});
+
+describe('lib/kanban.ts — findGroupMember() (which group holds a task)', () => {
+  const t = (id: string, parent: string | null, updatedAt: string) => ({
+    taskId: `epic-a/${id}`,
+    taskStatus: 'todo',
+    parentTaskId: parent === null ? null : `epic-a/${parent}`,
+    parentTitle: null,
+    updatedAt,
+  });
+  const items = groupFollowups(
+    [
+      t('f1', 'p', '2029-01-01T00:00:03Z'),
+      t('f2', 'p', '2029-01-01T00:00:02Z'),
+      t('f3', 'p', '2029-01-01T00:00:01Z'),
+      t('solo', null, '2029-01-01T00:00:00Z'),
+    ],
+    'Todo',
+  );
+
+  it('returns the group key and the member index (newest first)', () => {
+    expect(findGroupMember(items, 'epic-a/f1')).toEqual({ key: 'Todo:epic-a/p', index: 0 });
+    expect(findGroupMember(items, 'epic-a/f3')).toEqual({ key: 'Todo:epic-a/p', index: 2 });
+  });
+
+  it('returns null for a plain card or an unknown id', () => {
+    expect(findGroupMember(items, 'epic-a/solo')).toBeNull();
+    expect(findGroupMember(items, 'epic-a/nope')).toBeNull();
+    expect(findGroupMember(items, null)).toBeNull();
   });
 });

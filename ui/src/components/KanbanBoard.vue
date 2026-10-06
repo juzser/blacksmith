@@ -16,15 +16,20 @@ import {
   TriangleAlert,
 } from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
+import { useProjectContext } from '../composables/useProjectContext.js';
 import { useViewport } from '../composables/useViewport.js';
 import type { KanbanTask } from '../lib/api.js';
 import { KANBAN_VIRTUALIZE_THRESHOLD } from '../lib/constants.js';
+import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
+import { parentLabel } from '../lib/format.js';
 import {
   capColumn,
   columnTone,
   defaultMobileColumnKey,
+  findGroupMember,
   type GroupableTask,
   groupByKanban,
+  groupFollowups,
   isDoneStatus,
   isInteractiveDescendant,
   type KanbanGroupBy,
@@ -36,6 +41,7 @@ import {
   saveKanbanDisplayOptions,
 } from '../lib/kanbanDisplayOptions.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
+import KanbanFollowupGroup from './KanbanFollowupGroup.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
 import IconButton from './kit/IconButton.vue';
 import Popover from './kit/Popover.vue';
@@ -62,6 +68,25 @@ const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean 
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 const { isPhoneWidth } = useViewport();
+const { project } = useProjectContext();
+
+// Which follow-up groups are open, per browser tab (sessionStorage, via
+// expandedRows.ts). Keyed `{column}:{parentTaskId}`, never by position, so it
+// survives the polling refresh; a group that falls under two members renders
+// as a plain card and its stored flag is simply never read.
+const groupScope = computed(() => `kanban-groups:${project.value ?? 'all'}`);
+const browserSession: Storage | null =
+  typeof window !== 'undefined' && window.sessionStorage ? window.sessionStorage : null;
+const openGroups = ref<Set<string>>(
+  browserSession ? loadExpanded(browserSession, groupScope.value) : new Set(),
+);
+watch(groupScope, (scope) => {
+  openGroups.value = browserSession ? loadExpanded(browserSession, scope) : new Set();
+});
+function toggleGroup(key: string) {
+  openGroups.value = toggleExpanded(openGroups.value, key);
+  if (browserSession) saveExpanded(browserSession, groupScope.value, openGroups.value);
+}
 
 // `localStorage` is only ever reached through this one guarded accessor so a
 // SSR/private-browsing/no-storage environment degrades to the hardcoded
@@ -131,14 +156,26 @@ const columns = computed(() =>
     const active = col.tasks.filter((t) => !isDoneStatus(t.taskStatus));
     const done = col.tasks.filter((t) => isDoneStatus(t.taskStatus));
     const showDone = expandedDone.value[col.key] ?? false;
-    const visible = showDone ? [...active, ...done] : active;
+    // Follow-ups of one parent stack into a single item; the stack counts as
+    // one toward the cap below, while `total` stays the task count.
+    const visibleTasks = showDone ? [...active, ...done] : active;
+    const visible = groupFollowups(visibleTasks, col.key);
     // A simple windowed slice rather than a scroll-driven virtualizer: past
     // KANBAN_VIRTUALIZE_THRESHOLD the column reuses the same capColumn()/
     // "view more" control the rest of the board already has, so a very
     // large column stays DOM-light without a second rendering strategy.
-    const windowed = visible.length > KANBAN_VIRTUALIZE_THRESHOLD;
+    const windowed = visibleTasks.length > KANBAN_VIRTUALIZE_THRESHOLD;
     const page = capColumn(visible, revealed.value[col.key] ?? 0);
-    return { ...col, done, showDone, windowed, ...page, total: visible.length };
+    // `items` is the uncapped grouped list: a quick-look target may sit past the page.
+    return {
+      ...col,
+      done,
+      showDone,
+      windowed,
+      items: visible,
+      ...page,
+      total: visibleTasks.length,
+    };
   }),
 );
 
@@ -188,11 +225,25 @@ function onMobileTabKeydown(event: KeyboardEvent) {
 // peek panel. Escape restores focus to the card that opened the panel.
 const boardEl = ref<HTMLElement | null>(null);
 const peekTaskId = ref<string | null>(null);
+// Spec 1.4: a quick-look that targets a fix opens the group holding it. Only
+// the peek changing triggers this, so closing the group afterwards sticks.
+watch(peekTaskId, (id) => {
+  for (const col of columns.value) {
+    const hit = findGroupMember(col.items, id);
+    if (hit && !openGroups.value.has(hit.key)) toggleGroup(hit.key);
+  }
+});
 let lastFocusedCard: HTMLElement | null = null;
 
 function cardEls(): HTMLElement[] {
   if (!boardEl.value) return [];
-  return Array.from(boardEl.value.querySelectorAll<HTMLElement>('.bs-kanban-card'));
+  // A follow-up group is one stop (its summary) plus, once open, each fix row:
+  // the rows of a closed group stay in the DOM but cannot take focus.
+  return Array.from(
+    boardEl.value.querySelectorAll<HTMLElement>(
+      '.bs-kanban-card, .bs-kanban-group__summary, .bs-kanban-group[open] .bs-kanban-group__row',
+    ),
+  );
 }
 
 function openPeek(taskId: string, trigger: HTMLElement | null) {
@@ -235,6 +286,10 @@ function onCardKeydown(event: KeyboardEvent, taskId: string) {
     openPeek(taskId, current);
     return;
   }
+  moveFocus(event, current);
+}
+
+function moveFocus(event: KeyboardEvent, current: HTMLElement) {
   if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
   const cards = cardEls();
@@ -247,6 +302,17 @@ function onCardKeydown(event: KeyboardEvent, taskId: string) {
   const step = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
   const next = cards[(index + step + cards.length) % cards.length];
   next?.focus();
+}
+// A group summary takes arrows only: Enter/Space on it is the native toggle.
+function onGroupKeydown(event: KeyboardEvent) {
+  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
+  moveFocus(event, event.target as HTMLElement);
+}
+// A fix row is a role="link" stop like a card. onGroupKeydown skips it (a
+// role-bearing target counts as interactive), so the row hands arrows to the
+// board itself through its `navigate` event.
+function onRowNavigate(event: KeyboardEvent) {
+  moveFocus(event, event.target as HTMLElement);
 }
 
 function onBoardKeydown(event: KeyboardEvent) {
@@ -347,14 +413,28 @@ defineExpose({ focusFirstCard });
         </div>
         <p v-if="col.total === 0" class="bs-kanban-col__empty">No tasks in {{ col.label }}.</p>
         <ul role="list" class="bs-kanban-col__list">
-          <li v-for="task in col.visible" :key="task.taskId">
+          <li v-for="item in col.visible" :key="item.key">
+            <KanbanFollowupGroup
+              v-if="item.kind === 'group'"
+              :members="item.members"
+              :parent-label="parentLabel(item.parentTaskId, item.parentTitle)"
+              :open="openGroups.has(item.key)"
+              :status-in-column="options.groupBy === 'status' && !showAll"
+              :compact="isPhoneWidth"
+              :reveal-task-id="peekTaskId"
+              @toggle="toggleGroup(item.key)"
+              @select="onCardSelect"
+              @keydown="onGroupKeydown"
+              @navigate="onRowNavigate"
+            />
             <KanbanTaskCard
-              :task="task"
+              v-else
+              :task="item.task"
               :group-by="options.groupBy"
               :summary-enabled="options.summary"
               :compact="isPhoneWidth"
               @select="onCardSelect"
-              @keydown="onCardKeydown($event, task.taskId)"
+              @keydown="onCardKeydown($event, item.task.taskId)"
             />
           </li>
         </ul>

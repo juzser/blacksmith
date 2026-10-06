@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
-import { AUDIT_AXES } from './audit.js';
+import { isAuditAxisTaskId } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
 import {
@@ -705,22 +705,6 @@ function describeShapeFailures(
   return failures
     .map((f) => `index ${f.index} (${f.errors.map((e) => e.message).join('; ')})`)
     .join(', ');
-}
-
-/**
- * `mintAuditId` (audit.ts) mints `<YYYYMMDD>-<8 hex>` — a day stamp and eight
- * hex characters joined by "-", never a "/". Audit.md's "Declare the artifact
- * before the call" names the task id an audit axis turn dispatches and
- * reports against as `<audit-id>.<axis>`. An ordinary task id is always
- * "<epic>/<bare>" (taskId.ts) — qualified with a "/" by construction — so the
- * two shapes cannot collide: this checks the exact mint format, not just the
- * absence of "/", so a coincidentally dotted bare task id still reads as
- * ordinary rather than as an axis.
- */
-const AUDIT_AXIS_TASK_ID = new RegExp(`^\\d{8}-[0-9a-f]{8}\\.(${AUDIT_AXES.join('|')})$`);
-
-function isAuditAxisTaskId(taskId: string): boolean {
-  return AUDIT_AXIS_TASK_ID.test(taskId);
 }
 
 /**
