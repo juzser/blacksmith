@@ -116,12 +116,13 @@ describe('KanbanTaskCard.vue — footer hides "Waits for: nothing" with no depen
   });
 });
 
-describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-10-05)', () => {
-  it('makes the AgentChip the element that grows and ellipsises first, not the id', () => {
+describe('KanbanTaskCard.vue — row 1 flex roles (operator follow-up fix 2026-10-06)', () => {
+  it('keeps the AgentChip at its natural content width, left-aligned, not stretched', () => {
     const block = rule(PRIMITIVES_CSS, '.bs-kanban-card__row--1 .bs-agent-chip');
-    expect(block).toMatch(/flex:\s*1 1 auto/);
+    expect(block).toMatch(/flex:\s*0 1 auto/);
     expect(block).toMatch(/min-width:\s*0/);
-    expect(block).not.toMatch(/max-width/);
+    expect(block).toMatch(/max-width:\s*100%/);
+    expect(block).not.toMatch(/flex:\s*1 1 auto/);
   });
 
   it('keeps the Quote icon from ever shrinking', () => {

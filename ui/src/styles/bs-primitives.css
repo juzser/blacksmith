@@ -2705,21 +2705,26 @@ summary.bs-inbox__group-head {
 }
 /* Operator fix 2026-10-05: row 1's id text + copy button moved to a link
    icon right after the title (below), so row 1 now only carries the
-   AgentChip and the Quote trigger. The chip grows into the space the id
-   used to take (flex: 1 1 auto, ellipsising via its own .bs-agent-chip__text
-   rule); the Quote trigger (flex: none) stays pinned to the right edge via
-   margin-left: auto so it does not float mid-row on a card whose AgentChip
-   renders nothing at all (see AgentChip.vue's own `v-if`). `.bs-kanban-card__id`
-   itself stays — WaveTaskCard on Roadmap still renders it and is out of
-   this slice's claim. */
+   AgentChip and the Quote trigger. The Quote trigger (flex: none) stays
+   pinned to the right edge via margin-left: auto so it does not float
+   mid-row on a card whose AgentChip renders nothing at all (see
+   AgentChip.vue's own `v-if`). `.bs-kanban-card__id` itself stays —
+   WaveTaskCard on Roadmap still renders it and is out of this slice's
+   claim. */
 .bs-kanban-card__id {
   white-space: nowrap;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
+/* Operator fix 2026-10-06: the chip should not auto-grow to fill row 1 —
+   it sits at its own content width, left-aligned (flex: 0 1 auto). It can
+   still shrink and ellipsise via its own .bs-agent-chip__text rule on a
+   label too long for the row (min-width: 0, max-width: 100% caps it at
+   the row's own width so it never overflows the card). */
 .bs-kanban-card__row--1 .bs-agent-chip {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
 }
 .bs-kanban-card__row--1 .bs-tooltip-trigger {
   flex: none;
