@@ -200,6 +200,53 @@ describe('cliSessions reader', () => {
       expect((await read()).sessions[0]!.status).toBe('idle');
     });
 
+    it('maps registry waiting + pending AskUserQuestion to waiting_answer with waitingFor', async () => {
+      await session(140, { status: 'waiting', waitingFor: 'input needed' });
+      await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('AskUserQuestion', 'q1'))]));
+      const s = (await read()).sessions[0]!;
+      expect(s.status).toBe('waiting_answer');
+      expect(s.waitingFor).toBe('input needed');
+      expect(s.parseIssues).toEqual([]);
+    });
+
+    it('maps registry waiting without a pending ask to waiting_operator', async () => {
+      await session(141, { status: 'waiting', waitingFor: 'dialog open' });
+      await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('Bash', 't1'))]));
+      const s = (await read()).sessions[0]!;
+      expect(s.status).toBe('waiting_operator');
+      expect(s.waitingFor).toBe('dialog open');
+      expect(s.parseIssues).toEqual([]);
+    });
+
+    it('keeps registry waiting a waiting status when waitingFor is absent or not a string', async () => {
+      await session(142, { status: 'waiting' });
+      let s = (await read()).sessions[0]!;
+      expect(s.status).toBe('waiting_operator');
+      expect(s.waitingFor).toBeNull();
+      expect(s.parseIssues).toEqual([]);
+      await session(142, { status: 'waiting', waitingFor: 7 });
+      s = (await read()).sessions[0]!;
+      expect(s.status).toBe('waiting_operator');
+      expect(s.waitingFor).toBeNull();
+      expect(s.parseIssues).toEqual([]);
+      await session(142, { status: 'waiting', waitingFor: ' \n ' });
+      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+    });
+
+    it('cleans and bounds waitingFor', async () => {
+      await session(143, { status: 'waiting', waitingFor: `a\nb${'x'.repeat(500)}` });
+      const w = (await read()).sessions[0]!.waitingFor!;
+      expect(w.startsWith('a b')).toBe(true);
+      expect(w.length).toBeLessThanOrEqual(64);
+    });
+
+    it('carries no waitingFor on busy or idle sessions, even with a stray one', async () => {
+      await session(144, { status: 'busy', waitingFor: 'input needed' });
+      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+      await session(144, { status: 'idle', waitingFor: 'input needed' });
+      expect((await read()).sessions[0]!.waitingFor).toBeNull();
+    });
+
     it('maps idle with no transcript to idle and transcript missing', async () => {
       await session(104, { status: 'idle' });
       const s = (await read()).sessions[0]!;

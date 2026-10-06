@@ -119,6 +119,8 @@ export interface CliSessionCard {
   inScopeBy: 'cwd' | 'stamped' | 'heuristic';
   status: CliSessionStatus;
   statusSince: string | null;
+  /** The registry's reason while it says `waiting` (e.g. `input needed`); null otherwise. */
+  waitingFor: string | null;
   doingNow: {
     prompt: string | null;
     /** When the operator typed `prompt`, from the prompt history; null when unknown. */
@@ -168,6 +170,7 @@ const HEAD_BYTES = 64 * 1024;
 const HISTORY_BYTES = 1024 * 1024;
 const TEXT_MAX = 280;
 const VERSION_MAX = 32;
+const WAITING_FOR_MAX = 64;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
 const WORKTREES_TTL_MS = 5 * 60 * 1000;
 // Only a dispatch this much later takes over a plan task's agent, so parallel
@@ -430,6 +433,7 @@ interface RegistryEntry {
   startedAt: string | null;
   status: CliSessionStatus;
   statusSince: string | null;
+  waitingFor: string | null;
   version: string | null;
   /** One `<field>: invalid` per registry field that was present but dropped. */
   parseIssues: string[];
@@ -458,8 +462,20 @@ function parseRegistry(
   if (j.pid !== filePid) return null;
   if (typeof j.sessionId !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(j.sessionId)) return null;
   if (typeof j.cwd !== 'string' || !path.isAbsolute(j.cwd)) return null;
+  // `waiting` starts as waiting_operator; statusOf upgrades it to waiting_answer
+  // when the transcript has a pending ask.
   const status: CliSessionStatus =
-    j.status === 'busy' ? 'working' : j.status === 'idle' ? 'idle' : 'unknown';
+    j.status === 'busy'
+      ? 'working'
+      : j.status === 'idle'
+        ? 'idle'
+        : j.status === 'waiting'
+          ? 'waiting_operator'
+          : 'unknown';
+  const waitingFor =
+    j.status === 'waiting' && typeof j.waitingFor === 'string'
+      ? Array.from(clean(j.waitingFor)).slice(0, WAITING_FOR_MAX).join('').trim() || null
+      : null;
   const version =
     typeof j.version === 'string'
       ? Array.from(clean(j.version)).slice(0, VERSION_MAX).join('') || null
@@ -473,6 +489,7 @@ function parseRegistry(
     startedAt: isoOrNull(j.startedAt),
     status,
     statusSince: isoOrNull(j.statusUpdatedAt),
+    waitingFor,
     version,
     parseIssues: [],
   };
@@ -700,8 +717,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   }
 
   function statusOf(e: RegistryEntry, t: TranscriptRead): CliSessionStatus {
-    if (e.status !== 'idle') return e.status;
     const a = t.analysis;
+    if (e.status === 'waiting_operator') {
+      return a?.pendingAsk != null && t.state === 'ok' ? 'waiting_answer' : 'waiting_operator';
+    }
+    if (e.status !== 'idle') return e.status;
     if (a === null || t.state !== 'ok') return 'idle';
     if (a.pendingAsk !== null) return 'waiting_answer';
     if (a.last === 'assistant_text') return 'waiting_operator';
@@ -1133,6 +1153,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         inScopeBy: by,
         status: statusOf(e, t),
         statusSince: e.statusSince,
+        waitingFor: e.waitingFor,
         doingNow:
           a || prompt
             ? {
