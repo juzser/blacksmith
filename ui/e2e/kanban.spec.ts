@@ -35,7 +35,67 @@ function task(taskId: string, taskStatus: string): KanbanTask {
     epicLabel: null,
     hasRequest: false,
     requestFirstLine: null,
+    parentTaskId: null,
+    parentTitle: null,
   };
+}
+
+/** A follow-up card as the server projects it: the finding summary as title, plus its parent. */
+function fix(
+  name: string,
+  summary: string,
+  parent: { id: string; title: string | null },
+  updatedAt: string,
+  taskStatus = 'todo',
+): KanbanTask {
+  return {
+    ...task(`epic-a/followup-${name}`, taskStatus),
+    title: `Fix: ${summary}`,
+    updatedAt,
+    parentTaskId: parent.id,
+    parentTitle: parent.title,
+  };
+}
+
+const SETTINGS = { id: 'epic-a/task-1-settings-layout', title: 'Settings layout' };
+const BILLING = { id: 'epic-a/task-2-billing-page', title: 'Billing page' };
+
+/** A board with one parent holding three follow-ups, another holding exactly one. */
+function followupBoard() {
+  return [
+    {
+      taskStatus: 'todo',
+      tasks: [
+        fix(
+          '0a1b2c3d',
+          'The settings form loses its unsaved changes when the tab is switched',
+          SETTINGS,
+          '2026-01-03T00:00:00.000Z',
+        ),
+        fix(
+          '1b2c3d4e',
+          'Wrap long labels in the settings sidebar',
+          SETTINGS,
+          '2026-01-02T00:00:00.000Z',
+        ),
+        fix(
+          '2c3d4e5f',
+          'Keep the save button visible while scrolling',
+          SETTINGS,
+          '2026-01-01T00:00:00.000Z',
+        ),
+        fix(
+          '3d4e5f6a',
+          'Show the invoice total with the currency symbol',
+          BILLING,
+          '2026-01-04T00:00:00.000Z',
+        ),
+      ],
+    },
+    { taskStatus: 'in-progress', tasks: [task('epic-a/task-3', 'in-progress')] },
+    { taskStatus: 'failed', tasks: [task('epic-a/task-4', 'failed')] },
+    { taskStatus: 'completed', tasks: [task('epic-a/task-5', 'completed')] },
+  ];
 }
 
 async function mockBoard(
@@ -924,6 +984,115 @@ test.describe('Kanban', () => {
     const secondColLabel = await visibleCol.getAttribute('aria-label');
     expect(secondColLabel).not.toBe(firstColLabel);
   });
+
+  // Follow-ups of one parent stack into one card per column; a parent with a
+  // single follow-up stays a plain card. Titles are readable text, never ids.
+  test('follow-ups stack into one group per parent; a lone follow-up stays a card', async ({
+    page,
+  }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const todo = page.getByRole('region', { name: 'Todo column' });
+    const group = todo.locator('.bs-kanban-group');
+    await expect(group).toHaveCount(1);
+    await expect(group.locator('.bs-kanban-group__title')).toHaveText('3 fixes · Settings layout');
+    // The billing follow-up is alone, so it is an ordinary card with its own summary.
+    await expect(todo.locator('.bs-kanban-card')).toHaveCount(1);
+    await expect(todo.locator('.bs-kanban-card')).toContainText(
+      'Fix: Show the invoice total with the currency symbol',
+    );
+    // No id text on any card or group.
+    for (const el of await todo.locator('.bs-kanban-card, .bs-kanban-group').all()) {
+      expect(await el.innerText()).not.toMatch(/[0-9a-f]{8}/);
+    }
+  });
+
+  test('a group opens and closes by click and by keyboard, and its fix rows read as text', async ({
+    page,
+  }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    const summary = group.locator('summary');
+    await expect(summary).toHaveAccessibleName('3 fixes for Settings layout, expand/collapse');
+    await expect(group).not.toHaveAttribute('open', /.*/);
+
+    await summary.click();
+    await expect(group).toHaveAttribute('open', '');
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
+    const rows = group.locator('.bs-kanban-group__row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toContainText(
+      'Fix: The settings form loses its unsaved changes when the tab is switched',
+    );
+    for (const row of await rows.all()) {
+      expect(await row.innerText()).not.toMatch(/[0-9a-f]{8}/);
+    }
+
+    await summary.click();
+    await expect(group).not.toHaveAttribute('open', /.*/);
+
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(group).toHaveAttribute('open', '');
+    await page.keyboard.press('Space');
+    await expect(group).not.toHaveAttribute('open', /.*/);
+  });
+
+  test('an open group stays open across a reload within the tab', async ({ page }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    await page.locator('.bs-kanban-group summary').click();
+    await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
+    await page.reload();
+    await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
+  });
+
+  test('a fix row opens the peek panel and arrows step into an open group', async ({ page }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    await group.locator('summary').click();
+    await group.locator('summary').focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(group.locator('.bs-kanban-group__row').first()).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('phone: the group summary and every fix row are at least 44px tall', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    const summary = group.locator('summary');
+    await summary.click();
+    const summaryBox = await summary.boundingBox();
+    expect(summaryBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    for (const row of await group.locator('.bs-kanban-group__row').all()) {
+      expect((await row.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot group/desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await mockBoard(page, followupBoard());
+      await page.goto('/work/kanban');
+      await page.locator('.bs-kanban-group summary').click();
+      await settleForShot(page, page.locator('.bs-kanban-group'));
+      await shoot(page, `work-kanban-group-desktop-${theme}`);
+    });
+    test(`screenshot group/mobile/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await mockBoard(page, followupBoard());
+      await page.goto('/work/kanban');
+      await page.locator('.bs-kanban-group summary').click();
+      await settleForShot(page, page.locator('.bs-kanban-group'));
+      await shoot(page, `work-kanban-group-mobile-${theme}`);
+    });
+  }
 
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot mobile/tab2/${theme}`, async ({ page }) => {

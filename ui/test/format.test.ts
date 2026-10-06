@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  boardTitle,
   formatAbsolute,
   formatBudgetPct,
   formatCompactNumber,
@@ -13,6 +14,7 @@ import {
   formatRelativeVerbose,
   formatShortDate,
   formatShortDateTime,
+  parentLabel,
   pluralize,
   shortTaskId,
   summarize,
@@ -472,5 +474,52 @@ describe('lib/format.ts formatCompactValue()', () => {
 
   it('appends the unit word to a small, unsuffixed number too', () => {
     expect(formatCompactValue(43, 'tok')).toBe('43 tokens');
+  });
+});
+
+describe('lib/format.ts boardTitle() / parentLabel() (Kanban readable titles)', () => {
+  const long = `Fix: ${'the label is clipped on narrow screens and '.repeat(3)}done`;
+
+  it('keeps a short objective as is', () => {
+    expect(boardTitle('epic-a/task-1-settings', 'Settings layout')).toBe('Settings layout');
+  });
+
+  it('keeps a long objective whole instead of falling back to the id slug', () => {
+    expect(long.length).toBeGreaterThan(60);
+    expect(boardTitle('epic-a/followup-0a1b2c3d', long)).toBe(long);
+  });
+
+  it('humanises a plan task id without its ordinal when there is no objective', () => {
+    expect(boardTitle('epic-a/task-12-settings-layout', null)).toBe('Settings layout');
+    expect(boardTitle('epic-a/task-12-settings-layout', '  ')).toBe('Settings layout');
+  });
+
+  it('never prints the hex of a minted id', () => {
+    for (const id of [
+      'epic-a/followup-0a1b2c3d',
+      '20260918-e6492f02.security',
+      'epic-a/0a1b2c3d',
+    ]) {
+      const text = boardTitle(id, null);
+      expect(text).toBe('Follow-up fix');
+      expect(text).not.toMatch(/[0-9a-f]{8}/);
+    }
+  });
+
+  it('appends the parent to a generic follow-up title', () => {
+    expect(boardTitle('epic-a/followup-0a1b2c3d', null, 'Settings layout')).toBe(
+      'Follow-up fix · Settings layout',
+    );
+  });
+
+  it('reads the parent from its title, else its plan slug, else nothing', () => {
+    expect(parentLabel('epic-a/task-1-settings', 'Settings layout')).toBe('Settings layout');
+    expect(parentLabel('epic-a/task-1-settings-layout', null)).toBe('Settings layout');
+    expect(parentLabel('epic-a/followup-0a1b2c3d', null)).toBeNull();
+    expect(parentLabel(null, null)).toBeNull();
+  });
+
+  it('leaves taskLabel() as it was: a long title still falls back to the slug', () => {
+    expect(taskLabel('epic-a/followup-0a1b2c3d', long)).toBe('Followup 0a1b2c3d');
   });
 });

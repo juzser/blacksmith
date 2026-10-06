@@ -393,11 +393,49 @@ export function shortTaskId(taskId: string): string {
 export function taskLabel(taskId: string, title?: string): string {
   const trimmedTitle = title?.trim();
   if (trimmedTitle && trimmedTitle.length <= SHORT_TASK_LABEL_MAX) return trimmedTitle;
+  return slugLabel(taskId);
+}
 
+function slugLabel(taskId: string): string {
   const lastSegment = taskId.split('/').pop() ?? taskId;
   const slug = lastSegment.replace(/^task-\d+-/, '');
   const spaced = slug.replace(/-/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** A minted id: `followup-<hex>`, or any segment holding an eight-hex-digit run. */
+function isMintedId(taskId: string): boolean {
+  const last = taskId.split('/').pop() ?? taskId;
+  return last.startsWith('followup-') || /(^|[-._])[0-9a-f]{8}($|[-._])/.test(last);
+}
+
+/**
+ * The text a Kanban card shows for a task: its objective whole (the card
+ * fits it to two lines itself — taskLabel()'s fallback to the id slug is what
+ * turned "Fix: <long summary>" into "Followup 48bb6826"), else the plan-task
+ * slug without its ordinal, else "Follow-up fix" for a minted id — never the
+ * hex. `parent` is the origin task's readable title, when known.
+ */
+export function boardTitle(
+  taskId: string,
+  objective?: string | null,
+  parent?: string | null,
+): string {
+  const trimmed = objective?.trim();
+  if (trimmed) return trimmed;
+  if (!isMintedId(taskId)) return slugLabel(taskId);
+  return parent ? `Follow-up fix · ${parent}` : 'Follow-up fix';
+}
+
+/** The origin task's readable title for a follow-up, or null when only a minted id is left. */
+export function parentLabel(
+  parentTaskId: string | null,
+  parentTitle: string | null,
+): string | null {
+  const trimmed = parentTitle?.trim();
+  if (trimmed) return trimmed;
+  if (parentTaskId === null || isMintedId(parentTaskId)) return null;
+  return slugLabel(parentTaskId);
 }
 
 /**

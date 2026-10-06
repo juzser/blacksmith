@@ -17,7 +17,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
-import { taskLabel } from '../lib/format.js';
+import { boardTitle, parentLabel } from '../lib/format.js';
 import {
   agentChip,
   attemptLabel,
@@ -44,7 +44,13 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
+const title = computed(() =>
+  boardTitle(
+    props.task.taskId,
+    props.task.title,
+    parentLabel(props.task.parentTaskId, props.task.parentTitle),
+  ),
+);
 // A CSS line clamp would cut the inline copy icon along with the text, so the
 // title is fitted by measurement instead: when it renders taller than
 // TITLE_LINES lines, binary-search the longest prefix that still fits with a

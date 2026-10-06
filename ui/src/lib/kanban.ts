@@ -353,6 +353,65 @@ export function groupByKanban<T extends GroupableTask>(
     .map(([key, { label, tasks: bucketTasks }]) => ({ key, label, tasks: bucketTasks }));
 }
 
+export interface FollowupTaskLike extends KanbanTaskLike {
+  parentTaskId: string | null;
+  parentTitle: string | null;
+  updatedAt: string;
+}
+
+/** What a column draws: a plain card, or one stacked card for a parent's follow-ups. */
+export type ColumnItem<T extends FollowupTaskLike> =
+  | { kind: 'task'; key: string; task: T }
+  | { kind: 'group'; key: string; parentTaskId: string; parentTitle: string | null; members: T[] };
+
+/** Fewer follow-ups than this stay plain cards: a "1 fix" stack only hides one row. */
+export const FOLLOWUP_GROUP_MIN = 2;
+
+/**
+ * Stack a column's follow-ups by the task they came from. A parent with
+ * FOLLOWUP_GROUP_MIN or more follow-ups in this column becomes one group
+ * (members newest first), seated where its newest member sits; everything
+ * else stays a card, in input order. `key` is `{column}:{parentTaskId}` for a
+ * group — the stable id its expanded state is stored under — and the task id
+ * for a card.
+ */
+export function groupFollowups<T extends FollowupTaskLike>(
+  tasks: readonly T[],
+  columnKey: string,
+): Array<ColumnItem<T>> {
+  const byParent = new Map<string, T[]>();
+  for (const task of tasks) {
+    if (task.parentTaskId === null) continue;
+    const list = byParent.get(task.parentTaskId) ?? [];
+    list.push(task);
+    byParent.set(task.parentTaskId, list);
+  }
+  const groups = new Map<string, T[]>();
+  for (const [parent, members] of byParent) {
+    if (members.length < FOLLOWUP_GROUP_MIN) continue;
+    groups.set(
+      parent,
+      [...members].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)),
+    );
+  }
+  const items: Array<ColumnItem<T>> = [];
+  for (const task of tasks) {
+    const members = task.parentTaskId === null ? undefined : groups.get(task.parentTaskId);
+    if (task.parentTaskId === null || members === undefined) {
+      items.push({ kind: 'task', key: task.taskId, task });
+    } else if (members[0] === task) {
+      items.push({
+        kind: 'group',
+        key: `${columnKey}:${task.parentTaskId}`,
+        parentTaskId: task.parentTaskId,
+        parentTitle: task.parentTitle,
+        members,
+      });
+    }
+  }
+  return items;
+}
+
 export interface KanbanCardChip {
   text: string;
   /** `null` is a descriptive (non-evaluative) pill: no status colour, per design-spec.md §3's rule. */
