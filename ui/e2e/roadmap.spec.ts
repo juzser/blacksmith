@@ -545,3 +545,75 @@ test.describe('Roadmap window (spec Part 2)', () => {
     });
   }
 });
+
+// Roadmap label and axis geometry (visual fix round 2): the fixture's long
+// "Phase 6b — Remaining pages" lane is the current one, so its name sits beside
+// the "Current" Tag. Every track column must start at the same x as the axis.
+test.describe('Roadmap: label column and shared track column', () => {
+  for (const width of [1280, 768]) {
+    test.describe(`at ${width}px`, () => {
+      test.beforeEach(async ({ page }) => {
+        await page.setViewportSize({ width, height: 1024 });
+        await page.goto('/work/roadmap');
+        await expect(page.locator('.lrow').first()).toBeVisible();
+      });
+
+      test('the current lane name is not truncated beside its Tag', async ({ page }) => {
+        const head = page
+          .locator('.lrow:not(.sub) .lhead')
+          .filter({ has: page.locator('.bs-tag', { hasText: 'Current' }) })
+          .first();
+        const name = head.locator('.lname');
+        await expect(name).toContainText('Remaining pages');
+        await expect(head.locator('.bs-tag')).toBeVisible();
+        const fit = await name.evaluate((el) => ({
+          sw: el.scrollWidth,
+          cw: el.clientWidth,
+          sh: el.scrollHeight,
+          ch: el.clientHeight,
+        }));
+        expect(fit.sw).toBeLessThanOrEqual(fit.cw);
+        expect(fit.sh).toBeLessThanOrEqual(fit.ch);
+        const lhead = await head.boundingBox();
+        const tag = await head.locator('.bs-tag').boundingBox();
+        expect((tag?.x ?? 0) + (tag?.width ?? 0)).toBeLessThanOrEqual(
+          (lhead?.x ?? 0) + (lhead?.width ?? 0) + 1,
+        );
+      });
+
+      test('every track starts at the axis and now-line column x', async ({ page }) => {
+        const axis = await page.locator('.months-row').first().boundingBox();
+        const nowCol = await page.locator('.now-track__col').first().boundingBox();
+        expect(axis).not.toBeNull();
+        const tracks = await page.locator('.lrow .track').all();
+        expect(tracks.length).toBeGreaterThan(1);
+        expect(await page.locator('.lrow.sub').count()).toBeGreaterThan(0);
+        for (const t of tracks) {
+          const box = await t.boundingBox();
+          expect(Math.abs((box?.x ?? 0) - (axis?.x ?? 0))).toBeLessThanOrEqual(1);
+        }
+        expect(Math.abs((nowCol?.x ?? 0) - (axis?.x ?? 0))).toBeLessThanOrEqual(1);
+      });
+
+      test('every axis label stays inside the track column', async ({ page }) => {
+        const axis = await page.locator('.months-row').first().boundingBox();
+        const marks = await page.locator('.months-row').first().locator('.months-mark').all();
+        expect(marks.length).toBeGreaterThan(1);
+        for (const m of marks) {
+          const box = await m.boundingBox();
+          expect(box?.x ?? 0).toBeGreaterThanOrEqual((axis?.x ?? 0) - 1);
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+            (axis?.x ?? 0) + (axis?.width ?? 0) + 1,
+          );
+        }
+      });
+    });
+  }
+
+  test('at 768px the track column is at least 430px wide', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto('/work/roadmap');
+    const box = await page.locator('.lrow:not(.sub) .track').first().boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(430);
+  });
+});

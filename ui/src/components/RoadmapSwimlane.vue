@@ -26,6 +26,11 @@ const props = defineProps<{
   project?: string;
 }>();
 
+// A mark centred on a tick near the right end overhangs the track by half its
+// own width (the label is a fixed ~40px, so the narrower the track, the larger
+// that share). From this percent on the label ends at its tick instead.
+const AXIS_END_ALIGN_FROM = 90;
+
 const emit = defineEmits<{ selectPhase: [string]; selectEpic: [string] }>();
 
 const shownRegions = computed<LaneRegion[]>(
@@ -45,6 +50,7 @@ const scrollLabel = computed(() =>
           v-for="m in swimlane.months"
           :key="`${m.label}:${m.left}`"
           class="months-mark"
+          :class="{ 'months-mark--end': m.left >= AXIS_END_ALIGN_FROM }"
           :style="{ left: `${m.left}%` }"
           >{{ m.label }}</span
         >
@@ -89,7 +95,7 @@ const scrollLabel = computed(() =>
             @click="row.kind === 'phase' ? emit('selectPhase', row.id) : emit('selectEpic', row.id)"
           >
             <span class="lhead">
-              <span class="lname">{{ row.label }}</span>
+              <span class="lname" :title="row.label">{{ row.label }}</span>
               <Tag v-if="row === group.head && row.id === currentLane" tone="progress" size="sm">Current</Tag>
             </span>
             <div class="track">

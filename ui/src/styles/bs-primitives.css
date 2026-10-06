@@ -3538,9 +3538,17 @@ h2.rm-section__head {
      and `.now-track` all read this instead of repeating — or deriving pixel
      math from — the literal 160px. `.months` and `.lane` are siblings here,
      so it lives on their shared parent, not on `.lane` alone. */
-  /* 160px of name plus the "Current" Tag (about 62px) and its gap, so the Tag
-     never takes width from the name. */
+  /* Room for a two-line name beside the "Current" Tag (about 62px) and its
+     gap; the Tag never shrinks and the name wraps before it clips. */
   --rm-label-col: 232px;
+}
+/* Tablet: a narrower label column keeps the bar track at 430px or more at
+   768px (names wrap to two lines instead). 900px is the stylesheet's own
+   tablet breakpoint (see the max-width: 900px block below). */
+@media (max-width: 900px) {
+  .rm-scroll {
+    --rm-label-col: 180px;
+  }
 }
 .lane {
   position: relative;
@@ -3577,6 +3585,10 @@ h2.rm-section__head {
 .months-mark:first-child {
   transform: none;
 }
+/* Right-end ticks: the label ends at the tick, so it stays inside the track. */
+.months-mark--end {
+  transform: translateX(-100%);
+}
 .lrow {
   display: grid;
   grid-template-columns: var(--rm-label-col) 1fr;
@@ -3593,9 +3605,10 @@ h2.rm-section__head {
   color: inherit;
   cursor: pointer;
 }
-.lrow.sub {
-  grid-template-columns: var(--rm-label-col) 1fr;
-  padding-left: var(--bs-space-6);
+/* The epic row indents its label, never the row, so every track column
+   starts at the same x as the axis and the now line (mock: .lrow.sub .lname). */
+.lrow.sub .lname {
+  padding-left: var(--bs-space-4);
 }
 .lrow.sel {
   background: var(--bs-surface-selected);
@@ -3612,8 +3625,12 @@ h2.rm-section__head {
 .lname {
   font-size: var(--bs-text-sm);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Two lines, then an ellipsis; the full name is also in the title. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 /* UI spec Part 2 — rows come grouped: a region per window side, a
    `role="group"` per lane. Both stack like `.lane`, so the rows lay out as
