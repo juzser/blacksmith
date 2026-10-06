@@ -3,7 +3,7 @@
 // (ui/test/workView.test.ts, workPageMobile.test.ts, kitSegmentedControl.test.ts)
 // own the source-level contract; this is the one claim only a browser can
 // settle — a real navigation, a real history stack, a real viewport.
-import { expect, test } from './harness.js';
+import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 test.describe('Work switcher', () => {
@@ -377,4 +377,119 @@ test.describe('Work switcher', () => {
       await shoot(page, `work-mobile-overflow-${theme}`);
     });
   }
+});
+
+// A Teleport whose target is missing at mount never mounts its children; the
+// next patch of one of them then throws mid-render and leaves the app shell
+// dead (every screen blank until a reload). So these walks assert real page
+// content at each stop and that the page logged no error at all.
+function collectErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
+  });
+  return errors;
+}
+
+async function walkEveryScreen(page: Page, errors: string[]): Promise<void> {
+  const primary = page.getByRole('navigation', { name: 'Primary' });
+  // Activity has no h1 of its own (the topbar carries the title); its feed is
+  // the landmark that only renders once the page mounted.
+  const screens = [
+    { tab: /^Home/, content: page.getByRole('heading', { level: 1, name: 'Home' }) },
+    { tab: /^Activity/, content: page.getByRole('feed', { name: 'Activity' }) },
+    { tab: /^Sessions/, content: page.getByRole('heading', { level: 1, name: 'Sessions' }) },
+    { tab: /^Cost/, content: page.getByRole('heading', { level: 1, name: 'Cost & quality' }) },
+    { tab: /^Lessons/, content: page.getByRole('heading', { level: 1, name: 'Lessons' }) },
+    { tab: /^Work/, content: page.getByRole('heading', { level: 1, name: 'Work' }) },
+  ];
+  for (const { tab, content } of screens) {
+    await primary.getByRole('button', { name: tab }).first().click();
+    await expect(content).toBeAttached();
+  }
+  expect(errors).toEqual([]);
+}
+
+test.describe('Work view switch keeps the app alive', () => {
+  test('desktop: Kanban -> Roadmap (segmented control) -> Home, then every screen', async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const primary = page.getByRole('navigation', { name: 'Primary' });
+    await primary.getByRole('button', { name: 'Work', exact: true }).click();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+
+    await page.locator('#bs-work-view-switch').getByRole('link', { name: 'Roadmap' }).click();
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+    await expect(page.locator('.lrow').first()).toBeVisible();
+    expect(errors).toEqual([]);
+
+    await primary.getByRole('button', { name: 'Home', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible();
+    await walkEveryScreen(page, errors);
+  });
+
+  test('desktop: Kanban -> Roadmap (sidebar) -> Home, then every screen', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const primary = page.getByRole('navigation', { name: 'Primary' });
+    await primary.getByRole('button', { name: 'Work', exact: true }).click();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+
+    await primary.getByRole('button', { name: 'Roadmap', exact: true }).click();
+    await expect(page.locator('.lrow').first()).toBeVisible();
+    expect(errors).toEqual([]);
+
+    await primary.getByRole('button', { name: 'Home', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible();
+    await walkEveryScreen(page, errors);
+  });
+
+  test('phone: View switched through the overflow menu, then Home and the rest', async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page
+      .getByRole('group', { name: 'View' })
+      .getByRole('menuitemradio', { name: 'Roadmap' })
+      .click();
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('button', { name: 'Home', exact: true })
+      .click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible();
+    await walkEveryScreen(page, errors);
+  });
+
+  test('resize: desktop Kanban -> phone width -> Roadmap -> desktop -> Home', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await page
+      .getByRole('group', { name: 'View' })
+      .getByRole('menuitemradio', { name: 'Roadmap' })
+      .click();
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('button', { name: 'Home', exact: true })
+      .click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible();
+    await walkEveryScreen(page, errors);
+  });
 });
