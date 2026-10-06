@@ -24,3 +24,14 @@ describe('kit/TimelineRow.vue fix round 2 item 4 (row height matches the mock .m
     );
   });
 });
+
+describe('kit/TimelineRow.vue phone tag order (status tag after title and kind tag)', () => {
+  it('puts the status class on the status Tag', () => {
+    expect(TIMELINE_ROW).toMatch(/<Tag v-if="statusTag"[^>]*class="bs-timeline-row__status"/);
+  });
+  it('orders it after the kind tag on phone', () => {
+    expect(PRIMITIVES).toMatch(
+      /@media \(max-width: 640px\) \{[^}]*\.bs-event-kind-tag \{\s*order: 2;[^@]*\.bs-timeline-row__head \.bs-timeline-row__status \{\s*order: 3;/s,
+    );
+  });
+});

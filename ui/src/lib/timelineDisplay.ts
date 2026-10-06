@@ -591,6 +591,10 @@ const GATE_FAILED: GateStatusTag = { tone: 'danger', label: 'Failed', icon: 'Cir
 
 export function gateStatusTag(entry: TimelineEntry): GateStatusTag | null {
   const p = entry.payload as Record<string, unknown>;
+  // A pass over zero items is not a verdict the row can stand behind; the
+  // meta already says "nothing to check". A failure is never hidden.
+  const counts = (entry as ActivityEntry).gateCounts;
+  if (counts && counts.failed === 0 && counts.passed === 0) return null;
   const boolTag = (v: unknown): GateStatusTag | null =>
     typeof v !== 'boolean' ? null : v ? GATE_PASSED : GATE_FAILED;
   switch (entry.eventType) {
@@ -683,6 +687,15 @@ export function titleFor(entry: TimelineEntry): string {
       return gateStatusTag(entry) && p.detail
         ? `Dependency check: ${String(p.detail)}`
         : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+    case 'budget-check-result': {
+      const overruns = Array.isArray(p.overruns) ? p.overruns : [];
+      if (p.status === 'checked') {
+        return overruns.length > 0 ? 'Budget check: over budget' : 'Budget check: within budget';
+      }
+      if (p.status === 'not-declared') return 'Budget check: no budget declared';
+      if (p.status === 'unmeasurable') return 'Budget check: could not measure';
+      return 'Budget check result';
+    }
     case 'testgate-result':
       return gateStatusTag(entry) ? 'Test gate' : 'Test gate: no verdict recorded';
     case 'gate-outcome': {
@@ -968,6 +981,17 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       const checkName = GATE_CHECK_NAME[entry.eventType] ?? entry.eventType;
       if (!titleFor(entry).toLowerCase().includes(checkName.toLowerCase())) parts.push(checkName);
       parts.push(gateCountsItem(entry.gateCounts));
+      if (entry.eventType === 'budget-check-result' && Array.isArray(p.overruns)) {
+        for (const o of p.overruns as Record<string, unknown>[]) {
+          if (!o || !Number.isFinite(o.measured) || !Number.isFinite(o.cap)) continue;
+          const measured = o.measured as number;
+          const cap = o.cap as number;
+          if (o.field === 'diff_lines') parts.push(`${measured} lines changed, cap ${cap}`);
+          else if (o.field === 'tokens') {
+            parts.push(`${formatCompactNumber(measured)} tokens, cap ${formatCompactNumber(cap)}`);
+          }
+        }
+      }
       if (p.round != null) parts.push(`round ${String(p.round)}`);
       break;
     }

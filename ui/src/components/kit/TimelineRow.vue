@@ -139,7 +139,7 @@ function onBecauseOf() {
     <div class="bs-timeline-row__body">
       <div class="bs-timeline-row__head">
         <EventKindTag :kind="kind" />
-        <Tag v-if="statusTag" :tone="statusTag.tone" variant="subtle" size="sm">
+        <Tag v-if="statusTag" :tone="statusTag.tone" variant="subtle" size="sm" class="bs-timeline-row__status">
           <Icon v-if="statusIcon" :icon="statusIcon" :size="14" />{{ statusTag.label }}
         </Tag>
         <button

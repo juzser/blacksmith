@@ -1737,3 +1737,73 @@ describe('gate row title and meta without repeats', () => {
     );
   });
 });
+
+describe('lib/timelineDisplay.ts empty gate checks carry no status tag', () => {
+  const withCounts = (eventType: string, payload: Record<string, unknown>, counts: unknown) => {
+    const e = entry({ eventType, payload });
+    (e as unknown as { gateCounts: unknown }).gateCounts = counts;
+    return gateStatusTag(e);
+  };
+  it('returns null when nothing was checked', () => {
+    expect(withCounts('artifact-check-result', { ok: true }, { passed: 0, failed: 0 })).toBeNull();
+    expect(withCounts('testgate-result', { pass: true }, { passed: 0, failed: 0 })).toBeNull();
+  });
+  it('still tags a non-empty pass and a schema check without counts', () => {
+    expect(withCounts('artifact-check-result', { ok: true }, { passed: 3, failed: 0 })).toEqual({
+      tone: 'done',
+      label: 'Passed',
+      icon: 'CircleCheck',
+    });
+    expect(withCounts('schema-check-result', { valid: true }, undefined)).toEqual({
+      tone: 'done',
+      label: 'Passed',
+      icon: 'CircleCheck',
+    });
+  });
+});
+
+describe('lib/timelineDisplay.ts budget-check-result title and meta', () => {
+  const budget = (payload: Record<string, unknown>) =>
+    entry({ eventType: 'budget-check-result', payload });
+  it('titles each status from the payload', () => {
+    expect(titleFor(budget({ status: 'checked', overruns: [] }))).toBe(
+      'Budget check: within budget',
+    );
+    expect(
+      titleFor(
+        budget({ status: 'checked', overruns: [{ field: 'diff_lines', cap: 480, measured: 543 }] }),
+      ),
+    ).toBe('Budget check: over budget');
+    expect(titleFor(budget({ status: 'not-declared' }))).toBe('Budget check: no budget declared');
+    expect(titleFor(budget({ status: 'unmeasurable' }))).toBe('Budget check: could not measure');
+  });
+  it('falls back for a missing or unknown status and never tags', () => {
+    expect(titleFor(budget({}))).toBe('Budget check result');
+    expect(titleFor(budget({ status: 'weird' }))).toBe('Budget check result');
+    expect(gateStatusTag(budget({ status: 'checked', overruns: [] }))).toBeNull();
+  });
+  it('lists one meta item per overrun from real numbers', () => {
+    const e = budget({
+      status: 'checked',
+      overruns: [
+        { field: 'diff_lines', cap: 480, measured: 543 },
+        { field: 'tokens', cap: 1_000_000, measured: 1_200_000 },
+      ],
+    });
+    expect(metaFor(e)).toBe('543 lines changed, cap 480 · 1.2M tokens, cap 1M');
+  });
+  it('skips a malformed overrun and prints nothing for none', () => {
+    expect(
+      metaFor(
+        budget({
+          status: 'checked',
+          overruns: [
+            { field: 'diff_lines', cap: 480 },
+            { field: 'diff_lines', cap: 'x', measured: 5 },
+          ],
+        }),
+      ),
+    ).toBe('');
+    expect(metaFor(budget({ status: 'checked', overruns: [] }))).toBe('');
+  });
+});
