@@ -39,15 +39,14 @@ import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { toggleExpanded } from '../lib/expandedRows.js';
 import { pluralize } from '../lib/format.js';
 import {
-  budgetDeltaSentence,
   budgetRingLabel,
-  budgetSummary,
+  budgetView,
+  cardShowsRing,
+  cardTokensText,
   decisionLine,
   outlierSentence,
   runningNowCards,
-  tokensOfBudget,
   trackJustFinished,
-  unmeasuredSentence,
 } from '../lib/homeView.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
 import { storeKey } from '../lib/storeKey.js';
@@ -127,8 +126,7 @@ usePoll(load, POLL_MS);
 
 const cards = computed(() => (overview.value ? runningNowCards(overview.value, project.value) : []));
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
-const budget = computed(() => (overview.value ? budgetSummary(overview.value.tokensByEpic) : null));
-const budgetDelta = computed(() => budgetDeltaSentence(overview.value?.budgetUsedPctPointDelta1h ?? null));
+const budget = computed(() => (overview.value ? budgetView(overview.value) : null));
 
 // Same causal-chain walk ActivityPage.vue uses for ctxFor(), scoped to this
 // page's own 8-row list rather than the whole feed.
@@ -247,14 +245,17 @@ function becauseOf(promptId: string) {
               <p class="bs-home__stat">{{ pluralize(c.epics.length, 'epic') }} in flight</p>
               <div class="bs-home__tokens">
                 <ProgressRing
-                  v-if="c.tokens.budget"
+                  v-if="c.tokens.budget && cardShowsRing(c.tokens)"
                   :value="c.tokens.spent"
                   :max="c.tokens.budget"
                   kind="budget"
                   :label="budgetRingLabel(c.tokens.spent, c.tokens.budget)"
                 />
-                <span>{{ tokensOfBudget(c.tokens) }}</span>
+                <span>{{ cardTokensText(c.tokens) }}</span>
               </div>
+              <p v-if="outlierSentence(c.tokens.outliers)" class="bs-home__quiet">
+                {{ outlierSentence(c.tokens.outliers) }}
+              </p>
             </div>
           </Card>
         </div>
@@ -296,23 +297,22 @@ function becauseOf(promptId: string) {
     <section class="bs-home__section" aria-labelledby="budget-heading">
       <h2 id="budget-heading" class="bs-section-title">Budget</h2>
       <Skeleton v-if="overview === null && !overviewFailed" :height="48" />
-      <template v-else-if="budget !== null">
+      <p v-else-if="budget?.kind === 'none'" class="bs-home__quiet">{{ budget.text }}</p>
+      <template v-else-if="budget?.kind === 'figures'">
         <div class="bs-home__tokens">
           <ProgressRing
-            v-if="budget.budget"
-            :value="budget.spent"
-            :max="budget.budget"
+            v-if="budget.ring"
+            :value="budget.ring.value"
+            :max="budget.ring.max"
             kind="budget"
-            :label="budgetRingLabel(budget.spent, budget.budget)"
+            :label="budget.ring.label"
           />
-          <span class="bs-home__stat">{{ tokensOfBudget(budget) }}</span>
+          <span class="bs-home__stat">{{ budget.tokensText }}</span>
         </div>
-        <p v-if="budgetDelta" class="bs-home__quiet">{{ budgetDelta }}</p>
-        <p v-if="unmeasuredSentence(budget.unmeasured)" class="bs-home__quiet">
-          {{ unmeasuredSentence(budget.unmeasured) }}
-        </p>
-        <p v-if="outlierSentence(budget.outliers.length)" class="bs-home__quiet">
-          {{ outlierSentence(budget.outliers.length) }}
+        <p v-if="budget.deltaSentence" class="bs-home__quiet">{{ budget.deltaSentence }}</p>
+        <p v-if="budget.unmeasuredSentence" class="bs-home__quiet">{{ budget.unmeasuredSentence }}</p>
+        <p v-if="budget.outlierSentence" class="bs-home__quiet">
+          {{ budget.outlierSentence }}
           <RouterLink to="/analytics">Details</RouterLink>.
         </p>
       </template>

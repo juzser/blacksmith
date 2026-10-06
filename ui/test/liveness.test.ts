@@ -48,6 +48,8 @@ function session(sessionId: string, lastEventAt: string): RunningSession {
     lastEventAt,
     eventCount: 12,
     lastEventType: 'dispatch_decision',
+    lastStepRole: null,
+    lastStepTask: null,
     liveAgentCount: 1,
     workingAgentCount: 1,
     projects: ['black-smith'],

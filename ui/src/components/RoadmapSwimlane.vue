@@ -24,6 +24,8 @@ const props = defineProps<{
   currentLane?: string | null;
   /** Names the scroll region when several swimlanes share the page. */
   project?: string;
+  /** Epic id -> "idle 18d", for the idle epics only. */
+  idleLabels: Record<string, string>;
 }>();
 
 // A mark centred on a tick near the right end overhangs the track by half its
@@ -96,6 +98,13 @@ const scrollLabel = computed(() =>
           >
             <span class="lhead">
               <span class="lname" :title="row.label">{{ row.label }}</span>
+              <Tag
+                v-if="row.kind === 'epic' && idleLabels[row.id]"
+                tone="neutral"
+                variant="outline"
+                size="sm"
+                >{{ idleLabels[row.id] }}</Tag
+              >
               <Tag v-if="row === group.head && row.id === currentLane" tone="progress" size="sm">Current</Tag>
             </span>
             <div class="track">

@@ -34,7 +34,9 @@ const NOT_MEASURED = 'not measured';
 
 function tokensItem(run: DispatchRun | undefined): string | null {
   if (!run) return null;
-  if (run.tokensIn == null && run.tokensOut == null) return NOT_MEASURED;
+  // No token numbers is not a failed measurement worth a label (ds-spec §4.3:
+  // "Only fields that exist are rendered"), so the item is left out.
+  if (run.tokensIn == null && run.tokensOut == null) return null;
   const total = (run.tokensIn ?? 0) + (run.tokensOut ?? 0);
   return `${formatCompactNumber(total)} tokens`;
 }
@@ -90,6 +92,7 @@ function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
   if (counts === undefined) return null;
   if (counts === null) return NOT_MEASURED;
   const total = counts.passed + counts.failed;
+  if (total === 0) return 'nothing to check';
   return counts.failed > 0
     ? `${counts.failed} of ${total} failed`
     : `${counts.passed} of ${total} passed`;
@@ -572,6 +575,51 @@ export function gateVerdict(entry: TimelineEntry): 'pass' | 'fail' | 'unrecorded
   return raw ? 'pass' : 'fail';
 }
 
+/** The Passed/Failed status `Tag` a gate row shows after its kind tag
+ * (ds-spec.md §4.3). `null` whenever the event recorded no verdict of its own:
+ * the tag never guesses a pass (D-169), and a type with no verdict field
+ * (budget, judges-outstanding, coverage, spec review, goal check, quorum,
+ * issue) has nothing to say. `icon` names a lucide icon for the row to map. */
+export interface GateStatusTag {
+  tone: 'done' | 'danger';
+  label: 'Passed' | 'Failed';
+  icon: 'CircleCheck' | 'CircleX';
+}
+
+const GATE_PASSED: GateStatusTag = { tone: 'done', label: 'Passed', icon: 'CircleCheck' };
+const GATE_FAILED: GateStatusTag = { tone: 'danger', label: 'Failed', icon: 'CircleX' };
+
+export function gateStatusTag(entry: TimelineEntry): GateStatusTag | null {
+  const p = entry.payload as Record<string, unknown>;
+  // A pass over zero items is not a verdict the row can stand behind; the
+  // meta already says "nothing to check". A failure is never hidden.
+  const counts = (entry as ActivityEntry).gateCounts;
+  if (counts && counts.failed === 0 && counts.passed === 0) return null;
+  const boolTag = (v: unknown): GateStatusTag | null =>
+    typeof v !== 'boolean' ? null : v ? GATE_PASSED : GATE_FAILED;
+  switch (entry.eventType) {
+    case 'artifact-check-result': {
+      const failed = (entry as ActivityEntry).gateCounts?.failed ?? 0;
+      return failed > 0 ? GATE_FAILED : boolTag(p.ok);
+    }
+    case 'commit-check-result':
+      return boolTag(p.certified);
+    case 'integration-check':
+      return boolTag(p.pass);
+    case 'grader-verdict':
+    case 'schema-check-result':
+    case 'deps-check-result':
+    case 'testgate-result':
+    case 'gate-outcome': {
+      const outcome = verdictOutcome(entry);
+      if (outcome === 'pass') return GATE_PASSED;
+      return outcome === 'fail' ? GATE_FAILED : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** D-169: the third word is the point — a row with no verdict says so. */
 const GATE_VERDICT_WORD: Record<'pass' | 'fail' | 'unrecorded', string> = {
   pass: 'passed',
@@ -623,16 +671,35 @@ export function titleFor(entry: TimelineEntry): string {
     }
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
-      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? `: ${reason}` : ''}`;
+      // Tier and provider are shown only when present: "(/)" says nothing.
+      const via = [p.model_tier, p.provider].filter(
+        (v) => v !== undefined && v !== null && v !== '',
+      );
+      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))}${via.length ? ` (${via.join('/')})` : ''}${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
-      return `Schema check: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return gateVerdict(entry) !== 'unrecorded'
+        ? 'Schema check'
+        : 'Schema check: no verdict recorded';
     case 'deps-check-result':
       // The detail is the whole point of this row: "passed" alone cannot
       // distinguish an installed worktree from one with nothing to install.
-      return `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+      // A recorded verdict is said by the status tag (or by the meta, for an
+      // empty check), so only a row with no verdict field spells that out.
+      return gateVerdict(entry) !== 'unrecorded' && p.detail
+        ? `Dependency check: ${String(p.detail)}`
+        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+    case 'budget-check-result': {
+      const overruns = Array.isArray(p.overruns) ? p.overruns : [];
+      if (p.status === 'checked') {
+        return overruns.length > 0 ? 'Budget check: over budget' : 'Budget check: within budget';
+      }
+      if (p.status === 'not-declared') return 'Budget check: no budget declared';
+      if (p.status === 'unmeasurable') return 'Budget check: could not measure';
+      return 'Budget check result';
+    }
     case 'testgate-result':
-      return `Test gate: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return gateVerdict(entry) !== 'unrecorded' ? 'Test gate' : 'Test gate: no verdict recorded';
     case 'gate-outcome': {
       // The outcome value itself when there is one — `blocked`,
       // `pass-with-waivers-pending` and the rest each mean something the word
@@ -640,7 +707,10 @@ export function titleFor(entry: TimelineEntry): string {
       // used to print as a dangling em dash and nothing after it.
       const verdict = gateVerdict(entry);
       if (verdict === 'unrecorded') return 'Gate outcome: no outcome recorded';
-      return `Gate outcome: ${String(p.outcome)}`;
+      // The tag already says a plain pass/fail.
+      return p.outcome === 'pass' || p.outcome === 'fail'
+        ? 'Gate outcome'
+        : `Gate outcome: ${String(p.outcome)}`;
     }
     case 'finding-raised': {
       // The payload is the finding itself (findings.ts raiseFinding), so a
@@ -878,9 +948,27 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'returned': {
-      parts.push(tokensItem(entry.run));
-      parts.push(durationItem(entry.run?.durationMs));
-      parts.push(entry.run?.runStatus == null ? NOT_MEASURED : String(entry.run.runStatus));
+      // The row's own `task-result-recorded` payload; `entry.run` is joined
+      // for Dispatched rows only, so it stays a fallback. Unmeasured items
+      // are left out. The title already names `run_status`, so the result
+      // shows here only when the payload lacks it and a run supplies one.
+      const usage = p.token_usage as Record<string, unknown> | null | undefined;
+      const inT = usage?.input_tokens;
+      const outT = usage?.output_tokens;
+      if (typeof inT === 'number' || typeof outT === 'number') {
+        const total = (typeof inT === 'number' ? inT : 0) + (typeof outT === 'number' ? outT : 0);
+        parts.push(`${formatCompactNumber(total)} tokens`);
+      } else if (typeof usage?.total_tokens === 'number') {
+        parts.push(`${formatCompactNumber(usage.total_tokens)} tokens`);
+      } else {
+        parts.push(tokensItem(entry.run));
+      }
+      parts.push(
+        durationItem(typeof p.duration_ms === 'number' ? p.duration_ms : entry.run?.durationMs),
+      );
+      if (p.run_status == null && entry.run?.runStatus != null) {
+        parts.push(String(entry.run.runStatus));
+      }
       break;
     }
     case 'finding': {
@@ -890,9 +978,22 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'gate': {
+      // Same rule as the role on a Dispatched row: what the title already
+      // names is not said again.
       const checkName = GATE_CHECK_NAME[entry.eventType] ?? entry.eventType;
-      parts.push(checkName);
+      if (!titleFor(entry).toLowerCase().includes(checkName.toLowerCase())) parts.push(checkName);
       parts.push(gateCountsItem(entry.gateCounts));
+      if (entry.eventType === 'budget-check-result' && Array.isArray(p.overruns)) {
+        for (const o of p.overruns as Record<string, unknown>[]) {
+          if (!o || !Number.isFinite(o.measured) || !Number.isFinite(o.cap)) continue;
+          const measured = o.measured as number;
+          const cap = o.cap as number;
+          if (o.field === 'diff_lines') parts.push(`${measured} lines changed, cap ${cap}`);
+          else if (o.field === 'tokens') {
+            parts.push(`${formatCompactNumber(measured)} tokens, cap ${formatCompactNumber(cap)}`);
+          }
+        }
+      }
       if (p.round != null) parts.push(`round ${String(p.round)}`);
       break;
     }

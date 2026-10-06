@@ -5,6 +5,7 @@
 // unit-tested without mounting AgentStatusBadge.vue.
 import type { SessionAgent } from './api.js';
 import { AGENT_STALE_AFTER_MS } from './liveness.js';
+import { roleLabel } from './roleLabels.js';
 import { titleFor } from './timelineDisplay.js';
 
 export type AgentStatusState = 'working' | 'no-result' | 'done' | 'failed' | 'stopped';
@@ -73,8 +74,17 @@ export function tokenDisplay(agent: SessionAgent): TokenDisplay {
  * with the detail blank, which is still a truthful "what kind of thing just
  * happened" one-liner.
  */
-export function lastStepLabel(lastEventType: string | null): string {
+export function lastStepLabel(
+  lastEventType: string | null,
+  dispatch: { role: string | null; task: string | null } = { role: null, task: null },
+): string {
   if (lastEventType === null) return 'No events yet';
+  // A dispatch's role and task are known to the sessions API, so the row can
+  // say who was sent where instead of a bare "Dispatched Agent".
+  if (lastEventType === 'dispatch_decision' && dispatch.role !== null) {
+    const who = `Dispatched ${roleLabel(dispatch.role)}`;
+    return dispatch.task ? `${who} · ${dispatch.task}` : who;
+  }
   return titleFor({
     eventId: '',
     ts: '',

@@ -13,6 +13,7 @@
 // options, so on phone they name the picker in `aria-controls`.
 import { computed } from 'vue';
 import { useViewport } from '../composables/useViewport.js';
+import { pickerSelection, withIdleLabels } from '../lib/epicPicker.js';
 import {
   disclosureLabel,
   laneOptions,
@@ -35,6 +36,8 @@ const props = defineProps<{
   /** The selection's lane is in this section, shown or hidden: open on phone. */
   hostsSelection: boolean;
   pickerLabel: string;
+  /** Epic id -> "idle 18d", for the idle epics only. */
+  idleLabels: Record<string, string>;
 }>();
 
 const emit = defineEmits<{
@@ -57,8 +60,11 @@ const pickerValue = computed(
   () => (props.section.kind === 'phase' ? props.selectedPhase : props.selectedEpic) ?? '',
 );
 const pickerOptions = computed(() => {
-  const options = laneOptions(view.value.regions, view.value.currentLane);
-  if (options.some((o) => o.value === pickerValue.value)) return options;
+  const options = withIdleLabels(
+    laneOptions(view.value.regions, view.value.currentLane),
+    props.idleLabels,
+  );
+  if (pickerSelection(pickerValue.value, options) !== '') return options;
   // The selection lives in another section (or nowhere): a placeholder, so
   // the select never silently shows a lane that is not selected.
   return [
@@ -66,6 +72,10 @@ const pickerOptions = computed(() => {
     ...options,
   ];
 });
+
+const effectivePickerValue = computed(() =>
+  pickerSelection(pickerValue.value, pickerOptions.value),
+);
 
 function onPick(value: string) {
   if (value === '') return;
@@ -123,6 +133,7 @@ const later = computed(() => disclosure('later'));
       :project="showHeading ? section.title : undefined"
       :selected-phase="selectedPhase"
       :selected-epic="selectedEpic"
+      :idle-labels="idleLabels"
       @select-phase="(id) => emit('selectPhase', id)"
       @select-epic="(id) => emit('selectEpic', id)"
     />
@@ -130,7 +141,7 @@ const later = computed(() => disclosure('later'));
       v-else-if="showPicker"
       :id="windowPickerId(section.project)"
       class="bs-roadmap-mobile__phase-select"
-      :model-value="pickerValue"
+      :model-value="effectivePickerValue"
       :options="pickerOptions"
       :aria-label="pickerLabel"
       @update:model-value="onPick"

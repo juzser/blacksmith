@@ -370,7 +370,7 @@ describe('db/queries.ts', () => {
       const budget = openDb(dbPath);
       try {
         expect(
-          overview(budget.db, {}, { nowIso: '2031-01-01T00:00:00.000Z' }).budgetUsedPctPointDelta1h,
+          overview(budget.db, {}, { nowIso: '2030-01-01T02:00:00.000Z' }).budgetUsedPctPointDelta1h,
         ).toBe(0);
       } finally {
         budget.sqlite.close();
@@ -404,7 +404,7 @@ describe('db/queries.ts', () => {
       const budgetPlaceholder = openDb(dbPath);
       try {
         expect(
-          overview(budgetPlaceholder.db, {}, { nowIso: '2031-01-01T00:00:00.000Z' })
+          overview(budgetPlaceholder.db, {}, { nowIso: '2030-01-01T02:00:00.000Z' })
             .budgetUsedPctPointDelta1h,
         ).toBe(0);
       } finally {

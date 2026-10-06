@@ -6,7 +6,7 @@
 // chevron whose open state is sessionStorage-persisted by the caller (see
 // expandedRows.ts), not owned here, so "Expand all" can flip every row's
 // state from one place.
-import { ChevronDown, ChevronRight } from '@lucide/vue';
+import { ChevronDown, ChevronRight, CircleCheck, CircleX } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { formatTime } from '../../lib/format.js';
 // DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
@@ -15,12 +15,14 @@ import { formatTime } from '../../lib/format.js';
 import type { KitTone } from '../../lib/taxonomy.js';
 import {
   type ActivityEntry,
+  gateStatusTag,
   kindFor,
   type MetaContext,
   metaFor,
   titleFor,
 } from '../../lib/timelineDisplay.js';
 import EventKindTag from './EventKindTag.vue';
+import Icon from './Icon.vue';
 import IconButton from './IconButton.vue';
 import RelativeTime from './RelativeTime.vue';
 import Tag from './Tag.vue';
@@ -63,6 +65,16 @@ const emit = defineEmits<{
 }>();
 
 const kind = computed(() => kindFor(props.entry));
+// The rail's explicit `tag` wins; otherwise a gate row shows its own
+// Passed/Failed tag (ds-spec.md §4.3), never on the rail (its rows are runs).
+const STATUS_ICON = { CircleCheck, CircleX };
+const gateTag = computed(() =>
+  kind.value === 'gate' && props.variant !== 'rail' ? gateStatusTag(props.entry) : null,
+);
+const statusTag = computed(() => props.tag ?? gateTag.value);
+const statusIcon = computed(() =>
+  !props.tag && gateTag.value ? STATUS_ICON[gateTag.value.icon] : null,
+);
 const title = computed(() => props.titleOverride ?? titleFor(props.entry));
 
 // "Running for N s" ticks live while a Dispatched row has no run result yet
@@ -96,7 +108,10 @@ const hasPromptLink = computed(
 // ds-spec.md §4.3: "A kind with no useful stats (System: 'Session … started')
 // has no meta line and no chevron." metaFor() returns '' for exactly that
 // case, so an empty meta is also the signal that there is nothing to expand.
-const hasDetails = computed(() => meta.value !== '');
+// A gate row whose meta de-duplicated away still has Task/Session to expand.
+const hasDetails = computed(
+  () => meta.value !== '' || (kind.value === 'gate' && props.variant !== 'rail'),
+);
 
 // Deep-links into SessionsPage's own `?session=<id>` marker
 // (sessionsSelection.ts) when the entry carries one; a plain string route
@@ -124,7 +139,9 @@ function onBecauseOf() {
     <div class="bs-timeline-row__body">
       <div class="bs-timeline-row__head">
         <EventKindTag :kind="kind" />
-        <Tag v-if="tag" :tone="tag.tone" variant="subtle" size="sm">{{ tag.label }}</Tag>
+        <Tag v-if="statusTag" :tone="statusTag.tone" variant="subtle" size="sm" class="bs-timeline-row__status">
+          <Icon v-if="statusIcon" :icon="statusIcon" :size="14" />{{ statusTag.label }}
+        </Tag>
         <button
           v-if="entry.taskId && linkable"
           type="button"
@@ -136,7 +153,7 @@ function onBecauseOf() {
         <span v-else class="bs-timeline-row__title">{{ title }}</span>
       </div>
       <div v-if="hasDetails" class="bs-timeline-row__meta">
-        <span>{{ meta }}</span>
+        <span v-if="meta">{{ meta }}</span>
         <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
           because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
         </button>
@@ -164,8 +181,10 @@ function onBecauseOf() {
         <dd>{{ kind }}</dd>
         <dt>Title</dt>
         <dd>{{ title }}</dd>
-        <dt>Meta</dt>
-        <dd>{{ meta }}</dd>
+        <template v-if="meta">
+          <dt>Meta</dt>
+          <dd>{{ meta }}</dd>
+        </template>
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
              on TaskDetailPage): a "Task" row here would only ever read 'not
              measured', since TaskRun carries no taskId. -->

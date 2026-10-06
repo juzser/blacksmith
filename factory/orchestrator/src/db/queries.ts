@@ -390,6 +390,10 @@ export interface RunningSession {
   workingAgentCount: number;
   /** The most recent event's type — what this session just did. Null if its events are gone. */
   lastEventType: string | null;
+  /** The agent role of the last event when it is a dispatch, else null. */
+  lastStepRole: string | null;
+  /** The dispatched task's title (its id when untitled) when the last event is a dispatch, else null. */
+  lastStepTask: string | null;
   /**
    * Projects this session worked on, sorted. `sessions` has no project
    * column of its own (schema.ts), so membership is derived (sessionProjects):
@@ -557,6 +561,12 @@ export interface ClosedEpic {
   closedAt: string;
 }
 
+export interface IdleEpic {
+  epicId: string;
+  /** Whole days since the epic's last activity, rounded down. */
+  idleDays: number;
+}
+
 export interface ProjectOverviewSummary {
   project: string;
   liveAgentCount: number;
@@ -565,10 +575,14 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
   epicsActivelyRunning: string[];
+  /** In-flight epics idle for more than EPIC_IDLE_DAYS — see epicLastActivity(). */
+  epicsIdle: IdleEpic[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
   unmeasured: number;
+  /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
+  tokensByEpic: EpicTokenSpend[];
   alerts: { escalations: number; pendingWaivers: number };
 }
 
@@ -601,6 +615,8 @@ export interface OverviewResult {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
   epicsActivelyRunning: string[];
+  /** In-flight epics idle for more than EPIC_IDLE_DAYS — see epicLastActivity(). */
+  epicsIdle: IdleEpic[];
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -790,6 +806,17 @@ function epicTokenMaps(
   }
 
   return { budgetByEpic, spentByEpic, unmeasuredByEpic };
+}
+
+function epicTokenSpends(maps: ReturnType<typeof epicTokenMaps>): EpicTokenSpend[] {
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = maps;
+  const epicIds = new Set([...budgetByEpic.keys(), ...spentByEpic.keys()]);
+  return [...epicIds].sort().map((epicId) => ({
+    epicId,
+    tokensSpent: spentByEpic.get(epicId) ?? 0,
+    tokensBudget: budgetByEpic.get(epicId) ?? null,
+    unmeasured: unmeasuredByEpic.get(epicId) ?? 0,
+  }));
 }
 
 /**
@@ -1346,10 +1373,14 @@ export function runningSessions(
   // back in ts order, so the latest row is chosen by comparison rather than by
   // trusting scan order — and isLaterEvent settles a tie on ts the same way
   // pulse() does, which is what lets the two agree about one session.
-  const lastEvent = new Map<string, { ts: string; eventType: string; eventId: string }>();
+  const lastEvent = new Map<
+    string,
+    { ts: string; eventType: string; eventId: string; taskId: string | null }
+  >();
   const eventQuery = db
     .select({
       sessionId: eventsRaw.sessionId,
+      taskId: eventsRaw.taskId,
       ts: eventsRaw.ts,
       eventType: eventsRaw.eventType,
       eventId: eventsRaw.eventId,
@@ -1361,6 +1392,42 @@ export function runningSessions(
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
 
+  // A dispatch's role lives in its payload and its task's title in `tasks`;
+  // both are read only for the sessions whose last event is a dispatch.
+  const dispatchIds = [...lastEvent.values()]
+    .filter((e) => e.eventType === 'dispatch_decision')
+    .map((e) => e.eventId);
+  const roleByEvent = new Map<string, string>();
+  const titleByTask = new Map<string, string | null>();
+  if (dispatchIds.length > 0) {
+    for (const r of db
+      .select({ eventId: eventsRaw.eventId, payload: eventsRaw.payload })
+      .from(eventsRaw)
+      .where(inArray(eventsRaw.eventId, dispatchIds))
+      .all()) {
+      const role = (JSON.parse(r.payload) as { agent_role?: unknown }).agent_role;
+      if (typeof role === 'string') roleByEvent.set(r.eventId, role);
+    }
+    const taskIds = [...lastEvent.values()].flatMap((e) => (e.taskId ? [e.taskId] : []));
+    if (taskIds.length > 0) {
+      for (const t of db
+        .select({ taskId: tasks.taskId, title: tasks.title })
+        .from(tasks)
+        .where(inArray(tasks.taskId, taskIds))
+        .all()) {
+        titleByTask.set(t.taskId, t.title);
+      }
+    }
+  }
+  const lastStep = (sessionId: string) => {
+    const e = lastEvent.get(sessionId);
+    if (e?.eventType !== 'dispatch_decision') return { role: null, task: null };
+    return {
+      role: roleByEvent.get(e.eventId) ?? null,
+      task: (e.taskId && (titleByTask.get(e.taskId) || e.taskId)) || null,
+    };
+  };
+
   return (
     rows
       .map((s) => ({
@@ -1371,6 +1438,8 @@ export function runningSessions(
         liveAgentCount: liveBySession.get(s.sessionId) ?? 0,
         workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
+        lastStepRole: lastStep(s.sessionId).role,
+        lastStepTask: lastStep(s.sessionId).task,
         projects: [...(projectsBySession.get(s.sessionId) ?? [])].sort(),
         title: titles.get(s.sessionId) ?? null,
       }))
@@ -1532,17 +1601,129 @@ function inFlightEpics(
 function activeEpics(
   taskRows: readonly { epicId: string | null; taskStatus: string }[],
   closed: readonly ClosedEpic[],
+  idle: readonly IdleEpic[],
 ): string[] {
   const closedIds = new Set(closed.map((e) => e.epicId));
+  const idleIds = new Set(idle.map((e) => e.epicId));
   return [
     ...new Set(
       taskRows
         .filter(
-          (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
+          (t) =>
+            t.epicId &&
+            !TERMINAL_TASK_STATUSES.has(t.taskStatus) &&
+            !closedIds.has(t.epicId) &&
+            !idleIds.has(t.epicId),
         )
         .map((t) => t.epicId as string),
     ),
   ].sort();
+}
+
+/** An epic with no activity for longer than this is idle (7 x 24 h; exactly 7 days is not). */
+const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** One group of `events_raw` rows: the newest `ts` per (task id, payload epic id, project). */
+interface ActivityRow {
+  taskId: string | null;
+  payloadEpic: string | null;
+  /** The event's project, `projectOf()`-normalised. */
+  project: string;
+  last: string;
+}
+
+/**
+ * The newest event per (task id, payload `epic_id`, project), session-scoped. Read once
+ * per `overview()` and shared with every per-project summary, so a dashboard
+ * poll scans `events_raw` once rather than once per project plus once overall.
+ * Rows without a task id are kept: goal-check, spec-review and plan-amend
+ * events carry only the payload's `epic_id`.
+ */
+function epicActivityRows(db: SmithDb, scope: Scope): ActivityRow[] {
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  // json_valid() first: json_extract() throws on a non-JSON payload, and one
+  // bad row must not fail the whole overview.
+  const payloadEpic = sql<
+    string | null
+  >`CASE WHEN json_valid(${eventsRaw.payload}) THEN json_extract(${eventsRaw.payload}, '$.epic_id') END`;
+  const query = db
+    .select({
+      taskId: eventsRaw.taskId,
+      payloadEpic,
+      project: eventsRaw.project,
+      last: max(eventsRaw.ts),
+    })
+    .from(eventsRaw);
+  const rows = (sessionCond ? query.where(sessionCond) : query)
+    .groupBy(eventsRaw.taskId, payloadEpic, eventsRaw.project)
+    .all();
+  return rows.flatMap((r) =>
+    r.last === null
+      ? []
+      : [
+          {
+            taskId: r.taskId,
+            payloadEpic: typeof r.payloadEpic === 'string' ? r.payloadEpic : null,
+            project: projectOf(r.project),
+            last: r.last,
+          },
+        ],
+  );
+}
+
+/**
+ * The in-flight epics nothing has happened to for more than 7 days before
+ * `nowIso`. An epic's last activity is the newest of its tasks' `updatedAt`
+ * and the `ts` of the newest event that belongs to it: `updatedAt` only moves
+ * when the projector touches the row, so a finding, a judge report or a gate
+ * result logged against a task would otherwise read as silence. An event
+ * belongs to an epic by, in order: its payload `epic_id` (the key the
+ * projector itself trusts, and the only one a task-less event has); the task
+ * id through `epicResolver`, so a bare task id lands on its epic as in the
+ * spend figures; the `<epic>/` prefix of a task id no task row carries, which
+ * is how a plan ref (`<epic>/plan-rN`, `<epic>/spec-review-rN`) names its
+ * epic. Timestamps compare as instants, not strings. An idle epic stays in
+ * `inFlightEpics()` (it is still pickable) and only leaves `activeEpics()`.
+ * With `project` set, only that project's events count (an unset one spans all).
+ */
+function idleEpics(
+  taskRows: readonly (typeof tasks.$inferSelect)[],
+  activity: readonly ActivityRow[],
+  inFlight: readonly string[],
+  nowIso: string,
+  project?: string,
+): IdleEpic[] {
+  const lastByEpic = new Map<string, number>();
+  const bump = (epicId: string | undefined, ts: string) => {
+    if (epicId === undefined) return;
+    const ms = Date.parse(ts);
+    if (Number.isNaN(ms)) return;
+    const seen = lastByEpic.get(epicId);
+    if (seen === undefined || ms > seen) lastByEpic.set(epicId, ms);
+  };
+  const epicByTask = new Map<string, string>();
+  for (const t of taskRows) {
+    if (!t.epicId) continue;
+    epicByTask.set(t.taskId, t.epicId);
+    bump(t.epicId, t.updatedAt);
+  }
+  const epicOf = epicResolver(epicByTask);
+  for (const r of activity) {
+    if (project !== undefined && r.project !== project) continue;
+    const slash = r.taskId?.lastIndexOf('/') ?? -1;
+    const prefix = r.taskId && slash > 0 ? r.taskId.slice(0, slash) : undefined;
+    bump(r.payloadEpic ?? epicOf(r.taskId ?? undefined) ?? prefix, r.last);
+  }
+  const now = Date.parse(nowIso);
+  const idle: IdleEpic[] = [];
+  for (const epicId of inFlight) {
+    const lastMs = lastByEpic.get(epicId);
+    if (lastMs === undefined) continue;
+    const idleMs = now - lastMs;
+    if (idleMs > EPIC_IDLE_MS)
+      idle.push({ epicId, idleDays: Math.floor(idleMs / (24 * 60 * 60 * 1000)) });
+  }
+  return idle;
 }
 
 /**
@@ -1748,14 +1929,17 @@ function projectSummary(
   project: string,
   baseScope: Scope,
   nowIso: string,
+  activity: readonly ActivityRow[],
 ): ProjectOverviewSummary {
   const scope: Scope = { ...baseScope, project };
   const liveRows = allAgentsForScope(db, scope);
   const taskRows = allTasksForScope(db, scope);
   const closedEpicsHere = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere);
-  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, project);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
+  const tokenMaps = epicTokenMaps(db, scope, taskRows);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
@@ -1773,9 +1957,11 @@ function projectSummary(
     workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
     epicsInFlight,
     epicsActivelyRunning,
+    epicsIdle,
     tokensSpent,
     tokensBudget,
     unmeasured,
+    tokensByEpic: epicTokenSpends(tokenMaps),
     alerts: { escalations, pendingWaivers },
   };
 }
@@ -1973,17 +2159,13 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpics);
+  const activity = epicActivityRows(db, scope);
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
-  const epicIds = new Set([...budgetByEpic.keys(), ...spentByEpic.keys()]);
-  const tokensByEpic: EpicTokenSpend[] = [...epicIds].sort().map((epicId) => ({
-    epicId,
-    tokensSpent: spentByEpic.get(epicId) ?? 0,
-    tokensBudget: budgetByEpic.get(epicId) ?? null,
-    unmeasured: unmeasuredByEpic.get(epicId) ?? 0,
-  }));
+  const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
 
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
 
@@ -2053,7 +2235,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     // filters them by one, so they join the list under a session scope too.
     const declaredRows = db.select({ project: milestones.project }).from(milestones).all();
     projects = distinctProjects(allTaskRowsUnfiltered, declaredRows).map((p) =>
-      projectSummary(db, p, scope, nowIso),
+      projectSummary(db, p, scope, nowIso, activity),
     );
   }
 
@@ -2062,11 +2244,21 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const liveAgentCountDelta5m = liveRows.length - liveAgentCountAt(db, scope, fiveMinAgo);
   const workingAgentCountDelta5m = workingRows.length - workingAgentCountAt(db, scope, fiveMinAgo);
 
+  // The Budget panel counts the epics the Running-now cards count, so its
+  // 1-hour delta is folded over the same set: running epics that declare a
+  // budget (an unbudgeted epic adds to neither side of the card's ratio).
+  const runningBudgeted = new Set(epicsActivelyRunning.filter((e) => budgetByEpic.has(e)));
   const epicByTask = new Map(
-    taskRows.filter((t) => t.epicId !== null).map((t) => [t.taskId, t.epicId as string]),
+    taskRows
+      .filter((t) => t.epicId !== null && runningBudgeted.has(t.epicId))
+      .map((t) => [t.taskId, t.epicId as string]),
   );
-  const totalBudgetNow = [...budgetByEpic.values()].reduce((s, v) => s + v, 0);
-  const totalSpentNow = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
+  const totalBudgetNow = [...budgetByEpic]
+    .filter(([e]) => runningBudgeted.has(e))
+    .reduce((s, [, v]) => s + v, 0);
+  const totalSpentNow = [...spentByEpic]
+    .filter(([e]) => runningBudgeted.has(e))
+    .reduce((s, [, v]) => s + v, 0);
   let budgetUsedPctPointDelta1h: number | null = null;
   if (totalBudgetNow > 0) {
     const currentPct = (totalSpentNow / totalBudgetNow) * 100;
@@ -2102,6 +2294,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     runningSessions: runningSessions(db, scope, { nowIso }),
     epicsInFlight,
     epicsActivelyRunning,
+    epicsIdle,
     closedEpics,
     tokensByEpic,
     alerts: { escalations, pendingWaivers },
@@ -2698,6 +2891,12 @@ function joinSessionTitles(db: SmithDb, page: TimelineEntry[]): void {
  * above): one `agents` query keyed on the page's own dispatch event ids,
  * then one `eventsRaw` query for the terminal `task_run_result` rows those
  * `agents` rows name, rather than one query per row.
+ *
+ * `runStatus` is the task-result payload's `run_status` when present, else the
+ * agent's own `status` once it is no longer `live` (done / superseded / error /
+ * abandoned, so steps ended by judge-reported, error-logged, epic-closed etc.
+ * read as finished), else null (truly live). Tokens and duration still come
+ * only from a task-result payload.
  */
 function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
   const dispatchIds = page.filter((e) => e.kind === 'Dispatched').map((e) => e.eventId);
@@ -2741,7 +2940,11 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
       tokensOut: typeof usage?.output_tokens === 'number' ? usage.output_tokens : null,
       durationMs: durationMsFromPayload(resultPayload ?? {}),
       runStatus:
-        typeof resultPayload?.run_status === 'string' ? (resultPayload.run_status as string) : null,
+        typeof resultPayload?.run_status === 'string'
+          ? (resultPayload.run_status as string)
+          : agent.status !== 'live'
+            ? agent.status
+            : null,
       dispatchedAt: agent.dispatchedAt,
       round: agent.round,
     };
@@ -2750,17 +2953,36 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
 
 /**
  * DS6 PR2 (§4.3 table) — normalised `{passed, failed}` counts for every
- * `Gate` entry in `page`, from `testgate-result.results` (or
- * `gate-outcome.results`, if a future writer adds one); `null` when the
- * payload carries no derivable `results` array. Pure over already-fetched
- * payloads, so no extra query is needed.
+ * `Gate` entry in `page`, from `testgate-result.results` (or an artifact check's `checked`/`issues`, or
+ * `gate-outcome.results`, if a future writer adds one). `null` ("not
+ * measured") only where counts are expected and missing: an artifact check
+ * with neither field, or a `testgate-result` with no `results` array. Every
+ * other check type without a `results` array never carries counts, so its
+ * `gateCounts` stays unset and the UI leaves the item out. Pure over
+ * already-fetched payloads, so no extra query is needed.
  */
 function joinGateCounts(page: TimelineEntry[]): void {
   for (const entry of page) {
     if (entry.kind !== 'Gate') continue;
+    if (entry.eventType === 'artifact-check-result') {
+      // Not a results array: { ok, checked, issues }.
+      const { ok, checked, issues } = entry.payload as {
+        ok?: unknown;
+        checked?: unknown;
+        issues?: unknown;
+      };
+      if (typeof checked !== 'number' && !Array.isArray(issues)) {
+        entry.gateCounts = null;
+        continue;
+      }
+      const failed = Math.max(Array.isArray(issues) ? issues.length : 0, ok === false ? 1 : 0);
+      const total = typeof checked === 'number' ? checked : 0;
+      entry.gateCounts = { passed: Math.max(0, total - failed), failed };
+      continue;
+    }
     const results = entry.payload.results;
     if (!Array.isArray(results)) {
-      entry.gateCounts = null;
+      if (entry.eventType === 'testgate-result') entry.gateCounts = null;
       continue;
     }
     let passed = 0;

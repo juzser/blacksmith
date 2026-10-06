@@ -9,8 +9,24 @@ import {
   ALL_EPICS,
   EPIC_LIST_UNAVAILABLE,
   epicOptions,
+  idleLabel,
+  idleLabelsById,
+  pickerSelection,
   retainedEpic,
+  withIdleLabels,
 } from '../src/lib/epicPicker.js';
+
+describe('lib/epicPicker.ts — idle epics', () => {
+  it('words the idle label as whole days', () => {
+    expect(idleLabel(18)).toBe('idle 18d');
+  });
+
+  it('suffixes an idle epic option, and only that one, keeping its value', () => {
+    const options = epicOptions(['epic-1', 'epic-2'], [{ epicId: 'epic-2', idleDays: 18 }]);
+    expect(options[1]).toEqual({ value: 'epic-1', label: 'epic-1' });
+    expect(options[2]).toEqual({ value: 'epic-2', label: 'epic-2 · idle 18d' });
+  });
+});
 
 describe('lib/epicPicker.ts — epicOptions', () => {
   it('offers the all-epics escape hatch first, so a picker is never empty', () => {
@@ -91,4 +107,60 @@ describe('the epic-picker pages source their control and their fetch guard from 
       expect(src).not.toContain(EPIC_LIST_UNAVAILABLE);
     });
   }
+});
+
+describe('idle labels on lists that are not the picker', () => {
+  it('maps only idle epics to their label', () => {
+    const labels = idleLabelsById([{ epicId: 'epic-a', idleDays: 18 }]);
+    expect(labels).toEqual({ 'epic-a': 'idle 18d' });
+    expect(labels['epic-b']).toBeUndefined();
+  });
+
+  it('appends the label to an idle epic option and keeps every other option as it was', () => {
+    const labels = idleLabelsById([{ epicId: 'epic-a', idleDays: 18 }]);
+    const options = [
+      { value: '', label: 'Pick an epic' },
+      { value: 'epic-a', label: 'epic-a' },
+      { value: 'epic-b', label: 'epic-b' },
+    ];
+    expect(withIdleLabels(options, labels)).toEqual([
+      { value: '', label: 'Pick an epic' },
+      { value: 'epic-a', label: 'epic-a · idle 18d' },
+      { value: 'epic-b', label: 'epic-b' },
+    ]);
+  });
+
+  it('does not read an inherited property as a label', () => {
+    expect(withIdleLabels([{ value: 'constructor', label: 'constructor' }], {})).toEqual([
+      { value: 'constructor', label: 'constructor' },
+    ]);
+  });
+});
+
+describe('pickerSelection()', () => {
+  const options = [{ value: 'epic-a', label: 'epic-a' }];
+
+  it('keeps a selection that is among the options', () => {
+    expect(pickerSelection('epic-a', options)).toBe('epic-a');
+  });
+
+  it('falls back to the placeholder value when the selection belongs to another section', () => {
+    expect(pickerSelection('epic-z', options)).toBe('');
+  });
+});
+
+describe('RoadmapProjectSection.vue picker value', () => {
+  it('passes the effective selection, not the page-wide one, to the select', () => {
+    const sfc = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'src',
+        'components',
+        'RoadmapProjectSection.vue',
+      ),
+      'utf8',
+    );
+    expect(sfc).toMatch(/:model-value="effectivePickerValue"/);
+  });
 });

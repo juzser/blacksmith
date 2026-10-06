@@ -257,3 +257,24 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     await expect(roadmapChild).toHaveAttribute('aria-current', 'page');
   });
 });
+
+test.describe('Unknown URL', () => {
+  for (const [label, size] of [
+    ['desktop', { width: 1280, height: 800 }],
+    ['phone', { width: 375, height: 812 }],
+  ] as const) {
+    test(`${label}: shows the crumb once, one sr-only heading, a body message and a link home`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await page.goto('/no-such-page');
+      await expect(page.locator('#main').getByText('Nothing at this address')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toHaveCount(1);
+      await expect(
+        page.getByRole('banner').getByText('Page not found', { exact: true }),
+      ).toHaveCount(1);
+      await page.getByRole('link', { name: 'Go to Home' }).click();
+      await expect(page).toHaveURL(/\/overview/);
+    });
+  }
+});

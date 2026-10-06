@@ -119,4 +119,14 @@ describe('lastStepLabel', () => {
   it('runs a known event type through titleFor, with no payload to read from', () => {
     expect(lastStepLabel('user_prompt')).toBe('');
   });
+
+  it('names the role and the task for a dispatch, with no tier/provider', () => {
+    const label = lastStepLabel('dispatch_decision', { role: 'coder', task: 'Fix the thing' });
+    expect(label).toBe('Dispatched Builder · Fix the thing');
+    expect(label).not.toContain('(/)');
+  });
+
+  it('never prints "(/)" for a dispatch the API gave no detail for', () => {
+    expect(lastStepLabel('dispatch_decision')).not.toMatch(/\(\/\)|\/\)/);
+  });
 });

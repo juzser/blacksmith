@@ -27,6 +27,7 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
     runningSessions: [],
     epicsInFlight,
     epicsActivelyRunning: epicsInFlight,
+    epicsIdle: [],
     closedEpics,
     tokensByEpic: [],
     alerts: { escalations: 0, pendingWaivers: 0 },
@@ -39,6 +40,24 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
 }
 
 describe('lib/api.ts — selectableEpics (D-43/P9-27)', () => {
+  it('lists running epics before idle ones, each in overview order, then closed', () => {
+    const ov = overview(
+      ['epic-idle-1', 'epic-run', 'epic-idle-2', 'epic-run-2'],
+      [closed('epic-done', '2026-08-07T00:00:00.000Z')],
+    );
+    ov.epicsIdle = [
+      { epicId: 'epic-idle-1', idleDays: 18 },
+      { epicId: 'epic-idle-2', idleDays: 21 },
+    ];
+    expect(selectableEpics(ov)).toEqual([
+      'epic-run',
+      'epic-run-2',
+      'epic-idle-1',
+      'epic-idle-2',
+      'epic-done',
+    ]);
+  });
+
   it('keeps a closed epic selectable, after the ones still in flight', () => {
     const ov = overview(['epic-b', 'epic-a'], [closed('epic-done', '2026-08-07T00:00:00.000Z')]);
     expect(selectableEpics(ov)).toEqual(['epic-b', 'epic-a', 'epic-done']);

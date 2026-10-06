@@ -107,6 +107,13 @@ const routes: RouteRecordRaw[] = [
       crumb: (r) => [{ label: 'Work', to: '/work/kanban' }, { label: String(r.params.taskId) }],
     },
   },
+  // Last: anything no route above claims renders a page instead of an empty shell.
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('./pages/NotFoundPage.vue'),
+    meta: { crumb: () => [{ label: 'Page not found' }] },
+  },
 ];
 
 const router = createRouter({

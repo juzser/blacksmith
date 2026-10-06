@@ -57,6 +57,27 @@ describe('timeline() run + gate join (DS6 PR2)', () => {
     expect(dispatch?.run?.dispatchedAt).toBe(dispatch?.ts);
   });
 
+  describe.each([
+    ['ended by judge-reported (no task-result)', 'done', 'judge-reported', 'done'],
+    ['superseded', 'superseded', null, 'superseded'],
+    ['ended by error-logged', 'error', 'error-logged', 'error'],
+  ])('a Dispatched row whose agent is %s', (_label, agentStatus, terminalType, expected) => {
+    it(`reads runStatus ${expected} with tokens null`, async () => {
+      await openFixture();
+      const before = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_4 });
+      const dispatch = before.find((e) => e.eventType === 'dispatch_decision');
+      expect(dispatch?.run?.runStatus).toBeNull();
+      handle.sqlite
+        .prepare('UPDATE agents SET status = ?, terminal_type = ? WHERE id = ?')
+        .run(agentStatus, terminalType, dispatch?.eventId);
+      const after = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_4 });
+      const run = after.find((e) => e.eventType === 'dispatch_decision')?.run;
+      expect(run?.runStatus).toBe(expected);
+      expect(run?.tokensIn).toBeNull();
+      expect(run?.tokensOut).toBeNull();
+    });
+  });
+
   it('non-Dispatched rows carry no run field at all', async () => {
     await openFixture();
     const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_1 });
@@ -87,12 +108,12 @@ describe('timeline() run + gate join (DS6 PR2)', () => {
     expect(gateRow?.gateCounts).toEqual({ passed: 0, failed: 0 });
   });
 
-  it('a Gate row whose payload carries no results array gets null gateCounts', async () => {
+  it('a Gate row whose payload carries no results array leaves gateCounts unset', async () => {
     await openFixture();
     const entries = timeline(handle.db, { sessionId: SESSION_ID, epicId: EPIC_ID });
     const outcomeRow = entries.find((e) => e.eventType === 'gate-outcome');
     expect(outcomeRow).toBeDefined();
-    expect(outcomeRow?.gateCounts).toBeNull();
+    expect(outcomeRow?.gateCounts).toBeUndefined();
   });
 
   it('non-Gate rows carry no gateCounts field at all', async () => {
