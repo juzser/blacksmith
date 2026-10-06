@@ -229,7 +229,7 @@ function becauseOf(promptId: string) {
     <Banner v-if="overviewFailed" show-retry @retry="loadOverview">Could not load Home.</Banner>
 
     <section class="bs-home__section" aria-labelledby="running-heading">
-      <div class="bs-home__section-head">
+      <div class="bs-home__section-head bs-home__section-head--flush">
         <h2 id="running-heading" class="bs-section-title">Running now</h2>
         <ActivityScopeToggle />
       </div>
@@ -276,8 +276,9 @@ function becauseOf(promptId: string) {
           </Card>
         </div>
         <p v-if="hiddenQuietCount > 0" class="bs-home__quiet bs-home__quiet-line">
-          {{ pluralize(hiddenQuietCount, 'quiet project') }} ·
-          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+          <template v-if="project !== undefined">{{ project }} is quiet · </template>
+          <template v-else>{{ pluralize(hiddenQuietCount, 'quiet project') }} · </template>
+          <RouterLink :to="scopeTo('all')">{{ project !== undefined ? 'Show it' : 'Show all' }}</RouterLink>
         </p>
         <div v-if="justFinished.length > 0" class="bs-home__finished">
           <h3 class="bs-home__subhead">Just finished</h3>

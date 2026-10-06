@@ -521,6 +521,15 @@ test.describe('Sessions', () => {
     }
   });
 
+  test('phone: the quiet line "Show all" link is a 44px target', async ({ page }) => {
+    await serveScope(page);
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions');
+    const box = await page.getByRole('link', { name: 'Show all' }).boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+  });
+
   // The 5 badge labels (ds-spec.md §4.6 pattern 13, operator Q2), each from
   // its own agent row. A badge mapping that collapsed any two of these to
   // the same label, or dropped the "No result after 4h" anomaly case,

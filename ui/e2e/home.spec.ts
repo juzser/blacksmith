@@ -374,6 +374,46 @@ test.describe('Home: Running now scope', () => {
     await expect(page.getByText('1 quiet project · Show all')).toBeVisible();
   });
 
+  test('a selected quiet project reads "<project> is quiet · Show it", linking to All', async ({
+    page,
+  }) => {
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.route('**/api/overview*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.workingAgentCount = 0;
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/overview?project=alpha');
+    await expect(page.getByText('Nothing is running right now.')).toBeVisible();
+    await expect(page.getByText('alpha is quiet · Show it')).toBeVisible();
+    await expect(page.getByText('quiet project')).toHaveCount(0);
+    await page.getByRole('link', { name: 'Show it' }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(page).toHaveURL(/project=alpha/);
+    await expect(card(page, 'alpha')).toBeVisible();
+  });
+
+  test('the Running now heading row sits one section gap above the first card', async ({
+    page,
+  }) => {
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.goto('/overview');
+    const section = page.locator('section[aria-labelledby="running-heading"]');
+    const head = await section.locator('.bs-home__section-head').boundingBox();
+    const first = await section.locator('.bs-card').first().boundingBox();
+    const gap = await section.evaluate((el) => {
+      const probe = document.createElement('div');
+      probe.style.height = getComputedStyle(el).rowGap;
+      document.body.append(probe);
+      const h = probe.getBoundingClientRect().height;
+      probe.remove();
+      return h;
+    });
+    expect(gap).toBeGreaterThan(0);
+    expect(first && head ? first.y - (head.y + head.height) : -1).toBeCloseTo(gap, 0);
+  });
+
   test("no projects at all: today's text and no quiet line", async ({ page }) => {
     await serveProjects(page, []);
     await page.goto('/overview');
@@ -395,6 +435,34 @@ test.describe('Home: Running now scope', () => {
       await shootElement(section, `home-running-now-scope-all-${vpName}-light`);
     });
   }
+
+  test('screenshot running-now nothing running, quiet projects (desktop/light)', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await serveProjects(page, [summary('alpha', 0, []), summary('ghost', 0, ['ghost-1'])]);
+    const section = page.locator('section[aria-labelledby="running-heading"]');
+    await page.goto('/overview');
+    await settleForShot(page, section.getByText('2 quiet projects'));
+    await shootElement(section, 'home-running-now-scope-idle-desktop-light');
+  });
+
+  test('screenshot running-now selected quiet project (desktop/light)', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.route('**/api/overview*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.workingAgentCount = 0;
+      await route.fulfill({ response, json: body });
+    });
+    const section = page.locator('section[aria-labelledby="running-heading"]');
+    await page.goto('/overview?project=alpha');
+    await settleForShot(page, section.getByText('alpha is quiet'));
+    await shootElement(section, 'home-running-now-scope-selected-desktop-light');
+  });
 
   test('phone: the toggle and the Show all link are 44px targets', async ({ page }) => {
     await serveProjects(page, SCOPE_PROJECTS);

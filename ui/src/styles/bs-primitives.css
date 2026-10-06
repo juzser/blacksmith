@@ -2665,9 +2665,10 @@ summary.bs-inbox__group-head {
 .bs-home__card--quiet .bs-home__tokens {
   color: var(--bs-text-subtle);
 }
-/* The "Show all" link in the quiet line is a phone tap target. */
+/* The "Show all" link in the quiet line (Home and Sessions) is a phone tap target. */
 @media (max-width: 640px) {
-  .bs-home__quiet-line a {
+  .bs-home__quiet-line a,
+  .bs-sessions__quiet a {
     display: inline-flex;
     align-items: center;
     min-height: var(--bs-touch);
@@ -2727,6 +2728,9 @@ summary.bs-inbox__group-head {
 /* Fix round item 6 (ds-review.html `.feedbar`): the link's own --sm padding
    otherwise reads as extra right-edge whitespace against the rest of the
    page's content; pull it back flush against the section edge. */
+.bs-home__section-head--flush {
+  margin-bottom: 0;
+}
 .bs-home__section-head > .bs-btn--sm {
   margin-right: calc(-1 * var(--bs-space-2));
 }

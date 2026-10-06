@@ -887,7 +887,8 @@ Sections, in order:
    0`, the Sessions rule); an epic still open on paper does not make it active. Active shows
    only active cards plus a muted "N quiet projects · Show all" line (singular "1 quiet
    project", hidden at 0; the link is a default link-role anchor, a 44px tap target on phone) that
-   links to `?scope=all`. With no active card but some quiet ones: "Nothing is running right
+   links to `?scope=all`. With one project selected and quiet, the line reads "<project> is quiet ·
+   Show it" instead (same link). With no active card but some quiet ones: "Nothing is running right
    now." plus that line. All lists the active cards, then the quiet ones in the server's
    (alphabetical) order, with the card title and text in `--bs-text-subtle`.
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
