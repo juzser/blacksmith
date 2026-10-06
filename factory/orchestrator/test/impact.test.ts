@@ -584,6 +584,25 @@ describe('what an export diff proves', () => {
     },
   );
 
+  // A template literal type holds `${…}` and a constructor type has its own `=>`: neither opens a body.
+  it.each([
+    ['a template literal type', 'export const f = wrap((x: X): `a${A1}` => { return 1; });\n'],
+    [
+      'a template literal type argument',
+      'export const f = wrap(async (x: X): Promise<`${A1}`> => { return 1; });\n',
+    ],
+    ['a constructor type', 'export const f = wrap((x: X): new () => { a: A1 } => { return 1; });\n'],
+    [
+      'an abstract constructor type',
+      'export const f = wrap((x: X): abstract new () => { a: A1 } => { return 1; });\n',
+    ],
+  ])('keeps a template literal or constructor type in a return type: %s', (_label, before) => {
+    const after = before.replace('A1', 'A2');
+    expect(diffExports(before, after, 'src/a.ts').signatureChanged).toEqual(['f']);
+    const bodyEdit = before.replace('return 1', 'return 2');
+    expect(diffExports(before, bodyEdit, 'src/a.ts').signatureChanged).toEqual([]);
+  });
+
   it('refuses to answer when either side is unreadable', () => {
     const diff = diffExports("export const a = 'unterminated;", 'export const a = 1;', 'src/a.ts');
     expect(diff.unverifiable).toBe(true);

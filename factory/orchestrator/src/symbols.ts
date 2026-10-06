@@ -648,7 +648,14 @@ function normalizeSignature(text: string): string {
 }
 
 /** Type words after which a `{` opens an object type, as it does after `:`. */
-const TYPE_OPERATORS: ReadonlySet<string> = new Set(['is', 'extends', 'keyof', 'readonly']);
+const TYPE_OPERATORS: ReadonlySet<string> = new Set([
+  'is',
+  'extends',
+  'keyof',
+  'readonly',
+  'new',
+  'abstract',
+]);
 
 /**
  * Whether the group `open`…`close` reads as a function type's parameters, as
@@ -665,12 +672,31 @@ function isTypeParameterList(masked: string, open: number, close: number): boole
 }
 
 /**
+ * The index just past the template literal opening at `open`. Its text is
+ * already blanked, so the next backtick closes it, and a `${` interpolation
+ * is stepped over as a bracket group. An unclosed one runs to `limit`.
+ */
+function skipTemplate(masked: string, open: number, limit: number): number {
+  let i = open + 1;
+  while (i < limit) {
+    const ch = masked.charAt(i);
+    if (ch === '`') return i + 1;
+    if (ch === '$' && masked.charAt(i + 1) === '{') {
+      const close = matchBracket(masked, i + 1, limit);
+      if (close === -1) return limit;
+      i = close + 1;
+    } else i += 1;
+  }
+  return limit;
+}
+
+/**
  * Walk a return-type annotation (`from` is just past its `:`) and answer where
  * it stops: the index of the function body's `{`, the index of the `=>`,
  * `limit` when the type runs to it, or -1 when what follows the `:` is not a
  * return type at all (a ternary branch, say). A `{` directly after `:`, `|`,
  * `&`, `<`, `,`, `?`, a word in TYPE_OPERATORS or a function type's `=>` is an
- * object type.
+ * object type; a template literal type is skipped whole.
  */
 function skipReturnType(masked: string, from: number, limit: number): number {
   let prev = ':';
@@ -680,6 +706,12 @@ function skipReturnType(masked: string, from: number, limit: number): number {
     const ch = masked.charAt(i);
     if (/\s/.test(ch)) {
       i += 1;
+      continue;
+    }
+    if (ch === '`') {
+      // A template literal type is skipped whole: its `${…}` braces are not a body.
+      i = skipTemplate(masked, i, limit);
+      prev = 'a';
       continue;
     }
     if (ch === '=' && masked.charAt(i + 1) === '>') return i;
