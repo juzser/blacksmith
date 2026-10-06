@@ -863,18 +863,11 @@ describe('cliSessions reader', () => {
       };
     }
 
-    async function linkedEpics(
-      pid: number,
-      cli: string,
-      nowIso?: () => string,
-      /** Edits the projection before the read, for a state the events alone cannot reach. */
-      tweak?: (sqlite: ReturnType<typeof openDb>['sqlite']) => void,
-    ) {
+    async function linkedEpics(pid: number, cli: string, nowIso?: () => string) {
       await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(tmp, 'none.md') });
       await session(pid, { sessionId: cli, cwd: outside });
       const handle = openDb(dbPath, {});
       try {
-        tweak?.(handle.sqlite);
         // Events are stamped with the real clock, so the read clock is real too
         // unless a test asks for another.
         const over = { nowIso: nowIso ?? (() => new Date().toISOString()) };
@@ -1109,6 +1102,101 @@ describe('cliSessions reader', () => {
       );
     });
 
+    it('never lets a later dispatch on an epic-level id take over the live agent there', async () => {
+      const t0 = Date.now() - 30 * 60_000;
+      const at = (ms: number) => vi.setSystemTime(t0 + ms);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        at(0);
+        const root = await factorySession('sess-int', SID_B);
+        await root.addTask('epic-w', 'epic-w/task-1');
+        await root.dispatch('epic-w/integration', { agent_role: 'wave-runner', epic_id: 'epic-w' });
+        at(3 * 60_000);
+        // A planner on the same pseudo id, minutes later, already finished.
+        await root.dispatch('epic-w/integration', { agent_role: 'planner', epic_id: 'epic-w' });
+        await root.add(
+          'task-result-recorded',
+          { task_id: 'integration', agent: 'planner', run_status: 'done', structured_output: {} },
+          { taskId: 'epic-w/integration' },
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const [epic] = await linkedEpics(181, SID_B, () => new Date(t0 + 5 * 60_000).toISOString());
+      expect(epic?.epicId).toBe('epic-w');
+      expect(epic?.workingAgents.map((a) => [a.role, a.taskId])).toEqual([
+        ['wave-runner', 'epic-w/integration'],
+      ]);
+    });
+
+    it('lets a judge of another role run beside a live judge, while a same-role judge or a worker takes over', async () => {
+      const t0 = Date.now() - 30 * 60_000;
+      const at = (ms: number) => vi.setSystemTime(t0 + ms);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        at(0);
+        const root = await factorySession('sess-judge', SID_B);
+        for (const n of [1, 2, 3]) await root.addTask('epic-j', `epic-j/task-${n}`);
+        await root.add('wave-admitted', {
+          epic_id: 'epic-j',
+          task_ids: ['epic-j/task-1', 'epic-j/task-2', 'epic-j/task-3'],
+        });
+        for (const n of [1, 2, 3])
+          await root.dispatch(`epic-j/task-${n}`, { agent_role: 'grader' });
+        at(10 * 60_000);
+        // task-1: a reviewer joins while the grader still runs.
+        await root.dispatch('epic-j/task-1', { agent_role: 'reviewer' });
+        // task-2: the grader's next round, on the bare id so the fold's own
+        // same-role supersede misses it and take-over has to, already done.
+        await root.dispatch('task-2', { agent_role: 'grader', epic_id: 'epic-j' });
+        await root.add(
+          'task-result-recorded',
+          { task_id: 'task-2', agent: 'grader', run_status: 'done', structured_output: {} },
+          { taskId: 'task-2' },
+        );
+        // task-3: the coder is back on it.
+        await root.dispatch('epic-j/task-3');
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const [epic] = await linkedEpics(182, SID_B, () => new Date(t0 + 12 * 60_000).toISOString());
+      const mine = (epic?.workingAgents ?? []).map((a) => [a.role, a.taskId]);
+      expect(mine).toHaveLength(3);
+      expect(mine).toEqual(
+        expect.arrayContaining([
+          ['grader', 'epic-j/task-1'],
+          ['reviewer', 'epic-j/task-1'],
+          ['coder', 'epic-j/task-3'],
+        ]),
+      );
+    });
+
+    it('keeps a take-over inside the agent epic', async () => {
+      const t0 = Date.now() - 30 * 60_000;
+      const at = (ms: number) => vi.setSystemTime(t0 + ms);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        at(0);
+        const root = await factorySession('sess-cross', SID_B);
+        await root.addTask('epic-a', 'epic-a/task-1');
+        await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: ['epic-a/task-1'] });
+        await root.dispatch('epic-a/task-1');
+        at(10 * 60_000);
+        // Another epic's task-1, recorded with the bare id it shares.
+        await root.dispatch('task-1', { agent_role: 'tester', epic_id: 'epic-b' });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const epics = await linkedEpics(183, SID_B, () => new Date(t0 + 12 * 60_000).toISOString());
+      const epic = epics.find((e) => e.epicId === 'epic-a');
+      expect(epic?.workingAgents.map((a) => [a.role, a.taskId])).toEqual([
+        ['coder', 'epic-a/task-1'],
+      ]);
+    });
+
     it('tells open waves of one session apart by their admission event', async () => {
       const root = await factorySession('sess-id', SID_B);
       await root.addTask('epic-i', 'epic-i/task-1');
@@ -1146,7 +1234,7 @@ describe('cliSessions reader', () => {
 
     it('lets a wave that re-admits a task reopen it over a merge that came before', async () => {
       const root = await factorySession('sess-re', SID_B);
-      for (const n of [1, 2, 3]) await root.addTask('epic-r', `epic-r/task-${n}`);
+      for (const n of [1, 2, 3, 4]) await root.addTask('epic-r', `epic-r/task-${n}`);
       await root.add('wave-admitted', {
         epic_id: 'epic-r',
         task_ids: ['epic-r/task-1', 'epic-r/task-2'],
@@ -1157,22 +1245,25 @@ describe('cliSessions reader', () => {
       });
       await new Promise((r) => setTimeout(r, 5));
       // A re-run wave admits task-1 again; task-2 stays merged; task-3 was
-      // merged without ever being admitted.
-      await root.add('wave-admitted', { epic_id: 'epic-r', task_ids: ['epic-r/task-1'] });
+      // merged without ever being admitted. The projector keeps every merged
+      // row completed with terminal_at at the merge, re-admitted or not.
+      await root.add('wave-admitted', {
+        epic_id: 'epic-r',
+        task_ids: ['epic-r/task-1', 'epic-r/task-4'],
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      // task-4 merges after its admission, in a session outside this lineage,
+      // so only its row can close it.
+      const other = await factorySession('sess-elsewhere', null);
+      await other.add('wave-merged', { epic_id: 'epic-r', task_ids: ['epic-r/task-4'] });
       await root.dispatch('epic-r/task-1');
       await root.dispatch('epic-r/task-2', { agent_role: 'reviewer' });
       await root.dispatch('epic-r/task-3', { agent_role: 'tester' });
+      await root.dispatch('epic-r/task-4', { agent_role: 'reviewer' });
 
-      // The projector marks a merged task completed and keeps it so on a
-      // re-admission, which closes it by its row alone; the rows are set back
-      // by hand so this pins the merge rule on its own.
-      const epics = await linkedEpics(174, SID_B, undefined, (sqlite) => {
-        sqlite
-          .prepare("update tasks set task_status = 'in-progress' where epic_id = ?")
-          .run('epic-r');
-      });
+      const epics = await linkedEpics(174, SID_B);
       const epic = epics[0];
-      expect(epic?.openWaves.map((w) => w.taskIds)).toEqual([['epic-r/task-1']]);
+      expect(epic?.openWaves.map((w) => w.taskIds)).toEqual([['epic-r/task-1', 'epic-r/task-4']]);
       expect(epic?.workingAgents.map((a) => [a.role, a.taskId])).toEqual([
         ['coder', 'epic-r/task-1'],
       ]);
@@ -1271,6 +1362,16 @@ describe('cliSessions reader', () => {
       expect(await nextOf('Shall I ship it?\n\n~~~\ncode\n```\nleak\n~~~')).toBe(
         'Shall I ship it?',
       );
+    });
+
+    it('closes a fence only on a bare run of its marker at least as long as the opener', async () => {
+      expect(await nextOf('Shall I ship it?\n\n````md\n```js\ncode\n```\n````')).toBe(
+        'Shall I ship it?',
+      );
+      expect(await nextOf('Shall I ship it?\n\n```\ncode\n```js\nleak\n```')).toBe(
+        'Shall I ship it?',
+      );
+      expect(await nextOf('```\ncode\n`````  \n\nShipped it.')).toBe('Shipped it.');
     });
 
     it('is null when no paragraph is prose', async () => {

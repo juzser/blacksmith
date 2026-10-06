@@ -49,6 +49,7 @@ import {
   runningSessions,
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
+import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
@@ -169,8 +170,11 @@ const TEXT_MAX = 280;
 const VERSION_MAX = 32;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
 const WORKTREES_TTL_MS = 5 * 60 * 1000;
-// Only a dispatch this much later supersedes, so parallel fan-out stays visible.
+// Only a dispatch this much later takes over a plan task's agent, so parallel
+// fan-out stays visible; judges of different roles never take over each other
+// at any distance (see takenOver).
 const SUPERSEDED_AFTER_MS = 60 * 1000;
+const JUDGE_ROLES: readonly string[] = JUDGE_TURN_ROLES;
 const FOLD_CASE = process.platform === 'darwin' || process.platform === 'win32';
 
 function defaultIsAlive(pid: number): boolean {
@@ -297,11 +301,14 @@ const BOLD_LEAD = /^\s*(\*\*|__)(?:(?!\1).)+\1/;
 
 /**
  * The last paragraph of an assistant message that reads as prose. Fenced code
- * never counts (a fence also ends the paragraph before it, and only the marker
- * that opened it closes it); a list item, heading, table row, quote or a
- * bold-only label line is skipped. Plain prose wins over a paragraph that
- * opens with a bold label (often a trailing details block); the last
- * bold-led paragraph is the fallback when there is no plain one.
+ * never counts (a fence also ends the paragraph before it). As in CommonMark,
+ * a fence opens on three or more backticks or tildes after at most three
+ * spaces, info string allowed, and closes only on a run of the same character
+ * at least as long with nothing but whitespace after it. A list item,
+ * heading, table row, quote or a bold-only label line is skipped. Plain prose
+ * wins over a paragraph that opens with a bold label (often a trailing
+ * details block); the last bold-led paragraph is the fallback when there is
+ * no plain one.
  */
 function lastProse(body: string): string | null {
   const paragraphs: string[][] = [];
@@ -312,14 +319,18 @@ function lastProse(body: string): string | null {
     cur = [];
   };
   for (const line of body.split('\n')) {
-    const marker = /^\s*(```|~~~)/.exec(line)?.[1];
-    if (marker !== undefined && fence === null) {
-      fence = marker;
-      flush();
-    } else if (marker !== undefined && marker === fence) {
-      fence = null;
+    const run = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (run !== undefined && fence === null) {
+      fence = run;
       flush();
     } else if (fence !== null) {
+      if (
+        run !== undefined &&
+        run[0] === fence[0] &&
+        run.length >= fence.length &&
+        line.trimStart().slice(run.length).trim() === ''
+      )
+        fence = null;
     } else if (line.trim() === '') {
       flush();
     } else {
@@ -783,7 +794,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const taskRows = (
           handle.sqlite
             .prepare(
-              'select task_id, task_status, plan_version, origin, project from tasks where epic_id = ?',
+              'select task_id, task_status, plan_version, origin, project, terminal_at from tasks where epic_id = ?',
             )
             .all(epicId) as {
             task_id: string;
@@ -791,6 +802,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             plan_version: number | null;
             origin: string | null;
             project: string | null;
+            terminal_at: string | null;
           }[]
         ).map((r) => ({
           taskId: r.task_id,
@@ -798,6 +810,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           planVersion: r.plan_version,
           origin: r.origin,
           project: r.project,
+          terminalAt: typeof r.terminal_at === 'string' ? r.terminal_at : null,
         }));
         const fold = (rows: { taskStatus: string }[]): StatusCounts => {
           const c: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
@@ -854,9 +867,12 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const byId = new Map(taskRows.map((t) => [t.taskId, t]));
         const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
         // Closed: merged in a wave no later admission came after, or its row
-        // says done or superseded. A re-admitted task reopens over an earlier
-        // merge; one no wave admitted is closed by any merge. A task with
-        // neither a row nor a merge is not closed.
+        // says superseded, or done at or after its last admission. A
+        // re-admitted task reopens over an earlier merge, and over the row
+        // that merge left completed (the projector never reopens it, so its
+        // terminal_at is the only sign it predates the admission); one no
+        // wave admitted is closed by any merge. A task with neither a row nor
+        // a merge is not closed.
         const isClosed = (t: string): boolean => {
           const lastAdmit = epicWaves.reduce<string | null>(
             (m, w) =>
@@ -874,7 +890,13 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           )
             return true;
           const r = row(t);
-          return r !== undefined && isDoneOrSuperseded(r);
+          if (r === undefined) return false;
+          const bucket = statusBucketForTaskStatus(r.taskStatus);
+          if (bucket === 'superseded') return true;
+          return (
+            bucket === 'done' &&
+            (lastAdmit === null || r.terminalAt === null || r.terminalAt >= lastAdmit)
+          );
         };
         // A task belongs to the LAST wave that admitted it, so a re-run wave
         // takes over what it re-admits.
@@ -912,10 +934,15 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
 
         // Really working now: live, dispatched inside the same window the rest
         // of the read side calls "working", on this epic, on a task that is
-        // not closed, and not taken over: the work on a task runs as a
-        // pipeline, so an agent whose task saw a later dispatch (any role,
-        // any status) is done with it even when its own terminal event was
-        // never logged. One entry per (role, task), the newest dispatch.
+        // not closed, and not taken over: the work on a plan task runs as a
+        // pipeline, so an agent whose task saw a later dispatch (any status)
+        // is done with it even when its own terminal event was never logged.
+        // Take-over stays on plan tasks (epic-level agents share pseudo ids
+        // such as `<epic>/integration` and run side by side), inside one epic
+        // (a bare id another epic shares is not this task), and lets judges
+        // of different roles overlap, as they do for real; a same-role judge
+        // or any other role still takes over. One entry per (role, task),
+        // the newest dispatch.
         const agentRows = handle.sqlite
           .prepare(
             `select agent_role, task_id, epic_id, dispatched_at, status from agents where session_id in (${marks})`,
@@ -927,13 +954,20 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           dispatched_at: string;
           status: string;
         }[];
-        const takenOver = (taskId: string, since: string): boolean =>
-          agentRows.some(
+        const takenOver = (ag: (typeof agentRows)[number]): boolean => {
+          const taskId = ag.task_id;
+          if (taskId === null || !taskRows.some((r) => taskIdsMatch(r.taskId, taskId)))
+            return false;
+          const judge = JUDGE_ROLES.includes(ag.agent_role);
+          return agentRows.some(
             (o) =>
               o.task_id !== null &&
               taskIdsMatch(o.task_id, taskId) &&
-              Date.parse(o.dispatched_at) - Date.parse(since) > SUPERSEDED_AFTER_MS,
+              (o.epic_id === null || ag.epic_id === null || o.epic_id === ag.epic_id) &&
+              !(judge && JUDGE_ROLES.includes(o.agent_role) && o.agent_role !== ag.agent_role) &&
+              Date.parse(o.dispatched_at) - Date.parse(ag.dispatched_at) > SUPERSEDED_AFTER_MS,
           );
+        };
         const newestAgent = new Map<string, LinkedEpic['workingAgents'][number]>();
         for (const ag of agentRows) {
           if (ag.status !== 'live' || !isWorkingAt(ag.dispatched_at, scopeNow)) continue;
@@ -943,8 +977,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               ? ag.epic_id === epicId
               : taskId !== null && taskRows.some((r) => taskIdsMatch(r.taskId, taskId));
           if (!onEpic) continue;
-          if (taskId !== null && (isClosed(taskId) || takenOver(taskId, ag.dispatched_at)))
-            continue;
+          if (taskId !== null && (isClosed(taskId) || takenOver(ag))) continue;
           const key = JSON.stringify([ag.agent_role, taskId]);
           const seen = newestAgent.get(key);
           if (seen === undefined || ag.dispatched_at > seen.since)
