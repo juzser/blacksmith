@@ -149,8 +149,9 @@
   --bs-font-weight-normal: 400;
   --bs-font-weight-medium: 500;
   --bs-font-weight-semibold: 600;
-  /* §2 Title row (550-600): TimelineRow's title (DS6 PR4b round 2 item 4,
-     ds-review.html `.ev .ehead`). */
+  /* §2 Title row (550-600), ds-review.html `.ev .ehead`. Currently unused:
+     TimelineRow's title moved to --bs-font-weight-medium (operator
+     override, 2026-10-06). */
   --bs-font-weight-title: 550;
 
   /* ---- Spacing, 4px base (§1.5) ---- */
