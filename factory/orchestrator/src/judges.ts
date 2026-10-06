@@ -452,6 +452,16 @@ export async function recordJudgeDispatch(
     );
   }
   assertKindAllowed(input.role, input.kind);
+  // A kindless uiux dispatch folds into a `kind: null` turn the uiux gate never
+  // reads, so a pass reported against it blocks forever. Reads of old logs
+  // still fold such turns; only a new write is refused.
+  if (input.role === UIUX_ROLE && input.kind === undefined) {
+    throw new JudgeError(
+      'judges.kind-required',
+      `A "${UIUX_ROLE}" dispatch must name its turn: "--kind spec" for the pre-code spec, "--kind visual" for the post-test visual pass.`,
+      { task_id: input.taskId, agent_role: input.role },
+    );
+  }
   if (!Number.isInteger(input.round) || input.round < 1) {
     throw new JudgeError(
       'judges.invalid-round',

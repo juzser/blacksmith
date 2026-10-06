@@ -36,16 +36,20 @@ describe('uiuxGate.ts checkUiux', () => {
     await rm(artifactsDir, { recursive: true, force: true });
   });
 
-  async function dispatchUiux(kind: 'spec' | 'visual', artifactPath: string) {
+  async function dispatchUiux(kind: 'spec' | 'visual', artifactPath: string, round = 1) {
     return recordJudgeDispatch(
-      { taskId, role: 'uiux', round: 1, artifactPath, model: 'claude-opus-5', kind },
+      { taskId, role: 'uiux', round, artifactPath, model: 'claude-opus-5', kind },
       ctx(),
       opts(),
     );
   }
 
-  async function reportUiux(kind: 'spec' | 'visual') {
-    return recordJudgeReport({ taskId, role: 'uiux', noFindings: true, kind }, ctx(), opts());
+  async function reportUiux(kind: 'spec' | 'visual', round?: number) {
+    return recordJudgeReport(
+      { taskId, role: 'uiux', noFindings: true, kind, ...(round === undefined ? {} : { round }) },
+      ctx(),
+      opts(),
+    );
   }
 
   const SCREENSHOTS = [
@@ -151,5 +155,35 @@ describe('uiuxGate.ts checkUiux', () => {
 
     const result = await checkUiux({ taskId, head: 'sha-1', artifactsDir }, ctx(), opts());
     expect(result).toEqual({ outcome: 'pass' });
+  });
+
+  it('passes when a later visual round, dispatched and reported after a newer tester record, supersedes round 1', async () => {
+    await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
+    await reportUiux('spec');
+    await writeScreenshotsToDisk();
+    await recordTester('sha-1');
+    await dispatchUiux('visual', path.join(artifactsDir, 'visual-r1.json'), 1);
+    await reportUiux('visual', 1);
+    // The tester re-records; round 1 now predates the latest record.
+    await recordTester('sha-2');
+    await dispatchUiux('visual', path.join(artifactsDir, 'visual-r2.json'), 2);
+    await reportUiux('visual', 2);
+
+    const result = await checkUiux({ taskId, head: 'sha-2', artifactsDir }, ctx(), opts());
+    expect(result).toEqual({ outcome: 'pass' });
+  });
+
+  it('blocks uiux-visual-missing when a later visual round is dispatched but not yet reported', async () => {
+    await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
+    await reportUiux('spec');
+    await writeScreenshotsToDisk();
+    await recordTester('sha-1');
+    await dispatchUiux('visual', path.join(artifactsDir, 'visual-r1.json'), 1);
+    await reportUiux('visual', 1);
+    await recordTester('sha-2');
+    await dispatchUiux('visual', path.join(artifactsDir, 'visual-r2.json'), 2);
+
+    const result = await checkUiux({ taskId, head: 'sha-2', artifactsDir }, ctx(), opts());
+    expect(result).toEqual({ outcome: 'blocked', reason: 'uiux-visual-missing' });
   });
 });
