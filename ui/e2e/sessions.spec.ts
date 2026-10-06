@@ -494,13 +494,13 @@ test.describe('Sessions', () => {
     await page.route('**/api/sessions/*/agents*', (route) =>
       route.fulfill({ json: { sessionId: 'sc', roles: [] } }),
     );
-    await page.goto('/sessions?project=proj-a');
+    await page.goto('/sessions');
     await page.getByText('Active in proj-a').click();
     quiet = true;
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible();
-    // proj-a holds one other quiet session; the pinned one is not counted.
-    await expect(page.getByText('1 quiet session · Show all')).toBeVisible();
+    // Three quiet sessions now; the pinned one is shown, so only two are counted.
+    await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
   });
 
   test('All with no sessions at all shows the empty state', async ({ page }) => {
