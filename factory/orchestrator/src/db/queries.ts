@@ -20,7 +20,7 @@ import {
   TASK_RESULT_EVENT_TYPE,
   type TerminalType,
 } from '../agents-registry.js';
-import { isAuditAxisTaskId } from '../audit.js';
+import { isAuditAxisRowId } from '../audit.js';
 import { isPlausibleTokenCount } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
@@ -3147,7 +3147,7 @@ export function kanban(
       : db.select().from(tasks).all(),
     scope,
     // An audit axis turn's task row is a judge's bookkeeping, not work on the board.
-  ).filter((t) => !isAuditAxisTaskId(t.taskId));
+  ).filter((t) => !isAuditAxisRowId(t.taskId));
 
   const epicIdsInScope = new Set(
     taskRows.map((t) => t.epicId).filter((e): e is string => e !== null),

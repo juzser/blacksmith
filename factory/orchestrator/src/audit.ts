@@ -97,6 +97,20 @@ export function isAuditAxisTaskId(taskId: string): boolean {
   return AUDIT_AXIS_TASK_ID.test(taskId);
 }
 
+const AUDIT_AXIS_ROW_ID = new RegExp(
+  `^\\d{8}-[0-9a-f]{8}\\.(${AUDIT_AXES.join('|')})(-[A-Za-z0-9-]+)?$`,
+);
+
+/**
+ * Broader than `isAuditAxisTaskId`: also matches a re-run or cross-check turn
+ * dispatched under a suffixed id (`<audit-id>.performance-2`, `.security-codex`).
+ * Used only by the dashboard Kanban read to hide those rows; the judge gate
+ * keeps the exact matcher so its behaviour does not widen.
+ */
+export function isAuditAxisRowId(taskId: string): boolean {
+  return AUDIT_AXIS_ROW_ID.test(taskId);
+}
+
 /** Spec §4.3's table, in the order that table is written. */
 export const AUDIT_STATUSES = ['raised', 'merged', 'accepted', 'declined', 'fixed'] as const;
 export type AuditStatus = (typeof AUDIT_STATUSES)[number];
