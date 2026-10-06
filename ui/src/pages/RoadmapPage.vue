@@ -37,6 +37,7 @@ import {
   type ProjectOverviewSummary,
   selectableEpics,
 } from '../lib/api.js';
+import { idleLabelsById } from '../lib/epicPicker.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { planVersionOptions } from '../lib/planVersion.js';
 import { defaultSelection } from '../lib/roadmapSelection.js';
@@ -76,6 +77,7 @@ const { isPhoneWidth } = useViewport();
 const milestones = ref<MilestoneProgress[] | null>(null);
 const epics = ref<string[]>([]);
 const activeEpics = ref<string[]>([]);
+const idleLabels = ref<Record<string, string>>({});
 /** Unscoped only: a project with epics in flight but no declared phase gets an epic section. */
 const overviewProjects = ref<ProjectOverviewSummary[]>([]);
 const error = ref<string | null>(null);
@@ -168,6 +170,7 @@ async function load() {
     milestones.value = roadmap;
     epics.value = selectableEpics(overview);
     activeEpics.value = overview.epicsActivelyRunning;
+    idleLabels.value = idleLabelsById(overview.epicsIdle);
     overviewProjects.value = overview.projects ?? [];
     error.value = null;
 
@@ -475,6 +478,7 @@ async function closePeek() {
           :selected-epic="selectedEpic"
           :hosts-selection="item.section === hostSection"
           :picker-label="pickerLabel(item.section)"
+          :idle-labels="idleLabels"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
           @select-phase="selectPhase"
           @select-epic="selectEpic"
@@ -488,12 +492,14 @@ async function closePeek() {
           :tasks-completed="selectedPhaseData.tasksCompleted"
           :status-counts="selectedPhaseData.statusCounts"
           :epics="epicSections"
+          :idle-labels="idleLabels"
           @select="openPeek"
           @select-epic="selectEpic"
         />
         <EpicBlock
           v-else-if="selectedEpicData"
           :epic="selectedEpicData"
+          :idle-labels="idleLabels"
           @select="openPeek"
           @update:plan-version="setEpicPlanVersion"
           @back-to-phase="selectPhase"

@@ -115,6 +115,52 @@ describe('overview() idle epics', () => {
     expect(result.epicsIdle).toEqual([]);
   });
 
+  it('counts an event with no task id that names the epic in its payload as activity', () => {
+    const result = run([
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(30) }),
+      taskAdded('epic-a', daysBefore(30)),
+      event({
+        event_type: 'judge-reported',
+        ts: daysBefore(1),
+        payload: { epic_id: 'epic-a', role: 'spec-reviewer', verdict: 'pass' },
+      }),
+    ]);
+    expect(result.epicsActivelyRunning).toEqual(['epic-a']);
+    expect(result.epicsIdle).toEqual([]);
+  });
+
+  it('counts an event on a plan-ref task id (<epic>/plan-rN) as activity of that epic', () => {
+    const result = run([
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(30) }),
+      taskAdded('epic-a', daysBefore(30)),
+      event({
+        event_type: 'dispatch_decision',
+        task_id: 'epic-a/spec-review-r3',
+        ts: daysBefore(1),
+        payload: { role: 'spec-reviewer' },
+      }),
+    ]);
+    expect(result.epicsActivelyRunning).toEqual(['epic-a']);
+    expect(result.epicsIdle).toEqual([]);
+  });
+
+  it('compares timestamps as instants, so an offset ts that is really newer wins', () => {
+    // 08:00-07:00 is 15:00Z: after the 7-day cutoff (12:00Z), though it sorts
+    // below the task's 10:00Z updatedAt as a string.
+    const result = run([
+      event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(30) }),
+      taskAdded('epic-a', '2026-08-13T10:00:00.000Z'),
+      event({
+        event_type: 'judge-reported',
+        task_id: 'epic-a/task-1',
+        ts: '2026-08-13T08:00:00.000-07:00',
+        payload: { role: 'reviewer', verdict: 'pass' },
+      }),
+    ]);
+    expect(result.epicsActivelyRunning).toEqual(['epic-a']);
+    expect(result.epicsIdle).toEqual([]);
+  });
+
   it('gives a project summary the same rule', () => {
     const result = run([
       event({ event_type: 'session-start', causal_parent: null, ts: daysBefore(9) }),

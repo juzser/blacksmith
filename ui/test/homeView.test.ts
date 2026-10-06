@@ -5,6 +5,7 @@ import {
   budgetPanel,
   budgetRingLabel,
   budgetSummary,
+  budgetView,
   cardTokensText,
   decisionLine,
   isBudgetOutlier,
@@ -308,6 +309,65 @@ describe('lib/homeView.ts budgetPanel()', () => {
       tokensByEpic: [epic('idle-a', 500, 600)],
     });
     expect(budgetPanel(o)).toBeNull();
+  });
+});
+
+describe('lib/homeView.ts budgetView()', () => {
+  it('is the quiet line and no figures when no epic is running', () => {
+    const o = overview({
+      epicsInFlight: ['idle-a'],
+      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
+      tokensByEpic: [epic('idle-a', 500, 600), epic('closed-a', 9_000, 20_000)],
+    });
+    expect(budgetView(o)).toEqual({ kind: 'none', text: 'No epic is running.' });
+  });
+
+  it('shows figures over the running epics only, with a mix of running, idle and closed', () => {
+    const o = overview({
+      epicsInFlight: ['run-a', 'run-b', 'idle-a'],
+      epicsActivelyRunning: ['run-a', 'run-b'],
+      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
+      tokensByEpic: [
+        epic('run-a', 40_000, 100_000, 2),
+        epic('run-b', 10_000, 100_000),
+        epic('idle-a', 500_000, 600_000, 7),
+        epic('closed-a', 9_000_000, 20_000_000, 5),
+      ],
+      budgetUsedPctPointDelta1h: 4,
+    });
+    const view = budgetView(o);
+    if (view.kind !== 'figures') throw new Error('expected figures');
+    expect(view.ring).toEqual({
+      value: 50_000,
+      max: 200_000,
+      label: budgetRingLabel(50_000, 200_000),
+    });
+    expect(view.tokensText).toBe(tokensOfBudget({ spent: 50_000, budget: 200_000, unmeasured: 2 }));
+    expect(view.deltaSentence).toBe('4 points higher than an hour ago');
+    expect(view.unmeasuredSentence).toBe('2 steps did not report their cost');
+    expect(view.outlierSentence).toBeNull();
+  });
+
+  it('names a running outlier and keeps it out of the ring', () => {
+    const o = overview({
+      epicsActivelyRunning: ['run-a', 'run-wild'],
+      tokensByEpic: [epic('run-a', 40, 100), epic('run-wild', 11_000, 1_000)],
+    });
+    const view = budgetView(o);
+    if (view.kind !== 'figures') throw new Error('expected figures');
+    expect(view.ring).toMatchObject({ value: 40, max: 100 });
+    expect(view.outlierSentence).toBe(outlierSentence(['run-wild']));
+    expect(view.outlierSentence).toContain('run-wild');
+  });
+
+  it('draws no ring when no running epic reported its cost', () => {
+    const o = overview({
+      epicsActivelyRunning: ['run-a'],
+      tokensByEpic: [epic('run-a', 0, 100, 3)],
+    });
+    const view = budgetView(o);
+    if (view.kind !== 'figures') throw new Error('expected figures');
+    expect(view.ring).toBeNull();
   });
 });
 

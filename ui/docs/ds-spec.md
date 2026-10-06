@@ -882,9 +882,12 @@ Sections, in order:
    session — closes audit item 2 (the stale "shop-ux-1 finished, PR #558" case). Each
    project card links its "View ->" to Work filtered by that project, not to a dropped
    `/flow` route (audit item 8). An epic with no activity for more than 7 days (its
-   tasks' last update or event, `epicsIdle` carries each one and its idle days) is not
-   running: it leaves the card and the Budget, stays in `epicsInFlight`, and reads
-   "idle 18d" in the Kanban epic picker.
+   tasks' last update, or the last event naming it by payload `epic_id`, by task id, or by
+   a plan-ref id such as `<epic>/plan-r3`; `epicsIdle` carries each one and its idle
+   days) is not running: it leaves the card and the Budget, stays in `epicsInFlight`,
+   and reads "idle 18d" wherever its name is still listed: the Kanban epic picker, and
+   on the Roadmap the swimlane rows, the phone picker, the phone epic rows, the phase
+   mode epic sections and the epic-mode header.
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
    audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
    double-checking another model's review" style, from `/api/overview`'s

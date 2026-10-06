@@ -10,7 +10,9 @@ import {
   EPIC_LIST_UNAVAILABLE,
   epicOptions,
   idleLabel,
+  idleLabelsById,
   retainedEpic,
+  withIdleLabels,
 } from '../src/lib/epicPicker.js';
 
 describe('lib/epicPicker.ts — idle epics', () => {
@@ -104,4 +106,32 @@ describe('the epic-picker pages source their control and their fetch guard from 
       expect(src).not.toContain(EPIC_LIST_UNAVAILABLE);
     });
   }
+});
+
+describe('idle labels on lists that are not the picker', () => {
+  it('maps only idle epics to their label', () => {
+    const labels = idleLabelsById([{ epicId: 'epic-a', idleDays: 18 }]);
+    expect(labels).toEqual({ 'epic-a': 'idle 18d' });
+    expect(labels['epic-b']).toBeUndefined();
+  });
+
+  it('appends the label to an idle epic option and keeps every other option as it was', () => {
+    const labels = idleLabelsById([{ epicId: 'epic-a', idleDays: 18 }]);
+    const options = [
+      { value: '', label: 'Pick an epic' },
+      { value: 'epic-a', label: 'epic-a' },
+      { value: 'epic-b', label: 'epic-b' },
+    ];
+    expect(withIdleLabels(options, labels)).toEqual([
+      { value: '', label: 'Pick an epic' },
+      { value: 'epic-a', label: 'epic-a · idle 18d' },
+      { value: 'epic-b', label: 'epic-b' },
+    ]);
+  });
+
+  it('does not read an inherited property as a label', () => {
+    expect(withIdleLabels([{ value: 'constructor', label: 'constructor' }], {})).toEqual([
+      { value: 'constructor', label: 'constructor' },
+    ]);
+  });
 });

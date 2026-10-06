@@ -71,12 +71,8 @@ describe('HomePage.vue', () => {
 
   it('flags budget outliers with a Details link', () => {
     expect(TEMPLATE).toMatch(
-      /outlierSentence\(budget\.outliers\)[\s\S]*?<RouterLink to="\/analytics">Details<\/RouterLink>/,
+      /budget\.outlierSentence[\s\S]*?<RouterLink to="\/analytics">Details<\/RouterLink>/,
     );
-  });
-
-  it('says so, in one quiet line, when no epic is running', () => {
-    expect(TEMPLATE).toMatch(/budget === null" class="bs-home__quiet">No epic is running\.</);
   });
 
   it('is built on the BS kit only', () => {

@@ -66,6 +66,24 @@ export function idleLabel(idleDays: number): string {
   return `idle ${idleDays}d`;
 }
 
+/** Epic id -> its idle label, for the epics `epicsIdle` names; the Roadmap
+ *  rows and pickers look an epic up here and show the label only on a hit. */
+export function idleLabelsById(idle: readonly IdleEpic[]): Record<string, string> {
+  return Object.fromEntries(idle.map((e) => [e.epicId, idleLabel(e.idleDays)]));
+}
+
+/** Options with an idle epic's label appended, as `epicOptions` does; any
+ *  option whose value is not an idle epic (the placeholder, a phase) is kept. */
+export function withIdleLabels<T extends { value: string; label: string }>(
+  options: readonly T[],
+  labels: Record<string, string>,
+): T[] {
+  return options.map((o) => {
+    const label = Object.hasOwn(labels, o.value) ? labels[o.value] : undefined;
+    return label === undefined ? o : { ...o, label: `${o.label} · ${label}` };
+  });
+}
+
 export function epicOptions(
   epics: readonly string[],
   idle: readonly IdleEpic[] = [],

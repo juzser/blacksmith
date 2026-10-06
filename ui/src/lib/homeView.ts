@@ -124,6 +124,40 @@ export function budgetPanel(o: OverviewResult): CardTokens | null {
   return cardTokens(o.tokensByEpic, o.epicsActivelyRunning);
 }
 
+/** What the Budget panel renders: one quiet line, or the figures. */
+export type BudgetView =
+  | { kind: 'none'; text: string }
+  | {
+      kind: 'figures';
+      /** Drawn only for a measured ratio; null otherwise. */
+      ring: { value: number; max: number; label: string } | null;
+      tokensText: string;
+      deltaSentence: string | null;
+      unmeasuredSentence: string | null;
+      outlierSentence: string | null;
+    };
+
+/** The Budget panel's decision, so HomePage.vue only renders it. */
+export function budgetView(o: OverviewResult): BudgetView {
+  const panel = budgetPanel(o);
+  if (panel === null) return { kind: 'none', text: 'No epic is running.' };
+  return {
+    kind: 'figures',
+    ring:
+      panel.budget && cardShowsRing(panel)
+        ? {
+            value: panel.spent,
+            max: panel.budget,
+            label: budgetRingLabel(panel.spent, panel.budget),
+          }
+        : null,
+    tokensText: cardTokensText(panel),
+    deltaSentence: budgetDeltaSentence(o.budgetUsedPctPointDelta1h ?? null),
+    unmeasuredSentence: unmeasuredSentence(panel.unmeasured),
+    outlierSentence: outlierSentence(panel.outliers),
+  };
+}
+
 /**
  * "84K of 350K tokens"; never "0 of" for spend nobody measured, which reads
  * "not measured · 4.1M budget" instead. Empty while the only budgeted epics
