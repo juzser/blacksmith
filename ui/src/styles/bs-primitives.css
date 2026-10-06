@@ -1264,6 +1264,50 @@ a:hover {
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
+/* Fix round 2: each group is its own flex container (h2 + its ul), so the
+   header hugs its own list (small gap) while .app-page's own flex gap -
+   applied between .bs-sessions__group siblings, not inside one - reads as
+   the much larger gap between groups. The previous margin-top on the
+   header alone put both gaps at roughly the same size, so a header read as
+   floating between its own list and the one above it rather than owning
+   either. */
+.bs-sessions__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+/* Fix round (visual pass): the nested RouterLink wears .bs-btn--sm, whose
+   own font-size/weight/height/padding (line 269 above) override the h2's
+   .bs-section-title values on the branch that has a project, so it rendered
+   12px/500 against the "No project" branch's plain-text 14px/600, and its
+   own space-2 padding indented the text off the card's left edge below.
+   Zeroing padding and letting height follow the text's own line-height
+   (instead of the button's fixed 28px box) makes both branches render
+   identical type, flush with the card edge. */
+.bs-sessions__group-title .bs-btn--sm {
+  height: auto;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+/* Fix round 2 item 2: the global ≤640px .bs-btn--sm rule (line ~281) floors
+   min-height at --bs-touch, which inflates only the linked variant's line
+   box -- the plain-text "No project" branch has no .bs-btn--sm and is
+   unaffected, so the two branches' headers sat at different heights above
+   their own list. Same pattern as .bs-timeline-row__title--link above:
+   cancel the inflated min-height and grow the hit box via padding-block
+   instead, offset by an equal negative margin-block so the row's own
+   layout height stays driven by the text line. padding-inline stays 0
+   (set above) so the link text stays flush with the card edge. */
+@media (max-width: 640px) {
+  .bs-sessions__group-title .bs-btn--sm {
+    min-height: 0;
+    display: inline-flex;
+    align-items: center;
+    padding-block: calc((var(--bs-touch) - 1lh) / 2);
+    margin-block: calc((var(--bs-touch) - 1lh) / -2);
+  }
+}
 .bs-sessions__detail {
   display: flex;
   flex-direction: column;
