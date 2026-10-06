@@ -81,6 +81,22 @@ export class AuditError extends SmithError {}
 export const AUDIT_AXES = ['performance', 'code-quality', 'architecture', 'security'] as const;
 export type AuditAxis = (typeof AUDIT_AXES)[number];
 
+/**
+ * `mintAuditId` (audit.ts) mints `<YYYYMMDD>-<8 hex>` — a day stamp and eight
+ * hex characters joined by "-", never a "/". Audit.md's "Declare the artifact
+ * before the call" names the task id an audit axis turn dispatches and
+ * reports against as `<audit-id>.<axis>`. An ordinary task id is always
+ * "<epic>/<bare>" (taskId.ts) — qualified with a "/" by construction — so the
+ * two shapes cannot collide: this checks the exact mint format, not just the
+ * absence of "/", so a coincidentally dotted bare task id still reads as
+ * ordinary rather than as an axis.
+ */
+const AUDIT_AXIS_TASK_ID = new RegExp(`^\\d{8}-[0-9a-f]{8}\\.(${AUDIT_AXES.join('|')})$`);
+
+export function isAuditAxisTaskId(taskId: string): boolean {
+  return AUDIT_AXIS_TASK_ID.test(taskId);
+}
+
 /** Spec §4.3's table, in the order that table is written. */
 export const AUDIT_STATUSES = ['raised', 'merged', 'accepted', 'declined', 'fixed'] as const;
 export type AuditStatus = (typeof AUDIT_STATUSES)[number];
