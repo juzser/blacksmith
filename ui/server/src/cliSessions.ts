@@ -87,8 +87,18 @@ export interface LinkedEpic {
   factorySessionIds: string[];
   /** The newest event this CLI session wrote into any of `factorySessionIds`. */
   lastEventAt: string;
-  /** Waves with a task that is not closed yet, newest admitted first. */
-  openWaves: { sessionId: string; admittedAt: string; taskIds: string[]; counts: StatusCounts }[];
+  /**
+   * Waves with a task that is not closed yet, newest admitted first. One
+   * session writes every `wave-admitted` of an epic, so `admittedEventId`
+   * (the admission event) is what tells two waves apart.
+   */
+  openWaves: {
+    sessionId: string;
+    admittedEventId: string;
+    admittedAt: string;
+    taskIds: string[];
+    counts: StatusCounts;
+  }[];
   /** Plan tasks only: dropped re-plan leftovers and escalation follow-ups are not counted. */
   progress: StatusCounts | null;
   /** Escalation tasks of the epic that are neither done nor superseded; null with no epic. */
@@ -159,6 +169,8 @@ const TEXT_MAX = 280;
 const VERSION_MAX = 32;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
 const WORKTREES_TTL_MS = 5 * 60 * 1000;
+// Only a dispatch this much later supersedes, so parallel fan-out stays visible.
+const SUPERSEDED_AFTER_MS = 60 * 1000;
 const FOLD_CASE = process.platform === 'darwin' || process.platform === 'win32';
 
 function defaultIsAlive(pid: number): boolean {
@@ -277,27 +289,37 @@ function operatorText(raw: string): string | null {
   return clean(trimmed) || null;
 }
 
-const LIST_OR_QUOTE = /^\s*(?:(?:[-*+]|\d+[.)])(?:\s|$)|[#|>])/;
+// A heading is one to six `#` and then a space or the end of the line, so
+// `#123 is fixed` stays prose.
+const LIST_OR_QUOTE = /^\s*(?:(?:[-*+]|\d+[.)])(?:\s|$)|#{1,6}(?:\s|$)|[|>])/;
 const BOLD_ONLY = /^\s*(\*\*|__)((?:(?!\1).)+)\1\s*:?\s*$/;
+const BOLD_LEAD = /^\s*(\*\*|__)(?:(?!\1).)+\1/;
 
 /**
  * The last paragraph of an assistant message that reads as prose. Fenced code
- * never counts (a fence also ends the paragraph before it); a list item,
- * heading, table row, quote or a bold-only label line is skipped.
+ * never counts (a fence also ends the paragraph before it, and only the marker
+ * that opened it closes it); a list item, heading, table row, quote or a
+ * bold-only label line is skipped. Plain prose wins over a paragraph that
+ * opens with a bold label (often a trailing details block); the last
+ * bold-led paragraph is the fallback when there is no plain one.
  */
 function lastProse(body: string): string | null {
   const paragraphs: string[][] = [];
   let cur: string[] = [];
-  let fence = false;
+  let fence: string | null = null;
   const flush = (): void => {
     if (cur.length > 0) paragraphs.push(cur);
     cur = [];
   };
   for (const line of body.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fence = !fence;
+    const marker = /^\s*(```|~~~)/.exec(line)?.[1];
+    if (marker !== undefined && fence === null) {
+      fence = marker;
       flush();
-    } else if (fence) {
+    } else if (marker !== undefined && marker === fence) {
+      fence = null;
+      flush();
+    } else if (fence !== null) {
     } else if (line.trim() === '') {
       flush();
     } else {
@@ -305,12 +327,17 @@ function lastProse(body: string): string | null {
     }
   }
   flush();
+  let boldLed: string[] | null = null;
   for (let i = paragraphs.length - 1; i >= 0; i -= 1) {
     const first = paragraphs[i]?.[0] ?? '';
     if (LIST_OR_QUOTE.test(first) || BOLD_ONLY.test(first)) continue;
+    if (BOLD_LEAD.test(first)) {
+      boldLed ??= paragraphs[i] ?? null;
+      continue;
+    }
     return clean((paragraphs[i] ?? []).join('\n')) || null;
   }
-  return null;
+  return boldLed === null ? null : clean(boldLed.join('\n')) || null;
 }
 
 interface Analysis {
@@ -583,7 +610,12 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       let body = (await readSlice(fs, file, pos, Math.min(HISTORY_BYTES, st.size))).toString(
         'utf8',
       );
-      if (pos > 0) body = body.slice(body.indexOf('\n') + 1);
+      if (pos > 0) {
+        // A tail read starts mid-line: drop up to the first newline, and with
+        // no newline at all there is no complete line to read.
+        const nl = body.indexOf('\n');
+        body = nl === -1 ? '' : body.slice(nl + 1);
+      }
       const byId = new Map<string, Prompt>();
       for (const j of parseLines(body)) {
         // Only `display` and `timestamp` are read: nothing else in an entry is kept.
@@ -697,15 +729,21 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       const waves = (
         handle.sqlite
           .prepare(
-            `select session_id, ts, payload from events_raw where event_type = 'wave-admitted' and session_id in (${marks}) order by ts, event_id`,
+            `select event_id, session_id, ts, payload from events_raw where event_type = 'wave-admitted' and session_id in (${marks}) order by ts, event_id`,
           )
-          .all(...g.lineage) as { session_id: string; ts: string; payload: string }[]
+          .all(...g.lineage) as {
+          event_id: string;
+          session_id: string;
+          ts: string;
+          payload: string;
+        }[]
       ).flatMap((r) => {
         try {
           const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
           return [
             {
               sessionId: r.session_id,
+              admittedEventId: r.event_id,
               admittedAt: r.ts,
               epicId: typeof p.epic_id === 'string' ? p.epic_id : null,
               taskIds: Array.isArray(p.task_ids)
@@ -771,14 +809,21 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           return b === 'done' || b === 'superseded';
         };
         // Plan tasks only: not an escalation follow-up, and either on the
-        // epic's newest plan version or merged work from an older one.
+        // epic's newest plan version (a row with no version counts as
+        // current) or done work from an older one. A task an older version
+        // left superseded is a re-plan leftover, not progress.
         const planRows = taskRows.filter((t) => t.origin !== 'escalation');
         const newest = planRows.reduce<number | null>(
           (m, t) =>
             t.planVersion !== null && (m === null || t.planVersion > m) ? t.planVersion : m,
           null,
         );
-        const planTasks = planRows.filter((t) => t.planVersion === newest || isDoneOrSuperseded(t));
+        const planTasks = planRows.filter(
+          (t) =>
+            t.planVersion === null ||
+            t.planVersion === newest ||
+            statusBucketForTaskStatus(t.taskStatus) === 'done',
+        );
         progress = fold(planTasks);
         followUps = taskRows.filter(
           (t) => t.origin === 'escalation' && !isDoneOrSuperseded(t),
@@ -790,32 +835,49 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const merged = (
           handle.sqlite
             .prepare(
-              `select payload from events_raw where event_type = 'wave-merged' and session_id in (${marks})`,
+              `select ts, payload from events_raw where event_type = 'wave-merged' and session_id in (${marks})`,
             )
-            .all(...g.lineage) as { payload: string }[]
+            .all(...g.lineage) as { ts: string; payload: string }[]
         ).flatMap((r) => {
           try {
             const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
             if (typeof p.epic_id === 'string' && p.epic_id !== epicId) return [];
-            return Array.isArray(p.task_ids)
+            const taskIds = Array.isArray(p.task_ids)
               ? p.task_ids.filter((t): t is string => typeof t === 'string')
               : [];
+            return [{ ts: r.ts, taskIds }];
           } catch {
             return [];
           }
         });
+        const epicWaves = waves.filter((w) => w.epicId === epicId);
         const byId = new Map(taskRows.map((t) => [t.taskId, t]));
         const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
-        // Closed: merged in a wave, or its row says done or superseded. A task
-        // with neither a row nor a merge is not closed.
+        // Closed: merged in a wave no later admission came after, or its row
+        // says done or superseded. A re-admitted task reopens over an earlier
+        // merge; one no wave admitted is closed by any merge. A task with
+        // neither a row nor a merge is not closed.
         const isClosed = (t: string): boolean => {
-          if (merged.some((m) => taskIdsMatch(m, t))) return true;
+          const lastAdmit = epicWaves.reduce<string | null>(
+            (m, w) =>
+              w.taskIds.some((x) => taskIdsMatch(x, t)) && (m === null || w.admittedAt > m)
+                ? w.admittedAt
+                : m,
+            null,
+          );
+          if (
+            merged.some(
+              (m) =>
+                (lastAdmit === null || m.ts >= lastAdmit) &&
+                m.taskIds.some((x) => taskIdsMatch(x, t)),
+            )
+          )
+            return true;
           const r = row(t);
           return r !== undefined && isDoneOrSuperseded(r);
         };
         // A task belongs to the LAST wave that admitted it, so a re-run wave
         // takes over what it re-admits.
-        const epicWaves = waves.filter((w) => w.epicId === epicId);
         const claimed: string[] = [];
         const open = new Set<(typeof epicWaves)[number]>();
         for (const w of [...epicWaves].reverse()) {
@@ -829,6 +891,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           if (!open.has(w)) continue;
           openWaves.push({
             sessionId: w.sessionId,
+            admittedEventId: w.admittedEventId,
             admittedAt: w.admittedAt,
             taskIds: w.taskIds,
             counts: fold(w.taskIds.flatMap((t) => row(t) ?? [])),
@@ -849,25 +912,39 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
 
         // Really working now: live, dispatched inside the same window the rest
         // of the read side calls "working", on this epic, on a task that is
-        // not closed. One entry per (role, task), the newest dispatch.
-        const newestAgent = new Map<string, LinkedEpic['workingAgents'][number]>();
-        for (const ag of handle.sqlite
+        // not closed, and not taken over: the work on a task runs as a
+        // pipeline, so an agent whose task saw a later dispatch (any role,
+        // any status) is done with it even when its own terminal event was
+        // never logged. One entry per (role, task), the newest dispatch.
+        const agentRows = handle.sqlite
           .prepare(
-            `select agent_role, task_id, epic_id, dispatched_at from agents where status = 'live' and session_id in (${marks})`,
+            `select agent_role, task_id, epic_id, dispatched_at, status from agents where session_id in (${marks})`,
           )
           .all(...g.lineage) as {
           agent_role: string;
           task_id: string | null;
           epic_id: string | null;
           dispatched_at: string;
-        }[]) {
-          if (!isWorkingAt(ag.dispatched_at, scopeNow)) continue;
+          status: string;
+        }[];
+        const takenOver = (taskId: string, since: string): boolean =>
+          agentRows.some(
+            (o) =>
+              o.task_id !== null &&
+              taskIdsMatch(o.task_id, taskId) &&
+              Date.parse(o.dispatched_at) - Date.parse(since) > SUPERSEDED_AFTER_MS,
+          );
+        const newestAgent = new Map<string, LinkedEpic['workingAgents'][number]>();
+        for (const ag of agentRows) {
+          if (ag.status !== 'live' || !isWorkingAt(ag.dispatched_at, scopeNow)) continue;
           const taskId = ag.task_id;
           const onEpic =
             ag.epic_id !== null
               ? ag.epic_id === epicId
               : taskId !== null && taskRows.some((r) => taskIdsMatch(r.taskId, taskId));
-          if (!onEpic || (taskId !== null && isClosed(taskId))) continue;
+          if (!onEpic) continue;
+          if (taskId !== null && (isClosed(taskId) || takenOver(taskId, ag.dispatched_at)))
+            continue;
           const key = JSON.stringify([ag.agent_role, taskId]);
           const seen = newestAgent.get(key);
           if (seen === undefined || ag.dispatched_at > seen.since)
