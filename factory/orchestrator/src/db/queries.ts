@@ -2944,9 +2944,12 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
 /**
  * DS6 PR2 (§4.3 table) — normalised `{passed, failed}` counts for every
  * `Gate` entry in `page`, from `testgate-result.results` (or an artifact check's `checked`/`issues`, or
- * `gate-outcome.results`, if a future writer adds one); `null` when the
- * payload carries no derivable `results` array. Pure over already-fetched
- * payloads, so no extra query is needed.
+ * `gate-outcome.results`, if a future writer adds one). `null` ("not
+ * measured") only where counts are expected and missing: an artifact check
+ * with neither field, or a `testgate-result` with no `results` array. Every
+ * other check type without a `results` array never carries counts, so its
+ * `gateCounts` stays unset and the UI leaves the item out. Pure over
+ * already-fetched payloads, so no extra query is needed.
  */
 function joinGateCounts(page: TimelineEntry[]): void {
   for (const entry of page) {
@@ -2969,7 +2972,7 @@ function joinGateCounts(page: TimelineEntry[]): void {
     }
     const results = entry.payload.results;
     if (!Array.isArray(results)) {
-      entry.gateCounts = null;
+      if (entry.eventType === 'testgate-result') entry.gateCounts = null;
       continue;
     }
     let passed = 0;

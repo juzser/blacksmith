@@ -87,12 +87,12 @@ describe('timeline() run + gate join (DS6 PR2)', () => {
     expect(gateRow?.gateCounts).toEqual({ passed: 0, failed: 0 });
   });
 
-  it('a Gate row whose payload carries no results array gets null gateCounts', async () => {
+  it('a Gate row whose payload carries no results array leaves gateCounts unset', async () => {
     await openFixture();
     const entries = timeline(handle.db, { sessionId: SESSION_ID, epicId: EPIC_ID });
     const outcomeRow = entries.find((e) => e.eventType === 'gate-outcome');
     expect(outcomeRow).toBeDefined();
-    expect(outcomeRow?.gateCounts).toBeNull();
+    expect(outcomeRow?.gateCounts).toBeUndefined();
   });
 
   it('non-Gate rows carry no gateCounts field at all', async () => {

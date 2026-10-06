@@ -11,7 +11,11 @@ import type { StoredEvent } from '../../src/events.js';
 
 const SESSION_ID = 'sess-artifact-check';
 
-function check(n: number, payload: Record<string, unknown>): StoredEvent {
+function check(
+  n: number,
+  payload: Record<string, unknown>,
+  eventType = 'artifact-check-result',
+): StoredEvent {
   return {
     event_id: `${SESSION_ID}#${n}`,
     record: {
@@ -19,7 +23,7 @@ function check(n: number, payload: Record<string, unknown>): StoredEvent {
       actor: 'system',
       plan_version: 1,
       causal_parent: n === 1 ? null : `${SESSION_ID}#${n - 1}`,
-      event_type: 'artifact-check-result',
+      event_type: eventType,
       task_id: 'epic-a/t1',
       payload,
       ts: `2026-08-04T12:00:0${n}.000Z`,
@@ -39,11 +43,11 @@ describe('timeline() artifact-check gateCounts', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  function counts(payloads: Record<string, unknown>[]) {
+  function counts(payloads: Record<string, unknown>[], eventType = 'artifact-check-result') {
     projectSession(
       handle,
       SESSION_ID,
-      payloads.map((p, i) => check(i + 1, p)),
+      payloads.map((p, i) => check(i + 1, p, eventType)),
     );
     return timeline(handle.db, { sessionId: SESSION_ID }).map((e) => e.gateCounts);
   }
@@ -64,5 +68,22 @@ describe('timeline() artifact-check gateCounts', () => {
 
   it('stays null when the payload carries nothing to count', () => {
     expect(counts([{}])).toEqual([null]);
+  });
+
+  // Only checks that carry counts get an item; a schema/outcome check without
+  // a results array leaves the key absent so the UI drops it, not "not measured".
+  it('leaves gateCounts unset for a check type that never carries counts', () => {
+    expect(counts([{ ok: true }], 'schema-check-result')).toEqual([undefined]);
+    expect(counts([{ outcome: 'pass' }], 'gate-outcome')).toEqual([undefined]);
+  });
+
+  it('keeps null for a test gate with no results array', () => {
+    expect(counts([{}], 'testgate-result')).toEqual([null]);
+  });
+
+  it('still counts a results array on any gate type', () => {
+    expect(counts([{ results: [{ pass: true }, { pass: false }] }], 'gate-outcome')).toEqual([
+      { passed: 1, failed: 1 },
+    ]);
   });
 });
