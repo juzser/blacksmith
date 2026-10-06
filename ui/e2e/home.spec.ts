@@ -866,6 +866,11 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
   expect.soft(r.outside, 'h. hit box outside its card').toEqual([]);
 }
 
+const FONT_VARIANTS: { label: string; css: string | null }[] = [
+  { label: '', css: null },
+  { label: ' (Arial metrics)', css: ':root { --bs-font-sans: Arial, sans-serif; }' },
+];
+
 test.describe('Home: Live sessions', () => {
   test('desktop: one labelled card per session with title, status, Now and Next', async ({
     page,
@@ -954,54 +959,60 @@ test.describe('Home: Live sessions', () => {
     expect(overflow).toBe(false);
   });
 
-  test('375px: tight rows, one title rhythm, 44px unclipped targets, long title clamps inline', async ({
-    page,
-  }) => {
-    await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
-    await page.setViewportSize(PHONE);
-    await page.goto('/overview');
-    await expect(page.locator('.bs-live-card')).toHaveCount(4);
-    const m = await measureLiveCards(page);
-    // a. one text line per row, key top-aligned with the value
-    expect(m.rows.some((r) => r.oneLine)).toBe(true);
-    for (const r of m.rows) {
-      if (!r.oneLine) continue;
-      // The "+ N more" row is the one row that carries added gap (20px, so its
-      // 44px box and the Next link's box below never overlap), so it is exempt.
-      if (!r.text.startsWith('+')) {
-        expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+  // The 44px floor must hold for any font, not just the macOS system one: the
+  // CI runner resolves the stack to an Arial-metric font, whose inline content
+  // area is shorter than the line height.
+  for (const font of FONT_VARIANTS) {
+    test(`375px: tight rows, one title rhythm, 44px unclipped targets, long title clamps inline${font.label}`, async ({
+      page,
+    }) => {
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+      await page.setViewportSize(PHONE);
+      await page.goto('/overview');
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await expect(page.locator('.bs-live-card')).toHaveCount(4);
+      const m = await measureLiveCards(page);
+      // a. one text line per row, key top-aligned with the value
+      expect(m.rows.some((r) => r.oneLine)).toBe(true);
+      for (const r of m.rows) {
+        if (!r.oneLine) continue;
+        // The "+ N more" row is the one row that carries added gap (20px, so its
+        // 44px box and the Next link's box below never overlap), so it is exempt.
+        if (!r.text.startsWith('+')) {
+          expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+        }
+        expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
       }
-      expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
-    }
-    // b. linked and unlinked one-line titles share one height
-    const one = m.titles.filter((t) => t.lines === 1);
-    const linked = one.find((t) => t.linked);
-    const unlinked = one.find((t) => !t.linked);
-    expect(linked && unlinked).toBeTruthy();
-    expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
-    // c + d. every target the inline-link-in-prose exemption (WCAG 2.2 SC
-    // 2.5.8) does not cover measures >= 44, and no clamped ancestor clips any
-    // target. The Now task links read "Builder on <link>", so they are exempt.
-    expect(m.targets.length).toBeGreaterThanOrEqual(8);
-    expect(m.targets.some((t) => t.inline)).toBe(true);
-    expect(m.targets.some((t) => !t.inline)).toBe(true);
-    for (const t of m.targets) {
-      if (!t.inline) expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(43.5);
-      expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
-    }
-    // f + g + h. hit boxes never overlap, taps land on the text, cards contain them
-    await expectHitBoxesSound(page);
-    // e. long title: first line shares the role text's line, at most 2 lines show
-    expect(Math.abs(m.long.firstTop - m.long.vTop)).toBeLessThanOrEqual(2);
-    // The link wraps to 3+ lines; the 2-line clamp hides the rest. Line tops
-    // are measured from the value's content top; any line from the 3rd on that
-    // starts above the clip edge (the box's padding edge) would show through.
-    expect(m.long.lineTops.length).toBeGreaterThanOrEqual(3);
-    const below = m.long.lineTops.filter(
-      (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
-    );
-    expect(below).toEqual([]);
-  });
+      // b. linked and unlinked one-line titles share one height
+      const one = m.titles.filter((t) => t.lines === 1);
+      const linked = one.find((t) => t.linked);
+      const unlinked = one.find((t) => !t.linked);
+      expect(linked && unlinked).toBeTruthy();
+      expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
+      // c + d. every target the inline-link-in-prose exemption (WCAG 2.2 SC
+      // 2.5.8) does not cover measures >= 44, and no clamped ancestor clips any
+      // target. The Now task links read "Builder on <link>", so they are exempt.
+      expect(m.targets.length).toBeGreaterThanOrEqual(8);
+      expect(m.targets.some((t) => t.inline)).toBe(true);
+      expect(m.targets.some((t) => !t.inline)).toBe(true);
+      for (const t of m.targets) {
+        if (!t.inline) expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(44 - 1 / 64);
+        expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
+      }
+      // f + g + h. hit boxes never overlap, taps land on the text, cards contain them
+      await expectHitBoxesSound(page);
+      // e. long title: first line shares the role text's line, at most 2 lines show
+      expect(Math.abs(m.long.firstTop - m.long.vTop)).toBeLessThanOrEqual(2);
+      // The link wraps to 3+ lines; the 2-line clamp hides the rest. Line tops
+      // are measured from the value's content top; any line from the 3rd on that
+      // starts above the clip edge (the box's padding edge) would show through.
+      expect(m.long.lineTops.length).toBeGreaterThanOrEqual(3);
+      const below = m.long.lineTops.filter(
+        (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
+      );
+      expect(below).toEqual([]);
+    });
+  }
 
   test('card body padding is space-3 at 375px and space-4 on desktop, on all four sides', async ({
     page,
@@ -1033,17 +1044,20 @@ test.describe('Home: Live sessions', () => {
     }
   });
 
-  test('375px expanded: two Now links above the next task link still never overlap', async ({
-    page,
-  }) => {
-    await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
-    await page.setViewportSize(PHONE);
-    await page.goto('/overview');
-    const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
-    await first.getByRole('button', { name: '+ 2 more' }).click();
-    await expect(first).toContainText('Code reviewer on Check the cart total');
-    await expectHitBoxesSound(page);
-  });
+  for (const font of FONT_VARIANTS) {
+    test(`375px expanded: two Now links above the next task link still never overlap${font.label}`, async ({
+      page,
+    }) => {
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+      await page.setViewportSize(PHONE);
+      await page.goto('/overview');
+      const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await first.getByRole('button', { name: '+ 2 more' }).click();
+      await expect(first).toContainText('Code reviewer on Check the cart total');
+      await expectHitBoxesSound(page);
+    });
+  }
 
   test('empty: says so, with how many sessions were hidden', async ({ page }) => {
     await serveLive(
