@@ -381,6 +381,21 @@ test.describe('Home: Running now scope', () => {
     await expect(page.getByText('quiet project')).toHaveCount(0);
   });
 
+  for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+    test(`screenshot running-now scope ${vpName}/light (Active, then All)`, async ({ page }) => {
+      await setTheme(page, 'light');
+      await page.setViewportSize(viewport);
+      await serveProjects(page, SCOPE_PROJECTS);
+      const section = page.locator('section[aria-labelledby="running-heading"]');
+      await page.goto('/overview');
+      await settleForShot(page, section.getByText('2 quiet projects'));
+      await shootElement(section, `home-running-now-scope-active-${vpName}-light`);
+      await page.goto('/overview?scope=all');
+      await settleForShot(page, section.locator('.bs-home__card--quiet').first());
+      await shootElement(section, `home-running-now-scope-all-${vpName}-light`);
+    });
+  }
+
   test('phone: the toggle and the Show all link are 44px targets', async ({ page }) => {
     await serveProjects(page, SCOPE_PROJECTS);
     await page.setViewportSize(PHONE);
