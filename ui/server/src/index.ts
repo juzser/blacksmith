@@ -14,6 +14,10 @@ export interface ServeOptions {
   specsDir?: string;
   /** See AppOpts.nowIso: a pinned clock for screenshot harnesses, unset in real use. */
   nowIso?: string;
+  /** See AppOpts.claudeConfigDir / claudeConfigSource / knownRoots. */
+  claudeConfigDir?: string;
+  claudeConfigSource?: 'flag' | 'env' | 'default';
+  knownRoots?: string[];
 }
 
 export interface ServerHandle {
@@ -30,6 +34,9 @@ export function serve(opts: ServeOptions): ServerHandle {
     ...(opts.roadmapPath ? { roadmapPath: opts.roadmapPath } : {}),
     ...(opts.specsDir ? { specsDir: opts.specsDir } : {}),
     ...(opts.nowIso ? { nowIso: opts.nowIso } : {}),
+    ...(opts.claudeConfigDir ? { claudeConfigDir: opts.claudeConfigDir } : {}),
+    ...(opts.claudeConfigSource ? { claudeConfigSource: opts.claudeConfigSource } : {}),
+    ...(opts.knownRoots ? { knownRoots: opts.knownRoots } : {}),
     uiDistDir: UI_DIST_DIR,
   });
   const port = opts.port ?? DEFAULT_PORT;

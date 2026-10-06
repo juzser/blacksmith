@@ -98,3 +98,20 @@ export function writeGuard() {
     return next();
   };
 }
+
+/**
+ * Refuses a request whose Host header does not name a loopback address, so a
+ * rebound hostname that resolves to 127.0.0.1 cannot read the route from a
+ * foreign page. Mounted per route on `GET /api/cli-sessions`, which carries
+ * operator prompt text; writeGuard() covers POST only, and extending this to
+ * the other read routes is a separate change.
+ */
+export function loopbackGuard() {
+  return async (c: Context, next: Next) => {
+    const host = c.req.header('host') ?? new URL(c.req.url).host;
+    if (!isLoopbackHost(host)) {
+      return c.json({ error: { code: 'ui.forbidden-host', message: 'Host is not allowed.' } }, 403);
+    }
+    return next();
+  };
+}

@@ -2092,3 +2092,103 @@ describe('read boundary guard (finding 871ee8f7)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('GET /api/cli-sessions', () => {
+  const CLI_ID = '66666666-6666-4666-8666-666666666666';
+  let stateDir: string;
+  let dbDir: string;
+  let configDir: string;
+  let dbPath: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-cli-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-cli-db-'));
+    configDir = path.join(dbDir, 'claude');
+    await mkdir(path.join(configDir, 'sessions'), { recursive: true });
+    await buildFixture({ stateDir, cliSessionId: CLI_ID });
+    dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(dbDir, 'none.md') });
+    await writeFile(
+      path.join(configDir, 'sessions', '4242.json'),
+      JSON.stringify({
+        pid: 4242,
+        sessionId: CLI_ID,
+        cwd: path.join(dbDir, 'unrelated'),
+        kind: 'interactive',
+        status: 'idle',
+        name: 'fixture',
+        version: '2.1.290',
+        startedAt: 1_790_000_000_000,
+        statusUpdatedAt: 1_790_000_100_000,
+      }),
+    );
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  function serve(extra: { claudeConfigDir?: string } = { claudeConfigDir: configDir }) {
+    return createApp({
+      dbPath,
+      stateDir,
+      ...extra,
+      cliIsAlive: (pid) => pid === 4242,
+      cliListWorktrees: async () => [],
+    });
+  }
+
+  it('returns the full shape, with the stamped session linked to its epic', async () => {
+    const handle = serve();
+    try {
+      const res = await handle.app.request('/api/cli-sessions', {
+        headers: { host: '127.0.0.1:4680' },
+      });
+      expect(res.status).toBe(200);
+      const body = await json<{
+        state: string;
+        configSource: string;
+        hidden: Record<string, number>;
+        sessions: { name: string; status: string; inScopeBy: string; linked: { epics: { epicId: string }[] } }[];
+      }>(res);
+      expect(body.state).toBe('ok');
+      expect(body.configSource).toBe('flag');
+      expect(body.hidden).toEqual({ outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 });
+      expect(body.sessions).toHaveLength(1);
+      expect(body.sessions[0]).toMatchObject({ name: 'fixture', status: 'idle', inScopeBy: 'stamped' });
+      expect(body.sessions[0]?.linked.epics[0]?.epicId).toBe(EPIC_ID);
+      expect(JSON.stringify(body)).not.toContain(dbDir);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('answers 403 to a foreign Host and serves loopback names', async () => {
+    const handle = serve();
+    try {
+      const foreign = await handle.app.request('/api/cli-sessions', {
+        headers: { host: 'evil.example' },
+      });
+      expect(foreign.status).toBe(403);
+      const local = await handle.app.request('/api/cli-sessions', { headers: { host: 'localhost:4680' } });
+      expect(local.status).toBe(200);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('answers absent when no config dir is given', async () => {
+    const handle = serve({});
+    try {
+      const res = await handle.app.request('/api/cli-sessions', { headers: { host: '127.0.0.1:4680' } });
+      expect(await json<{ state: string; configSource: string; sessions: unknown[] }>(res)).toMatchObject({
+        state: 'absent',
+        configSource: 'none',
+        sessions: [],
+      });
+    } finally {
+      closeApp(handle);
+    }
+  });
+});

@@ -23,6 +23,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
@@ -150,6 +151,7 @@ import {
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
   STATE_DB_PATH,
+  WORK_ROOT,
 } from './paths.js';
 import {
   diffPlans,
@@ -5035,6 +5037,9 @@ async function main(): Promise<number> {
         roadmapPath?: string;
         specsDir?: string;
         nowIso?: string;
+        claudeConfigDir?: string;
+        claudeConfigSource?: 'flag' | 'env' | 'default';
+        knownRoots?: string[];
       }) => {
         close: () => void;
       };
@@ -5062,6 +5067,16 @@ async function main(): Promise<number> {
     // request, and the plan files it consults to place an unstamped epic
     // (D-246) must be the served db's, not this repo's.
     const specsDir = flags['specs-dir'];
+    // Where Claude Code keeps its live-session registry and transcripts, for
+    // /api/cli-sessions: --claude-config-dir, then $CLAUDE_CONFIG_DIR, then
+    // ~/.claude. Only this verb resolves a default; the server never does.
+    const claudeFlag = flags['claude-config-dir'];
+    const claudeEnv = process.env.CLAUDE_CONFIG_DIR;
+    const claude: { dir: string; source: 'flag' | 'env' | 'default' } = claudeFlag
+      ? { dir: path.resolve(claudeFlag), source: 'flag' }
+      : claudeEnv
+        ? { dir: path.resolve(claudeEnv), source: 'env' }
+        : { dir: path.join(homedir(), '.claude'), source: 'default' };
     mod.serve({
       port,
       dbPath,
@@ -5069,6 +5084,9 @@ async function main(): Promise<number> {
       ...(roadmapPath ? { roadmapPath } : {}),
       ...(specsDir ? { specsDir } : {}),
       ...(nowIso !== undefined ? { nowIso } : {}),
+      claudeConfigDir: claude.dir,
+      claudeConfigSource: claude.source,
+      knownRoots: [...new Set([REPO_ROOT, WORK_ROOT])],
     });
     return 0;
   }

@@ -72,7 +72,10 @@ import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/schedul
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
-import { writeGuard } from './middleware.js';
+import type { CliConfigSource } from './cliSessions.js';
+import { createCliSessionsReader } from './cliSessions.js';
+import { loopbackGuard, writeGuard } from './middleware.js';
+import { REPO_ROOT } from './paths.js';
 
 /**
  * The only image types the artifact route will stream — a screenshot is a
@@ -152,6 +155,20 @@ export interface AppOpts {
    * half a fixed page once the server computes time-dependent facts too.
    */
   nowIso?: string;
+  /**
+   * The Claude Code config dir whose `sessions/` and `projects/` feed
+   * `/api/cli-sessions`. Only `smith ui serve` resolves a default; omitted
+   * here the route answers `absent`, so no test or harness reads a real
+   * ~/.claude by accident.
+   */
+  claudeConfigDir?: string;
+  /** Where `claudeConfigDir` came from, echoed in the response. */
+  claudeConfigSource?: CliConfigSource;
+  /** Roots whose sessions count as Blacksmith sessions; the repo this server lives in when omitted. */
+  knownRoots?: string[];
+  /** Injection seams for tests of the route. */
+  cliIsAlive?: (pid: number) => boolean;
+  cliListWorktrees?: () => Promise<string[]>;
 }
 
 /**
@@ -925,6 +942,19 @@ export function createApp(opts: AppOpts): AppHandle {
     }
     return c.json(result);
   });
+
+  // Live Claude Code CLI sessions (name, working/waiting/idle, doing now,
+  // linked epic). Behind the refresh middleware above so links are current,
+  // and behind loopbackGuard() because it carries operator prompt text.
+  const cliSessions = createCliSessionsReader({
+    configDir: opts.claudeConfigDir,
+    configSource: opts.claudeConfigDir ? (opts.claudeConfigSource ?? 'flag') : 'none',
+    roots: opts.knownRoots && opts.knownRoots.length > 0 ? opts.knownRoots : [REPO_ROOT],
+    nowIso: () => opts.nowIso ?? new Date().toISOString(),
+    ...(opts.cliIsAlive ? { isAlive: opts.cliIsAlive } : {}),
+    ...(opts.cliListWorktrees ? { listWorktrees: opts.cliListWorktrees } : {}),
+  });
+  app.get('/api/cli-sessions', loopbackGuard(), async (c) => c.json(await cliSessions.read(handle)));
 
   app.get('/api/projects', (c) => {
     const result = overview(handle.db, sessionScope(c), clock);

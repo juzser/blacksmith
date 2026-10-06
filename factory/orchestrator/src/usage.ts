@@ -871,7 +871,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'ui serve',
     positionals: '',
     flags:
-      '[--port <n>] [--db <file>] [--state-dir <dir>] [--roadmap-path <file>] [--specs-dir <dir>] [--now-iso <iso>]',
+      '[--port <n>] [--db <file>] [--state-dir <dir>] [--roadmap-path <file>] [--specs-dir <dir>] [--now-iso <iso>] [--claude-config-dir <dir>]',
     summary: 'Serve the dashboard from the built ui/server.',
   },
   {
