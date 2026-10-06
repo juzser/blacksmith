@@ -42,10 +42,10 @@ const props = defineProps<{
   /** A task a quick-look targets: a row hidden past the cap is revealed for it. */
   revealTaskId?: string | null;
 }>();
+// `navigate` carries an arrow key on a fix row: the board moves focus on.
 const emit = defineEmits<{
   toggle: [];
   select: [taskId: string];
-  /** An arrow key on a fix row: the board moves focus to the next stop. */
   navigate: [event: KeyboardEvent];
 }>();
 

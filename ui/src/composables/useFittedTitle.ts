@@ -19,7 +19,11 @@ const GLUE_MAX = 24;
 
 function splitTitle(text: string): { head: string; tail: string } {
   const m = /^(.*?)(\S+)$/s.exec(text);
-  return m && m[2].length <= GLUE_MAX ? { head: m[1], tail: m[2] } : { head: text, tail: '' };
+  const head = m?.[1];
+  const tail = m?.[2];
+  return head !== undefined && tail !== undefined && tail.length <= GLUE_MAX
+    ? { head, tail }
+    : { head: text, tail: '' };
 }
 
 export function useFittedTitle(titleEl: Ref<HTMLElement | null>, title: Ref<string>) {

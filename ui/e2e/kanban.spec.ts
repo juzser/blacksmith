@@ -128,7 +128,9 @@ function richFollowupBoard() {
     ['s0', 'The settings form loses its unsaved changes when the tab is switched'],
     ['s1', 'Wrap long labels in the settings sidebar'],
     ['s2', 'Keep the save button visible while scrolling'],
-  ].map(([name, summary], i) => fix(name, summary, SETTINGS, `2026-01-1${3 - i}T00:00:00.000Z`));
+  ].map(([name = '', summary = ''], i) =>
+    fix(name, summary, SETTINGS, `2026-01-1${3 - i}T00:00:00.000Z`),
+  );
   return [
     { taskStatus: 'todo', tasks: [...settings, ...billing] },
     { taskStatus: 'in-progress', tasks: [task('epic-a/task-3', 'in-progress')] },
