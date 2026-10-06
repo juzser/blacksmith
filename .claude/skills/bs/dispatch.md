@@ -351,7 +351,8 @@ spec-reviewer, security-reviewer, auditor, and uiux (wave.md step 3's pre-code
 spec and step 5's visual pass; each is bracketed with `judge dispatch`/`judge
 report` the same as the other six, but also carries `--kind spec` or `--kind
 visual` — the two are separate turns on the same task, and the gate's uiux
-stage reads them apart). `judge report` reads the declared file and refuses it four
+stage reads them apart; a uiux dispatch with no `--kind` is refused with
+`judges.kind-required`). `judge report` reads the declared file and refuses it four
 ways — `judges.artifact-missing` (re-poke the agent; recovery was six for
 six), `judges.artifact-unparseable` (it narrated instead of reporting),
 `judges.artifact-not-a-list` (it wrote some other shape), and

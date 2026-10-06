@@ -204,6 +204,10 @@ one thing this playbook never asks you to.
      The pass is a judgment about the rendered screen, and a uiux session
      that reads the diff ends up reviewing intent, which the reviewer
      already covers.
+     Bracket it with `bs judge dispatch --role uiux --kind visual` / `bs
+     judge report --role uiux --kind visual`: a dispatch with no `--kind` is
+     refused (`judges.kind-required`), because a kindless turn is one the gate's
+     uiux stage never reads.
    - **Blast radius.** When the task's claims touch a shared primitive (a
      design-system/kit component or a global stylesheet), a screenshot of
      the task's own screens is not the full surface: the tester re-shoots

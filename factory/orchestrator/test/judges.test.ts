@@ -135,11 +135,23 @@ describe('judges.ts', () => {
   // blocked Stop", and uiux's artifact is never that array shape). Dispatch
   // and report still have to open and close a turn for it.
   describe('uiux dispatch/report (not a JUDGE_ROLES member, still opens a turn)', () => {
+    it('refuses a uiux dispatch with no kind, naming both kinds, and writes no event', async () => {
+      const before = (await readEvents(sessionId, opts())).length;
+      const attempt = dispatch({ role: 'uiux', artifactPath: path.join(artifactDir, 'k.json') });
+      await expect(attempt).rejects.toMatchObject({ code: 'judges.kind-required' });
+      await expect(attempt).rejects.toThrow(/--kind spec.*--kind visual/s);
+      expect((await readEvents(sessionId, opts())).length).toBe(before);
+    });
+
     it('a uiux dispatch opens a turn and judge report --role uiux closes it', async () => {
-      await dispatch({ role: 'uiux', artifactPath: path.join(artifactDir, 'uiux.json') });
+      await dispatch({
+        role: 'uiux',
+        kind: 'visual',
+        artifactPath: path.join(artifactDir, 'uiux.json'),
+      });
       const open = await turns();
       expect(open).toHaveLength(1);
-      expect(open[0]).toMatchObject({ role: 'uiux', round: 1 });
+      expect(open[0]).toMatchObject({ role: 'uiux', round: 1, kind: 'visual' });
 
       const report = await recordJudgeReport(
         { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
@@ -207,7 +219,27 @@ describe('judges.ts', () => {
 
     it('legacy uiux events with no judge_kind still fold and close', async () => {
       const file = path.join(artifactDir, 'uiux-legacy.json');
-      await dispatch({ role: 'uiux', artifactPath: file });
+      // Written straight to the log: the CLI no longer lets a new kindless
+      // uiux dispatch through, but an old log still holds them.
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'dispatch_decision',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            agent_role: 'uiux',
+            provider: 'claude',
+            model_tier: 'frontier',
+            model: 'claude-opus-5',
+            round: 1,
+            declared_artifact: file,
+          },
+        },
+        opts(),
+      );
       const open = await turns();
       expect(open).toHaveLength(1);
       expect(open[0]?.kind).toBeNull();

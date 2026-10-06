@@ -10468,12 +10468,14 @@ describe('cli.ts (built binary)', () => {
       eventsDir: string,
       role: string,
       artifact: string,
+      kind?: string,
     ): void {
       const dispatched = judgeCli('dispatch', sessionId, eventsDir, [
         '--task',
         'epic-1/task-1',
         '--role',
         role,
+        ...(kind ? ['--kind', kind] : []),
         '--round',
         '1',
         '--artifact',
@@ -10682,7 +10684,7 @@ describe('cli.ts (built binary)', () => {
 
     it('report rejects an unknown --kind', async () => {
       const { sessionId, eventsDir, artifact } = await judgeSession();
-      dispatchJudge(sessionId, eventsDir, 'uiux', artifact);
+      dispatchJudge(sessionId, eventsDir, 'uiux', artifact, 'visual');
 
       const reported = judgeCli('report', sessionId, eventsDir, [
         '--task',
