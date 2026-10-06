@@ -26,6 +26,7 @@ import {
   capColumn,
   columnTone,
   defaultMobileColumnKey,
+  findGroupMember,
   type GroupableTask,
   groupByKanban,
   groupFollowups,
@@ -215,14 +216,23 @@ function onMobileTabKeydown(event: KeyboardEvent) {
 // peek panel. Escape restores focus to the card that opened the panel.
 const boardEl = ref<HTMLElement | null>(null);
 const peekTaskId = ref<string | null>(null);
+// Spec 1.4: a quick-look that targets a fix opens the group holding it. Only
+// the peek changing triggers this, so closing the group afterwards sticks.
+watch(peekTaskId, (id) => {
+  for (const col of columns.value) {
+    const hit = findGroupMember(col.visible, id);
+    if (hit && !openGroups.value.has(hit.key)) toggleGroup(hit.key);
+  }
+});
 let lastFocusedCard: HTMLElement | null = null;
 
 function cardEls(): HTMLElement[] {
   if (!boardEl.value) return [];
-  // A follow-up group is one stop (its summary) plus, once open, each fix row.
+  // A follow-up group is one stop (its summary) plus, once open, each fix row:
+  // the rows of a closed group stay in the DOM but cannot take focus.
   return Array.from(
     boardEl.value.querySelectorAll<HTMLElement>(
-      '.bs-kanban-card, .bs-kanban-group__summary, .bs-kanban-group__row',
+      '.bs-kanban-card, .bs-kanban-group__summary, .bs-kanban-group[open] .bs-kanban-group__row',
     ),
   );
 }
@@ -397,6 +407,7 @@ defineExpose({ focusFirstCard });
               :open="openGroups.has(item.key)"
               :status-in-column="options.groupBy === 'status' && !showAll"
               :compact="isPhoneWidth"
+              :reveal-task-id="peekTaskId"
               @toggle="toggleGroup(item.key)"
               @select="onCardSelect"
               @keydown="onGroupKeydown"

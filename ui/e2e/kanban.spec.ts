@@ -98,6 +98,45 @@ function followupBoard() {
   ];
 }
 
+/**
+ * The board the group screenshots use: a three-fix group that stays collapsed
+ * (newest, so it sits first) and a seven-fix group, two of them live, that is
+ * opened — so the shot shows a collapsed group, an expanded one, the live chip
+ * and "+1" on the summary, and the "Show 2 more" row past the five-row cap.
+ */
+function richFollowupBoard() {
+  const live = (t: KanbanTask): KanbanTask => ({
+    ...t,
+    agentRole: 'coder',
+    agentModelTier: 'mid',
+    agentActivity: 'working',
+  });
+  const reports = [
+    'The invoice total drops its currency symbol',
+    'Keep the pagination footer pinned on long tables',
+    'Retry the export when the connection resets',
+    'Show the due date in the viewer time zone',
+    'Round tax lines the same way on every page',
+    'Stop the receipt preview from flickering',
+    'Link each invoice row to its customer',
+  ];
+  const billing = reports.map((summary, i) => {
+    const t = fix(`b${i}`, summary, BILLING, `2026-01-0${7 - i}T00:00:00.000Z`);
+    return i < 2 ? live(t) : t;
+  });
+  const settings = [
+    ['s0', 'The settings form loses its unsaved changes when the tab is switched'],
+    ['s1', 'Wrap long labels in the settings sidebar'],
+    ['s2', 'Keep the save button visible while scrolling'],
+  ].map(([name, summary], i) => fix(name, summary, SETTINGS, `2026-01-1${3 - i}T00:00:00.000Z`));
+  return [
+    { taskStatus: 'todo', tasks: [...settings, ...billing] },
+    { taskStatus: 'in-progress', tasks: [task('epic-a/task-3', 'in-progress')] },
+    { taskStatus: 'failed', tasks: [task('epic-a/task-4', 'failed')] },
+    { taskStatus: 'completed', tasks: [task('epic-a/task-5', 'completed')] },
+  ];
+}
+
 async function mockBoard(
   page: import('@playwright/test').Page,
   columns: Array<{ taskStatus: string; tasks: ReturnType<typeof task>[] }>,
@@ -1019,7 +1058,6 @@ test.describe('Kanban', () => {
 
     await summary.click();
     await expect(group).toHaveAttribute('open', '');
-    await expect(summary).toHaveAttribute('aria-expanded', 'true');
     const rows = group.locator('.bs-kanban-group__row');
     await expect(rows).toHaveCount(3);
     await expect(rows.first()).toContainText(
@@ -1044,6 +1082,12 @@ test.describe('Kanban', () => {
     await page.goto('/work/kanban');
     await page.locator('.bs-kanban-group summary').click();
     await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
+    // The native toggle event is queued after the click: wait until the board stored it.
+    await page.waitForFunction(() =>
+      Object.keys(sessionStorage).some(
+        (k) => k.includes('kanban-groups') && sessionStorage[k]?.includes('Todo'),
+      ),
+    );
     await page.reload();
     await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
   });
@@ -1058,6 +1102,71 @@ test.describe('Kanban', () => {
     await expect(group.locator('.bs-kanban-group__row').first()).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('a toggled group keeps its state across a polling refresh', async ({ page }) => {
+    let requests = 0;
+    await page.route('**/api/kanban*', (route) => {
+      requests += 1;
+      return route.fulfill({ json: followupBoard() });
+    });
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    await group.locator('summary').click();
+    await expect(group).toHaveAttribute('open', '');
+    const before = requests;
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => requests).toBeGreaterThan(before);
+    await expect(group).toHaveAttribute('open', '');
+    await group.locator('summary').click();
+    await expect(group).not.toHaveAttribute('open', /.*/);
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect.poll(() => requests).toBeGreaterThan(before + 1);
+    await expect(group).not.toHaveAttribute('open', /.*/);
+  });
+
+  test('fix row keyboard: Tab reaches row then copy; Enter opens; copy does not open', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    const summary = group.locator('summary');
+    await summary.click();
+    await summary.focus();
+    // The summary is one stop: arrows step into the open rows, Tab goes row then its copy button.
+    await page.keyboard.press('ArrowDown');
+    const row = group.locator('.bs-kanban-group__row').first();
+    await expect(row).toBeFocused();
+    await page.keyboard.press('Tab');
+    const copy = row.getByRole('button', { name: 'Copy task id' });
+    await expect(copy).toBeFocused();
+    // Enter on the copy button copies and does not open the task.
+    await page.keyboard.press('Enter');
+    await expect(row.getByRole('button', { name: 'Copied' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // Space on the copy button behaves the same.
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // Enter on the row itself opens the task (the quick-look panel on desktop).
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('arrows treat a collapsed group as one stop and skip its rows', async ({ page }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const todo = page.getByRole('region', { name: 'Todo column' });
+    const summary = todo.locator('.bs-kanban-group summary');
+    await summary.focus();
+    await page.keyboard.press('ArrowDown');
+    // Next stop is the lone follow-up card, not a hidden row of the closed group.
+    await expect(todo.locator('.bs-kanban-card')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(summary).toBeFocused();
   });
 
   test('phone: the group summary and every fix row are at least 44px tall', async ({ page }) => {
@@ -1075,23 +1184,26 @@ test.describe('Kanban', () => {
   });
 
   for (const theme of ['light', 'dark'] as const) {
-    test(`screenshot group/desktop/${theme}`, async ({ page }) => {
-      await setTheme(page, theme);
-      await mockBoard(page, followupBoard());
-      await page.goto('/work/kanban');
-      await page.locator('.bs-kanban-group summary').click();
-      await settleForShot(page, page.locator('.bs-kanban-group'));
-      await shoot(page, `work-kanban-group-desktop-${theme}`);
-    });
-    test(`screenshot group/mobile/${theme}`, async ({ page }) => {
-      await setTheme(page, theme);
-      await page.setViewportSize(VIEWPORTS.mobile);
-      await mockBoard(page, followupBoard());
-      await page.goto('/work/kanban');
-      await page.locator('.bs-kanban-group summary').click();
-      await settleForShot(page, page.locator('.bs-kanban-group'));
-      await shoot(page, `work-kanban-group-mobile-${theme}`);
-    });
+    for (const [vpName, viewport] of [
+      ['desktop', VIEWPORTS.desktop],
+      ['mobile', VIEWPORTS.mobile],
+    ] as const) {
+      test(`screenshot group/${vpName}/${theme}`, async ({ page }) => {
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await mockBoard(page, richFollowupBoard());
+        await page.goto('/work/kanban');
+        // The first (three-fix) group stays collapsed; the seven-fix one opens.
+        const groups = page.locator('.bs-kanban-group');
+        await expect(groups).toHaveCount(2);
+        await groups.nth(1).locator('summary').click();
+        await expect(groups.nth(1)).toHaveAttribute('open', '');
+        await expect(groups.nth(0)).not.toHaveAttribute('open', /.*/);
+        await expect(groups.nth(1).locator('.bs-kanban-group__more')).toHaveText('Show 2 more');
+        await settleForShot(page, groups.nth(1));
+        await shoot(page, `work-kanban-group-${vpName}-${theme}`);
+      });
+    }
   }
 
   for (const theme of ['light', 'dark'] as const) {

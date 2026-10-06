@@ -391,7 +391,9 @@ export function groupFollowups<T extends FollowupTaskLike>(
     if (members.length < FOLLOWUP_GROUP_MIN) continue;
     groups.set(
       parent,
-      [...members].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)),
+      [...members].sort((a, b) =>
+        a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
+      ),
     );
   }
   const items: Array<ColumnItem<T>> = [];
@@ -410,6 +412,24 @@ export function groupFollowups<T extends FollowupTaskLike>(
     }
   }
   return items;
+}
+
+/**
+ * The follow-up group that holds `taskId`, with the member's position in the
+ * group (newest first), or null for a plain card or an unknown id. The board
+ * opens that group, and the group its hidden rows, when a peek targets a fix.
+ */
+export function findGroupMember<T extends FollowupTaskLike>(
+  items: ReadonlyArray<ColumnItem<T>>,
+  taskId: string | null,
+): { key: string; index: number } | null {
+  if (taskId === null) return null;
+  for (const item of items) {
+    if (item.kind !== 'group') continue;
+    const index = item.members.findIndex((m) => m.taskId === taskId);
+    if (index !== -1) return { key: item.key, index };
+  }
+  return null;
 }
 
 export interface KanbanCardChip {

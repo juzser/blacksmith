@@ -13,6 +13,7 @@ import {
   defaultMobileColumnKey,
   dependencyChainText,
   epicKeyForTask,
+  findGroupMember,
   foldIntoColumns,
   groupByKanban,
   groupFollowups,
@@ -886,5 +887,35 @@ describe('lib/kanban.ts — groupFollowups() (one stacked card per parent, min 2
     );
     expect(items).toHaveLength(1);
     expect(items[0]?.kind).toBe('group');
+  });
+});
+
+describe('lib/kanban.ts — findGroupMember() (which group holds a task)', () => {
+  const t = (id: string, parent: string | null, updatedAt: string) => ({
+    taskId: `epic-a/${id}`,
+    taskStatus: 'todo',
+    parentTaskId: parent === null ? null : `epic-a/${parent}`,
+    parentTitle: null,
+    updatedAt,
+  });
+  const items = groupFollowups(
+    [
+      t('f1', 'p', '2029-01-01T00:00:03Z'),
+      t('f2', 'p', '2029-01-01T00:00:02Z'),
+      t('f3', 'p', '2029-01-01T00:00:01Z'),
+      t('solo', null, '2029-01-01T00:00:00Z'),
+    ],
+    'Todo',
+  );
+
+  it('returns the group key and the member index (newest first)', () => {
+    expect(findGroupMember(items, 'epic-a/f1')).toEqual({ key: 'Todo:epic-a/p', index: 0 });
+    expect(findGroupMember(items, 'epic-a/f3')).toEqual({ key: 'Todo:epic-a/p', index: 2 });
+  });
+
+  it('returns null for a plain card or an unknown id', () => {
+    expect(findGroupMember(items, 'epic-a/solo')).toBeNull();
+    expect(findGroupMember(items, 'epic-a/nope')).toBeNull();
+    expect(findGroupMember(items, null)).toBeNull();
   });
 });

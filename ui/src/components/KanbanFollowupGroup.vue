@@ -3,16 +3,18 @@
 // one column (ds-spec.md Work/Kanban row, "Collapse, don't cram"). Built from
 // the board's existing parts: a native <details>/<summary> disclosure, the
 // kit Tag, AgentChip, RelativeTime and the card chrome of KanbanTaskCard.
-// The open state is owned by KanbanBoard (stored through expandedRows.ts), so
-// the <details> is driven by `open` and the summary click is intercepted
-// rather than left to the browser.
+// The open state is owned by KanbanBoard (stored through expandedRows.ts): the
+// <details> is driven by `open` and keeps its native toggle (so find-in-page
+// can open it); the `toggle` event is forwarded only when the browser changed
+// the state, never when it merely echoes the prop.
 //
 // There is no copy-id icon on the group (it has no single id) and no id text
 // anywhere: each fix row carries the small inline copy icon of its own task.
 
 import { ChevronDown, Clock, Link } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
+import { useFittedTitle } from '../composables/useFittedTitle.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
@@ -37,6 +39,8 @@ const props = defineProps<{
   statusInColumn: boolean;
   /** Phone cards keep to title and one meta line. */
   compact?: boolean;
+  /** A task a quick-look targets: a row hidden past the cap is revealed for it. */
+  revealTaskId?: string | null;
 }>();
 const emit = defineEmits<{ toggle: []; select: [taskId: string] }>();
 
@@ -54,7 +58,22 @@ const newest = computed(() => props.members[0]);
 const liveMembers = computed(() => props.members.filter((m) => agentChip(m)?.live));
 const liveChipTask = computed(() => liveMembers.value[0] ?? null);
 
+const titleEl = ref<HTMLElement | null>(null);
+const { fitted, titleHead, titleTail } = useFittedTitle(titleEl, title);
+
+function onToggle(event: Event) {
+  if ((event.target as HTMLDetailsElement).open !== props.open) emit('toggle');
+}
+
 const showAllRows = ref(false);
+watch(
+  () => props.revealTaskId,
+  (id) => {
+    const index = props.members.findIndex((m) => m.taskId === id);
+    if (index >= ROW_CAP) showAllRows.value = true;
+  },
+  { immediate: true },
+);
 const rows = computed(() => (showAllRows.value ? props.members : props.members.slice(0, ROW_CAP)));
 const hiddenRows = computed(() => Math.max(0, props.members.length - ROW_CAP));
 
@@ -90,15 +109,13 @@ function onRowKeydown(event: KeyboardEvent, taskId: string) {
 </script>
 
 <template>
-  <details class="bs-kanban-group" :open="open">
+  <details class="bs-kanban-group" :open="open" @toggle="onToggle">
     <summary
       class="bs-kanban-group__summary"
       :aria-label="ariaName"
-      :aria-expanded="open"
-      @click.prevent="emit('toggle')"
     >
       <span class="bs-kanban-group__head">
-        <span class="bs-kanban-group__title">{{ title }}</span>
+        <span ref="titleEl" class="bs-kanban-group__title" :title="fitted ? title : undefined">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}</span></span>
         <Icon :icon="ChevronDown" :size="16" class="bs-kanban-group__chev" />
       </span>
       <span class="bs-kanban-group__meta">
