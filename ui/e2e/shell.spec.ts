@@ -257,3 +257,20 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     await expect(roadmapChild).toHaveAttribute('aria-current', 'page');
   });
 });
+
+test.describe('Unknown URL', () => {
+  for (const [label, size] of [
+    ['desktop', { width: 1280, height: 800 }],
+    ['phone', { width: 375, height: 812 }],
+  ] as const) {
+    test(`${label}: renders "Page not found" with a link home, not a blank shell`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await page.goto('/no-such-page');
+      await expect(page.locator('#main').getByText('Page not found')).toBeVisible();
+      await page.getByRole('link', { name: 'Go to Home' }).click();
+      await expect(page).toHaveURL(/\/overview/);
+    });
+  }
+});

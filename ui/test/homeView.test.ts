@@ -4,6 +4,7 @@ import {
   budgetDeltaSentence,
   budgetRingLabel,
   budgetSummary,
+  cardTokensText,
   decisionLine,
   isBudgetOutlier,
   outlierSentence,
@@ -115,6 +116,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensSpent: 10_600_000,
           tokensBudget: 10_300_000,
           unmeasured: 0,
+          tokensByEpic: [epic('shop-1', 5_000_000, 10_300_000), epic('shop-old', 5_600_000, null)],
           alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
@@ -126,6 +128,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensSpent: 5,
           tokensBudget: null,
           unmeasured: 0,
+          tokensByEpic: [],
           alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
@@ -140,6 +143,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensSpent: 0,
           tokensBudget: null,
           unmeasured: 0,
+          tokensByEpic: [],
           alerts: { escalations: 1, pendingWaivers: 0 },
         },
       ],
@@ -149,7 +153,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
         project: 'shop-api',
         workingAgents: 28,
         epics: ['shop-1'],
-        tokens: { spent: 10_600_000, budget: 10_300_000, unmeasured: 0 },
+        tokens: { spent: 5_000_000, budget: 10_300_000, unmeasured: 0, outliers: 0 },
       },
     ]);
   });
@@ -166,9 +170,84 @@ describe('lib/homeView.ts runningNowCards()', () => {
         project: 'shop-api',
         workingAgents: 3,
         epics: ['e1'],
-        tokens: { spent: 40, budget: 100, unmeasured: 1 },
+        tokens: { spent: 40, budget: 100, unmeasured: 1, outliers: 0 },
       },
     ]);
+  });
+
+  function summary(over: Partial<NonNullable<OverviewResult['projects']>[number]>) {
+    return {
+      project: 'p',
+      liveAgentCount: 1,
+      workingAgentCount: 1,
+      epicsInFlight: [],
+      epicsActivelyRunning: [],
+      tokensSpent: 0,
+      tokensBudget: null,
+      unmeasured: 0,
+      tokensByEpic: [],
+      alerts: { escalations: 0, pendingWaivers: 0 },
+      ...over,
+    };
+  }
+
+  it('divides spend by budget over the budgeted in-flight epics only: an unbudgeted or closed epic adds to neither side', () => {
+    const o = overview({
+      projects: [
+        summary({
+          epicsInFlight: ['a', 'b'],
+          epicsActivelyRunning: ['a', 'b'],
+          // The project-wide fold the server also sends: 2.1M against 350K.
+          tokensSpent: 2_100_000,
+          tokensBudget: 350_000,
+          tokensByEpic: [
+            epic('a', 84_000, 350_000),
+            epic('b', 900_000, null),
+            epic('closed-one', 1_116_000, null),
+          ],
+        }),
+      ],
+    });
+    const [card] = runningNowCards(o);
+    expect(card?.tokens).toMatchObject({ spent: 84_000, budget: 350_000 });
+    expect(Math.round(((card?.tokens.spent ?? 0) / (card?.tokens.budget ?? 1)) * 100)).toBe(24);
+  });
+
+  it('keeps a closed epic out of the card even when it has a budget', () => {
+    const o = overview({
+      projects: [
+        summary({
+          epicsActivelyRunning: ['a'],
+          tokensByEpic: [epic('a', 10, 100), epic('closed-one', 9_000, 20_000)],
+        }),
+      ],
+    });
+    expect(runningNowCards(o)[0]?.tokens).toMatchObject({ spent: 10, budget: 100 });
+  });
+
+  it('treats an outlier epic exactly as the Budget panel does: out of the ratio, counted apart', () => {
+    const epics = [epic('a', 40, 100), epic('wild', 11_000, 1_000)];
+    const o = overview({
+      projects: [summary({ epicsActivelyRunning: ['a', 'wild'], tokensByEpic: epics })],
+    });
+    const card = runningNowCards(o)[0];
+    const panel = budgetSummary(epics);
+    expect(card?.tokens).toEqual({
+      spent: panel.spent,
+      budget: panel.budget,
+      unmeasured: panel.unmeasured,
+      outliers: panel.outliers.length,
+    });
+    expect(card?.tokens.outliers).toBe(1);
+  });
+
+  it('applies the same rule to the selected-project card', () => {
+    const o = overview({
+      workingAgentCount: 1,
+      epicsActivelyRunning: ['a'],
+      tokensByEpic: [epic('a', 10, 100), epic('closed-one', 9_000, 20_000)],
+    });
+    expect(runningNowCards(o, 'p')[0]?.tokens).toMatchObject({ spent: 10, budget: 100 });
   });
 
   it('shows no card for a selected project with nothing running', () => {
@@ -273,5 +352,26 @@ describe('lib/homeView.ts token wording', () => {
     expect(outlierSentence(1)).toBe('1 epic has a suspicious total.');
     expect(outlierSentence(2)).toBe('2 epics have suspicious totals.');
     expect(outlierSentence(0)).toBeNull();
+  });
+});
+
+describe('lib/homeView.ts cardTokensText()', () => {
+  it('reads "X of Y tokens" when measured', () => {
+    expect(cardTokensText({ spent: 84_000, budget: 350_000, unmeasured: 0, outliers: 0 })).toBe(
+      '84K of 350K tokens',
+    );
+  });
+
+  it('never prints "0 of" for an unmeasured epic: it says not measured beside the budget', () => {
+    const text = cardTokensText({ spent: 0, budget: 4_100_000, unmeasured: 3, outliers: 0 });
+    expect(text).toContain('not measured');
+    expect(text).toContain('4.1M');
+    expect(text).not.toMatch(/0 of/);
+  });
+
+  it('says no budget set when no in-flight epic declares one', () => {
+    expect(cardTokensText({ spent: 0, budget: null, unmeasured: 0, outliers: 0 })).toBe(
+      'No budget set',
+    );
   });
 });

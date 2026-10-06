@@ -23,8 +23,12 @@ describe('kit/SessionRow.vue', () => {
 
   it('shows the project, a RelativeTime start, duration, agent count, and last step', () => {
     expect(ROW).toMatch(/<RelativeTime[^>]*:iso="session\.startedAt"/);
-    expect(ROW).toMatch(/session\.liveAgentCount/);
-    expect(ROW).toMatch(/lastStepLabel\(props\.session\.lastEventType\)/);
+    expect(ROW).toMatch(/session\.workingAgentCount/);
+    expect(ROW).toMatch(/lastStepLabel\(props\.session\.lastEventType,/);
+  });
+
+  it('counts working agents, never the stalled ones liveAgentCount still includes', () => {
+    expect(ROW.replace(/\/\/.*$/gm, '')).not.toContain('liveAgentCount');
   });
 
   it('renders as a button only when clickable, like LessonCard', () => {

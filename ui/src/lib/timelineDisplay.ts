@@ -623,7 +623,11 @@ export function titleFor(entry: TimelineEntry): string {
     }
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
-      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? `: ${reason}` : ''}`;
+      // Tier and provider are shown only when present: "(/)" says nothing.
+      const via = [p.model_tier, p.provider].filter(
+        (v) => v !== undefined && v !== null && v !== '',
+      );
+      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))}${via.length ? ` (${via.join('/')})` : ''}${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
       return `Schema check: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;

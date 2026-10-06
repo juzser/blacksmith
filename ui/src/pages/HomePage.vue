@@ -42,6 +42,8 @@ import {
   budgetDeltaSentence,
   budgetRingLabel,
   budgetSummary,
+  cardShowsRing,
+  cardTokensText,
   decisionLine,
   outlierSentence,
   runningNowCards,
@@ -246,14 +248,17 @@ function becauseOf(promptId: string) {
               <p class="bs-home__stat">{{ pluralize(c.epics.length, 'epic') }} in flight</p>
               <div class="bs-home__tokens">
                 <ProgressRing
-                  v-if="c.tokens.budget"
+                  v-if="c.tokens.budget && cardShowsRing(c.tokens)"
                   :value="c.tokens.spent"
                   :max="c.tokens.budget"
                   kind="budget"
                   :label="budgetRingLabel(c.tokens.spent, c.tokens.budget)"
                 />
-                <span>{{ tokensOfBudget(c.tokens) }}</span>
+                <span>{{ cardTokensText(c.tokens) }}</span>
               </div>
+              <p v-if="outlierSentence(c.tokens.outliers)" class="bs-home__quiet">
+                {{ outlierSentence(c.tokens.outliers) }}
+              </p>
             </div>
           </Card>
         </div>

@@ -57,3 +57,24 @@ describe('router.ts Home (ds-spec.md §4.1)', () => {
     expect(SRC).toMatch(/\{ path: '\/projects', redirect: homeRedirect \}/);
   });
 });
+
+describe('router.ts catch-all', () => {
+  it('ends with a not-found route that renders the NotFoundPage, so an unknown path is not a blank shell', () => {
+    expect(SRC).toMatch(/path:\s*'\/:pathMatch\(\.\*\)\*'/);
+    expect(SRC).toMatch(/name:\s*'not-found'[\s\S]*pages\/NotFoundPage\.vue/);
+    // Last route: vue-router ranks by specificity, but the array order is the tie-break a reader trusts.
+    expect(SRC.lastIndexOf("path: '/:pathMatch")).toBeGreaterThan(
+      SRC.lastIndexOf("path: '/tasks/:taskId'"),
+    );
+  });
+
+  it('NotFoundPage says "Page not found" in an EmptyState and links Home', () => {
+    const page = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'NotFoundPage.vue'),
+      'utf8',
+    );
+    expect(page).toContain('<EmptyState');
+    expect(page).toContain('title="Page not found"');
+    expect(page).toMatch(/<RouterLink[^>]*to="\/overview"/);
+  });
+});

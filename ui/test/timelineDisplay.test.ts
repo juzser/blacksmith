@@ -83,6 +83,16 @@ describe('lib/timelineDisplay.ts', () => {
     expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic)');
   });
 
+  it('never prints empty parentheses or a bare slash when tier/provider are missing', () => {
+    const bare = entry({ eventType: 'dispatch_decision', payload: { agent_role: 'coder' } });
+    expect(titleFor(bare)).toBe('Dispatched Builder');
+    const tierOnly = entry({
+      eventType: 'dispatch_decision',
+      payload: { agent_role: 'coder', model_tier: 'mid' },
+    });
+    expect(titleFor(tierOnly)).toBe('Dispatched Builder (mid)');
+  });
+
   // Task 3 (dispatch reason fallback): writers put the reason under other
   // keys than `reason` — the same fallback chain the projector now applies
   // server-side (reason ?? rationale ?? note ?? why, strings only, trimmed)
@@ -1328,7 +1338,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'spec-change-decided': ['Spec change decided', 'Spec change decided'],
       user_prompt: ['', 'You · not measured'],
       'operator-note': ['Operator note', 'You · not measured'],
-      dispatch_decision: ['Dispatched Agent (/)', 'Running for 0 s'],
+      dispatch_decision: ['Dispatched Agent', 'Running for 0 s'],
       'task-result-recorded': ['Task result: ', 'not measured'],
       'session-start': ['Session started', ''],
       'judge-reported': ['Judge reported: 0 findings (round )', ''],

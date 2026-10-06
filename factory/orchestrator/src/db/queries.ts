@@ -390,6 +390,10 @@ export interface RunningSession {
   workingAgentCount: number;
   /** The most recent event's type — what this session just did. Null if its events are gone. */
   lastEventType: string | null;
+  /** The agent role of the last event when it is a dispatch, else null. */
+  lastStepRole: string | null;
+  /** The dispatched task's title (its id when untitled) when the last event is a dispatch, else null. */
+  lastStepTask: string | null;
   /**
    * Projects this session worked on, sorted. `sessions` has no project
    * column of its own (schema.ts), so membership is derived (sessionProjects):
@@ -569,6 +573,8 @@ export interface ProjectOverviewSummary {
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
   unmeasured: number;
+  /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
+  tokensByEpic: EpicTokenSpend[];
   alerts: { escalations: number; pendingWaivers: number };
 }
 
@@ -790,6 +796,17 @@ function epicTokenMaps(
   }
 
   return { budgetByEpic, spentByEpic, unmeasuredByEpic };
+}
+
+function epicTokenSpends(maps: ReturnType<typeof epicTokenMaps>): EpicTokenSpend[] {
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = maps;
+  const epicIds = new Set([...budgetByEpic.keys(), ...spentByEpic.keys()]);
+  return [...epicIds].sort().map((epicId) => ({
+    epicId,
+    tokensSpent: spentByEpic.get(epicId) ?? 0,
+    tokensBudget: budgetByEpic.get(epicId) ?? null,
+    unmeasured: unmeasuredByEpic.get(epicId) ?? 0,
+  }));
 }
 
 /**
@@ -1346,10 +1363,14 @@ export function runningSessions(
   // back in ts order, so the latest row is chosen by comparison rather than by
   // trusting scan order — and isLaterEvent settles a tie on ts the same way
   // pulse() does, which is what lets the two agree about one session.
-  const lastEvent = new Map<string, { ts: string; eventType: string; eventId: string }>();
+  const lastEvent = new Map<
+    string,
+    { ts: string; eventType: string; eventId: string; taskId: string | null }
+  >();
   const eventQuery = db
     .select({
       sessionId: eventsRaw.sessionId,
+      taskId: eventsRaw.taskId,
       ts: eventsRaw.ts,
       eventType: eventsRaw.eventType,
       eventId: eventsRaw.eventId,
@@ -1361,6 +1382,42 @@ export function runningSessions(
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
 
+  // A dispatch's role lives in its payload and its task's title in `tasks`;
+  // both are read only for the sessions whose last event is a dispatch.
+  const dispatchIds = [...lastEvent.values()]
+    .filter((e) => e.eventType === 'dispatch_decision')
+    .map((e) => e.eventId);
+  const roleByEvent = new Map<string, string>();
+  const titleByTask = new Map<string, string | null>();
+  if (dispatchIds.length > 0) {
+    for (const r of db
+      .select({ eventId: eventsRaw.eventId, payload: eventsRaw.payload })
+      .from(eventsRaw)
+      .where(inArray(eventsRaw.eventId, dispatchIds))
+      .all()) {
+      const role = (JSON.parse(r.payload) as { agent_role?: unknown }).agent_role;
+      if (typeof role === 'string') roleByEvent.set(r.eventId, role);
+    }
+    const taskIds = [...lastEvent.values()].flatMap((e) => (e.taskId ? [e.taskId] : []));
+    if (taskIds.length > 0) {
+      for (const t of db
+        .select({ taskId: tasks.taskId, title: tasks.title })
+        .from(tasks)
+        .where(inArray(tasks.taskId, taskIds))
+        .all()) {
+        titleByTask.set(t.taskId, t.title);
+      }
+    }
+  }
+  const lastStep = (sessionId: string) => {
+    const e = lastEvent.get(sessionId);
+    if (e?.eventType !== 'dispatch_decision') return { role: null, task: null };
+    return {
+      role: roleByEvent.get(e.eventId) ?? null,
+      task: (e.taskId && (titleByTask.get(e.taskId) || e.taskId)) || null,
+    };
+  };
+
   return (
     rows
       .map((s) => ({
@@ -1371,6 +1428,8 @@ export function runningSessions(
         liveAgentCount: liveBySession.get(s.sessionId) ?? 0,
         workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
+        lastStepRole: lastStep(s.sessionId).role,
+        lastStepTask: lastStep(s.sessionId).task,
         projects: [...(projectsBySession.get(s.sessionId) ?? [])].sort(),
         title: titles.get(s.sessionId) ?? null,
       }))
@@ -1755,7 +1814,8 @@ function projectSummary(
   const closedEpicsHere = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
   const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere);
-  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
+  const tokenMaps = epicTokenMaps(db, scope, taskRows);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
@@ -1776,6 +1836,7 @@ function projectSummary(
     tokensSpent,
     tokensBudget,
     unmeasured,
+    tokensByEpic: epicTokenSpends(tokenMaps),
     alerts: { escalations, pendingWaivers },
   };
 }
@@ -1977,13 +2038,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
-  const epicIds = new Set([...budgetByEpic.keys(), ...spentByEpic.keys()]);
-  const tokensByEpic: EpicTokenSpend[] = [...epicIds].sort().map((epicId) => ({
-    epicId,
-    tokensSpent: spentByEpic.get(epicId) ?? 0,
-    tokensBudget: budgetByEpic.get(epicId) ?? null,
-    unmeasured: unmeasuredByEpic.get(epicId) ?? 0,
-  }));
+  const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
 
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
 
@@ -2750,7 +2805,7 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
 
 /**
  * DS6 PR2 (§4.3 table) — normalised `{passed, failed}` counts for every
- * `Gate` entry in `page`, from `testgate-result.results` (or
+ * `Gate` entry in `page`, from `testgate-result.results` (or an artifact check's `checked`/`issues`, or
  * `gate-outcome.results`, if a future writer adds one); `null` when the
  * payload carries no derivable `results` array. Pure over already-fetched
  * payloads, so no extra query is needed.
@@ -2758,6 +2813,22 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
 function joinGateCounts(page: TimelineEntry[]): void {
   for (const entry of page) {
     if (entry.kind !== 'Gate') continue;
+    if (entry.eventType === 'artifact-check-result') {
+      // Not a results array: { ok, checked, issues }.
+      const { ok, checked, issues } = entry.payload as {
+        ok?: unknown;
+        checked?: unknown;
+        issues?: unknown;
+      };
+      if (typeof checked !== 'number' && !Array.isArray(issues)) {
+        entry.gateCounts = null;
+        continue;
+      }
+      const failed = Math.max(Array.isArray(issues) ? issues.length : 0, ok === false ? 1 : 0);
+      const total = typeof checked === 'number' ? checked : 0;
+      entry.gateCounts = { passed: Math.max(0, total - failed), failed };
+      continue;
+    }
     const results = entry.payload.results;
     if (!Array.isArray(results)) {
       entry.gateCounts = null;

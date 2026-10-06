@@ -2,7 +2,7 @@
 // cards, the "Just finished" rule, the decision lines and the Budget
 // numbers, kept out of the .vue file so the DOM-free unit suite covers them.
 import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from './api.js';
-import { formatCompactNumber, pluralize, taskLabel } from './format.js';
+import { formatBudgetPct, formatCompactNumber, pluralize, taskLabel } from './format.js';
 import { dispatchDecisionLine } from './roleLabels.js';
 
 export interface TokenTotals {
@@ -85,11 +85,47 @@ export function outlierSentence(count: number): string | null {
   return count === 1 ? '1 epic has a suspicious total.' : `${count} epics have suspicious totals.`;
 }
 
+export interface CardTokens extends TokenTotals {
+  /** In-flight epics kept out of the ratio by isBudgetOutlier, as the Budget panel does. */
+  outliers: number;
+}
+
 export interface RunningCard {
   project: string;
   workingAgents: number;
   epics: string[];
-  tokens: TokenTotals;
+  tokens: CardTokens;
+}
+
+/**
+ * The card is about work in flight, so its tokens cover only the epics it
+ * counts (`epicsActivelyRunning`), and spend and budget are folded over the
+ * same set: an epic with no budget adds to neither side, and an outlier is
+ * handled by budgetSummary exactly as on the Budget panel.
+ */
+function cardTokens(all: EpicTokenSpend[], inFlight: string[]): CardTokens {
+  const running = new Set(inFlight);
+  const budgeted = all.filter((e) => running.has(e.epicId) && e.tokensBudget !== null);
+  const { outliers, ...totals } = budgetSummary(budgeted);
+  return { ...totals, outliers: outliers.length };
+}
+
+/**
+ * "84K of 350K tokens"; never "0 of" for spend nobody measured, which reads
+ * "not measured · 4.1M budget" instead. Empty while the only budgeted epics
+ * are outliers (the card's outlier sentence says so).
+ */
+export function cardTokensText(t: CardTokens): string {
+  if (t.budget === null) return t.outliers > 0 ? '' : 'No budget set';
+  if (t.spent === 0 && t.unmeasured > 0) {
+    return `${formatBudgetPct(t.spent, t.budget, t.unmeasured)} · ${formatCompactNumber(t.budget)} budget`;
+  }
+  return tokensOfBudget(t);
+}
+
+/** The card's ring is drawn only for a measured ratio. */
+export function cardShowsRing(t: CardTokens): boolean {
+  return t.budget !== null && t.budget > 0 && !(t.spent === 0 && t.unmeasured > 0);
 }
 
 function isRunning(workingAgents: number, epics: string[]): boolean {
@@ -99,7 +135,7 @@ function isRunning(workingAgents: number, epics: string[]): boolean {
 /**
  * One card per project with work in flight or agents working. Unscoped, the
  * overview carries a per-project summary; scoped to one project it does not,
- * so that project's single card is built from the scoped totals instead.
+ * so that project's single card is built from the scoped per-epic spend.
  */
 export function runningNowCards(o: OverviewResult, project?: string): RunningCard[] {
   if (project !== undefined) {
@@ -109,7 +145,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
         project,
         workingAgents: o.workingAgentCount,
         epics: o.epicsActivelyRunning,
-        tokens: sumTokens(o.tokensByEpic),
+        tokens: cardTokens(o.tokensByEpic, o.epicsActivelyRunning),
       },
     ];
   }
@@ -119,7 +155,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
       project: p.project,
       workingAgents: p.workingAgentCount,
       epics: p.epicsActivelyRunning,
-      tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },
+      tokens: cardTokens(p.tokensByEpic, p.epicsActivelyRunning),
     }));
 }
 

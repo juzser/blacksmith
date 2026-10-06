@@ -42,6 +42,8 @@ describe('D-216: the project switcher is shown exactly where the scope is read',
       'lessons',
       'analytics',
       'task-detail',
+      // The catch-all; it ignores the scope, so the switcher stays hidden.
+      'not-found',
     ]);
   });
 

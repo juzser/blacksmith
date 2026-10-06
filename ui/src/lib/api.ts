@@ -83,6 +83,10 @@ export interface RunningSession {
   workingAgentCount: number;
   /** The most recent event's type — what this session just did. */
   lastEventType: string | null;
+  /** Agent role of the last event when it is a dispatch, else null. */
+  lastStepRole: string | null;
+  /** Title (id when untitled) of the task that dispatch was for, else null. */
+  lastStepTask: string | null;
   /**
    * Projects the session worked on: those of the tasks it created, and of
    * every task and epic its own events and agents name. Empty for a run that
@@ -180,6 +184,8 @@ export interface ProjectOverviewSummary {
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
   unmeasured: number;
+  /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
+  tokensByEpic: EpicTokenSpend[];
   alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {

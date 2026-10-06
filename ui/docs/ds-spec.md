@@ -877,7 +877,7 @@ Sections, in order:
 2. **"Running now"** — grouped by project (audit item 10 / plan B). Example, from
    `/api/projects`: a "shop-api" group card showing "28 agents working" (from
    `liveAgentCount`), "10.6M of 10.3M tokens" + a danger `ProgressRing` reading "103%" (label "103% of token budget used, over budget") (from
-   `tokensSpent`/`tokensBudget`, `CompactNumber`), and a "Just finished" row for any epic
+   `tokensByEpic`, summed over the in-flight epics that have a budget, `CompactNumber`; "not measured" and no ring when none of that spend is measured), and a "Just finished" row for any epic
    whose `closedEpics` entry is newer than its `inFlightEpics` entry disappeared this
    session — closes audit item 2 (the stale "shop-ux-1 finished, PR #558" case). Each
    project card links its "View ->" to Work filtered by that project, not to a dropped
