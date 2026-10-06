@@ -2891,6 +2891,12 @@ function joinSessionTitles(db: SmithDb, page: TimelineEntry[]): void {
  * above): one `agents` query keyed on the page's own dispatch event ids,
  * then one `eventsRaw` query for the terminal `task_run_result` rows those
  * `agents` rows name, rather than one query per row.
+ *
+ * `runStatus` is the task-result payload's `run_status` when present, else the
+ * agent's own `status` once it is no longer `live` (done / superseded / error /
+ * abandoned, so steps ended by judge-reported, error-logged, epic-closed etc.
+ * read as finished), else null (truly live). Tokens and duration still come
+ * only from a task-result payload.
  */
 function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
   const dispatchIds = page.filter((e) => e.kind === 'Dispatched').map((e) => e.eventId);
@@ -2934,7 +2940,11 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
       tokensOut: typeof usage?.output_tokens === 'number' ? usage.output_tokens : null,
       durationMs: durationMsFromPayload(resultPayload ?? {}),
       runStatus:
-        typeof resultPayload?.run_status === 'string' ? (resultPayload.run_status as string) : null,
+        typeof resultPayload?.run_status === 'string'
+          ? (resultPayload.run_status as string)
+          : agent.status !== 'live'
+            ? agent.status
+            : null,
       dispatchedAt: agent.dispatchedAt,
       round: agent.round,
     };
