@@ -68,7 +68,7 @@ describe('KanbanTaskCard.vue — row 1 drops the id text (operator fix 2026-10-0
 describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)', () => {
   it('renders the copy IconButton inline inside the title, glued to the last word', () => {
     expect(SRC).toMatch(
-      /class="bs-kanban-card__title"[^>]*>\{\{ titleHead \}\}<span class="bs-kanban-card__title-tail">\{\{ titleTail \}\}<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
+      /class="bs-kanban-card__title"[^>]*>\s*\{\{ titleHead \}\}\s*<span\s+class="bs-kanban-card__title-tail"\s*>\s*\{\{ titleTail \}\}\s*<IconButton\s+:icon="Link"\s+:label="copyIdLabel"\s+size="sm"\s+class="bs-kanban-card__title-copy"\s+@click="onCopyTaskId"/,
     );
   });
 
@@ -126,7 +126,7 @@ describe('KanbanTaskCard.vue — title-copy icon flows inline with the title tex
     expect(SRC).toMatch(/new ResizeObserver/);
     expect(SRC).toMatch(/\.disconnect\(\)/);
     expect(SRC).toMatch(/TITLE_LINES\s*=\s*2/);
-    expect(SRC).toMatch(/\+ '…'|\}…`/);
+    expect(SRC).toMatch(/fitTitleText\(/);
     expect(SRC).toMatch(/:title="fitted \? title : undefined"/);
     expect(SRC).toMatch(/aria-label="`\$\{title\}, opens task detail`"/);
   });

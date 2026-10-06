@@ -502,14 +502,12 @@ test.describe('Kanban', () => {
     });
   }
 
-  // S3 review fix (visual pass, 2026-10-05): below 640px .bs-iconbtn grows
-  // to the 44px --bs-touch floor (bs-primitives.css ~133-138) while the
-  // title keeps align-items: flex-start, so the icon — centred in that
-  // taller box — sat visibly below the title's first text line
-  // (work-kanban-mobile-dark.png: title glyph centre y~223, icon centre
-  // y~234). The icon must come back level with the title without losing
-  // the 44px hit area or spilling into the row above.
-  test("phone: the title-line copy button's icon aligns with the title's first line and keeps its 44px hit area", async ({
+  // Below 640px .bs-iconbtn grows to the 44px --bs-touch floor
+  // (bs-primitives.css ~133-138). The copy button is inline in the title text,
+  // so negative margins must keep that hit box out of the line layout: the
+  // icon stays level with the title's first line, the title stays one line
+  // tall, and the 44px hit area stays inside the card.
+  test('phone: the title copy button keeps its 44px hit area without growing the title line', async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
@@ -518,37 +516,30 @@ test.describe('Kanban', () => {
 
     const card = page.locator('.bs-kanban-card').first();
     const titleRow = card.locator('.bs-kanban-card__title');
-    const titleText = card.locator('.bs-kanban-card__title');
     // The real hit box (what touchTargets.spec.ts's selector measures) is
     // the <button> itself, not Tooltip's non-interactive trigger span
-    // (.bs-kanban-card__title-copy) wrapping it -- the span's own auto
-    // height tracks the collapsed title line, while the button inside it
-    // keeps its full 44px border box (CSS align-items: stretch resolves the
-    // button's cross size against the line, independent of the wrapper's
-    // own determined size).
+    // (.bs-kanban-card__title-copy) wrapping it: the button keeps its full
+    // 44px border box while negative margins keep it out of the line height.
     const copyButton = card.locator('.bs-kanban-card__title-copy button').first();
     const icon = copyButton.locator('svg');
     await expect(copyButton).toBeVisible();
 
     const cardBox = await card.boundingBox();
     const titleRowBox = await titleRow.boundingBox();
-    const titleBox = await titleText.boundingBox();
     const copyBox = await copyButton.boundingBox();
     const iconBox = await icon.boundingBox();
     expect(cardBox).not.toBeNull();
     expect(titleRowBox).not.toBeNull();
-    expect(titleBox).not.toBeNull();
     expect(copyBox).not.toBeNull();
     expect(iconBox).not.toBeNull();
 
     const card_ = cardBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const titleRow_ = titleRowBox ?? { x: 0, y: 0, width: 0, height: 0 };
-    const title_ = titleBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const copy_ = copyBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const icon_ = iconBox ?? { x: 0, y: 0, width: 0, height: 0 };
 
     // The title text is one line here, so its own box is the first line.
-    const titleLineCenter = title_.y + title_.height / 2;
+    const titleLineCenter = titleRow_.y + titleRow_.height / 2;
     const iconCenter = icon_.y + icon_.height / 2;
     expect(Math.abs(iconCenter - titleLineCenter)).toBeLessThanOrEqual(3);
 
@@ -556,13 +547,9 @@ test.describe('Kanban', () => {
     expect(copy_.width).toBeGreaterThanOrEqual(44);
     expect(copy_.height).toBeGreaterThanOrEqual(44);
 
-    // Review follow-up (phone gap): the title row's own layout height must
-    // track the one-line title text, not the button's 44px hit box — else a
-    // one-line title leaves an empty band before the next row (origin/main's
-    // work-kanban-mobile-tab2-light.png has none).
-    expect(Math.abs(titleRow_.height - title_.height)).toBeLessThanOrEqual(2);
-    // ...and it really is one text line tall (the title's line-height, ~24px),
-    // not 44px: the negative margins keep the hit box out of the layout.
+    // The title is one text line tall (the title's line-height, ~24px), not
+    // 44px: the negative margins keep the hit box out of the layout, so no
+    // empty band opens before the next row.
     expect(titleRow_.height).toBeLessThan(32);
 
     // The grown hit box stays inside the card...
@@ -585,7 +572,7 @@ test.describe('Kanban', () => {
       expect(hasInteractive).toBe(false);
       const chipsBox = await chipsRow.boundingBox();
       if (chipsBox) {
-        const gap = chipsBox.y - (title_.y + title_.height);
+        const gap = chipsBox.y - (titleRow_.y + titleRow_.height);
         expect(gap).toBeLessThanOrEqual(10); // --bs-space-2 (8px) + 2px tolerance
       }
     }

@@ -2765,9 +2765,9 @@ summary.bs-inbox__group-head {
 }
 /* Operator fix 2026-10-06: the title is plain inline flow and the copy icon
    an inline-flex box at the end of it, so it wraps with the text and sits
-   right after the last word on whichever line that falls. No line clamp:
-   a clamp box would clip the icon whenever the text overflowed it, so the
-   length is bounded in KanbanTaskCard.vue instead (TITLE_MAX) and
+   right after the last word on whichever line that falls. The title is
+   clamped to 2 lines by measurement in KanbanTaskCard.vue (fitTitle /
+   TITLE_LINES), not by a CSS line clamp, which would clip the inline icon;
    overflow-wrap: anywhere lets an unbroken token wrap rather than spill. */
 .bs-kanban-card__title {
   margin: 0;

@@ -505,3 +505,27 @@ export interface AttemptLabelTask {
 export function attemptLabel(task: AttemptLabelTask): string | null {
   return task.attemptCount > 1 ? `Attempt ${task.attemptCount}` : null;
 }
+
+/**
+ * Longest prefix of `full` that still fits once "…" is appended, or null when
+ * the whole title fits. `fits(text)` renders `text` and reports whether it fits
+ * the allowed lines; it is called O(log n) times. A cut prefers the last space
+ * within `wordCutSlack` characters of the longest fit, so words stay whole.
+ */
+export function fitTitleText(
+  full: string,
+  fits: (text: string) => boolean,
+  wordCutSlack: number,
+): string | null {
+  if (fits(full)) return null;
+  const cut = (n: number) => `${full.slice(0, n).trimEnd()}…`;
+  let lo = 0;
+  let hi = full.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(cut(mid))) lo = mid;
+    else hi = mid - 1;
+  }
+  const space = full.lastIndexOf(' ', lo);
+  return cut(space > 0 && lo - space <= wordCutSlack ? space : lo);
+}

@@ -23,6 +23,7 @@ import {
   attemptLabel,
   cardChips,
   dependencyChainText,
+  fitTitleText,
   hasWaitingDependency,
   isInteractiveDescendant,
   type KanbanGroupBy,
@@ -76,30 +77,26 @@ function fitTitle() {
   const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
   if (el.clientWidth === 0 || !Number.isFinite(lineHeight)) return;
   const full = title.value;
+  // `current` is what the DOM shows now: the full title unless a cut is applied.
+  // Writing only on change keeps the first measurement free of layout thrash.
+  let current = fitted.value ?? full;
   const show = (text: string) => {
+    if (text === current) return;
+    current = text;
     const { head, tail } = splitTitle(text);
     headNode.textContent = head;
     tailNode.textContent = tail;
   };
-  const fits = () => el.getBoundingClientRect().height <= TITLE_LINES * lineHeight + 1;
-  const cut = (n: number) => `${full.slice(0, n).trimEnd()}…`;
-  show(full);
-  if (fits()) {
-    fitted.value = null;
-    return;
-  }
-  let lo = 0;
-  let hi = full.length - 1;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    show(cut(mid));
-    if (fits()) lo = mid;
-    else hi = mid - 1;
-  }
-  const space = full.lastIndexOf(' ', lo);
-  const n = space > 0 && lo - space <= WORD_CUT_SLACK ? space : lo;
-  show(cut(n));
-  fitted.value = cut(n);
+  const result = fitTitleText(
+    full,
+    (text) => {
+      show(text);
+      return el.getBoundingClientRect().height <= TITLE_LINES * lineHeight + 1;
+    },
+    WORD_CUT_SLACK,
+  );
+  show(result ?? full);
+  fitted.value = result;
 }
 function onTitleResize() {
   const width = titleEl.value?.clientWidth ?? 0;
