@@ -1576,6 +1576,21 @@ describe('project attribution across sessions', () => {
     }
   });
 
+  it("does not give a qualified ref another epic's bare task row", async () => {
+    await open('sess-owner');
+    await addTask('sess-owner', 'task-1', 'epic-y', 'alpha');
+    await addTask('sess-owner', 'epic-x/task-2', 'epic-x', 'beta');
+    await open('sess-ref');
+    await dispatch('sess-ref', 'epic-x/task-1', 'reviewer');
+
+    const handle = await rebuilt('cross-epic-ref');
+    try {
+      expect(sessionProjects(handle).get('sess-ref')).toEqual(['beta']);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
   it('splits live agents across projects without counting one twice', async () => {
     await buildWaveFixture();
     const handle = await rebuilt('overview');

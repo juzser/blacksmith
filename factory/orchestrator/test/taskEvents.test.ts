@@ -723,6 +723,18 @@ describe('taskEvents', () => {
       expect((await typesFor('task-added'))[1]?.project).toBe('alpha');
     });
 
+    it("ignores another epic's bare event for a qualified originating task", async () => {
+      await emitTasksAdded(
+        { ...planWith(task({ task_id: 'task-2', epic_id: 'epic-b' })), epic_id: 'epic-b', project: 'beta' },
+        ctx,
+        { stateDir },
+      );
+
+      await emitFollowUpTask(followUp({ fromTaskId: 'epic-a/task-2' }), ctx, { stateDir });
+
+      expect((await typesFor('task-added'))[1]?.project).toBeUndefined();
+    });
+
     it('stamps nothing when no source names a project', async () => {
       await emitTasksAdded(planWith(task()), ctx, { stateDir });
 

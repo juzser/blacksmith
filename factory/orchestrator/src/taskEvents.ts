@@ -7,7 +7,7 @@ import {
 } from './events.js';
 import type { EventContext } from './findings.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
-import { taskIdsMatch } from './taskId.js';
+import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { BRANCH_PREFIX, epicBranchPrefix, taskBranchName } from './worktree.js';
 
@@ -658,11 +658,15 @@ function fromTaskProject(
   fromTaskId: string | undefined,
 ): string | undefined {
   if (fromTaskId === undefined) return undefined;
+  const fromEpic = epicOfTaskId(fromTaskId);
   const stamped = new Set<string>();
   for (const { record } of lineage) {
-    if (record.project && record.task_id && taskIdsMatch(record.task_id, fromTaskId)) {
-      stamped.add(record.project);
-    }
+    if (!record.project || !record.task_id || !taskIdsMatch(record.task_id, fromTaskId)) continue;
+    // A bare id does not say which epic it is in; a record that names another
+    // epic (task events carry `payload.epic_id`) belongs to another task.
+    const named = record.payload?.epic_id;
+    if (fromEpic !== null && typeof named === 'string' && named !== fromEpic) continue;
+    stamped.add(record.project);
   }
   return stamped.size === 1 ? [...stamped][0] : undefined;
 }

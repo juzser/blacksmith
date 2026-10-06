@@ -354,10 +354,12 @@ Two storage layers, one source of truth:
   rebuild repairs history with no migration. Task writers stamp from the plan
   (`planScoped`); a follow-up minted from a reattributed finding, written
   where no plan is at hand, falls back to the project its originating task
-  was stamped with. A **session** has no project of its own: its `projects`
-  are those of the tasks it created plus every task and epic its own events
-  and agents name (matched with `taskIdsMatch`, bare and qualified alike) —
-  never its lineage's, since a continuation may start from another project's
+  was stamped with (a bare-id event naming another epic does not count).
+  A **session** has no project of its own: its `projects`
+  are those of the tasks it owns (the first session to touch each) plus every
+  task and epic its own events and agents name (matched with `taskIdsMatch`,
+  bare and qualified alike; a qualified ref never takes another epic's bare
+  row) — never its lineage's, since a continuation may start from another project's
   epic. A ref nothing answers for, or a bare id two projects share, adds no
   project rather than the default one.
 - **`task_id` is `<epic>/<task>`, and the epic is a field, not a parse**

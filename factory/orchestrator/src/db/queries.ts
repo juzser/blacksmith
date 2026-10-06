@@ -1205,8 +1205,11 @@ function sessionProjects(db: SmithDb, scope: Scope): Map<string, Set<string>> {
   const refProject = (ref: string): string | null => {
     const exact = byId.get(ref)?.project;
     if (exact) return exact;
+    const refEpic = epicOfTaskId(ref);
     const matched = new Set<string>();
     for (const t of byBare.get(bareTaskId(ref)) ?? []) {
+      // A qualified ref names its epic: another epic's bare row is not it.
+      if (refEpic !== null && t.epicId !== null && t.epicId !== refEpic) continue;
       if (t.project !== null && taskIdsMatch(ref, t.taskId)) matched.add(t.project);
     }
     if (matched.size > 1) return null;
