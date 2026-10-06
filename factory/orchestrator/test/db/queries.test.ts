@@ -1076,6 +1076,30 @@ describe('db/queries.ts', () => {
         expect(orphan?.parentTitle).toBeNull();
       });
 
+      it('keeps the earliest parent when two events name one follow-up', async () => {
+        await appendFile(
+          path.join(stateDir, `${session}.jsonl`),
+          tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+            added(`${epicId}/task-1-settings`, 'Settings layout') +
+            added(`${epicId}/task-2-other`, 'Other') +
+            added(`${epicId}/followup-2c3d4e5f`, 'Fix: twice attributed') +
+            reattributed(`${epicId}/task-1-settings`, `${epicId}/followup-2c3d4e5f`) +
+            reattributed(`${epicId}/task-2-other`, `${epicId}/followup-2c3d4e5f`),
+          'utf8',
+        );
+        const dbPath = path.join(dbDir, 'followups-twice.db');
+        await rebuild(dbPath, 'all', { stateDir });
+        const h = openDb(dbPath);
+        try {
+          const fix = kanban(h.db)
+            .flatMap((c) => c.tasks)
+            .find((t) => t.taskId === `${epicId}/followup-2c3d4e5f`);
+          expect(fix?.parentTaskId).toBe(`${epicId}/task-1-settings`);
+        } finally {
+          h.sqlite.close();
+        }
+      });
+
       it('keeps audit-axis task rows off the board', async () => {
         const ids = [...(await board()).keys()];
         expect(ids).not.toContain('20291231-0a1b2c3d.security');

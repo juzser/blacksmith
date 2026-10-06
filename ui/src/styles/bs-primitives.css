@@ -2755,6 +2755,10 @@ summary.bs-inbox__group-head {
   background: var(--bs-surface);
   cursor: pointer;
 }
+.bs-kanban-group:not([open]) {
+  /* The closed <details> content slot is hidden but would still take a gap. */
+  gap: 0;
+}
 .bs-kanban-card:focus-visible {
   outline: 2px solid var(--bs-focus-ring);
   outline-offset: 2px;

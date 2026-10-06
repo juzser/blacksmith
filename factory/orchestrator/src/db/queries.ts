@@ -4,7 +4,7 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, isNotNull, lte, max, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, lte, max, type SQL, sql } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -3284,6 +3284,7 @@ export function kanban(
     .select({ payload: eventsRaw.payload })
     .from(eventsRaw)
     .where(eq(eventsRaw.eventType, 'finding-reattributed'))
+    .orderBy(sql`rowid`)
     .all()) {
     const p = JSON.parse(e.payload) as {
       from_task_id?: unknown;
@@ -3293,8 +3294,10 @@ export function kanban(
     if (
       p.attribution === 'follow-up' &&
       typeof p.from_task_id === 'string' &&
-      typeof p.to_task_id === 'string'
+      typeof p.to_task_id === 'string' &&
+      !parentByFollowUp.has(p.to_task_id)
     ) {
+      // First event wins: the origin never moves once it is recorded.
       parentByFollowUp.set(p.to_task_id, p.from_task_id);
     }
   }

@@ -42,7 +42,12 @@ const props = defineProps<{
   /** A task a quick-look targets: a row hidden past the cap is revealed for it. */
   revealTaskId?: string | null;
 }>();
-const emit = defineEmits<{ toggle: []; select: [taskId: string] }>();
+const emit = defineEmits<{
+  toggle: [];
+  select: [taskId: string];
+  /** An arrow key on a fix row: the board moves focus to the next stop. */
+  navigate: [event: KeyboardEvent];
+}>();
 
 const count = computed(() => props.members.length);
 const title = computed(() =>
@@ -104,6 +109,8 @@ function onRowKeydown(event: KeyboardEvent, taskId: string) {
   } else if (event.key === ' ') {
     event.preventDefault();
     emit('select', taskId);
+  } else if (event.key.startsWith('Arrow')) {
+    emit('navigate', event);
   }
 }
 </script>

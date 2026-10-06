@@ -1104,6 +1104,23 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
   });
 
+  test('arrow keys move between fix rows; the copy button keeps its own keys', async ({ page }) => {
+    await mockBoard(page, followupBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    await group.locator('summary').click();
+    const rows = group.locator('.bs-kanban-group__row');
+    await rows.first().focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(rows.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(rows.first()).toBeFocused();
+    const copy = rows.first().getByRole('button');
+    await copy.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(copy).toBeFocused();
+  });
+
   test('a toggled group keeps its state across a polling refresh', async ({ page }) => {
     let requests = 0;
     await page.route('**/api/kanban*', (route) => {

@@ -166,7 +166,16 @@ const columns = computed(() =>
     // large column stays DOM-light without a second rendering strategy.
     const windowed = visibleTasks.length > KANBAN_VIRTUALIZE_THRESHOLD;
     const page = capColumn(visible, revealed.value[col.key] ?? 0);
-    return { ...col, done, showDone, windowed, ...page, total: visibleTasks.length };
+    // `items` is the uncapped grouped list: a quick-look target may sit past the page.
+    return {
+      ...col,
+      done,
+      showDone,
+      windowed,
+      items: visible,
+      ...page,
+      total: visibleTasks.length,
+    };
   }),
 );
 
@@ -220,7 +229,7 @@ const peekTaskId = ref<string | null>(null);
 // the peek changing triggers this, so closing the group afterwards sticks.
 watch(peekTaskId, (id) => {
   for (const col of columns.value) {
-    const hit = findGroupMember(col.visible, id);
+    const hit = findGroupMember(col.items, id);
     if (hit && !openGroups.value.has(hit.key)) toggleGroup(hit.key);
   }
 });
@@ -294,10 +303,15 @@ function moveFocus(event: KeyboardEvent, current: HTMLElement) {
   const next = cards[(index + step + cards.length) % cards.length];
   next?.focus();
 }
-// A group's summary and fix rows take arrows only: Enter/Space on the summary
-// is the native toggle, on a row it is the row's own handler.
+// A group summary takes arrows only: Enter/Space on it is the native toggle.
 function onGroupKeydown(event: KeyboardEvent) {
   if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
+  moveFocus(event, event.target as HTMLElement);
+}
+// A fix row is a role="link" stop like a card. Its own keydown handler runs
+// first and Vue skips the handlers of ancestor elements for that event, so the
+// row hands arrows to the board itself instead of bubbling to the group.
+function onRowNavigate(event: KeyboardEvent) {
   moveFocus(event, event.target as HTMLElement);
 }
 
@@ -411,6 +425,7 @@ defineExpose({ focusFirstCard });
               @toggle="toggleGroup(item.key)"
               @select="onCardSelect"
               @keydown="onGroupKeydown"
+              @navigate="onRowNavigate"
             />
             <KanbanTaskCard
               v-else
