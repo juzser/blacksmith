@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MilestoneProgress } from '../src/lib/api.js';
+import type { MilestoneProgress, ProjectOverviewSummary } from '../src/lib/api.js';
 import { defaultSelection } from '../src/lib/roadmapSelection.js';
 
 function milestone(overrides: Partial<MilestoneProgress>): MilestoneProgress {
@@ -105,5 +105,24 @@ describe('defaultSelection', () => {
     const milestones = [milestone({ milestoneId: 'phase-1', epicIds: ['epic-a'] })];
     const result = defaultSelection(milestones, ['epic-a'], ['epic-a'], { epic: 'epic-z' });
     expect(result).toEqual({ phaseId: null, epicId: 'epic-z' });
+  });
+
+  describe("with the page's own section inputs", () => {
+    const phased = [milestone({ milestoneId: 'phase-1', sequence: 1, project: 'project-a' })];
+    const epicOnly = {
+      project: 'project-z',
+      epicsInFlight: ['epic-z'],
+      epicsActivelyRunning: ['epic-z'],
+    } as unknown as ProjectOverviewSummary;
+
+    it('lands in an epic-only project that orders first', () => {
+      const result = defaultSelection(phased, ['epic-z'], [], {}, [epicOnly], null);
+      expect(result).toEqual({ phaseId: null, epicId: 'epic-z' });
+    });
+
+    it('lands in the filtered project when a project filter is set', () => {
+      const result = defaultSelection(phased, ['epic-z'], [], {}, [epicOnly], 'project-a');
+      expect(result).toEqual({ phaseId: 'phase-1', epicId: null });
+    });
   });
 });

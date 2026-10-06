@@ -91,14 +91,19 @@ export function windowExpandId(project: string, side: WindowSide): string {
   return `${project}:${side}`;
 }
 
+/** Injective DOM-safe spelling of a project key: every char outside [A-Za-z0-9-] becomes `_<hex>_`. */
+function idPart(project: string): string {
+  return project.replace(/[^A-Za-z0-9-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
+}
+
 /** The hidden-lanes container's id, the disclosure's `aria-controls`. */
 export function windowRegionId(project: string, side: WindowSide): string {
-  return `rm-window-${project.replace(/[^A-Za-z0-9_-]/g, '-')}-${side}`;
+  return `rm-window-${idPart(project)}-${side}`;
 }
 
 /** The phone picker's id: on phone the disclosures widen its options, so they control it. */
 export function windowPickerId(project: string): string {
-  return `rm-window-${project.replace(/[^A-Za-z0-9_-]/g, '-')}-picker`;
+  return `rm-window-${idPart(project)}-picker`;
 }
 
 export interface ProjectLanes {
@@ -211,7 +216,7 @@ export function buildRoadmapSections(
 ): RoadmapSection[] {
   if (milestones.length === 0) {
     if (epics.length === 0) return [];
-    return [epicSection(projectFilter ?? 'epics', projectFilter ?? 'Epics', epics, activeEpics)];
+    return [epicSection(projectFilter ?? '', projectFilter ?? 'Epics', epics, activeEpics)];
   }
   const sections: RoadmapSection[] = groupByProject(milestones).map(({ project, lanes }) => ({
     kind: 'phase',
@@ -331,8 +336,12 @@ export function sectionSwimlane(
 /** The phone picker's options: every shown lane head, in order. */
 export function laneOptions(
   regions: readonly LaneRegion[],
+  current: string | null = null,
 ): Array<{ value: string; label: string }> {
   return regions.flatMap((r) =>
-    r.lanes.map((lane) => ({ value: lane.head.id, label: lane.head.label })),
+    r.lanes.map((lane) => ({
+      value: lane.head.id,
+      label: lane.head.id === current ? `${lane.head.label} (current)` : lane.head.label,
+    })),
   );
 }

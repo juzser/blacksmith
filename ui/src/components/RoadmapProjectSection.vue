@@ -57,7 +57,7 @@ const pickerValue = computed(
   () => (props.section.kind === 'phase' ? props.selectedPhase : props.selectedEpic) ?? '',
 );
 const pickerOptions = computed(() => {
-  const options = laneOptions(view.value.regions);
+  const options = laneOptions(view.value.regions, view.value.currentLane);
   if (options.some((o) => o.value === pickerValue.value)) return options;
   // The selection lives in another section (or nowhere): a placeholder, so
   // the select never silently shows a lane that is not selected.

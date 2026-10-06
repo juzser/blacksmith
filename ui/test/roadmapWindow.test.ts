@@ -402,6 +402,13 @@ describe('sectionSwimlane — only the shown lanes reach the swimlane', () => {
     ]);
   });
 
+  it('marks the current lane in the phone picker options', () => {
+    const view = sectionSwimlane(section, { earlier: false, later: true }, now);
+    const options = laneOptions(view.regions, view.currentLane);
+    const current = options.filter((o) => o.label.endsWith(' (current)'));
+    expect(current.map((o) => o.value)).toEqual([view.currentLane]);
+  });
+
   it("omits a side's region when that side hides nothing", () => {
     const first = phaseSection(buildRoadmapSections(lanes(3, 0), [], [], undefined, null)[0]);
     const view = sectionSwimlane(first, { earlier: false, later: false }, now);
@@ -427,10 +434,27 @@ describe('window ids', () => {
   });
 
   it('makes a DOM-safe region id from any project key', () => {
-    expect(windowRegionId('project a/b', 'later')).toBe('rm-window-project-a-b-later');
+    expect(windowRegionId('project a/b', 'later')).toMatch(/^rm-window-[A-Za-z0-9_-]+-later$/);
   });
 
   it('names the phone picker the disclosures control there', () => {
-    expect(windowPickerId('project a/b')).toBe('rm-window-project-a-b-picker');
+    expect(windowPickerId('project a/b')).toMatch(/^rm-window-[A-Za-z0-9_-]+-picker$/);
+  });
+
+  it('keeps ids unique across keys that differ only in punctuation', () => {
+    const ids = ['a.b', 'a-b', 'a b', 'a_b', 'epics', ''].flatMap((p) => [
+      windowRegionId(p, 'earlier'),
+      windowRegionId(p, 'later'),
+      windowPickerId(p),
+    ]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('gives the fallback Epics section a key no project name can take', () => {
+    const [fallback] = buildRoadmapSections([], ['epic-a'], [], undefined, null);
+    expect(fallback?.project).toBe('');
+    expect(windowRegionId(fallback?.project ?? 'x', 'later')).not.toBe(
+      windowRegionId('epics', 'later'),
+    );
   });
 });

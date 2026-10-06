@@ -403,6 +403,12 @@ test.describe('Roadmap window (spec Part 2)', () => {
     await expect(page.locator('h2.rm-section__head')).toHaveCount(2);
   });
 
+  test('the disclosure buttons clear 24px on desktop', async ({ page }) => {
+    await page.goto('/work/roadmap');
+    const box = await earlierToggle(page).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+  });
+
   test('only the window is in the DOM, with the current lane tagged', async ({ page }) => {
     await page.goto('/work/roadmap');
     await expect(phaseNames(page, 'project-a')).toHaveText([
@@ -499,6 +505,34 @@ test.describe('Roadmap window (spec Part 2)', () => {
     await expect(sectionFor(page, 'project-a').locator('[aria-current="step"]')).toContainText(
       'Phase 4',
     );
+  });
+
+  test('a reload of the data does not reopen a side the user collapsed after a deep link', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await earlierToggle(page).click();
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+
+    // Re-run load() without touching ?phase=: a project scope change does it.
+    const reloaded = page.waitForResponse(
+      (r) => r.url().includes('/api/roadmap') && r.url().includes('project=project-a'),
+    );
+    await page.evaluate(() => {
+      type Host = {
+        __vue_app__: { config: { globalProperties: { $router: { push(l: unknown): void } } } };
+      };
+      const host = document.querySelector('#app') as unknown as Host;
+      host.__vue_app__.config.globalProperties.$router.push({
+        path: '/work/roadmap',
+        query: { phase: 'phase-1', project: 'project-a' },
+      });
+    });
+    await reloaded;
+    await expect(page).toHaveURL(/project=project-a/);
+    await expect(earlierToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.lname', { hasText: /^Phase 1$/ })).toHaveCount(0);
   });
 
   for (const theme of ['light', 'dark'] as const) {

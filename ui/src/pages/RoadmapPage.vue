@@ -175,7 +175,14 @@ async function load() {
       phase: typeof route.query.phase === 'string' ? route.query.phase : null,
       epic: typeof route.query.epic === 'string' ? route.query.epic : null,
     };
-    const selection = defaultSelection(roadmap, activeEpics.value, epics.value, fromQuery);
+    const selection = defaultSelection(
+      roadmap,
+      activeEpics.value,
+      epics.value,
+      fromQuery,
+      overviewProjects.value,
+      project.value ?? null,
+    );
     selectedPhase.value = selection.phaseId;
     selectedEpic.value = selection.epicId;
     ensureEpicFlowsLoaded(epicIdsForPhase(selectedPhase.value));
@@ -278,14 +285,21 @@ function toggleWindow(section: RoadmapSection, side: WindowSide) {
   saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
 }
 
+// Once per deep link: a reload (project or session change) must not reopen a
+// side the user collapsed since.
+let revealedFor: string | null = null;
+
 /**
  * §2.3 — a deep link to a lane outside the window opens the side it is on
  * (stored, so "Show fewer" closes it again), then scrolls the selected row
  * into view and focuses it. A selection already on screen is left alone.
  */
 async function revealSelection() {
+  const key = `${route.query.phase ?? ''}|${route.query.epic ?? ''}`;
+  if (key === revealedFor) return;
   const host = hostSection.value;
   if (!host) return;
+  revealedFor = key;
   const side = selectionSide(host, { phaseId: selectedPhase.value, epicId: selectedEpic.value });
   if (side === null) return;
   const id = windowExpandId(host.project, side);

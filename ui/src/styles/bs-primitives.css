@@ -3411,6 +3411,7 @@ h2.rm-section__head {
    link-button look; a full-width 44px row on phone. */
 .rm-window__more {
   align-self: flex-start;
+  min-height: var(--bs-space-5);
   font: inherit;
   font-size: var(--bs-text-sm);
 }
@@ -3432,7 +3433,9 @@ h2.rm-section__head {
      and `.now-track` all read this instead of repeating — or deriving pixel
      math from — the literal 160px. `.months` and `.lane` are siblings here,
      so it lives on their shared parent, not on `.lane` alone. */
-  --rm-label-col: 160px;
+  /* 160px of name plus the "Current" Tag (about 56px) and its gap, so the Tag
+     never takes width from the name. */
+  --rm-label-col: 224px;
 }
 .lane {
   position: relative;

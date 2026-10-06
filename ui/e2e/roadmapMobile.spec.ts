@@ -309,7 +309,12 @@ test.describe('Roadmap window mobile (spec Part 2)', () => {
     await page.goto('/work/roadmap');
     const picker = page.getByLabel('project-a phase', { exact: true });
     await expect(picker).toHaveValue('phase-4');
-    await expect(picker.locator('option')).toHaveText(['Phase 3', 'Phase 4', 'Phase 5', 'Phase 6']);
+    await expect(picker.locator('option')).toHaveText([
+      'Phase 3',
+      'Phase 4 (current)',
+      'Phase 5',
+      'Phase 6',
+    ]);
 
     // On phone the disclosures widen the picker's options, so they name it.
     const section = page.locator('details.rm-section').nth(0);
@@ -334,7 +339,7 @@ test.describe('Roadmap window mobile (spec Part 2)', () => {
       'Phase 1',
       'Phase 2',
       'Phase 3',
-      'Phase 4',
+      'Phase 4 (current)',
       'Phase 5',
       'Phase 6',
     ]);
