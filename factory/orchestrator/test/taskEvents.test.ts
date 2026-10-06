@@ -725,7 +725,11 @@ describe('taskEvents', () => {
 
     it("ignores another epic's bare event for a qualified originating task", async () => {
       await emitTasksAdded(
-        { ...planWith(task({ task_id: 'task-2', epic_id: 'epic-b' })), epic_id: 'epic-b', project: 'beta' },
+        {
+          ...planWith(task({ task_id: 'task-2', epic_id: 'epic-b' })),
+          epic_id: 'epic-b',
+          project: 'beta',
+        },
         ctx,
         { stateDir },
       );
