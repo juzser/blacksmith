@@ -1566,6 +1566,19 @@ function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): b
  * also holds `waived`, which is decided — so `completed` is spelled out. The
  * inbox and both pendingWaivers counts read this one rule, so they agree.
  */
+/**
+ * The task row a finding's task id names: exact key first, then taskIdsMatch,
+ * the way projectResolver (projector.ts) does it. The log spells one task both
+ * bare ("task-1") and qualified ("epic-a/task-1"), and findings keep whichever
+ * spelling they were raised with.
+ */
+function taskResolver<T extends { taskId: string }>(
+  taskRows: readonly T[],
+): (taskId: string) => T | undefined {
+  const exact = new Map(taskRows.map((t) => [t.taskId, t]));
+  return (taskId) => exact.get(taskId) ?? taskRows.find((t) => taskIdsMatch(taskId, t.taskId));
+}
+
 function needsOperatorWaiver(
   f: {
     severity: string;
@@ -1574,11 +1587,11 @@ function needsOperatorWaiver(
     taskId: string;
     epicId: string | null;
   },
-  tasksById: ReadonlyMap<string, { taskStatus: string }>,
+  resolveTask: (taskId: string) => { taskStatus: string } | undefined,
   closedEpicIds: ReadonlySet<string>,
 ): boolean {
   if (!awaitsWaiverDecision(f) || f.waiverId !== null) return false;
-  const t = tasksById.get(f.taskId);
+  const t = resolveTask(f.taskId);
   if (t) return t.taskStatus === 'completed';
   return f.epicId !== null && closedEpicIds.has(f.epicId);
 }
@@ -1621,7 +1634,7 @@ function taskDisplayText(t: { objective: string | null; taskId: string }): strin
 
 export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   const taskRows = allTasksForScope(db, scope);
-  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const resolveTask = taskResolver(taskRows);
   const rows: InboxRow[] = [];
 
   // Escalations: task rows the projector parked at `escalated`
@@ -1659,16 +1672,17 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   // task's batch, not one finding at a time — /bs waivers's own unit).
   const closedEpicIds = new Set(closedEpicsForScope(db, scope).map((e) => e.epicId));
   const pendingFindings = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, tasksById, closedEpicIds),
+    needsOperatorWaiver(f, resolveTask, closedEpicIds),
   );
   const pendingByTask = new Map<string, (typeof pendingFindings)[number][]>();
   for (const f of pendingFindings) {
-    const list = pendingByTask.get(f.taskId) ?? [];
+    const key = resolveTask(f.taskId)?.taskId ?? f.taskId;
+    const list = pendingByTask.get(key) ?? [];
     list.push(f);
-    pendingByTask.set(f.taskId, list);
+    pendingByTask.set(key, list);
   }
   for (const [taskId, findingRows] of pendingByTask) {
-    const t = tasksById.get(taskId);
+    const t = resolveTask(taskId);
     const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
     const count = findingRows.length;
     rows.push({
@@ -1738,9 +1752,9 @@ function projectSummary(
   const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
   const closedEpicIds = new Set(closedEpicsHere.map((e) => e.epicId));
-  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const resolveTask = taskResolver(taskRows);
   const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, tasksById, closedEpicIds),
+    needsOperatorWaiver(f, resolveTask, closedEpicIds),
   ).length;
 
   return {
@@ -1964,9 +1978,9 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
 
   const closedEpicIds = new Set(closedEpics.map((e) => e.epicId));
-  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const resolveTask = taskResolver(taskRows);
   const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, tasksById, closedEpicIds),
+    needsOperatorWaiver(f, resolveTask, closedEpicIds),
   ).length;
 
   const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);

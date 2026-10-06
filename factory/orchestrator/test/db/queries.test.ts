@@ -2859,6 +2859,49 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
       expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
     });
 
+    it('finds the task of a bare-id finding on a task row stored qualified', () => {
+      seedTask('epic-a/task-9', 'completed');
+      seedFinding('f-bare', 'task-9', { epicId: null });
+      expect(waiverRows().filter((r) => r.title !== '')).toHaveLength(1);
+      const before = counts();
+      handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
+      expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
+    });
+
+    it('lets an open task row decide a bare-id finding even when its epic is closed', () => {
+      seedTask('epic-a/task-9', 'todo');
+      handle.db
+        .insert(epics)
+        .values({
+          epicId: 'epic-a',
+          sessionId: SESSION_ID,
+          epicStatus: 'closed',
+          closedBy: 'verdict',
+          closedAt: '2026-01-02T00:00:00.000Z',
+          eventId: `${SESSION_ID}#99`,
+        })
+        .run();
+      const base = counts();
+      seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-9'))).toEqual([]);
+      expect(counts()).toEqual(base);
+    });
+
+    it('folds a qualified and a bare spelling of one task into one titled row', () => {
+      seedTask('epic-a/task-9', 'completed');
+      seedFinding('f-q', 'epic-a/task-9');
+      seedFinding('f-b', 'task-9', { epicId: null });
+      const rows = waiverRows().filter((r) => r.taskId?.endsWith('task-9'));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: 'waiver:epic-a/task-9',
+        taskId: 'epic-a/task-9',
+        description: '2 findings awaiting a waiver decision',
+      });
+      const [t] = handle.db.select().from(tasks).where(eq(tasks.taskId, 'epic-a/task-9')).all();
+      expect(rows[0]?.title).toBe(t?.objective ?? 'epic-a/task-9');
+    });
+
     it('never lists a decided finding or an S1/S2 finding', () => {
       seedTask('epic-a/task-1', 'completed');
       seedFinding('f-decided', 'epic-a/task-1', { waiverId: 'w-1' });
