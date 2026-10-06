@@ -10,10 +10,12 @@ import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../components/kit/PageHeader.vue';
 import SegmentedControl from '../components/kit/SegmentedControl.vue';
 import Separator from '../components/kit/Separator.vue';
+import { useViewport } from '../composables/useViewport.js';
 import { switchQuery, WORK_VIEWS, workViewFromRouteName } from '../lib/workView.js';
 
 const route = useRoute();
 const router = useRouter();
+const { isPhoneWidth } = useViewport();
 
 const segItems = computed(() =>
   WORK_VIEWS.map((v) => ({
@@ -59,8 +61,13 @@ function onPickView(value: string) {
          inputs is not a valid child of the overflow's `role="menu"`, and
          RadioGroup keeps its unchanged contract for its other caller
          (LessonsPage). tabindex is "-1" by default; MobileTopBar owns the
-         roving tabindex across the whole menu. -->
-    <Teleport to="#bs-mtopbar-overflow-extra">
+         roving tabindex across the whole menu.
+
+         `v-if="isPhoneWidth"`: the target only exists inside MobileTopBar,
+         which App renders on phone alone. A Teleport mounted against a
+         missing target never mounts its children, and the next patch of one
+         (`aria-checked`) throws mid-render and kills the app shell. -->
+    <Teleport v-if="isPhoneWidth" to="#bs-mtopbar-overflow-extra">
       <span class="bs-mtopbar__menu-label" aria-hidden="true">View</span>
       <div class="bs-mtopbar__viewgroup" role="group" aria-label="View">
         <button
