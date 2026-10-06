@@ -3,13 +3,20 @@
 // same fixture so every id (epic, task, session, event) collides on purpose:
 // `project-a` is the served clone, `project-b` a foreign project that keeps
 // its state under `.blacksmith/` and has event logs but no smith.db at all.
-import { appendFileSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
-import { buildFixture, EPIC_ID, TASK_1 } from '../../../factory/orchestrator/test/db/fixtures.js';
+import {
+  buildFixture,
+  EPIC_ID,
+  TASK_1,
+  TASK_2,
+  TASK_3,
+  TASK_4,
+} from '../../../factory/orchestrator/test/db/fixtures.js';
 import { type AppHandle, createApp } from '../src/app.js';
 
 interface Store {
@@ -231,5 +238,155 @@ describe('multi-store dashboard reads', () => {
     const a = app({ stores: [path.join(projectB, '.blacksmith')] });
     const projects = await get<{ store: Store }[]>(a, '/api/projects');
     expect(projects.map((p) => p.store.label).sort()).toEqual(['home', 'project-b']);
+  });
+
+  // The foreign store mixes events that name no project (they read as the
+  // store's label) with events that name one: TASK_2 names the label itself,
+  // TASK_3 names another project. TASK_1 and TASK_4 name none.
+  function tagForeignEvents(): void {
+    for (const name of readdirSync(eventsB)) {
+      const file = path.join(eventsB, name);
+      const lines = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const rec = JSON.parse(line) as { task_id?: string; project?: string };
+          if (rec.task_id === TASK_2) rec.project = 'project-b';
+          if (rec.task_id === TASK_3) rec.project = 'project-c';
+          return JSON.stringify(rec);
+        });
+      writeFileSync(file, `${lines.join('\n')}\n`);
+    }
+  }
+  const foreignTasks = (columns: Col[]): Map<string, string | null> =>
+    new Map(
+      columns
+        .flatMap((c) => c.tasks)
+        .filter((t) => t.store.label === 'project-b')
+        .map((t) => [t.taskId, t.project]),
+    );
+  const homeTaskIds = (columns: Col[]): string[] =>
+    columns
+      .flatMap((c) => c.tasks)
+      .filter((t) => t.store.id === 'home')
+      .map((t) => t.taskId)
+      .sort();
+
+  it('a foreign project filter returns every row that reads as that project, tagged or not', async () => {
+    tagForeignEvents();
+    const a = app();
+    const all = foreignTasks(await get<Col[]>(a, '/api/kanban'));
+    expect(Object.fromEntries(all)).toEqual({
+      [TASK_1]: 'project-b',
+      [TASK_2]: 'project-b',
+      [TASK_3]: 'project-c',
+      [TASK_4]: 'project-b',
+    });
+    const byLabel = await get<Col[]>(a, '/api/kanban?project=project-b');
+    expect([...foreignTasks(byLabel).keys()].sort()).toEqual([TASK_1, TASK_2, TASK_4]);
+    expect(homeTaskIds(byLabel)).toEqual([]);
+    const byOther = await get<Col[]>(a, '/api/kanban?project=project-c');
+    expect([...foreignTasks(byOther).keys()]).toEqual([TASK_3]);
+    const byDefault = await get<Col[]>(a, '/api/kanban?project=blacksmith');
+    expect(foreignTasks(byDefault).size).toBe(0);
+    expect(homeTaskIds(byDefault)).toHaveLength(4);
+  });
+
+  it('overview and projects count each foreign row once under every project filter', async () => {
+    tagForeignEvents();
+    await mkdir(path.join(projectB, '.blacksmith', 'factory', 'specs'), { recursive: true });
+    await writeFile(
+      path.join(projectB, '.blacksmith', 'factory', 'specs', 'roadmap.md'),
+      ROADMAP_MD,
+    );
+    const a = app();
+    type Ms = { store: Store; project: string; tasksTotal: number };
+    const total = async (query: string): Promise<number | undefined> => {
+      const o = await get<{ milestoneProgress: Ms[] }>(a, `/api/overview${query}`);
+      return o.milestoneProgress.find((m) => m.store.label === 'project-b')?.tasksTotal;
+    };
+    expect(await total('')).toBe(4);
+    expect(await total('?project=project-b')).toBe(3);
+    expect(await total('?project=project-c')).toBeUndefined();
+    expect(await total('?project=blacksmith')).toBeUndefined();
+    const projects = await get<{ project: string; store: Store }[]>(a, '/api/projects');
+    expect(
+      projects
+        .filter((p) => p.store.label === 'project-b')
+        .map((p) => p.project)
+        .sort(),
+    ).toEqual(['project-b', 'project-c']);
+    const o = await get<{ projects: { project: string }[] }>(a, '/api/overview');
+    expect(o.projects.filter((p) => p.project === 'project-b')).toHaveLength(1);
+  });
+
+  it('a foreign store milestone progress comes through the overview', async () => {
+    await mkdir(path.join(projectB, '.blacksmith', 'factory', 'specs'), { recursive: true });
+    await writeFile(
+      path.join(projectB, '.blacksmith', 'factory', 'specs', 'roadmap.md'),
+      ROADMAP_MD,
+    );
+    const a = app();
+    const o = await get<{
+      milestoneProgress: { milestoneId: string; project: string; store: Store }[];
+    }>(a, '/api/overview');
+    const foreign = o.milestoneProgress.filter((m) => m.store.label === 'project-b');
+    expect(foreign).toHaveLength(1);
+    expect(foreign[0]?.project).toBe('project-b');
+  });
+
+  describe('local-only, like /api/cli-sessions', () => {
+    const routes = [
+      '/api/overview',
+      '/api/kanban',
+      '/api/projects',
+      `/api/tasks/${encodeURIComponent(TASK_1)}`,
+      `/api/tasks/${encodeURIComponent(TASK_1)}/runs`,
+    ];
+    for (const route of routes) {
+      it(`${route} refuses a non-loopback Host and answers a loopback one`, async () => {
+        const a = app();
+        const refused = await a.app.request(route, { headers: { host: 'rebound.example:4681' } });
+        expect(refused.status).toBe(403);
+        const ok = await a.app.request(route, { headers: { host: '127.0.0.1:4681' } });
+        expect(ok.status).toBe(200);
+      });
+    }
+  });
+
+  describe('a task of a foreign store', () => {
+    const task = encodeURIComponent(TASK_1);
+    const foreignId = async (a: AppHandle): Promise<string> => {
+      const columns = await get<Col[]>(a, '/api/kanban');
+      const id = columns.flatMap((c) => c.tasks).find((t) => t.store.label === 'project-b')
+        ?.store.id;
+      expect(id).toBeDefined();
+      return id as string;
+    };
+
+    it('is read from that store with ?store=<id>, the bare id still meaning the served store', async () => {
+      const a = app();
+      const id = await foreignId(a);
+      const foreign = await get<{ task: { taskId: string; project: string | null } }>(
+        a,
+        `/api/tasks/${task}?store=${id}`,
+      );
+      expect(foreign.task.taskId).toBe(TASK_1);
+      expect(foreign.task.project).toBe('project-b');
+      const served = await get<{ task: { project: string | null } }>(a, `/api/tasks/${task}`);
+      expect(served.task.project).not.toBe('project-b');
+      const runs = await get<{ runs: unknown[] }>(a, `/api/tasks/${task}/runs?store=${id}`);
+      expect(Array.isArray(runs.runs)).toBe(true);
+    });
+
+    it('answers 404 for an unknown store, never the served store', async () => {
+      const a = app();
+      for (const route of [
+        `/api/tasks/${task}?store=nope0000`,
+        `/api/tasks/${task}/runs?store=nope0000`,
+      ]) {
+        expect((await a.app.request(route)).status).toBe(404);
+      }
+    });
   });
 });

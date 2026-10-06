@@ -3,11 +3,10 @@
  * database, tag what comes back with `store: {id, label}`, and combine in
  * TypeScript. Nothing here reimplements a query.
  *
- * Two things differ for a foreign store. Its rows carry the default project
- * name (`blacksmith`) unless the project said otherwise, which would make every
- * foreign project read as the factory itself, so the default is replaced by the
- * store's label. And a `?project=<label>` filter has to be translated back into
- * the default name before it reaches that store's own query.
+ * A foreign store's cache already reads each untagged row as the store's label
+ * (stores.ts readAsLabel), so a `?project=` filter reaches its query unchanged
+ * and each row is returned once. `relabelProject` only covers what the cache
+ * does not hold in a project column (an epic label built at query time).
  */
 
 import type { SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
@@ -45,8 +44,8 @@ export function relabelProject<T>(value: T, label: string): T {
 
 /**
  * Runs `query` against every store. `project` is the requested filter; a
- * foreign store gets `undefined` back when the filter names another store, or
- * is skipped outright when it can hold no row of that project.
+ * foreign store is skipped outright when the filter names the default project
+ * and its own label is another, since none of its rows read as the default.
  */
 export function fanOut<T>(
   entries: StoreEntry[],
@@ -61,7 +60,7 @@ export function fanOut<T>(
     }
     if (project === DEFAULT_PROJECT && e.label !== DEFAULT_PROJECT) continue;
     try {
-      const data = query(e.handle.db, project === e.label ? DEFAULT_PROJECT : project);
+      const data = query(e.handle.db, project);
       parts.push({ store: ref(e), data: relabelProject(data, e.label) });
     } catch {
       // A foreign cache that cannot be read is one store fewer, never a 500.
@@ -114,7 +113,11 @@ export function mergeOverview(
   return {
     ...first,
     liveAgents: [...groups.values()],
-    liveAgentEntries: rows('liveAgentEntries'),
+    // The order one store already uses: newest dispatch first.
+    liveAgentEntries: sorted(
+      rows('liveAgentEntries'),
+      (a, b) => newest(a.dispatchedAt, b.dispatchedAt) || byStore(a, b),
+    ),
     liveAgentCount: sum(parts, (o) => o.liveAgentCount),
     workingAgentCount: sum(parts, (o) => o.workingAgentCount),
     stalledAgentCount: sum(parts, (o) => o.stalledAgentCount),
@@ -138,7 +141,11 @@ export function mergeOverview(
       escalations: sum(parts, (o) => o.alerts.escalations),
       pendingWaivers: sum(parts, (o) => o.alerts.pendingWaivers),
     },
-    milestoneProgress: rows('milestoneProgress'),
+    // The order one store already uses: roadmap sequence.
+    milestoneProgress: sorted(
+      rows('milestoneProgress'),
+      (a, b) => a.sequence - b.sequence || byStore(a, b),
+    ),
     recentDispatches: sorted(
       rows('recentDispatches'),
       (a, b) => newest(a.ts, b.ts) || byStore(a, b),

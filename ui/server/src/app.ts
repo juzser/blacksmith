@@ -74,7 +74,7 @@ import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/wai
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
-import { fanOut, mergeKanban, mergeOverview } from './fanout.js';
+import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
 import type { StoreEntry } from './stores.js';
@@ -736,9 +736,18 @@ export function createApp(opts: AppOpts): AppHandle {
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
   const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
-  // The loopback-only route is guarded ahead of the refresh, so a refused
+  // Local-only, like /api/cli-sessions: these routes carry operator prompt text
+  // or other projects' data. The guard sits ahead of the refresh, so a refused
   // request costs no fold.
-  app.use('/api/cli-sessions', loopbackGuard());
+  for (const route of [
+    '/api/cli-sessions',
+    '/api/overview',
+    '/api/kanban',
+    '/api/projects',
+    '/api/tasks/*',
+  ]) {
+    app.use(route, loopbackGuard());
+  }
   // Every other live project's store: discovered from the CLI sessions'
   // working directories and read-only (see stores.ts).
   const homeStore: StoreEntry = { id: 'home', label: 'home', handle, refresher, home: true };
@@ -1013,11 +1022,23 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(merged.projects ?? []);
   });
 
+  // `?store=<id>` reads a task of another project's store. An id no store
+  // answers to is a 404: falling back to the served store would show it
+  // another project's task of the same id.
+  const storeOf = (c: Context): StoreEntry => {
+    const id = c.req.query('store');
+    if (id === undefined) return homeStore;
+    const found = stores.store(id);
+    if (!found) throw new SmithError('store.not-found', `No store "${id}".`, { store: id });
+    return found;
+  };
+
   app.get('/api/tasks/:taskId', (c) => {
     const taskId = c.req.param('taskId');
-    const detail = taskDetail(handle.db, taskId);
+    const store = storeOf(c);
+    const detail = taskDetail(store.handle.db, taskId);
     if (!detail) throw new SmithError('task.not-found', `No task "${taskId}".`, { taskId });
-    return c.json(detail);
+    return c.json(store.home ? detail : relabelProject(detail, store.label));
   });
 
   // DS3 §4.7 — RunHistoryTimeline's data source: a scoped read on the
@@ -1025,7 +1046,8 @@ export function createApp(opts: AppOpts): AppHandle {
   // for this task). No new event type, no writer.
   app.get('/api/tasks/:taskId/runs', (c) => {
     const taskId = c.req.param('taskId');
-    return c.json({ runs: taskRuns(handle.db, taskId), totals: taskTotals(handle.db, taskId) });
+    const { db } = storeOf(c).handle;
+    return c.json({ runs: taskRuns(db, taskId), totals: taskTotals(db, taskId) });
   });
 
   // Serves a task's own screenshots to the dashboard. The id comes from the
