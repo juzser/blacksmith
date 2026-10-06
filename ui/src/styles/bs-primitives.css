@@ -3606,9 +3606,16 @@ h2.rm-section__head {
   cursor: pointer;
 }
 /* The epic row indents its label, never the row, so every track column
-   starts at the same x as the axis and the now line (mock: .lrow.sub .lname). */
+   starts at the same x as the axis and the now line (mock: .lrow.sub .lname).
+   The epic name is regular weight and subtle; a selected row (below) restores
+   the text colour. */
 .lrow.sub .lname {
-  padding-left: var(--bs-space-4);
+  padding-left: 14px; /* ds-allow-hardcode: mock .lrow.sub .lname indent */
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+}
+.lrow.sel .lname {
+  color: var(--bs-text);
 }
 .lrow.sel {
   background: var(--bs-surface-selected);

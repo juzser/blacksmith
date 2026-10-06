@@ -645,6 +645,44 @@ test.describe('Roadmap: label column and shared track column', () => {
         expect(Math.abs((nowCol?.x ?? 0) - (axis?.x ?? 0))).toBeLessThanOrEqual(1);
       });
 
+      test('the epic row name is indented, regular weight and subtle (mock .lrow.sub .lname)', async ({
+        page,
+      }) => {
+        test.skip(width !== 1280, 'desktop width only');
+        const name = (sel: string) => page.locator(sel).first().locator('.lname').first();
+        const read = (loc: ReturnType<Page['locator']>) =>
+          loc.evaluate((el) => {
+            const s = getComputedStyle(el);
+            const root = getComputedStyle(document.documentElement);
+            return {
+              pad: s.paddingLeft,
+              weight: s.fontWeight,
+              color: s.color,
+              text: root.getPropertyValue('--bs-text').trim(),
+              subtle: root.getPropertyValue('--bs-text-subtle').trim(),
+            };
+          });
+        const resolve = (v: string) =>
+          page.evaluate((c) => {
+            const d = document.createElement('div');
+            d.style.color = c;
+            document.body.append(d);
+            const out = getComputedStyle(d).color;
+            d.remove();
+            return out;
+          }, v);
+        const epic = await read(name('.lrow.sub:not(.sel)'));
+        expect(epic.pad).toBe('14px');
+        expect(epic.weight).toBe('400');
+        expect(epic.color).toBe(await resolve(epic.subtle));
+        const phase = await read(name('.lrow:not(.sub)'));
+        expect(phase.pad).toBe('0px');
+        expect(phase.color).not.toBe(await resolve(phase.subtle));
+        await page.goto('/work/roadmap?epic=epic-9');
+        const selEpic = await read(name('.lrow.sub.sel'));
+        expect(selEpic.color).toBe(await resolve(selEpic.text));
+      });
+
       test('every axis label stays inside the track column', async ({ page }) => {
         const axis = await page.locator('.months-row').first().boundingBox();
         const marks = await page.locator('.months-row').first().locator('.months-mark').all();
