@@ -591,7 +591,10 @@ describe('what an export diff proves', () => {
       'a template literal type argument',
       'export const f = wrap(async (x: X): Promise<`${A1}`> => { return 1; });\n',
     ],
-    ['a constructor type', 'export const f = wrap((x: X): new () => { a: A1 } => { return 1; });\n'],
+    [
+      'a constructor type',
+      'export const f = wrap((x: X): new () => { a: A1 } => { return 1; });\n',
+    ],
     [
       'an abstract constructor type',
       'export const f = wrap((x: X): abstract new () => { a: A1 } => { return 1; });\n',
