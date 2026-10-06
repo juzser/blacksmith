@@ -885,6 +885,8 @@ describe('db/queries.ts', () => {
           epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
+          parentTaskId: null,
+          parentTitle: null,
         },
       ]);
       // task-2's only finding is waived (not "open"), so no severity chip.
@@ -915,6 +917,8 @@ describe('db/queries.ts', () => {
           epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
+          parentTaskId: null,
+          parentTitle: null,
         },
       ]);
       expect(byStatus.escalated).toEqual([
@@ -937,6 +941,8 @@ describe('db/queries.ts', () => {
           epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
+          parentTaskId: null,
+          parentTitle: null,
         },
       ]);
       // task-4's finding-4 sits at "confirmed" — open, not waived/fixed — so
@@ -963,6 +969,8 @@ describe('db/queries.ts', () => {
           epicLabel: 'blacksmith: Epic 1',
           hasRequest: true,
           requestFirstLine: 'Build the widget and fix the flaky import.',
+          parentTaskId: null,
+          parentTitle: null,
         },
       ]);
     });
@@ -1003,6 +1011,77 @@ describe('db/queries.ts', () => {
       expect(later.get(TASK_4)?.agentActivity).toBe('stalled');
       expect(later.get(TASK_2)?.agentActivity).toBe('stalled');
       expect(later.get(TASK_1)?.agentActivity).toBeNull();
+    });
+
+    describe('follow-up parents and audit-axis rows', () => {
+      const session = 'sess-followups';
+      const epicId = 'epic-a';
+      const ts = '2029-06-01T00:00:00.000Z';
+      const added = (taskId: string, objective: string | null) =>
+        tiedLine('task-added', ts, { task_id: taskId, epic_id: epicId, objective }, session);
+      const reattributed = (from: string, to: string, attribution = 'follow-up') =>
+        tiedLine(
+          'finding-reattributed',
+          ts,
+          { from_task_id: from, to_task_id: to, attribution },
+          session,
+        );
+
+      // An audit axis never joins a wave: the fold only ever sees it through
+      // the auditor's closing judge-reported event.
+      const auditorClose = (taskId: string) =>
+        tiedLine('task-added', ts, { task_id: taskId, objective: null }, session) +
+        tiedLine('judge-reported', ts, { task_id: taskId, agent_role: 'auditor' }, session);
+
+      async function board() {
+        await appendFile(
+          path.join(stateDir, `${session}.jsonl`),
+          tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+            added(`${epicId}/task-1-settings`, 'Settings layout') +
+            added(`${epicId}/followup-0a1b2c3d`, 'Fix: label is clipped') +
+            reattributed(`${epicId}/task-1-settings`, `${epicId}/followup-0a1b2c3d`) +
+            added(`${epicId}/followup-1b2c3d4e`, 'Fix: orphan parent') +
+            reattributed(`${epicId}/task-gone`, `${epicId}/followup-1b2c3d4e`) +
+            auditorClose('20291231-0a1b2c3d.security') +
+            auditorClose('20291231-0a1b2c3d.performance'),
+          'utf8',
+        );
+        const dbPath = path.join(dbDir, 'followups.db');
+        await rebuild(dbPath, 'all', { stateDir });
+        const h = openDb(dbPath);
+        try {
+          return new Map(
+            kanban(h.db)
+              .flatMap((c) => c.tasks)
+              .map((t) => [t.taskId, t]),
+          );
+        } finally {
+          h.sqlite.close();
+        }
+      }
+
+      it('carries the parent id and title on a follow-up card, nulls on any other', async () => {
+        const cards = await board();
+        const fix = cards.get(`${epicId}/followup-0a1b2c3d`);
+        expect(fix?.parentTaskId).toBe(`${epicId}/task-1-settings`);
+        expect(fix?.parentTitle).toBe('Settings layout');
+        const plain = cards.get(`${epicId}/task-1-settings`);
+        expect(plain?.parentTaskId).toBeNull();
+        expect(plain?.parentTitle).toBeNull();
+      });
+
+      it('gives a null parentTitle when the parent has no task row', async () => {
+        const orphan = (await board()).get(`${epicId}/followup-1b2c3d4e`);
+        expect(orphan?.parentTaskId).toBe(`${epicId}/task-gone`);
+        expect(orphan?.parentTitle).toBeNull();
+      });
+
+      it('keeps audit-axis task rows off the board', async () => {
+        const ids = [...(await board()).keys()];
+        expect(ids).not.toContain('20291231-0a1b2c3d.security');
+        expect(ids).not.toContain('20291231-0a1b2c3d.performance');
+        expect(ids).toContain(`${epicId}/task-1-settings`);
+      });
     });
 
     it('supports an "all epics" mode when epicId is omitted', () => {

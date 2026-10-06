@@ -20,6 +20,7 @@ import {
   TASK_RESULT_EVENT_TYPE,
   type TerminalType,
 } from '../agents-registry.js';
+import { isAuditAxisTaskId } from '../audit.js';
 import { isPlausibleTokenCount } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
@@ -2834,6 +2835,10 @@ export interface KanbanTask {
   hasRequest: boolean;
   /** DS3 — first line of the linked request's prompt, or null when `hasRequest` is false. */
   requestFirstLine: string | null;
+  /** The task a follow-up fix came from (its `finding-reattributed` event), or null for any other task. */
+  parentTaskId: string | null;
+  /** That parent's objective, or null when this is no follow-up or the parent has no task row. */
+  parentTitle: string | null;
 }
 
 export interface KanbanDependency {
@@ -3086,7 +3091,8 @@ export function kanban(
           .all()
       : db.select().from(tasks).all(),
     scope,
-  );
+    // An audit axis turn's task row is a judge's bookkeeping, not work on the board.
+  ).filter((t) => !isAuditAxisTaskId(t.taskId));
 
   const epicIdsInScope = new Set(
     taskRows.map((t) => t.epicId).filter((e): e is string => e !== null),
@@ -3216,6 +3222,27 @@ export function kanban(
   // call: bounds the N+1 causal walk/epic-fallback cost that scaled with the
   // task count (see QuoteMemo's doc comment).
   const quoteMemo = createQuoteMemo();
+  // A follow-up's origin lives only on the `finding-reattributed` event that
+  // follows its `task-added`; one read of those events, keyed by the follow-up.
+  const parentByFollowUp = new Map<string, string>();
+  for (const e of db
+    .select({ payload: eventsRaw.payload })
+    .from(eventsRaw)
+    .where(eq(eventsRaw.eventType, 'finding-reattributed'))
+    .all()) {
+    const p = JSON.parse(e.payload) as {
+      from_task_id?: unknown;
+      to_task_id?: unknown;
+      attribution?: unknown;
+    };
+    if (
+      p.attribution === 'follow-up' &&
+      typeof p.from_task_id === 'string' &&
+      typeof p.to_task_id === 'string'
+    ) {
+      parentByFollowUp.set(p.to_task_id, p.from_task_id);
+    }
+  }
   const columns = new Map<string, KanbanTask[]>();
   for (const t of taskRows) {
     const column = columns.get(t.taskStatus) ?? [];
@@ -3251,6 +3278,8 @@ export function kanban(
       epicLabel: epicLabelFor(t.epicId, t.project, closedEpicIds),
       hasRequest: quote !== null,
       requestFirstLine: quote ? firstLineOf(quote.prompt) : null,
+      parentTaskId: parentByFollowUp.get(t.taskId) ?? null,
+      parentTitle: taskRowByTaskId.get(parentByFollowUp.get(t.taskId) ?? '')?.objective ?? null,
     });
     columns.set(t.taskStatus, column);
   }
