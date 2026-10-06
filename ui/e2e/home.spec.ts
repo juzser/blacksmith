@@ -286,6 +286,118 @@ test.describe('Home', () => {
   });
 });
 
+// "Running now" scope (ds-spec.md §4.1 point 2): a project is active only with
+// an agent working in the window; the rest are quiet and sit behind All.
+function summary(project: string, workingAgentCount: number, epics: string[]) {
+  return {
+    project,
+    liveAgentCount: workingAgentCount,
+    workingAgentCount,
+    epicsInFlight: epics,
+    epicsActivelyRunning: epics,
+    tokensSpent: 100,
+    tokensBudget: null,
+    unmeasured: 0,
+    alerts: { escalations: 0, pendingWaivers: 0 },
+  };
+}
+
+async function serveProjects(page: Page, projects: ReturnType<typeof summary>[]): Promise<void> {
+  await page.route('**/api/overview*', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    // Only the unscoped overview carries a per-project list.
+    if (body.projects !== undefined) body.projects = projects;
+    await route.fulfill({ response, json: body });
+  });
+}
+
+// ghost has an epic open on paper but no agent working: the old rule showed it.
+const SCOPE_PROJECTS = [
+  summary('alpha', 0, []),
+  summary('ghost', 0, ['ghost-1']),
+  summary('live', 2, ['live-1']),
+];
+const card = (page: Page, name: string) =>
+  page.locator('.bs-home__cards .bs-card', { hasText: name });
+
+test.describe('Home: Running now scope', () => {
+  test('the bare URL is Active: only active cards, the quiet line, toggle on the section row', async ({
+    page,
+  }) => {
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.goto('/overview');
+    await expect(page.locator('.bs-home__cards .bs-card')).toHaveCount(1);
+    await expect(card(page, 'live')).toBeVisible();
+    await expect(page.getByText('2 quiet projects · Show all')).toBeVisible();
+    const head = page.locator('.bs-home__section-head', { hasText: 'Running now' });
+    await expect(head.getByRole('navigation', { name: 'Activity scope' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Activity scope' })).toHaveCount(1);
+  });
+
+  test('Show all goes to scope=all keeping other keys, quiet cards muted after active ones', async ({
+    page,
+  }) => {
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.goto('/overview?foo=bar');
+    await page.getByRole('link', { name: 'Show all' }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(page).toHaveURL(/foo=bar/);
+    const titles = page.locator('.bs-home__cards .bs-card .bs-card__title');
+    await expect(titles).toHaveText(['live', 'alpha', 'ghost']);
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(2);
+    await expect(card(page, 'live')).not.toHaveClass(/bs-home__card--quiet/);
+    await expect(page.getByText('quiet projects')).toHaveCount(0);
+    // Back to Active hides them again.
+    await page
+      .getByRole('navigation', { name: 'Activity scope' })
+      .getByRole('link', { name: 'Active' })
+      .click();
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect(page).toHaveURL(/foo=bar/);
+    await expect(page.locator('.bs-home__cards .bs-card')).toHaveCount(1);
+  });
+
+  test('a single quiet project reads "1 quiet project"', async ({ page }) => {
+    await serveProjects(page, [summary('live', 1, []), summary('alpha', 0, [])]);
+    await page.goto('/overview');
+    await expect(page.getByText('1 quiet project · Show all')).toBeVisible();
+  });
+
+  test('nothing active but some quiet: says so and still offers the quiet line', async ({
+    page,
+  }) => {
+    await serveProjects(page, [summary('ghost', 0, ['ghost-1'])]);
+    await page.goto('/overview');
+    await expect(page.getByText('Nothing is running right now.')).toBeVisible();
+    await expect(page.locator('.bs-home__cards')).toHaveCount(0);
+    await expect(page.getByText('1 quiet project · Show all')).toBeVisible();
+  });
+
+  test("no projects at all: today's text and no quiet line", async ({ page }) => {
+    await serveProjects(page, []);
+    await page.goto('/overview');
+    await expect(page.getByText('Nothing is running right now.')).toBeVisible();
+    await expect(page.getByText('quiet project')).toHaveCount(0);
+  });
+
+  test('phone: the toggle and the Show all link are 44px targets', async ({ page }) => {
+    await serveProjects(page, SCOPE_PROJECTS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const scope = page.getByRole('navigation', { name: 'Activity scope' });
+    await expect(scope).toBeVisible();
+    for (const name of ['Active', 'All']) {
+      const box = await scope.getByRole('link', { name }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+    }
+    const link = await page.getByRole('link', { name: 'Show all' }).boundingBox();
+    expect(link?.height).toBeGreaterThanOrEqual(44);
+    expect(link?.width).toBeGreaterThanOrEqual(44);
+  });
+});
+
 test.describe('Home: Needs you inbox', () => {
   test('desktop: groups by project, project-less rows last, one action per row', async ({
     page,

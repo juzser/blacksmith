@@ -102,49 +102,38 @@ describe('lib/homeView.ts sentences', () => {
   });
 });
 
+function summary(
+  project: string,
+  workingAgentCount: number,
+  epicsActivelyRunning: string[] = [],
+): NonNullable<OverviewResult['projects']>[number] {
+  return {
+    project,
+    liveAgentCount: workingAgentCount,
+    workingAgentCount,
+    epicsInFlight: epicsActivelyRunning,
+    epicsActivelyRunning,
+    tokensSpent: 5,
+    tokensBudget: null,
+    unmeasured: 0,
+    alerts: { escalations: 0, pendingWaivers: 0 },
+  };
+}
+
 describe('lib/homeView.ts runningNowCards()', () => {
-  it('builds one card per project that has something running, from overview.projects', () => {
+  it('is active only with an agent working in the window, from overview.projects', () => {
     const o = overview({
       projects: [
         {
-          project: 'shop-api',
-          liveAgentCount: 30,
-          workingAgentCount: 28,
-          epicsInFlight: ['shop-1'],
-          epicsActivelyRunning: ['shop-1'],
+          ...summary('shop-api', 28, ['shop-1']),
           tokensSpent: 10_600_000,
           tokensBudget: 10_300_000,
-          unmeasured: 0,
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
-        {
-          project: 'idle',
-          liveAgentCount: 0,
-          workingAgentCount: 0,
-          epicsInFlight: [],
-          epicsActivelyRunning: [],
-          tokensSpent: 5,
-          tokensBudget: null,
-          unmeasured: 0,
-          alerts: { escalations: 0, pendingWaivers: 0 },
-        },
-        {
-          // F1: an epic whose only open task is escalated stays in
-          // epicsInFlight (Kanban/Flow must still reach it) but drops out
-          // of epicsActivelyRunning — nothing is actually running.
-          project: 'stuck',
-          liveAgentCount: 0,
-          workingAgentCount: 0,
-          epicsInFlight: ['stuck-1'],
-          epicsActivelyRunning: [],
-          tokensSpent: 0,
-          tokensBudget: null,
-          unmeasured: 0,
-          alerts: { escalations: 1, pendingWaivers: 0 },
-        },
+        summary('idle', 0),
       ],
     });
-    expect(runningNowCards(o)).toEqual([
+    const r = runningNowCards(o);
+    expect(r.active).toEqual([
       {
         project: 'shop-api',
         workingAgents: 28,
@@ -152,6 +141,32 @@ describe('lib/homeView.ts runningNowCards()', () => {
         tokens: { spent: 10_600_000, budget: 10_300_000, unmeasured: 0 },
       },
     ]);
+    expect(r.quiet.map((c) => c.project)).toEqual(['idle']);
+  });
+
+  it('a project with an actively running epic but no working agent is quiet, not active', () => {
+    const o = overview({
+      projects: [summary('ghost', 0, ['ghost-1']), summary('live', 2, ['live-1'])],
+    });
+    const r = runningNowCards(o);
+    expect(r.active.map((c) => c.project)).toEqual(['live']);
+    expect(r.quiet).toEqual([
+      {
+        project: 'ghost',
+        workingAgents: 0,
+        epics: ['ghost-1'],
+        tokens: { spent: 5, budget: null, unmeasured: 0 },
+      },
+    ]);
+  });
+
+  it('keeps the server order inside each group, so All lists active first, then quiet', () => {
+    const o = overview({
+      projects: [summary('a', 0), summary('b', 1), summary('c', 0), summary('d', 3)],
+    });
+    const r = runningNowCards(o);
+    expect([...r.active, ...r.quiet].map((c) => c.project)).toEqual(['b', 'd', 'a', 'c']);
+    expect(r.quiet).toHaveLength(2);
   });
 
   it('builds the single selected-project card from the scoped overview', () => {
@@ -161,27 +176,41 @@ describe('lib/homeView.ts runningNowCards()', () => {
       epicsActivelyRunning: ['e1'],
       tokensByEpic: [epic('e1', 40, 100, 1)],
     });
-    expect(runningNowCards(o, 'shop-api')).toEqual([
+    expect(runningNowCards(o, 'shop-api')).toEqual({
+      active: [
+        {
+          project: 'shop-api',
+          workingAgents: 3,
+          epics: ['e1'],
+          tokens: { spent: 40, budget: 100, unmeasured: 1 },
+        },
+      ],
+      quiet: [],
+    });
+  });
+
+  it('makes a selected project with no working agent a quiet card, even with a running epic', () => {
+    const o = overview({
+      workingAgentCount: 0,
+      epicsInFlight: ['e1'],
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 40, 100)],
+    });
+    const r = runningNowCards(o, 'shop-api');
+    expect(r.active).toEqual([]);
+    expect(r.quiet).toEqual([
       {
         project: 'shop-api',
-        workingAgents: 3,
+        workingAgents: 0,
         epics: ['e1'],
-        tokens: { spent: 40, budget: 100, unmeasured: 1 },
+        tokens: { spent: 40, budget: 100, unmeasured: 0 },
       },
     ]);
   });
 
-  it('shows no card for a selected project with nothing running', () => {
-    expect(runningNowCards(overview({}), 'shop-api')).toEqual([]);
-  });
-
-  it('shows no card for a selected project whose only open epic is escalated (F1)', () => {
-    const o = overview({
-      workingAgentCount: 0,
-      epicsInFlight: ['stuck-1'],
-      epicsActivelyRunning: [],
-    });
-    expect(runningNowCards(o, 'shop-api')).toEqual([]);
+  it('is empty when there are no projects', () => {
+    expect(runningNowCards(overview({}))).toEqual({ active: [], quiet: [] });
+    expect(runningNowCards(overview({ projects: [] }))).toEqual({ active: [], quiet: [] });
   });
 });
 

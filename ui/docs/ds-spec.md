@@ -881,7 +881,15 @@ Sections, in order:
    whose `closedEpics` entry is newer than its `inFlightEpics` entry disappeared this
    session — closes audit item 2 (the stale "shop-ux-1 finished, PR #558" case). Each
    project card links its "View ->" to Work filtered by that project, not to a dropped
-   `/flow` route (audit item 8).
+   `/flow` route (audit item 8). **Scope:** the shared Active/All `ActivityScopeToggle` sits on
+   this section's heading row, right side (it scopes only this section; phone keeps it, 44px
+   items). A project is active iff an agent is working in the 4h window (`workingAgentCount >
+   0`, the Sessions rule); an epic still open on paper does not make it active. Active shows
+   only active cards plus a muted "N quiet projects · Show all" line (singular "1 quiet
+   project", hidden at 0; the link is a default link-role anchor, a 44px tap target on phone) that
+   links to `?scope=all`. With no active card but some quiet ones: "Nothing is running right
+   now." plus that line. All lists the active cards, then the quiet ones in the server's
+   (alphabetical) order, with the card title and text in `--bs-text-subtle`.
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
    audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
    double-checking another model's review" style, from `/api/overview`'s

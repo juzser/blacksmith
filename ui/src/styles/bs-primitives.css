@@ -2658,6 +2658,22 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
   margin: 0;
 }
+/* A quiet project's card (no agent working within the window): same card,
+   muted text, like a quiet session row on Sessions. */
+.bs-home__card--quiet .bs-card__title,
+.bs-home__card--quiet .bs-home__stat,
+.bs-home__card--quiet .bs-home__tokens {
+  color: var(--bs-text-subtle);
+}
+/* The "Show all" link in the quiet line is a phone tap target. */
+@media (max-width: 640px) {
+  .bs-home__quiet-line a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
+  }
+}
 .bs-home__tokens {
   display: flex;
   align-items: center;

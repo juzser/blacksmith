@@ -14,6 +14,7 @@ const seenInFlight = new Set<string>();
 import { Activity } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import NeedsYouInbox from '../components/NeedsYouInbox.vue';
 import Banner from '../components/kit/Banner.vue';
 import Card from '../components/kit/Card.vue';
@@ -23,6 +24,7 @@ import ProgressRing from '../components/kit/ProgressRing.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
+import { useActivityScope } from '../composables/useActivityScope.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
@@ -60,6 +62,7 @@ const RECENT_ACTIVITY_SHOWN = 8;
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
 const router = useRouter();
+const { scope, scopeTo } = useActivityScope();
 
 const overview = ref<OverviewResult | null>(null);
 const overviewFailed = ref(false);
@@ -124,7 +127,14 @@ watch([project, sessionKey], () => {
 });
 usePoll(load, POLL_MS);
 
-const cards = computed(() => (overview.value ? runningNowCards(overview.value, project.value) : []));
+const running = computed(() =>
+  overview.value ? runningNowCards(overview.value, project.value) : { active: [], quiet: [] },
+);
+// Active shows only working projects; All lists the quiet ones after them.
+const cards = computed(() =>
+  scope.value === 'all' ? [...running.value.active, ...running.value.quiet] : running.value.active,
+);
+const hiddenQuietCount = computed(() => (scope.value === 'active' ? running.value.quiet.length : 0));
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
 const budget = computed(() => (overview.value ? budgetSummary(overview.value.tokensByEpic) : null));
 const budgetDelta = computed(() => budgetDeltaSentence(overview.value?.budgetUsedPctPointDelta1h ?? null));
@@ -219,12 +229,20 @@ function becauseOf(promptId: string) {
     <Banner v-if="overviewFailed" show-retry @retry="loadOverview">Could not load Home.</Banner>
 
     <section class="bs-home__section" aria-labelledby="running-heading">
-      <h2 id="running-heading" class="bs-section-title">Running now</h2>
+      <div class="bs-home__section-head">
+        <h2 id="running-heading" class="bs-section-title">Running now</h2>
+        <ActivityScopeToggle />
+      </div>
       <Skeleton v-if="overview === null && !overviewFailed" :height="96" />
       <template v-else-if="overview !== null">
         <p v-if="cards.length === 0" class="bs-home__quiet">Nothing is running right now.</p>
         <div v-else class="bs-home__cards">
-          <Card v-for="c in cards" :key="c.project" :title="c.project">
+          <Card
+            v-for="c in cards"
+            :key="c.project"
+            :title="c.project"
+            :class="{ 'bs-home__card--quiet': c.workingAgents === 0 }"
+          >
             <template #action>
               <RouterLink
                 class="bs-btn bs-btn--link bs-btn--sm"
@@ -257,6 +275,10 @@ function becauseOf(promptId: string) {
             </div>
           </Card>
         </div>
+        <p v-if="hiddenQuietCount > 0" class="bs-home__quiet bs-home__quiet-line">
+          {{ pluralize(hiddenQuietCount, 'quiet project') }} ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
         <div v-if="justFinished.length > 0" class="bs-home__finished">
           <h3 class="bs-home__subhead">Just finished</h3>
           <ul class="bs-home__list">

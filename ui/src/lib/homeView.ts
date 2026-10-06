@@ -92,35 +92,42 @@ export interface RunningCard {
   tokens: TokenTotals;
 }
 
-function isRunning(workingAgents: number, epics: string[]): boolean {
-  return workingAgents > 0 || epics.length > 0;
+export interface RunningNow {
+  /** Projects with an agent working inside the 4h window. */
+  active: RunningCard[];
+  /** The rest, in the server's (alphabetical) order; Active hides them, All lists them after `active`. */
+  quiet: RunningCard[];
 }
 
 /**
- * One card per project with work in flight or agents working. Unscoped, the
- * overview carries a per-project summary; scoped to one project it does not,
- * so that project's single card is built from the scoped totals instead.
+ * One card per project, split by liveness: active = `workingAgentCount > 0`,
+ * the same rule as isSessionActive. An epic still open on paper does not make
+ * a project active -- its agents may have died hours ago -- so such a project
+ * is quiet and keeps its epics on the card. Unscoped, the overview carries a
+ * per-project summary; scoped to one project it does not, so that project's
+ * single card is built from the scoped totals instead.
  */
-export function runningNowCards(o: OverviewResult, project?: string): RunningCard[] {
-  if (project !== undefined) {
-    if (!isRunning(o.workingAgentCount, o.epicsActivelyRunning)) return [];
-    return [
-      {
-        project,
-        workingAgents: o.workingAgentCount,
-        epics: o.epicsActivelyRunning,
-        tokens: sumTokens(o.tokensByEpic),
-      },
-    ];
-  }
-  return (o.projects ?? [])
-    .filter((p) => isRunning(p.workingAgentCount, p.epicsActivelyRunning))
-    .map((p) => ({
-      project: p.project,
-      workingAgents: p.workingAgentCount,
-      epics: p.epicsActivelyRunning,
-      tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },
-    }));
+export function runningNowCards(o: OverviewResult, project?: string): RunningNow {
+  const cards: RunningCard[] =
+    project !== undefined
+      ? [
+          {
+            project,
+            workingAgents: o.workingAgentCount,
+            epics: o.epicsActivelyRunning,
+            tokens: sumTokens(o.tokensByEpic),
+          },
+        ]
+      : (o.projects ?? []).map((p) => ({
+          project: p.project,
+          workingAgents: p.workingAgentCount,
+          epics: p.epicsActivelyRunning,
+          tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },
+        }));
+  return {
+    active: cards.filter((c) => c.workingAgents > 0),
+    quiet: cards.filter((c) => c.workingAgents === 0),
+  };
 }
 
 /** How long a closed epic stays under "Just finished" on a fresh load (F3). */
