@@ -84,9 +84,10 @@ export interface RunningSession {
   /** The most recent event's type — what this session just did. */
   lastEventType: string | null;
   /**
-   * Projects the session's tasks belong to. Empty for a run that has not
-   * created a task yet (the `sessions` table has no project column of its
-   * own — membership is derived from tasks).
+   * Projects the session worked on: those of the tasks it created, and of
+   * every task and epic its own events and agents name. Empty for a run that
+   * names none yet (the `sessions` table has no project column of its own —
+   * membership is derived from tasks).
    */
   projects: string[];
   /**

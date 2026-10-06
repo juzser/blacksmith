@@ -346,6 +346,22 @@ Two storage layers, one source of truth:
   read helpers treat an absent/null `project` as the default project
   `'black-smith'`, never the event writer (`events.ts` persists exactly
   what it's given).
+  A **task's** project is the one its own events stamp; failing that, the
+  one every other task of its epic was stamped with (an epic is one
+  project's — an epic whose tasks name two leaves the unstamped ones null
+  rather than pick by log order); only then the plan file naming the epic.
+  The `epics` row takes the same answer when its own events carry none, so a
+  rebuild repairs history with no migration. Task writers stamp from the plan
+  (`planScoped`); a follow-up minted from a reattributed finding, written
+  where no plan is at hand, falls back to the project its originating task
+  was stamped with (a bare-id event naming another epic does not count).
+  A **session** has no project of its own: its `projects`
+  are those of the tasks it owns (the first session to touch each) plus every
+  task and epic its own events and agents name (matched with `taskIdsMatch`,
+  bare and qualified alike; a qualified ref never takes another epic's bare
+  row) — never its lineage's, since a continuation may start from another project's
+  epic. A ref nothing answers for, or a bare id two projects share, adds no
+  project rather than the default one.
   **`cli_session_id`**: optional, the CLI session that wrote the event.
   `events.ts`'s `appendEventLocked` — the one place every write passes
   through — stamps it from `CLAUDE_CODE_SESSION_ID` when that is set and

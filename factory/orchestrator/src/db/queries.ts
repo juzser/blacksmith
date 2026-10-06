@@ -4,7 +4,7 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, lte, max, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, lte, max, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -29,7 +29,7 @@ import { JUDGE_ROLES } from '../judgeRoles.js';
 import { FACTORY_PROJECT_NAME, normalizeProjectName } from '../projectName.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
-import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
+import { bareTaskId, epicOfTaskId, taskIdsMatch } from '../taskId.js';
 import {
   CLOSED_TO_FURTHER_WORK,
   TERMINAL_OK_TASK_STATUSES,
@@ -37,7 +37,7 @@ import {
 } from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
 import { WAIVABLE_SEVERITIES } from '../waivers.js';
-import type { SmithDb } from './projector.js';
+import { type SmithDb, unanimousEpicProjects } from './projector.js';
 import {
   agents,
   artifacts,
@@ -390,10 +390,14 @@ export interface RunningSession {
   /** The most recent event's type — what this session just did. Null if its events are gone. */
   lastEventType: string | null;
   /**
-   * Projects this session's tasks belong to, sorted. `sessions` has no
-   * project column of its own (schema.ts), so project membership is derived
-   * from the session's tasks — a session that has not created a task yet
-   * belongs to no project, and is therefore invisible under a project scope.
+   * Projects this session worked on, sorted. `sessions` has no project
+   * column of its own (schema.ts), so membership is derived (sessionProjects):
+   * the tasks the session was first to touch, plus every task and epic its
+   * own events and agents name, resolved to the project those tasks carry.
+   * A wave session that only runs its epic session's tasks belongs to their
+   * project; one that names no task or epic belongs to none, and is therefore
+   * invisible under a project scope. A ref no task or epic answers for adds
+   * nothing — never the default project.
    */
   projects: string[];
   /**
@@ -1155,6 +1159,88 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
   });
 }
 
+/**
+ * The projects each session worked on, keyed by session id.
+ *
+ * Two sources, unioned. The tasks a session owns (tasks.session_id: the
+ * first session to touch a task) keep the rule they always had, default
+ * project included. But a wave session is a continuation that runs the tasks
+ * its epic session added, so it owns almost none: owning alone left most
+ * sessions with no project at all. So every task id its events carry and
+ * every task and epic its agents name count too, resolved against the tasks
+ * table — taskIdsMatch, because the log spells one task both bare and
+ * epic-qualified; an epic, or a ref naming an epic (`<epic>/integration`),
+ * through the project its tasks agree on.
+ *
+ * Only the session's own rows: a continuation can start from another
+ * project's epic, so the lineage is never unioned in. A ref nothing answers
+ * for, or a bare id two projects share, adds nothing — no guess, and no
+ * fallback to the default project. Three queries whatever the session count.
+ */
+function sessionProjects(db: SmithDb, scope: Scope): Map<string, Set<string>> {
+  const bySession = new Map<string, Set<string>>();
+  const add = (sessionId: string, project: string) => {
+    const set = bySession.get(sessionId) ?? new Set<string>();
+    set.add(project);
+    bySession.set(sessionId, set);
+  };
+
+  for (const t of allTasksForScope(db, scope)) add(t.sessionId, projectOf(t.project));
+
+  // Every task, not the scoped ones: a bare id is only unambiguous if no
+  // other project's task shares it, and only the whole table can say so.
+  const allTasks = db
+    .select({ taskId: tasks.taskId, epicId: tasks.epicId, project: tasks.project })
+    .from(tasks)
+    .all()
+    .map((t) => ({ ...t, project: t.project === null ? null : normalizeProjectName(t.project) }));
+  const byId = new Map(allTasks.map((t) => [t.taskId, t] as const));
+  const byBare = new Map<string, typeof allTasks>();
+  for (const t of allTasks) {
+    const bare = bareTaskId(t.taskId);
+    byBare.set(bare, [...(byBare.get(bare) ?? []), t]);
+  }
+  const epicProject = unanimousEpicProjects(allTasks);
+
+  const refProject = (ref: string): string | null => {
+    const exact = byId.get(ref)?.project;
+    if (exact) return exact;
+    const refEpic = epicOfTaskId(ref);
+    const matched = new Set<string>();
+    for (const t of byBare.get(bareTaskId(ref)) ?? []) {
+      // A qualified ref names its epic: another epic's bare row is not it.
+      if (refEpic !== null && t.epicId !== null && t.epicId !== refEpic) continue;
+      if (t.project !== null && taskIdsMatch(ref, t.taskId)) matched.add(t.project);
+    }
+    if (matched.size > 1) return null;
+    return [...matched][0] ?? epicProject.get(epicOfTaskId(ref) ?? ref) ?? null;
+  };
+
+  const wanted = scopeProject(scope);
+  const addRef = (sessionId: string, project: string | null | undefined) => {
+    if (project && (wanted === undefined || project === wanted)) add(sessionId, project);
+  };
+
+  const eventRefs = db
+    .selectDistinct({ sessionId: eventsRaw.sessionId, taskId: eventsRaw.taskId })
+    .from(eventsRaw)
+    .where(and(isNotNull(eventsRaw.taskId), scopedToSessions(eventsRaw.sessionId, scope)))
+    .all();
+  for (const e of eventRefs) addRef(e.sessionId, refProject(e.taskId as string));
+
+  const agentRefs = db
+    .selectDistinct({ sessionId: agents.sessionId, taskId: agents.taskId, epicId: agents.epicId })
+    .from(agents)
+    .where(scopedToSessions(agents.sessionId, scope))
+    .all();
+  for (const a of agentRefs) {
+    if (a.taskId !== null) addRef(a.sessionId, refProject(a.taskId));
+    if (a.epicId !== null) addRef(a.sessionId, epicProject.get(a.epicId));
+  }
+
+  return bySession;
+}
+
 const SESSION_TITLE_MAX_LEN = 80;
 
 /**
@@ -1251,12 +1337,7 @@ export function runningSessions(
     }
   }
 
-  const projectsBySession = new Map<string, Set<string>>();
-  for (const t of allTasksForScope(db, scope)) {
-    const set = projectsBySession.get(t.sessionId) ?? new Set<string>();
-    set.add(projectOf(t.project));
-    projectsBySession.set(t.sessionId, set);
-  }
+  const projectsBySession = sessionProjects(db, scope);
 
   const titles = sessionTitles(db, scope);
 
@@ -1293,9 +1374,9 @@ export function runningSessions(
         title: titles.get(s.sessionId) ?? null,
       }))
       // Under a project scope, a session belongs to the project only through
-      // its tasks — one with none (a run that has not planned anything yet) is
-      // not this project's business, and would otherwise show up in every
-      // project's Overview at once.
+      // the tasks it touched — one with none (a run that has not planned or
+      // dispatched anything yet) is not this project's business, and would
+      // otherwise show up in every project's Overview at once.
       .filter((s) => scope.project === undefined || s.projects.length > 0)
       .sort(
         (a, b) =>
