@@ -646,7 +646,7 @@ async function measureLiveCards(page: Page): Promise<{
     vTop: number;
   }[];
   titles: { linked: boolean; h: number; lines: number }[];
-  targets: { name: string; h: number; clipped: string | null }[];
+  targets: { name: string; h: number; clipped: string | null; inline: boolean }[];
   long: { firstTop: number; vTop: number; lineTops: number[]; clipBottom: number; lineH: number };
 }> {
   return page.evaluate(() => {
@@ -660,7 +660,18 @@ async function measureLiveCards(page: Page): Promise<{
       vTop: number;
     }[] = [];
     const titles: { linked: boolean; h: number; lines: number }[] = [];
-    const targets: { name: string; h: number; clipped: string | null }[] = [];
+    const targets: { name: string; h: number; clipped: string | null; inline: boolean }[] = [];
+    // Same definition as touchTargets.spec.ts: an <a> left display:inline whose
+    // parent has real text beside it is an inline link inside prose.
+    const isInlineProseLink = (el: Element): boolean => {
+      if (el.tagName.toLowerCase() !== 'a') return false;
+      if (getComputedStyle(el).display !== 'inline') return false;
+      const parent = el.parentElement;
+      if (!parent) return false;
+      return Array.from(parent.childNodes).some(
+        (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0,
+      );
+    };
     for (const card of cards) {
       const t = card.querySelector('.bs-live-card__title') as HTMLElement;
       const lh = parseFloat(getComputedStyle(t).lineHeight);
@@ -682,7 +693,9 @@ async function measureLiveCards(page: Page): Promise<{
           lineH: vlh,
           kTop: k.getBoundingClientRect().top,
           vTop: v.classList.contains('bs-live-card__more')
-            ? v.getBoundingClientRect().top + (v.getBoundingClientRect().height - vlh) / 2
+            ? v.getBoundingClientRect().top +
+              parseFloat(getComputedStyle(v).borderTopWidth) +
+              parseFloat(getComputedStyle(v).paddingTop)
             : v.getBoundingClientRect().top + parseFloat(getComputedStyle(v).paddingTop),
         });
       }
@@ -715,7 +728,12 @@ async function measureLiveCards(page: Page): Promise<{
           h = Math.min(h, r.height);
           if (why && !clipped) clipped = why;
         }
-        targets.push({ name: (el.textContent ?? '').trim().slice(0, 30), h, clipped });
+        targets.push({
+          name: (el.textContent ?? '').trim().slice(0, 30),
+          h,
+          clipped,
+          inline: isInlineProseLink(el),
+        });
       }
     }
     const longCard = cards[cards.length - 1];
@@ -740,6 +758,99 @@ async function measureLiveCards(page: Page): Promise<{
       },
     };
   });
+}
+
+// Hit-box soundness (kanban.spec.ts precedent: a grown hit box may overlap
+// plain text and gaps, never another interactive element, and stays inside its
+// card). A hit box is the element's client rects, each clipped to the padding
+// box of every ancestor whose overflow is not visible.
+async function expectHitBoxesSound(page: Page): Promise<void> {
+  const r = await page.evaluate(() => {
+    type Box = { l: number; t: number; r: number; b: number };
+    const out = {
+      overlaps: [] as string[],
+      misses: [] as string[],
+      outside: [] as string[],
+      count: 0,
+    };
+    const boxesOf = (el: Element): Box[] => {
+      const res: Box[] = [];
+      for (const rc of Array.from(el.getClientRects())) {
+        let box: Box = { l: rc.left, t: rc.top, r: rc.right, b: rc.bottom };
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const cs = getComputedStyle(p);
+          if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+          const pr = p.getBoundingClientRect();
+          box = {
+            l: Math.max(box.l, pr.left + parseFloat(cs.borderLeftWidth)),
+            t: Math.max(box.t, pr.top + parseFloat(cs.borderTopWidth)),
+            r: Math.min(box.r, pr.right - parseFloat(cs.borderRightWidth)),
+            b: Math.min(box.b, pr.bottom - parseFloat(cs.borderBottomWidth)),
+          };
+        }
+        if (box.r > box.l && box.b > box.t) res.push(box);
+      }
+      return res;
+    };
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
+    const all: { el: Element; label: string; boxes: Box[] }[] = [];
+    for (const card of cards) {
+      const cr = card.getBoundingClientRect();
+      for (const el of Array.from(card.querySelectorAll('a[href], button'))) {
+        const label = (el.textContent ?? '').trim().slice(0, 30);
+        const boxes = boxesOf(el);
+        all.push({ el, label, boxes });
+        for (const b of boxes) {
+          if (
+            b.l < cr.left - 0.5 ||
+            b.r > cr.right + 0.5 ||
+            b.t < cr.top - 0.5 ||
+            b.b > cr.bottom + 0.5
+          ) {
+            out.outside.push(
+              `"${label}" [${b.t.toFixed(1)}, ${b.b.toFixed(1)}] vs card [${cr.top.toFixed(1)}, ${cr.bottom.toFixed(1)}]`,
+            );
+          }
+        }
+        // g. the centre of each visible text line hits this element
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        for (const lr of Array.from(range.getClientRects())) {
+          if (lr.width === 0 || lr.height === 0) continue;
+          const x = lr.left + lr.width / 2;
+          const y = lr.top + lr.height / 2;
+          if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b)) continue;
+          const hit = document.elementFromPoint(x, y);
+          if (!hit || !(hit === el || el.contains(hit))) {
+            out.misses.push(
+              `"${label}" line at y=${y.toFixed(1)} lands on ${hit?.className || hit?.tagName}`,
+            );
+          }
+        }
+      }
+    }
+    out.count = all.length;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        for (const a of all[i].boxes) {
+          for (const b of all[j].boxes) {
+            const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
+            const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+            if (w > 0.5 && h > 0.5) {
+              out.overlaps.push(
+                `"${all[i].label}" x "${all[j].label}" overlap ${w.toFixed(1)}x${h.toFixed(1)}`,
+              );
+            }
+          }
+        }
+      }
+    }
+    return out;
+  });
+  expect(r.count).toBeGreaterThanOrEqual(8);
+  expect.soft(r.overlaps, 'f. hit boxes overlapping each other').toEqual([]);
+  expect.soft(r.misses, 'g. taps on the text land elsewhere').toEqual([]);
+  expect.soft(r.outside, 'h. hit box outside its card').toEqual([]);
 }
 
 test.describe('Home: Live sessions', () => {
@@ -826,7 +937,11 @@ test.describe('Home: Live sessions', () => {
     expect(m.rows.some((r) => r.oneLine)).toBe(true);
     for (const r of m.rows) {
       if (!r.oneLine) continue;
-      expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+      // The "+ N more" row is the one row that carries added gap (16px, so its
+      // 44px box and the Next link's box below never overlap), so it is exempt.
+      if (!r.text.startsWith('+')) {
+        expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
+      }
       expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
     }
     // b. linked and unlinked one-line titles share one height
@@ -835,12 +950,18 @@ test.describe('Home: Live sessions', () => {
     const unlinked = one.find((t) => !t.linked);
     expect(linked && unlinked).toBeTruthy();
     expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
-    // c + d. every target measures >= 44 and no clamped ancestor clips it
+    // c + d. every target the inline-link-in-prose exemption (WCAG 2.2 SC
+    // 2.5.8) does not cover measures >= 44, and no clamped ancestor clips any
+    // target. The Now task links read "Builder on <link>", so they are exempt.
     expect(m.targets.length).toBeGreaterThanOrEqual(8);
+    expect(m.targets.some((t) => t.inline)).toBe(true);
+    expect(m.targets.some((t) => !t.inline)).toBe(true);
     for (const t of m.targets) {
-      expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(43.5);
+      if (!t.inline) expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(43.5);
       expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
     }
+    // f + g + h. hit boxes never overlap, taps land on the text, cards contain them
+    await expectHitBoxesSound(page);
     // e. long title: first line shares the role text's line, at most 2 lines show
     expect(Math.abs(m.long.firstTop - m.long.vTop)).toBeLessThanOrEqual(2);
     // The link wraps to 3+ lines; the 2-line clamp hides the rest. Line tops
@@ -851,6 +972,18 @@ test.describe('Home: Live sessions', () => {
       (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
     );
     expect(below).toEqual([]);
+  });
+
+  test('375px expanded: two Now links above the next task link still never overlap', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+    await first.getByRole('button', { name: '+ 2 more' }).click();
+    await expect(first).toContainText('Code reviewer on Check the cart total');
+    await expectHitBoxesSound(page);
   });
 
   test('empty: says so, with how many sessions were hidden', async ({ page }) => {

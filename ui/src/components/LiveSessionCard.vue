@@ -51,7 +51,7 @@ const view = computed(() =>
     </div>
     <div v-if="view.next" class="bs-live-card__line">
       <span class="bs-live-card__k">Next</span>
-      <span v-if="view.next.kind === 'task'" class="bs-live-card__v">
+      <span v-if="view.next.kind === 'task'" class="bs-live-card__v bs-live-card__v--solo">
         <RouterLink :to="view.next.to" class="bs-live-card__link" :aria-label="`Open task ${view.next.taskTitle}`">{{ view.next.taskTitle }}</RouterLink>
       </span>
       <span v-else-if="view.next.kind === 'waiting'" class="bs-live-card__v bs-live-card__wait">Waiting on you</span>

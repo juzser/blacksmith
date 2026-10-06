@@ -2785,25 +2785,46 @@ summary.bs-inbox__group-head {
     flex-direction: column;
     gap: var(--bs-space-1);
   }
-  /* 44px hit boxes without growing the layout. The links stay inline (they
-     must wrap and clamp), so vertical padding on them leaves line layout
-     alone. The clamped boxes carry the same padding cancelled by an equal
-     negative margin, so their clip edge clears the links' padding. Nearly
-     all of it sits above the text: the box's clip edge is its padding edge,
-     and padding below the 2nd line would show the first glyphs of a clamped
-     3rd line. */
+  /* 44px hit boxes without growing the layout, and without two hit boxes
+     overlapping. The Now task links read "Builder on <link>": inline links in
+     prose, exempt from the floor, so they keep their line box. The title link,
+     "+ N more" and the Next task link get their extra height where nothing
+     interactive is: the card's own padding, the status row, the row gaps.
+     The links stay inline (they wrap and clamp), so vertical padding on them
+     leaves line layout alone; the clamped box carries the same padding
+     cancelled by an equal negative margin so its clip edge clears the link.
+     Padding under a clamp's 2nd line would show a 3rd line's first glyphs, so
+     that strip is masked out (a mask never changes hit testing). */
   .bs-live-card__title,
-  .bs-live-card__v {
-    padding-block: calc(var(--bs-touch) - 1.1em) 0.1em;
-    margin-block: calc(1.1em - var(--bs-touch)) -0.1em;
+  .bs-live-card__v--solo {
+    --bs-live-above: var(--bs-space-3);
+    --bs-live-below: calc(var(--bs-touch) - 1.2em - var(--bs-live-above));
+    padding-block: var(--bs-live-above) var(--bs-live-below);
+    margin-block: calc(-1 * var(--bs-live-above)) calc(-1 * var(--bs-live-below));
+    -webkit-mask-image: linear-gradient(#000 calc(100% - var(--bs-live-below)), transparent 0);
+    mask-image: linear-gradient(#000 calc(100% - var(--bs-live-below)), transparent 0);
   }
-  .bs-live-card__link {
-    padding-block: calc(var(--bs-touch) - 1.1em) 0.1em;
+  .bs-live-card__title .bs-live-card__link,
+  .bs-live-card__v--solo .bs-live-card__link {
+    padding-block: var(--bs-live-above) var(--bs-live-below);
   }
+  /* The Next link is the last row: its extra height goes mostly below, into
+     the card's own padding. */
+  .bs-live-card__v--solo {
+    --bs-live-above: calc(var(--bs-space-2) + 2px);
+    --bs-live-below: calc(var(--bs-touch) - 1.2em - var(--bs-live-above));
+  }
+  /* The button's extra height: its text starts at the row's top, 8px of box
+     above it (the row gap) and the rest below. That leaves 16px of added gap
+     under this one row (the only added gap), so its box and the Next link's
+     box below never overlap: 28px row pitch cannot hold two 44px boxes. */
   .bs-live-card__more {
     align-self: start;
+    align-items: flex-start;
+    height: auto;
     min-height: var(--bs-touch);
-    margin-block: calc((1lh - var(--bs-touch)) / 2);
+    padding-block: calc(var(--bs-space-2) - 1px) 0;
+    margin-block: calc(-1 * var(--bs-space-2)) 0;
   }
 }
 
