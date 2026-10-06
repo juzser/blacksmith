@@ -19,13 +19,13 @@ import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
 import { agentChip, isInteractiveDescendant, titleCase } from '../lib/kanban.js';
+import { storeKey } from '../lib/storeKey.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
 import AgentChip from './AgentChip.vue';
 import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
-import { storeKey } from '../lib/storeKey.js';
 
 /** Rows shown before "Show N more" (ds-spec follow-up group: capped at 5). */
 const ROW_CAP = 5;
