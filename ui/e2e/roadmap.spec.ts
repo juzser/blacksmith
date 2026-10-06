@@ -72,6 +72,56 @@ test.describe('Roadmap', () => {
     expect(pastStyle.opacity).toBeLessThan(1);
   });
 
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the empty track stays distinct on a selected and a hovered row (${theme})`, async ({
+      page,
+    }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto('/work/roadmap?phase=phase-7');
+      const selected = page.locator('.lrow.sel').first();
+      await expect(selected).toBeVisible();
+      const fills = (row: ReturnType<Page['locator']>) =>
+        row.evaluate((el) => {
+          const track = el.querySelector('.track');
+          if (!track) throw new Error('row has no .track');
+          return {
+            row: getComputedStyle(el).backgroundColor,
+            track: getComputedStyle(track).backgroundColor,
+          };
+        });
+      // Summed per-channel distance; the unfixed light selected row (#f4f4f5
+      // vs #f7f7f8) sits at 9, which the eye cannot tell apart.
+      const gap = (a: string, b: string) => {
+        const rgb = (c: string) => (c.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+        const [x, y] = [rgb(a), rgb(b)];
+        return x.reduce((n, v, i) => n + Math.abs(v - (y[i] ?? 0)), 0);
+      };
+      const sel = await fills(selected);
+      expect(
+        gap(sel.track, sel.row),
+        `selected row fill ${sel.row}, track ${sel.track}`,
+      ).toBeGreaterThanOrEqual(10);
+
+      const other = page.locator('.lrow:not(.sel)').first();
+      await other.hover();
+      await page.waitForTimeout(200);
+      const hov = await fills(other);
+      expect(
+        gap(hov.track, hov.row),
+        `hovered row fill ${hov.row}, track ${hov.track}`,
+      ).toBeGreaterThanOrEqual(10);
+
+      await selected.hover();
+      await page.waitForTimeout(200);
+      const both = await fills(selected);
+      expect(
+        gap(both.track, both.row),
+        `selected+hovered row fill ${both.row}, track ${both.track}`,
+      ).toBeGreaterThanOrEqual(10);
+    });
+  }
+
   test('no sideways page scroll at 390px on /work/roadmap', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/work/roadmap');

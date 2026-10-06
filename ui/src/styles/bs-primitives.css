@@ -3659,6 +3659,17 @@ h2.rm-section__head {
   background: var(--bs-surface-sunken);
   border-radius: var(--bs-radius-sm);
 }
+/* Fix round 3 — the sunken track vanished on a filled row: light selected
+   #f4f4f5 vs sunken #f7f7f8, and hover fills with sunken itself (both
+   themes). On a selected or hovered row the track takes the plain surface
+   (light #ffffff, dark #151619 — both differ from the selected fill and
+   from the hover fill) plus a --bs-border hairline, so the dark hover case
+   (#111214 vs #151619) still reads as a track. */
+.lrow.sel .track,
+.lrow:hover .track {
+  background: var(--bs-surface);
+  box-shadow: inset 0 0 0 1px var(--bs-border);
+}
 .lbar {
   position: absolute;
   top: 0;
