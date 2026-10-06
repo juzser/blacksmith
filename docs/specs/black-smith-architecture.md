@@ -853,7 +853,8 @@ later**: the UI is built stack-compatible with Workers/Pages + D1 from day one
 (§14 stack standard) so deployment is a port of the data layer (SQLite → D1),
 not a rewrite; auth (Cloudflare Access) required before anything is exposed.
 `GET /api/cli-sessions` additionally reads, read-only, outside `smith.db`,
-the local Claude Code session registry and transcripts (config dir from
+the local Claude Code session registry, transcripts and prompt history
+(`history.jsonl`, only each prompt's text and time) (config dir from
 `--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default)
 and answers loopback requests only, since it carries operator prompt text.
 
