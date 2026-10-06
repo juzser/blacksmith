@@ -77,7 +77,7 @@ test.describe('Home', () => {
     ]);
   });
 
-  test('Running now has one card per project with work in flight, linked to Work', async ({
+  test('Running now (Active) has one card per project with an agent working, linked to Work', async ({
     page,
   }) => {
     await page.goto('/overview');
@@ -85,7 +85,7 @@ test.describe('Home', () => {
     await expect(view).toHaveAttribute('href', '/work/kanban?project=blacksmith');
     await expect(page.getByText('2 epics in flight')).toBeVisible();
     await expect(page.getByText('epic in flights')).toHaveCount(0);
-    // envkit is declared but has nothing running: no card for it.
+    // envkit is declared but has no agent working: no card for it in Active.
     await expect(page.getByRole('link', { name: 'View envkit in Work' })).toHaveCount(0);
   });
 
