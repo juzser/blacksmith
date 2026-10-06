@@ -32,7 +32,7 @@ import {
   RefreshCw,
   Timer,
 } from '@lucide/vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import AgentChip from '../components/AgentChip.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
@@ -178,18 +178,22 @@ async function load() {
   // `v-else-if="detail"`. A retry after a failed fetch still gets its
   // skeleton, because there the page really is empty (D-243).
   loading.value = detail.value === null;
+  const { taskId, storeId } = props;
+  // An answer for a task the page has since left must not land on the new one.
+  const stale = () => taskId !== props.taskId || storeId !== props.storeId;
   try {
     const [d, r] = await Promise.all([
-      fetchTaskDetail(props.taskId, props.storeId),
-      fetchTaskRuns(props.taskId, props.storeId),
+      fetchTaskDetail(taskId, storeId),
+      fetchTaskRuns(taskId, storeId),
     ]);
+    if (stale()) return;
     detail.value = d;
     runs.value = r.runs;
     totals.value = r.totals;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (!stale()) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (!stale()) loading.value = false;
   }
 }
 async function loadHistory() {
@@ -201,8 +205,9 @@ async function loadHistory() {
   historyLoading.value = history.value.length === 0;
   historyError.value = null;
   try {
-    const page = await fetchTimelinePage({ task: props.taskId, limit: 200 });
-    history.value = page.entries;
+    const taskId = props.taskId;
+    const page = await fetchTimelinePage({ task: taskId, limit: 200 });
+    if (taskId === props.taskId) history.value = page.entries;
   } catch (e) {
     historyError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -214,6 +219,26 @@ function refresh() {
   void load();
   void loadHistory();
 }
+
+// Vue-router reuses this component when only the param or `?store=` changes,
+// so nothing would remount it: drop what the old task showed and load the new
+// one at once rather than at the next poll.
+watch(
+  () => [props.taskId, props.storeId],
+  () => {
+    detail.value = null;
+    runs.value = [];
+    totals.value = null;
+    history.value = [];
+    error.value = null;
+    historyError.value = null;
+    activeTab.value = 'overview';
+    historyExpanded.value = loadExpanded(sessionStorage, historyStorageKey.value);
+    setBreadcrumb([{ label: 'Work', to: '/work/kanban' }, { label: props.taskId }]);
+    void load();
+    void loadHistory();
+  },
+);
 
 onMounted(() => {
   // Before the fetch, never after it. The crumb states where the operator is

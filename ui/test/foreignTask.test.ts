@@ -87,7 +87,7 @@ describe('the store id reaches the peek panel and the task page', () => {
   });
   it('the task page keeps served-store-only reads empty for a foreign task', () => {
     const page = src('pages', 'TaskDetailPage.vue');
-    expect(page).toMatch(/fetchTaskDetail\(props\.taskId, props\.storeId\)/);
+    expect(page).toMatch(/fetchTaskDetail\(taskId, storeId\)/);
     expect(page).toMatch(/if \(foreign\.value\) \{\s*historyLoading\.value = false;/);
     expect(page).toMatch(/!foreign\.value && isWaivable/);
   });

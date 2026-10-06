@@ -323,7 +323,7 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
     }
   }
 
-  async function refresh(): Promise<void> {
+  async function refreshAll(): Promise<void> {
     if (Date.now() - lastDiscovery >= deps.refreshMs) {
       lastDiscovery = Date.now();
       discovering ??= discover().finally(() => {
@@ -334,6 +334,25 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
     await discovering?.catch(() => {});
     await Promise.all([...foreign.values()].map((s) => s.refresher.refresh().catch(() => {})));
   }
+
+  // One refresh-all pass in flight per registry, joined by every caller. A scan
+  // commits a session at a time and `readAsLabel` only runs when it ends, so a
+  // cache can hold untagged rows meanwhile. If a second request started its own
+  // scan of store A while a first still waited on a slower store B, the first
+  // request's handler would read A mid-fold, unlabelled. Joining the pass means
+  // no scan of any store starts while another caller still waits on this pass,
+  // and the callers resume in the same microtask run that follows its end, ahead
+  // of any new scan's I/O. (Chosen over relabelling inside the fold, which would
+  // mean changing the projector's commit path, and over read-time mapping, which
+  // would complicate every query and risk double counting.) Only the request
+  // middleware calls this; the change stream's ticker scans the home store only.
+  let pass: Promise<void> | null = null;
+  const refresh = (): Promise<void> => {
+    pass ??= refreshAll().finally(() => {
+      pass = null;
+    });
+    return pass;
+  };
 
   return {
     entries: () => [
@@ -358,6 +377,7 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
       for (const e of foreign.values()) closeEntry(e);
       foreign.clear();
     },
-    store: (id) => (id === deps.home.id ? deps.home : foreign.get(id)),
+    store: (id) =>
+      id === deps.home.id ? deps.home : (foreign.get(id) ?? lingering.get(id)?.entry),
   };
 }

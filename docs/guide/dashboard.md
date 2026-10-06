@@ -37,7 +37,7 @@ is not touched.
 loopback requests only, like `/api/cli-sessions`, as does `/api/tasks/*`.
 
 **Cache lifetime.** A store that drops out keeps its open cache for a grace period
-(5 minutes), so a session that restarts is not folded again from scratch. On
+(5 minutes), so a session that restarts is not folded again from scratch, and an open task page of that store keeps loading (the Kanban board shows live projects only). On
 startup, cache files in `state/ui-stores/` whose store is not known and that were
 last written more than 7 days ago are deleted; nothing outside that directory is
 touched.

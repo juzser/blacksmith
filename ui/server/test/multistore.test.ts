@@ -379,6 +379,17 @@ describe('multi-store dashboard reads', () => {
       expect(Array.isArray(runs.runs)).toBe(true);
     });
 
+    it('still opens once its CLI session has ended, while the cache lingers', async () => {
+      const a = app();
+      const id = await foreignId(a);
+      await rm(path.join(config, 'sessions'), { recursive: true, force: true });
+      await mkdir(path.join(config, 'sessions'), { recursive: true });
+      const columns = await get<Col[]>(a, '/api/kanban');
+      expect(columns.flatMap((c) => c.tasks).some((t) => t.store.id === id)).toBe(false);
+      const detail = await get<{ task: { taskId: string } }>(a, `/api/tasks/${task}?store=${id}`);
+      expect(detail.task.taskId).toBe(TASK_1);
+    });
+
     it('answers 404 for an unknown store, never the served store', async () => {
       const a = app();
       for (const route of [

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { Refresher } from '../src/app.js';
 import {
   createStoreRegistry,
@@ -218,6 +219,91 @@ describe('store cache lifetime', () => {
     expect(existsSync(outside)).toBe(true);
     // The store known right now keeps its own cache.
     expect(reg.entries()).toHaveLength(2);
+    reg.close();
+  });
+
+  it('finds a lingering store by id, and not once the grace period is over', async () => {
+    const { reg, cwds } = registry({ graceMs: 60 });
+    await reg.refresh();
+    const first = reg.entries()[1];
+    expect(first).toBeDefined();
+    cwds.length = 0;
+    await reg.refresh();
+    expect(reg.entries()).toHaveLength(1);
+    expect(reg.store(first?.id ?? '')).toBe(first);
+    await sleep(150);
+    expect(reg.store(first?.id ?? '')).toBeUndefined();
+    reg.close();
+  });
+
+  it('never lets a caller read a foreign cache between a fold commit and its relabel', async () => {
+    const home = mk('home-x');
+    mk('home-x', 'state', 'events');
+    const tops = ['project-a', 'project-b'].map((n) => {
+      mk(n, '.git');
+      mk(n, '.blacksmith', 'state', 'events');
+      return path.join(tmp, n);
+    });
+    let releaseB = () => {};
+    const lateScans: Array<() => void> = [];
+    const scans: Record<string, number> = {};
+    const reg = createStoreRegistry({
+      home: {
+        id: 'home',
+        label: 'home',
+        handle: null as never,
+        refresher: fakeRefresher(),
+        home: true,
+      },
+      homeEventsDir: eventsDirOf(home),
+      cacheDir: path.join(home, 'state', 'ui-stores'),
+      extra: [],
+      liveCwds: async () => tops,
+      // A scan commits an untagged row at once, then keeps folding until released.
+      makeRefresher: (dbPath) => ({
+        ...fakeRefresher(),
+        refresh: async () => {
+          const n = (scans[dbPath] ?? 0) + 1;
+          scans[dbPath] = n;
+          const db = openDb(dbPath);
+          db.sqlite
+            .prepare(
+              "INSERT INTO tasks (task_id, session_id, task_status, created_at, updated_at) VALUES (?, 's', 'todo', 't', 't')",
+            )
+            .run(`t${n}-${path.basename(dbPath)}`);
+          db.sqlite.close();
+          if (n > 1) await new Promise<void>((r) => lateScans.push(r));
+          else if (
+            dbPath.endsWith(`${storeIdOf(eventsDirOf(path.join(tops[1] ?? '', '.blacksmith')))}.db`)
+          )
+            await new Promise<void>((r) => {
+              releaseB = r;
+            });
+        },
+      }),
+      refreshMs: 0,
+    });
+    const r1 = reg.refresh();
+    await sleep(30);
+    const r2 = reg.refresh();
+    await sleep(30);
+    // R1 still waits on store B's first scan; R2 has arrived since.
+    releaseB();
+    await r1;
+    // R1's handler would run now, while any scan R2 started is still folding.
+    const seen = reg
+      .entries()
+      .slice(1)
+      .map((e) => ({
+        label: e.label,
+        rows: e.handle.sqlite.prepare('SELECT project FROM tasks').all() as Array<{
+          project: string | null;
+        }>,
+      }));
+    expect(seen.flatMap((x) => x.rows)).not.toHaveLength(0);
+    for (const x of seen) for (const r of x.rows) expect(r.project).toBe(x.label);
+    for (const g of lateScans.splice(0)) g();
+    await r2;
     reg.close();
   });
 });
