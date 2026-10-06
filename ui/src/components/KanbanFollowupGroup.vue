@@ -25,6 +25,7 @@ import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
+import { storeKey } from '../lib/storeKey.js';
 
 /** Rows shown before "Show N more" (ds-spec follow-up group: capped at 5). */
 const ROW_CAP = 5;
@@ -135,7 +136,7 @@ function onRowKeydown(event: KeyboardEvent, taskId: string) {
       </span>
     </summary>
     <ul role="list" class="bs-kanban-group__rows">
-      <li v-for="task in rows" :key="task.taskId">
+      <li v-for="task in rows" :key="storeKey(task, task.taskId)">
         <div
           class="bs-kanban-group__row"
           role="link"

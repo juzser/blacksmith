@@ -4,6 +4,7 @@
 import { agentWaitingThresholdMs } from './constants.js';
 import { taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
+import { type StoreRef, storeKey } from './storeKey.js';
 import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
 
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
@@ -37,6 +38,7 @@ export function columnForStatus(taskStatus: string, showAll = false): KanbanColu
 export interface KanbanTaskLike {
   taskId: string;
   taskStatus: string;
+  store?: StoreRef;
 }
 
 /** Groups tasks into the 5 default columns (or 7 with showAll), in KANBAN_COLUMNS order. */
@@ -379,12 +381,14 @@ export function groupFollowups<T extends FollowupTaskLike>(
   tasks: readonly T[],
   columnKey: string,
 ): Array<ColumnItem<T>> {
+  const parentKey = (task: T, parent: string) => storeKey(task, parent);
   const byParent = new Map<string, T[]>();
   for (const task of tasks) {
     if (task.parentTaskId === null) continue;
-    const list = byParent.get(task.parentTaskId) ?? [];
+    const k = parentKey(task, task.parentTaskId);
+    const list = byParent.get(k) ?? [];
     list.push(task);
-    byParent.set(task.parentTaskId, list);
+    byParent.set(k, list);
   }
   const groups = new Map<string, T[]>();
   for (const [parent, members] of byParent) {
@@ -398,13 +402,14 @@ export function groupFollowups<T extends FollowupTaskLike>(
   }
   const items: Array<ColumnItem<T>> = [];
   for (const task of tasks) {
-    const members = task.parentTaskId === null ? undefined : groups.get(task.parentTaskId);
+    const members =
+      task.parentTaskId === null ? undefined : groups.get(parentKey(task, task.parentTaskId));
     if (task.parentTaskId === null || members === undefined) {
-      items.push({ kind: 'task', key: task.taskId, task });
+      items.push({ kind: 'task', key: storeKey(task, task.taskId), task });
     } else if (members[0] === task) {
       items.push({
         kind: 'group',
-        key: `${columnKey}:${task.parentTaskId}`,
+        key: `${columnKey}:${parentKey(task, task.parentTaskId)}`,
         parentTaskId: task.parentTaskId,
         parentTitle: task.parentTitle,
         members,

@@ -5084,9 +5084,13 @@ async function main(): Promise<number> {
       : claudeEnv
         ? { dir: path.resolve(claudeEnv), source: 'env' }
         : { dir: path.join(homedir(), '.claude'), source: 'default' };
+    // Repeatable: extra state homes (`<dir>/state/events`) the dashboard reads
+    // besides the live sessions' own. Read-only; see ui/server/src/stores.ts.
+    const stores = (repeated.store ?? []).map((dir) => path.resolve(dir));
     mod.serve({
       port,
       dbPath,
+      ...(stores.length > 0 ? { stores } : {}),
       ...(stateDir ? { stateDir } : {}),
       ...(roadmapPath ? { roadmapPath } : {}),
       ...(specsDir ? { specsDir } : {}),

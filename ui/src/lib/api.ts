@@ -4,6 +4,7 @@
 // server/client boundary (ui/ and ui/server/ are separate TS projects; see
 // ui/server/src/app.ts's header comment for why they don't share a build).
 import { applySessionScope, type SessionScope } from './sessionScope.js';
+import type { StoreRef } from './storeKey.js';
 
 export class ApiError extends Error {
   readonly code: string;
@@ -158,6 +159,7 @@ export interface EpicDates {
   sourcePrompt: RequestQuote | null;
 }
 export interface RecentDispatch {
+  store?: StoreRef;
   eventId: string;
   ts: string;
   agentRole: string;
@@ -169,6 +171,7 @@ export interface RecentDispatch {
   round: number;
 }
 export interface ProjectOverviewSummary {
+  store?: StoreRef;
   project: string;
   liveAgentCount: number;
   /** Of `liveAgentCount`, the ones inside the 4h window — see RunningSession.workingAgentCount. */
@@ -183,6 +186,7 @@ export interface ProjectOverviewSummary {
   alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {
+  store?: StoreRef;
   epicId: string;
   closedBy: string;
   machineVerdict: string | null;
@@ -265,6 +269,7 @@ export interface KanbanDependency {
   edgeType: string;
 }
 export interface KanbanTask {
+  store?: StoreRef;
   taskId: string;
   taskStatus: string;
   title: string | null;

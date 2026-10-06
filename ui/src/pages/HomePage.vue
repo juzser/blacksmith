@@ -50,6 +50,7 @@ import {
   unmeasuredSentence,
 } from '../lib/homeView.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
+import { storeKey } from '../lib/storeKey.js';
 
 const POLL_MS = 5000;
 /** How many decisions the section lists; the rest live on Activity. */
@@ -224,7 +225,7 @@ function becauseOf(promptId: string) {
       <template v-else-if="overview !== null">
         <p v-if="cards.length === 0" class="bs-home__quiet">Nothing is running right now.</p>
         <div v-else class="bs-home__cards">
-          <Card v-for="c in cards" :key="c.project" :title="c.project">
+          <Card v-for="c in cards" :key="storeKey(c, c.project)" :title="c.project">
             <template #action>
               <RouterLink
                 class="bs-btn bs-btn--link bs-btn--sm"
@@ -260,7 +261,7 @@ function becauseOf(promptId: string) {
         <div v-if="justFinished.length > 0" class="bs-home__finished">
           <h3 class="bs-home__subhead">Just finished</h3>
           <ul class="bs-home__list">
-            <li v-for="e in justFinished" :key="e.epicId" class="bs-home__line">
+            <li v-for="e in justFinished" :key="storeKey(e, e.epicId)" class="bs-home__line">
               <RouterLink :to="{ path: '/work/kanban', query: { epic: e.epicId } }">{{ e.epicId }}</RouterLink>
               <span>finished</span>
               <RelativeTime :iso="e.closedAt" />
@@ -281,7 +282,7 @@ function becauseOf(promptId: string) {
           body="Each time the factory hands a task to an agent, the choice and its reason appear here."
         />
         <ul v-else class="bs-home__list">
-          <li v-for="d in decisions" :key="d.eventId" class="bs-home__line">
+          <li v-for="d in decisions" :key="storeKey(d, d.eventId)" class="bs-home__line">
             <RouterLink v-if="d.taskId" :to="`/tasks/${encodeURIComponent(d.taskId)}`" class="bs-home__decision">
               {{ decisionLine(d) }}
             </RouterLink>

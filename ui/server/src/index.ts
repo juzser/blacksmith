@@ -18,6 +18,8 @@ export interface ServeOptions {
   claudeConfigDir?: string;
   claudeConfigSource?: 'flag' | 'env' | 'default';
   knownRoots?: string[];
+  /** See AppOpts.stores. */
+  stores?: string[];
 }
 
 export interface ServerHandle {
@@ -37,6 +39,7 @@ export function serve(opts: ServeOptions): ServerHandle {
     ...(opts.claudeConfigDir ? { claudeConfigDir: opts.claudeConfigDir } : {}),
     ...(opts.claudeConfigSource ? { claudeConfigSource: opts.claudeConfigSource } : {}),
     ...(opts.knownRoots ? { knownRoots: opts.knownRoots } : {}),
+    ...(opts.stores ? { stores: opts.stores } : {}),
     uiDistDir: UI_DIST_DIR,
   });
   const port = opts.port ?? DEFAULT_PORT;

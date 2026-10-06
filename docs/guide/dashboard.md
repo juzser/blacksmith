@@ -9,6 +9,24 @@ transcripts and prompt history — from `--claude-config-dir`, else `$CLAUDE_CON
 Claude Code's default — and serves them as `GET /api/cli-sessions`, to
 loopback requests only.
 
+## Other projects' stores
+
+Home and Kanban also show every project that has a live Claude Code CLI session,
+not only the clone the dashboard was started in. For each live session's working
+directory the server takes the git toplevel and treats it as a store when
+`<top>/.blacksmith/state/events` (a `BS_HOME` layout) or `<top>/state/events` (a
+clone) exists. Pass `--store <dir>` (repeatable) to add a state home that has no
+live session. Discovery reruns at most every 5 seconds; stores are deduped by
+realpath, so a session inside the served clone is the served store, not a second one.
+
+A foreign store is only ever read. Its event logs are projected into a
+dashboard-owned cache, `state/ui-stores/<storeId>.db` under the served clone;
+nothing is created or written in the foreign project. A store that disappears is
+dropped from the views and shows up as a `store-unavailable` issue on the pulse.
+Rows from it carry `store: {id, label}` (the label is the project's directory
+name), and its default project reads as that label. Only `/api/overview`,
+`/api/kanban` and `/api/projects` span stores for now.
+
 ```bash
 pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
 bs ui serve                          # http://127.0.0.1:4680
