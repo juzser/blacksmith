@@ -4,6 +4,11 @@ A local, read-only view of what the factory is doing. Nothing you click here
 dispatches an agent — the dashboard is a *projection* of the append-only event
 log, and `bs db rebuild` reconstructs the whole thing from that log alone.
 
+The server also reads, read-only, the local Claude Code session registry and
+transcripts — from `--claude-config-dir`, else `$CLAUDE_CONFIG_DIR`, else
+Claude Code's default — and serves them as `GET /api/cli-sessions`, to
+loopback requests only.
+
 ```bash
 pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
 bs ui serve                          # http://127.0.0.1:4680

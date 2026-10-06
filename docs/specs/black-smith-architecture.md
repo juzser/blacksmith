@@ -836,6 +836,10 @@ read-only API; lesson/waiver actions are the only writes. **Cloudflare
 later**: the UI is built stack-compatible with Workers/Pages + D1 from day one
 (§14 stack standard) so deployment is a port of the data layer (SQLite → D1),
 not a rewrite; auth (Cloudflare Access) required before anything is exposed.
+One read sits outside `smith.db`: `GET /api/cli-sessions` reads, read-only,
+the local Claude Code session registry and transcripts (config dir from
+`--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default)
+and answers loopback requests only, since it carries operator prompt text.
 
 Pages:
 
