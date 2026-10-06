@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activeFirst,
   isSessionActive,
   isStaleResponse,
   selectedSessionFromQuery,
   sessionsByProject,
+  sessionsInScope,
 } from '../src/lib/sessionsSelection.js';
 
 const sessions = [{ sessionId: 'sess-a' }, { sessionId: 'sess-b' }];
@@ -115,5 +117,58 @@ describe('sessionsByProject', () => {
     expect(groups.map((g) => g.project)).toEqual(['proj-a', 'proj-b']);
     expect(groups[0]?.sessions).toEqual([multi]);
     expect(groups[1]?.sessions).toEqual([multi]);
+  });
+});
+
+describe('sessionsInScope', () => {
+  const mk = (sessionId: string, workingAgentCount: number) => ({ sessionId, workingAgentCount });
+  const list = [mk('a', 1), mk('q1', 0), mk('q2', 0)];
+  const ids = (xs: readonly { sessionId: string }[]) => xs.map((s) => s.sessionId);
+
+  it('active keeps only sessions with a working agent', () => {
+    expect(ids(sessionsInScope(list, 'active', null))).toEqual(['a']);
+  });
+
+  it('all keeps every session', () => {
+    expect(ids(sessionsInScope(list, 'all', null))).toEqual(['a', 'q1', 'q2']);
+  });
+
+  it('active keeps a quiet selected session pinned, and only that one', () => {
+    expect(ids(sessionsInScope(list, 'active', 'q2'))).toEqual(['a', 'q2']);
+  });
+
+  it('a selected id that no longer exists adds nothing', () => {
+    expect(ids(sessionsInScope(list, 'active', 'gone'))).toEqual(['a']);
+  });
+
+  it('the hidden quiet count excludes a pinned session', () => {
+    expect(list.length - sessionsInScope(list, 'active', null).length).toBe(2);
+    expect(list.length - sessionsInScope(list, 'active', 'q1').length).toBe(1);
+    expect(list.length - sessionsInScope(list, 'all', 'q1').length).toBe(0);
+  });
+});
+
+describe('activeFirst', () => {
+  const mk = (sessionId: string, lastEventAt: string, workingAgentCount: number) => ({
+    sessionId,
+    lastEventAt,
+    workingAgentCount,
+  });
+
+  it('puts active ahead of quiet, each group newest first', () => {
+    const out = activeFirst([
+      mk('q-new', '2026-01-04', 0),
+      mk('a-old', '2026-01-01', 1),
+      mk('q-old', '2026-01-02', 0),
+      mk('a-new', '2026-01-03', 2),
+    ]);
+    expect(out.map((s) => s.sessionId)).toEqual(['a-new', 'a-old', 'q-new', 'q-old']);
+  });
+
+  it('is stable for equal keys and does not mutate its input', () => {
+    const input = [mk('x', '2026-01-01', 1), mk('y', '2026-01-01', 1), mk('z', '2026-01-01', 0)];
+    const copy = [...input];
+    expect(activeFirst(input).map((s) => s.sessionId)).toEqual(['x', 'y', 'z']);
+    expect(input).toEqual(copy);
   });
 });

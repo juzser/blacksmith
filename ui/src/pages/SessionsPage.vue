@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Sessions — DS8 PR3, rebuilt on the kit. Replaces the VueFlow canvas
-// entirely: a history list (kit SessionRow, one per run) with an "N
-// finished runs" toggle, and selecting a run loads its agents through
+// entirely: a history list (kit SessionRow, one per run) scoped Active/All
+// by the shared `?scope=` toggle, and selecting a run loads its agents through
 // fetchSessionAgents and shows one kit AgentBlock per role. No @vue-flow/core
 // import anywhere on this page — the dependency stays in package.json only
 // because nothing else in this round removes it from there.
@@ -16,6 +16,7 @@
 import { Play, RefreshCw } from '@lucide/vue';
 import { nextTick, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import AgentBlock from '../components/kit/AgentBlock.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
@@ -23,10 +24,12 @@ import EmptyState from '../components/kit/EmptyState.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
 import SessionRow from '../components/kit/SessionRow.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
+import { useActivityScope } from '../composables/useActivityScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useViewport } from '../composables/useViewport.js';
+import { scopeQuery } from '../lib/activityScope.js';
 import {
   fetchSessionAgents,
   fetchSessions,
@@ -36,10 +39,12 @@ import {
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { pluralize } from '../lib/format.js';
 import {
+  activeFirst,
   isSessionActive,
   isStaleResponse,
   selectedSessionFromQuery,
   sessionsByProject,
+  sessionsInScope,
 } from '../lib/sessionsSelection.js';
 
 const router = useRouter();
@@ -47,6 +52,7 @@ const route = useRoute();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
 const { isPhoneWidth } = useViewport();
+const { scope, scopeTo } = useActivityScope();
 
 // Same cadence as every other polling page (design-spec.md §8).
 const POLL_MS = 5000;
@@ -60,15 +66,22 @@ const agents = ref<SessionAgentsResult | null>(null);
 const agentsLoadedFor = ref<string | null>(null);
 const agentsError = ref<string | null>(null);
 
-const showFinished = ref(false);
+const activeCount = () => sessions.value.filter(isSessionActive).length;
 
-const running = () => sessions.value.filter(isSessionActive);
-const finished = () => sessions.value.filter((s) => !isSessionActive(s));
+// Active shows only running sessions (plus a quiet selection, pinned); All
+// also reveals the quiet ones, which render muted after the active ones.
+const visible = () => sessionsInScope(sessions.value, scope.value, selectedId.value);
+// Quiet sessions Active leaves out: a pinned selection is shown, so not counted.
+const hiddenQuietCount = () => sessions.value.length - visible().length;
 
 // Unscoped (no project in context, SessionsPage never pre-selects one):
-// group the running list by project, newest group first. Scoped to one
-// project, every running row already belongs to it, so no header renders.
-const runningGroups = () => sessionsByProject(running());
+// group the visible list by project, newest group first, active rows ahead of
+// quiet ones inside a group. Scoped to one project, every row already
+// belongs to it, so no header renders and the list is flat.
+const groups = () =>
+  sessionsByProject(visible()).map((g) => ({ ...g, sessions: activeFirst(g.sessions) }));
+const flat = () => activeFirst(visible());
+const isQuiet = (s: RunningSession) => !isSessionActive(s);
 
 // Gates the poll: a selected run with nothing left live has nothing left to
 // learn by asking again every 5s.
@@ -150,7 +163,6 @@ function selectSession(id: string) {
   selectedId.value = id;
   agents.value = null;
   agentsLoadedFor.value = null;
-  if (finished().some((s) => s.sessionId === id)) showFinished.value = true;
   router.replace({ query: { ...route.query, session: id } });
   void loadAgents();
 }
@@ -165,7 +177,13 @@ onMounted(async () => {
   const deepLinked = selectedSessionFromQuery(route.query, sessions.value);
   if (deepLinked) {
     selectedId.value = deepLinked;
-    if (finished().some((s) => s.sessionId === deepLinked)) showFinished.value = true;
+    // Deep link to a quiet session while the scope is Active: its row is
+    // hidden there. Least surprising rule: widen the scope with router.replace
+    // (no extra history entry) so the URL tells the truth about what is shown.
+    const hit = sessions.value.find((s) => s.sessionId === deepLinked);
+    if (hit && isQuiet(hit) && scope.value === 'active') {
+      await router.replace({ query: scopeQuery(route.query, 'all') as typeof route.query });
+    }
     await loadAgents();
     await nextTick();
     const row = rowRefs.get(deepLinked);
@@ -173,6 +191,34 @@ onMounted(async () => {
     // rowRefs holds the <li>, not SessionRow's own root — its clickable
     // button is the row's one focusable descendant.
     row?.querySelector('button')?.focus({ preventScroll: true });
+  }
+});
+
+// Browser back/forward (or any outside query change) moves `?session=`;
+// re-derive the selection from it. selectSession's own replace already set
+// selectedId, so the equal case is a no-op and nothing loops.
+watch(
+  () => route.query.session,
+  () => {
+    const id = selectedSessionFromQuery(route.query, sessions.value);
+    if (id === selectedId.value) return;
+    selectedId.value = id;
+    agents.value = null;
+    agentsLoadedFor.value = null;
+    void loadAgents();
+  },
+);
+
+// Narrowing to Active hides a quiet selection's row, so the selection (and
+// its `?session=`) goes with it rather than leaving a detail with no row.
+watch(scope, (next) => {
+  const sel = sessions.value.find((s) => s.sessionId === selectedId.value);
+  if (next === 'active' && sel && isQuiet(sel)) {
+    selectedId.value = null;
+    agents.value = null;
+    agentsLoadedFor.value = null;
+    const { session: _drop, ...rest } = route.query;
+    void router.replace({ query: rest });
   }
 });
 
@@ -201,6 +247,7 @@ function refresh() {
   <div class="app-page">
     <PageHeader title="Sessions">
       <template #actions>
+        <ActivityScopeToggle />
         <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
       </template>
     </PageHeader>
@@ -222,9 +269,10 @@ function refresh() {
     <template v-else>
       <template v-if="project === undefined">
         <section
-          v-for="(group, i) in runningGroups()"
+          v-for="(group, i) in groups()"
           :key="group.project"
           class="bs-sessions__group"
+          :class="{ 'bs-sessions__group--quiet': !group.sessions.some((s) => !isQuiet(s)) }"
           :aria-labelledby="`sessions-group-title-${i}`"
         >
           <h2 :id="`sessions-group-title-${i}`" class="bs-section-title bs-sessions__group-title">
@@ -246,6 +294,7 @@ function refresh() {
               <SessionRow
                 :session="s"
                 clickable
+                :quiet="isQuiet(s)"
                 :selected="selectedId === s.sessionId"
                 @click="selectSession(s.sessionId)"
               />
@@ -254,42 +303,23 @@ function refresh() {
         </section>
       </template>
       <ul v-else class="bs-sessions__list" role="list">
-        <li v-for="s in running()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
+        <li v-for="s in flat()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
           <SessionRow
             :session="s"
             clickable
+            :quiet="isQuiet(s)"
             :selected="selectedId === s.sessionId"
             @click="selectSession(s.sessionId)"
           />
         </li>
       </ul>
-      <p v-if="running().length === 0" class="bs-sessions__quiet">
+      <p v-if="scope === 'active' && activeCount() === 0" class="bs-sessions__quiet">
         Nothing is active right now.
       </p>
-
-      <Button
-        v-if="finished().length > 0"
-        variant="ghost"
-        size="sm"
-        @click="showFinished = !showFinished"
-      >
-        {{ showFinished ? 'Hide finished runs' : `Show ${pluralize(finished().length, 'finished run')}` }}
-      </Button>
-
-      <ul v-if="showFinished" class="bs-sessions__list" role="list">
-        <li
-          v-for="s in finished()"
-          :key="s.sessionId"
-          :ref="(el) => setRowRef(s.sessionId, el as Element | null)"
-        >
-          <SessionRow
-            :session="s"
-            clickable
-            :selected="selectedId === s.sessionId"
-            @click="selectSession(s.sessionId)"
-          />
-        </li>
-      </ul>
+      <p v-if="scope === 'active' && hiddenQuietCount() > 0" class="bs-sessions__quiet">
+        {{ pluralize(hiddenQuietCount(), 'quiet session') }} ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
 
       <Banner v-if="agentsError" tone="danger" show-retry @retry="loadAgents">
         {{ agentsError }}

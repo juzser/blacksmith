@@ -1264,6 +1264,12 @@ a:hover {
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
+/* A quiet session (no agent working within the window): same row, muted text. */
+.bs-sessionrow--quiet .bs-sessionrow__title,
+.bs-sessions__group--quiet .bs-sessions__group-title,
+.bs-sessions__group--quiet .bs-sessions__group-title .bs-btn--link {
+  color: var(--bs-text-subtle);
+}
 /* Fix round 2: each group is its own flex container (h2 + its ul), so the
    header hugs its own list (small gap) while .app-page's own flex gap -
    applied between .bs-sessions__group siblings, not inside one - reads as
@@ -1664,19 +1670,33 @@ a:hover {
 .bs-segctl__item:hover {
   background: var(--bs-surface-sunken);
   color: var(--bs-text);
+  /* beats the global a:hover underline (0,1,1) */
+  text-decoration: none;
 }
 .bs-segctl__item[aria-current='page'] {
   background: var(--bs-surface-selected);
   color: var(--bs-text);
   font-weight: var(--bs-font-weight-medium);
 }
+/* Inset: .bs-segctl clips overflow, so an outer ring would vanish. The solid
+   token, not the 50% mix: the mix is 2.2-2.3:1 in light (under the 3:1
+   non-text floor); solid is 6.7:1+ in light and 7.7:1+ in dark. */
 .bs-segctl__item:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+  box-shadow: inset 0 0 0 2px var(--bs-focus-ring);
 }
 @media (max-width: 640px) {
   .bs-segctl {
     display: none;
+  }
+  /* ActivityScopeToggle: stays on phone, at the touch floor. */
+  .bs-segctl.bs-segctl--touch {
+    display: flex;
+  }
+  .bs-segctl--touch .bs-segctl__item {
+    min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
+    padding-inline: var(--bs-space-3);
   }
 }
 
