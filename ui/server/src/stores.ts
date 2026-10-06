@@ -164,8 +164,13 @@ export interface StoreRegistryDeps {
   graceMs?: number;
   /** A cache file of an unknown store older than this is deleted at startup (default 7 days). */
   pruneAfterMs?: number;
+  /** A refresh pass running longer than this logs one warning (default 10 s). */
+  slowPassMs?: number;
+  /** Where that warning goes (default: stderr, as the rest of `bs ui` logs). */
+  warn?: (message: string) => void;
 }
 
+const DEFAULT_SLOW_PASS_MS = 10_000;
 const DEFAULT_GRACE_MS = 5 * 60 * 1000;
 const DEFAULT_PRUNE_AFTER_MS = 7 * 24 * 3600 * 1000;
 const CACHE_FILE = /^[0-9a-f]{8}\.db(-wal|-shm)?$/;
@@ -323,6 +328,9 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
     }
   }
 
+  // What the current pass is still waiting on, for the slow-pass warning.
+  const waitingOn = new Set<string>();
+
   async function refreshAll(): Promise<void> {
     if (Date.now() - lastDiscovery >= deps.refreshMs) {
       lastDiscovery = Date.now();
@@ -331,8 +339,21 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
       });
     }
     // A failed discovery leaves the stores already known in place.
-    await discovering?.catch(() => {});
-    await Promise.all([...foreign.values()].map((s) => s.refresher.refresh().catch(() => {})));
+    if (discovering) {
+      waitingOn.add('store discovery');
+      await discovering.catch(() => {});
+      waitingOn.delete('store discovery');
+    }
+    await Promise.all(
+      [...foreign.values()].map((s) => {
+        const name = `${s.label} (${s.id})`;
+        waitingOn.add(name);
+        return s.refresher
+          .refresh()
+          .catch(() => {})
+          .finally(() => waitingOn.delete(name));
+      }),
+    );
   }
 
   // One refresh-all pass in flight per registry, joined by every caller. A scan
@@ -352,12 +373,23 @@ export function createStoreRegistry(deps: StoreRegistryDeps): StoreRegistry {
   // `/api/*` request with it. There is no per-store timeout: abandoning a scan
   // leaves it folding in the background, so either the next pass starts a second
   // scan of the same store or the reader sees a half-folded cache, the very
-  // window this pass closes. A stuck store is a bug to surface, not to mask.
+  // window this pass closes. A stuck store is a bug to surface, not to mask: a pass
+  // still running after `slowPassMs` logs one warning naming what it waits on.
   let pass: Promise<void> | null = null;
   const refresh = (): Promise<void> => {
-    pass ??= refreshAll().finally(() => {
-      pass = null;
-    });
+    if (!pass) {
+      const slow = setTimeout(() => {
+        const names = [...waitingOn].join(', ') || 'unknown';
+        const message = `a store refresh has been running for over ${(deps.slowPassMs ?? DEFAULT_SLOW_PASS_MS) / 1000}s; still waiting on: ${names}`;
+        (deps.warn ?? ((m) => process.stderr.write(`bs ui: ${m}\n`)))(message);
+      }, deps.slowPassMs ?? DEFAULT_SLOW_PASS_MS);
+      slow.unref();
+      pass = refreshAll().finally(() => {
+        clearTimeout(slow);
+        waitingOn.clear();
+        pass = null;
+      });
+    }
     return pass;
   };
 

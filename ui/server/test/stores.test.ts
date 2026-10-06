@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { Refresher } from '../src/app.js';
 import {
@@ -19,6 +19,7 @@ import {
   discoverStores,
   eventsDirOf,
   gitTop,
+  type StoreRegistryDeps,
   storeIdOf,
   storeRootAt,
   storeRootOf,
@@ -136,7 +137,7 @@ describe('store cache lifetime', () => {
   });
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-  function registry(over: { graceMs?: number } = {}) {
+  function registry(over: Partial<StoreRegistryDeps> = {}) {
     const b = mk('project-b');
     mk('project-b', '.git');
     mk('project-b', '.blacksmith', 'state', 'events');
@@ -251,6 +252,50 @@ describe('store cache lifetime', () => {
     reg.close();
   });
 
+  describe('a slow refresh pass', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('warns once, naming the store still scanning, and not again for the same pass', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const warnings: string[] = [];
+      let started = () => {};
+      const scanning = new Promise<void>((r) => {
+        started = r;
+      });
+      const { reg } = registry({
+        slowPassMs: 1000,
+        warn: (m) => warnings.push(m),
+        makeRefresher: () => ({
+          ...fakeRefresher(),
+          refresh: () => {
+            started();
+            return new Promise<void>(() => {});
+          },
+        }),
+      });
+      void reg.refresh();
+      void reg.refresh();
+      await scanning;
+      vi.advanceTimersByTime(999);
+      expect(warnings).toEqual([]);
+      vi.advanceTimersByTime(1);
+      vi.advanceTimersByTime(60_000);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('project-b');
+      reg.close();
+    });
+
+    it('stays silent when the pass finishes under the threshold', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const warnings: string[] = [];
+      const { reg } = registry({ slowPassMs: 1000, warn: (m) => warnings.push(m) });
+      await reg.refresh();
+      vi.advanceTimersByTime(60_000);
+      expect(warnings).toEqual([]);
+      reg.close();
+    });
+  });
+
   it('never lets a caller read a foreign cache between a fold commit and its relabel', async () => {
     const home = mk('home-x');
     mk('home-x', 'state', 'events');
@@ -264,7 +309,7 @@ describe('store cache lifetime', () => {
     const bScanning = new Promise<void>((r) => {
       bIsScanning = r;
     });
-    let secondScanStarted = false;
+    let draining = false;
     const lateScans: Array<() => void> = [];
     const scans: Record<string, number> = {};
     const reg = createStoreRegistry({
@@ -293,8 +338,7 @@ describe('store cache lifetime', () => {
             .run(`t${n}-${path.basename(dbPath)}`);
           db.sqlite.close();
           if (n > 1) {
-            secondScanStarted = true;
-            await new Promise<void>((r) => lateScans.push(r));
+            if (!draining) await new Promise<void>((r) => lateScans.push(r));
           } else if (
             dbPath.endsWith(`${storeIdOf(eventsDirOf(path.join(tops[1] ?? '', '.blacksmith')))}.db`)
           ) {
@@ -312,10 +356,6 @@ describe('store cache lifetime', () => {
     // R1 is parked inside store B's first scan, and R2 arrives while it is.
     await bScanning;
     const r2 = reg.refresh();
-    // Give a pass of R2's own every event-loop turn it needs to reach a second
-    // scan of store A; with a shared pass it never does, so this just runs out.
-    for (let turn = 0; turn < 100 && !secondScanStarted; turn++)
-      await new Promise<void>((r) => setImmediate(r));
     releaseB();
     await r1;
     // R1's handler would run now, while any scan R2 started is still folding.
@@ -330,8 +370,12 @@ describe('store cache lifetime', () => {
       }));
     expect(seen.flatMap((x) => x.rows)).not.toHaveLength(0);
     for (const x of seen) for (const r of x.rows) expect(r.project).toBe(x.label);
+    // Settle both requests, whatever number of event-loop turns that takes: a
+    // second scan by R2 (its own pass) shows up as a count of 2.
+    draining = true;
     for (const g of lateScans.splice(0)) g();
     await r2;
+    for (const [dbPath, n] of Object.entries(scans)) expect([dbPath, n]).toEqual([dbPath, 1]);
     reg.close();
   });
 });

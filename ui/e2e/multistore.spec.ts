@@ -11,6 +11,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,15 @@ async function pushRoute(page: Page, to: string) {
     app?.config.globalProperties.$router.push(target);
   }, to);
 }
+
+/** Lets the page run the continuations of a response it has just received. */
+const settled = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        setTimeout(() => setTimeout(() => setTimeout(resolve, 0), 0), 0),
+      ),
+  );
 
 const title = (page: Page) => page.getByRole('heading', { level: 1 });
 
@@ -216,8 +226,16 @@ test.describe('a foreign store in the dashboard', () => {
   });
 
   test.afterAll(async () => {
-    if (server && !server.killed) server.kill();
-    await rm(tmp, { recursive: true, force: true });
+    // The server writes its cache under tmp: let it exit before the tree goes.
+    const child = server;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      child.kill();
+      const forced = setTimeout(() => child.kill('SIGKILL'), 5000);
+      await exited;
+      clearTimeout(forced);
+    }
+    await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   test('B1: a foreign task page reads its own store and offers nothing store-blind', async ({
@@ -239,7 +257,8 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(page.getByText('one more layer than the task needs')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Waive' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
-    await page.waitForTimeout(500);
+    // Every read the page makes is issued when it loads, before the Findings
+    // tab above could render, so nothing is still to come.
 
     const taskReads = requests.filter((p) => p.startsWith('/api/tasks/'));
     expect(taskReads.length).toBeGreaterThan(0);
@@ -270,6 +289,14 @@ test.describe('a foreign store in the dashboard', () => {
   test('B3: changing task or store on the open page loads the new one at once, once', async ({
     page,
   }) => {
+    // The page's 15 s poll runs on a clock this test owns: paused, so no poll
+    // can fire by itself, and advanced by hand past exactly one interval.
+    // With the change stream open the interval stands down, so refuse the
+    // stream: the interval is then the page's only trigger for a re-read.
+    await page.route('**/api/stream', (route) => route.abort());
+    const start = new Date(FIXTURE_NOW_ISO);
+    await page.clock.install({ time: start });
+    await page.clock.pauseAt(new Date(start.getTime() + 1000));
     await page.goto(taskUrl(TASK_1));
     await expect(title(page)).toHaveText(HOME_TITLE_1);
 
@@ -288,12 +315,83 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(title(page)).toHaveText(FOREIGN_TITLE_2, { timeout: 3000 });
     await expect(page.getByText(FOREIGN_TITLE_1)).toHaveCount(0);
 
-    // One read per change, and no second poll behind it.
-    await page.waitForTimeout(2500);
+    // One read per change so far; the poll of the old task is gone.
     expect(detailReads).toEqual([
       `/api/tasks/epic-1%2Ftask-1?store=${foreignId}`,
       `/api/tasks/epic-1%2Ftask-2?store=${foreignId}`,
     ]);
+    // One poll interval later: one read, for the new task only.
+    await page.clock.runFor(15_000);
+    await expect.poll(() => detailReads.length).toBe(3);
+    expect(detailReads[2]).toBe(`/api/tasks/epic-1%2Ftask-2?store=${foreignId}`);
+  });
+
+  test('A1: a history answer for the old task leaves nothing on the new one', async ({ page }) => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let held = false;
+    await page.route('**/api/timeline?*', async (route) => {
+      if (held) return route.continue();
+      held = true;
+      await gate;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'boom', message: 'boom-history' } }),
+      });
+    });
+    await page.goto(taskUrl(TASK_4));
+    await expect(title(page)).toBeVisible();
+    await expect.poll(() => held).toBe(true);
+    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_2)}`);
+    await expect(title(page)).toHaveText(HOME_TITLE_2);
+    await page.getByRole('tab', { name: 'History' }).click();
+    await expect(page.getByText('No events recorded.')).toHaveCount(0);
+    await expect(page.locator('.timeline-feed').first()).toBeVisible();
+    const late = page.waitForResponse(
+      (r) => r.url().includes('/api/timeline') && r.status() === 500,
+    );
+    release();
+    await late;
+    await settled(page);
+    await expect(page.getByText('boom-history')).toHaveCount(0);
+    await expect(page.locator('.timeline-feed').first()).toBeVisible();
+  });
+
+  test('A2: a waiver answer for the old task writes no error on the new one', async ({ page }) => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let held = false;
+    await page.route('**/api/waivers/apply-batch', async (route) => {
+      held = true;
+      await gate;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'boom', message: 'boom-decide' } }),
+      });
+    });
+    await page.goto(taskUrl(TASK_4));
+    await page.getByRole('tab', { name: 'Findings' }).click();
+    await page.getByRole('button', { name: 'Deny' }).click();
+    await expect.poll(() => held).toBe(true);
+    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_2)}`);
+    await expect(title(page)).toHaveText(HOME_TITLE_2);
+    const late = page.waitForResponse(
+      (r) => r.url().includes('/api/waivers/') && r.status() === 500,
+    );
+    release();
+    await late;
+    await settled(page);
+    await expect(page.getByText('boom-decide')).toHaveCount(0);
+    // The waiver is still there to act on, its controls not left disabled.
+    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}`);
+    await page.getByRole('tab', { name: 'Findings' }).click();
+    await expect(page.getByRole('button', { name: 'Deny' })).toBeEnabled();
   });
 
   test('B5: a lightbox and a popover do not outlive the task they belong to', async ({ page }) => {
