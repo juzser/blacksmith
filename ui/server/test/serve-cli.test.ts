@@ -3,7 +3,7 @@
 // can never see a flag the CLI forgets to forward; this file exists for
 // exactly that gap.
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -139,5 +139,42 @@ describe('smith ui serve (built binary)', () => {
       workingAgentCount: 0,
       stalledAgentCount: 2,
     });
+  }, 60_000); // spawns the built CLI and waits for a real HTTP server
+
+  /**
+   * app.test.ts hands createApp a claudeConfigDir directly and so cannot see
+   * the flag being dropped between the CLI and the server. A session file in
+   * a temp config dir, answered by the spawned binary, proves it travels. The
+   * pid is this runner's own, so it is alive for the whole test.
+   */
+  it('forwards --claude-config-dir, so /api/cli-sessions reads that directory', async () => {
+    const configDir = path.join(dbDir, 'claude');
+    await mkdir(path.join(configDir, 'sessions'), { recursive: true });
+    await writeFile(
+      path.join(configDir, 'sessions', `${process.pid}.json`),
+      JSON.stringify({
+        pid: process.pid,
+        sessionId: '77777777-7777-4777-8777-777777777777',
+        cwd: REPO_ROOT,
+        kind: 'interactive',
+        status: 'busy',
+        name: 'served-fixture',
+        version: '2.1.290',
+        startedAt: 1_790_000_000_000,
+        statusUpdatedAt: 1_790_000_100_000,
+      }),
+    );
+    await serve(['--claude-config-dir', configDir]);
+
+    const body = (await (await fetch(`http://127.0.0.1:${PORT}/api/cli-sessions`)).json()) as {
+      state: string;
+      configSource: string;
+      sessions: { name: string; status: string; inScopeBy: string }[];
+    };
+
+    expect(body, `server stderr:\n${stderr}`).toMatchObject({ state: 'ok', configSource: 'flag' });
+    expect(body.sessions).toEqual([
+      expect.objectContaining({ name: 'served-fixture', status: 'working', inScopeBy: 'cwd' }),
+    ]);
   }, 60_000); // spawns the built CLI and waits for a real HTTP server
 });

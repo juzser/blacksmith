@@ -1,9 +1,14 @@
 # `/bs ui` — serve the local dashboard
 
 `bs ui serve [--port 4680] [--db state/smith.db] [--state-dir …]
-[--roadmap-path …]`. If it errors `ui.not-built`, run `pnpm build:ui`
-first (builds `ui/server/dist` + `ui/dist`), then retry, and print the local
-URL (`http://127.0.0.1:<port>`).
+[--roadmap-path …] [--claude-config-dir …]`. If it errors `ui.not-built`,
+run `pnpm build:ui` first (builds `ui/server/dist` + `ui/dist`), then retry,
+and print the local URL (`http://127.0.0.1:<port>`).
+
+Besides the event log, the server reads — read-only — the local Claude Code
+session registry and transcripts, from `--claude-config-dir`, else
+`$CLAUDE_CONFIG_DIR`, else Claude Code's default, and serves them as
+`GET /api/cli-sessions`, loopback-only.
 
 **That build needs a clone.** `ui/` is not in the package's `files`, so an
 install — npm or plugin — ships no dashboard at all and `ui.not-built` is the
