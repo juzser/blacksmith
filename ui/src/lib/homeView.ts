@@ -79,15 +79,18 @@ export function budgetRingLabel(spent: number, budget: number): string {
   return `${pct}% of token budget used${spent > budget ? ', over budget' : ''}`;
 }
 
-/** "1 epic has a suspicious total." — the outlier flag's sentence. */
-export function outlierSentence(count: number): string | null {
-  if (count === 0) return null;
-  return count === 1 ? '1 epic has a suspicious total.' : `${count} epics have suspicious totals.`;
+/** "1 epic has a suspicious total: epic-a." — the outlier flag's sentence. */
+export function outlierSentence(epicIds: readonly string[]): string | null {
+  if (epicIds.length === 0) return null;
+  const names = epicIds.join(', ');
+  return epicIds.length === 1
+    ? `1 epic has a suspicious total: ${names}.`
+    : `${epicIds.length} epics have suspicious totals: ${names}.`;
 }
 
 export interface CardTokens extends TokenTotals {
-  /** In-flight epics kept out of the ratio by isBudgetOutlier, as the Budget panel does. */
-  outliers: number;
+  /** The running epics kept out of the ratio by isBudgetOutlier. */
+  outliers: string[];
 }
 
 export interface RunningCard {
@@ -107,7 +110,18 @@ function cardTokens(all: EpicTokenSpend[], inFlight: string[]): CardTokens {
   const running = new Set(inFlight);
   const budgeted = all.filter((e) => running.has(e.epicId) && e.tokensBudget !== null);
   const { outliers, ...totals } = budgetSummary(budgeted);
-  return { ...totals, outliers: outliers.length };
+  return { ...totals, outliers: outliers.map((e) => e.epicId) };
+}
+
+/**
+ * The Budget panel: the figures the Running-now cards show, over the same
+ * epic set (`epicsActivelyRunning`, which the server already scopes to the
+ * selected project). Null when no epic is running, so the panel says so
+ * rather than drawing a zero.
+ */
+export function budgetPanel(o: OverviewResult): CardTokens | null {
+  if (o.epicsActivelyRunning.length === 0) return null;
+  return cardTokens(o.tokensByEpic, o.epicsActivelyRunning);
 }
 
 /**
@@ -116,7 +130,7 @@ function cardTokens(all: EpicTokenSpend[], inFlight: string[]): CardTokens {
  * are outliers (the card's outlier sentence says so).
  */
 export function cardTokensText(t: CardTokens): string {
-  if (t.budget === null) return t.outliers > 0 ? '' : 'No budget set';
+  if (t.budget === null) return t.outliers.length > 0 ? '' : 'No budget set';
   if (t.spent === 0 && t.unmeasured > 0) {
     return `${formatBudgetPct(t.spent, t.budget, t.unmeasured)} · ${formatCompactNumber(t.budget)} budget`;
   }

@@ -172,6 +172,12 @@ export interface RecentDispatch {
   /** Which attempt this was — Home's derived line when `reason` is null. */
   round: number;
 }
+/** An in-flight epic nothing has touched for more than 7 days. */
+export interface IdleEpic {
+  epicId: string;
+  /** Whole days since its last activity, rounded down. */
+  idleDays: number;
+}
 export interface ProjectOverviewSummary {
   project: string;
   liveAgentCount: number;
@@ -180,6 +186,8 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
   epicsActivelyRunning: string[];
+  /** The in-flight epics left out of `epicsActivelyRunning` for being idle over 7 days. */
+  epicsIdle: IdleEpic[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
@@ -215,6 +223,8 @@ export interface OverviewResult {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
   epicsActivelyRunning: string[];
+  /** The in-flight epics left out of `epicsActivelyRunning` for being idle over 7 days. */
+  epicsIdle: IdleEpic[];
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];

@@ -12,6 +12,8 @@
 // neither tsc nor biome here, so a control assembled in a template has no
 // gate on it at all; assembling it here is what makes the rules below
 // assertable.
+import type { IdleEpic } from './api.js';
+
 /** Structurally the option shape Select.vue declares. Declared here rather
  *  than imported because `shims.d.ts` types every `.vue` module as a default
  *  export only, so a named type cannot cross out of an SFC. */
@@ -59,13 +61,26 @@ export function retainedEpic(selected: string, epics: readonly string[]): string
   return epics.includes(selected) ? selected : ALL_EPICS;
 }
 
-export function epicOptions(epics: readonly string[]): EpicOption[] {
+/** The quiet suffix an idle epic carries wherever it is still offered. */
+export function idleLabel(idleDays: number): string {
+  return `idle ${idleDays}d`;
+}
+
+export function epicOptions(
+  epics: readonly string[],
+  idle: readonly IdleEpic[] = [],
+): EpicOption[] {
+  const idleDays = new Map(idle.map((e) => [e.epicId, e.idleDays]));
   const seen = new Set<string>([ALL_EPICS]);
   const options: EpicOption[] = [{ value: ALL_EPICS, label: 'All epics' }];
   for (const epic of epics) {
     if (seen.has(epic)) continue;
     seen.add(epic);
-    options.push({ value: epic, label: epic });
+    const days = idleDays.get(epic);
+    options.push({
+      value: epic,
+      label: days === undefined ? epic : `${epic} · ${idleLabel(days)}`,
+    });
   }
   return options;
 }

@@ -40,14 +40,13 @@ import { toggleExpanded } from '../lib/expandedRows.js';
 import { pluralize } from '../lib/format.js';
 import {
   budgetDeltaSentence,
+  budgetPanel,
   budgetRingLabel,
-  budgetSummary,
   cardShowsRing,
   cardTokensText,
   decisionLine,
   outlierSentence,
   runningNowCards,
-  tokensOfBudget,
   trackJustFinished,
   unmeasuredSentence,
 } from '../lib/homeView.js';
@@ -128,7 +127,7 @@ usePoll(load, POLL_MS);
 
 const cards = computed(() => (overview.value ? runningNowCards(overview.value, project.value) : []));
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
-const budget = computed(() => (overview.value ? budgetSummary(overview.value.tokensByEpic) : null));
+const budget = computed(() => (overview.value ? budgetPanel(overview.value) : null));
 const budgetDelta = computed(() => budgetDeltaSentence(overview.value?.budgetUsedPctPointDelta1h ?? null));
 
 // Same causal-chain walk ActivityPage.vue uses for ctxFor(), scoped to this
@@ -300,23 +299,24 @@ function becauseOf(promptId: string) {
     <section class="bs-home__section" aria-labelledby="budget-heading">
       <h2 id="budget-heading" class="bs-section-title">Budget</h2>
       <Skeleton v-if="overview === null && !overviewFailed" :height="48" />
+      <p v-else-if="overview !== null && budget === null" class="bs-home__quiet">No epic is running.</p>
       <template v-else-if="budget !== null">
         <div class="bs-home__tokens">
           <ProgressRing
-            v-if="budget.budget"
+            v-if="budget.budget && cardShowsRing(budget)"
             :value="budget.spent"
             :max="budget.budget"
             kind="budget"
             :label="budgetRingLabel(budget.spent, budget.budget)"
           />
-          <span class="bs-home__stat">{{ tokensOfBudget(budget) }}</span>
+          <span class="bs-home__stat">{{ cardTokensText(budget) }}</span>
         </div>
         <p v-if="budgetDelta" class="bs-home__quiet">{{ budgetDelta }}</p>
         <p v-if="unmeasuredSentence(budget.unmeasured)" class="bs-home__quiet">
           {{ unmeasuredSentence(budget.unmeasured) }}
         </p>
-        <p v-if="outlierSentence(budget.outliers.length)" class="bs-home__quiet">
-          {{ outlierSentence(budget.outliers.length) }}
+        <p v-if="outlierSentence(budget.outliers)" class="bs-home__quiet">
+          {{ outlierSentence(budget.outliers) }}
           <RouterLink to="/analytics">Details</RouterLink>.
         </p>
       </template>

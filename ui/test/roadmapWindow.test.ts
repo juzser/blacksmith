@@ -76,6 +76,8 @@ function summary(project: string, epicsInFlight: string[]): ProjectOverviewSumma
     workingAgentCount: 0,
     epicsInFlight,
     epicsActivelyRunning: [],
+    epicsIdle: [],
+    tokensByEpic: [],
     tokensSpent: 0,
     tokensBudget: null,
     unmeasured: 0,

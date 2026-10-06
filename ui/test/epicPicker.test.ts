@@ -9,8 +9,21 @@ import {
   ALL_EPICS,
   EPIC_LIST_UNAVAILABLE,
   epicOptions,
+  idleLabel,
   retainedEpic,
 } from '../src/lib/epicPicker.js';
+
+describe('lib/epicPicker.ts — idle epics', () => {
+  it('words the idle label as whole days', () => {
+    expect(idleLabel(18)).toBe('idle 18d');
+  });
+
+  it('suffixes an idle epic option, and only that one, keeping its value', () => {
+    const options = epicOptions(['epic-1', 'epic-2'], [{ epicId: 'epic-2', idleDays: 18 }]);
+    expect(options[1]).toEqual({ value: 'epic-1', label: 'epic-1' });
+    expect(options[2]).toEqual({ value: 'epic-2', label: 'epic-2 · idle 18d' });
+  });
+});
 
 describe('lib/epicPicker.ts — epicOptions', () => {
   it('offers the all-epics escape hatch first, so a picker is never empty', () => {

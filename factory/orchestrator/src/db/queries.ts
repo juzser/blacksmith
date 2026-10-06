@@ -561,6 +561,12 @@ export interface ClosedEpic {
   closedAt: string;
 }
 
+export interface IdleEpic {
+  epicId: string;
+  /** Whole days since the epic's last activity, rounded down. */
+  idleDays: number;
+}
+
 export interface ProjectOverviewSummary {
   project: string;
   liveAgentCount: number;
@@ -569,6 +575,8 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
   epicsActivelyRunning: string[];
+  /** In-flight epics idle for more than EPIC_IDLE_DAYS — see epicLastActivity(). */
+  epicsIdle: IdleEpic[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
@@ -607,6 +615,8 @@ export interface OverviewResult {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
   epicsActivelyRunning: string[];
+  /** In-flight epics idle for more than EPIC_IDLE_DAYS — see epicLastActivity(). */
+  epicsIdle: IdleEpic[];
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -1591,17 +1601,81 @@ function inFlightEpics(
 function activeEpics(
   taskRows: readonly { epicId: string | null; taskStatus: string }[],
   closed: readonly ClosedEpic[],
+  idle: readonly IdleEpic[],
 ): string[] {
   const closedIds = new Set(closed.map((e) => e.epicId));
+  const idleIds = new Set(idle.map((e) => e.epicId));
   return [
     ...new Set(
       taskRows
         .filter(
-          (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
+          (t) =>
+            t.epicId &&
+            !TERMINAL_TASK_STATUSES.has(t.taskStatus) &&
+            !closedIds.has(t.epicId) &&
+            !idleIds.has(t.epicId),
         )
         .map((t) => t.epicId as string),
     ),
   ].sort();
+}
+
+/** An epic with no activity for longer than this is idle (7 x 24 h; exactly 7 days is not). */
+const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The in-flight epics nothing has happened to for more than 7 days before
+ * `nowIso`. An epic's last activity is the newest of its tasks' `updatedAt`
+ * and the `ts` of the newest event naming one of its tasks: `updatedAt` only
+ * moves when the projector touches the row, so a finding, a judge report or a
+ * gate result logged against a task would otherwise read as silence. Events
+ * resolve to an epic through `epicResolver`, so a bare task id lands on its
+ * epic as in the spend figures. An idle epic stays in `inFlightEpics()` (it
+ * is still pickable) and only leaves `activeEpics()`.
+ */
+function idleEpics(
+  db: SmithDb,
+  scope: Scope,
+  taskRows: readonly (typeof tasks.$inferSelect)[],
+  inFlight: readonly string[],
+  nowIso: string,
+): IdleEpic[] {
+  const lastByEpic = new Map<string, string>();
+  const bump = (epicId: string | undefined, ts: string) => {
+    if (epicId === undefined) return;
+    const seen = lastByEpic.get(epicId);
+    if (seen === undefined || ts > seen) lastByEpic.set(epicId, ts);
+  };
+  const epicByTask = new Map<string, string>();
+  for (const t of taskRows) {
+    if (!t.epicId) continue;
+    epicByTask.set(t.taskId, t.epicId);
+    bump(t.epicId, t.updatedAt);
+  }
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const rows = db
+    .select({ taskId: eventsRaw.taskId, last: max(eventsRaw.ts) })
+    .from(eventsRaw)
+    .where(
+      sessionCond ? and(isNotNull(eventsRaw.taskId), sessionCond) : isNotNull(eventsRaw.taskId),
+    )
+    .groupBy(eventsRaw.taskId)
+    .all();
+  const epicOf = epicResolver(epicByTask);
+  for (const r of rows) {
+    if (r.taskId !== null && r.last !== null) bump(epicOf(r.taskId), r.last);
+  }
+  const now = Date.parse(nowIso);
+  const idle: IdleEpic[] = [];
+  for (const epicId of inFlight) {
+    const last = lastByEpic.get(epicId);
+    const lastMs = last === undefined ? Number.NaN : Date.parse(last);
+    if (Number.isNaN(lastMs)) continue;
+    const idleMs = now - lastMs;
+    if (idleMs > EPIC_IDLE_MS)
+      idle.push({ epicId, idleDays: Math.floor(idleMs / (24 * 60 * 60 * 1000)) });
+  }
+  return idle;
 }
 
 /**
@@ -1813,7 +1887,8 @@ function projectSummary(
   const taskRows = allTasksForScope(db, scope);
   const closedEpicsHere = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere);
+  const epicsIdle = idleEpics(db, scope, taskRows, epicsInFlight, nowIso);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
   const tokenMaps = epicTokenMaps(db, scope, taskRows);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
@@ -1833,6 +1908,7 @@ function projectSummary(
     workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
     epicsInFlight,
     epicsActivelyRunning,
+    epicsIdle,
     tokensSpent,
     tokensBudget,
     unmeasured,
@@ -2034,7 +2110,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpics);
+  const epicsIdle = idleEpics(db, scope, taskRows, epicsInFlight, nowIso);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
@@ -2117,11 +2194,21 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const liveAgentCountDelta5m = liveRows.length - liveAgentCountAt(db, scope, fiveMinAgo);
   const workingAgentCountDelta5m = workingRows.length - workingAgentCountAt(db, scope, fiveMinAgo);
 
+  // The Budget panel counts the epics the Running-now cards count, so its
+  // 1-hour delta is folded over the same set: running epics that declare a
+  // budget (an unbudgeted epic adds to neither side of the card's ratio).
+  const runningBudgeted = new Set(epicsActivelyRunning.filter((e) => budgetByEpic.has(e)));
   const epicByTask = new Map(
-    taskRows.filter((t) => t.epicId !== null).map((t) => [t.taskId, t.epicId as string]),
+    taskRows
+      .filter((t) => t.epicId !== null && runningBudgeted.has(t.epicId))
+      .map((t) => [t.taskId, t.epicId as string]),
   );
-  const totalBudgetNow = [...budgetByEpic.values()].reduce((s, v) => s + v, 0);
-  const totalSpentNow = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
+  const totalBudgetNow = [...budgetByEpic]
+    .filter(([e]) => runningBudgeted.has(e))
+    .reduce((s, [, v]) => s + v, 0);
+  const totalSpentNow = [...spentByEpic]
+    .filter(([e]) => runningBudgeted.has(e))
+    .reduce((s, [, v]) => s + v, 0);
   let budgetUsedPctPointDelta1h: number | null = null;
   if (totalBudgetNow > 0) {
     const currentPct = (totalSpentNow / totalBudgetNow) * 100;
@@ -2157,6 +2244,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     runningSessions: runningSessions(db, scope, { nowIso }),
     epicsInFlight,
     epicsActivelyRunning,
+    epicsIdle,
     closedEpics,
     tokensByEpic,
     alerts: { escalations, pendingWaivers },
