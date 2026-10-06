@@ -846,12 +846,14 @@ describe('cliSessions reader', () => {
       }
     });
 
-    it('titles a linked epic with its root session title', async () => {
+    it('never takes the epic name from the root session prompt', async () => {
       await session(142, { cwd: outside });
       const handle = openDb(dbPath, {});
       try {
-        const epic = (await reader().read(handle)).sessions[0]?.linked?.epics[0];
-        expect(epic?.title).toBe('Build the widget and fix the flaky import.');
+        const card = must((await reader().read(handle)).sessions[0]);
+        expect(card.focus?.epicId).toBe(EPIC_ID);
+        expect(card.focus?.epicTitle).toBeNull();
+        expect(JSON.stringify(card.focus)).not.toContain('Build the widget');
       } finally {
         handle.sqlite.close();
       }
