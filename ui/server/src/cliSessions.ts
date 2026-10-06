@@ -126,6 +126,10 @@ export interface CliSessionsDeps {
   listWorktrees?: () => Promise<string[]>;
   /** Response cache window, 1 s by default. */
   cacheMs?: number;
+  /** How long a transcript that was not found anywhere is not searched for again; 30 s by default. */
+  missTtlMs?: number;
+  /** Milliseconds clock for the miss cache; Date.now by default. */
+  clock?: () => number;
   /** Compare paths case-insensitively; true on darwin and win32 by default. */
   foldCase?: boolean;
 }
@@ -408,6 +412,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   const fs = deps.fs ?? nodeFs;
   const isAlive = deps.isAlive ?? defaultIsAlive;
   const cacheMs = deps.cacheMs ?? 1000;
+  const missTtlMs = deps.missTtlMs ?? 30_000;
+  const clock = deps.clock ?? Date.now;
   const listWorktrees = deps.listWorktrees ?? (() => gitWorktrees(deps.roots[0] ?? '.'));
 
   const sticky = new Map<string, CliSessionCard['inScopeBy']>();
@@ -416,6 +422,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     string,
     { size: number; mtimeMs: number; read: TranscriptRead }
   >();
+  /** Session id -> until when a full search for its transcript is not repeated. */
+  const missUntil = new Map<string, number>();
   let worktrees: { at: number; dirs: string[] } | null = null;
   let memo: { at: number; value: Promise<CliSessionsResponse> } | null = null;
 
@@ -483,23 +491,37 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         // try the next
       }
     }
-    let dirs: string[];
+    // A miss scans every project dir; it is not repeated on every poll.
+    if (clock() < (missUntil.get(e.cliSessionId) ?? 0)) return null;
+    let dirs: string[] = [];
     try {
       dirs = await fs.readdir(path.join(configDir, 'projects'));
     } catch {
-      return null;
+      dirs = [];
     }
     for (const d of dirs) {
       const candidate = path.join(configDir, 'projects', d, `${e.cliSessionId}.jsonl`);
       try {
         await fs.stat(candidate);
         transcriptPaths.set(e.cliSessionId, candidate);
+        missUntil.delete(e.cliSessionId);
         return candidate;
       } catch {
         // not in this dir
       }
     }
+    transcriptPaths.delete(e.cliSessionId);
+    missUntil.set(e.cliSessionId, clock() + missTtlMs);
     return null;
+  }
+
+  /** Drops what was remembered about sessions no longer in the registry. */
+  function forgetGone(live: ReadonlySet<string>): void {
+    for (const m of [sticky, transcriptPaths, missUntil]) {
+      for (const id of m.keys()) if (!live.has(id)) m.delete(id);
+    }
+    const files = new Set(transcriptPaths.values());
+    for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
   }
 
   async function readTranscript(configDir: string, e: RegistryEntry): Promise<TranscriptRead> {
@@ -743,6 +765,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         entries.push(parsed.entry);
       }
     }
+
+    forgetGone(new Set(entries.map((e) => e.cliSessionId)));
 
     const odd = entries.find((e) => e.version !== null && !KNOWN_VERSION.test(e.version));
     const formatWarning =

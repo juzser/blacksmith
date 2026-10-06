@@ -377,6 +377,53 @@ describe('cliSessions reader', () => {
       expect(first).toBeGreaterThan(0);
       expect(opened.filter((p) => p === file).length).toBe(first);
     });
+
+    it('re-reads the transcript of a session that left the registry and came back', async () => {
+      await session(126, { status: 'idle' });
+      const file = await transcript(root, SID_A, jsonl([user('hi'), asst(text('hello'))]));
+      const opened: string[] = [];
+      const spy: CliFs = {
+        readdir,
+        stat,
+        lstat,
+        open: async (p) => (opened.push(p), open(p, 'r')),
+        realpath,
+      };
+      const r = reader({ fs: spy });
+      await r.read();
+      const first = opened.filter((p) => p === file).length;
+      await rm(path.join(config, 'sessions', '126.json'));
+      expect((await r.read()).sessions).toHaveLength(0);
+      await session(126, { status: 'idle' });
+      const back = await r.read();
+      expect(back.sessions[0]?.doingNow?.assistant).toBe('hello');
+      expect(opened.filter((p) => p === file).length).toBeGreaterThan(first);
+    });
+
+    it('caches a transcript miss for a short time before scanning again', async () => {
+      await session(127, { status: 'idle' });
+      await mkdir(path.join(config, 'projects', '-other'), { recursive: true });
+      const projects = path.join(config, 'projects');
+      let scans = 0;
+      let clock = 1_000;
+      const spy: CliFs = {
+        readdir: async (p) => {
+          if (p === projects) scans += 1;
+          return readdir(p);
+        },
+        stat,
+        lstat,
+        open: (p) => open(p, 'r'),
+        realpath,
+      };
+      const r = reader({ fs: spy, missTtlMs: 30_000, clock: () => clock });
+      expect((await r.read()).sessions[0]?.transcript).toBe('missing');
+      await r.read();
+      expect(scans).toBe(1);
+      clock += 30_001;
+      expect((await r.read()).sessions[0]?.transcript).toBe('missing');
+      expect(scans).toBe(2);
+    });
   });
 
   describe('scope', () => {
@@ -457,6 +504,27 @@ describe('cliSessions reader', () => {
       expect(again.hidden.outOfScope).toBe(0);
       // A fresh reader has no memory of it.
       expect((await reader().read()).sessions).toHaveLength(0);
+    });
+
+    it('forgets the scope and transcript of a session that left the registry', async () => {
+      await session(129, { cwd: outside, status: 'idle' });
+      await transcript(
+        outside,
+        SID_A,
+        jsonl([user('<command-name>/bs</command-name>'), asst(text('old'))]),
+        false,
+      );
+      const r = reader();
+      expect((await r.read()).sessions[0]).toMatchObject({ inScopeBy: 'heuristic' });
+      await rm(path.join(config, 'sessions', '129.json'));
+      expect((await r.read()).sessions).toHaveLength(0);
+      // It comes back with a transcript of its own and no /bs evidence: judged
+      // afresh, not admitted on what the earlier session showed.
+      await transcript(outside, SID_A, jsonl([user('just chatting'), asst(text('new'))]));
+      await session(129, { cwd: outside, status: 'idle' });
+      const back = await r.read();
+      expect(back.sessions).toHaveLength(0);
+      expect(back.hidden.outOfScope).toBe(1);
     });
   });
 
