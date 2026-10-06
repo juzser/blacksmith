@@ -28,8 +28,19 @@ describe('SegmentedControl.vue', () => {
   it('renders plain RouterLinks and relies on vue-router for aria-current', () => {
     const template = SRC.slice(SRC.indexOf('<template>'));
     expect(template).toMatch(/<RouterLink[\s\S]*class="bs-segctl__item"[\s\S]*:to="item\.to"/);
-    expect(template).not.toMatch(/aria-current=/);
+    // Without `current`, the router alone marks the item; aria-current is
+    // only ever written by the opt-in `current` branch (query-only links).
+    const routerBranch = template.slice(0, template.indexOf('<RouterLink v-else'));
+    expect(routerBranch).not.toMatch(/aria-current/);
     expect(template).not.toMatch(/tabindex/);
+  });
+});
+
+describe('SegmentedControl.vue current/touch opt-ins', () => {
+  it('marks the current item itself and offers a phone-visible touch variant', () => {
+    expect(SRC).toMatch(/current\?: string/);
+    expect(SRC).toMatch(/:aria-current="current === item\.label \? 'page' : undefined"/);
+    expect(CSS).toMatch(/\.bs-segctl\.bs-segctl--touch \{\s*display: flex;/);
   });
 });
 

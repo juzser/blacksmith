@@ -72,3 +72,11 @@ export function sessionsByProject<T extends { lastEventAt: string; projects: rea
   }
   return [...groups.entries()].map(([project, sessions]) => ({ project, sessions }));
 }
+
+/** Newest first, then a stable split: active sessions ahead of quiet ones. */
+export function activeFirst<T extends { lastEventAt: string; workingAgentCount: number }>(
+  sessions: readonly T[],
+): T[] {
+  const ordered = [...sessions].sort(byRecency);
+  return [...ordered.filter(isSessionActive), ...ordered.filter((s) => !isSessionActive(s))];
+}

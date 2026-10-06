@@ -15,6 +15,8 @@ const props = defineProps<{
   clickable?: boolean;
   /** The run currently open in the detail section below the list. */
   selected?: boolean;
+  /** No agent working: the row renders muted. */
+  quiet?: boolean;
   /** Test seam for RelativeTime's clock, same as elsewhere in the kit. */
   now?: string;
 }>();
@@ -60,7 +62,7 @@ const lastStep = computed(() => lastStepLabel(props.session.lastEventType));
     :is="clickable ? 'button' : 'div'"
     :type="clickable ? 'button' : undefined"
     class="bs-sessionrow"
-    :class="{ 'bs-sessionrow--clickable': clickable, 'bs-sessionrow--selected': selected }"
+    :class="{ 'bs-sessionrow--clickable': clickable, 'bs-sessionrow--selected': selected, 'bs-sessionrow--quiet': quiet }"
     :aria-current="selected ? 'true' : undefined"
     @click="onClick"
   >

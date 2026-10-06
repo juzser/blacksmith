@@ -26,8 +26,10 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value\)/);
   });
 
-  it('separates running and finished runs behind a toggle, on workingAgentCount not liveAgentCount', () => {
-    expect(PAGE).toMatch(/showFinished/);
+  it('scopes running vs quiet runs by the shared toggle, on workingAgentCount not liveAgentCount', () => {
+    expect(PAGE).toMatch(/useActivityScope/);
+    expect(PAGE).toMatch(/<ActivityScopeToggle/);
+    expect(PAGE).not.toMatch(/showFinished/);
     expect(PAGE).toMatch(/filter\(isSessionActive\)/);
     expect(PAGE).toMatch(/filter\(\(s\) => !isSessionActive\(s\)\)/);
     expect(PAGE).not.toMatch(/liveAgentCount/);
@@ -59,9 +61,9 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
   });
 
-  it('marks the open run selected in the grouped, scoped and finished lists', () => {
+  it('marks the open run selected in the grouped and scoped lists', () => {
     const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
-    expect(matches?.length).toBe(3);
+    expect(matches?.length).toBe(2);
   });
 
   it('moves focus to the deep-linked row after scrolling it into view', () => {

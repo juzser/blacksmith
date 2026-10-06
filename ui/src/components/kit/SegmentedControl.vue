@@ -12,13 +12,28 @@ export interface SegmentedControlItem {
   label: string;
 }
 
-defineProps<{ items: SegmentedControlItem[] }>();
+// `current` (an item label) makes the control mark the current item itself
+// instead of trusting the router, whose exact-active ignores the query -- for
+// query-only links. `touch` keeps it on phone at the --bs-touch floor.
+defineProps<{ items: SegmentedControlItem[]; current?: string; touch?: boolean }>();
 </script>
 
 <template>
-  <nav class="bs-segctl">
-    <RouterLink v-for="item in items" :key="item.label" class="bs-segctl__item" :to="item.to">
-      {{ item.label }}
-    </RouterLink>
+  <nav class="bs-segctl" :class="{ 'bs-segctl--touch': touch }">
+    <template v-for="item in items" :key="item.label">
+      <RouterLink v-if="current === undefined" class="bs-segctl__item" :to="item.to">
+        {{ item.label }}
+      </RouterLink>
+      <RouterLink v-else :to="item.to" custom v-slot="{ href, navigate }">
+        <a
+          class="bs-segctl__item"
+          :href="href"
+          :aria-current="current === item.label ? 'page' : undefined"
+          @click="navigate"
+        >
+          {{ item.label }}
+        </a>
+      </RouterLink>
+    </template>
   </nav>
 </template>

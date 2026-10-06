@@ -1268,6 +1268,16 @@ a:hover {
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
+.bs-sessions__quiet a {
+  color: inherit;
+  text-decoration: underline;
+}
+/* A quiet session (no agent working within the window): same row, muted text. */
+.bs-sessionrow--quiet .bs-sessionrow__title,
+.bs-sessions__group--quiet .bs-sessions__group-title,
+.bs-sessions__group--quiet .bs-sessions__group-title .bs-btn--link {
+  color: var(--bs-text-subtle);
+}
 /* Fix round 2: each group is its own flex container (h2 + its ul), so the
    header hugs its own list (small gap) while .app-page's own flex gap -
    applied between .bs-sessions__group siblings, not inside one - reads as
@@ -1681,6 +1691,15 @@ a:hover {
 @media (max-width: 640px) {
   .bs-segctl {
     display: none;
+  }
+  /* ActivityScopeToggle: stays on phone, at the touch floor. */
+  .bs-segctl.bs-segctl--touch {
+    display: flex;
+  }
+  .bs-segctl--touch .bs-segctl__item {
+    min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
+    padding-inline: var(--bs-space-3);
   }
 }
 
