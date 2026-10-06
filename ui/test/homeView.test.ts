@@ -471,10 +471,9 @@ describe('lib/homeView.ts cardTokensText()', () => {
     );
   });
 
-  it('never prints "0 of" for an unmeasured epic: it says not measured beside the budget', () => {
+  it('never prints "0 of" for an unmeasured epic: the budget first, then that spend is not measured', () => {
     const text = cardTokensText({ spent: 0, budget: 4_100_000, unmeasured: 3, outliers: [] });
-    expect(text).toContain('not measured');
-    expect(text).toContain('4.1M');
+    expect(text).toBe('4.1M budget · spend not measured');
     expect(text).not.toMatch(/0 of/);
   });
 

@@ -2,7 +2,7 @@
 // cards, the "Just finished" rule, the decision lines and the Budget
 // numbers, kept out of the .vue file so the DOM-free unit suite covers them.
 import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from './api.js';
-import { formatBudgetPct, formatCompactNumber, pluralize, taskLabel } from './format.js';
+import { formatCompactNumber, pluralize, taskLabel } from './format.js';
 import { dispatchDecisionLine } from './roleLabels.js';
 import type { StoreRef } from './storeKey.js';
 
@@ -162,13 +162,13 @@ export function budgetView(o: OverviewResult): BudgetView {
 
 /**
  * "84K of 350K tokens"; never "0 of" for spend nobody measured, which reads
- * "not measured · 4.1M budget" instead. Empty while the only budgeted epics
+ * "4.1M budget · spend not measured" instead. Empty while the only budgeted epics
  * are outliers (the card's outlier sentence says so).
  */
 export function cardTokensText(t: CardTokens): string {
   if (t.budget === null) return t.outliers.length > 0 ? '' : 'No budget set';
   if (t.spent === 0 && t.unmeasured > 0) {
-    return `${formatBudgetPct(t.spent, t.budget, t.unmeasured)} · ${formatCompactNumber(t.budget)} budget`;
+    return `${formatCompactNumber(t.budget)} budget · spend not measured`;
   }
   return tokensOfBudget(t);
 }

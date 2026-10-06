@@ -1050,6 +1050,14 @@ describe('lib/timelineDisplay.ts', () => {
 // humanizes its taskId via taskLabel(); an unmapped kind (System) renders
 // no meta at all, per the table's own "— (no meta, no chevron)" row.
 describe('lib/timelineDisplay.ts metaFor()', () => {
+  it('says "nothing to check" for a gate row whose check counted nothing, never "0 of 0"', () => {
+    const e = entry({ eventType: 'artifact-check-result', payload: {} });
+    (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 0, failed: 0 };
+    expect(metaFor(e)).toBe('Artifact check · nothing to check');
+    (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 3, failed: 0 };
+    expect(metaFor(e)).toBe('Artifact check · 3 of 3 passed');
+  });
+
   it('humanizes a taskId rather than showing the raw slug (merge, no task_ids)', () => {
     const e = entry({
       eventType: 'wave-merged',

@@ -61,6 +61,13 @@ export function retainedEpic(selected: string, epics: readonly string[]): string
   return epics.includes(selected) ? selected : ALL_EPICS;
 }
 
+/** The value a picker should show: the selection when it is among the options,
+ *  else the placeholder's empty value. A native `<select>` handed a value it
+ *  has no option for renders blank. */
+export function pickerSelection(selected: string, options: readonly { value: string }[]): string {
+  return options.some((o) => o.value === selected) ? selected : '';
+}
+
 /** The quiet suffix an idle epic carries wherever it is still offered. */
 export function idleLabel(idleDays: number): string {
   return `idle ${idleDays}d`;

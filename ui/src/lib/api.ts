@@ -248,12 +248,15 @@ export interface OverviewResult {
 
 /**
  * Every epic an operator can still pick on Kanban/Flow: the ones in flight,
- * then the closed ones newest first. A close removes an epic from
+ * the running ones before the idle ones, then the closed ones newest first. A close removes an epic from
  * `epicsInFlight` (D-43/P9-27), and its board has to stay reachable after that.
  */
 export function selectableEpics(overview: OverviewResult): string[] {
   const closed = overview.closedEpics ?? [];
-  return [...new Set([...overview.epicsInFlight, ...closed.map((e) => e.epicId)])];
+  const idle = new Set(overview.epicsIdle.map((e) => e.epicId));
+  const running = overview.epicsInFlight.filter((id) => !idle.has(id));
+  const idling = overview.epicsInFlight.filter((id) => idle.has(id));
+  return [...new Set([...running, ...idling, ...closed.map((e) => e.epicId)])];
 }
 
 export interface TimelineEntry {

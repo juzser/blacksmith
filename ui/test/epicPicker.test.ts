@@ -11,6 +11,7 @@ import {
   epicOptions,
   idleLabel,
   idleLabelsById,
+  pickerSelection,
   retainedEpic,
   withIdleLabels,
 } from '../src/lib/epicPicker.js';
@@ -133,5 +134,33 @@ describe('idle labels on lists that are not the picker', () => {
     expect(withIdleLabels([{ value: 'constructor', label: 'constructor' }], {})).toEqual([
       { value: 'constructor', label: 'constructor' },
     ]);
+  });
+});
+
+describe('pickerSelection()', () => {
+  const options = [{ value: 'epic-a', label: 'epic-a' }];
+
+  it('keeps a selection that is among the options', () => {
+    expect(pickerSelection('epic-a', options)).toBe('epic-a');
+  });
+
+  it('falls back to the placeholder value when the selection belongs to another section', () => {
+    expect(pickerSelection('epic-z', options)).toBe('');
+  });
+});
+
+describe('RoadmapProjectSection.vue picker value', () => {
+  it('passes the effective selection, not the page-wide one, to the select', () => {
+    const sfc = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'src',
+        'components',
+        'RoadmapProjectSection.vue',
+      ),
+      'utf8',
+    );
+    expect(sfc).toMatch(/:model-value="effectivePickerValue"/);
   });
 });

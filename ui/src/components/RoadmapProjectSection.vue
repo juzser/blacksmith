@@ -13,7 +13,7 @@
 // options, so on phone they name the picker in `aria-controls`.
 import { computed } from 'vue';
 import { useViewport } from '../composables/useViewport.js';
-import { withIdleLabels } from '../lib/epicPicker.js';
+import { pickerSelection, withIdleLabels } from '../lib/epicPicker.js';
 import {
   disclosureLabel,
   laneOptions,
@@ -64,7 +64,7 @@ const pickerOptions = computed(() => {
     laneOptions(view.value.regions, view.value.currentLane),
     props.idleLabels,
   );
-  if (options.some((o) => o.value === pickerValue.value)) return options;
+  if (pickerSelection(pickerValue.value, options) !== '') return options;
   // The selection lives in another section (or nowhere): a placeholder, so
   // the select never silently shows a lane that is not selected.
   return [
@@ -72,6 +72,10 @@ const pickerOptions = computed(() => {
     ...options,
   ];
 });
+
+const effectivePickerValue = computed(() =>
+  pickerSelection(pickerValue.value, pickerOptions.value),
+);
 
 function onPick(value: string) {
   if (value === '') return;
@@ -137,7 +141,7 @@ const later = computed(() => disclosure('later'));
       v-else-if="showPicker"
       :id="windowPickerId(section.project)"
       class="bs-roadmap-mobile__phase-select"
-      :model-value="pickerValue"
+      :model-value="effectivePickerValue"
       :options="pickerOptions"
       :aria-label="pickerLabel"
       @update:model-value="onPick"

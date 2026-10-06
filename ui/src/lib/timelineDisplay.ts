@@ -90,6 +90,7 @@ function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
   if (counts === undefined) return null;
   if (counts === null) return NOT_MEASURED;
   const total = counts.passed + counts.failed;
+  if (total === 0) return 'nothing to check';
   return counts.failed > 0
     ? `${counts.failed} of ${total} failed`
     : `${counts.passed} of ${total} passed`;
