@@ -256,7 +256,7 @@ describe('store cache lifetime', () => {
     afterEach(() => vi.useRealTimers());
 
     it('warns once, naming the store still scanning, and not again for the same pass', async () => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
       const warnings: string[] = [];
       let started = () => {};
       const scanning = new Promise<void>((r) => {
@@ -286,7 +286,7 @@ describe('store cache lifetime', () => {
     });
 
     it('stays silent when the pass finishes under the threshold', async () => {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
       const warnings: string[] = [];
       const { reg } = registry({ slowPassMs: 1000, warn: (m) => warnings.push(m) });
       await reg.refresh();

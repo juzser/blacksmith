@@ -68,13 +68,34 @@ async function pushRoute(page: Page, to: string) {
   }, to);
 }
 
-/** Lets the page run the continuations of a response it has just received. */
-const settled = (page: Page) =>
+/**
+ * Records every response body the page finishes reading, so a test can wait on
+ * a signal instead of a timer. The page's `await res.json()` continuation, its
+ * throw and the stale-guarded catch (and Vue's render) are all chained after
+ * this wrapper's `.finally`, so they run in the same microtask checkpoint; a
+ * later `page.evaluate` (a new task) that sees the count has run after them.
+ */
+async function recordBodies(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __bodies: { url: string; status: number }[] };
+    w.__bodies = [];
+    const orig = Response.prototype.json;
+    Response.prototype.json = function (this: Response) {
+      return orig.call(this).finally(() => {
+        w.__bodies.push({ url: this.url, status: this.status });
+      });
+    };
+  });
+}
+
+/** How many 500 bodies the page has finished reading for a URL containing `part`. */
+const errorBodiesRead = (page: Page, part: string) =>
   page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        setTimeout(() => setTimeout(() => setTimeout(resolve, 0), 0), 0),
-      ),
+    (p) =>
+      (window as unknown as { __bodies: { url: string; status: number }[] }).__bodies.filter(
+        (b) => b.url.includes(p) && b.status === 500,
+      ).length,
+    part,
   );
 
 const title = (page: Page) => page.getByRole('heading', { level: 1 });
@@ -342,6 +363,7 @@ test.describe('a foreign store in the dashboard', () => {
         body: JSON.stringify({ error: { code: 'boom', message: 'boom-history' } }),
       });
     });
+    await recordBodies(page);
     await page.goto(taskUrl(TASK_4));
     await expect(title(page)).toBeVisible();
     await expect.poll(() => held).toBe(true);
@@ -350,12 +372,8 @@ test.describe('a foreign store in the dashboard', () => {
     await page.getByRole('tab', { name: 'History' }).click();
     await expect(page.getByText('No events recorded.')).toHaveCount(0);
     await expect(page.locator('.timeline-feed').first()).toBeVisible();
-    const late = page.waitForResponse(
-      (r) => r.url().includes('/api/timeline') && r.status() === 500,
-    );
     release();
-    await late;
-    await settled(page);
+    await expect.poll(() => errorBodiesRead(page, '/api/timeline')).toBe(1);
     await expect(page.getByText('boom-history')).toHaveCount(0);
     await expect(page.locator('.timeline-feed').first()).toBeVisible();
   });
@@ -375,18 +393,15 @@ test.describe('a foreign store in the dashboard', () => {
         body: JSON.stringify({ error: { code: 'boom', message: 'boom-decide' } }),
       });
     });
+    await recordBodies(page);
     await page.goto(taskUrl(TASK_4));
     await page.getByRole('tab', { name: 'Findings' }).click();
     await page.getByRole('button', { name: 'Deny' }).click();
     await expect.poll(() => held).toBe(true);
     await pushRoute(page, `/tasks/${encodeURIComponent(TASK_2)}`);
     await expect(title(page)).toHaveText(HOME_TITLE_2);
-    const late = page.waitForResponse(
-      (r) => r.url().includes('/api/waivers/') && r.status() === 500,
-    );
     release();
-    await late;
-    await settled(page);
+    await expect.poll(() => errorBodiesRead(page, '/api/waivers/')).toBe(1);
     await expect(page.getByText('boom-decide')).toHaveCount(0);
     // The waiver is still there to act on, its controls not left disabled.
     await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}`);
