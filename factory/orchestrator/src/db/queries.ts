@@ -1545,17 +1545,42 @@ function activeEpics(
 }
 
 /**
- * A finding the operator's pending-waiver count is about: one the waiver
- * machinery would actually act on. Both rosters are imported from the modules
- * that own them — the severities from waivers.ts, the statuses from findings.ts,
- * where they are read off LEGAL_TRANSITIONS — rather than spelled out here.
- * This count is a second *reader* of what can be waived and must not become a
- * second opinion about it: a count that disagrees with the batch does not
- * error, it just tells the operator a different number than `/bs waivers`
- * will offer them.
+ * A finding the waiver machinery would actually act on. Both rosters are
+ * imported from the modules that own them — the severities from waivers.ts,
+ * the statuses from findings.ts, where they are read off LEGAL_TRANSITIONS —
+ * rather than spelled out here. `bs waivers pending` lists every such finding:
+ * what *could* be waived. The operator's inbox and pending-waiver count are
+ * narrower, see needsOperatorWaiver() below.
  */
 function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): boolean {
   return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
+}
+
+/**
+ * An undecided waivable finding the factory will no longer act on, so only the
+ * operator can: its task shipped, or it is epic-level (no task row, such as
+ * `<epic>/integration`) and its epic is closed. A task still open is in the
+ * factory's own fix loop (a follow-up task exists to fix its finding), a
+ * superseded task's findings are moot, and an escalated task has its own inbox
+ * row. No shared status set names "shipped" alone — TERMINAL_OK_TASK_STATUSES
+ * also holds `waived`, which is decided — so `completed` is spelled out. The
+ * inbox and both pendingWaivers counts read this one rule, so they agree.
+ */
+function needsOperatorWaiver(
+  f: {
+    severity: string;
+    findingStatus: string;
+    waiverId: string | null;
+    taskId: string;
+    epicId: string | null;
+  },
+  tasksById: ReadonlyMap<string, { taskStatus: string }>,
+  closedEpicIds: ReadonlySet<string>,
+): boolean {
+  if (!awaitsWaiverDecision(f) || f.waiverId !== null) return false;
+  const t = tasksById.get(f.taskId);
+  if (t) return t.taskStatus === 'completed';
+  return f.epicId !== null && closedEpicIds.has(f.epicId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1629,11 +1654,12 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
     });
   }
 
-  // Pending waivers: findings `awaitsWaiverDecision()` covers, not yet
-  // decided, grouped one row per task (the operator waives a task's batch,
-  // not one finding at a time — /bs waivers's own unit).
-  const pendingFindings = allFindingsForScope(db, scope).filter(
-    (f) => awaitsWaiverDecision(f) && f.waiverId === null,
+  // Pending waivers: findings `needsOperatorWaiver()` covers (shipped work
+  // nothing else will touch), grouped one row per task (the operator waives a
+  // task's batch, not one finding at a time — /bs waivers's own unit).
+  const closedEpicIds = new Set(closedEpicsForScope(db, scope).map((e) => e.epicId));
+  const pendingFindings = allFindingsForScope(db, scope).filter((f) =>
+    needsOperatorWaiver(f, tasksById, closedEpicIds),
   );
   const pendingByTask = new Map<string, (typeof pendingFindings)[number][]>();
   for (const f of pendingFindings) {
@@ -1711,8 +1737,11 @@ function projectSummary(
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
   const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-  const findingRows = allFindingsForScope(db, scope).filter(awaitsWaiverDecision);
-  const pendingWaivers = findingRows.filter((f) => f.waiverId === null).length;
+  const closedEpicIds = new Set(closedEpicsHere.map((e) => e.epicId));
+  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
+    needsOperatorWaiver(f, tasksById, closedEpicIds),
+  ).length;
 
   return {
     project,
@@ -1934,8 +1963,11 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
 
-  const pendingWaiverFindings = allFindingsForScope(db, scope).filter(awaitsWaiverDecision);
-  const pendingWaivers = pendingWaiverFindings.filter((f) => f.waiverId === null).length;
+  const closedEpicIds = new Set(closedEpics.map((e) => e.epicId));
+  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
+    needsOperatorWaiver(f, tasksById, closedEpicIds),
+  ).length;
 
   const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
   const dispatchRows = dispatchSessionCond
