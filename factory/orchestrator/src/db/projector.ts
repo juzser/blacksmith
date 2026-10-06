@@ -35,7 +35,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -1310,9 +1310,47 @@ function planProjectResolver(
  */
 function foldTasksWithPlanProject(events: readonly StoredEvent[], opts: DbOpts): TaskFoldRow[] {
   const projectFromPlan = planProjectResolver(opts.specsDir);
-  return foldTasks([...events], { specsDir: opts.specsDir }).map((t) =>
-    t.project === null ? { ...t, project: projectFromPlan(t.epicId) } : t,
+  const folded = foldTasks([...events], { specsDir: opts.specsDir });
+  // The log before the plan file: a task added with no project -- a follow-up
+  // minted inside a wave, whose runner stamps nothing -- belongs where the
+  // rest of its epic's tasks were stamped. The plan file is only read when
+  // the log has nothing to say, and it may not be the project's own (ui serve
+  // without --specs-dir reads the factory's specs).
+  const fromSiblings = unanimousEpicProjects(folded);
+  return folded.map((t) =>
+    t.project === null
+      ? {
+          ...t,
+          project:
+            (t.epicId === null ? undefined : fromSiblings.get(t.epicId)) ??
+            projectFromPlan(t.epicId),
+        }
+      : t,
   );
+}
+
+/**
+ * The one project each epic's tasks agree on, keyed by epic id.
+ *
+ * An epic belongs to one project, so a task of it that was never stamped
+ * belongs to the project its siblings were. An epic whose tasks name two
+ * projects breaks that assumption, and the map leaves it out rather than
+ * pick a winner by log order: an unanswered epic stays NULL, which is
+ * visible; a guessed one is filed under the wrong project silently.
+ */
+export function unanimousEpicProjects(
+  rows: readonly { epicId: string | null; project: string | null }[],
+): Map<string, string> {
+  const seen = new Map<string, string | null>();
+  for (const { epicId, project } of rows) {
+    if (!epicId || project === null) continue;
+    const prior = seen.get(epicId);
+    if (prior === undefined) seen.set(epicId, project);
+    else if (prior !== project) seen.set(epicId, null);
+  }
+  const agreed = new Map<string, string>();
+  for (const [epicId, project] of seen) if (project !== null) agreed.set(epicId, project);
+  return agreed;
 }
 
 export function projectSession(
@@ -1335,9 +1373,7 @@ export function projectSession(
     // plan-file backfill lands here so they agree with the global one.
     const taskRows = foldTasksWithPlanProject(events, opts);
     const projectForTask = projectResolver(taskRows);
-    const projectForEpic = new Map(
-      taskRows.flatMap((t) => (t.project === null ? [] : [[t.epicId, t.project] as const])),
-    );
+    const projectForEpic = unanimousEpicProjects(taskRows);
     /**
      * The project a row inherits from whatever its ref names, task or epic.
      *
@@ -1664,7 +1700,8 @@ export function projectTasks(
 ): void {
   handle.db.transaction((txDb) => {
     txDb.delete(schema.tasks).run();
-    for (const task of foldTasksWithPlanProject(events, opts)) {
+    const rows = foldTasksWithPlanProject(events, opts);
+    for (const task of rows) {
       txDb
         .insert(schema.tasks)
         .values({
@@ -1686,6 +1723,18 @@ export function projectTasks(
           project: task.project,
           terminalAt: task.terminalAt,
         })
+        .run();
+    }
+    // The epics row is written per session, and a session that closes an
+    // epic it never planned -- a continuation -- folds none of its tasks, so
+    // the row's own fallback (projectForEpic in projectSession) has nothing
+    // to read and stays NULL. Every session's tasks are in hand here: fill
+    // what is still unanswered, and never overwrite a stamped project.
+    for (const [epicId, project] of unanimousEpicProjects(rows)) {
+      txDb
+        .update(schema.epics)
+        .set({ project })
+        .where(and(eq(schema.epics.epicId, epicId), isNull(schema.epics.project)))
         .run();
     }
   });
@@ -1894,9 +1943,7 @@ function projectFindings(
   // against `<epic>/integration`, a pseudo-task that never gets a task row:
   // no task lookup can ever answer for it, its epic always can, and the row
   // already stores that epic. On the shipped logs this is 37 of 56 findings.
-  const projectForEpic = new Map(
-    taskRows.flatMap((t) => (t.project === null ? [] : [[t.epicId, t.project] as const])),
-  );
+  const projectForEpic = unanimousEpicProjects(taskRows);
   const projectFromPlan = planProjectResolver(opts.specsDir);
   const rows: (typeof schema.findings.$inferInsert)[] = [];
   for (const finding of findings) {
@@ -1936,7 +1983,7 @@ function projectFindings(
       epicId: findingEpicId,
       project:
         projectForTask(finding.task_id) ??
-        projectForEpic.get(findingEpicId) ??
+        (findingEpicId === null ? undefined : projectForEpic.get(findingEpicId)) ??
         projectFromPlan(findingEpicId),
       fingerprint: finding.fingerprint,
       findingCategory: finding.finding_category,

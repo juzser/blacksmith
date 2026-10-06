@@ -6,8 +6,9 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { apply, openDb } from '../../src/db/projector.js';
+import { apply, openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
   errorsPage,
@@ -15,10 +16,17 @@ import {
   overview,
   pulse,
   roadmapPage,
+  runningSessions,
   timeline,
 } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
-import { appendEvent, type EventInput, type EventOpts, readEvents } from '../../src/events.js';
+import {
+  appendEvent,
+  type EventInput,
+  type EventOpts,
+  readEvents,
+  startSession,
+} from '../../src/events.js';
 
 const SESSION_ID = 'sess-project-fixture';
 
@@ -1338,6 +1346,265 @@ describe('project dimension (Phase 6b)', () => {
     } finally {
       handle.sqlite.close();
       await rm(specsDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Where work belongs when the session doing it never says. A wave session
+// is a continuation of its epic's session: it adds follow-up tasks and runs
+// tasks the epic session added, and a wave-runner stamps no project of its
+// own. Both used to read as the default project -- the follow-up through
+// projectOf(null), the session through owning no task at all.
+describe('project attribution across sessions', () => {
+  let stateDir: string;
+  let dbDir: string;
+  /** Empty on purpose: no plan file answers, so only the log can. */
+  let specsDir: string;
+  /** Named, never written -- see the Phase 6b describe above. */
+  let roadmapPath: string;
+  const lastEvent = new Map<string, string>();
+
+  async function open(sessionId: string, continues?: string): Promise<void> {
+    const root = await startSession(sessionId, {
+      stateDir,
+      ...(continues === undefined ? {} : { continues }),
+    });
+    lastEvent.set(sessionId, root.event_id);
+  }
+
+  async function emit(
+    sessionId: string,
+    input: Omit<EventInput, 'session_id' | 'causal_parent' | 'plan_version' | 'actor'> & {
+      actor?: string;
+    },
+  ): Promise<void> {
+    const stored = await appendEvent(
+      {
+        actor: 'planner',
+        ...input,
+        session_id: sessionId,
+        plan_version: 1,
+        causal_parent: lastEvent.get(sessionId) ?? null,
+      },
+      { stateDir },
+    );
+    lastEvent.set(sessionId, stored.event_id);
+  }
+
+  function addTask(sessionId: string, taskId: string, epicId: string, project?: string) {
+    return emit(sessionId, {
+      event_type: 'task-added',
+      task_id: taskId,
+      ...(project === undefined ? {} : { project }),
+      payload: {
+        epic_id: epicId,
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+        budget_tokens: 1000,
+      },
+    });
+  }
+
+  function addFollowUp(sessionId: string, taskId: string, epicId: string) {
+    return emit(sessionId, {
+      event_type: 'task-added',
+      task_id: taskId,
+      payload: {
+        epic_id: epicId,
+        case: 'bugfix',
+        origin: 'escalation',
+        task_status: 'todo',
+      },
+    });
+  }
+
+  function dispatch(sessionId: string, taskId: string, role: string) {
+    return emit(sessionId, {
+      actor: 'wave-runner',
+      event_type: 'dispatch_decision',
+      task_id: taskId,
+      payload: {
+        agent_role: role,
+        provider: 'claude',
+        model_tier: 'mid',
+        model: 'claude-sonnet-5',
+        reason: 'fixture',
+      },
+    });
+  }
+
+  /** Two projects, one epic each; the beta epic's work runs in two waves. */
+  async function buildWaveFixture(): Promise<void> {
+    await open('sess-alpha');
+    await addTask('sess-alpha', 'epic-alpha/task-1', 'epic-alpha', 'alpha');
+
+    await open('sess-beta');
+    await addTask('sess-beta', 'epic-beta/task-1', 'epic-beta', 'beta');
+    await addTask('sess-beta', 'epic-beta/task-2', 'epic-beta', 'beta');
+
+    // Wave 1 owns no task: it runs the epic session's, once by the qualified
+    // id and once by the bare id a dispatch is just as likely to carry.
+    await open('sess-beta-w1', 'sess-beta#0');
+    await dispatch('sess-beta-w1', 'epic-beta/task-1', 'coder');
+    await dispatch('sess-beta-w1', 'task-2', 'tester');
+
+    // Wave 2 raises a follow-up the way a wave does: no project anywhere.
+    await open('sess-beta-w2', 'sess-beta#0');
+    await addFollowUp('sess-beta-w2', 'epic-beta/followup-1', 'epic-beta');
+    await dispatch('sess-beta-w2', 'epic-beta/followup-1', 'coder');
+
+    await open('sess-both');
+    await dispatch('sess-both', 'epic-alpha/task-1', 'reviewer');
+    await dispatch('sess-both', 'epic-beta/task-1', 'reviewer');
+
+    await open('sess-quiet');
+  }
+
+  async function rebuilt(name: string) {
+    const dbPath = path.join(dbDir, `${name}.db`);
+    await rebuild(dbPath, 'all', { stateDir, roadmapPath, specsDir });
+    return openDb(dbPath);
+  }
+
+  function taskProject(handle: ReturnType<typeof openDb>, taskId: string): string | null {
+    const row = handle.db
+      .select({ project: schema.tasks.project })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.taskId, taskId))
+      .get();
+    if (row === undefined) throw new Error(`no task row for ${taskId}`);
+    return row.project;
+  }
+
+  function sessionProjects(handle: ReturnType<typeof openDb>, scope = {}): Map<string, string[]> {
+    return new Map(runningSessions(handle.db, scope).map((s) => [s.sessionId, s.projects]));
+  }
+
+  beforeEach(async () => {
+    lastEvent.clear();
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-attribution-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-attribution-db-'));
+    specsDir = await mkdtemp(path.join(tmpdir(), 'smith-attribution-specs-'));
+    roadmapPath = path.join(dbDir, 'roadmap.md');
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+    await rm(specsDir, { recursive: true, force: true });
+  });
+
+  it("gives an unstamped follow-up its epic's project", async () => {
+    await buildWaveFixture();
+    const handle = await rebuilt('follow-up');
+    try {
+      expect(taskProject(handle, 'epic-beta/followup-1')).toBe('beta');
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('leaves a follow-up unscoped when its epic spans two projects', async () => {
+    await open('sess-mixed');
+    await addTask('sess-mixed', 'epic-mixed/task-1', 'epic-mixed', 'alpha');
+    await addTask('sess-mixed', 'epic-mixed/task-2', 'epic-mixed', 'beta');
+    await addFollowUp('sess-mixed', 'epic-mixed/followup-1', 'epic-mixed');
+
+    const handle = await rebuilt('mixed');
+    try {
+      expect(taskProject(handle, 'epic-mixed/followup-1')).toBeNull();
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it("fills an unstamped epic row from its tasks' project", async () => {
+    await buildWaveFixture();
+    await emit('sess-beta-w2', {
+      actor: 'operator',
+      event_type: 'epic-closed',
+      payload: { epic_id: 'epic-beta', closed_by: 'operator', machine_verdict: 'pass' },
+    });
+
+    const handle = await rebuilt('epic-row');
+    try {
+      const row = handle.db
+        .select({ project: schema.epics.project })
+        .from(schema.epics)
+        .where(eq(schema.epics.epicId, 'epic-beta'))
+        .get();
+      expect(row?.project).toBe('beta');
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('attributes a wave session to the project of the tasks it ran', async () => {
+    await buildWaveFixture();
+    const handle = await rebuilt('sessions');
+    try {
+      const projects = sessionProjects(handle);
+      expect(projects.get('sess-beta-w1')).toEqual(['beta']);
+      expect(projects.get('sess-beta-w2')).toEqual(['beta']);
+      expect(projects.get('sess-both')).toEqual(['alpha', 'beta']);
+      expect(projects.get('sess-quiet')).toEqual([]);
+
+      const betaOnly = sessionProjects(handle, { project: 'beta' });
+      expect([...betaOnly.keys()].sort()).toEqual([
+        'sess-beta',
+        'sess-beta-w1',
+        'sess-beta-w2',
+        'sess-both',
+      ]);
+      expect(betaOnly.get('sess-both')).toEqual(['beta']);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('does not guess a project for a bare id two projects share', async () => {
+    await buildWaveFixture();
+    await open('sess-ambiguous');
+    await dispatch('sess-ambiguous', 'task-1', 'reviewer');
+
+    const handle = await rebuilt('ambiguous');
+    try {
+      expect(sessionProjects(handle).get('sess-ambiguous')).toEqual([]);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it("does not give a qualified ref another epic's bare task row", async () => {
+    await open('sess-owner');
+    await addTask('sess-owner', 'task-1', 'epic-y', 'alpha');
+    await addTask('sess-owner', 'epic-x/task-2', 'epic-x', 'beta');
+    await open('sess-ref');
+    await dispatch('sess-ref', 'epic-x/task-1', 'reviewer');
+
+    const handle = await rebuilt('cross-epic-ref');
+    try {
+      expect(sessionProjects(handle).get('sess-ref')).toEqual(['beta']);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('splits live agents across projects without counting one twice', async () => {
+    await buildWaveFixture();
+    const handle = await rebuilt('overview');
+    try {
+      const global = overview(handle.db);
+      const perProject = global.projects ?? [];
+      expect(perProject.map((p) => p.project)).toEqual(['alpha', 'beta']);
+      expect(global.liveAgentCount).toBe(5);
+      const sum = (pick: (p: (typeof perProject)[number]) => number) =>
+        perProject.reduce((n, p) => n + pick(p), 0);
+      expect(sum((p) => p.liveAgentCount)).toBe(global.liveAgentCount);
+      expect(sum((p) => p.workingAgentCount)).toBe(global.workingAgentCount);
+    } finally {
+      handle.sqlite.close();
     }
   });
 });

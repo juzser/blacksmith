@@ -695,6 +695,57 @@ describe('taskEvents', () => {
 
       expect((await typesFor('task-added'))[0]?.project).toBe('envkit');
     });
+
+    // A follow-up is minted inside a wave, where no plan is at hand and the
+    // wave-runner stamps no project -- so it carries the project of the task
+    // whose finding it was raised for, as the log already recorded it.
+    it("stamps a follow-up with the originating task's project", async () => {
+      await emitTasksAdded({ ...planWith(task()), project: 'beta' }, ctx, { stateDir });
+
+      await emitFollowUpTask(followUp({ fromTaskId: 'epic-1/task-1' }), ctx, { stateDir });
+
+      const added = await typesFor('task-added');
+      expect(added.map((r) => [r.task_id, r.project])).toEqual([
+        ['epic-1/task-1', 'beta'],
+        ['epic-1/followup-4b70d608', 'beta'],
+      ]);
+    });
+
+    it("prefers the caller's project over the originating task's", async () => {
+      await emitTasksAdded({ ...planWith(task()), project: 'beta' }, ctx, { stateDir });
+
+      await emitFollowUpTask(
+        followUp({ fromTaskId: 'task-1' }),
+        { ...ctx, project: 'alpha' },
+        { stateDir },
+      );
+
+      expect((await typesFor('task-added'))[1]?.project).toBe('alpha');
+    });
+
+    it("ignores another epic's bare event for a qualified originating task", async () => {
+      await emitTasksAdded(
+        {
+          ...planWith(task({ task_id: 'task-2', epic_id: 'epic-b' })),
+          epic_id: 'epic-b',
+          project: 'beta',
+        },
+        ctx,
+        { stateDir },
+      );
+
+      await emitFollowUpTask(followUp({ fromTaskId: 'epic-a/task-2' }), ctx, { stateDir });
+
+      expect((await typesFor('task-added'))[1]?.project).toBeUndefined();
+    });
+
+    it('stamps nothing when no source names a project', async () => {
+      await emitTasksAdded(planWith(task()), ctx, { stateDir });
+
+      await emitFollowUpTask(followUp({ fromTaskId: 'epic-1/task-1' }), ctx, { stateDir });
+
+      expect((await typesFor('task-added'))[1]?.project).toBeUndefined();
+    });
   });
 
   describe('readAddedTasks', () => {
