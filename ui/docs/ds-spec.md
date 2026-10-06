@@ -408,8 +408,8 @@ stacked `ProgressBar` + the % number).
 | `KanbanBoard` | Column layout, ported at the layout level, re-themed; "Completed" column collapsed by default per audit Kanban-5. Grouping is switchable (status/project/epic/role, each with a "none" column, pattern 6). Column header: status icon (Lucide, coloured by the column's tone, decorative), name, count pill, a column menu behind a sm `IconButton` `Ellipsis` "Column menu" with "Hide column", restorable from a "Hidden columns" control in the display-options popover (`KanbanDisplayOptions`, below). Empty column: one plain sentence, e.g. "No tasks in Blocked." Columns above `KANBAN_VIRTUALIZE_THRESHOLD` (a named constant, default 30, `ui/src/lib/constants.ts`) render virtualised. Follow-up fixes of one parent task stack into one `KanbanFollowupGroup` card per column once there are two or more ("3 fixes · Settings layout"; a native `<details>`, collapsed by default, open state kept per tab in `sessionStorage`); the group counts as one item toward "View N more", each fix row keeps the inline copy-id icon, and no card shows an id as text. A group shows at most 5 fix rows, then a "Show N more" row; a quick-look on a fix opens its group (revealing a row past the cap); the summary is one arrow-key stop and an open group's rows are stops too (arrows on a row move focus, the copy icon keeps its own keys). Audit-axis judge rows never reach the board. |
 | `KanbanDisplayOptions` | Popover: one-line-summary on/off, group-by (status/project/epic/role), hidden-columns list. Per-viewer preference, persisted to `localStorage` under one namespaced key, read/write wrapped in `try`/`catch` with a hardcoded default (`{summary: true, groupBy: "status", hidden: []}`) used whenever storage throws or is unavailable (private browsing, quota). |
 | `WaveList` | One row per wave: header "Wave N of M · X/Y done", `ProgressBar`, state tag (done/running/upcoming), collapsed-by-default for past waves, contains `TaskCard`s. Replaces the entire Flow page (plan item H). |
-| `RoadmapSwimlane` | Milestone/phase rows with epic sub-rows, a months header, a "now" vertical line with a pulsing dot (static fallback: a solid line + "Now" label), bars: past faded solid / current solid animated / upcoming dashed. Replaces the VueFlow roadmap canvas (plan item G). No `@vue-flow` import. |
-| `EpicBlock` | Sits below `RoadmapSwimlane` on Work -> Roadmap and follows its selection (replaces the old right-hand `RoadmapDetailPanel` and the separate Epic page). **Phase selected**: goal, "13 of 25 tasks done", stacked `ProgressBar`, exit criteria, then one section per epic in the phase (name, status `Tag`, "N of M tasks done", a "Show waves / Hide waves" `aria-expanded` toggle over that epic's `WaveList`); the in-progress epic is expanded, the rest collapsed; an epic with no tasks reads "No tasks tracked". **Epic selected**: epic name, project, status, progress, the "Epic started from" `RequestQuote`, the plan-version picker ("Plan: latest (v12) / earlier drafts"), then `WaveList`. |
+| `RoadmapSwimlane` | Milestone/phase rows with epic sub-rows, a months header, a "now" vertical line with a pulsing dot (static fallback: a solid line + "Now" label), bars: past faded solid / current solid animated / upcoming dashed. Replaces the VueFlow roadmap canvas (plan item G). No `@vue-flow` import. One instance per project section (`RoadmapProjectSection`), windowed to 1 earlier + the current + 2 later lanes; the current lane carries a "Current" `Tag` and `aria-current="step"`. |
+| `EpicBlock` | Sits below the project section holding the selection on Work -> Roadmap (last when none does) and follows its selection (replaces the old right-hand `RoadmapDetailPanel` and the separate Epic page). **Phase selected**: goal, "13 of 25 tasks done", stacked `ProgressBar`, exit criteria, then one section per epic in the phase (name, status `Tag`, "N of M tasks done", a "Show waves / Hide waves" `aria-expanded` toggle over that epic's `WaveList`); the in-progress epic is expanded, the rest collapsed; an epic with no tasks reads "No tasks tracked". **Epic selected**: epic name, project, status, progress, the "Epic started from" `RequestQuote`, the plan-version picker ("Plan: latest (v12) / earlier drafts"), then `WaveList`. |
 | `AgentBlock` | One block per role inside a session's detail view: role's friendly name, then a list of its agents with one-line "what it is doing" (derived from last event), `RelativeTime` duration, in/out tokens via `CompactNumber`, or "not measured", plus an `AgentStatusBadge` per agent (pattern 13, §2.4c). Replaces the Sessions graph node (plan item F) and the per-node canvas entirely — no `@vue-flow` import on Sessions either. |
 | `AgentStatusBadge` | Workload-axis-only badge (pattern 13, §2.4c): reads the same `agentActivity` value `AgentChip` does (`working`/`stalled`, `agents-registry.ts`'s `isWorkingAt`, `DEFAULT_STALE_HOURS`), plus `agentWaitingThresholdMs` (pattern 3, §2.4) to flag "queued longer than expected" as a named `anomaly` tone, never rendered as "busy" (a queue-depth problem is not a productivity signal). **Presence is not shown**: the projection has no per-agent heartbeat or online/offline signal today (only a dispatch-elapsed-time estimate), so this badge ships single-axis (workload only); a second, true presence axis is filed as a named follow-up, not invented here. |
 | `SessionRow` | One row in the Sessions history list: run label (derived title, plan item B), project, started `RelativeTime`, duration, agent count, last step (humanized). |
@@ -813,7 +813,7 @@ fallbacks. The phone frames below are the intended layout.
 | Shell | Top bar (title, project, Live dot, More); bottom tab bar | Pause, theme, settings, and desktop view go into the overflow menu | Sidebar, breadcrumb, refresh, clocks | Navigation only |
 | Home | 3-up summary (Agents, project budget ring, factory ring); Needs you grouped by project; 4 recent activity rows plus "View all" | Needs-you groups collapse, with the most urgent open; activity is cut to 4 rows | Activity filter chips, project cards grid, cost chart | **Decide** (the only primary), on the top Needs-you item |
 | Work (Kanban) | Column switcher as a tab row with counts; one column of compact cards (title, tag, meta) | 5 columns become 1 column chosen by tab | Display options and view switch go into overflow; card menu, copy id, quick look | Tap a card to open the task |
-| Work (Roadmap) | Phase picker; "13 of 25" plus ring; epic list with mini bars | Waves in a collapsed group | Swimlane, per-wave task lanes, session picker | Tap an epic to open it |
+| Work (Roadmap) | Project sections as `<details>` (the one holding the selection open), each with a windowed phase picker (44px disclosure rows widen it, the current lane ends " (current)"); "13 of 25" plus ring; epic list with mini bars | Waves in a collapsed group | Swimlane, per-wave task lanes, session picker | Tap an epic to open it |
 | Task | Title, status tag, meta; request quote clamped to 3 lines; 3-up stats (tokens, agent time, elapsed); tabs Asked / Findings / Outputs / History; one-line timeline rows | Per-role token table in "More: tokens by role" | Side panel, raw payloads, copy buttons | "Show more" on the quote |
 | Activity | Filter as a tab row; one-line event rows with "because of" as meta; "Load older" | Kind filters become tabs; pause goes into overflow | Filter chips, row hover highlight, session picker | "Load older" (secondary) |
 | Cost | 7/30/90-day tabs; 2-up stat tiles (tokens per task, second-opinion ring, and 2 "Not enough data yet"); tokens by role as a list with mini bars | Charts become a single role list | Token-trend chart, provider table | Navigation only |
@@ -967,7 +967,7 @@ This same `TaskCard` and its keyboard model (peek + no drag) also apply inside R
 `EpicBlock`, below.
 
 **Roadmap view** (URL `/work/roadmap`, selection in the query: `?phase=<milestoneId>` or
-`?epic=<epicId>`): `RoadmapSwimlane` on top, `EpicBlock` below it.
+`?epic=<epicId>`): one section per project (`RoadmapSwimlane` each), `EpicBlock` after the section that holds the selection.
 
 - **Swimlane.** Milestone/phase rows with their epics as indented sub-rows (a project
   without milestones falls back to epic-only lanes, per plan G). Months header, red
@@ -978,8 +978,26 @@ This same `TaskCard` and its keyboard model (peek + no drag) also apply inside R
   horizontally inside its own container (`overflow-x: auto`, `tabindex="0"`, labelled
   region, lane `min-width` 520px); the page itself never scrolls sideways, and
   `EpicBlock` stacks below.
-- **Default selection.** With no query param, select the phase containing the in-progress
-  epic (if none, the most recent phase); with no milestones, select the in-progress epic.
+- **Project sections.** One section per project, ordered running first, then most recent
+  activity, ties alphabetical; the heading is hidden when the project filter picks one
+  project. The heading carries the done count ("3 of 25 phases done", "All 25 phases
+  done"; never "0 of 0", so none when a project has no phase). A project with epics in
+  flight but no declared phase gets an epic-only section; with no phase anywhere the
+  page shows one "Epics" section. Lanes keep declared order.
+- **Window.** Each section shows 1 earlier lane + the current lane + 2 later lanes. The
+  current lane is the one holding a running epic, else the first declared lane not done
+  (else the last); it carries a "Current" `Tag` and `aria-current="step"`, and selecting
+  another lane never moves it. Hidden lanes sit behind "Show N earlier lane(s)" / "Show N
+  later lane(s)" disclosures (`aria-expanded`, `aria-controls`; "Show fewer ..." when open),
+  rendered only when a side hides something. The open/closed state is kept per tab session
+  (`sessionStorage`), per project and side. A `?phase=`/`?epic=` deep link into a hidden
+  lane opens that side once, scrolls the row into view and focuses it; "Show fewer" is
+  then respected until the link changes. Disclosure buttons are at least 24px tall on
+  desktop, 44px on phone.
+- **Default selection.** With no query param, select the current lane of the top section
+  (the same section list the page renders, project filter included): the phase containing
+  the in-progress epic, else the first declared phase not done, else the last; in an
+  epic-only section, the in-progress epic, else its first.
 - **Phase selected** -> `EpicBlock` shows the phase header — example from `/api/roadmap`'s
   "Phase 6 — UI (HDS)" milestone, goal text from `goal`, "13 of 25 tasks done" from
   `tasksCompleted`/`tasksTotal`, stacked `ProgressBar` (needs a new breakdown field; only a
