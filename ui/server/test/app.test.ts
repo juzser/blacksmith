@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
-import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
+import { appendEvent, readEvents, startSession } from '../../../factory/orchestrator/src/events.js';
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/src/scheduler.js';
 import {
   buildFixture,
@@ -2150,13 +2150,22 @@ describe('GET /api/cli-sessions', () => {
         state: string;
         configSource: string;
         hidden: Record<string, number>;
-        sessions: { name: string; status: string; inScopeBy: string; linked: { epics: { epicId: string }[] } }[];
+        sessions: {
+          name: string;
+          status: string;
+          inScopeBy: string;
+          linked: { epics: { epicId: string }[] };
+        }[];
       }>(res);
       expect(body.state).toBe('ok');
       expect(body.configSource).toBe('flag');
       expect(body.hidden).toEqual({ outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 });
       expect(body.sessions).toHaveLength(1);
-      expect(body.sessions[0]).toMatchObject({ name: 'fixture', status: 'idle', inScopeBy: 'stamped' });
+      expect(body.sessions[0]).toMatchObject({
+        name: 'fixture',
+        status: 'idle',
+        inScopeBy: 'stamped',
+      });
       expect(body.sessions[0]?.linked.epics[0]?.epicId).toBe(EPIC_ID);
       expect(JSON.stringify(body)).not.toContain(dbDir);
     } finally {
@@ -2171,8 +2180,35 @@ describe('GET /api/cli-sessions', () => {
         headers: { host: 'evil.example' },
       });
       expect(foreign.status).toBe(403);
-      const local = await handle.app.request('/api/cli-sessions', { headers: { host: 'localhost:4680' } });
+      const local = await handle.app.request('/api/cli-sessions', {
+        headers: { host: 'localhost:4680' },
+      });
       expect(local.status).toBe(200);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('refuses a foreign Host before the projection is refreshed', async () => {
+    const handle = serve();
+    try {
+      await startSession('sess-late', { stateDir, cliSessionId: null });
+      const projected = () =>
+        (
+          handle.handle.sqlite
+            .prepare('select count(*) as n from events_raw where session_id = ?')
+            .get('sess-late') as { n: number }
+        ).n;
+      const foreign = await handle.app.request('/api/cli-sessions', {
+        headers: { host: 'evil.example' },
+      });
+      expect(foreign.status).toBe(403);
+      expect(await json<{ error: { code: string } }>(foreign)).toMatchObject({
+        error: { code: 'ui.forbidden-host' },
+      });
+      expect(projected()).toBe(0);
+      await handle.app.request('/api/cli-sessions', { headers: { host: '127.0.0.1:4680' } });
+      expect(projected()).toBe(1);
     } finally {
       closeApp(handle);
     }
@@ -2181,8 +2217,12 @@ describe('GET /api/cli-sessions', () => {
   it('answers absent when no config dir is given', async () => {
     const handle = serve({});
     try {
-      const res = await handle.app.request('/api/cli-sessions', { headers: { host: '127.0.0.1:4680' } });
-      expect(await json<{ state: string; configSource: string; sessions: unknown[] }>(res)).toMatchObject({
+      const res = await handle.app.request('/api/cli-sessions', {
+        headers: { host: '127.0.0.1:4680' },
+      });
+      expect(
+        await json<{ state: string; configSource: string; sessions: unknown[] }>(res),
+      ).toMatchObject({
         state: 'absent',
         configSource: 'none',
         sessions: [],

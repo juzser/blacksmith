@@ -723,6 +723,9 @@ export function createApp(opts: AppOpts): AppHandle {
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
   const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
+  // The loopback-only route is guarded ahead of the refresh, so a refused
+  // request costs no fold.
+  app.use('/api/cli-sessions', loopbackGuard());
   app.use('/api/*', async (_c, next) => {
     await refresher.refresh();
     await next();
@@ -945,7 +948,8 @@ export function createApp(opts: AppOpts): AppHandle {
 
   // Live Claude Code CLI sessions (name, working/waiting/idle, doing now,
   // linked epic). Behind the refresh middleware above so links are current,
-  // and behind loopbackGuard() because it carries operator prompt text.
+  // and loopback-only (guard mounted ahead of the refresh) because it carries
+  // operator prompt text.
   const cliSessions = createCliSessionsReader({
     configDir: opts.claudeConfigDir,
     configSource: opts.claudeConfigDir ? (opts.claudeConfigSource ?? 'flag') : 'none',
@@ -954,7 +958,7 @@ export function createApp(opts: AppOpts): AppHandle {
     ...(opts.cliIsAlive ? { isAlive: opts.cliIsAlive } : {}),
     ...(opts.cliListWorktrees ? { listWorktrees: opts.cliListWorktrees } : {}),
   });
-  app.get('/api/cli-sessions', loopbackGuard(), async (c) => c.json(await cliSessions.read(handle)));
+  app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(handle)));
 
   app.get('/api/projects', (c) => {
     const result = overview(handle.db, sessionScope(c), clock);
