@@ -575,6 +575,47 @@ export function gateVerdict(entry: TimelineEntry): 'pass' | 'fail' | 'unrecorded
   return raw ? 'pass' : 'fail';
 }
 
+/** The Passed/Failed status `Tag` a gate row shows after its kind tag
+ * (ds-spec.md §4.3). `null` whenever the event recorded no verdict of its own:
+ * the tag never guesses a pass (D-169), and a type with no verdict field
+ * (budget, judges-outstanding, coverage, spec review, goal check, quorum,
+ * issue) has nothing to say. `icon` names a lucide icon for the row to map. */
+export interface GateStatusTag {
+  tone: 'done' | 'danger';
+  label: 'Passed' | 'Failed';
+  icon: 'CircleCheck' | 'CircleX';
+}
+
+const GATE_PASSED: GateStatusTag = { tone: 'done', label: 'Passed', icon: 'CircleCheck' };
+const GATE_FAILED: GateStatusTag = { tone: 'danger', label: 'Failed', icon: 'CircleX' };
+
+export function gateStatusTag(entry: TimelineEntry): GateStatusTag | null {
+  const p = entry.payload as Record<string, unknown>;
+  const boolTag = (v: unknown): GateStatusTag | null =>
+    typeof v !== 'boolean' ? null : v ? GATE_PASSED : GATE_FAILED;
+  switch (entry.eventType) {
+    case 'artifact-check-result': {
+      const failed = (entry as ActivityEntry).gateCounts?.failed ?? 0;
+      return failed > 0 ? GATE_FAILED : boolTag(p.ok);
+    }
+    case 'commit-check-result':
+      return boolTag(p.certified);
+    case 'integration-check':
+      return boolTag(p.pass);
+    case 'grader-verdict':
+    case 'schema-check-result':
+    case 'deps-check-result':
+    case 'testgate-result':
+    case 'gate-outcome': {
+      const outcome = verdictOutcome(entry);
+      if (outcome === 'pass') return GATE_PASSED;
+      return outcome === 'fail' ? GATE_FAILED : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /** D-169: the third word is the point — a row with no verdict says so. */
 const GATE_VERDICT_WORD: Record<'pass' | 'fail' | 'unrecorded', string> = {
   pass: 'passed',
@@ -633,13 +674,17 @@ export function titleFor(entry: TimelineEntry): string {
       return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))}${via.length ? ` (${via.join('/')})` : ''}${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
-      return `Schema check: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return gateStatusTag(entry) ? 'Schema check' : 'Schema check: no verdict recorded';
     case 'deps-check-result':
       // The detail is the whole point of this row: "passed" alone cannot
       // distinguish an installed worktree from one with nothing to install.
-      return `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+      // A status tag now says passed/failed, so only an untagged row spells
+      // out the missing verdict.
+      return gateStatusTag(entry) && p.detail
+        ? `Dependency check: ${String(p.detail)}`
+        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
     case 'testgate-result':
-      return `Test gate: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return gateStatusTag(entry) ? 'Test gate' : 'Test gate: no verdict recorded';
     case 'gate-outcome': {
       // The outcome value itself when there is one — `blocked`,
       // `pass-with-waivers-pending` and the rest each mean something the word
@@ -647,7 +692,10 @@ export function titleFor(entry: TimelineEntry): string {
       // used to print as a dangling em dash and nothing after it.
       const verdict = gateVerdict(entry);
       if (verdict === 'unrecorded') return 'Gate outcome: no outcome recorded';
-      return `Gate outcome: ${String(p.outcome)}`;
+      // The tag already says a plain pass/fail.
+      return p.outcome === 'pass' || p.outcome === 'fail'
+        ? 'Gate outcome'
+        : `Gate outcome: ${String(p.outcome)}`;
     }
     case 'finding-raised': {
       // The payload is the finding itself (findings.ts raiseFinding), so a
@@ -915,8 +963,10 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'gate': {
+      // Same rule as the role on a Dispatched row: what the title already
+      // names is not said again.
       const checkName = GATE_CHECK_NAME[entry.eventType] ?? entry.eventType;
-      parts.push(checkName);
+      if (!titleFor(entry).toLowerCase().includes(checkName.toLowerCase())) parts.push(checkName);
       parts.push(gateCountsItem(entry.gateCounts));
       if (p.round != null) parts.push(`round ${String(p.round)}`);
       break;

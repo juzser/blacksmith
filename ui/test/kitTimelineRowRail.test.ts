@@ -34,7 +34,7 @@ describe('kit/TimelineRow.vue rail variant', () => {
   it('binds the rail class only when variant is rail, same EventKindTag/meta/chevron markup', () => {
     expect(TIMELINE_ROW).toMatch(/'bs-timeline-row--rail': variant === 'rail'/);
     expect(TIMELINE_ROW).toMatch(/<EventKindTag :kind="kind" \/>/);
-    expect(TIMELINE_ROW).toMatch(/<Tag v-if="tag" :tone="tag\.tone" variant="subtle" size="sm">/);
+    expect(TIMELINE_ROW).toMatch(/<Tag v-if="statusTag" :tone="statusTag\.tone" variant="subtle" size="sm">/);
   });
 
   it('renders the time column with RelativeTime on every variant (DS6 PR4b round 2 item 4)', () => {
@@ -72,5 +72,16 @@ describe('RunHistoryTimeline.vue rail rendering', () => {
     );
     expect(RUN_HISTORY).toMatch(/if \(run\.outcome === null\) return null;/);
     expect(RUN_HISTORY).toMatch(/runOutcomeKitTone\(run\.kind, run\.outcome\)/);
+  });
+
+  it('computes the gate status tag when no tag prop is given, never on the rail', () => {
+    expect(TIMELINE_ROW).toMatch(/gateStatusTag\(props\.entry\)/);
+    expect(TIMELINE_ROW).toMatch(/props\.variant !== 'rail'/);
+    expect(TIMELINE_ROW).toMatch(/<Tag v-if="statusTag" :tone="statusTag\.tone"/);
+    expect(TIMELINE_ROW).toMatch(/<Icon v-if="statusIcon" :icon="statusIcon"/);
+  });
+
+  it('keeps the chevron on a gate row whose meta is empty (Task/Session still show)', () => {
+    expect(TIMELINE_ROW).toMatch(/meta\.value !== '' \|\| \(kind\.value === 'gate'/);
   });
 });

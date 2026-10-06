@@ -8,6 +8,7 @@ import {
   DISPATCH_GROUP_MIN,
   type DispatchGroup,
   EVENT_KINDS,
+  gateStatusTag,
   groupByDay,
   groupByRoleMinute,
   groupDispatches,
@@ -222,7 +223,7 @@ describe('lib/timelineDisplay.ts', () => {
       titleFor(
         entry({ eventType: 'deps-check-result', payload: { ok: false, detail: 'no .bin' } }),
       ),
-    ).toBe('Dependency check (failed): no .bin');
+    ).toBe('Dependency check: no .bin');
   });
 
   // The other half of the fix that put seven free event types onto the
@@ -1053,9 +1054,9 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
   it('says "nothing to check" for a gate row whose check counted nothing, never "0 of 0"', () => {
     const e = entry({ eventType: 'artifact-check-result', payload: {} });
     (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 0, failed: 0 };
-    expect(metaFor(e)).toBe('Artifact check · nothing to check');
+    expect(metaFor(e)).toBe('nothing to check');
     (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 3, failed: 0 };
-    expect(metaFor(e)).toBe('Artifact check · 3 of 3 passed');
+    expect(metaFor(e)).toBe('3 of 3 passed');
   });
 
   it('humanizes a taskId rather than showing the raw slug (merge, no task_ids)', () => {
@@ -1351,19 +1352,19 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     // [title, meta] for an entry built from entry({ eventType }) alone --
     // empty payload, taskId null, no server-side kind/run/gateCounts.
     const expected: Record<string, [string, string]> = {
-      'schema-check-result': ['Schema check: no verdict recorded', 'Schema check'],
-      'artifact-check-result': ['Artifact check result', 'Artifact check'],
-      'commit-check-result': ['Commit check result', 'Commit check'],
-      'deps-check-result': ['Dependency check (no verdict recorded): ', 'Dependency check'],
-      'judges-outstanding': ['Judges outstanding', 'Judges outstanding'],
-      'grader-verdict': ['Grader verdict', 'Grader verdict'],
-      'budget-check-result': ['Budget check result', 'Budget check'],
+      'schema-check-result': ['Schema check: no verdict recorded', ''],
+      'artifact-check-result': ['Artifact check result', ''],
+      'commit-check-result': ['Commit check result', ''],
+      'deps-check-result': ['Dependency check (no verdict recorded): ', ''],
+      'judges-outstanding': ['Judges outstanding', ''],
+      'grader-verdict': ['Grader verdict', ''],
+      'budget-check-result': ['Budget check result', ''],
       'testgate-result': ['Test gate: no verdict recorded', 'Unit tests'],
-      'coverage-evidence': ['Coverage evidence', 'Coverage'],
-      'integration-check': ['Integration check', 'Integration check'],
-      'spec-review-recorded': ['Spec review recorded', 'Spec review'],
-      'goal-check-recorded': ['Goal check recorded', 'Goal check'],
-      'quorum-decision': ['Quorum decision', 'Quorum decision'],
+      'coverage-evidence': ['Coverage evidence', ''],
+      'integration-check': ['Integration check', ''],
+      'spec-review-recorded': ['Spec review recorded', ''],
+      'goal-check-recorded': ['Goal check recorded', ''],
+      'quorum-decision': ['Quorum decision', ''],
       'finding-raised': ['Finding raised: ', ''],
       'finding-reverified': ['Finding reverified', ''],
       'finding-suppressed': ['Finding suppressed', ''],
@@ -1373,8 +1374,8 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'waiver-granted': ['Waiver granted', 'Waiver granted'],
       'waiver-denied': ['Waiver denied', 'Waiver denied'],
       'task-waiver-approved': ['Task waiver approved', ''],
-      'gate-outcome': ['Gate outcome: no outcome recorded', 'Gate outcome'],
-      'issue-reported': ['Issue reported', 'Issue reported'],
+      'gate-outcome': ['Gate outcome: no outcome recorded', ''],
+      'issue-reported': ['Issue reported', ''],
       'plan-version-created': ['Plan v?: 0 findings cited', ''],
       'plan-version-superseded': ['Plan v? superseded', ''],
       'task-added': ['Task added: ', ''],
@@ -1637,5 +1638,102 @@ describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
 
   it('falls back to the session id when sessionTitle is empty', () => {
     expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
+  });
+});
+
+// Gate rows carry a Passed/Failed status tag (ds-spec.md §4.3), so the title
+// and meta no longer repeat the verdict word or the check name.
+describe('lib/timelineDisplay.ts gateStatusTag()', () => {
+  const passed = { tone: 'done', label: 'Passed', icon: 'CircleCheck' };
+  const failed = { tone: 'danger', label: 'Failed', icon: 'CircleX' };
+  const tag = (eventType: string, payload: Record<string, unknown>, counts?: unknown) => {
+    const e = entry({ eventType, payload });
+    if (counts !== undefined) (e as unknown as { gateCounts: unknown }).gateCounts = counts;
+    return gateStatusTag(e);
+  };
+
+  it('reads the verdict field of schema-check / testgate / deps-check / gate-outcome', () => {
+    expect(tag('schema-check-result', { valid: true })).toEqual(passed);
+    expect(tag('schema-check-result', { valid: false })).toEqual(failed);
+    expect(tag('testgate-result', { pass: true })).toEqual(passed);
+    expect(tag('deps-check-result', { ok: false })).toEqual(failed);
+    expect(tag('gate-outcome', { outcome: 'pass' })).toEqual(passed);
+    expect(tag('gate-outcome', { outcome: 'blocked' })).toEqual(failed);
+  });
+
+  it('reads the grader overall verdict', () => {
+    expect(tag('grader-verdict', { overall: 'pass' })).toEqual(passed);
+    expect(tag('grader-verdict', { overall: 'fail' })).toEqual(failed);
+  });
+
+  it('reads artifact-check ok and the failed counts', () => {
+    expect(tag('artifact-check-result', { ok: true })).toEqual(passed);
+    expect(tag('artifact-check-result', { ok: false })).toEqual(failed);
+    expect(tag('artifact-check-result', {}, { passed: 2, failed: 1 })).toEqual(failed);
+    expect(tag('artifact-check-result', { ok: true }, { passed: 2, failed: 1 })).toEqual(failed);
+    expect(tag('artifact-check-result', {})).toBeNull();
+  });
+
+  it('reads commit-check certified and integration-check pass', () => {
+    expect(tag('commit-check-result', { certified: true })).toEqual(passed);
+    expect(tag('commit-check-result', { certified: false })).toEqual(failed);
+    expect(tag('integration-check', { pass: true })).toEqual(passed);
+    expect(tag('integration-check', { pass: false })).toEqual(failed);
+  });
+
+  it('never guesses a pass: no tag when the verdict field is absent or mistyped', () => {
+    expect(tag('schema-check-result', {})).toBeNull();
+    expect(tag('testgate-result', { pass: 'false' })).toBeNull();
+    expect(tag('gate-outcome', {})).toBeNull();
+    expect(tag('commit-check-result', {})).toBeNull();
+    expect(tag('grader-verdict', {})).toBeNull();
+  });
+
+  it('has no tag for a gate type without a verdict field, or a non-gate row', () => {
+    expect(tag('budget-check-result', { status: 'checked' })).toBeNull();
+    expect(tag('judges-outstanding', {})).toBeNull();
+    expect(tag('coverage-evidence', {})).toBeNull();
+    expect(tag('user_prompt', { pass: true })).toBeNull();
+  });
+});
+
+describe('gate row title and meta without repeats', () => {
+  it('drops the verdict word from the title when a status tag shows it', () => {
+    expect(titleFor(entry({ eventType: 'schema-check-result', payload: { valid: true } }))).toBe(
+      'Schema check',
+    );
+    expect(titleFor(entry({ eventType: 'testgate-result', payload: { pass: false } }))).toBe(
+      'Test gate',
+    );
+    expect(
+      titleFor(entry({ eventType: 'deps-check-result', payload: { ok: true, detail: 'no .bin' } })),
+    ).toBe('Dependency check: no .bin');
+    expect(titleFor(entry({ eventType: 'gate-outcome', payload: { outcome: 'pass' } }))).toBe(
+      'Gate outcome',
+    );
+    expect(titleFor(entry({ eventType: 'gate-outcome', payload: { outcome: 'blocked' } }))).toBe(
+      'Gate outcome: blocked',
+    );
+    expect(
+      titleFor(
+        entry({ eventType: 'gate-outcome', payload: { outcome: 'pass-with-waivers-pending' } }),
+      ),
+    ).toBe('Gate outcome: pass-with-waivers-pending');
+  });
+
+  it('leaves out of the meta the check name the title already names', () => {
+    expect(metaFor(entry({ eventType: 'schema-check-result', payload: { valid: true } }))).toBe('');
+    expect(
+      metaFor(entry({ eventType: 'grader-verdict', payload: { overall: 'pass', round: 2 } })),
+    ).toBe('round 2');
+    const e = entry({ eventType: 'artifact-check-result', payload: { ok: true } });
+    (e as unknown as { gateCounts: unknown }).gateCounts = { passed: 3, failed: 0 };
+    expect(metaFor(e)).toBe('3 of 3 passed');
+  });
+
+  it('keeps the check name when the title does not carry it', () => {
+    expect(metaFor(entry({ eventType: 'testgate-result', payload: { pass: true } }))).toBe(
+      'Unit tests',
+    );
   });
 });
