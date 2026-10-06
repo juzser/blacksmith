@@ -54,7 +54,7 @@ describe('RoadmapPage.vue — phone branch (DS4 S4)', () => {
   });
 
   it("shows a phase-picker Select on phone, over the swimlane's own shown lanes (R4)", () => {
-    expect(SECTION).toMatch(/laneOptions\(view\.value\.regions\)/);
+    expect(SECTION).toMatch(/laneOptions\(view\.value\.regions, view\.value\.currentLane\)/);
     expect(SECTION).toMatch(/<Select\s+v-else-if="showPicker"/);
     // Phase mode only: an epic selected in this section shows EpicBlock's back link instead.
     expect(SECTION).toMatch(/!\(props\.hostsSelection && props\.selectedEpic !== null\)/);
