@@ -139,7 +139,156 @@ async function serveSessions(page: import('@playwright/test').Page) {
   );
 }
 
+// PR1 (ds8 active-sessions spec §3 "Sessions"): the unscoped running list
+// groups by project, newest group first, newest row first within a group.
+const GROUPED_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'grp-newest',
+    lastEventAt: minutesAgo(1),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-a'],
+    title: 'Newest in proj-a',
+  }),
+  session({
+    sessionId: 'grp-middle',
+    lastEventAt: minutesAgo(2),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-b'],
+    title: 'Only one in proj-b',
+  }),
+  session({
+    sessionId: 'grp-older',
+    lastEventAt: minutesAgo(3),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-a'],
+    title: 'Older in proj-a',
+  }),
+];
+
+// A session whose agents are all `live` but dispatched well outside the 4h
+// staleness window: liveAgentCount > 0, workingAgentCount 0 -- the ghost
+// case the running/finished split must now treat as quiet.
+const STALE_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'stale-only',
+    liveAgentCount: 2,
+    workingAgentCount: 0,
+    projects: ['proj-a'],
+    title: 'Stale ghost run',
+  }),
+];
+
+// A session genuinely shared across two projects (sessionsByProject lists it
+// under both), used by the fix-round tests below for the rendering and the
+// deep-link-focus behavior sessionsByProject's own unit tests cannot cover
+// (they fold data, they never mount the page).
+const MULTI_GROUP_SESSION = session({
+  sessionId: 'grp-multi',
+  lastEventAt: minutesAgo(1),
+  liveAgentCount: 1,
+  workingAgentCount: 1,
+  projects: ['proj-a', 'proj-b'],
+  title: 'Shared across two projects',
+});
+
+// Fix round (visual gap #5): a fixture that actually reaches a "No project"
+// group and 2+ stacked groups at once — the 4 original screenshots only ever
+// showed one group, so neither state was ever shot.
+const GROUPED_WITH_NO_PROJECT_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'grp-np-a',
+    lastEventAt: minutesAgo(1),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-a'],
+    title: 'Running in proj-a',
+  }),
+  session({
+    sessionId: 'grp-np-b',
+    lastEventAt: minutesAgo(2),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: ['proj-b'],
+    title: 'Running in proj-b',
+  }),
+  session({
+    sessionId: 'grp-np-none',
+    lastEventAt: minutesAgo(3),
+    liveAgentCount: 1,
+    workingAgentCount: 1,
+    projects: [],
+    title: 'Running with no project',
+  }),
+];
+
+// Fix round (visual gap #5): a finished-only fixture so the quiet copy
+// ("Nothing is active right now.") is the state the screenshot actually
+// shows, instead of always landing on a running row.
+const QUIET_SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'quiet-finished',
+    liveAgentCount: 0,
+    workingAgentCount: 0,
+    projects: ['proj-a'],
+    title: 'Finished earlier',
+  }),
+];
+
 test.describe('Sessions', () => {
+  test('groups the unscoped running list by project, newest group and row first', async ({
+    page,
+  }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: GROUPED_SESSIONS }));
+    await page.goto('/sessions');
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
+    const titles = await page.locator('.bs-sessionrow__title').allTextContents();
+    expect(titles).toEqual(['Newest in proj-a', 'Older in proj-a', 'Only one in proj-b']);
+  });
+
+  // Fix round item 1 (reviewer S3): sessionsByProject's own unit tests prove
+  // the fold lists a multi-project session under every project it belongs
+  // to, but nothing proved the page itself renders both copies. It does.
+  test('a session belonging to two projects renders a row under each group header', async ({
+    page,
+  }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: [MULTI_GROUP_SESSION] }));
+    await page.goto('/sessions');
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
+    await expect(
+      page.locator('.bs-sessionrow__title', { hasText: 'Shared across two projects' }),
+    ).toHaveCount(2);
+  });
+
+  // Fix round item 2 (reviewer S3): rowRefs used to be keyed by session id
+  // alone, so the second (later-rendered) group's copy of a shared session
+  // silently evicted the first group's entry and a deep link could focus a
+  // row that is not even the topmost one. groupRowRef makes the first
+  // rendered group's row the one and only entry, deterministically.
+  test('a deep link to a two-project session focuses the row in the first group', async ({
+    page,
+  }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: [MULTI_GROUP_SESSION] }));
+    await page.goto('/sessions?session=grp-multi');
+    const lists = page.locator('.bs-sessions__list');
+    await expect(lists).toHaveCount(2);
+    await expect(page.locator(':focus')).toHaveCount(1);
+    // The focused element sits inside the FIRST group's list, not the second.
+    await expect(lists.first().locator(':focus')).toHaveCount(1);
+    await expect(lists.nth(1).locator(':focus')).toHaveCount(0);
+  });
+
+  test('a session with live-but-stale agents lands in finished, not running', async ({ page }) => {
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: STALE_SESSIONS }));
+    await page.goto('/sessions');
+    await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Show 1 finished run' })).toBeVisible();
+    await page.getByRole('button', { name: 'Show 1 finished run' }).click();
+    await expect(page.getByText('Stale ghost run')).toBeVisible();
+  });
+
   test('lists running sessions and offers a count of finished ones', async ({ page }) => {
     await serveSessions(page);
     await page.goto('/sessions');
@@ -321,6 +470,38 @@ test.describe('Sessions', () => {
         await expect(page.locator('h1')).toHaveText('Sessions');
         await settleForShot(page, page.locator('.bs-agentblock').first());
         await shoot(page, `sessions-${vpName}-${theme}`);
+      });
+
+      // Fix round (visual gap #5): the original 4 shots never showed 2+
+      // stacked project groups or the "No project" fallback group — both new
+      // behavior this diff introduces (active-sessions-design.md §3).
+      test(`screenshot ${vpName}/${theme}/grouped-with-no-project`, async ({ page }) => {
+        await page.route('**/api/sessions*', (route) =>
+          route.fulfill({ json: GROUPED_WITH_NO_PROJECT_SESSIONS }),
+        );
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/sessions');
+        await expect(page.getByRole('heading', { level: 2 })).toHaveText([
+          'proj-a',
+          'proj-b',
+          'No project',
+        ]);
+        await settleForShot(page, page.locator('.bs-sessionrow').first());
+        await shoot(page, `sessions-${vpName}-${theme}-grouped-with-no-project`);
+      });
+
+      // Fix round (visual gap #5): the quiet copy ("Nothing is active right
+      // now.") was never shot either — every original fixture always had a
+      // running row.
+      test(`screenshot ${vpName}/${theme}/quiet`, async ({ page }) => {
+        await page.route('**/api/sessions*', (route) => route.fulfill({ json: QUIET_SESSIONS }));
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/sessions');
+        await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+        await settleForShot(page, page.getByText('Nothing is active right now.'));
+        await shoot(page, `sessions-${vpName}-${theme}-quiet`);
       });
     }
   }

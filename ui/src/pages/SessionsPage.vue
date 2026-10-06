@@ -15,7 +15,7 @@
 // selects an id this page's own history list already knows about.
 import { Play, RefreshCw } from '@lucide/vue';
 import { nextTick, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import AgentBlock from '../components/kit/AgentBlock.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
@@ -35,7 +35,12 @@ import {
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { pluralize } from '../lib/format.js';
-import { isStaleResponse, selectedSessionFromQuery } from '../lib/sessionsSelection.js';
+import {
+  isSessionActive,
+  isStaleResponse,
+  selectedSessionFromQuery,
+  sessionsByProject,
+} from '../lib/sessionsSelection.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -57,8 +62,13 @@ const agentsError = ref<string | null>(null);
 
 const showFinished = ref(false);
 
-const running = () => sessions.value.filter((s) => s.liveAgentCount > 0);
-const finished = () => sessions.value.filter((s) => s.liveAgentCount === 0);
+const running = () => sessions.value.filter(isSessionActive);
+const finished = () => sessions.value.filter((s) => !isSessionActive(s));
+
+// Unscoped (no project in context, SessionsPage never pre-selects one):
+// group the running list by project, newest group first. Scoped to one
+// project, every running row already belongs to it, so no header renders.
+const runningGroups = () => sessionsByProject(running());
 
 // Gates the poll: a selected run with nothing left live has nothing left to
 // learn by asking again every 5s.
@@ -104,6 +114,35 @@ const rowRefs = new Map<string, HTMLElement>();
 function setRowRef(id: string, el: Element | null) {
   if (el instanceof HTMLElement) rowRefs.set(id, el);
   else rowRefs.delete(id);
+}
+
+// The unscoped running list repeats a session under every project it
+// belongs to, so its <li> renders once per group and each one binds its own
+// ref callback for the SAME session id. A plain id-keyed setRowRef (above)
+// lets whichever group renders last overwrite the one rendered first, so a
+// deep link's scroll/focus target becomes non-deterministic. groupRowRef
+// gives each (group, session) slot its own stable closure — reused across
+// re-renders via groupRowSetters — that remembers the element IT mounted, so
+// the first group to mount a given session wins rowRefs and a later
+// group's own unmount can never evict an earlier group's live entry.
+const groupRowSetters = new Map<string, (el: Element | null) => void>();
+function groupRowRef(groupKey: string, id: string): (el: Element | null) => void {
+  const compositeKey = `${groupKey}\u0000${id}`;
+  const existing = groupRowSetters.get(compositeKey);
+  if (existing) return existing;
+  let mine: HTMLElement | null = null;
+  const setter = (el: Element | null) => {
+    if (el instanceof HTMLElement) {
+      mine = el;
+      if (!rowRefs.has(id)) rowRefs.set(id, el);
+    } else {
+      if (mine && rowRefs.get(id) === mine) rowRefs.delete(id);
+      mine = null;
+      groupRowSetters.delete(compositeKey);
+    }
+  };
+  groupRowSetters.set(compositeKey, setter);
+  return setter;
 }
 
 function selectSession(id: string) {
@@ -181,7 +220,40 @@ function refresh() {
     </template>
 
     <template v-else>
-      <ul class="bs-sessions__list" role="list">
+      <template v-if="project === undefined">
+        <section
+          v-for="(group, i) in runningGroups()"
+          :key="group.project"
+          class="bs-sessions__group"
+          :aria-labelledby="`sessions-group-title-${i}`"
+        >
+          <h2 :id="`sessions-group-title-${i}`" class="bs-section-title bs-sessions__group-title">
+            <RouterLink
+              v-if="group.project"
+              :to="{ query: { ...route.query, project: group.project } }"
+              class="bs-btn bs-btn--link bs-btn--sm"
+            >
+              {{ group.project }}
+            </RouterLink>
+            <template v-else>No project</template>
+          </h2>
+          <ul class="bs-sessions__list" role="list">
+            <li
+              v-for="s in group.sessions"
+              :key="s.sessionId"
+              :ref="(el) => groupRowRef(group.project, s.sessionId)(el as Element | null)"
+            >
+              <SessionRow
+                :session="s"
+                clickable
+                :selected="selectedId === s.sessionId"
+                @click="selectSession(s.sessionId)"
+              />
+            </li>
+          </ul>
+        </section>
+      </template>
+      <ul v-else class="bs-sessions__list" role="list">
         <li v-for="s in running()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
           <SessionRow
             :session="s"
@@ -192,7 +264,7 @@ function refresh() {
         </li>
       </ul>
       <p v-if="running().length === 0" class="bs-sessions__quiet">
-        No sessions are running right now.
+        Nothing is active right now.
       </p>
 
       <Button

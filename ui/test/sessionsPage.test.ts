@@ -26,10 +26,17 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value\)/);
   });
 
-  it('separates running and finished runs behind a toggle', () => {
+  it('separates running and finished runs behind a toggle, on workingAgentCount not liveAgentCount', () => {
     expect(PAGE).toMatch(/showFinished/);
-    expect(PAGE).toMatch(/s\.liveAgentCount > 0/);
-    expect(PAGE).toMatch(/s\.liveAgentCount === 0/);
+    expect(PAGE).toMatch(/filter\(isSessionActive\)/);
+    expect(PAGE).toMatch(/filter\(\(s\) => !isSessionActive\(s\)\)/);
+    expect(PAGE).not.toMatch(/liveAgentCount/);
+  });
+
+  it('groups the unscoped running list by project through the pure fold', () => {
+    expect(PAGE).toMatch(/from '\.\.\/lib\/sessionsSelection\.js'/);
+    expect(PAGE).toMatch(/sessionsByProject/);
+    expect(PAGE).toMatch(/project === undefined/);
   });
 
   it('loads one run of agents through fetchSessionAgents and renders one AgentBlock per role', () => {
@@ -52,9 +59,9 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
   });
 
-  it('marks the open run selected in both the running and finished lists', () => {
+  it('marks the open run selected in the grouped, scoped and finished lists', () => {
     const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
-    expect(matches?.length).toBe(2);
+    expect(matches?.length).toBe(3);
   });
 
   it('moves focus to the deep-linked row after scrolling it into view', () => {
