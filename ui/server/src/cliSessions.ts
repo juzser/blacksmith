@@ -8,10 +8,15 @@
 //   same directory holds `<pid>.<hash>.key` files, which are secrets, so the
 //   directory listing is filtered by name BEFORE any open and a key file is
 //   never opened, stat'ed or echoed.
-// - `<configDir>/projects/<cwd, "/" -> "-">/<sessionId>.jsonl`, the transcript,
+// - `<configDir>/projects/<cwd, non-alphanumerics -> "-">/<sessionId>.jsonl`, the transcript,
 //   read only in bounded slices (tail 256 KB, one retry at 1 MB, head 64 KB,
 //   never a whole-file read) behind a (path, size, mtime) cache, so an
 //   unchanged session costs one stat. Nothing from a transcript is logged.
+// - `<configDir>/history.jsonl`, the CLI's prompt history, for the operator's
+//   last prompt per session once it scrolled out of the transcript tail. Tail
+//   1 MB through the same bounded read, same cache; only `display` and
+//   `timestamp` are ever kept (never `pastedContents` or `project`). A missing
+//   or unreadable file is not an error.
 // - the projection, via `cliSessionLinks` (events_raw.cli_session_id): the
 //   stamp events.ts puts on every write made inside a CLI session.
 //
@@ -34,15 +39,14 @@ import { constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import * as fsp from 'node:fs/promises';
 import path from 'node:path';
+import { isWorkingAt } from '../../../factory/orchestrator/dist/agents-registry.js';
 import type { DbHandle } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
   type CliSessionLink,
   cliSessionLinks,
-  kanban,
   projectedLineage,
   runningSessions,
-  sessionAgents,
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
@@ -83,9 +87,13 @@ export interface LinkedEpic {
   factorySessionIds: string[];
   /** The newest event this CLI session wrote into any of `factorySessionIds`. */
   lastEventAt: string;
-  currentWave: { sessionId: string; taskIds: string[]; counts: StatusCounts } | null;
+  /** Waves with a task that is not closed yet, newest admitted first. */
+  openWaves: { sessionId: string; admittedAt: string; taskIds: string[]; counts: StatusCounts }[];
+  /** Plan tasks only: dropped re-plan leftovers and escalation follow-ups are not counted. */
   progress: StatusCounts | null;
-  workingAgents: { role: string; taskId: string | null }[];
+  /** Escalation tasks of the epic that are neither done nor superseded; null with no epic. */
+  followUps: number | null;
+  workingAgents: { role: string; taskId: string | null; since: string }[];
 }
 
 export interface CliSessionCard {
@@ -95,10 +103,18 @@ export interface CliSessionCard {
   nameSource: string | null;
   startedAt: string | null;
   cwdLabel: string;
+  /** The first linked epic's project; null when unlinked. */
+  project: string | null;
   inScopeBy: 'cwd' | 'stamped' | 'heuristic';
   status: CliSessionStatus;
   statusSince: string | null;
-  doingNow: { prompt: string | null; assistant: string | null; lastTool: string | null } | null;
+  doingNow: {
+    prompt: string | null;
+    /** When the operator typed `prompt`, from the prompt history; null when unknown. */
+    promptAt: string | null;
+    assistant: string | null;
+    lastTool: string | null;
+  } | null;
   next: string | null;
   transcript: 'ok' | 'missing' | 'tail-empty' | 'unreadable';
   linked: { epics: LinkedEpic[] } | null;
@@ -138,6 +154,7 @@ const SESSION_FILE_MAX = 64 * 1024;
 const TAIL_BYTES = 256 * 1024;
 const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
+const HISTORY_BYTES = 1024 * 1024;
 const TEXT_MAX = 280;
 const VERSION_MAX = 32;
 const KNOWN_VERSION = /^2\.1(\.|$)/;
@@ -260,6 +277,42 @@ function operatorText(raw: string): string | null {
   return clean(trimmed) || null;
 }
 
+const LIST_OR_QUOTE = /^\s*(?:(?:[-*+]|\d+[.)])(?:\s|$)|[#|>])/;
+const BOLD_ONLY = /^\s*(\*\*|__)((?:(?!\1).)+)\1\s*:?\s*$/;
+
+/**
+ * The last paragraph of an assistant message that reads as prose. Fenced code
+ * never counts (a fence also ends the paragraph before it); a list item,
+ * heading, table row, quote or a bold-only label line is skipped.
+ */
+function lastProse(body: string): string | null {
+  const paragraphs: string[][] = [];
+  let cur: string[] = [];
+  let fence = false;
+  const flush = (): void => {
+    if (cur.length > 0) paragraphs.push(cur);
+    cur = [];
+  };
+  for (const line of body.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fence = !fence;
+      flush();
+    } else if (fence) {
+    } else if (line.trim() === '') {
+      flush();
+    } else {
+      cur.push(line);
+    }
+  }
+  flush();
+  for (let i = paragraphs.length - 1; i >= 0; i -= 1) {
+    const first = paragraphs[i]?.[0] ?? '';
+    if (LIST_OR_QUOTE.test(first) || BOLD_ONLY.test(first)) continue;
+    return clean((paragraphs[i] ?? []).join('\n')) || null;
+  }
+  return null;
+}
+
 interface Analysis {
   meaningful: boolean;
   last: 'user' | 'tool_result' | 'interrupt' | 'assistant_text' | 'assistant_tool' | null;
@@ -314,8 +367,7 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
           a.last = 'assistant_text';
           const body = b.text ?? '';
           a.assistant = clean(body);
-          const paragraphs = body.split(/\n\s*\n/).filter((p) => p.trim() !== '');
-          a.next = clean(paragraphs[paragraphs.length - 1] ?? '') || null;
+          a.next = lastProse(body);
         } else if (b.type === 'tool_use' && typeof b.name === 'string') {
           a.meaningful = true;
           a.last = 'assistant_tool';
@@ -478,7 +530,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     const primary = path.join(
       configDir,
       'projects',
-      e.cwd.replace(/\//g, '-'),
+      e.cwd.replace(/[^A-Za-z0-9]/g, '-'),
       `${e.cliSessionId}.jsonl`,
     );
     for (const candidate of [cached, primary]) {
@@ -515,6 +567,37 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return null;
   }
 
+  /** The operator's last prompt per session, from the CLI's prompt history. */
+  type Prompt = { text: string; at: string | null };
+  let historyCache: { size: number; mtimeMs: number; byId: Map<string, Prompt> } | null = null;
+  /** Last prompt seen per session, kept for when it is in neither the history nor the tail. */
+  const lastPrompt = new Map<string, Prompt>();
+
+  async function readHistory(configDir: string): Promise<Map<string, Prompt>> {
+    const file = path.join(configDir, 'history.jsonl');
+    try {
+      const st = await fs.stat(file);
+      if (historyCache && historyCache.size === st.size && historyCache.mtimeMs === st.mtimeMs)
+        return historyCache.byId;
+      const pos = Math.max(0, st.size - HISTORY_BYTES);
+      let body = (await readSlice(fs, file, pos, Math.min(HISTORY_BYTES, st.size))).toString(
+        'utf8',
+      );
+      if (pos > 0) body = body.slice(body.indexOf('\n') + 1);
+      const byId = new Map<string, Prompt>();
+      for (const j of parseLines(body)) {
+        // Only `display` and `timestamp` are read: nothing else in an entry is kept.
+        if (typeof j.sessionId !== 'string' || typeof j.display !== 'string') continue;
+        const text = clean(j.display);
+        if (text !== '') byId.set(j.sessionId, { text, at: isoOrNull(j.timestamp) });
+      }
+      historyCache = { size: st.size, mtimeMs: st.mtimeMs, byId };
+      return byId;
+    } catch {
+      return new Map();
+    }
+  }
+
   /** The registry file each remembered session was last parsed from. */
   const pidFileOf = new Map<string, number>();
 
@@ -527,7 +610,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const [id, pid] of pidFileOf) {
       if (!live.has(id) && !unparsedPids.has(pid)) pidFileOf.delete(id);
     }
-    for (const m of [sticky, transcriptPaths, missUntil]) {
+    for (const m of [sticky, transcriptPaths, missUntil, lastPrompt]) {
       for (const id of m.keys()) if (!pidFileOf.has(id)) m.delete(id);
     }
     const files = new Set(transcriptPaths.values());
@@ -614,15 +697,16 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       const waves = (
         handle.sqlite
           .prepare(
-            `select session_id, payload from events_raw where event_type = 'wave-admitted' and session_id in (${marks}) order by ts, event_id`,
+            `select session_id, ts, payload from events_raw where event_type = 'wave-admitted' and session_id in (${marks}) order by ts, event_id`,
           )
-          .all(...g.lineage) as { session_id: string; payload: string }[]
+          .all(...g.lineage) as { session_id: string; ts: string; payload: string }[]
       ).flatMap((r) => {
         try {
           const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
           return [
             {
               sessionId: r.session_id,
+              admittedAt: r.ts,
               epicId: typeof p.epic_id === 'string' ? p.epic_id : null,
               taskIds: Array.isArray(p.task_ids)
                 ? p.task_ids.filter((t): t is string => typeof t === 'string')
@@ -649,19 +733,57 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         );
 
       let progress: StatusCounts | null = null;
+      let followUps: number | null = null;
       let project: string | null = null;
-      let currentWave: LinkedEpic['currentWave'] = null;
+      const openWaves: LinkedEpic['openWaves'] = [];
+      const workingAgents: LinkedEpic['workingAgents'] = [];
+      // The epic's own session: the earliest one in the lineage that belongs
+      // to THIS epic, since a lineage continued from an earlier epic is rooted
+      // in that one.
+      let ownerId = rootId;
       if (epicId !== null) {
-        const taskRows = kanban(handle.db, epicId, {}, { nowIso: scopeNow }).flatMap(
-          (c) => c.tasks,
-        );
+        const taskRows = (
+          handle.sqlite
+            .prepare(
+              'select task_id, task_status, plan_version, origin, project from tasks where epic_id = ?',
+            )
+            .all(epicId) as {
+            task_id: string;
+            task_status: string;
+            plan_version: number | null;
+            origin: string | null;
+            project: string | null;
+          }[]
+        ).map((r) => ({
+          taskId: r.task_id,
+          taskStatus: r.task_status,
+          planVersion: r.plan_version,
+          origin: r.origin,
+          project: r.project,
+        }));
         const fold = (rows: { taskStatus: string }[]): StatusCounts => {
           const c: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
           for (const r of rows) c[statusBucketForTaskStatus(r.taskStatus)] += 1;
           return c;
         };
-        progress = fold(taskRows);
-        project = taskRows.find((t) => t.project !== null)?.project ?? null;
+        const isDoneOrSuperseded = (t: { taskStatus: string }): boolean => {
+          const b = statusBucketForTaskStatus(t.taskStatus);
+          return b === 'done' || b === 'superseded';
+        };
+        // Plan tasks only: not an escalation follow-up, and either on the
+        // epic's newest plan version or merged work from an older one.
+        const planRows = taskRows.filter((t) => t.origin !== 'escalation');
+        const newest = planRows.reduce<number | null>(
+          (m, t) =>
+            t.planVersion !== null && (m === null || t.planVersion > m) ? t.planVersion : m,
+          null,
+        );
+        const planTasks = planRows.filter((t) => t.planVersion === newest || isDoneOrSuperseded(t));
+        progress = fold(planTasks);
+        followUps = taskRows.filter(
+          (t) => t.origin === 'escalation' && !isDoneOrSuperseded(t),
+        ).length;
+        project = planTasks.find((t) => t.project !== null)?.project ?? null;
         // Task ids are compared the way the rest of the read side compares
         // them (taskIdsMatch): a wave written with bare ids still matches
         // the qualified ids its tasks carry, and the other way round.
@@ -682,41 +804,92 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             return [];
           }
         });
-        const isMerged = (t: string): boolean => merged.some((m) => taskIdsMatch(m, t));
-        const open = waves
-          .filter((w) => w.epicId === epicId && w.taskIds.some((t) => !isMerged(t)))
-          .at(-1);
-        if (open) {
-          const byId = new Map(taskRows.map((t) => [t.taskId, t]));
-          const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
-          currentWave = {
-            sessionId: open.sessionId,
-            taskIds: open.taskIds,
-            counts: fold(open.taskIds.flatMap((t) => row(t) ?? [])),
-          };
-        }
-      }
-
-      const workingAgents: LinkedEpic['workingAgents'] = [];
-      for (const sid of g.lineage) {
-        for (const role of sessionAgents(handle.db, sid, { nowIso: scopeNow }).roles) {
-          for (const ag of role.agents) {
-            if (ag.status === 'live')
-              workingAgents.push({ role: role.agentRole, taskId: ag.taskId });
+        const byId = new Map(taskRows.map((t) => [t.taskId, t]));
+        const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
+        // Closed: merged in a wave, or its row says done or superseded. A task
+        // with neither a row nor a merge is not closed.
+        const isClosed = (t: string): boolean => {
+          if (merged.some((m) => taskIdsMatch(m, t))) return true;
+          const r = row(t);
+          return r !== undefined && isDoneOrSuperseded(r);
+        };
+        // A task belongs to the LAST wave that admitted it, so a re-run wave
+        // takes over what it re-admits.
+        const epicWaves = waves.filter((w) => w.epicId === epicId);
+        const claimed: string[] = [];
+        const open = new Set<(typeof epicWaves)[number]>();
+        for (const w of [...epicWaves].reverse()) {
+          for (const t of w.taskIds) {
+            if (claimed.some((c) => taskIdsMatch(c, t))) continue;
+            claimed.push(t);
+            if (!isClosed(t)) open.add(w);
           }
         }
+        for (const w of [...epicWaves].reverse()) {
+          if (!open.has(w)) continue;
+          openWaves.push({
+            sessionId: w.sessionId,
+            admittedAt: w.admittedAt,
+            taskIds: w.taskIds,
+            counts: fold(w.taskIds.flatMap((t) => row(t) ?? [])),
+          });
+        }
+
+        const owners = new Set<string>([
+          ...epicWaves.map((w) => w.sessionId),
+          ...(
+            handle.sqlite
+              .prepare(
+                `select session_id as s from tasks where epic_id = ? and session_id in (${marks}) union select session_id from agents where epic_id = ? and session_id in (${marks})`,
+              )
+              .all(epicId, ...g.lineage, epicId, ...g.lineage) as { s: string }[]
+          ).map((r) => r.s),
+        ]);
+        ownerId = g.lineage.find((id) => owners.has(id)) ?? rootId;
+
+        // Really working now: live, dispatched inside the same window the rest
+        // of the read side calls "working", on this epic, on a task that is
+        // not closed. One entry per (role, task), the newest dispatch.
+        const newestAgent = new Map<string, LinkedEpic['workingAgents'][number]>();
+        for (const ag of handle.sqlite
+          .prepare(
+            `select agent_role, task_id, epic_id, dispatched_at from agents where status = 'live' and session_id in (${marks})`,
+          )
+          .all(...g.lineage) as {
+          agent_role: string;
+          task_id: string | null;
+          epic_id: string | null;
+          dispatched_at: string;
+        }[]) {
+          if (!isWorkingAt(ag.dispatched_at, scopeNow)) continue;
+          const taskId = ag.task_id;
+          const onEpic =
+            ag.epic_id !== null
+              ? ag.epic_id === epicId
+              : taskId !== null && taskRows.some((r) => taskIdsMatch(r.taskId, taskId));
+          if (!onEpic || (taskId !== null && isClosed(taskId))) continue;
+          const key = JSON.stringify([ag.agent_role, taskId]);
+          const seen = newestAgent.get(key);
+          if (seen === undefined || ag.dispatched_at > seen.since)
+            newestAgent.set(key, { role: ag.agent_role, taskId, since: ag.dispatched_at });
+        }
+        workingAgents.push(
+          ...[...newestAgent.values()].sort((a, b) => b.since.localeCompare(a.since)),
+        );
       }
 
       out.push({
-        rootSessionId: rootId,
+        rootSessionId: ownerId,
         epicId,
         project,
         title:
-          runningSessions(handle.db, { sessionId: rootId }, { nowIso: scopeNow })[0]?.title ?? null,
+          runningSessions(handle.db, { sessionId: ownerId }, { nowIso: scopeNow })[0]?.title ??
+          null,
         factorySessionIds: [...new Set(g.ids)].sort(),
         lastEventAt: g.lastEventAt,
-        currentWave,
+        openWaves,
         progress,
+        followUps,
         workingAgents,
       });
     }
@@ -800,6 +973,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const l of links)
       factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l]);
 
+    const history = await readHistory(deps.configDir);
     const cards: CliSessionCard[] = [];
     for (const e of entries) {
       const cwd = await real(e.cwd);
@@ -816,6 +990,14 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       }
       const a = t.state === 'ok' ? t.analysis : null;
       const ids = factoryBy.get(e.cliSessionId);
+      const linked = handle && ids ? { epics: linkEpics(handle, ids, readAt) } : null;
+      const hist = history.get(e.cliSessionId);
+      const prompt: Prompt | null = hist
+        ? hist
+        : a?.prompt != null
+          ? { text: a.prompt, at: null }
+          : (lastPrompt.get(e.cliSessionId) ?? null);
+      if (prompt !== null) lastPrompt.set(e.cliSessionId, prompt);
       cards.push({
         cliSessionId: e.cliSessionId,
         pid: e.pid,
@@ -823,13 +1005,22 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         nameSource: e.nameSource,
         startedAt: e.startedAt,
         cwdLabel: labelFor(cwd, hit),
+        project: linked?.epics[0]?.project ?? null,
         inScopeBy: by,
         status: statusOf(e, t),
         statusSince: e.statusSince,
-        doingNow: a ? { prompt: a.prompt, assistant: a.assistant, lastTool: a.lastTool } : null,
+        doingNow:
+          a || prompt
+            ? {
+                prompt: prompt?.text ?? null,
+                promptAt: prompt?.at ?? null,
+                assistant: a?.assistant ?? null,
+                lastTool: a?.lastTool ?? null,
+              }
+            : null,
         next: a?.next ?? null,
         transcript: t.state,
-        linked: handle && ids ? { epics: linkEpics(handle, ids, readAt) } : null,
+        linked,
         parseIssues: e.parseIssues,
       });
     }

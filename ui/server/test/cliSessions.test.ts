@@ -51,6 +51,8 @@ const toolResult = (id: string) => ({
   type: 'user',
   message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] },
 });
+/** The CLI's name for a cwd's transcript directory. */
+const slug = (cwd: string) => cwd.replace(/[^A-Za-z0-9]/g, '-');
 const jsonl = (entries: unknown[]) => `${entries.map((e) => JSON.stringify(e)).join('\n')}\n`;
 
 describe('cliSessions reader', () => {
@@ -108,7 +110,7 @@ describe('cliSessions reader', () => {
     content: string,
     encode = true,
   ): Promise<string> {
-    const dir = path.join(config, 'projects', encode ? cwd.replace(/\//g, '-') : '-wrong-dir');
+    const dir = path.join(config, 'projects', encode ? slug(cwd) : '-wrong-dir');
     await mkdir(dir, { recursive: true });
     const file = path.join(dir, `${sid}.jsonl`);
     await writeFile(file, content);
@@ -179,6 +181,7 @@ describe('cliSessions reader', () => {
       expect(s.status).toBe('waiting_operator');
       expect(s.doingNow).toEqual({
         prompt: 'fix the bug',
+        promptAt: null,
         assistant: 'Done. Shall I open the PR?',
         lastTool: 'Bash',
       });
@@ -605,7 +608,7 @@ describe('cliSessions reader', () => {
         execFileSync('mkfifo', [regFifo]);
         alive.add(170);
         await session(171, { sessionId: SID_B, status: 'idle' });
-        const dir = path.join(config, 'projects', root.replace(/\//g, '-'));
+        const dir = path.join(config, 'projects', slug(root));
         await mkdir(dir, { recursive: true });
         const tFifo = path.join(dir, `${SID_B}.jsonl`);
         execFileSync('mkfifo', [tFifo]);
@@ -655,7 +658,7 @@ describe('cliSessions reader', () => {
       await session(173, { sessionId: SID_B, status: 'idle' });
       const decoyTranscript = path.join(tmp, 'decoy.jsonl');
       await writeFile(decoyTranscript, jsonl([user(LEAK), asst(text(LEAK))]));
-      const dir = path.join(config, 'projects', root.replace(/\//g, '-'));
+      const dir = path.join(config, 'projects', slug(root));
       await mkdir(dir, { recursive: true });
       await symlink(decoyTranscript, path.join(dir, `${SID_B}.jsonl`));
 
@@ -743,9 +746,10 @@ describe('cliSessions reader', () => {
         expect(s.inScopeBy).toBe('stamped');
         const epic = s.linked?.epics[0];
         expect(epic).toMatchObject({ epicId: EPIC_ID, factorySessionIds: [SESSION_ID] });
-        expect(epic?.currentWave?.sessionId).toBe(SESSION_ID);
-        expect(epic?.currentWave?.taskIds).toHaveLength(4);
-        expect(epic?.currentWave?.counts.done).toBeGreaterThanOrEqual(1);
+        const wave = epic?.openWaves[0];
+        expect(wave?.sessionId).toBe(SESSION_ID);
+        expect(wave?.taskIds).toHaveLength(4);
+        expect(wave?.counts.done).toBeGreaterThanOrEqual(1);
         expect(epic?.progress).toMatchObject({
           done: expect.any(Number),
           todo: expect.any(Number),
@@ -798,7 +802,7 @@ describe('cliSessions reader', () => {
       const add = async (
         eventType: string,
         payload: Record<string, unknown>,
-        extra: { taskId?: string; actor?: string } = {},
+        extra: { taskId?: string; actor?: string; project?: string } = {},
       ): Promise<void> => {
         parent = (
           await appendEvent(
@@ -810,6 +814,7 @@ describe('cliSessions reader', () => {
               causal_parent: parent,
               payload,
               ...(extra.taskId ? { task_id: extra.taskId } : {}),
+              ...(extra.project ? { project: extra.project } : {}),
             },
             opts,
           )
@@ -818,7 +823,12 @@ describe('cliSessions reader', () => {
       return {
         add,
         last: () => parent,
-        addTask: (epicId: string, taskId: string) =>
+        addTask: (
+          epicId: string,
+          taskId: string,
+          over: Record<string, unknown> = {},
+          project?: string,
+        ) =>
           add(
             'task-added',
             {
@@ -832,10 +842,11 @@ describe('cliSessions reader', () => {
               summary: 'Does the thing.',
               claims: ['src/thing.ts'],
               budget_tokens: 1000,
+              ...over,
             },
-            { taskId, actor: 'planner' },
+            { taskId, actor: 'planner', ...(project ? { project } : {}) },
           ),
-        dispatch: (taskId: string) =>
+        dispatch: (taskId: string | null, over: Record<string, unknown> = {}) =>
           add(
             'dispatch_decision',
             {
@@ -845,18 +856,22 @@ describe('cliSessions reader', () => {
               model: 'claude-sonnet-5',
               spec_ref: 'specs/thing.json',
               reason: 'implement the thing',
+              ...over,
             },
-            { taskId, actor: 'planner' },
+            { actor: 'planner', ...(taskId ? { taskId } : {}) },
           ),
       };
     }
 
-    async function linkedEpics(pid: number, cli: string) {
+    async function linkedEpics(pid: number, cli: string, nowIso?: () => string) {
       await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(tmp, 'none.md') });
       await session(pid, { sessionId: cli, cwd: outside });
       const handle = openDb(dbPath, {});
       try {
-        return (await reader().read(handle)).sessions[0]?.linked?.epics ?? [];
+        // Events are stamped with the real clock, so the read clock is real too
+        // unless a test asks for another.
+        const over = { nowIso: nowIso ?? (() => new Date().toISOString()) };
+        return (await reader(over).read(handle)).sessions[0]?.linked?.epics ?? [];
       } finally {
         handle.sqlite.close();
       }
@@ -884,12 +899,15 @@ describe('cliSessions reader', () => {
         epicId: 'epic-9',
         factorySessionIds: ['sess-a-wave1', 'sess-root'],
       });
-      expect(epic?.currentWave).toMatchObject({
+      expect(epic?.openWaves).toHaveLength(1);
+      expect(epic?.openWaves[0]).toMatchObject({
         sessionId: 'sess-a-wave2',
         taskIds: ['epic-9/task-2'],
       });
-      expect(total(epic?.currentWave?.counts)).toBe(1);
-      expect(epic?.workingAgents).toEqual([{ role: 'coder', taskId: 'epic-9/task-2' }]);
+      expect(total(epic?.openWaves[0]?.counts)).toBe(1);
+      expect(epic?.workingAgents).toEqual([
+        { role: 'coder', taskId: 'epic-9/task-2', since: expect.any(String) },
+      ]);
     });
 
     it('orders the epics one CLI session drove newest first, each with its last event time', async () => {
@@ -906,7 +924,7 @@ describe('cliSessions reader', () => {
       expect(epics[1]?.lastEventAt).toBe(await lastTs('sess-e1'));
     });
 
-    it('does not report a wave merged under bare task ids as the current wave', async () => {
+    it('does not report a wave merged under bare task ids as open', async () => {
       const root = await factorySession('sess-q', SID_B);
       await root.addTask('epic-6', 'epic-6/task-1');
       await root.add('wave-admitted', { epic_id: 'epic-6', task_ids: ['epic-6/task-1'] });
@@ -914,7 +932,7 @@ describe('cliSessions reader', () => {
 
       const [epic] = await linkedEpics(162, SID_B);
       expect(epic?.epicId).toBe('epic-6');
-      expect(epic?.currentWave).toBeNull();
+      expect(epic?.openWaves).toEqual([]);
     });
 
     it('counts a wave admitted under bare task ids against its qualified tasks', async () => {
@@ -924,8 +942,298 @@ describe('cliSessions reader', () => {
       await root.add('wave-admitted', { epic_id: 'epic-5', task_ids: ['task-1', 'task-2'] });
 
       const [epic] = await linkedEpics(163, SID_B);
-      expect(epic?.currentWave?.taskIds).toEqual(['task-1', 'task-2']);
-      expect(total(epic?.currentWave?.counts)).toBe(2);
+      expect(epic?.openWaves[0]?.taskIds).toEqual(['task-1', 'task-2']);
+      expect(total(epic?.openWaves[0]?.counts)).toBe(2);
+    });
+
+    it('lists every open wave newest first, closing a wave only when all its tasks are closed', async () => {
+      const root = await factorySession('sess-ow', SID_B);
+      for (const n of [1, 2, 3, 4]) await root.addTask('epic-4', `epic-4/task-${n}`);
+      await root.add('wave-admitted', {
+        epic_id: 'epic-4',
+        task_ids: ['epic-4/task-1', 'epic-4/task-2'],
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      await root.add('wave-admitted', { epic_id: 'epic-4', task_ids: ['epic-4/task-3'] });
+      await new Promise((r) => setTimeout(r, 5));
+      // A re-run wave re-admits task-3 and takes it over from the wave before.
+      await root.add('wave-admitted', {
+        epic_id: 'epic-4',
+        task_ids: ['epic-4/task-3', 'epic-4/task-4'],
+      });
+      await root.add('wave-merged', { epic_id: 'epic-4', task_ids: ['epic-4/task-1'] });
+
+      const [epic] = await linkedEpics(164, SID_B);
+      // wave 1 still owns task-2 (open); wave 2 owns nothing, task-3 moved to wave 3.
+      expect(epic?.openWaves.map((w) => w.taskIds)).toEqual([
+        ['epic-4/task-3', 'epic-4/task-4'],
+        ['epic-4/task-1', 'epic-4/task-2'],
+      ]);
+      const [newest, older] = epic?.openWaves ?? [];
+      expect(newest!.admittedAt > older!.admittedAt).toBe(true);
+      expect(total(older?.counts)).toBe(2);
+    });
+
+    it('closes a task whose row is done or superseded even without a wave-merged', async () => {
+      const root = await factorySession('sess-cl', SID_B);
+      await root.addTask('epic-3', 'epic-3/task-1', { task_status: 'completed' });
+      await root.addTask('epic-3', 'epic-3/task-2', { task_status: 'superseded' });
+      await root.addTask('epic-3', 'epic-3/task-3');
+      await root.add('wave-admitted', {
+        epic_id: 'epic-3',
+        task_ids: ['epic-3/task-1', 'epic-3/task-2'],
+      });
+      await root.add('wave-admitted', {
+        epic_id: 'epic-3',
+        task_ids: ['epic-3/task-3', 'epic-3/ghost'],
+      });
+
+      const [epic] = await linkedEpics(165, SID_B);
+      expect(epic?.openWaves.map((w) => w.taskIds)).toEqual([['epic-3/task-3', 'epic-3/ghost']]);
+    });
+
+    it('counts progress over plan tasks only and reports escalation follow-ups apart', async () => {
+      const root = await factorySession('sess-pg', SID_B);
+      await root.addTask('epic-2', 'epic-2/old-todo', { plan_version: 1 });
+      await root.addTask('epic-2', 'epic-2/old-done', {
+        plan_version: 1,
+        task_status: 'completed',
+      });
+      await root.addTask('epic-2', 'epic-2/new-a', { plan_version: 2 });
+      await root.addTask('epic-2', 'epic-2/new-b', { plan_version: 2, task_status: 'in-progress' });
+      await root.addTask('epic-2', 'epic-2/follow-1', { plan_version: 2, origin: 'escalation' });
+      await root.addTask('epic-2', 'epic-2/follow-2', {
+        plan_version: 2,
+        origin: 'escalation',
+        task_status: 'completed',
+      });
+
+      const [epic] = await linkedEpics(166, SID_B);
+      expect(total(epic?.progress ?? undefined)).toBe(3);
+      expect(epic?.progress).toMatchObject({ done: 1, todo: 1, inProgress: 1 });
+      expect(epic?.followUps).toBe(1);
+    });
+
+    it('keeps only agents really working now: live, fresh, on this epic, on an open task, one per role and task', async () => {
+      const prev = await factorySession('sess-prev', SID_B);
+      await prev.addTask('epic-1', 'epic-1/task-1');
+      await prev.dispatch('epic-1/task-1');
+      const root = await factorySession('sess-cur', SID_B, prev.last());
+      await root.addTask('epic-0', 'epic-0/task-1');
+      await root.addTask('epic-0', 'epic-0/task-2', { task_status: 'completed' });
+      await root.addTask('epic-0', 'epic-0/task-3');
+      await root.add('wave-admitted', {
+        epic_id: 'epic-0',
+        task_ids: ['epic-0/task-1', 'epic-0/task-3'],
+      });
+      await root.dispatch('epic-0/task-1');
+      await root.dispatch('epic-0/task-2');
+      await root.dispatch('epic-0/task-3', { agent_role: 'reviewer' });
+      await root.dispatch(null, { agent_role: 'planner', epic_id: 'epic-0' });
+      await new Promise((r) => setTimeout(r, 5));
+      await root.dispatch(null, { agent_role: 'planner', epic_id: 'epic-0' });
+
+      const [epic] = await linkedEpics(167, SID_B);
+      expect(epic?.epicId).toBe('epic-0');
+      const mine = (epic?.workingAgents ?? []).map((a) => [a.role, a.taskId]);
+      expect(mine).toHaveLength(3);
+      expect(mine).toEqual(
+        expect.arrayContaining([
+          ['coder', 'epic-0/task-1'],
+          ['reviewer', 'epic-0/task-3'],
+          ['planner', null],
+        ]),
+      );
+      const since = (epic?.workingAgents ?? []).map((a) => a.since);
+      expect(since).toEqual([...since].sort().reverse());
+
+      // Past the stale window nothing counts as working.
+      const later = await linkedEpics(167, SID_B, () =>
+        new Date(Date.now() + 5 * 3.6e6).toISOString(),
+      );
+      expect(later[0]?.workingAgents).toEqual([]);
+    });
+
+    it('puts the plan tasks project on the card and leaves it null when unlinked', async () => {
+      const wave = await factorySession('sess-pj', SID_B);
+      await wave.addTask('epic-p', 'epic-p/dropped', { plan_version: 1 }, 'stale-project');
+      await wave.addTask('epic-p', 'epic-p/kept', { plan_version: 2 }, 'app-a');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(tmp, 'none.md') });
+      await session(169, { sessionId: SID_B, cwd: outside });
+      await session(170, { sessionId: SID_C, cwd: root });
+      const handle = openDb(dbPath, {});
+      try {
+        const by = new Map((await reader().read(handle)).sessions.map((s) => [s.pid, s]));
+        expect(by.get(169)?.project).toBe('app-a');
+        expect(by.get(169)?.linked?.epics[0]?.project).toBe('app-a');
+        expect(by.get(170)?.project).toBeNull();
+      } finally {
+        handle.sqlite.close();
+      }
+    });
+
+    it('titles and roots a continued lineage at the first session of this epic', async () => {
+      const prev = await factorySession('sess-first', SID_B);
+      await prev.addTask('epic-old', 'epic-old/task-1');
+      const next = await factorySession('sess-second', SID_B, prev.last());
+      await next.addTask('epic-new', 'epic-new/task-1');
+      await next.add('wave-admitted', { epic_id: 'epic-new', task_ids: ['epic-new/task-1'] });
+
+      const epics = await linkedEpics(168, SID_B);
+      const current = epics.find((e) => e.epicId === 'epic-new');
+      expect(current?.rootSessionId).toBe('sess-second');
+    });
+  });
+
+  describe('next', () => {
+    const nextOf = async (body: string) => {
+      await session(180, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('go'), asst(text(body))]));
+      return (await read()).sessions[0]!.next;
+    };
+
+    it('skips a trailing list, heading, table, quote and bold-only label', async () => {
+      const body = [
+        'Merged the fix and the suite is green.',
+        '- one\n- two',
+        '## Technical details',
+        '| a | b |\n| - | - |',
+        '> quoted',
+        '**Files changed**',
+        '**Notes:**',
+        '__Tail__:',
+        '1. first',
+        '2) second',
+      ].join('\n\n');
+      expect(await nextOf(body)).toBe('Merged the fix and the suite is green.');
+    });
+
+    it('keeps a paragraph that starts bold and continues as prose', async () => {
+      expect(await nextOf('Intro.\n\n**Status:** working on x')).toBe('**Status:** working on x');
+      expect(await nextOf('Intro.\n\n**a** and **b**')).toBe('**a** and **b**');
+    });
+
+    it('never takes text from a fenced code block, blank lines inside included', async () => {
+      expect(await nextOf('Shall I ship it?\n\n```\nconst x = 1;\n\nconst y = 2;\n```')).toBe(
+        'Shall I ship it?',
+      );
+      expect(await nextOf('Shall I ship it?\n\n~~~\ncode\n\nmore code\n~~~')).toBe(
+        'Shall I ship it?',
+      );
+    });
+
+    it('is null when no paragraph is prose', async () => {
+      expect(await nextOf('- a\n- b\n\n## Heading')).toBeNull();
+    });
+  });
+
+  describe('operator prompt from the prompt history', () => {
+    const history = (...entries: Record<string, unknown>[]) =>
+      writeFile(path.join(config, 'history.jsonl'), jsonl(entries));
+    const entry = (sessionId: string, display: string, timestamp: number) => ({
+      display,
+      timestamp,
+      sessionId,
+      project: '/secret/project',
+      pastedContents: { 1: { content: 'PASTED-SENTINEL' } },
+    });
+
+    it('serves the last history entry for the session, with its time, and nothing else from it', async () => {
+      await session(190, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('tail prompt'), asst(text('ok'))]));
+      await history(
+        entry(SID_A, 'first ask', Date.parse('2026-10-06T08:00:00Z')),
+        entry(SID_B, 'other session', Date.parse('2026-10-06T08:30:00Z')),
+        entry(SID_A, 'latest ask', Date.parse('2026-10-06T09:00:00Z')),
+      );
+      const r = await read();
+      expect(r.sessions[0]!.doingNow).toMatchObject({
+        prompt: 'latest ask',
+        promptAt: '2026-10-06T09:00:00.000Z',
+        assistant: 'ok',
+      });
+      const wire = JSON.stringify(r);
+      expect(wire).not.toContain('PASTED-SENTINEL');
+      expect(wire).not.toContain('/secret/project');
+    });
+
+    it('is enough for a non-null doingNow when the transcript is missing', async () => {
+      await session(191, { status: 'idle' });
+      await history(entry(SID_A, 'only in history', Date.parse('2026-10-06T09:00:00Z')));
+      const s = (await read()).sessions[0]!;
+      expect(s.transcript).toBe('missing');
+      expect(s.doingNow).toEqual({
+        prompt: 'only in history',
+        promptAt: '2026-10-06T09:00:00.000Z',
+        assistant: null,
+        lastTool: null,
+      });
+    });
+
+    it('drops the partial first line of a tail read and reads at most the last 1 MB', async () => {
+      await session(192, { status: 'idle' });
+      const filler = Array.from({ length: 300 }, () =>
+        entry(SID_B, 'x'.repeat(5000), Date.parse('2026-10-06T07:00:00Z')),
+      );
+      await history(
+        entry(SID_A, 'scrolled away', 1_000_000),
+        ...filler,
+        entry(SID_A, 'near the end', 2_000_000),
+      );
+      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('near the end');
+      await history(entry(SID_A, 'scrolled away', 1_000_000), ...filler);
+      expect((await read()).sessions[0]!.doingNow).toBeNull();
+    });
+
+    it('falls back to the transcript prompt, then to the last prompt seen, and forgets it with the session', async () => {
+      await session(193, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('tail prompt'), asst(text('ok'))]));
+      const r = reader();
+      expect((await r.read()).sessions[0]!.doingNow).toMatchObject({
+        prompt: 'tail prompt',
+        promptAt: null,
+      });
+      // The prompt scrolls out of the tail: the server still remembers it.
+      await transcript(root, SID_A, jsonl([asst(text('still going'))]));
+      expect((await r.read()).sessions[0]!.doingNow).toMatchObject({
+        prompt: 'tail prompt',
+        assistant: 'still going',
+      });
+      await rm(path.join(config, 'sessions', '193.json'));
+      await r.read();
+      await session(193, { status: 'idle' });
+      expect((await r.read()).sessions[0]!.doingNow?.prompt).toBeNull();
+    });
+
+    it('treats a missing or unreadable history as no history', async () => {
+      await session(194, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('tail prompt'), asst(text('ok'))]));
+      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('tail prompt');
+      await mkdir(path.join(config, 'history.jsonl'));
+      expect((await read()).sessions[0]!.doingNow?.prompt).toBe('tail prompt');
+    });
+  });
+
+  describe('transcript directory name', () => {
+    it('finds a transcript of a cwd with dots and underscores without scanning every project dir', async () => {
+      const cwd = path.join(root, '.wt', 'task_one');
+      await mkdir(cwd, { recursive: true });
+      await session(195, { cwd, status: 'idle' });
+      await transcript(cwd, SID_A, jsonl([user('hi'), asst(text('hello'))]));
+      const projects = path.join(config, 'projects');
+      let scans = 0;
+      const spy: CliFs = {
+        readdir: async (p) => {
+          if (p === projects) scans += 1;
+          return readdir(p);
+        },
+        stat,
+        lstat,
+        open: (p) => open(p, 'r'),
+        realpath,
+      };
+      expect((await read({ fs: spy })).sessions[0]?.transcript).toBe('ok');
+      expect(scans).toBe(0);
     });
   });
 

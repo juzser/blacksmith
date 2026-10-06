@@ -6,7 +6,7 @@ run `pnpm build:ui` first (builds `ui/server/dist` + `ui/dist`), then retry,
 and print the local URL (`http://127.0.0.1:<port>`).
 
 Besides the event log, the server reads — read-only — the local Claude Code
-session registry and transcripts, from `--claude-config-dir`, else
+session registry, transcripts and prompt history, from `--claude-config-dir`, else
 `$CLAUDE_CONFIG_DIR`, else Claude Code's default, and serves them as
 `GET /api/cli-sessions`, loopback-only.
 
