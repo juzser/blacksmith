@@ -26,7 +26,7 @@ import {
   taskRuns,
   timeline,
 } from '../../src/db/queries.js';
-import { eventsRaw, findings, tasks } from '../../src/db/schema.js';
+import { epics, eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
@@ -2757,6 +2757,175 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     } finally {
       fresh.sqlite.close();
     }
+  });
+
+  describe('which pending waivers reach the inbox', () => {
+    /** Park a task row at `status`, copied from a fixture row so every
+     * required column is filled; the epic is the fixture's own unless `over`
+     * names another. */
+    function seedTask(
+      taskId: string,
+      status: string,
+      over: Partial<typeof tasks.$inferInsert> = {},
+    ): void {
+      const [base] = handle.db.select().from(tasks).where(eq(tasks.taskId, TASK_1)).all();
+      if (!base) throw new Error('fixture task missing');
+      handle.db.delete(tasks).where(eq(tasks.taskId, taskId)).run();
+      handle.db
+        .insert(tasks)
+        .values({ ...base, taskId, taskStatus: status, ...over })
+        .run();
+    }
+
+    function seedFinding(
+      id: string,
+      taskId: string,
+      over: Partial<typeof findings.$inferInsert> = {},
+    ): void {
+      handle.db
+        .insert(findings)
+        .values({
+          findingId: id,
+          sessionId: SESSION_ID,
+          taskId,
+          epicId: EPIC_ID,
+          fingerprint: id,
+          findingCategory: 'correctness',
+          severity: 'S3-minor',
+          findingStatus: 'raised',
+          summary: 'a stray console.log',
+          foundBy: 'reviewer',
+          raisedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          ...over,
+        })
+        .run();
+    }
+
+    const waiverRows = () => inboxRows(handle.db).filter((r) => r.kind === 'waiver');
+    const counts = () => [
+      overview(handle.db).alerts.pendingWaivers,
+      (overview(handle.db).projects ?? []).reduce((n, p) => n + p.alerts.pendingWaivers, 0),
+    ];
+
+    it('lists a finding on a completed task and counts it', () => {
+      seedTask('epic-a/task-1', 'completed');
+      seedFinding('f-done', 'epic-a/task-1');
+      expect(waiverRows().map((r) => r.taskId)).toContain('epic-a/task-1');
+      const before = counts();
+      handle.db.delete(findings).where(eq(findings.findingId, 'f-done')).run();
+      expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
+    });
+
+    it.each(['todo', 'in_progress', 'superseded', 'waived', 'escalated'])(
+      'leaves a finding on a %s task out of the inbox and the count',
+      (status) => {
+        const base = counts();
+        seedTask('epic-a/task-1', status);
+        seedFinding('f-open', 'epic-a/task-1');
+        expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-1')).toEqual([]);
+        expect(counts()).toEqual(base);
+        const escalation = inboxRows(handle.db).some(
+          (r) => r.kind === 'escalation' && r.taskId === 'epic-a/task-1',
+        );
+        expect(escalation).toBe(status === 'escalated');
+      },
+    );
+
+    it('lists a follow-up task finding only once the follow-up has completed', () => {
+      seedTask('epic-a/followup-1a2b3c4d', 'todo');
+      seedFinding('f-follow', 'epic-a/followup-1a2b3c4d');
+      expect(waiverRows().map((r) => r.taskId)).not.toContain('epic-a/followup-1a2b3c4d');
+      handle.db
+        .update(tasks)
+        .set({ taskStatus: 'completed' })
+        .where(eq(tasks.taskId, 'epic-a/followup-1a2b3c4d'))
+        .run();
+      expect(waiverRows().map((r) => r.taskId)).toContain('epic-a/followup-1a2b3c4d');
+    });
+
+    it('lists an epic-level finding only once its epic is closed', () => {
+      const owner = 'epic-a/integration';
+      seedFinding('f-epic', owner, { epicId: 'epic-a', findingScope: 'spec' });
+      const base = counts();
+      expect(waiverRows().map((r) => r.taskId)).not.toContain(owner);
+      handle.db
+        .insert(epics)
+        .values({
+          epicId: 'epic-a',
+          sessionId: SESSION_ID,
+          epicStatus: 'closed',
+          closedBy: 'verdict',
+          closedAt: '2026-01-02T00:00:00.000Z',
+          eventId: `${SESSION_ID}#99`,
+        })
+        .run();
+      expect(waiverRows().map((r) => r.taskId)).toContain(owner);
+      expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
+    });
+
+    it('finds the task of a bare-id finding on a task row stored qualified', () => {
+      seedTask('epic-a/task-9', 'completed');
+      seedFinding('f-bare', 'task-9', { epicId: null });
+      expect(waiverRows().filter((r) => r.title !== '')).toHaveLength(1);
+      const before = counts();
+      handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
+      expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
+    });
+
+    it('lets an open task row decide a bare-id finding even when its epic is closed', () => {
+      seedTask('epic-a/task-9', 'todo');
+      handle.db
+        .insert(epics)
+        .values({
+          epicId: 'epic-a',
+          sessionId: SESSION_ID,
+          epicStatus: 'closed',
+          closedBy: 'verdict',
+          closedAt: '2026-01-02T00:00:00.000Z',
+          eventId: `${SESSION_ID}#99`,
+        })
+        .run();
+      const base = counts();
+      seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-9'))).toEqual([]);
+      expect(counts()).toEqual(base);
+    });
+
+    it('resolves a bare-id finding to the task row of its own epic', () => {
+      seedTask('epic-a/task-7', 'completed', { epicId: 'epic-a' });
+      seedTask('epic-b/task-7', 'todo', { epicId: 'epic-b' });
+      seedFinding('f-b7', 'task-7', { epicId: 'epic-b' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toEqual([]);
+      handle.db.delete(findings).where(eq(findings.findingId, 'f-b7')).run();
+      seedFinding('f-a7', 'task-7', { epicId: 'epic-a' });
+      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toMatchObject([
+        { taskId: 'epic-a/task-7' },
+      ]);
+    });
+
+    it('folds a qualified and a bare spelling of one task into one titled row', () => {
+      seedTask('epic-a/task-9', 'completed');
+      seedFinding('f-q', 'epic-a/task-9');
+      seedFinding('f-b', 'task-9', { epicId: null });
+      const rows = waiverRows().filter((r) => r.taskId?.endsWith('task-9'));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: 'waiver:epic-a/task-9',
+        taskId: 'epic-a/task-9',
+        description: '2 findings awaiting a waiver decision',
+      });
+      const [t] = handle.db.select().from(tasks).where(eq(tasks.taskId, 'epic-a/task-9')).all();
+      expect(rows[0]?.title).toBe(t?.objective ?? 'epic-a/task-9');
+    });
+
+    it('never lists a decided finding or an S1/S2 finding', () => {
+      seedTask('epic-a/task-1', 'completed');
+      seedFinding('f-decided', 'epic-a/task-1', { waiverId: 'w-1' });
+      seedFinding('f-s1', 'epic-a/task-1', { severity: 'S1-stop-the-line' });
+      seedFinding('f-s2', 'epic-a/task-1', { severity: 'S2-major' });
+      expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-1')).toEqual([]);
+    });
   });
 
   it('reports the empty-inbox shape when nothing is pending', async () => {
