@@ -3497,6 +3497,36 @@ summary.bs-inbox__group-head {
   gap: var(--bs-space-4);
 }
 
+/* UI spec Part 2 — one section per project (RoadmapProjectSection.vue). The
+   head reuses NeedsYouInbox's `.bs-inbox__group-head` one level up (an h2,
+   or the phone's 44px <summary>), the done count muted after the name. */
+.rm-section {
+  gap: var(--bs-space-2);
+}
+h2.rm-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--bs-space-2);
+}
+.rm-section__count {
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtlest);
+}
+/* §2.2 — "Show N earlier/later lanes" in `.bs-kanban-col__more`'s
+   link-button look; a full-width 44px row on phone. */
+.rm-window__more {
+  align-self: flex-start;
+  min-height: var(--bs-space-5);
+  font: inherit;
+  font-size: var(--bs-text-sm);
+}
+@media (max-width: 640px) {
+  .rm-window__more {
+    align-self: stretch;
+    min-height: var(--bs-touch);
+  }
+}
+
 /* DS4 S2 — Roadmap swimlane (RoadmapSwimlane.vue). Class names match
    ui/docs/ds-review.html's #p-roadmap mock so the app renders pixel-for-pixel
    against the signed-off reference. `.rm-scroll` is the only region that
@@ -3508,7 +3538,17 @@ summary.bs-inbox__group-head {
      and `.now-track` all read this instead of repeating — or deriving pixel
      math from — the literal 160px. `.months` and `.lane` are siblings here,
      so it lives on their shared parent, not on `.lane` alone. */
-  --rm-label-col: 160px;
+  /* Room for a two-line name beside the "Current" Tag (about 62px) and its
+     gap; the Tag never shrinks and the name wraps before it clips. */
+  --rm-label-col: 232px;
+}
+/* Tablet: a narrower label column keeps the bar track at 430px or more at
+   768px (names wrap to two lines instead). 900px is the stylesheet's own
+   tablet breakpoint (see the max-width: 900px block below). */
+@media (max-width: 900px) {
+  .rm-scroll {
+    --rm-label-col: 180px;
+  }
 }
 .lane {
   position: relative;
@@ -3545,6 +3585,10 @@ summary.bs-inbox__group-head {
 .months-mark:first-child {
   transform: none;
 }
+/* Right-end ticks: the label ends at the tick, so it stays inside the track. */
+.months-mark--end {
+  transform: translateX(-100%);
+}
 .lrow {
   display: grid;
   grid-template-columns: var(--rm-label-col) 1fr;
@@ -3561,9 +3605,17 @@ summary.bs-inbox__group-head {
   color: inherit;
   cursor: pointer;
 }
-.lrow.sub {
-  grid-template-columns: var(--rm-label-col) 1fr;
-  padding-left: var(--bs-space-6);
+/* The epic row indents its label, never the row, so every track column
+   starts at the same x as the axis and the now line (mock: .lrow.sub .lname).
+   The epic name is regular weight and subtle; a selected row (below) restores
+   the text colour. */
+.lrow.sub .lname {
+  padding-left: 14px; /* ds-allow-hardcode: mock .lrow.sub .lname indent */
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+}
+.lrow.sel .lname {
+  color: var(--bs-text);
 }
 .lrow.sel {
   background: var(--bs-surface-selected);
@@ -3580,14 +3632,50 @@ summary.bs-inbox__group-head {
 .lname {
   font-size: var(--bs-text-sm);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Two lines, then an ellipsis; the full name is also in the title. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+/* UI spec Part 2 — rows come grouped: a region per window side, a
+   `role="group"` per lane. Both stack like `.lane`, so the rows lay out as
+   before. `.lhead` is the label cell: the name, then the current lane's
+   "Current" Tag, which never shrinks — the name ellipsizes first. */
+.lane-region,
+.lane-group {
+  display: flex;
+  flex-direction: column;
+}
+.lhead {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-width: 0;
+}
+.lhead > .lname {
+  min-width: 0;
+}
+.lhead > .bs-tag {
+  flex-shrink: 0;
 }
 .track {
   position: relative;
   height: var(--bs-space-4);
   background: var(--bs-surface-sunken);
   border-radius: var(--bs-radius-sm);
+}
+/* Fix round 3 — the sunken track vanished on a filled row: light selected
+   #f4f4f5 vs sunken #f7f7f8, and hover fills with sunken itself (both
+   themes). On a selected or hovered row the track takes the plain surface
+   (light #ffffff, dark #151619 — both differ from the selected fill and
+   from the hover fill) plus a --bs-border hairline, so the dark hover case
+   (#111214 vs #151619) still reads as a track. */
+.lrow.sel .track,
+.lrow:hover .track {
+  background: var(--bs-surface);
+  box-shadow: inset 0 0 0 1px var(--bs-border);
 }
 .lbar {
   position: absolute;
