@@ -53,6 +53,8 @@ field for field — never invent numbers the query didn't return:
 - **In flight**: `epicsInFlight`, `recentDispatches` (last 10).
 - **Alerts**: `alerts.escalations` and `alerts.pendingWaivers` — call these
   out first if non-zero, they're what the operator came here to see.
+  `pendingWaivers` is narrower than `bs waivers pending`: only waivers on
+  finished work (completed tasks, closed epics).
 - **Milestones**: `milestoneProgress` — one line each, `%` complete.
 
 If the UI is already running, just point the operator at it instead of
