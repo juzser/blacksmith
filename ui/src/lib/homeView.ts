@@ -4,6 +4,7 @@
 import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from './api.js';
 import { formatCompactNumber, pluralize, taskLabel } from './format.js';
 import { dispatchDecisionLine } from './roleLabels.js';
+import type { StoreRef } from './storeKey.js';
 
 export interface TokenTotals {
   spent: number;
@@ -87,6 +88,7 @@ export function outlierSentence(count: number): string | null {
 
 export interface RunningCard {
   project: string;
+  store?: StoreRef;
   workingAgents: number;
   epics: string[];
   tokens: TokenTotals;
@@ -117,6 +119,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
     .filter((p) => isRunning(p.workingAgentCount, p.epicsActivelyRunning))
     .map((p) => ({
       project: p.project,
+      ...(p.store ? { store: p.store } : {}),
       workingAgents: p.workingAgentCount,
       epics: p.epicsActivelyRunning,
       tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },

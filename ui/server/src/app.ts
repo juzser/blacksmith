@@ -73,9 +73,12 @@ import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/schedule
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 import type { CliConfigSource } from './cliSessions.js';
-import { createCliSessionsReader } from './cliSessions.js';
+import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
+import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
+import type { StoreEntry } from './stores.js';
+import { createStoreRegistry } from './stores.js';
 
 /**
  * The only image types the artifact route will stream — a screenshot is a
@@ -169,6 +172,13 @@ export interface AppOpts {
   /** Injection seams for tests of the route. */
   cliIsAlive?: (pid: number) => boolean;
   cliListWorktrees?: () => Promise<string[]>;
+  /**
+   * Extra state homes to read besides the live sessions' own (`ui serve
+   * --store <dir>`, repeatable). Each is only ever read.
+   */
+  stores?: string[];
+  /** How often store discovery is recomputed; 5 s in production, 0 in tests. */
+  storeRefreshMs?: number;
 }
 
 /**
@@ -201,8 +211,11 @@ export interface ProjectionIssue {
    * `artifacts` that is not a list, so its artifact rows are missing while the
    * rest of the session stands. Cleared when the session re-projects without
    * it.
+   * `store-unavailable`: a foreign project's store (see stores.ts) was dropped
+   * because its logs are gone or its cache could not open; `sessionId` is the
+   * store's label. Cleared when the store is found again.
    */
-  kind: 'session-not-projected' | 'artifacts-skipped';
+  kind: 'session-not-projected' | 'artifacts-skipped' | 'store-unavailable';
   /** The event whose payload was held back; only for `artifacts-skipped`. */
   eventId?: string;
   message: string;
@@ -213,7 +226,7 @@ export interface ProjectionIssue {
  * request), the change stream (`/api/stream`) and the issue report
  * (`/api/pulse`). See createRefresher().
  */
-interface Refresher {
+export interface Refresher {
   /** Fold anything newly appended into the projection. Concurrent calls share one scan. */
   refresh(): Promise<void>;
   /** Every issue still standing after the latest scan, one per session or event. */
@@ -723,11 +736,37 @@ export function createApp(opts: AppOpts): AppHandle {
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
   const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
-  // The loopback-only route is guarded ahead of the refresh, so a refused
+  // Local-only, like /api/cli-sessions: these routes carry operator prompt text
+  // or other projects' data. The guard sits ahead of the refresh, so a refused
   // request costs no fold.
-  app.use('/api/cli-sessions', loopbackGuard());
+  for (const route of [
+    '/api/cli-sessions',
+    '/api/overview',
+    '/api/kanban',
+    '/api/projects',
+    '/api/tasks/*',
+  ]) {
+    app.use(route, loopbackGuard());
+  }
+  // Every other live project's store: discovered from the CLI sessions'
+  // working directories and read-only (see stores.ts).
+  const homeStore: StoreEntry = { id: 'home', label: 'home', handle, refresher, home: true };
+  const stores = createStoreRegistry({
+    home: homeStore,
+    homeEventsDir: opts.stateDir ?? STATE_EVENTS_DIR,
+    cacheDir: path.join(path.dirname(opts.dbPath), 'ui-stores'),
+    extra: opts.stores ?? [],
+    liveCwds: () => liveSessionCwds(opts.claudeConfigDir, opts.cliIsAlive),
+    makeRefresher: createRefresher,
+    refreshMs: opts.storeRefreshMs ?? 5000,
+  });
+  // A `?session` names a session of the served store, so no other store has
+  // anything to say about it.
+  const readable = (c: Context): StoreEntry[] =>
+    c.req.query('session') ? [homeStore] : stores.entries();
   app.use('/api/*', async (_c, next) => {
     await refresher.refresh();
+    await stores.refresh();
     await next();
   });
 
@@ -797,8 +836,13 @@ export function createApp(opts: AppOpts): AppHandle {
   // --- Reads: one route per §10 page query -----------------------------
   app.get('/api/overview', (c) => {
     const project = c.req.query('project');
+    const scope = sessionScope(c);
     return c.json(
-      overview(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+      mergeOverview(
+        fanOut(readable(c), project, (db, p) =>
+          overview(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }, clock),
+        ),
+      ),
     );
   });
 
@@ -886,8 +930,18 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/kanban', (c) => {
     const epic = c.req.query('epic');
     const project = c.req.query('project');
+    const scope = sessionScope(c);
     return c.json(
-      kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+      mergeKanban(
+        fanOut(readable(c), project, (db, p) =>
+          kanban(
+            db,
+            epic,
+            { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) },
+            clock,
+          ),
+        ),
+      ),
     );
   });
 
@@ -904,7 +958,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const project = c.req.query('project');
     return c.json({
       ...pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }),
-      projectionIssues: refresher.issues(),
+      projectionIssues: [...refresher.issues(), ...stores.issues()],
     });
   });
 
@@ -961,15 +1015,30 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(handle)));
 
   app.get('/api/projects', (c) => {
-    const result = overview(handle.db, sessionScope(c), clock);
-    return c.json(result.projects ?? []);
+    const scope = sessionScope(c);
+    const merged = mergeOverview(
+      fanOut(readable(c), undefined, (db) => overview(db, db === handle.db ? scope : {}, clock)),
+    );
+    return c.json(merged.projects ?? []);
   });
+
+  // `?store=<id>` reads a task of another project's store. An id no store
+  // answers to is a 404: falling back to the served store would show it
+  // another project's task of the same id.
+  const storeOf = (c: Context): StoreEntry => {
+    const id = c.req.query('store');
+    if (id === undefined) return homeStore;
+    const found = stores.store(id);
+    if (!found) throw new SmithError('store.not-found', `No store "${id}".`, { store: id });
+    return found;
+  };
 
   app.get('/api/tasks/:taskId', (c) => {
     const taskId = c.req.param('taskId');
-    const detail = taskDetail(handle.db, taskId);
+    const store = storeOf(c);
+    const detail = taskDetail(store.handle.db, taskId);
     if (!detail) throw new SmithError('task.not-found', `No task "${taskId}".`, { taskId });
-    return c.json(detail);
+    return c.json(store.home ? detail : relabelProject(detail, store.label));
   });
 
   // DS3 §4.7 — RunHistoryTimeline's data source: a scoped read on the
@@ -977,7 +1046,8 @@ export function createApp(opts: AppOpts): AppHandle {
   // for this task). No new event type, no writer.
   app.get('/api/tasks/:taskId/runs', (c) => {
     const taskId = c.req.param('taskId');
-    return c.json({ runs: taskRuns(handle.db, taskId), totals: taskTotals(handle.db, taskId) });
+    const { db } = storeOf(c).handle;
+    return c.json({ runs: taskRuns(db, taskId), totals: taskTotals(db, taskId) });
   });
 
   // Serves a task's own screenshots to the dashboard. The id comes from the
@@ -1175,7 +1245,14 @@ export function createApp(opts: AppOpts): AppHandle {
     });
   }
 
-  return { app, handle, closeStream: () => refresher.stop() };
+  return {
+    app,
+    handle,
+    closeStream: () => {
+      refresher.stop();
+      stores.close();
+    },
+  };
 }
 
 export function closeApp(handle: AppHandle): void {

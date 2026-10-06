@@ -166,6 +166,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       // wall clock.
       '--now-iso',
       FIXTURE_NOW_ISO,
+      // An empty registry, so the suite never discovers the live CLI sessions
+      // (and therefore the other projects' stores) of the machine running it.
+      '--claude-config-dir',
+      path.join(dbDir, 'no-claude'),
     ],
     // Kept out of the server's env explicitly, rather than trusting the scrub
     // above to still hold when it starts. spawn() drops an undefined entry.

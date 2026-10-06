@@ -14,7 +14,7 @@ import Dialog from './kit/Dialog.vue';
 import Tag from './kit/Tag.vue';
 import RequestQuote from './RequestQuote.vue';
 
-const props = defineProps<{ taskId: string }>();
+const props = defineProps<{ taskId: string; storeId?: string }>();
 const emit = defineEmits<{ close: []; openFull: [taskId: string] }>();
 
 const detail = ref<TaskDetail | null>(null);
@@ -24,14 +24,14 @@ async function load() {
   detail.value = null;
   loadError.value = null;
   try {
-    detail.value = await fetchTaskDetail(props.taskId);
+    detail.value = await fetchTaskDetail(props.taskId, props.storeId);
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
   }
 }
 
 onMounted(load);
-watch(() => props.taskId, load);
+watch(() => [props.taskId, props.storeId], load);
 
 // The latest dispatch, same "who was last sent" source kanban()'s own
 // AgentChip reads (not the `agents` fold, which only says who is still on

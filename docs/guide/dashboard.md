@@ -9,6 +9,46 @@ transcripts and prompt history — from `--claude-config-dir`, else `$CLAUDE_CON
 Claude Code's default — and serves them as `GET /api/cli-sessions`, to
 loopback requests only.
 
+## Other projects' stores
+
+Home and Kanban also show every project that has a live Claude Code CLI session,
+not only the clone the dashboard was started in. For each live session's working
+directory the server takes the git toplevel and treats it as a store when
+`<top>/.blacksmith/state/events` (a `BS_HOME` layout) or `<top>/state/events` (a
+clone) exists. Pass `--store <dir>` (repeatable) to add a state home that has no
+live session. Discovery reruns at most every 5 seconds; stores are deduped by
+realpath, so a session inside the served clone is the served store, not a second one.
+
+A foreign store is only ever read. Its event logs are projected into a
+dashboard-owned cache, `state/ui-stores/<storeId>.db` under the served clone;
+nothing is created or written in the foreign project. A store that disappears is
+dropped from the views and shows up as a `store-unavailable` issue on the pulse.
+Rows from it carry `store: {id, label}` (the label is the project's directory
+name). Only `/api/overview`, `/api/kanban` and `/api/projects` span stores for now.
+
+**Project filter.** In a foreign store a row with no project, or with the factory
+default, reads as the store's label; a row with any other explicit project reads as
+that project. `?project=X` returns exactly the rows that read as X from every store,
+each counted once, and a foreign store never answers `?project=<default>` with rows
+that read as its label. The cache applies this after every fold; the foreign project
+is not touched.
+
+**Local-only.** Because those routes now carry other projects' data they answer
+loopback requests only, like `/api/cli-sessions`, as does `/api/tasks/*`.
+
+**Cache lifetime.** A store that drops out keeps its open cache for a grace period
+(5 minutes), so a session that restarts is not folded again from scratch. An open task page of that store keeps loading, frozen at its last scan (the Kanban board shows live projects only). On
+startup, cache files in `state/ui-stores/` whose store is not known and that were
+last written more than 7 days ago are deleted; nothing outside that directory is
+touched.
+
+**Foreign tasks.** A foreign Kanban card opens its own task: the peek and the task
+page read `GET /api/tasks/:taskId?store=<storeId>` (and `/runs`); an unknown store
+is a 404, never the served store. The task page keeps the store in its URL
+(`/tasks/<id>?store=<storeId>`), so a reload stays on it. History, artifacts and
+waivers resolve in the served store only, so a foreign task shows their empty state
+and offers no Waive or Deny.
+
 ```bash
 pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
 bs ui serve                          # http://127.0.0.1:4680

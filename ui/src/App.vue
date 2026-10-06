@@ -78,7 +78,8 @@ async function loadProjectOptions() {
     const projects = await fetchProjects();
     projectOptions.value = [
       { value: '', label: 'All projects' },
-      ...projects.map((p) => ({ value: p.project, label: p.project })),
+      // Two stores can run a project of the same name; the switcher filters by name, so list it once.
+      ...[...new Set(projects.map((p) => p.project))].map((name) => ({ value: name, label: name })),
     ];
   } catch {
     // Non-fatal — the switcher just shows "All projects" only.

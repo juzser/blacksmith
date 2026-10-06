@@ -55,7 +55,7 @@ describe('fix rows are compact rows, not cards (spec 1.2)', () => {
 
 describe('auto-open on peek (spec 1.4)', () => {
   it('the board opens the group holding the peeked task, and the group reveals a hidden row', () => {
-    expect(BOARD).toMatch(/watch\(peekTaskId/);
+    expect(BOARD).toMatch(/watch\(\[peekTaskId/);
     expect(BOARD).toMatch(/findGroupMember\(/);
     expect(GROUP).toMatch(/revealTaskId/);
   });
