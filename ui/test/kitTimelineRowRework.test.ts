@@ -42,9 +42,11 @@ describe('kit/TimelineRow.vue row rework (round 2 item 4)', () => {
     );
   });
 
-  it('sets the title weight to 550 via a token', () => {
-    expect(TOKENS).toMatch(/--bs-font-weight-title:\s*550;/);
+  it("sets the title weight to medium (operator override, 2026-10-06), not the mock's 550", () => {
     expect(PRIMITIVES).toMatch(
+      /\.bs-timeline-row__title\s*\{[^}]*font-weight:\s*var\(--bs-font-weight-medium\);/s,
+    );
+    expect(PRIMITIVES).not.toMatch(
       /\.bs-timeline-row__title\s*\{[^}]*font-weight:\s*var\(--bs-font-weight-title\);/s,
     );
   });
