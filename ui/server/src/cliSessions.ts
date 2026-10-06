@@ -37,13 +37,15 @@ import path from 'node:path';
 import type { DbHandle } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
+  type CliSessionLink,
   cliSessionLinks,
   kanban,
-  overview,
   projectedLineage,
+  runningSessions,
   sessionAgents,
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
+import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
   readdir(p: string): Promise<string[]>;
@@ -79,6 +81,8 @@ export interface LinkedEpic {
   project: string | null;
   title: string | null;
   factorySessionIds: string[];
+  /** The newest event this CLI session wrote into any of `factorySessionIds`. */
+  lastEventAt: string;
   currentWave: { sessionId: string; taskIds: string[]; counts: StatusCounts } | null;
   progress: StatusCounts | null;
   workingAgents: { role: string; taskId: string | null }[];
@@ -543,14 +547,34 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return 'idle';
   }
 
-  function linkEpics(handle: DbHandle, factoryIds: string[], scopeNow: string): LinkedEpic[] {
-    const groups = new Map<string, { lineage: string[]; ids: string[] }>();
-    for (const id of factoryIds) {
-      const lineage = projectedLineage(handle.db, id);
-      const rootId = lineage[0] ?? id;
-      const g = groups.get(rootId) ?? { lineage, ids: [] };
-      g.ids.push(id);
-      groups.set(rootId, g);
+  function linkEpics(
+    handle: DbHandle,
+    links: readonly CliSessionLink[],
+    scopeNow: string,
+  ): LinkedEpic[] {
+    // Grouped by epic root, and each group read through the ROOT's lineage:
+    // a wave's own lineage stops at that wave, so its sibling waves -- and
+    // their admissions, merges and agents -- would be missed.
+    const groups = new Map<string, { lineage: string[]; ids: string[]; lastEventAt: string }>();
+    for (const l of links) {
+      const known = [...groups.values()].find((g) => g.lineage.includes(l.sessionId));
+      let g = known;
+      if (g === undefined) {
+        const own = projectedLineage(handle.db, l.sessionId);
+        const rootId = own[0] ?? l.sessionId;
+        g = groups.get(rootId);
+        if (g === undefined) {
+          const lineage = rootId === l.sessionId ? own : projectedLineage(handle.db, rootId);
+          g = {
+            lineage: lineage.length > 0 ? lineage : [rootId],
+            ids: [],
+            lastEventAt: l.lastEventAt,
+          };
+          groups.set(rootId, g);
+        }
+      }
+      g.ids.push(l.sessionId);
+      if (l.lastEventAt > g.lastEventAt) g.lastEventAt = l.lastEventAt;
     }
     const out: LinkedEpic[] = [];
     for (const [rootId, g] of groups) {
@@ -606,33 +630,37 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         };
         progress = fold(taskRows);
         project = taskRows.find((t) => t.project !== null)?.project ?? null;
-        const merged = new Set(
-          (
-            handle.sqlite
-              .prepare(
-                `select payload from events_raw where event_type = 'wave-merged' and session_id in (${marks})`,
-              )
-              .all(...g.lineage) as { payload: string }[]
-          ).flatMap((r) => {
-            try {
-              const ids = (JSON.parse(r.payload) as { task_ids?: unknown }).task_ids;
-              return Array.isArray(ids)
-                ? ids.filter((t): t is string => typeof t === 'string')
-                : [];
-            } catch {
-              return [];
-            }
-          }),
-        );
+        // Task ids are compared the way the rest of the read side compares
+        // them (taskIdsMatch): a wave written with bare ids still matches
+        // the qualified ids its tasks carry, and the other way round.
+        const merged = (
+          handle.sqlite
+            .prepare(
+              `select payload from events_raw where event_type = 'wave-merged' and session_id in (${marks})`,
+            )
+            .all(...g.lineage) as { payload: string }[]
+        ).flatMap((r) => {
+          try {
+            const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
+            if (typeof p.epic_id === 'string' && p.epic_id !== epicId) return [];
+            return Array.isArray(p.task_ids)
+              ? p.task_ids.filter((t): t is string => typeof t === 'string')
+              : [];
+          } catch {
+            return [];
+          }
+        });
+        const isMerged = (t: string): boolean => merged.some((m) => taskIdsMatch(m, t));
         const open = waves
-          .filter((w) => w.epicId === epicId && w.taskIds.some((t) => !merged.has(t)))
+          .filter((w) => w.epicId === epicId && w.taskIds.some((t) => !isMerged(t)))
           .at(-1);
         if (open) {
           const byId = new Map(taskRows.map((t) => [t.taskId, t]));
+          const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
           currentWave = {
             sessionId: open.sessionId,
             taskIds: open.taskIds,
-            counts: fold(open.taskIds.flatMap((t) => byId.get(t) ?? [])),
+            counts: fold(open.taskIds.flatMap((t) => row(t) ?? [])),
           };
         }
       }
@@ -652,15 +680,20 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         epicId,
         project,
         title:
-          overview(handle.db, { sessionId: rootId }, { nowIso: scopeNow }).runningSessions[0]
-            ?.title ?? null,
+          runningSessions(handle.db, { sessionId: rootId }, { nowIso: scopeNow })[0]?.title ?? null,
         factorySessionIds: [...new Set(g.ids)].sort(),
+        lastEventAt: g.lastEventAt,
         currentWave,
         progress,
         workingAgents,
       });
     }
-    return out;
+    // Newest first: the epic this CLI session wrote into last leads.
+    return out.sort(
+      (a, b) =>
+        b.lastEventAt.localeCompare(a.lastEventAt) ||
+        a.rootSessionId.localeCompare(b.rootSessionId),
+    );
   }
 
   async function compute(handle?: DbHandle): Promise<CliSessionsResponse> {
@@ -724,9 +757,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           entries.map((e) => e.cliSessionId),
         )
       : [];
-    const factoryBy = new Map<string, string[]>();
+    const factoryBy = new Map<string, CliSessionLink[]>();
     for (const l of links)
-      factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l.sessionId]);
+      factoryBy.set(l.cliSessionId, [...(factoryBy.get(l.cliSessionId) ?? []), l]);
 
     const cards: CliSessionCard[] = [];
     for (const e of entries) {

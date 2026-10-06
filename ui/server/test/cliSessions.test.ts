@@ -17,6 +17,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { appendEvent, readEvents, startSession } from '../../../factory/orchestrator/src/events.js';
 import {
   buildFixture,
   EPIC_ID,
@@ -667,6 +668,165 @@ describe('cliSessions reader', () => {
       } finally {
         handle.sqlite.close();
       }
+    });
+
+    it('titles a linked epic with its root session title', async () => {
+      await session(142, { cwd: outside });
+      const handle = openDb(dbPath, {});
+      try {
+        const epic = (await reader().read(handle)).sessions[0]?.linked?.epics[0];
+        expect(epic?.title).toBe('Build the widget and fix the flaky import.');
+      } finally {
+        handle.sqlite.close();
+      }
+    });
+  });
+
+  describe('linking across factory sessions', () => {
+    let stateDir: string;
+    let dbPath: string;
+    beforeEach(async () => {
+      stateDir = path.join(tmp, 'events');
+      await mkdir(stateDir, { recursive: true });
+      dbPath = path.join(tmp, 'smith.db');
+    });
+
+    /** Opens a factory session stamped by `cli` (null: unstamped) and chains its events. */
+    async function factorySession(sid: string, cli: string | null, continues?: string) {
+      const opts = { stateDir, cliSessionId: cli };
+      let parent = (await startSession(sid, { ...opts, ...(continues ? { continues } : {}) }))
+        .event_id;
+      const add = async (
+        eventType: string,
+        payload: Record<string, unknown>,
+        extra: { taskId?: string; actor?: string } = {},
+      ): Promise<void> => {
+        parent = (
+          await appendEvent(
+            {
+              session_id: sid,
+              actor: extra.actor ?? 'system',
+              event_type: eventType,
+              plan_version: 1,
+              causal_parent: parent,
+              payload,
+              ...(extra.taskId ? { task_id: extra.taskId } : {}),
+            },
+            opts,
+          )
+        ).event_id;
+      };
+      return {
+        add,
+        last: () => parent,
+        addTask: (epicId: string, taskId: string) =>
+          add(
+            'task-added',
+            {
+              epic_id: epicId,
+              case: 'feature',
+              origin: 'user',
+              task_status: 'todo',
+              plan_version: 1,
+              objective: 'Do the thing.',
+              title: 'Thing',
+              summary: 'Does the thing.',
+              claims: ['src/thing.ts'],
+              budget_tokens: 1000,
+            },
+            { taskId, actor: 'planner' },
+          ),
+        dispatch: (taskId: string) =>
+          add(
+            'dispatch_decision',
+            {
+              agent_role: 'coder',
+              provider: 'claude',
+              model_tier: 'mid',
+              model: 'claude-sonnet-5',
+              spec_ref: 'specs/thing.json',
+              reason: 'implement the thing',
+            },
+            { taskId, actor: 'planner' },
+          ),
+      };
+    }
+
+    async function linkedEpics(pid: number, cli: string) {
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath: path.join(tmp, 'none.md') });
+      await session(pid, { sessionId: cli, cwd: outside });
+      const handle = openDb(dbPath, {});
+      try {
+        return (await reader().read(handle)).sessions[0]?.linked?.epics ?? [];
+      } finally {
+        handle.sqlite.close();
+      }
+    }
+
+    const total = (c: object | undefined): number =>
+      Object.values(c ?? {}).reduce((a: number, b: number) => a + b, 0);
+
+    it('reads every wave of the epic when a wave session sorts before its epic session', async () => {
+      const root = await factorySession('sess-root', SID_B);
+      await root.addTask('epic-9', 'epic-9/task-1');
+      await root.addTask('epic-9', 'epic-9/task-2');
+      const first = await factorySession('sess-a-wave1', SID_B, root.last());
+      await first.add('wave-admitted', { epic_id: 'epic-9', task_ids: ['epic-9/task-1'] });
+      await first.add('wave-merged', { epic_id: 'epic-9', task_ids: ['epic-9/task-1'] });
+      const second = await factorySession('sess-a-wave2', null, root.last());
+      await second.add('wave-admitted', { epic_id: 'epic-9', task_ids: ['epic-9/task-2'] });
+      await second.dispatch('epic-9/task-2');
+
+      const epics = await linkedEpics(160, SID_B);
+      expect(epics).toHaveLength(1);
+      const epic = epics[0];
+      expect(epic).toMatchObject({
+        rootSessionId: 'sess-root',
+        epicId: 'epic-9',
+        factorySessionIds: ['sess-a-wave1', 'sess-root'],
+      });
+      expect(epic?.currentWave).toMatchObject({
+        sessionId: 'sess-a-wave2',
+        taskIds: ['epic-9/task-2'],
+      });
+      expect(total(epic?.currentWave?.counts)).toBe(1);
+      expect(epic?.workingAgents).toEqual([{ role: 'coder', taskId: 'epic-9/task-2' }]);
+    });
+
+    it('orders the epics one CLI session drove newest first, each with its last event time', async () => {
+      const older = await factorySession('sess-e1', SID_B);
+      await older.addTask('epic-7', 'epic-7/task-1');
+      await new Promise((r) => setTimeout(r, 5));
+      const newer = await factorySession('sess-e2', SID_B);
+      await newer.addTask('epic-8', 'epic-8/task-1');
+      const lastTs = async (sid: string) => (await readEvents(sid, { stateDir })).at(-1)?.record.ts;
+
+      const epics = await linkedEpics(161, SID_B);
+      expect(epics.map((e) => e.rootSessionId)).toEqual(['sess-e2', 'sess-e1']);
+      expect(epics[0]?.lastEventAt).toBe(await lastTs('sess-e2'));
+      expect(epics[1]?.lastEventAt).toBe(await lastTs('sess-e1'));
+    });
+
+    it('does not report a wave merged under bare task ids as the current wave', async () => {
+      const root = await factorySession('sess-q', SID_B);
+      await root.addTask('epic-6', 'epic-6/task-1');
+      await root.add('wave-admitted', { epic_id: 'epic-6', task_ids: ['epic-6/task-1'] });
+      await root.add('wave-merged', { epic_id: 'epic-6', task_ids: ['task-1'] });
+
+      const [epic] = await linkedEpics(162, SID_B);
+      expect(epic?.epicId).toBe('epic-6');
+      expect(epic?.currentWave).toBeNull();
+    });
+
+    it('counts a wave admitted under bare task ids against its qualified tasks', async () => {
+      const root = await factorySession('sess-b', SID_B);
+      await root.addTask('epic-5', 'epic-5/task-1');
+      await root.addTask('epic-5', 'epic-5/task-2');
+      await root.add('wave-admitted', { epic_id: 'epic-5', task_ids: ['task-1', 'task-2'] });
+
+      const [epic] = await linkedEpics(163, SID_B);
+      expect(epic?.currentWave?.taskIds).toEqual(['task-1', 'task-2']);
+      expect(total(epic?.currentWave?.counts)).toBe(2);
     });
   });
 

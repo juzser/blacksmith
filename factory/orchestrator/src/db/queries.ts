@@ -4,7 +4,7 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, max, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -1328,33 +1328,32 @@ export function cliSessionLinks(db: SmithDb, cliIds: readonly string[]): CliSess
   // No ids, no question -- and no `inArray(col, [])` either; see
   // scopedToSessions for why this file never builds one.
   if (cliIds.length === 0) return [];
+  // Aggregated in SQL, one row per pair: a CLI session that wrote thousands
+  // of events costs one row here, not thousands folded in JS.
   const rows = db
     .select({
       cliSessionId: eventsRaw.cliSessionId,
       sessionId: eventsRaw.sessionId,
-      ts: eventsRaw.ts,
+      lastEventAt: max(eventsRaw.ts),
     })
     .from(eventsRaw)
     .where(inArray(eventsRaw.cliSessionId, [...new Set(cliIds)]))
+    .groupBy(eventsRaw.cliSessionId, eventsRaw.sessionId)
     .all();
 
-  const links = new Map<string, CliSessionLink>();
-  for (const row of rows) {
-    if (row.cliSessionId === null) continue;
-    const key = `${row.cliSessionId}\u0000${row.sessionId}`;
-    const seen = links.get(key);
-    if (seen === undefined) {
-      links.set(key, {
-        cliSessionId: row.cliSessionId,
-        sessionId: row.sessionId,
-        lastEventAt: row.ts,
-      });
-    } else if (row.ts > seen.lastEventAt) {
-      seen.lastEventAt = row.ts;
-    }
-  }
+  const links: CliSessionLink[] = rows.flatMap((row) =>
+    row.cliSessionId === null || row.lastEventAt === null
+      ? []
+      : [
+          {
+            cliSessionId: row.cliSessionId,
+            sessionId: row.sessionId,
+            lastEventAt: row.lastEventAt,
+          },
+        ],
+  );
   const byCodePoint = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-  return [...links.values()].sort(
+  return links.sort(
     (a, b) => byCodePoint(a.cliSessionId, b.cliSessionId) || byCodePoint(a.sessionId, b.sessionId),
   );
 }
