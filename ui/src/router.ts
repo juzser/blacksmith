@@ -99,7 +99,10 @@ const routes: RouteRecordRaw[] = [
     path: '/tasks/:taskId',
     name: 'task-detail',
     component: () => import('./pages/TaskDetailPage.vue'),
-    props: true,
+    props: (r) => ({
+      taskId: r.params.taskId,
+      storeId: typeof r.query.store === 'string' ? r.query.store : undefined,
+    }),
     meta: {
       crumb: (r) => [{ label: 'Work', to: '/work/kanban' }, { label: String(r.params.taskId) }],
     },

@@ -667,10 +667,13 @@ describe('ui/server app.ts', () => {
     const body = await json<Array<{ sessionId: string; liveAgentCount: number }>>(res);
     expect(body.map((s) => s.sessionId)).toContain(SESSION_ID);
 
-    const full = await json<{ runningSessions: unknown[] }>(
+    const full = await json<{ runningSessions: Record<string, unknown>[] }>(
       await handle.app.request('/api/overview'),
     );
-    expect(body).toEqual(full.runningSessions);
+    // The overview tags each row with its store; /api/sessions is not fanned out yet.
+    expect(body).toEqual(
+      full.runningSessions.map(({ store: _store, ...row }: Record<string, unknown>) => row),
+    );
     closeApp(handle);
   });
 

@@ -81,6 +81,9 @@ describe('smith ui serve (built binary)', () => {
         dbPath,
         '--state-dir',
         stateDir,
+        // No registry: never discover the host's live sessions' stores.
+        '--claude-config-dir',
+        path.join(dbDir, 'no-claude'),
         ...extraArgs,
       ],
       { stdio: 'pipe', env: process.env },

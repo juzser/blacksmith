@@ -516,6 +516,40 @@ interface TranscriptRead {
   headBs: boolean;
 }
 
+/**
+ * The working directory of every live interactive CLI session in the
+ * registry, deduplicated. The dashboard's store discovery reads this to find
+ * the projects whose state it should show; no transcript or prompt is opened.
+ */
+export async function liveSessionCwds(
+  configDir: string | undefined,
+  isAlive: (pid: number) => boolean = defaultIsAlive,
+): Promise<string[]> {
+  if (configDir === undefined) return [];
+  const sessionsDir = path.join(configDir, 'sessions');
+  let names: string[];
+  try {
+    names = await nodeFs.readdir(sessionsDir);
+  } catch {
+    return [];
+  }
+  const cwds = new Set<string>();
+  for (const name of names.filter((n) => /^\d+\.json$/.test(n))) {
+    const filePid = Number.parseInt(name, 10);
+    try {
+      const buf = await readSlice(nodeFs, path.join(sessionsDir, name), 0, SESSION_FILE_MAX + 1);
+      if (buf.length > SESSION_FILE_MAX) continue;
+      const parsed = parseRegistry(filePid, buf.toString('utf8'));
+      if (parsed === null || !isAlive(filePid)) continue;
+      if (parsed.kind !== null && parsed.kind !== 'interactive') continue;
+      cwds.add(parsed.entry.cwd);
+    } catch {
+      // An unreadable registry file is one session fewer, never an error.
+    }
+  }
+  return [...cwds];
+}
+
 export function createCliSessionsReader(deps: CliSessionsDeps): {
   read(handle?: DbHandle): Promise<CliSessionsResponse>;
 } {

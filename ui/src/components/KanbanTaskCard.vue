@@ -29,6 +29,7 @@ import {
   type KanbanGroupBy,
 } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
+import { foreignStoreId } from '../lib/storeKey.js';
 import AgentChip from './AgentChip.vue';
 import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
@@ -42,7 +43,7 @@ const props = defineProps<{
   /** ds-spec.md §3.1 Work/Kanban row — phone cards show only title, one tag, one meta line. */
   compact?: boolean;
 }>();
-const emit = defineEmits<{ select: [taskId: string] }>();
+const emit = defineEmits<{ select: [taskId: string, storeId?: string] }>();
 
 const title = computed(() =>
   boardTitle(
@@ -82,7 +83,7 @@ async function onCopyTaskId(event: MouseEvent) {
 }
 
 function onSelect() {
-  emit('select', props.task.taskId);
+  emit('select', props.task.taskId, foreignStoreId(props.task));
 }
 
 // S2 review fix: ignore Enter/Space that started on a focusable descendant

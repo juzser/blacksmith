@@ -19,6 +19,7 @@ import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
 import { agentChip, isInteractiveDescendant, titleCase } from '../lib/kanban.js';
+import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
 import AgentChip from './AgentChip.vue';
 import Icon from './kit/Icon.vue';
@@ -41,6 +42,7 @@ const props = defineProps<{
   compact?: boolean;
   /** A task a quick-look targets: a row hidden past the cap is revealed for it. */
   revealTaskId?: string | null;
+  revealStoreId?: string;
 }>();
 // `navigate` carries an arrow key on a fix row: the board moves focus on.
 const emit = defineEmits<{
@@ -74,7 +76,9 @@ const showAllRows = ref(false);
 watch(
   () => props.revealTaskId,
   (id) => {
-    const index = props.members.findIndex((m) => m.taskId === id);
+    const index = props.members.findIndex(
+      (m) => m.taskId === id && foreignStoreId(m) === props.revealStoreId,
+    );
     if (index >= ROW_CAP) showAllRows.value = true;
   },
   { immediate: true },
@@ -102,13 +106,13 @@ async function onCopyTaskId(event: MouseEvent, taskId: string) {
   flash();
 }
 
-function onRowKeydown(event: KeyboardEvent, taskId: string) {
+function onRowKeydown(event: KeyboardEvent, task: KanbanTask) {
   if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
   if (event.key === 'Enter') {
-    emit('select', taskId);
+    emit('select', task.taskId, foreignStoreId(task));
   } else if (event.key === ' ') {
     event.preventDefault();
-    emit('select', taskId);
+    emit('select', task.taskId, foreignStoreId(task));
   } else if (event.key.startsWith('Arrow')) {
     emit('navigate', event);
   }
@@ -135,14 +139,14 @@ function onRowKeydown(event: KeyboardEvent, taskId: string) {
       </span>
     </summary>
     <ul role="list" class="bs-kanban-group__rows">
-      <li v-for="task in rows" :key="task.taskId">
+      <li v-for="task in rows" :key="storeKey(task, task.taskId)">
         <div
           class="bs-kanban-group__row"
           role="link"
           tabindex="0"
           :aria-label="`${rowTitle(task)}, opens task detail`"
-          @click="emit('select', task.taskId)"
-          @keydown="onRowKeydown($event, task.taskId)"
+          @click="emit('select', task.taskId, foreignStoreId(task))"
+          @keydown="onRowKeydown($event, task)"
         >
           <p class="bs-kanban-group__row-title" :title="compact ? undefined : rowTitle(task)">
             <span class="bs-kanban-group__row-text">{{ rowTitle(task) }}</span>

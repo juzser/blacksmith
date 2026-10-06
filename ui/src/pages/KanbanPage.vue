@@ -139,8 +139,11 @@ const taskCount = computed(() => visibleTaskCount(displayedColumns.value));
 // the server, so the board's input is simply every task across them.
 const boardTasks = computed(() => displayedColumns.value.flatMap((c) => c.tasks));
 
-function goToTask(taskId: string) {
-  router.push(`/tasks/${encodeURIComponent(taskId)}`);
+function goToTask(taskId: string, storeId?: string) {
+  router.push({
+    path: `/tasks/${encodeURIComponent(taskId)}`,
+    query: storeId ? { store: storeId } : {},
+  });
 }
 </script>
 

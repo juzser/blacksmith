@@ -4,6 +4,7 @@
 import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from './api.js';
 import { formatBudgetPct, formatCompactNumber, pluralize, taskLabel } from './format.js';
 import { dispatchDecisionLine } from './roleLabels.js';
+import type { StoreRef } from './storeKey.js';
 
 export interface TokenTotals {
   spent: number;
@@ -95,6 +96,7 @@ export interface CardTokens extends TokenTotals {
 
 export interface RunningCard {
   project: string;
+  store?: StoreRef;
   workingAgents: number;
   epics: string[];
   tokens: CardTokens;
@@ -201,6 +203,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
     .filter((p) => isRunning(p.workingAgentCount, p.epicsActivelyRunning))
     .map((p) => ({
       project: p.project,
+      ...(p.store ? { store: p.store } : {}),
       workingAgents: p.workingAgentCount,
       epics: p.epicsActivelyRunning,
       tokens: cardTokens(p.tokensByEpic, p.epicsActivelyRunning),

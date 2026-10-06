@@ -40,6 +40,7 @@ import {
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
 } from '../lib/kanbanDisplayOptions.js';
+import { foreignStoreId } from '../lib/storeKey.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
 import KanbanFollowupGroup from './KanbanFollowupGroup.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
@@ -65,7 +66,7 @@ const TONE_ICON = {
 const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean }>(), {
   showAll: false,
 });
-const emit = defineEmits<{ select: [taskId: string] }>();
+const emit = defineEmits<{ select: [taskId: string, storeId?: string] }>();
 
 const { isPhoneWidth } = useViewport();
 const { project } = useProjectContext();
@@ -225,11 +226,13 @@ function onMobileTabKeydown(event: KeyboardEvent) {
 // peek panel. Escape restores focus to the card that opened the panel.
 const boardEl = ref<HTMLElement | null>(null);
 const peekTaskId = ref<string | null>(null);
+// The store a foreign card's task lives in; undefined for the served store.
+const peekStoreId = ref<string | undefined>(undefined);
 // Spec 1.4: a quick-look that targets a fix opens the group holding it. Only
 // the peek changing triggers this, so closing the group afterwards sticks.
-watch(peekTaskId, (id) => {
+watch([peekTaskId, peekStoreId], ([id, storeId]) => {
   for (const col of columns.value) {
-    const hit = findGroupMember(col.items, id);
+    const hit = findGroupMember(col.items, id, storeId);
     if (hit && !openGroups.value.has(hit.key)) toggleGroup(hit.key);
   }
 });
@@ -246,18 +249,19 @@ function cardEls(): HTMLElement[] {
   );
 }
 
-function openPeek(taskId: string, trigger: HTMLElement | null) {
+function openPeek(taskId: string, storeId: string | undefined, trigger: HTMLElement | null) {
   lastFocusedCard = trigger;
+  peekStoreId.value = storeId;
   peekTaskId.value = taskId;
 }
-function onCardSelect(taskId: string) {
+function onCardSelect(taskId: string, storeId?: string) {
   // ds-spec.md §3.1 Work/Kanban row: tapping a card on phone opens the task
   // page directly — no card menu, copy id or quick-look peek panel there.
   if (isPhoneWidth.value) {
-    emit('select', taskId);
+    emit('select', taskId, storeId);
     return;
   }
-  openPeek(taskId, document.activeElement as HTMLElement | null);
+  openPeek(taskId, storeId, document.activeElement as HTMLElement | null);
 }
 async function closePeek() {
   const card = lastFocusedCard;
@@ -275,7 +279,7 @@ async function closePeek() {
   card?.focus();
 }
 
-function onCardKeydown(event: KeyboardEvent, taskId: string) {
+function onCardKeydown(event: KeyboardEvent, task: KanbanTask) {
   // S2 review fix: a keydown that started on a focusable descendant (e.g.
   // the footer's "Open PR" link) must keep its own native behaviour instead
   // of being swallowed by the card's own Enter/Space/arrow handling.
@@ -283,7 +287,7 @@ function onCardKeydown(event: KeyboardEvent, taskId: string) {
   const current = event.target as HTMLElement;
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault();
-    openPeek(taskId, current);
+    openPeek(task.taskId, foreignStoreId(task), current);
     return;
   }
   moveFocus(event, current);
@@ -422,6 +426,7 @@ defineExpose({ focusFirstCard });
               :status-in-column="options.groupBy === 'status' && !showAll"
               :compact="isPhoneWidth"
               :reveal-task-id="peekTaskId"
+              :reveal-store-id="peekStoreId"
               @toggle="toggleGroup(item.key)"
               @select="onCardSelect"
               @keydown="onGroupKeydown"
@@ -434,7 +439,7 @@ defineExpose({ focusFirstCard });
               :summary-enabled="options.summary"
               :compact="isPhoneWidth"
               @select="onCardSelect"
-              @keydown="onCardKeydown($event, item.task.taskId)"
+              @keydown="onCardKeydown($event, item.task)"
             />
           </li>
         </ul>
@@ -459,6 +464,12 @@ defineExpose({ focusFirstCard });
         </button>
       </section>
     </div>
-    <TaskPeekPanel v-if="peekTaskId" :task-id="peekTaskId" @close="closePeek" @open-full="(id) => emit('select', id)" />
+    <TaskPeekPanel
+      v-if="peekTaskId"
+      :task-id="peekTaskId"
+      :store-id="peekStoreId"
+      @close="closePeek"
+      @open-full="(id) => emit('select', id, peekStoreId)"
+    />
   </div>
 </template>
