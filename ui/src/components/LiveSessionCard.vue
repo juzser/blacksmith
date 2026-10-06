@@ -33,7 +33,7 @@ const view = computed(() =>
       </div>
       <div class="bs-live-card__status">
         <Tag :tone="view.status.tone" size="sm">{{ view.status.label }}</Tag>
-        <RelativeTime v-if="view.since" :iso="view.since" />
+        <RelativeTime v-if="view.since" :iso="view.since" duration />
       </div>
     </div>
     <p v-if="view.meta" class="bs-live-card__meta">{{ view.meta }}</p>

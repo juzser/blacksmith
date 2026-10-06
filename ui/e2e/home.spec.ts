@@ -796,7 +796,9 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
     const all: { el: Element; label: string; boxes: Box[] }[] = [];
     for (const card of cards) {
       const cr = card.getBoundingClientRect();
-      for (const el of Array.from(card.querySelectorAll('a[href], button'))) {
+      for (const el of Array.from(
+        card.querySelectorAll('a[href], button, [tabindex]:not([tabindex="-1"])'),
+      )) {
         const label = (el.textContent ?? '').trim().slice(0, 30);
         const boxes = boxesOf(el);
         all.push({ el, label, boxes });
@@ -879,6 +881,22 @@ test.describe('Home: Live sessions', () => {
     await first.getByRole('button', { name: '+ 1 more' }).click();
     await expect(first).toContainText('Code reviewer on Check the cart total');
     await expect(first.getByRole('button', { name: /more/ })).toHaveCount(0);
+  });
+
+  test('the status time reads "for N min", not "N min ago", on desktop and at 375px', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    for (const size of [null, PHONE]) {
+      if (size) await page.setViewportSize(size);
+      await page.goto('/overview');
+      const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
+      const t = items.nth(0).locator('.bs-live-card__status time');
+      await expect(t).toHaveText('for 12 min');
+      await expect(t).toHaveAttribute('datetime', minutesAgo(12));
+      await expect(items.nth(1).locator('.bs-live-card__status time')).toHaveText('for 5 min');
+      await expect(items.nth(0)).not.toContainText(' ago');
+    }
   });
 
   test('a foreign store task links with ?store=, and waiting on you reads in words', async ({

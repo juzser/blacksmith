@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// ds-spec.md §2.1: `iso`, `now?` (test seam); renders "5 min ago" / "2 h ago"
+// ds-spec.md §2.1: `iso`, `now?` (test seam), `duration?` ("for 12 min"); renders "5 min ago" / "2 h ago"
 // / "3 d ago" inside a `<time datetime>`; the absolute time
 // ("30 Sep 2026, 14:07:12") in a Tooltip (describe mode, the element is
 // focusable), not a title attribute — the single implementation for every
@@ -11,17 +11,22 @@
 // conditionally), but its ticking value is simply never read.
 import { computed } from 'vue';
 import { useNow } from '../../composables/useNow.js';
-import { formatAbsolute, formatRelativeVerbose } from '../../lib/format.js';
+import { formatAbsolute, formatRelativeVerbose, formatSinceVerbose } from '../../lib/format.js';
 import Tooltip from './Tooltip.vue';
 
 const props = defineProps<{
   iso: string;
   now?: string;
+  duration?: boolean;
 }>();
 
 const liveNow = useNow();
 const effectiveNow = computed(() => props.now ?? liveNow.value);
-const relative = computed(() => formatRelativeVerbose(props.iso, effectiveNow.value));
+const relative = computed(() =>
+  props.duration
+    ? formatSinceVerbose(props.iso, effectiveNow.value)
+    : formatRelativeVerbose(props.iso, effectiveNow.value),
+);
 const absolute = computed(() => formatAbsolute(props.iso));
 </script>
 

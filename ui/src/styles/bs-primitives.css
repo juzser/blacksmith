@@ -2788,7 +2788,9 @@ summary.bs-inbox__group-head {
 @media (max-width: 640px) {
   .bs-live-card__head {
     flex-direction: column;
-    gap: var(--bs-space-1);
+    /* Wider than the usual 4px: the status row's time is a focusable
+       tooltip trigger, so the title link's grown hit box must stop above it. */
+    gap: var(--bs-space-4);
   }
   /* 44px hit boxes without growing the layout, and without two hit boxes
      overlapping. The Now task links read "Builder on <link>": inline links in
