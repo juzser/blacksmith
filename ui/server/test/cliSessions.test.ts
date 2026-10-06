@@ -1269,6 +1269,37 @@ describe('cliSessions reader', () => {
       ]);
     });
 
+    it('keeps a shipped task closed when a later wave only re-admits it', async () => {
+      const root = await factorySession('sess-ship', SID_B);
+      await root.addTask('epic-s', 'epic-s/task-1');
+      await root.addTask('epic-s', 'epic-s/task-2');
+      await root.add('wave-admitted', { epic_id: 'epic-s', task_ids: ['epic-s/task-1'] });
+      // A coder whose terminal event was never logged stays live past the merge.
+      await root.dispatch('epic-s/task-1');
+      await root.add('wave-merged', { epic_id: 'epic-s', task_ids: ['epic-s/task-1'] });
+      await new Promise((r) => setTimeout(r, 5));
+      // A re-planned wave admits the shipped task again beside a new one, and
+      // nothing is dispatched on the shipped task after that admission.
+      await root.add('wave-admitted', {
+        epic_id: 'epic-s',
+        task_ids: ['epic-s/task-1', 'epic-s/task-2'],
+      });
+      await root.dispatch('epic-s/task-2');
+
+      const [epic] = await linkedEpics(184, SID_B);
+      expect(epic?.openWaves.map((w) => w.taskIds)).toEqual([['epic-s/task-1', 'epic-s/task-2']]);
+      expect(epic?.openWaves[0]?.counts).toMatchObject({ done: 1, inProgress: 1 });
+      expect(epic?.workingAgents.map((a) => [a.role, a.taskId])).toEqual([
+        ['coder', 'epic-s/task-2'],
+      ]);
+
+      // Once the new task merges, the wave holds nothing open.
+      await root.add('wave-merged', { epic_id: 'epic-s', task_ids: ['epic-s/task-2'] });
+      const [after] = await linkedEpics(184, SID_B);
+      expect(after?.openWaves).toEqual([]);
+      expect(after?.workingAgents).toEqual([]);
+    });
+
     it('puts the plan tasks project on the card and leaves it null when unlinked', async () => {
       const wave = await factorySession('sess-pj', SID_B);
       await wave.addTask('epic-p', 'epic-p/dropped', { plan_version: 1 }, 'stale-project');
@@ -1372,6 +1403,22 @@ describe('cliSessions reader', () => {
         'Shall I ship it?',
       );
       expect(await nextOf('```\ncode\n`````  \n\nShipped it.')).toBe('Shipped it.');
+    });
+
+    it('treats a fence indented inside a list item as a fence', async () => {
+      expect(
+        await nextOf(
+          'Shall I ship it?\n\n1. Run:\n   - build:\n\n     ```sh\n     pnpm build\n\n     pnpm test\n     ```',
+        ),
+      ).toBe('Shall I ship it?');
+    });
+
+    it('does not open a backtick fence whose info string holds a backtick', async () => {
+      expect(await nextOf('Shall I ship it?\n\n```inline``` is how a span opens.\n\nDone?')).toBe(
+        'Done?',
+      );
+      // Tildes are unaffected: a backtick after a tilde run still opens.
+      expect(await nextOf('Shall I ship it?\n\n~~~ a `b`\ncode\n~~~')).toBe('Shall I ship it?');
     });
 
     it('is null when no paragraph is prose', async () => {

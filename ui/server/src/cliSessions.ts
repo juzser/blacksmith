@@ -302,9 +302,11 @@ const BOLD_LEAD = /^\s*(\*\*|__)(?:(?!\1).)+\1/;
 /**
  * The last paragraph of an assistant message that reads as prose. Fenced code
  * never counts (a fence also ends the paragraph before it). As in CommonMark,
- * a fence opens on three or more backticks or tildes after at most three
- * spaces, info string allowed, and closes only on a run of the same character
- * at least as long with nothing but whitespace after it. A list item,
+ * a fence opens on three or more backticks or tildes, info string allowed
+ * (but no backtick in it after a backtick run, so ```x``` stays a code span),
+ * and closes only on a run of the same character at least as long with
+ * nothing but whitespace after it. Any indent goes before either marker, so
+ * a fence nested in a list item is still a fence. A list item,
  * heading, table row, quote or a bold-only label line is skipped. Plain prose
  * wins over a paragraph that opens with a bold label (often a trailing
  * details block); the last bold-led paragraph is the fallback when there is
@@ -319,8 +321,9 @@ function lastProse(body: string): string | null {
     cur = [];
   };
   for (const line of body.split('\n')) {
-    const run = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (run !== undefined && fence === null) {
+    const run = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    const rest = run === undefined ? '' : line.trimStart().slice(run.length);
+    if (run !== undefined && fence === null && !(run[0] === '`' && rest.includes('`'))) {
       fence = run;
       flush();
     } else if (fence !== null) {
@@ -328,7 +331,7 @@ function lastProse(body: string): string | null {
         run !== undefined &&
         run[0] === fence[0] &&
         run.length >= fence.length &&
-        line.trimStart().slice(run.length).trim() === ''
+        rest.trim() === ''
       )
         fence = null;
     } else if (line.trim() === '') {
@@ -866,13 +869,30 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const epicWaves = waves.filter((w) => w.epicId === epicId);
         const byId = new Map(taskRows.map((t) => [t.taskId, t]));
         const row = (t: string) => byId.get(t) ?? taskRows.find((r) => taskIdsMatch(r.taskId, t));
+        // Every agent row of the lineage, any status: reopening a shipped task
+        // and the working list below both read it.
+        const agentRows = handle.sqlite
+          .prepare(
+            `select agent_role, task_id, epic_id, dispatched_at, status from agents where session_id in (${marks})`,
+          )
+          .all(...g.lineage) as {
+          agent_role: string;
+          task_id: string | null;
+          epic_id: string | null;
+          dispatched_at: string;
+          status: string;
+        }[];
         // Closed: merged in a wave no later admission came after, or its row
-        // says superseded, or done at or after its last admission. A
-        // re-admitted task reopens over an earlier merge, and over the row
-        // that merge left completed (the projector never reopens it, so its
-        // terminal_at is the only sign it predates the admission); one no
-        // wave admitted is closed by any merge. A task with neither a row nor
-        // a merge is not closed.
+        // says superseded or done. A re-admitted task reopens over an earlier
+        // merge. Its done row (the projector never reopens one, so its
+        // terminal_at is the only sign it predates the admission) reopens
+        // only when an agent of this epic was dispatched on the task at or
+        // after that admission: a re-planned wave re-admits tasks that
+        // already shipped, and the admission alone is a fact about the wave,
+        // not a reopening of the task. The trade-off: a wave that re-admits
+        // only shipped tasks shows as open from its first dispatch on one of
+        // them, not from the admission. A task no wave admitted is closed by
+        // any merge; one with neither a row nor a merge is not closed.
         const isClosed = (t: string): boolean => {
           const lastAdmit = epicWaves.reduce<string | null>(
             (m, w) =>
@@ -893,9 +913,14 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           if (r === undefined) return false;
           const bucket = statusBucketForTaskStatus(r.taskStatus);
           if (bucket === 'superseded') return true;
-          return (
-            bucket === 'done' &&
-            (lastAdmit === null || r.terminalAt === null || r.terminalAt >= lastAdmit)
+          if (bucket !== 'done') return false;
+          if (lastAdmit === null || r.terminalAt === null || r.terminalAt >= lastAdmit) return true;
+          return !agentRows.some(
+            (o) =>
+              o.task_id !== null &&
+              taskIdsMatch(o.task_id, t) &&
+              (o.epic_id === null || o.epic_id === epicId) &&
+              o.dispatched_at >= lastAdmit,
           );
         };
         // A task belongs to the LAST wave that admitted it, so a re-run wave
@@ -943,17 +968,6 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         // of different roles overlap, as they do for real; a same-role judge
         // or any other role still takes over. One entry per (role, task),
         // the newest dispatch.
-        const agentRows = handle.sqlite
-          .prepare(
-            `select agent_role, task_id, epic_id, dispatched_at, status from agents where session_id in (${marks})`,
-          )
-          .all(...g.lineage) as {
-          agent_role: string;
-          task_id: string | null;
-          epic_id: string | null;
-          dispatched_at: string;
-          status: string;
-        }[];
         const takenOver = (ag: (typeof agentRows)[number]): boolean => {
           const taskId = ag.task_id;
           if (taskId === null || !taskRows.some((r) => taskIdsMatch(r.taskId, taskId)))
