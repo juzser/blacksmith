@@ -515,10 +515,20 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return null;
   }
 
-  /** Drops what was remembered about sessions no longer in the registry. */
-  function forgetGone(live: ReadonlySet<string>): void {
+  /** The registry file each remembered session was last parsed from. */
+  const pidFileOf = new Map<string, number>();
+
+  /**
+   * Drops what was remembered about sessions that left. A session whose file
+   * is still listed but did not parse this poll (torn write, oversized, failed
+   * open) keeps its memory: the next good read must not lose its scope.
+   */
+  function forgetGone(live: ReadonlySet<string>, unparsedPids: ReadonlySet<number>): void {
+    for (const [id, pid] of pidFileOf) {
+      if (!live.has(id) && !unparsedPids.has(pid)) pidFileOf.delete(id);
+    }
     for (const m of [sticky, transcriptPaths, missUntil]) {
-      for (const id of m.keys()) if (!live.has(id)) m.delete(id);
+      for (const id of m.keys()) if (!pidFileOf.has(id)) m.delete(id);
     }
     const files = new Set(transcriptPaths.values());
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
@@ -739,6 +749,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     }
 
     const entries: RegistryEntry[] = [];
+    const unparsedPids = new Set<number>();
     // Filtered by name before any open: a `.key` sibling is never touched.
     for (const name of names.filter((n) => /^\d+\.json$/.test(n))) {
       const filePid = Number.parseInt(name, 10);
@@ -747,26 +758,30 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const buf = await readSlice(fs, path.join(sessionsDir, name), 0, SESSION_FILE_MAX + 1);
         if (buf.length > SESSION_FILE_MAX) {
           hidden.unparsed += 1;
+          unparsedPids.add(filePid);
           continue;
         }
         raw = buf.toString('utf8');
       } catch {
         hidden.unparsed += 1;
+        unparsedPids.add(filePid);
         continue;
       }
       const parsed = parseRegistry(filePid, raw);
       if (parsed === null) {
         hidden.unparsed += 1;
+        unparsedPids.add(filePid);
       } else if (!isAlive(filePid)) {
         hidden.dead += 1;
       } else if (parsed.kind !== null && parsed.kind !== 'interactive') {
         hidden.nonInteractive += 1;
       } else {
         entries.push(parsed.entry);
+        pidFileOf.set(parsed.entry.cliSessionId, filePid);
       }
     }
 
-    forgetGone(new Set(entries.map((e) => e.cliSessionId)));
+    forgetGone(new Set(entries.map((e) => e.cliSessionId)), unparsedPids);
 
     const odd = entries.find((e) => e.version !== null && !KNOWN_VERSION.test(e.version));
     const formatWarning =

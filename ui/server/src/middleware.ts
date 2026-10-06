@@ -102,9 +102,10 @@ export function writeGuard() {
 /**
  * Refuses a request whose Host header does not name a loopback address, so a
  * rebound hostname that resolves to 127.0.0.1 cannot read the route from a
- * foreign page. Mounted per route on `GET /api/cli-sessions`, which carries
- * operator prompt text; writeGuard() covers POST only, and extending this to
- * the other read routes is a separate change.
+ * foreign page. Mounted app-level on `/api/cli-sessions` (app.ts), ahead of
+ * the `/api/*` refresh middleware so a refused request triggers no refresh.
+ * That route carries operator prompt text; writeGuard() covers POST only, and
+ * extending this to the other read routes is a separate change.
  */
 export function loopbackGuard() {
   return async (c: Context, next: Next) => {

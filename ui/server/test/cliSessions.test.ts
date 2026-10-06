@@ -526,6 +526,37 @@ describe('cliSessions reader', () => {
       expect(back.sessions).toHaveLength(0);
       expect(back.hidden.outOfScope).toBe(1);
     });
+
+    it('keeps what it remembered when a listed registry file is unreadable for one poll', async () => {
+      await session(131, { cwd: outside });
+      await transcript(outside, SID_A, jsonl([user('<command-name>/bs</command-name>')]));
+      const r = reader();
+      expect((await r.read()).sessions).toHaveLength(1);
+      // The evidence scrolls away, then the file is caught half-written.
+      await transcript(outside, SID_A, jsonl([user('just chatting')]));
+      await session(131, {}, { raw: '{"pid":131,"sessionId":' });
+      const torn = await r.read();
+      expect(torn.sessions).toHaveLength(0);
+      expect(torn.hidden.unparsed).toBe(1);
+      await session(131, { cwd: outside });
+      const back = await r.read();
+      expect(back.sessions).toHaveLength(1);
+      expect(back.sessions[0]!.inScopeBy).toBe('heuristic');
+    });
+
+    it('forgets a session whose pid died while its file stays listed', async () => {
+      await session(132, { cwd: outside });
+      await transcript(outside, SID_A, jsonl([user('<command-name>/bs</command-name>')]));
+      const r = reader();
+      expect((await r.read()).sessions).toHaveLength(1);
+      await transcript(outside, SID_A, jsonl([user('just chatting')]));
+      alive.delete(132);
+      expect((await r.read()).hidden.dead).toBe(1);
+      alive.add(132);
+      const back = await r.read();
+      expect(back.sessions).toHaveLength(0);
+      expect(back.hidden.outOfScope).toBe(1);
+    });
   });
 
   describe('hardening', () => {

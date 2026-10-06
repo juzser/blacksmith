@@ -356,8 +356,8 @@ a public issue.
 Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eleven
 read-only pages to `127.0.0.1`. They are a projection of the event log —
 `bs db rebuild` reconstructs them from it, `bs stats` prints the same facts in
-a terminal, and nothing you click there dispatches an agent. The one other
-read is the local Claude Code session registry and transcripts (read-only;
+a terminal, and nothing you click there dispatches an agent. It also reads
+the local Claude Code session registry and transcripts (read-only;
 `--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default),
 served as `GET /api/cli-sessions` to loopback requests only. The factory runs
 without ever opening the dashboard.
