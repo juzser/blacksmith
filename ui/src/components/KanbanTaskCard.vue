@@ -13,7 +13,7 @@
 // toolbar's "Show summary" option actually does something again.
 
 import { Clock, Link } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
@@ -43,27 +43,85 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-// The title is no longer line-clamped: a clamp box would clip the inline copy
-// control whenever the text overflowed it. taskLabel() already caps a real
-// title at 60 chars; only the id-slug fallback is unbounded, so cap what is
-// rendered here instead (the full title stays on the card's aria-label).
-const TITLE_MAX = 80;
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
-const shownTitle = computed(() =>
-  title.value.length > TITLE_MAX ? `${title.value.slice(0, TITLE_MAX - 1)}…` : title.value,
-);
+// A CSS line clamp would cut the inline copy icon along with the text, so the
+// title is fitted by measurement instead: when it renders taller than
+// TITLE_LINES lines, binary-search the longest prefix that still fits with a
+// trailing "…" (the icon stays glued after it). Trial strings are written
+// straight to the two text nodes, so only the final result is set on a ref.
+const TITLE_LINES = 2;
+const WORD_CUT_SLACK = 8;
+const fitted = ref<string | null>(null);
+const shownTitle = computed(() => fitted.value ?? title.value);
 // The last word travels with the copy icon in one nowrap span, so the icon can
 // never wrap onto a line of its own: it always sits right after the last word.
 // A token too long to keep unbroken (it would overflow the card) is not glued.
 const GLUE_MAX = 24;
-const titleSplit = computed(() => {
-  const m = /^(.*?)(\S+)$/s.exec(shownTitle.value);
-  return m && m[2].length <= GLUE_MAX
-    ? { head: m[1], tail: m[2] }
-    : { head: shownTitle.value, tail: '' };
-});
+function splitTitle(text: string): { head: string; tail: string } {
+  const m = /^(.*?)(\S+)$/s.exec(text);
+  return m && m[2].length <= GLUE_MAX ? { head: m[1], tail: m[2] } : { head: text, tail: '' };
+}
+const titleSplit = computed(() => splitTitle(shownTitle.value));
 const titleHead = computed(() => titleSplit.value.head);
 const titleTail = computed(() => titleSplit.value.tail);
+
+const titleEl = ref<HTMLElement | null>(null);
+let titleObserver: ResizeObserver | null = null;
+let lastWidth = 0;
+function fitTitle() {
+  const el = titleEl.value;
+  const headNode = el?.firstChild;
+  const tailNode = el?.querySelector('.bs-kanban-card__title-tail')?.firstChild;
+  if (!el || !headNode || !tailNode) return;
+  const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+  if (el.clientWidth === 0 || !Number.isFinite(lineHeight)) return;
+  const full = title.value;
+  const show = (text: string) => {
+    const { head, tail } = splitTitle(text);
+    headNode.textContent = head;
+    tailNode.textContent = tail;
+  };
+  const fits = () => el.getBoundingClientRect().height <= TITLE_LINES * lineHeight + 1;
+  const cut = (n: number) => `${full.slice(0, n).trimEnd()}…`;
+  show(full);
+  if (fits()) {
+    fitted.value = null;
+    return;
+  }
+  let lo = 0;
+  let hi = full.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    show(cut(mid));
+    if (fits()) lo = mid;
+    else hi = mid - 1;
+  }
+  const space = full.lastIndexOf(' ', lo);
+  const n = space > 0 && lo - space <= WORD_CUT_SLACK ? space : lo;
+  show(cut(n));
+  fitted.value = cut(n);
+}
+function onTitleResize() {
+  const width = titleEl.value?.clientWidth ?? 0;
+  if (width === lastWidth) return;
+  lastWidth = width;
+  fitTitle();
+}
+onMounted(() => {
+  const el = titleEl.value;
+  if (!el) return;
+  lastWidth = el.clientWidth;
+  fitTitle();
+  if (typeof ResizeObserver === 'undefined') return;
+  titleObserver = new ResizeObserver(onTitleResize);
+  titleObserver.observe(el);
+});
+onBeforeUnmount(() => titleObserver?.disconnect());
+watch(title, async () => {
+  fitted.value = null;
+  await nextTick();
+  fitTitle();
+});
 const chips = computed(() => cardChips(props.task, props.groupBy));
 // Audit finding 5: the meta-row role label duplicated the same role
 // AgentChip already shows ("Finding checker" next to "Finding checker ·
@@ -123,7 +181,7 @@ function onKeydown(event: KeyboardEvent) {
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
     </div>
 
-    <p class="bs-kanban-card__title">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
+    <p ref="titleEl" class="bs-kanban-card__title" :title="fitted ? title : undefined">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
         :icon="Link"
         :label="copyIdLabel"
         size="sm"

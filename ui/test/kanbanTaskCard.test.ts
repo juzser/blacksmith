@@ -121,8 +121,14 @@ describe('KanbanTaskCard.vue — title-copy icon flows inline with the title tex
     );
   });
 
-  it('caps a very long derived label so the title cannot run away', () => {
-    expect(SRC).toMatch(/TITLE_MAX/);
+  it('fits the title to 2 lines by measurement, keeping the icon after the ellipsis', () => {
+    expect(SRC).not.toMatch(/TITLE_MAX/);
+    expect(SRC).toMatch(/new ResizeObserver/);
+    expect(SRC).toMatch(/\.disconnect\(\)/);
+    expect(SRC).toMatch(/TITLE_LINES\s*=\s*2/);
+    expect(SRC).toMatch(/\+ '…'|\}…`/);
+    expect(SRC).toMatch(/:title="fitted \? title : undefined"/);
+    expect(SRC).toMatch(/aria-label="`\$\{title\}, opens task detail`"/);
   });
 });
 
