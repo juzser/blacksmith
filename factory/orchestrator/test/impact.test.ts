@@ -498,6 +498,92 @@ describe('what an export diff proves', () => {
     expect(diff.signatureChanged).toEqual(['cfg']);
   });
 
+  // Each source changes `a: A` to `a: B`: an object type after a `=>` in a type, never a body.
+  it.each([
+    [
+      'a function declaration',
+      'export function f(cb: (x: X) => { a: A }) {\n  return 1;\n}\n',
+      'f',
+    ],
+    [
+      'a function declaration with a return type',
+      'export function f(cb: (x: X) => { a: A }): R {\n  return 1;\n}\n',
+      'f',
+    ],
+    ['a declare function', 'export declare function f(cb: (x: X) => { a: A }): void;\n', 'f'],
+    ['an overload signature', 'export function f(cb: (x: X) => { a: A }): void;\n', 'f'],
+    [
+      'a default overload signature',
+      'export default function f(cb: (x: X) => { a: A }): void;\n',
+      'default',
+    ],
+    [
+      'an object parameter with a method type',
+      'export function f(o: { render: () => { a: A } }) {\n  return 1;\n}\n',
+      'f',
+    ],
+    ['a parenthesised type alias', 'export type H = ((e: E) => { a: A }) | null;\n', 'H'],
+    ['a type alias in a tuple type argument', 'export type H = Foo<[(e: E) => { a: A }]>;\n', 'H'],
+    [
+      'an async function expression',
+      'export const f = async function (cb: (x: X) => { a: A }) {\n  return 1;\n};\n',
+      'f',
+    ],
+    [
+      'a function expression with a return type',
+      'export const f = function (cb: (x: X) => { a: A }): R {\n  return 1;\n};\n',
+      'f',
+    ],
+    [
+      'an arrow whose object return type ends the clause',
+      'export const f = (cb: (x: X) => { a: A }): { r: R } => {\n  return 1;\n};\n',
+      'f',
+    ],
+    ['a const annotation', 'export const h: ((e: E) => { a: A }) | null = null;\n', 'h'],
+    [
+      'a class heritage call',
+      'export class K extends mixin((e: E) => { a: A }) {\n  x = 1;\n}\n',
+      'K',
+    ],
+  ])(
+    'names a changed callback type in a parameter as a changed signature: %s',
+    (_label, before, name) => {
+      const after = before.replace('a: A', 'a: B');
+      expect(diffExports(before, after, 'src/a.ts').signatureChanged).toEqual([name]);
+    },
+  );
+
+  // The `{` after these words or after a function type's `=>` is an object type, not the body.
+  it.each([
+    ['a type predicate', 'export const g = wrap(function (x): x is { a: A } {\n  return t;\n});\n'],
+    [
+      'an assertion signature',
+      'export const g = wrap(function (x): asserts x is { a: A } {\n  go();\n});\n',
+    ],
+    [
+      'a conditional type',
+      'export const g = wrap(function (x): T extends { a: A } ? 1 : 2 {\n  return 1;\n});\n',
+    ],
+    ['a keyof type', 'export const g = wrap(function (x): keyof { a: A } {\n  return k;\n});\n'],
+    [
+      'a readonly array type',
+      'export const g = wrap(function (x): readonly { a: A }[] {\n  return [];\n});\n',
+    ],
+    [
+      'an unparenthesised function type',
+      'export const g = wrap((x: X): () => { a: A } => {\n  return h;\n});\n',
+    ],
+  ])(
+    'names a changed object type in a return type as a changed signature: %s',
+    (_label, before) => {
+      const after = before.replace('a: A', 'a: B');
+      expect(diffExports(before, after, 'src/a.ts').signatureChanged).toEqual(['g']);
+      const bodyEdit = before.replace(/\{\n {2}([^\n]*)\n\}/, '{\n  $1\n  more();\n}');
+      expect(bodyEdit).not.toBe(before);
+      expect(diffExports(before, bodyEdit, 'src/a.ts').signatureChanged).toEqual([]);
+    },
+  );
+
   it('refuses to answer when either side is unreadable', () => {
     const diff = diffExports("export const a = 'unterminated;", 'export const a = 1;', 'src/a.ts');
     expect(diff.unverifiable).toBe(true);

@@ -647,12 +647,30 @@ function normalizeSignature(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
+/** Type words after which a `{` opens an object type, as it does after `:`. */
+const TYPE_OPERATORS: ReadonlySet<string> = new Set(['is', 'extends', 'keyof', 'readonly']);
+
+/**
+ * Whether the group `open`…`close` reads as a function type's parameters, as
+ * TypeScript decides it: empty, a rest parameter, or a name or binding pattern
+ * followed by `:`, `,`, `?`, `=` or the `)`. `(A | B)` is a parenthesised type.
+ */
+function isTypeParameterList(masked: string, open: number, close: number): boolean {
+  const first = skipSpace(masked, open + 1);
+  if (first === close || masked.startsWith('...', first)) return true;
+  const ch = masked.charAt(first);
+  let after = first + readIdent(masked, first).length;
+  if (ch === '{' || ch === '[') after = matchBracket(masked, first, close) + 1;
+  return after > first && ':,?=)'.includes(masked.charAt(skipSpace(masked, after)));
+}
+
 /**
  * Walk a return-type annotation (`from` is just past its `:`) and answer where
- * it stops before `limit`: the index of the function body's `{`, the index of
- * the `=>`, or -1 when what follows the `:` is not a return type at all (a
- * ternary branch, say). A `{` directly after `:`, `|`, `&`, `<`, `,` or `?` is
- * an object type.
+ * it stops: the index of the function body's `{`, the index of the `=>`,
+ * `limit` when the type runs to it, or -1 when what follows the `:` is not a
+ * return type at all (a ternary branch, say). A `{` directly after `:`, `|`,
+ * `&`, `<`, `,`, `?`, a word in TYPE_OPERATORS or a function type's `=>` is an
+ * object type.
  */
 function skipReturnType(masked: string, from: number, limit: number): number {
   let prev = ':';
@@ -669,8 +687,21 @@ function skipReturnType(masked: string, from: number, limit: number): number {
     if (ch === '{' || ch === '(' || ch === '[') {
       const close = matchBracket(masked, i, limit);
       if (close === -1) return -1;
-      i = close + 1;
-      prev = ')';
+      const arrow = skipSpace(masked, close + 1);
+      const functionType =
+        ch === '(' &&
+        ':|&<,?>'.includes(prev) &&
+        masked.startsWith('=>', arrow) &&
+        isTypeParameterList(masked, i, close);
+      // A function type's `=>` is not the arrow function's; its return type follows.
+      i = functionType ? arrow + 2 : close + 1;
+      prev = functionType ? ':' : ')';
+      continue;
+    }
+    if (isIdentStart(ch)) {
+      const word = readIdent(masked, i);
+      prev = prev !== '.' && TYPE_OPERATORS.has(word) ? ':' : 'a';
+      i += word.length;
       continue;
     }
     if (ch === '<') angle += 1;
@@ -680,25 +711,87 @@ function skipReturnType(masked: string, from: number, limit: number): number {
     prev = ch;
     i += 1;
   }
-  return -1;
+  return limit;
 }
 
-/** Whether the call opening at `open` is a class heritage, `extends mixin(Base) {`, whose `{` is a class body. */
+/**
+ * Whether the call opening at `open` is a class heritage, `extends mixin(Base) {`,
+ * whose `{` is a class body. It reads back from `open` only as far as the
+ * heritage name and the `extends` before it, never to `start`.
+ */
 function isHeritageCall(masked: string, start: number, open: number): boolean {
-  return /\bextends\s+[\w$.]+\s*$/.test(masked.slice(start, open));
+  let i = open;
+  while (i > start && /\s/.test(masked.charAt(i - 1))) i -= 1;
+  const nameEnd = i;
+  while (i > start && /[\w$.]/.test(masked.charAt(i - 1))) i -= 1;
+  const nameStart = i;
+  while (i > start && /\s/.test(masked.charAt(i - 1))) i -= 1;
+  const keyword = i - 'extends'.length;
+  return (
+    nameStart < nameEnd &&
+    i < nameStart &&
+    keyword >= start &&
+    masked.startsWith('extends', keyword) &&
+    (keyword === start || !/\w/.test(masked.charAt(keyword - 1)))
+  );
+}
+
+/** Words after `export default` that make it a declaration, not an expression. */
+const DEFAULT_DECLARATIONS: ReadonlySet<string> = new Set([
+  'function',
+  'class',
+  'interface',
+  'abstract',
+  'async',
+]);
+
+/**
+ * Where the clause's value starts — just past the `=` of `export const|let|var`
+ * or past `default` in `export default <expression>` — or -1 for any other
+ * clause. Only a value can hold a function body: a declaration's own body
+ * lies past the clause, and an annotation, a type alias, an interface or a
+ * `declare` is all types, where a `{` after `=>` is an object type.
+ */
+function valueStart(masked: string, from: number, end: number): number {
+  const at = skipSpace(masked, from);
+  const word = readIdent(masked, at);
+  if (word === 'default') {
+    const next = readIdent(masked, skipSpace(masked, at + word.length));
+    return DEFAULT_DECLARATIONS.has(next) ? -1 : at + word.length;
+  }
+  if (word !== 'const' && word !== 'let' && word !== 'var') return -1;
+  let depth = 0;
+  for (let i = at + word.length; i < end; i += 1) {
+    const ch = masked.charAt(i);
+    if (ch === '=' && masked.charAt(i + 1) === '>') i += 1;
+    else if ('([{<'.includes(ch)) depth += 1;
+    else if (')]}>'.includes(ch)) depth -= 1;
+    else if (ch === '=' && depth === 0) return i + 1;
+  }
+  return -1;
 }
 
 /** What a function body reads as in a signature. */
 const BODY_PLACEHOLDER = '{…}';
 
 /**
- * The clause text an importer can see: every function body in it becomes a
- * placeholder, so an edit inside a body is not a signature edit, while what
- * follows a body (a `memo` comparator, an `as` cast, a chained call) still is.
- * A body is the `{` right after a parameter list, after its return type, or
- * after `=>`; any other brace is text. A parameter list is kept whole, so a
- * type literal in it is never taken for a body. Nothing past `end` is read, and
- * an unmatched bracket keeps the clause whole.
+ * The value text an importer can see (`start` is from valueStart): every
+ * function body in it becomes a placeholder, so an edit inside a body is not a
+ * signature edit, while what follows a body (a `memo` comparator, an `as` cast,
+ * a chained call) still is. A body is the `{` right after a parameter list,
+ * after its return type, or after `=>`; any other brace is text. The scan steps
+ * over a parameter list and its return type once it finds the body or the
+ * `=>` after them, or when they run to the `{` that ends the clause (that body
+ * lies past `end`); any other parenthesised group, a call or a ternary branch,
+ * it reads into. Nothing past `end` is read, and an unmatched bracket keeps the
+ * text whole.
+ *
+ * Known limits, both rare: a function type with an object return inside a type
+ * argument or an `as` type within the value, `memo(forwardRef<R, (a: A) => { b: B }>(…))`
+ * or `memo(C as (p: P) => { a: A })`, reads its object type as a body; and a
+ * heritage that is not `extends name(…) {`, such as `extends mixin(A)(B) {`,
+ * `extends (c ? A : B) {` or `extends mixin<T>(Base) {`, has its class body
+ * read as a function body.
  */
 function signatureText(source: string, masked: string, start: number, end: number): string {
   let text = '';
@@ -719,14 +812,19 @@ function signatureText(source: string, masked: string, start: number, end: numbe
       if (close === -1) return source.slice(start, end);
       const after = skipSpace(masked, close + 1);
       const next = after < end ? masked.charAt(after) : '';
+      const stop = next === ':' ? skipReturnType(masked, after + 1, end) : after;
+      if (stop >= end && masked.charAt(end) === '{') {
+        // The `{` that ends the clause is this function's body: keep its parameters whole.
+        i = end;
+        continue;
+      }
       if (next === '{' && !isHeritageCall(masked, start, i)) body = after;
       else if (next === '=' && masked.charAt(after + 1) === '>') {
         i = after;
         continue;
-      } else if (next === ':') {
-        const stop = skipReturnType(masked, after + 1, end);
-        if (stop !== -1 && masked.charAt(stop) === '{') body = stop;
-        else if (stop !== -1) {
+      } else if (next === ':' && stop !== -1 && stop < end) {
+        if (masked.charAt(stop) === '{') body = stop;
+        else {
           i = stop;
           continue;
         }
@@ -764,7 +862,13 @@ function readClauseFacts(
   readClauseExports(source, masked, start, clause, keyword, facts);
   // An import introduces no export, so it has no signature to read.
   if (facts.exports.length === before) return;
-  const signature = normalizeSignature(signatureText(source, masked, start, clause.textEnd));
+  const end = clause.textEnd;
+  const value = valueStart(masked, start + keyword.length, end);
+  const text =
+    value === -1
+      ? source.slice(start, end)
+      : source.slice(start, value) + signatureText(source, masked, value, end);
+  const signature = normalizeSignature(text);
   for (let i = before; i < facts.exports.length; i += 1) {
     const name = facts.exports[i];
     if (name !== undefined) facts.exportSignatures.set(name, signature);
