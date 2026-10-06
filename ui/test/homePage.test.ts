@@ -88,7 +88,7 @@ describe('HomePage.vue', () => {
 
   it('flags budget outliers with a Details link', () => {
     expect(TEMPLATE).toMatch(
-      /outlierSentence\(budget\.outliers\.length\)[\s\S]*?<RouterLink to="\/analytics">Details<\/RouterLink>/,
+      /budget\.outlierSentence[\s\S]*?<RouterLink to="\/analytics">Details<\/RouterLink>/,
     );
   });
 

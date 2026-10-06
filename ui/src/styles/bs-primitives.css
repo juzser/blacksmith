@@ -574,10 +574,15 @@ a:hover {
    right end; the DOM keeps the kind tag before the title everywhere (a
    screen reader hears what kind of event this is before its title), so the
    phone-only swap is done with flex `order` on the existing children, not a
-   markup change. */
+   markup change. The Passed/Failed status tag goes last (order 3), the
+   mock's `.mrow .tag { justify-self: end; }`: title first, tags at the
+   row's right end, so the title starts at the left like every other row. */
 @media (max-width: 640px) {
   .bs-timeline-row__head .bs-event-kind-tag {
     order: 2;
+  }
+  .bs-timeline-row__head .bs-timeline-row__status {
+    order: 3;
   }
   .bs-timeline-row__head .bs-timeline-row__title {
     order: 1;

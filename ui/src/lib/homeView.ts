@@ -80,10 +80,18 @@ export function budgetRingLabel(spent: number, budget: number): string {
   return `${pct}% of token budget used${spent > budget ? ', over budget' : ''}`;
 }
 
-/** "1 epic has a suspicious total." — the outlier flag's sentence. */
-export function outlierSentence(count: number): string | null {
-  if (count === 0) return null;
-  return count === 1 ? '1 epic has a suspicious total.' : `${count} epics have suspicious totals.`;
+/** "1 epic has a suspicious total: epic-a." — the outlier flag's sentence. */
+export function outlierSentence(epicIds: readonly string[]): string | null {
+  if (epicIds.length === 0) return null;
+  const names = epicIds.join(', ');
+  return epicIds.length === 1
+    ? `1 epic has a suspicious total: ${names}.`
+    : `${epicIds.length} epics have suspicious totals: ${names}.`;
+}
+
+export interface CardTokens extends TokenTotals {
+  /** The running epics kept out of the ratio by isBudgetOutlier. */
+  outliers: string[];
 }
 
 export interface RunningCard {
@@ -91,7 +99,83 @@ export interface RunningCard {
   store?: StoreRef;
   workingAgents: number;
   epics: string[];
-  tokens: TokenTotals;
+  tokens: CardTokens;
+}
+
+/**
+ * The card is about work in flight, so its tokens cover only the epics it
+ * counts (`epicsActivelyRunning`), and spend and budget are folded over the
+ * same set: an epic with no budget adds to neither side, and an outlier is
+ * handled by budgetSummary exactly as on the Budget panel.
+ */
+function cardTokens(all: EpicTokenSpend[], inFlight: string[]): CardTokens {
+  const running = new Set(inFlight);
+  const budgeted = all.filter((e) => running.has(e.epicId) && e.tokensBudget !== null);
+  const { outliers, ...totals } = budgetSummary(budgeted);
+  return { ...totals, outliers: outliers.map((e) => e.epicId) };
+}
+
+/**
+ * The Budget panel: the figures the Running-now cards show, over the same
+ * epic set (`epicsActivelyRunning`, which the server already scopes to the
+ * selected project). Null when no epic is running, so the panel says so
+ * rather than drawing a zero.
+ */
+export function budgetPanel(o: OverviewResult): CardTokens | null {
+  if (o.epicsActivelyRunning.length === 0) return null;
+  return cardTokens(o.tokensByEpic, o.epicsActivelyRunning);
+}
+
+/** What the Budget panel renders: one quiet line, or the figures. */
+export type BudgetView =
+  | { kind: 'none'; text: string }
+  | {
+      kind: 'figures';
+      /** Drawn only for a measured ratio; null otherwise. */
+      ring: { value: number; max: number; label: string } | null;
+      tokensText: string;
+      deltaSentence: string | null;
+      unmeasuredSentence: string | null;
+      outlierSentence: string | null;
+    };
+
+/** The Budget panel's decision, so HomePage.vue only renders it. */
+export function budgetView(o: OverviewResult): BudgetView {
+  const panel = budgetPanel(o);
+  if (panel === null) return { kind: 'none', text: 'No epic is running.' };
+  return {
+    kind: 'figures',
+    ring:
+      panel.budget && cardShowsRing(panel)
+        ? {
+            value: panel.spent,
+            max: panel.budget,
+            label: budgetRingLabel(panel.spent, panel.budget),
+          }
+        : null,
+    tokensText: cardTokensText(panel),
+    deltaSentence: budgetDeltaSentence(o.budgetUsedPctPointDelta1h ?? null),
+    unmeasuredSentence: unmeasuredSentence(panel.unmeasured),
+    outlierSentence: outlierSentence(panel.outliers),
+  };
+}
+
+/**
+ * "84K of 350K tokens"; never "0 of" for spend nobody measured, which reads
+ * "4.1M budget · spend not measured" instead. Empty while the only budgeted epics
+ * are outliers (the card's outlier sentence says so).
+ */
+export function cardTokensText(t: CardTokens): string {
+  if (t.budget === null) return t.outliers.length > 0 ? '' : 'No budget set';
+  if (t.spent === 0 && t.unmeasured > 0) {
+    return `${formatCompactNumber(t.budget)} budget · spend not measured`;
+  }
+  return tokensOfBudget(t);
+}
+
+/** The card's ring is drawn only for a measured ratio. */
+export function cardShowsRing(t: CardTokens): boolean {
+  return t.budget !== null && t.budget > 0 && !(t.spent === 0 && t.unmeasured > 0);
 }
 
 function isRunning(workingAgents: number, epics: string[]): boolean {
@@ -101,7 +185,7 @@ function isRunning(workingAgents: number, epics: string[]): boolean {
 /**
  * One card per project with work in flight or agents working. Unscoped, the
  * overview carries a per-project summary; scoped to one project it does not,
- * so that project's single card is built from the scoped totals instead.
+ * so that project's single card is built from the scoped per-epic spend.
  */
 export function runningNowCards(o: OverviewResult, project?: string): RunningCard[] {
   if (project !== undefined) {
@@ -111,7 +195,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
         project,
         workingAgents: o.workingAgentCount,
         epics: o.epicsActivelyRunning,
-        tokens: sumTokens(o.tokensByEpic),
+        tokens: cardTokens(o.tokensByEpic, o.epicsActivelyRunning),
       },
     ];
   }
@@ -122,7 +206,7 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
       ...(p.store ? { store: p.store } : {}),
       workingAgents: p.workingAgentCount,
       epics: p.epicsActivelyRunning,
-      tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },
+      tokens: cardTokens(p.tokensByEpic, p.epicsActivelyRunning),
     }));
 }
 

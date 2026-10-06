@@ -57,6 +57,7 @@ function taskAdded(
   epicId: string,
   budgetTokens: number,
   ts: string = NOW,
+  taskStatus = 'completed',
 ): StoredEvent {
   return event({
     event_type: 'task-added',
@@ -67,7 +68,7 @@ function taskAdded(
       epic_id: epicId,
       case: 'feature',
       origin: 'user',
-      task_status: 'completed',
+      task_status: taskStatus,
       budget_tokens: budgetTokens,
     },
   });
@@ -197,9 +198,12 @@ describe('per-epic spend attribution (D-207)', () => {
     // denominator of "an hour ago" is now read as of an hour ago too, so a
     // task-added stamped NOW would mean nothing was budgeted then and the
     // whole 50% would be the move since.
+    //
+    // The task is still open: the delta covers the epics that are running,
+    // as the Budget panel does.
     project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: TWO_HOURS_AGO }),
-      taskAdded('epic-e/task-1', 'epic-e', 1000, TWO_HOURS_AGO),
+      taskAdded('epic-e/task-1', 'epic-e', 1000, TWO_HOURS_AGO, 'in-progress'),
       result('task-1', 'task-1', 300, TWO_HOURS_AGO),
       result('epic-e/task-1', 'epic-e/task-1', 200),
     ]);

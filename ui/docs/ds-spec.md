@@ -886,11 +886,17 @@ Sections, in order:
 2. **"Running now"** — grouped by project (audit item 10 / plan B). Example, from
    `/api/projects`: a "shop-api" group card showing "28 agents working" (from
    `liveAgentCount`), "10.6M of 10.3M tokens" + a danger `ProgressRing` reading "103%" (label "103% of token budget used, over budget") (from
-   `tokensSpent`/`tokensBudget`, `CompactNumber`), and a "Just finished" row for any epic
+   `tokensByEpic`, summed over the in-flight epics that have a budget, `CompactNumber`; "not measured" and no ring when none of that spend is measured), and a "Just finished" row for any epic
    whose `closedEpics` entry is newer than its `inFlightEpics` entry disappeared this
    session — closes audit item 2 (the stale "shop-ux-1 finished, PR #558" case). Each
    project card links its "View ->" to Work filtered by that project, not to a dropped
-   `/flow` route (audit item 8).
+   `/flow` route (audit item 8). An epic with no activity for more than 7 days (its
+   tasks' last update, or the last event naming it by payload `epic_id`, by task id, or by
+   a plan-ref id such as `<epic>/plan-r3`; `epicsIdle` carries each one and its idle
+   days) is not running: it leaves the card and the Budget, stays in `epicsInFlight`,
+   and reads "idle 18d" wherever its name is still listed: the Kanban epic picker, and
+   on the Roadmap the swimlane rows, the phone picker, the phone epic rows, the phase
+   mode epic sections and the epic-mode header.
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
    audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
    double-checking another model's review" style, from `/api/overview`'s
@@ -898,9 +904,12 @@ Sections, in order:
    file, pure data, no API change).
 4. **Budget** — "127M of 180M tokens" + a `ProgressRing` "71%" not "≥127113770 tok", "296 steps did not
    report their cost" not "296 not measured", "4 points lower than an hour ago" not "4pp"
-   (audit item 4). The one outlier epic (factory-error-log, 107M tokens against a 1.185M
-   budget) is flagged: "1 epic has a suspicious total. Details." rather than silently
-   dominating the percentage.
+   (audit item 4). The panel counts the epics "Running now" counts (the selected project's
+   when a project is chosen) and nothing else, so its figures are the sum of the cards; with
+   no epic running it reads "No epic is running." instead of a zero or an empty ring. The one
+   outlier epic (factory-error-log, 107M tokens against a 1.185M budget) is flagged by name:
+   "1 epic has a suspicious total: factory-error-log. Details." rather than silently
+   dominating the percentage; the card's outlier line uses the same wording.
 
 Data/API note: "Just finished" needs the `inFlightEpics()` staleness rule fixed
 server-side (queries.ts:1078, audit item 2) — a pure data fix, not new fields, since

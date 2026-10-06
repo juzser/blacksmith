@@ -22,6 +22,8 @@ function session(partial: Partial<RunningSession> & { sessionId: string }): Runn
     liveAgentCount: 0,
     workingAgentCount: 0,
     lastEventType: 'task-created',
+    lastStepRole: null,
+    lastStepTask: null,
     projects: ['black-smith'],
     title: null,
     ...partial,

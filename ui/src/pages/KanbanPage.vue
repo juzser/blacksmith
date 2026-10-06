@@ -23,7 +23,13 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
-import { fetchKanban, fetchOverview, type KanbanColumn, selectableEpics } from '../lib/api.js';
+import {
+  fetchKanban,
+  fetchOverview,
+  type IdleEpic,
+  type KanbanColumn,
+  selectableEpics,
+} from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
 import { visibleTaskCount } from '../lib/kanban.js';
@@ -37,6 +43,7 @@ const { sessionScope, sessionKey } = useSessionContext();
 const { isPhoneWidth } = useViewport();
 
 const epics = ref<string[]>([]);
+const idleEpics = ref<IdleEpic[]>([]);
 const selectedEpic = ref<string>(ALL_EPICS);
 /** Null until a fetch lands. That distinction is the whole guard on the empty state below. */
 const columns = ref<KanbanColumn[] | null>(null);
@@ -55,6 +62,7 @@ async function loadEpics() {
   try {
     const overview = await fetchOverview(sessionScope.value, project.value);
     epics.value = selectableEpics(overview);
+    idleEpics.value = overview.epicsIdle;
     epicsFailed.value = false;
   } catch {
     epicsFailed.value = true;
@@ -144,7 +152,7 @@ function goToTask(taskId: string, storeId?: string) {
     <div class="bs-kanban-page__toolbar">
       <label class="bs-kanban-page__toolbar-field">
         <span class="bs-kanban-page__count">Epic</span>
-        <Select v-model="selectedEpic" :options="epicOptions(epics)" aria-label="Epic" />
+        <Select v-model="selectedEpic" :options="epicOptions(epics, idleEpics)" aria-label="Epic" />
       </label>
       <span class="bs-kanban-page__count">{{ taskCount }} tasks</span>
       <div class="bs-kanban-page__toolbar-actions">

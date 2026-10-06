@@ -78,6 +78,8 @@ const props = defineProps<{
   statusCounts?: StatusCounts;
   // Epic mode — set instead of the phase-mode props above.
   epic?: EpicModeData;
+  /** Epic id -> "idle 18d", for the idle epics only. */
+  idleLabels: Record<string, string>;
 }>();
 
 /** DS4 S5c §1 — statusCounts-aware segments/aria-label, falling back to the
@@ -149,6 +151,9 @@ function toggle(epic: EpicSection) {
 
     <div class="esec-head">
       <b>{{ epic.epicId }}</b>
+      <Tag v-if="idleLabels[epic.epicId]" tone="neutral" variant="outline" size="sm">{{
+        idleLabels[epic.epicId]
+      }}</Tag>
       <IconButton
         :icon="Copy"
         :label="copyLabel"
@@ -226,6 +231,9 @@ function toggle(epic: EpicSection) {
         <li v-for="sec in epics" :key="sec.epicId" class="bs-roadmap-mobile__item">
           <button type="button" class="bs-roadmap-mobile__row" @click="emit('selectEpic', sec.epicId)">
             <span class="bs-roadmap-mobile__row-id" :title="sec.epicId">{{ sec.epicId }}</span>
+            <Tag v-if="idleLabels[sec.epicId]" tone="neutral" variant="outline" size="sm">{{
+              idleLabels[sec.epicId]
+            }}</Tag>
             <ProgressBarMini
               v-if="sec.tasksTotal"
               :value="sec.tasksCompleted ?? 0"
@@ -273,6 +281,9 @@ function toggle(epic: EpicSection) {
       <div v-for="sec in epics" :key="sec.epicId" class="esec">
         <div class="esec-head">
           <b>{{ sec.epicId }}</b>
+          <Tag v-if="idleLabels[sec.epicId]" tone="neutral" variant="outline" size="sm">{{
+            idleLabels[sec.epicId]
+          }}</Tag>
           <Tag :tone="sec.statusTone" size="sm">{{ sec.statusLabel }}</Tag>
           <template v-if="sec.tasksTotal === null">
             <!-- ds-allow-hardcode: placeholder width for the "N of M tasks done"

@@ -44,17 +44,23 @@ const duration = computed(() => {
   return formatDurationMs(Math.max(0, end - start));
 });
 
-// liveAgentCount is 0 for every finished run (its agents are no longer
-// live), not a count of how many agents it actually had -- the history list
-// has no field for that. Showing "0 agents" would read as a real zero, so
-// the count only renders while it is still a live measurement.
+// workingAgentCount, not liveAgentCount: a live row outlives an agent that
+// never reported, and every other screen counts only the working ones. It is
+// 0 for every finished run, not a count of how many agents it actually had --
+// the history list has no field for that. Showing "0 agents" would read as a
+// real zero, so the count only renders while it is still a live measurement.
 const agentCountLabel = computed(() => {
-  const n = props.session.liveAgentCount;
+  const n = props.session.workingAgentCount;
   if (n <= 0) return null;
   return `${n} ${n === 1 ? 'agent' : 'agents'}`;
 });
 
-const lastStep = computed(() => lastStepLabel(props.session.lastEventType));
+const lastStep = computed(() =>
+  lastStepLabel(props.session.lastEventType, {
+    role: props.session.lastStepRole,
+    task: props.session.lastStepTask,
+  }),
+);
 </script>
 
 <template>

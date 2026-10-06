@@ -85,6 +85,10 @@ export interface RunningSession {
   workingAgentCount: number;
   /** The most recent event's type — what this session just did. */
   lastEventType: string | null;
+  /** Agent role of the last event when it is a dispatch, else null. */
+  lastStepRole: string | null;
+  /** Title (id when untitled) of the task that dispatch was for, else null. */
+  lastStepTask: string | null;
   /**
    * Projects the session worked on: those of the tasks it created, and of
    * every task and epic its own events and agents name. Empty for a run that
@@ -171,6 +175,12 @@ export interface RecentDispatch {
   /** Which attempt this was — Home's derived line when `reason` is null. */
   round: number;
 }
+/** An in-flight epic nothing has touched for more than 7 days. */
+export interface IdleEpic {
+  epicId: string;
+  /** Whole days since its last activity, rounded down. */
+  idleDays: number;
+}
 export interface ProjectOverviewSummary {
   store?: StoreRef;
   project: string;
@@ -180,10 +190,14 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
   epicsActivelyRunning: string[];
+  /** The in-flight epics left out of `epicsActivelyRunning` for being idle over 7 days. */
+  epicsIdle: IdleEpic[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
   unmeasured: number;
+  /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
+  tokensByEpic: EpicTokenSpend[];
   alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {
@@ -214,6 +228,8 @@ export interface OverviewResult {
   epicsInFlight: string[];
   /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
   epicsActivelyRunning: string[];
+  /** The in-flight epics left out of `epicsActivelyRunning` for being idle over 7 days. */
+  epicsIdle: IdleEpic[];
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -233,12 +249,15 @@ export interface OverviewResult {
 
 /**
  * Every epic an operator can still pick on Kanban/Flow: the ones in flight,
- * then the closed ones newest first. A close removes an epic from
+ * the running ones before the idle ones, then the closed ones newest first. A close removes an epic from
  * `epicsInFlight` (D-43/P9-27), and its board has to stay reachable after that.
  */
 export function selectableEpics(overview: OverviewResult): string[] {
   const closed = overview.closedEpics ?? [];
-  return [...new Set([...overview.epicsInFlight, ...closed.map((e) => e.epicId)])];
+  const idle = new Set(overview.epicsIdle.map((e) => e.epicId));
+  const running = overview.epicsInFlight.filter((id) => !idle.has(id));
+  const idling = overview.epicsInFlight.filter((id) => idle.has(id));
+  return [...new Set([...running, ...idling, ...closed.map((e) => e.epicId)])];
 }
 
 export interface TimelineEntry {
