@@ -70,6 +70,7 @@ test.describe('Home', () => {
     await page.goto('/overview');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText([
       'Needs you',
+      'Live sessions',
       'Recent activity',
       'Running now',
       'What the factory decided recently',
@@ -504,5 +505,218 @@ test.describe('Home: Recent activity', () => {
       await expect(section.getByText('Nothing has happened yet.')).toBeVisible();
       await expect(section.locator('.bs-home__recent-activity')).toHaveCount(0);
     });
+  }
+});
+
+// Live sessions (ds-spec.md §4.1 item 1a): the e2e server runs with an empty
+// CLI registry, so the card data is served from a fixture instead. The
+// wording and link targets are unit-tested in ui/test/liveSessions.test.ts;
+// this layer proves the template renders them and that the section fits.
+const FOREIGN = { id: 'abcd1234', label: 'project-b' };
+const HOME_STORE = { id: 'home', label: 'home' };
+
+function liveCard(over: Record<string, unknown>): Record<string, unknown> {
+  return {
+    cliSessionId: 'cli-x',
+    name: null,
+    cwdLabel: 'workspace-c',
+    status: 'working',
+    statusSince: minutesAgo(12),
+    focus: null,
+    ...over,
+  };
+}
+
+const LIVE_CARDS = [
+  liveCard({
+    cliSessionId: 'cli-1',
+    focus: {
+      store: HOME_STORE,
+      project: 'project-a',
+      epicId: 'epic-a',
+      epicTitle: 'Checkout redesign',
+      wave: 6,
+      now: [
+        {
+          role: 'coder',
+          taskId: 'task-a1',
+          taskTitle: 'Show shipping fee before payment',
+          since: minutesAgo(9),
+        },
+        {
+          role: 'tester',
+          taskId: 'task-a2',
+          taskTitle: 'Drop the extra confirm step',
+          since: minutesAgo(8),
+        },
+        {
+          role: 'reviewer',
+          taskId: 'task-a3',
+          taskTitle: 'Check the cart total',
+          since: minutesAgo(7),
+        },
+      ],
+      next: { kind: 'task', taskId: 'task-a4', taskTitle: 'Cart summary' },
+    },
+  }),
+  liveCard({
+    cliSessionId: 'cli-2',
+    status: 'waiting_operator',
+    statusSince: minutesAgo(5),
+    focus: {
+      store: FOREIGN,
+      project: 'project-b',
+      epicId: 'epic-b',
+      epicTitle: 'Billing retries',
+      wave: 2,
+      now: [
+        {
+          role: 'reviewer',
+          taskId: 'task-b1',
+          taskTitle: 'Retry failed invoices',
+          since: minutesAgo(6),
+        },
+      ],
+      next: { kind: 'waiting_on_you' },
+    },
+  }),
+  liveCard({ cliSessionId: 'cli-3', status: 'idle', statusSince: null, name: 'session-c' }),
+];
+
+function liveResponse(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    state: 'ok',
+    configSource: 'default',
+    readAt: FIXTURE_NOW_ISO,
+    formatWarning: null,
+    hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+    sessions: LIVE_CARDS,
+    ...over,
+  };
+}
+
+async function serveLive(page: Page, body: Record<string, unknown>): Promise<void> {
+  await page.route('**/api/cli-sessions*', (route) => route.fulfill({ json: body }));
+}
+
+test.describe('Home: Live sessions', () => {
+  test('desktop: one labelled card per session with title, status, Now and Next', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const list = page.getByRole('list', { name: 'Live sessions' });
+    await expect(list.getByRole('listitem')).toHaveCount(3);
+    const first = list.getByRole('listitem').nth(0);
+    await expect(first).toContainText('project-a · epic-a · wave 6');
+    await expect(first).toContainText('Working');
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).toContainText('Tester on Drop the extra confirm step');
+    await expect(first.getByRole('button', { name: '+ 1 more' })).toBeVisible();
+    await expect(first.getByRole('link', { name: 'Open epic Checkout redesign' })).toHaveAttribute(
+      'href',
+      '/work/kanban?epic=epic-a',
+    );
+    await expect(first.getByRole('link', { name: 'Open task Cart summary' })).toHaveAttribute(
+      'href',
+      '/tasks/task-a4',
+    );
+    await first.getByRole('button', { name: '+ 1 more' }).click();
+    await expect(first).toContainText('Code reviewer on Check the cart total');
+    await expect(first.getByRole('button', { name: /more/ })).toHaveCount(0);
+  });
+
+  test('a foreign store task links with ?store=, and waiting on you reads in words', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const second = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(1);
+    await expect(second).toContainText('Waiting for you');
+    await expect(second).toContainText('Waiting on you');
+    await expect(
+      second.getByRole('link', { name: 'Open task Retry failed invoices' }),
+    ).toHaveAttribute('href', '/tasks/task-b1?store=abcd1234');
+  });
+
+  test('an unlinked session shows its folder, name and no Now or Next', async ({ page }) => {
+    await serveLive(page, liveResponse());
+    await page.goto('/overview');
+    const third = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(2);
+    await expect(third).toContainText('workspace-c · session-c');
+    await expect(third).toContainText('Idle');
+    await expect(third).toContainText('Not linked to a Blacksmith epic');
+    await expect(third).not.toContainText('Now');
+    await expect(third).not.toContainText('Next');
+    await expect(third.getByRole('link')).toHaveCount(0);
+  });
+
+  test('375px: one Now line, the rest behind "+ N more", and no sideways scroll', async ({
+    page,
+  }) => {
+    await serveLive(page, liveResponse());
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).not.toContainText('Tester on');
+    await expect(first.getByRole('button', { name: '+ 2 more' })).toBeVisible();
+    const box = await first.getByRole('button', { name: '+ 2 more' }).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(false);
+  });
+
+  test('empty: says so, with how many sessions were hidden', async ({ page }) => {
+    await serveLive(
+      page,
+      liveResponse({
+        sessions: [],
+        hidden: { outOfScope: 2, dead: 1, unparsed: 0, nonInteractive: 0 },
+      }),
+    );
+    await page.goto('/overview');
+    await expect(page.getByText('No live Blacksmith sessions')).toBeVisible();
+    await expect(page.getByText('3 other sessions hidden')).toBeVisible();
+  });
+
+  test('absent: says tracking is not set up, with no count', async ({ page }) => {
+    await serveLive(page, liveResponse({ state: 'absent', sessions: [] }));
+    await page.goto('/overview');
+    await expect(page.getByText('Session tracking is not set up on this machine.')).toBeVisible();
+    await expect(page.getByText(/hidden/)).toHaveCount(0);
+  });
+
+  test('unreadable and a failed fetch each show their own banner, never an empty list', async ({
+    page,
+  }) => {
+    await serveLive(
+      page,
+      liveResponse({ state: 'unreadable', sessions: [], formatWarning: 'unknown format' }),
+    );
+    await page.goto('/overview');
+    await expect(page.getByText('Could not read the live sessions: unknown format')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
+    await page.unroute('**/api/cli-sessions*');
+    await page.route('**/api/cli-sessions*', (route) => route.fulfill({ status: 500, json: {} }));
+    await page.reload();
+    await expect(page.getByText('Could not load live sessions')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+      test(`screenshot live sessions ${vpName}/${theme}`, async ({ page }) => {
+        await serveLive(page, liveResponse());
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/overview');
+        const section = page.locator('section[aria-labelledby="live-sessions-heading"]');
+        await settleForShot(page, section.getByRole('listitem').first());
+        await shootElement(section, `home-live-sessions-${vpName}-${theme}`);
+      });
+    }
   }
 });
