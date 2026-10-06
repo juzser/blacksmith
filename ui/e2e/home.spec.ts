@@ -599,6 +599,23 @@ async function serveLive(page: Page, body: Record<string, unknown>): Promise<voi
   await page.route('**/api/cli-sessions*', (route) => route.fulfill({ json: body }));
 }
 
+async function expectCardsAligned(page: Page, indicators: number): Promise<void> {
+  const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
+  const n = await items.count();
+  const lefts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const card = await items.nth(i).boundingBox();
+    const title = await items.nth(i).locator('[class*="__title"]').first().boundingBox();
+    expect(card).not.toBeNull();
+    expect(title).not.toBeNull();
+    expect((title?.x ?? 0) - (card?.x ?? 0)).toBeLessThan(24);
+    lefts.push(title?.x ?? 0);
+  }
+  for (const x of lefts) expect(Math.abs(x - lefts[0])).toBeLessThanOrEqual(1);
+  // Only the shell's LiveIndicator may wear .bs-live; the phone shell has none.
+  await expect(page.locator('.bs-live')).toHaveCount(indicators);
+}
+
 test.describe('Home: Live sessions', () => {
   test('desktop: one labelled card per session with title, status, Now and Next', async ({
     page,
@@ -608,6 +625,7 @@ test.describe('Home: Live sessions', () => {
     const list = page.getByRole('list', { name: 'Live sessions' });
     await expect(list.getByRole('listitem')).toHaveCount(3);
     const first = list.getByRole('listitem').nth(0);
+    await expectCardsAligned(page, 1);
     await expect(first).toContainText('project-a · epic-a · wave 6');
     await expect(first).toContainText('Working');
     await expect(first).toContainText('Builder on Show shipping fee before payment');
@@ -661,6 +679,7 @@ test.describe('Home: Live sessions', () => {
     await expect(first).toContainText('Builder on Show shipping fee before payment');
     await expect(first).not.toContainText('Tester on');
     await expect(first.getByRole('button', { name: '+ 2 more' })).toBeVisible();
+    await expectCardsAligned(page, 0);
     const box = await first.getByRole('button', { name: '+ 2 more' }).boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     const overflow = await page.evaluate(

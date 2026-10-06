@@ -2708,20 +2708,20 @@ summary.bs-inbox__group-head {
   flex-direction: column;
   gap: var(--bs-space-3);
 }
-.bs-live .bs-card__body {
+.bs-live-card .bs-card__body {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-2);
   min-width: 0;
 }
-.bs-live__head {
+.bs-live-card__head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--bs-space-3);
   min-width: 0;
 }
-.bs-live__title {
+.bs-live-card__title {
   min-width: 0;
   overflow: hidden;
   display: -webkit-box;
@@ -2731,13 +2731,13 @@ summary.bs-inbox__group-head {
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
 }
-.bs-live__link {
+.bs-live-card__link {
   color: inherit;
 }
-.bs-live__muted {
+.bs-live-card__muted {
   color: var(--bs-text-subtle);
 }
-.bs-live__status {
+.bs-live-card__status {
   display: flex;
   align-items: center;
   gap: var(--bs-space-2);
@@ -2745,23 +2745,23 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
 }
-.bs-live__meta {
+.bs-live-card__meta {
   margin: 0;
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
-.bs-live__line {
+.bs-live-card__line {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
   gap: var(--bs-space-2);
   text-align: left;
   font-size: var(--bs-text-sm);
 }
-.bs-live__k {
+.bs-live-card__k {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
-.bs-live__v {
+.bs-live-card__v {
   min-width: 0;
   overflow: hidden;
   display: -webkit-box;
@@ -2769,24 +2769,28 @@ summary.bs-inbox__group-head {
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
-.bs-live__wait {
+.bs-live-card__wait {
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-tone-warning-text);
 }
-.bs-live__more {
+/* The link-style button carries .bs-btn--sm's inline padding; zero it so its
+   text starts at the Now/Next value column (the mock's .ls-more sits at the
+   column's start edge). Declared after .bs-btn--sm, same specificity. */
+.bs-live-card__more {
   justify-self: start;
+  padding-inline: 0;
 }
 @media (max-width: 640px) {
-  .bs-live__head {
+  .bs-live-card__head {
     flex-direction: column;
     gap: var(--bs-space-1);
   }
-  .bs-live__link {
+  .bs-live-card__link {
     display: inline-flex;
     align-items: center;
     min-height: var(--bs-touch);
   }
-  .bs-live__more {
+  .bs-live-card__more {
     min-height: var(--bs-touch);
   }
 }
