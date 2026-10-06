@@ -3,7 +3,7 @@
   "$id": "https://black-smith.dev/schema/event.schema.json",
   "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
   "title": "Event",
-  "description": "One record in state/events/*.jsonl, the factory's durable execution substrate (architecture §7). Field names follow §7's record shape exactly: {ts, session_id, actor, event_type, task_id?, agent_id?, plan_version, causal_parent, payload}.",
+  "description": "One record in state/events/*.jsonl, the factory's durable execution substrate (architecture §7). Field names follow §7's record shape exactly: {ts, session_id, actor, event_type, task_id?, agent_id?, plan_version, causal_parent, payload, project?, cli_session_id?}.",
   "type": "object",
   "required": [
     "ts",
@@ -60,6 +60,13 @@
       "type": "string",
       "minLength": 1,
       "description": "Optional plain-string project identifier (Phase 6b, architecture §8) — NOT a closed taxonomy.yml vocabulary value, so no x-taxonomy annotation here. Absent on every event logged before Phase 6b; db/queries.ts's read helpers treat an absent/null project as the default 'black-smith'. That default is reached by absence, so \"\" would slip past it and name a project called nothing (D-244)."
+    },
+    "cli_session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[0-9a-fA-F-]{8,64}$",
+      "description": "Optional — the CLI session that wrote the event, stamped by the writer from CLAUDE_CODE_SESSION_ID and absent outside one (and on every event logged before the stamp existed). Not part of the envelope: it never stands in for session_id or causal_parent (architecture §18 rule 8), and it is never turn or delegation evidence, since an epic session and its subagents can share one CLI session (rule 4). It only links a live CLI session to the factory sessions it drives."
     },
     "edge": {
       "type": "object",

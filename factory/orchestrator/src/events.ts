@@ -40,6 +40,13 @@ export interface EventInput {
    * the log stays a faithful record of what was actually stamped.
    */
   project?: string;
+  /**
+   * The CLI session that wrote this event (architecture §7). Normally left
+   * unset: `appendEventLocked` stamps it from the environment. Set it only to
+   * record a value the caller read itself; an explicit one is kept as given
+   * and validated like any other field.
+   */
+  cli_session_id?: string;
 }
 
 export interface EventRecord extends EventInput {
@@ -55,6 +62,41 @@ export interface EventOpts {
   stateDir?: string;
   taxonomy?: Taxonomy;
   schemas?: CompiledSchemaSet;
+  /**
+   * Overrides `CLAUDE_CODE_SESSION_ID` as the source of the `cli_session_id`
+   * stamp; `null` opts out of the stamp altogether. Absent means "read the
+   * environment", which is what every production caller wants.
+   */
+  cliSessionId?: string | null;
+}
+
+/** The environment variable Claude Code sets in every process it runs. */
+const CLI_SESSION_ENV = 'CLAUDE_CODE_SESSION_ID';
+
+/** event.schema.json's `cli_session_id` pattern, case-insensitive. */
+const CLI_SESSION_ID_SHAPE = /^[0-9a-f-]{8,64}$/i;
+
+/**
+ * Which CLI session is writing, as `{ cli_session_id }` or nothing.
+ *
+ * Not part of the envelope (architecture §18 rule 8): it never names a
+ * session, a parent or an event id, so it can never stand in for `session_id`
+ * or `causal_parent`. Nor is it evidence of anything (rule 4): an epic session
+ * and the subagents it starts can share one CLI session, so two events with
+ * the same stamp say nothing about who dispatched whom or how many turns ran.
+ * It exists to link a live CLI session to the factory sessions it drives.
+ *
+ * An explicit `input.cli_session_id` wins and is left to the schema. Otherwise
+ * `opts.cliSessionId` (when given) beats the environment, `null` opts out, and
+ * a value of the wrong shape is dropped rather than thrown: a malformed
+ * environment must never cost the write it rides on.
+ */
+function cliStamp(input: EventInput, opts: EventOpts): { cli_session_id?: string } {
+  if (input.cli_session_id !== undefined) return {};
+  if (opts.cliSessionId === null) return {};
+  const candidate = opts.cliSessionId ?? process.env[CLI_SESSION_ENV];
+  if (candidate === undefined || !CLI_SESSION_ID_SHAPE.test(candidate)) return {};
+  return { cli_session_id: candidate };
 }
 
 // Root events (session_id's first event) are the only ones allowed a null
@@ -756,7 +798,9 @@ async function appendEventLocked(
     await validateCausalParent(input, opts, existing);
   }
 
-  const record: EventRecord = { ...input, ts: new Date().toISOString() };
+  // The CLI-session stamp rides along here, at the one place every write
+  // passes through; see cliStamp for why it is neither envelope nor evidence.
+  const record: EventRecord = { ...input, ...cliStamp(input, opts), ts: new Date().toISOString() };
 
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
   const result = validateRecord(schemas, taxonomy, 'event', record);

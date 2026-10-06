@@ -120,6 +120,13 @@
       "when": 1791191766572,
       "tag": "0016_milestones_project_default",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1791262161043,
+      "tag": "0017_events_raw_cli_session_id",
+      "breakpoints": true
     }
   ]
 }
