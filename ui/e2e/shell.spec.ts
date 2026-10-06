@@ -263,12 +263,16 @@ test.describe('Unknown URL', () => {
     ['desktop', { width: 1280, height: 800 }],
     ['phone', { width: 375, height: 812 }],
   ] as const) {
-    test(`${label}: renders "Page not found" with a link home, not a blank shell`, async ({
+    test(`${label}: shows the crumb once, one sr-only heading, a body message and a link home`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
       await page.goto('/no-such-page');
-      await expect(page.locator('#main').getByText('Page not found')).toBeVisible();
+      await expect(page.locator('#main').getByText('Nothing at this address')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toHaveCount(1);
+      await expect(
+        page.getByRole('navigation', { name: 'Breadcrumb' }).getByText('Page not found'),
+      ).toBeVisible();
       await page.getByRole('link', { name: 'Go to Home' }).click();
       await expect(page).toHaveURL(/\/overview/);
     });

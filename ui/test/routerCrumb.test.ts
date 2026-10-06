@@ -68,13 +68,15 @@ describe('router.ts catch-all', () => {
     );
   });
 
-  it('NotFoundPage says "Page not found" in an EmptyState and links Home', () => {
+  it('NotFoundPage keeps "Page not found" only in the sr-only PageHeader, its EmptyState says something else, and it links Home', () => {
     const page = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'NotFoundPage.vue'),
       'utf8',
     );
     expect(page).toContain('<EmptyState');
-    expect(page).toContain('title="Page not found"');
+    expect(page).toContain('<PageHeader title="Page not found"');
+    expect(page).toContain('title="Nothing at this address"');
+    expect(page).not.toMatch(/<EmptyState[^>]*title="Page not found"/);
     expect(page).toMatch(/<RouterLink[^>]*to="\/overview"/);
   });
 });
