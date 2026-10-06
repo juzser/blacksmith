@@ -1550,7 +1550,7 @@ describe('cliSessions reader', () => {
         const all = [1, 2, 3, 4].map((n) => `epic-a/task-${n}`);
         await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: all });
         await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [all[0]] });
-        await root.dispatch(all[1], { agent_role: 'coder' });
+        await root.dispatch('epic-a/task-2', { agent_role: 'coder' });
         const card = await cardOf(201);
         expect(card.focus?.next).toEqual({
           kind: 'task',
@@ -1609,7 +1609,7 @@ describe('cliSessions reader', () => {
         const all = [1, 2, 3].map((n) => `epic-a/task-${n}`);
         await root.add('wave-admitted', { epic_id: 'epic-a', task_ids: all });
         await root.add('wave-merged', { epic_id: 'epic-a', task_ids: [all[0]] });
-        await root.dispatch(all[1], { agent_role: 'coder' });
+        await root.dispatch('epic-a/task-2', { agent_role: 'coder' });
         const card = await cardOf(208);
         expect(card.focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-3' });
       });

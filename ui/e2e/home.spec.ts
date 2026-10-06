@@ -611,7 +611,9 @@ async function expectCardsAligned(page: Page, indicators: number): Promise<void>
     expect((title?.x ?? 0) - (card?.x ?? 0)).toBeLessThan(24);
     lefts.push(title?.x ?? 0);
   }
-  for (const x of lefts) expect(Math.abs(x - lefts[0])).toBeLessThanOrEqual(1);
+  const firstLeft = lefts[0];
+  if (firstLeft === undefined) throw new Error('no title left edge was measured');
+  for (const x of lefts) expect(Math.abs(x - firstLeft)).toBeLessThanOrEqual(1);
   // Only the shell's LiveIndicator may wear .bs-live; the phone shell has none.
   await expect(page.locator('.bs-live')).toHaveCount(indicators);
 }
@@ -737,6 +739,7 @@ async function measureLiveCards(page: Page): Promise<{
       }
     }
     const longCard = cards[cards.length - 1];
+    if (!longCard) throw new Error('no live-session card rendered');
     const v = longCard.querySelector('.bs-live-card__v') as HTMLElement;
     const a = v.querySelector('a') as HTMLElement;
     const range = document.createRange();
@@ -750,7 +753,12 @@ async function measureLiveCards(page: Page): Promise<{
       titles,
       targets,
       long: {
-        firstTop: rects[0].top,
+        firstTop: (
+          rects[0] ??
+          (() => {
+            throw new Error('long link has no client rects');
+          })()
+        ).top,
         vTop: vr.top + parseFloat(cs.paddingTop),
         lineTops: rects.map((r) => r.top),
         clipBottom: vr.bottom - parseFloat(cs.borderBottomWidth),
@@ -834,13 +842,16 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
     out.count = all.length;
     for (let i = 0; i < all.length; i++) {
       for (let j = i + 1; j < all.length; j++) {
-        for (const a of all[i].boxes) {
-          for (const b of all[j].boxes) {
+        const ai = all[i];
+        const aj = all[j];
+        if (!ai || !aj) throw new Error('overlap index out of range');
+        for (const a of ai.boxes) {
+          for (const b of aj.boxes) {
             const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
             const h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
             if (w > 0.5 && h > 0.5) {
               out.overlaps.push(
-                `"${all[i].label}" x "${all[j].label}" overlap ${w.toFixed(1)}x${h.toFixed(1)}`,
+                `"${ai.label}" x "${aj.label}" overlap ${w.toFixed(1)}x${h.toFixed(1)}`,
               );
             }
           }
