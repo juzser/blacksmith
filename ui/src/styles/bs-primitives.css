@@ -2697,6 +2697,100 @@ summary.bs-inbox__group-head {
   color: var(--bs-text);
 }
 
+/* "Live sessions" (ds-spec.md §4.1 item 1a, ds-review.html `.ls-*`): one card
+   per live CLI session. Title weight 500, Now/Next in a 40px label column,
+   agent text left-aligned, 2-line clamps, 44px targets on phone. */
+.bs-live-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.bs-live .bs-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  min-width: 0;
+}
+.bs-live__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bs-space-3);
+  min-width: 0;
+}
+.bs-live__title {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-live__link {
+  color: inherit;
+}
+.bs-live__muted {
+  color: var(--bs-text-subtle);
+}
+.bs-live__status {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-shrink: 0;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-live__meta {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-live__line {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--bs-space-2);
+  text-align: left;
+  font-size: var(--bs-text-sm);
+}
+.bs-live__k {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+.bs-live__v {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.bs-live__wait {
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-tone-warning-text);
+}
+.bs-live__more {
+  justify-self: start;
+}
+@media (max-width: 640px) {
+  .bs-live__head {
+    flex-direction: column;
+    gap: var(--bs-space-1);
+  }
+  .bs-live__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--bs-touch);
+  }
+  .bs-live__more {
+    min-height: var(--bs-touch);
+  }
+}
+
 /* "Recent activity" (DS6 PR4, ds-spec.md §4.1 point 1b): header row with the
    "View all activity" link, and the 8-row compact TimelineRow list -- same
    flush-row treatment .bs-run-history gives RunHistoryTimeline. Phone shows

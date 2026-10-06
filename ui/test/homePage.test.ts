@@ -16,6 +16,7 @@ describe('HomePage.vue', () => {
   it('lays out the §4.1 sections in order, inbox first', () => {
     const order = [
       '<NeedsYouInbox',
+      '>Live sessions</h2>',
       '>Recent activity</h2>',
       '>Running now</h2>',
       '>What the factory decided recently</h2>',
@@ -30,6 +31,22 @@ describe('HomePage.vue', () => {
     expect(TEMPLATE).toMatch(/<TimelineRow[\s\S]*?variant="compact"/);
     expect(TEMPLATE).not.toContain('Expand all');
     expect(TEMPLATE).toMatch(/<RouterLink to="\/activity"[^>]*>View all activity<\/RouterLink>/);
+  });
+
+  it('lists live CLI sessions under the inbox from one poll, with every state (§4.1 item 1a)', () => {
+    expect(SRC).toMatch(/fetchCliSessions\(\)/);
+    expect(SRC.match(/fetchCliSessions/g)?.length).toBe(2);
+    expect(TEMPLATE).toMatch(/<RouterLink to="\/sessions"[^>]*>All sessions<\/RouterLink>/);
+    expect(TEMPLATE).toContain('Could not load live sessions');
+    expect(TEMPLATE).toContain('Could not read the live sessions');
+    expect(TEMPLATE).toContain('Session tracking is not set up on this machine.');
+    expect(TEMPLATE).toContain('No live Blacksmith sessions');
+    expect(TEMPLATE).toMatch(/hidden`/);
+    expect(TEMPLATE).toMatch(
+      /<ul v-else class="bs-live-list" aria-labelledby="live-sessions-heading"/,
+    );
+    expect(TEMPLATE).not.toMatch(/aria-live/);
+    expect(TEMPLATE).toMatch(/storeKey\(s\.focus \?\? \{\}, s\.cliSessionId\)/);
   });
 
   it('reuses the existing endpoints with the page scope', () => {

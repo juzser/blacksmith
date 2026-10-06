@@ -3,6 +3,7 @@
 // field — kept as local interfaces rather than importing across the
 // server/client boundary (ui/ and ui/server/ are separate TS projects; see
 // ui/server/src/app.ts's header comment for why they don't share a build).
+import type { LiveSessionsResult } from './liveSessions.js';
 import { applySessionScope, type SessionScope } from './sessionScope.js';
 import type { StoreRef } from './storeKey.js';
 
@@ -845,6 +846,10 @@ export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {
   applySessionScope(q, session);
   const qs = q.toString();
   return getJson(`/api/lessons${qs ? `?${qs}` : ''}`);
+}
+
+export function fetchCliSessions(): Promise<LiveSessionsResult> {
+  return getJson('/api/cli-sessions');
 }
 
 export function fetchInbox(session?: SessionScope): Promise<InboxResult> {
