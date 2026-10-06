@@ -284,25 +284,23 @@ test.describe('Sessions', () => {
     await page.route('**/api/sessions*', (route) => route.fulfill({ json: STALE_SESSIONS }));
     await page.goto('/sessions');
     await expect(page.getByText('Nothing is active right now.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Show 1 finished run' })).toBeVisible();
-    await page.getByRole('button', { name: 'Show 1 finished run' }).click();
+    await expect(page.getByText('1 quiet session ·')).toBeVisible();
+    await page.getByRole('link', { name: 'Show all' }).click();
     await expect(page.getByText('Stale ghost run')).toBeVisible();
   });
 
-  test('lists running sessions and offers a count of finished ones', async ({ page }) => {
+  test('lists running sessions and offers a count of quiet ones', async ({ page }) => {
     await serveSessions(page);
     await page.goto('/sessions');
     await expect(page.locator('h1')).toHaveText('Sessions');
-    // Only the one running row renders up front; the finished ones are
-    // behind the toggle, which states exactly how many. Without the
-    // running/finished split every row would render at once and this count
-    // would not exist.
-    await expect(page.getByRole('button', { name: 'Show 2 finished runs' })).toBeVisible();
+    // Only the one running row renders up front; the quiet ones are behind
+    // "Show all", which states exactly how many.
+    await expect(page.getByText('2 quiet sessions ·')).toBeVisible();
     await expect(page.getByText('run-untitled')).toHaveCount(0);
     await expect(page.getByText('Second finished run')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Show 2 finished runs' }).click();
-    await expect(page.getByRole('button', { name: 'Hide finished runs' })).toBeVisible();
+    await page.getByRole('link', { name: 'Show all' }).click();
+    await expect(page.getByText('2 quiet sessions')).toHaveCount(0);
     await expect(page.getByText('run-untitled')).toBeVisible();
     await expect(page.getByText('Second finished run')).toBeVisible();
   });
@@ -314,10 +312,9 @@ test.describe('Sessions', () => {
     page,
   }) => {
     await serveSessions(page);
-    await page.goto('/sessions');
+    await page.goto('/sessions?scope=all');
     await expect(page.getByText('Fix the login retry loop')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Show 2 finished runs' }).click();
     // The untitled row's own title line reads the raw id -- not blank, not
     // "Untitled", which is what a missing fallback would render instead.
     await expect(
@@ -343,10 +340,121 @@ test.describe('Sessions', () => {
     await page.goto('/sessions?session=run-untitled');
     await expect(page.locator('.bs-agentblock')).toBeVisible();
     await expect(page.locator('.bs-agentblock__role')).toHaveText('Code reviewer');
-    // The finished row the id points at is visible, so the toggle already
-    // reads "open" -- proof the deep link reached into the finished half of
-    // the list, not only the running one.
-    await expect(page.getByRole('button', { name: 'Hide finished runs' })).toBeVisible();
+    // The quiet row the id points at is visible, and the URL says why: the
+    // deep link widened the scope to All.
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect(page.locator('.bs-sessionrow--selected')).toBeVisible();
+  });
+
+  // PR2: the shared Active/All scope (`?scope=`), two projects, an active and
+  // a quiet session each way round so ordering, muting and counts all show.
+  const SCOPE_SESSIONS: RunningSession[] = [
+    session({
+      sessionId: 'sc-active',
+      lastEventAt: minutesAgo(10),
+      liveAgentCount: 1,
+      workingAgentCount: 1,
+      projects: ['proj-a'],
+      title: 'Active in proj-a',
+    }),
+    session({
+      sessionId: 'sc-quiet-newer',
+      lastEventAt: minutesAgo(2),
+      projects: ['proj-a'],
+      title: 'Quiet newer in proj-a',
+    }),
+    session({
+      sessionId: 'sc-quiet-only',
+      lastEventAt: minutesAgo(5),
+      projects: ['proj-b'],
+      title: 'Quiet only in proj-b',
+    }),
+  ];
+  async function serveScope(page: import('@playwright/test').Page) {
+    await page.route('**/api/sessions*', (route) => {
+      const project = new URL(route.request().url()).searchParams.get('project');
+      return route.fulfill({
+        json: project ? SCOPE_SESSIONS.filter((x) => x.projects.includes(project)) : SCOPE_SESSIONS,
+      });
+    });
+    await page.route('**/api/sessions/*/agents*', (route) =>
+      route.fulfill({ json: { sessionId: 'sc', roles: [] } }),
+    );
+  }
+  const toggle = (page: import('@playwright/test').Page) =>
+    page.getByRole('navigation', { name: 'Session scope' });
+  const titles = (page: import('@playwright/test').Page) =>
+    page.locator('.bs-sessionrow__title').allTextContents();
+
+  test('the bare URL is Active: only active rows, the quiet count, "Active" current', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await page.goto('/sessions');
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a']);
+    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
+  });
+
+  test('All reveals quiet rows muted after the active ones; back returns to Active', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await page.goto('/sessions');
+    await toggle(page).getByRole('link', { name: 'All' }).click();
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
+    expect(await titles(page)).toEqual([
+      'Active in proj-a',
+      'Quiet newer in proj-a',
+      'Quiet only in proj-b',
+    ]);
+    await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(2);
+    await expect(page.locator('.bs-sessions__group--quiet')).toHaveCount(1);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('All');
+    await expect(page.getByText('quiet sessions')).toHaveCount(0);
+
+    await page.goBack();
+    await expect(page).not.toHaveURL(/scope=/);
+    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
+  });
+
+  test('the quiet line links to All, and project plus scope survive together', async ({ page }) => {
+    await serveScope(page);
+    await page.goto('/sessions?project=proj-a');
+    await expect(page.getByText('1 quiet session · Show all')).toBeVisible();
+    await page.getByRole('link', { name: 'Show all' }).click();
+    await expect(page).toHaveURL(/project=proj-a/);
+    await expect(page).toHaveURL(/scope=all/);
+    expect(await titles(page)).toEqual(['Active in proj-a', 'Quiet newer in proj-a']);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('All');
+    await toggle(page).getByRole('link', { name: 'Active' }).click();
+    await expect(page).toHaveURL(/project=proj-a/);
+    await expect(page).not.toHaveURL(/scope=/);
+  });
+
+  test('a deep link to a quiet session widens the scope so its row is visible', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await page.goto('/sessions?session=sc-quiet-only');
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(page).toHaveURL(/session=sc-quiet-only/);
+    await expect(page.locator('.bs-sessionrow--selected')).toContainText('Quiet only in proj-b');
+  });
+
+  test('phone: the scope toggle stays visible with 44px targets', async ({ page }) => {
+    await serveScope(page);
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions');
+    await expect(toggle(page)).toBeVisible();
+    for (const name of ['Active', 'All']) {
+      const box = await toggle(page).getByRole('link', { name }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+    }
   });
 
   // The 5 badge labels (ds-spec.md §4.6 pattern 13, operator Q2), each from
@@ -489,6 +597,16 @@ test.describe('Sessions', () => {
         ]);
         await settleForShot(page, page.locator('.bs-sessionrow').first());
         await shoot(page, `sessions-${vpName}-${theme}-grouped-with-no-project`);
+      });
+
+      test(`screenshot ${vpName}/${theme}/scope-all`, async ({ page }) => {
+        await serveScope(page);
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/sessions?scope=all');
+        await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(2);
+        await settleForShot(page, page.locator('.bs-sessionrow').first());
+        await shoot(page, `sessions-${vpName}-${theme}-scope-all`);
       });
 
       // Fix round (visual gap #5): the quiet copy ("Nothing is active right
