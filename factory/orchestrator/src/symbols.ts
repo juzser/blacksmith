@@ -647,47 +647,27 @@ function normalizeSignature(text: string): string {
   return text.trim().replace(/\s+/g, ' ');
 }
 
-/** Index of the bracket closing the one opened at `open`, or -1 when unclosed. */
-function matchClose(masked: string, open: number): number {
-  let depth = 0;
-  for (let i = open; i < masked.length; i += 1) {
-    const ch = masked.charAt(i);
-    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
-    else if (ch === ')' || ch === ']' || ch === '}') {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
 /**
  * Walk a return-type annotation (`from` is just past its `:`) and answer where
- * it stops: the index of the function body's `{`, the index of the `=>`, or -1
- * when what follows the `:` is not a return type at all (a ternary branch, say).
- * A `{` directly after `:`, `|`, `&`, `<`, `,` or `?` is an object type.
+ * it stops before `limit`: the index of the function body's `{`, the index of
+ * the `=>`, or -1 when what follows the `:` is not a return type at all (a
+ * ternary branch, say). A `{` directly after `:`, `|`, `&`, `<`, `,` or `?` is
+ * an object type.
  */
-function skipReturnType(masked: string, from: number): number {
+function skipReturnType(masked: string, from: number, limit: number): number {
   let prev = ':';
   let angle = 0;
   let i = from;
-  while (i < masked.length) {
+  while (i < limit) {
     const ch = masked.charAt(i);
     if (/\s/.test(ch)) {
       i += 1;
       continue;
     }
     if (ch === '=' && masked.charAt(i + 1) === '>') return i;
-    if (ch === '{') {
-      if (!':|&<,?'.includes(prev)) return i;
-      const close = matchClose(masked, i);
-      if (close === -1) return -1;
-      i = close + 1;
-      prev = '}';
-      continue;
-    }
-    if (ch === '(' || ch === '[') {
-      const close = matchClose(masked, i);
+    if (ch === '{' && !':|&<,?'.includes(prev)) return i;
+    if (ch === '{' || ch === '(' || ch === '[') {
+      const close = matchBracket(masked, i, limit);
       if (close === -1) return -1;
       i = close + 1;
       prev = ')';
@@ -703,66 +683,67 @@ function skipReturnType(masked: string, from: number): number {
   return -1;
 }
 
+/** Whether the call opening at `open` is a class heritage, `extends mixin(Base) {`, whose `{` is a class body. */
+function isHeritageCall(masked: string, start: number, open: number): boolean {
+  return /\bextends\s+[\w$.]+\s*$/.test(masked.slice(start, open));
+}
+
+/** What a function body reads as in a signature. */
+const BODY_PLACEHOLDER = '{…}';
+
 /**
- * The index of the first function body's `{` in `masked[from, limit)`: the brace
- * after a parameter list (and optional return type), or after `=>`. Braces that
- * are not a body — an object literal argument, a type literal in a parameter or
- * return type — are skipped whole. -1 when the span holds no function body.
+ * The clause text an importer can see: every function body in it becomes a
+ * placeholder, so an edit inside a body is not a signature edit, while what
+ * follows a body (a `memo` comparator, an `as` cast, a chained call) still is.
+ * A body is the `{` right after a parameter list, after its return type, or
+ * after `=>`; any other brace is text. A parameter list is kept whole, so a
+ * type literal in it is never taken for a body. Nothing past `end` is read, and
+ * an unmatched bracket keeps the clause whole.
  */
-function findFunctionBody(masked: string, from: number, limit: number): number {
-  let i = from;
-  while (i < limit) {
+function signatureText(source: string, masked: string, start: number, end: number): string {
+  let text = '';
+  let kept = start;
+  let i = start;
+  while (i < end) {
     const ch = masked.charAt(i);
-    if (ch === ';') return -1;
+    let body = -1;
     if (ch === '=' && masked.charAt(i + 1) === '>') {
       const next = skipSpace(masked, i + 2);
-      if (masked.charAt(next) === '{') return next;
-      i = next;
-      continue;
-    }
-    if (ch === '{') {
-      const close = matchClose(masked, i);
-      if (close === -1) return -1;
-      i = close + 1;
-      continue;
-    }
-    if (ch === '(') {
-      const close = matchClose(masked, i);
-      if (close === -1) return -1;
-      const after = skipSpace(masked, close + 1);
-      const next = masked.charAt(after);
-      if (next === '{') return after;
-      if (next === '=' && masked.charAt(after + 1) === '>') {
-        i = after;
+      if (next >= end || masked.charAt(next) !== '{') {
+        i = next;
         continue;
       }
-      if (next === ':') {
-        const stop = skipReturnType(masked, after + 1);
-        if (stop !== -1) {
-          if (masked.charAt(stop) === '{') return stop;
+      body = next;
+    } else if (ch === '(') {
+      const close = matchBracket(masked, i, end);
+      if (close === -1) return source.slice(start, end);
+      const after = skipSpace(masked, close + 1);
+      const next = after < end ? masked.charAt(after) : '';
+      if (next === '{' && !isHeritageCall(masked, start, i)) body = after;
+      else if (next === '=' && masked.charAt(after + 1) === '>') {
+        i = after;
+        continue;
+      } else if (next === ':') {
+        const stop = skipReturnType(masked, after + 1, end);
+        if (stop !== -1 && masked.charAt(stop) === '{') body = stop;
+        else if (stop !== -1) {
           i = stop;
           continue;
         }
       }
-      // A call or a group, not a parameter list: look inside it.
     }
-    i += 1;
+    if (body === -1) {
+      // A call, a group or plain text: look inside it.
+      i += 1;
+      continue;
+    }
+    const close = matchBracket(masked, body, end);
+    if (close === -1) return source.slice(start, end);
+    text += source.slice(kept, body) + BODY_PLACEHOLDER;
+    kept = close + 1;
+    i = kept;
   }
-  return -1;
-}
-
-/**
- * Where a declaration's signature ends: at its function body, so an edit inside
- * the body is not an edit to what importers can see. Without a function body the
- * whole clause is the signature. A clause that stopped at a depth-0 `{` right
- * after `:`, `|`, `&`, `<` or `,` stopped at an object type, so its body, if any,
- * lies further on.
- */
-function signatureEnd(masked: string, start: number, clause: Clause): number {
-  const head = masked.slice(start, clause.textEnd).trimEnd();
-  const openType = clause.stop === '{' && ':|&<,'.includes(head.charAt(head.length - 1));
-  const body = findFunctionBody(masked, start, openType ? masked.length : clause.textEnd);
-  return body === -1 ? clause.textEnd : body;
+  return text + source.slice(kept, end);
 }
 
 /**
@@ -781,7 +762,9 @@ function readClauseFacts(
 ): void {
   const before = facts.exports.length;
   readClauseExports(source, masked, start, clause, keyword, facts);
-  const signature = normalizeSignature(source.slice(start, signatureEnd(masked, start, clause)));
+  // An import introduces no export, so it has no signature to read.
+  if (facts.exports.length === before) return;
+  const signature = normalizeSignature(signatureText(source, masked, start, clause.textEnd));
   for (let i = before; i < facts.exports.length; i += 1) {
     const name = facts.exports[i];
     if (name !== undefined) facts.exportSignatures.set(name, signature);
@@ -911,12 +894,15 @@ function readStatementClauses(source: string, masked: string, facts: ModuleFacts
   }
 }
 
-function matchParen(masked: string, open: number): number {
+/** Index of the bracket closing the one at `open`, before `limit`; -1 when unclosed. */
+function matchBracket(masked: string, open: number, limit = masked.length): number {
+  const opener = masked.charAt(open);
+  const closer = opener === '{' ? '}' : opener === '[' ? ']' : ')';
   let depth = 0;
-  for (let i = open; i < masked.length; i += 1) {
+  for (let i = open; i < limit; i += 1) {
     const ch = masked.charAt(i);
-    if (ch === '(') depth += 1;
-    else if (ch === ')') {
+    if (ch === opener) depth += 1;
+    else if (ch === closer) {
       depth -= 1;
       if (depth === 0) return i;
     }
@@ -929,7 +915,7 @@ function readDynamicImports(source: string, masked: string, facts: ModuleFacts):
   let match = pattern.exec(masked);
   while (match !== null) {
     const open = match.index + match[0].length - 1;
-    const close = matchParen(masked, open);
+    const close = matchBracket(masked, open);
     const inner = close === -1 ? masked.length : close;
     const quoteStart = skipSpace(masked, open + 1);
     const quote = masked.charAt(quoteStart);

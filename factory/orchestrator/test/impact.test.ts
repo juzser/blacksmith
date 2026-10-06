@@ -368,25 +368,108 @@ describe('what an export diff proves', () => {
     expect(diff.signatureChanged).toEqual(['Foo']);
   });
 
-  it('does not end a signature at an object-type return annotation', () => {
-    const arrow = diffExports(
-      'export const f = (): { a: string } => { return one(); };',
-      'export const f = (): { a: number } => { return one(); };',
+  // Each pair differs only after the nested body closes, still inside the statement.
+  it.each([
+    [
+      'a memo comparator',
+      'export const X = memo(function X(p: P) {\n  return 1;\n}, eqA);',
+      'export const X = memo(function X(p: P) {\n  return 1;\n}, eqB);',
+      ['X'],
+    ],
+    [
+      'an as cast',
+      'export const X = forwardRef((p: P, r) => {\n  return 1;\n}) as CompA;',
+      'export const X = forwardRef((p: P, r) => {\n  return 1;\n}) as CompB;',
+      ['X'],
+    ],
+    [
+      'an as cast, semicolon-free, with a statement after it',
+      'export const X = forwardRef((p: P, r) => {\n  return 1\n}) as CompA\nexport const y = 2\n',
+      'export const X = forwardRef((p: P, r) => {\n  return 1\n}) as CompB\nexport const y = 2\n',
+      ['X'],
+    ],
+    [
+      'a satisfies clause',
+      'export const h = wrap((e: E) => { return 1; }) satisfies HA;',
+      'export const h = wrap((e: E) => { return 1; }) satisfies HB;',
+      ['h'],
+    ],
+    [
+      'a second call argument',
+      'export const d = debounce((x: number) => { go(x); }, 300);',
+      'export const d = debounce((x: number) => { go(x); }, 900);',
+      ['d'],
+    ],
+    [
+      'a ternary branch',
+      'export const C = ssr ? memo(() => { return 1; }) : ClientA;',
+      'export const C = ssr ? memo(() => { return 1; }) : ClientB;',
+      ['C'],
+    ],
+    [
+      'a chained call',
+      'export const r = make((x: X) => { a(); }).use(authA);',
+      'export const r = make((x: X) => { a(); }).use(authB);',
+      ['r'],
+    ],
+    [
+      'a default export comparator',
+      'export default memo(function X(p: P) { return 1; }, eqA);',
+      'export default memo(function X(p: P) { return 1; }, eqB);',
+      ['default'],
+    ],
+  ])(
+    'names a change after a nested function body as a changed signature: %s',
+    (_label, before, after, names) => {
+      expect(diffExports(before, after, 'src/a.ts').signatureChanged).toEqual(names);
+    },
+  );
+
+  it('does not call a body edit a changed signature when text follows the body', () => {
+    const diff = diffExports(
+      'export const X = memo(function X(p: P) {\n  const f = () => { one(); };\n  return f;\n}, eqA);',
+      'export const X = memo(function X(p: P) {\n  const f = () => { two(); };\n  return f;\n}, eqA);',
       'src/a.ts',
     );
-    expect(arrow.signatureChanged).toEqual(['f']);
-    const decl = diffExports(
-      'export function f(): { a: string } { return one(); }',
-      'export function f(): { a: number } { return one(); }',
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('keeps a class body that follows a heritage call: a member change is a signature change', () => {
+    const before =
+      'export const M = wrap(class extends mixin(Base) {\n  m(a: string) { return 1; }\n});';
+    expect(
+      diffExports(before, before.replace('a: string', 'a: number'), 'src/a.ts').signatureChanged,
+    ).toEqual(['M']);
+    expect(
+      diffExports(before, before.replace('return 1', 'return 2'), 'src/a.ts').signatureChanged,
+    ).toEqual([]);
+  });
+
+  it('does not read a type literal clause on into a later statement', () => {
+    const diff = diffExports(
+      'export type Props = Base & {\n  a: string\n}\nconst x = 1\nexport function Card(p: Props) {\n  return 1\n}\n',
+      'export type Props = Base & {\n  a: string\n}\nconst x = 2\nexport function Card(p: Props) {\n  return 1\n}\n',
       'src/a.ts',
     );
-    expect(decl.signatureChanged).toEqual(['f']);
-    const body = diffExports(
-      'export function f(): { a: string } { return one(); }',
-      'export function f(): { a: string } { return two(); }',
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('does not read a call followed by a ternary colon on into the next export', () => {
+    const diff = diffExports(
+      'export const x = c ? f(1) : b\nexport function g(n: number) {\n  return n\n}\n',
+      'export const x = c ? f(1) : b\nexport function g(n: string) {\n  return n\n}\n',
       'src/a.ts',
     );
-    expect(body.signatureChanged).toEqual([]);
+    expect(diff.signatureChanged).toEqual(['g']);
+  });
+
+  it('does not read a class clause cut at a type argument on into its body', () => {
+    const diff = diffExports(
+      'export class A extends B<{ a: 1 }> {\n  m() { return 1; }\n}\nexport function g(n: number) {\n  return n;\n}\n',
+      'export class A extends B<{ a: 1 }> {\n  m() { return 2; }\n}\nexport function g(n: number) {\n  return n;\n}\n',
+      'src/a.ts',
+    );
+    expect(diff.signatureChanged).toEqual([]);
   });
 
   it('keeps arrow-function and plain-function signatures as they were', () => {
