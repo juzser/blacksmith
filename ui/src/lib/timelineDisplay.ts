@@ -689,7 +689,7 @@ export function titleFor(entry: TimelineEntry): string {
       // empty check), so only a row with no verdict field spells that out.
       return gateVerdict(entry) !== 'unrecorded' && p.detail
         ? `Dependency check: ${String(p.detail)}`
-        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]})${p.detail ? `: ${String(p.detail)}` : ''}`;
     case 'budget-check-result': {
       const overruns = Array.isArray(p.overruns) ? p.overruns : [];
       if (p.status === 'checked') {
