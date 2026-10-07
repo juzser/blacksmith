@@ -2234,4 +2234,70 @@ describe('GET /api/cli-sessions', () => {
       closeApp(handle);
     }
   });
+
+  it('GET /api/active-scope answers the active-scope shape, prompt-free', async () => {
+    const handle = serve();
+    try {
+      const res = await handle.app.request('/api/active-scope', {
+        headers: { host: '127.0.0.1:4680' },
+      });
+      expect(res.status).toBe(200);
+      const body = await json<Record<string, unknown>>(res);
+      expect(Object.keys(body).sort()).toEqual([
+        'epics',
+        'factorySessions',
+        'liveSessions',
+        'measured',
+        'projects',
+        'readAt',
+        'unlinkedSessions',
+      ]);
+      expect(body).toMatchObject({ measured: true, liveSessions: 1, unlinkedSessions: 0 });
+      expect(JSON.stringify(body)).not.toMatch(/"(prompt|doingNow|transcript|cwd|name)"/);
+      const unmeasured = serve({});
+      try {
+        const none = await unmeasured.app.request('/api/active-scope', {
+          headers: { host: '127.0.0.1:4680' },
+        });
+        expect(await json<{ measured: boolean }>(none)).toMatchObject({ measured: false });
+      } finally {
+        closeApp(unmeasured);
+      }
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('GET /api/active-scope answers 403 to a foreign Host', async () => {
+    const handle = serve();
+    try {
+      const foreign = await handle.app.request('/api/active-scope', {
+        headers: { host: 'evil.example' },
+      });
+      expect(foreign.status).toBe(403);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('its actively-running set is /api/overview epicsActivelyRunning', async () => {
+    const handle = serve();
+    try {
+      const headers = { host: '127.0.0.1:4680' };
+      const overview = await json<{ epicsActivelyRunning: string[] }>(
+        await handle.app.request('/api/overview', { headers }),
+      );
+      const scope = await json<{ epics: { epicId: string }[] }>(
+        await handle.app.request('/api/active-scope', { headers }),
+      );
+      // The fixture's CLI session links EPIC_ID, so the epics it activates are
+      // exactly the linked epics that overview reports as actively running.
+      expect(scope.epics.map((e) => e.epicId)).toEqual(
+        [EPIC_ID].filter((id) => overview.epicsActivelyRunning.includes(id)),
+      );
+      expect(overview.epicsActivelyRunning).toContain(EPIC_ID);
+    } finally {
+      closeApp(handle);
+    }
+  });
 });

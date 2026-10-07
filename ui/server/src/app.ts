@@ -72,6 +72,7 @@ import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/schedul
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
+import { type ActiveScopeStore, computeActiveScope } from './activeScope.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
 import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
@@ -743,6 +744,7 @@ export function createApp(opts: AppOpts): AppHandle {
   // request costs no fold.
   for (const route of [
     '/api/cli-sessions',
+    '/api/active-scope',
     '/api/overview',
     '/api/kanban',
     '/api/projects',
@@ -1016,6 +1018,30 @@ export function createApp(opts: AppOpts): AppHandle {
     ...(opts.cliListWorktrees ? { listWorktrees: opts.cliListWorktrees } : {}),
   });
   app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(readable(c))));
+
+  // The one "active" scope: what the live CLI sessions are driving. The
+  // actively-running set and the epic -> project map come from overview() per
+  // store (the same call /api/overview fans out), so Home's "Running now" and
+  // this cannot drift. Prompt-free (ids, project names, counts only).
+  app.get('/api/active-scope', async (c) => {
+    const cli = await cliSessions.read(readable(c));
+    const nowIso = opts.nowIso ?? new Date().toISOString();
+    const stores: ActiveScopeStore[] =
+      cli.state === 'ok'
+        ? fanOut(readable(c), undefined, (db) => overview(db, {}, clock)).map(
+            ({ store, data }) => ({
+              store,
+              activelyRunning: data.epicsActivelyRunning,
+              epicProjects: Object.fromEntries(
+                (data.projects ?? []).flatMap((p) =>
+                  p.epicsInFlight.map((epicId) => [epicId, p.project] as const),
+                ),
+              ),
+            }),
+          )
+        : [];
+    return c.json(computeActiveScope(cli, stores, nowIso));
+  });
 
   app.get('/api/projects', (c) => {
     const scope = sessionScope(c);

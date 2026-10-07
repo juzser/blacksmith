@@ -867,6 +867,22 @@ export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {
   return getJson(`/api/lessons${qs ? `?${qs}` : ''}`);
 }
 
+/** `GET /api/active-scope`: what the live CLI sessions drive. Ids, project names and counts only. */
+export interface ActiveScopeResult {
+  /** false when the CLI session registry could not be read; every list is then empty. */
+  measured: boolean;
+  readAt: string;
+  liveSessions: number;
+  unlinkedSessions: number;
+  projects: { storeId: string; project: string; liveSessions: number; agentsWorking: number }[];
+  epics: { storeId: string; epicId: string; project: string | null }[];
+  factorySessions: { storeId: string; sessionId: string }[];
+}
+
+export function fetchActiveScope(): Promise<ActiveScopeResult> {
+  return getJson('/api/active-scope');
+}
+
 export function fetchCliSessions(): Promise<LiveSessionsResult> {
   return getJson('/api/cli-sessions');
 }

@@ -90,7 +90,7 @@ export interface CliStore extends StoreRef {
 }
 
 /** The id the served clone's own store carries (see stores.ts). */
-const HOME_STORE_ID = 'home';
+export const HOME_STORE_ID = 'home';
 
 export interface LinkedEpic {
   store: StoreRef;
@@ -102,6 +102,11 @@ export interface LinkedEpic {
   factorySessionIds: string[];
   /** The newest event this CLI session wrote into any of `factorySessionIds`. */
   lastEventAt: string;
+  /**
+   * Per member of `factorySessionIds`, the newest event this CLI session wrote
+   * into it (ids and timestamps only, so the body stays prompt-free).
+   */
+  factorySessionLastEventAt: Record<string, string>;
   /**
    * Waves with a task that is not closed yet, newest admitted first. One
    * session writes every `wave-admitted` of an epic, so `admittedEventId`
@@ -962,7 +967,10 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     // Grouped by epic root, and each group read through the ROOT's lineage:
     // a wave's own lineage stops at that wave, so its sibling waves -- and
     // their admissions, merges and agents -- would be missed.
-    const groups = new Map<string, { lineage: string[]; ids: string[]; lastEventAt: string }>();
+    const groups = new Map<
+      string,
+      { lineage: string[]; ids: string[]; lastEventAt: string; memberAt: Record<string, string> }
+    >();
     for (const l of links) {
       const known = [...groups.values()].find((g) => g.lineage.includes(l.sessionId));
       let g = known;
@@ -976,11 +984,14 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             lineage: lineage.length > 0 ? lineage : [rootId],
             ids: [],
             lastEventAt: l.lastEventAt,
+            memberAt: {},
           };
           groups.set(rootId, g);
         }
       }
       g.ids.push(l.sessionId);
+      const seen = g.memberAt[l.sessionId];
+      if (seen === undefined || l.lastEventAt > seen) g.memberAt[l.sessionId] = l.lastEventAt;
       if (l.lastEventAt > g.lastEventAt) g.lastEventAt = l.lastEventAt;
     }
     const out: LinkedEpic[] = [];
@@ -1323,6 +1334,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         closed,
         factorySessionIds: [...new Set(g.ids)].sort(),
         lastEventAt: g.lastEventAt,
+        factorySessionLastEventAt: g.memberAt,
         openWaves,
         progress,
         followUps,
