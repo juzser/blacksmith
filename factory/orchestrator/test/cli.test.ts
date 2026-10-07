@@ -5791,10 +5791,136 @@ describe('cli.ts (built binary)', () => {
         expect(admitted).toHaveLength(1);
         expect(admitted[0]?.payload.budget).toEqual({
           status: 'ok',
+          // PLAN declares no `effort` and trips no security trigger, so the
+          // cap was sized for effort.yml's `default_tier`.
+          tier: 'medium',
           cap_tokens: 4_000_000,
           projected_tokens: 0,
           wave_tokens: 2000,
           headroom_tokens: 4_000_000,
+        });
+      });
+
+      // `cap_tokens` is a number for one tier, and the log never said which.
+      // A reader of the log alone (no plan file, no DB) could not tell a small
+      // epic's cap from a huge one's, so the admission records the tier its
+      // cap was sized for beside the cap itself.
+      describe('records the tier the cap was sized for', () => {
+        /** One cap per tier, far enough apart that the recorded cap names the tier too. */
+        async function tieredPolicy(name: string): Promise<string> {
+          const policyPath = path.join(scratchDir, `${name}-tier-budgets.yml`);
+          await writeFile(
+            policyPath,
+            'epic:\n  cap_tokens:\n    small: 50000\n    medium: 500000\n    huge: 5000000\n' +
+              '  alarm_ratio: 0.7\n  max_in_flight_tasks: null\n',
+          );
+          return policyPath;
+        }
+
+        /** The two-task fixture under `effort`, with `task-1` given `taskOneCase`. */
+        async function effortPlan(name: string, effort: string, taskOneCase = 'feature') {
+          const planPath = path.join(scratchDir, `${name}-${effort}-${taskOneCase}-plan.json`);
+          await writeFile(
+            planPath,
+            JSON.stringify({
+              ...PLAN,
+              effort,
+              tasks: PLAN.tasks.map((task, i) => (i === 0 ? { ...task, case: taskOneCase } : task)),
+            }),
+          );
+          return planPath;
+        }
+
+        function check(planPath: string, budgetPolicy: string, extra: string[] = []) {
+          return runCli([
+            'wave',
+            'check',
+            planPath,
+            'task-1',
+            'task-2',
+            '--budget-policy',
+            budgetPolicy,
+            ...extra,
+          ]);
+        }
+
+        it("records the plan's own effort tier", async () => {
+          const { sessionId, eventsDir } = await session();
+          const planPath = await effortPlan(sessionId, 'small');
+          ingest(planPath, sessionId, eventsDir);
+          const budgetPolicy = await tieredPolicy(sessionId);
+
+          const result = check(planPath, budgetPolicy, [
+            '--session',
+            sessionId,
+            '--causal-parent',
+            `${sessionId}#0`,
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(result.status).toBe(0);
+
+          const admitted = tail(sessionId, eventsDir).filter(
+            (r) => r.event_type === 'wave-admitted',
+          );
+          expect(admitted).toHaveLength(1);
+          expect(admitted[0]?.payload.budget).toEqual({
+            status: 'ok',
+            tier: 'small',
+            cap_tokens: 50_000,
+            projected_tokens: 0,
+            wave_tokens: 2000,
+            headroom_tokens: 50_000,
+          });
+          expect(JSON.parse(result.stdout).budget).toMatchObject({
+            tier: 'small',
+            capTokens: 50_000,
+          });
+        });
+
+        it('records the tier the security floor raised it to, not the one the plan asked for', async () => {
+          const { sessionId, eventsDir } = await session();
+          // effort.yml: an `infra` task trips a crosscheck.yml security
+          // trigger, and the floor lifts `small` to `security_floor: medium`.
+          const planPath = await effortPlan(sessionId, 'small', 'infra');
+          ingest(planPath, sessionId, eventsDir);
+          const budgetPolicy = await tieredPolicy(sessionId);
+
+          const result = check(planPath, budgetPolicy, [
+            '--session',
+            sessionId,
+            '--causal-parent',
+            `${sessionId}#0`,
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(result.status).toBe(0);
+
+          const admitted = tail(sessionId, eventsDir).filter(
+            (r) => r.event_type === 'wave-admitted',
+          );
+          expect(admitted).toHaveLength(1);
+          expect(admitted[0]?.payload.budget).toMatchObject({
+            tier: 'medium',
+            cap_tokens: 500_000,
+          });
+        });
+
+        // No session means a `--dry` question, no admission and nothing
+        // logged, but the printed `capTokens` is still a number for one tier:
+        // the tier rides with it.
+        it('prints the tier on a session-less dry check too', async () => {
+          const { sessionId } = await session();
+          const planPath = await effortPlan(sessionId, 'huge');
+          const budgetPolicy = await tieredPolicy(sessionId);
+
+          const result = check(planPath, budgetPolicy, ['--dry']);
+          expect(result.status).toBe(0);
+          expect(JSON.parse(result.stdout).budget).toMatchObject({
+            status: 'unchecked',
+            tier: 'huge',
+            capTokens: 5_000_000,
+          });
         });
       });
     });

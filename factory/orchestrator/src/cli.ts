@@ -414,6 +414,9 @@ function declaredWaveBudgets(
 function admissionBudget(check: WaveBudgetCheck, rationale?: string): WaveAdmissionBudget {
   return {
     status: check.status,
+    // Threaded from the policy the cap came from, never re-resolved here: a
+    // second resolution is a second answer that can drift from the cap's.
+    tier: check.tier,
     cap_tokens: check.capTokens,
     projected_tokens: check.projectedTokens,
     wave_tokens: check.waveTokens,
