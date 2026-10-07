@@ -3,6 +3,8 @@
 // (ui/test/workView.test.ts, workPageMobile.test.ts, kitSegmentedControl.test.ts)
 // own the source-level contract; this is the one claim only a browser can
 // settle — a real navigation, a real history stack, a real viewport.
+
+import { stubActiveScope } from './activeScopeStub.js';
 import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -312,7 +314,7 @@ test.describe('Work switcher', () => {
     }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto('/work/kanban');
-      const segctl = page.locator('.bs-segctl');
+      const segctl = page.locator('#bs-work-view-switch .bs-segctl');
       const refresh = page
         .locator('.bs-kanban-page__toolbar')
         .getByRole('button', { name: 'Refresh', exact: true });
@@ -370,7 +372,8 @@ test.describe('Work switcher', () => {
     test(`screenshot mobile overflow/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.mobile);
-      await page.goto('/work/kanban');
+      await stubActiveScope(page, ['epic-9']);
+      await page.goto('/work/kanban?scope=all');
       await page.getByRole('button', { name: 'More actions' }).click();
       const group = page.getByRole('group', { name: 'View' });
       await settleForShot(page, group);

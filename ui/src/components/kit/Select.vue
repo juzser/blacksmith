@@ -11,6 +11,7 @@ const props = defineProps<{
   modelValue: string;
   options: SelectOption[];
   ariaLabel: string;
+  disabled?: boolean;
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 
@@ -20,7 +21,7 @@ function onChange(e: Event) {
 </script>
 
 <template>
-  <select class="bs-select" :aria-label="ariaLabel" :value="modelValue" @change="onChange">
+  <select class="bs-select" :aria-label="ariaLabel" :value="modelValue" :disabled="disabled" @change="onChange">
     <option v-for="opt in props.options" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
   </select>
 </template>

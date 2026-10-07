@@ -12,7 +12,10 @@
 // neither tsc nor biome here, so a control assembled in a template has no
 // gate on it at all; assembling it here is what makes the rules below
 // assertable.
-import type { IdleEpic } from './api.js';
+import { isActiveEpic } from './activeScope.js';
+import type { ActivityScope } from './activityScope.js';
+import type { ActiveScopeResult, IdleEpic } from './api.js';
+import type { StoreRef } from './storeKey.js';
 
 /** Structurally the option shape Select.vue declares. Declared here rather
  *  than imported because `shims.d.ts` types every `.vue` module as a default
@@ -94,10 +97,11 @@ export function withIdleLabels<T extends { value: string; label: string }>(
 export function epicOptions(
   epics: readonly string[],
   idle: readonly IdleEpic[] = [],
+  withAll = true,
 ): EpicOption[] {
   const idleDays = new Map(idle.map((e) => [e.epicId, e.idleDays]));
   const seen = new Set<string>([ALL_EPICS]);
-  const options: EpicOption[] = [{ value: ALL_EPICS, label: 'All epics' }];
+  const options: EpicOption[] = withAll ? [{ value: ALL_EPICS, label: 'All epics' }] : [];
   for (const epic of epics) {
     if (seen.has(epic)) continue;
     seen.add(epic);
@@ -108,4 +112,27 @@ export function epicOptions(
     });
   }
   return options;
+}
+
+/**
+ * The epics the picker offers under the Active/All scope. `epics` is the full
+ * list in its usual order; `inFlight` tags the in-flight ones with their store
+ * (an untagged one counts as the home store), so a closed epic can never match.
+ *
+ * Active keeps the epics a live CLI session drives (`isActiveEpic`, keyed by
+ * store), plus the `pinned` one when the overview knows it: an epic named by
+ * the URL stays reachable. All, and a scope that is null or unmeasured, return
+ * `epics` unchanged: unknown is not "nothing is active".
+ */
+export function activeSelection(
+  epics: readonly string[],
+  inFlight: readonly { epicId: string; store?: StoreRef }[],
+  scope: ActiveScopeResult | null,
+  mode: ActivityScope,
+  pinned: string,
+): string[] {
+  if (mode === 'all' || scope?.measured !== true) return [...epics];
+  return epics.filter(
+    (id) => id === pinned || inFlight.some((t) => t.epicId === id && isActiveEpic(scope, t, id)),
+  );
 }
