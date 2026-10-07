@@ -7304,6 +7304,178 @@ describe('cli.ts (built binary)', () => {
         });
       });
 
+      // A follow-up the gate minted lives in the log and in no plan file. `plan
+      // amend` has to be able to retire it, or it stays live beside its
+      // replacement with no verb that can end it.
+      describe('supersede of a task only the log added', () => {
+        const REPLACEMENT = {
+          task_id: 'epic-1/folded',
+          epic_id: 'epic-1',
+          plan_version: 2,
+          objective: 'One task that does what both follow-ups asked.',
+          output_schema_ref: 'result.schema.json',
+          acceptance_criteria: ['both follow-ups are covered'],
+          claims: ['src/qux/*.ts', 'src/quux/*.ts'],
+          budget: { tokens: 1000, diff_lines: 100 },
+          contract: { functional_clauses: ['do both'], nonfunctional_clauses: [] },
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+        };
+
+        async function amendOverLoggedFollowUps(name: string, supersedeKeys: string[]) {
+          const { sessionId, eventsDir, planPath } = await session();
+          ingest(planPath, sessionId, eventsDir);
+          for (const [i, claim] of ['src/qux/*.ts', 'src/quux/*.ts'].entries()) {
+            append(sessionId, eventsDir, {
+              event_type: 'task-added',
+              task_id: `epic-1/followup-${i}`,
+              payload: {
+                epic_id: 'epic-1',
+                case: 'bugfix',
+                origin: 'escalation',
+                task_status: 'todo',
+                plan_version: 1,
+                objective: `Follow-up ${i}.`,
+                claims: [claim],
+                budget_tokens: 4000,
+              },
+            });
+          }
+          const findingId = await raiseSpec(name, sessionId, eventsDir, planPath);
+          const specsDir = path.join(scratchDir, `${sessionId}-specs`);
+          const changesPath = path.join(scratchDir, `${sessionId}-changes.json`);
+          await writeFile(
+            changesPath,
+            JSON.stringify({
+              supersede: Object.fromEntries(
+                supersedeKeys.map((key, i) => [
+                  key,
+                  { ...REPLACEMENT, task_id: `epic-1/folded-${i}`, claims: [`src/fold${i}/*.ts`] },
+                ]),
+              ),
+            }),
+          );
+          const result = runCli([
+            'plan',
+            'amend',
+            '--plan',
+            planPath,
+            '--findings',
+            findingId,
+            '--rationale',
+            'fold the follow-ups into one planned task each',
+            '--sites',
+            'src/bar/thing.ts',
+            '--changes',
+            changesPath,
+            '--specs-dir',
+            specsDir,
+            '--session',
+            sessionId,
+            '--causal-parent',
+            `${sessionId}#0`,
+            '--state-dir',
+            eventsDir,
+          ]);
+          return {
+            result,
+            sessionId,
+            eventsDir,
+            specsDir,
+            v2Path: path.join(specsDir, 'epic-1', 'plan-v2.json'),
+          };
+        }
+
+        it('retires a bare and a qualified key: stub validates, ingest supersedes once, no reader sees them live', async () => {
+          const { result, sessionId, eventsDir, v2Path } = await amendOverLoggedFollowUps(
+            'spec-amend-logged',
+            ['followup-0', 'epic-1/followup-1'],
+          );
+          expect(result.stderr).toBe('');
+          expect(result.status).toBe(0);
+
+          const v2 = JSON.parse(await readFile(v2Path, 'utf8')) as {
+            tasks: { task_id: string; task_status: string; plan_version: number }[];
+          };
+          for (const id of ['epic-1/followup-0', 'epic-1/followup-1']) {
+            expect(v2.tasks.filter((t) => t.task_id === id)).toEqual([
+              expect.objectContaining({ task_status: 'superseded', plan_version: 2 }),
+            ]);
+          }
+
+          const validate = runCli(['plan', 'validate', v2Path]);
+          expect(validate.status).toBe(0);
+
+          ingest(v2Path, sessionId, eventsDir);
+          const records = tail(sessionId, eventsDir);
+          for (const id of ['epic-1/followup-0', 'epic-1/followup-1']) {
+            expect(
+              records.filter((r) => r.event_type === 'task-superseded' && r.task_id === id),
+            ).toHaveLength(1);
+            // Added once, by the gate that minted it; the amendment adds nothing under that id.
+            expect(
+              records.filter((r) => r.event_type === 'task-added' && r.task_id === id),
+            ).toHaveLength(1);
+          }
+
+          // wave next: neither follow-up is proposed, deferred or occupying a claim.
+          const next = runCli([
+            'wave',
+            'next',
+            v2Path,
+            '--repo',
+            scratchDir,
+            '--session',
+            sessionId,
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(next.status).toBe(0);
+          const proposal = JSON.parse(next.stdout);
+          const seen = [
+            ...proposal.wave,
+            ...proposal.deferred.map((d: { taskId: string }) => d.taskId),
+            ...proposal.occupied,
+          ];
+          expect(seen).not.toContain('epic-1/followup-0');
+          expect(seen).not.toContain('epic-1/followup-1');
+          expect(proposal.wave).toContain('epic-1/folded-0');
+
+          // The projection folds them to superseded.
+          const dbPath = path.join(scratchDir, `${sessionId}.db`);
+          const rebuild = runCli([
+            'db',
+            'rebuild',
+            '--db',
+            dbPath,
+            '--session',
+            sessionId,
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(rebuild.status).toBe(0);
+          for (const id of ['epic-1/followup-0', 'epic-1/followup-1']) {
+            const shown = runCli(['stats', 'task', '--db', dbPath, '--task', id]);
+            expect(JSON.parse(shown.stdout).task.taskStatus).toBe('superseded');
+          }
+        });
+
+        it('refuses a supersede key that names no task the plan or the log knows, writing nothing', async () => {
+          const { result, specsDir, v2Path } = await amendOverLoggedFollowUps('spec-amend-ghost', [
+            'followup-0',
+            'followup-ghost',
+          ]);
+          expect(result.status).toBe(1);
+          const error = JSON.parse(result.stdout).error;
+          expect(error.code).toBe('plan.unknown-task');
+          expect(error.message).toContain('followup-ghost');
+          expect(error.message).toContain('epic-1/followup-0');
+          expect(existsSync(v2Path)).toBe(false);
+          expect(existsSync(path.join(specsDir, 'epic-1'))).toBe(false);
+        });
+      });
+
       // #221: a denied waiver (or any other reason a finding sits open) is
       // easy to lose track of once the next amendment is cut for something
       // else entirely. When the amendment's own objective text names an open

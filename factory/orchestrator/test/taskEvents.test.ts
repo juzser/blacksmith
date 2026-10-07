@@ -753,7 +753,9 @@ describe('taskEvents', () => {
       await emitTasksAdded(planWith(task()), ctx, { stateDir });
       await emitFollowUpTask(followUp(), ctx, { stateDir });
 
-      expect(await readAddedTasks(ctx, { stateDir })).toEqual([
+      const added = await readAddedTasks(ctx, { stateDir });
+      expect(added.every((a) => typeof a.payload === 'object')).toBe(true);
+      expect(added).toMatchObject([
         { taskId: 'epic-1/task-1', claims: ['src/foo/**'], epicId: 'epic-1' },
         {
           taskId: 'epic-1/followup-4b70d608',

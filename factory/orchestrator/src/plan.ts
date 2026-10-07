@@ -801,7 +801,19 @@ function readAddedList(epicId: string, version: number, added: unknown): TaskSpe
   return added as TaskSpecRecord[];
 }
 
-export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile {
+export function draftNextVersion(
+  prev: PlanFile,
+  changes: PlanChanges,
+  /**
+   * Dead records for tasks the plan never listed — ones only the event log
+   * added — that `changes.supersede` retires. Built by the caller from the
+   * log (`supersededStubFromLog`), because this function does no I/O. Each
+   * must already be `superseded` at the new version; they are carried beside
+   * the plan's own records so ingest has something to emit
+   * `task-superseded` from.
+   */
+  loggedStubs: readonly TaskSpecRecord[] = [],
+): PlanFile {
   const newVersion = prev.version + 1;
   const supersede = readSupersedeMap(prev.epic_id, newVersion, changes.supersede);
 
@@ -816,6 +828,8 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
     }
     carried.push({ ...t, plan_version: newVersion });
   }
+
+  carried.push(...loggedStubs);
 
   const replacements = Object.values(supersede).map((t) => ({ ...t, plan_version: newVersion }));
   const added = readAddedList(prev.epic_id, newVersion, changes.added).map((t) => ({
@@ -911,8 +925,13 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
  * is not: a caller that could write half of a version could write a version
  * no event explains.
  */
-export function nextVersion(prev: PlanFile, changes: PlanChanges, opts: PlanOpts = {}): PlanFile {
-  const newPlan = draftNextVersion(prev, changes);
+export function nextVersion(
+  prev: PlanFile,
+  changes: PlanChanges,
+  opts: PlanOpts = {},
+  loggedStubs: readonly TaskSpecRecord[] = [],
+): PlanFile {
+  const newPlan = draftNextVersion(prev, changes, loggedStubs);
   writePlanFile(newPlan, opts);
   return newPlan;
 }

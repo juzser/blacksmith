@@ -208,6 +208,60 @@ export interface AddedTask {
    * epic", not as a match.
    */
   epicId: string | undefined;
+  /**
+   * The `task-added` payload as written, for a caller that has to rebuild a
+   * record from what the log knows (`supersededStubFromLog`). Free-form like
+   * the rest of the payload: read each field with a `typeof`, never assume.
+   */
+  payload: Record<string, unknown>;
+}
+
+/**
+ * The plan record `plan amend` carries for a task only the log added, when it
+ * supersedes that task: a dead (`superseded`) record under the task's own id,
+ * so the next plan version can say what the log alone could not and
+ * `plan ingest` has a record to emit `task-superseded` from.
+ *
+ * Built from the `task-added` payload where it speaks (objective, claims,
+ * case, origin, title, summary, `budget_tokens`) and from honest placeholders
+ * where the schema demands a field a follow-up never carried
+ * (`output_schema_ref`, acceptance criteria, contract clauses, `diff_lines`):
+ * the record is never dispatched, only has to validate. `ui_affecting: false`
+ * is set for the same reason; the UI-path rule asks every record claiming one
+ * to say so, and this one will never change a screen. `claims` is passed
+ * through as written, so a payload with unreadable claims fails the plan's own
+ * validation and the amendment is refused, rather than a claim being invented.
+ */
+export function supersededStubFromLog(
+  added: AddedTask,
+  epicId: string,
+  planVersion: number,
+): TaskSpecRecord {
+  const p = added.payload;
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && v !== '' ? v : undefined;
+  const tokens = p.budget_tokens;
+  const note = `Added by the event log; superseded by plan v${planVersion}.`;
+  return {
+    task_id: added.taskId,
+    epic_id: epicId,
+    plan_version: planVersion,
+    objective: str(p.objective) ?? note,
+    output_schema_ref: 'result.schema.json',
+    acceptance_criteria: [note],
+    claims: added.claims,
+    budget: {
+      tokens: typeof tokens === 'number' && Number.isInteger(tokens) && tokens >= 1 ? tokens : 1,
+      diff_lines: 1,
+    },
+    contract: { functional_clauses: [note], nonfunctional_clauses: [] },
+    case: str(p.case) ?? 'chore',
+    origin: str(p.origin) ?? 'user',
+    task_status: 'superseded',
+    ui_affecting: false,
+    ...(str(p.title) ? { title: str(p.title) } : {}),
+    ...(str(p.summary) ? { summary: str(p.summary) } : {}),
+  };
 }
 
 /**
@@ -247,6 +301,7 @@ export async function readAddedTasks(
       taskId: record.task_id,
       claims: record.payload?.claims,
       epicId: typeof epicId === 'string' ? epicId : undefined,
+      payload: record.payload ?? {},
     });
   }
   return [...byId.values()];
@@ -325,8 +380,14 @@ async function pendingIngest(
     // the number would re-add tasks whose spec never changed. The amendment's
     // own marker is what counts — an id the amendment touched carries a dead
     // record beside its live one, which is exactly what `supersededIds` holds.
+    //
+    // And only for a task that still HAS a live record. A task every record of
+    // which is dead (a log-added follow-up `plan amend` retired, or a renamed-
+    // away id) has no spec worth adding again; re-adding it as `superseded`
+    // would only repeat the row the log already holds.
     const amended =
       recorded !== undefined &&
+      task.task_status !== 'superseded' &&
       supersededIds.has(taskId) &&
       typeof liveVersion === 'number' &&
       liveVersion > recorded;

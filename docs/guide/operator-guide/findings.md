@@ -117,6 +117,11 @@ printed a warning and cut the version anyway. Since D-127 `amendPlan` itself
 refuses an amendment that adds and supersedes nothing, before the version
 exists: the cited finding would have had nothing to wait on.
 
+A `supersede` key may name a task of the plan or one the event log added
+(`task-added` follow-ups); a log-added one gets a `superseded` stub record in
+the new version, so ingest retires it. A key naming neither is refused with
+`plan.unknown-task` before anything is written.
+
 The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
 
