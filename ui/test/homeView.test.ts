@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from '../src/lib/api.js';
+import type {
+  ActiveScopeResult,
+  ClosedEpic,
+  EpicTokenSpend,
+  OverviewResult,
+  RecentDispatch,
+} from '../src/lib/api.js';
 import {
   budgetDeltaSentence,
   budgetPanel,
@@ -10,6 +16,7 @@ import {
   decisionLine,
   isBudgetOutlier,
   outlierSentence,
+  type RunningCard,
   runningNowCards,
   sumTokens,
   tokensOfBudget,
@@ -154,7 +161,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
         },
       ],
     });
-    expect(runningNowCards(o)).toEqual([
+    expect(runningNowCards(o, null, 'all').shown).toEqual([
       {
         project: 'shop-api',
         workingAgents: 28,
@@ -171,7 +178,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
       epicsActivelyRunning: ['e1'],
       tokensByEpic: [epic('e1', 40, 100, 1)],
     });
-    expect(runningNowCards(o, 'shop-api')).toEqual([
+    expect(runningNowCards(o, null, 'all', 'shop-api').shown).toEqual([
       {
         project: 'shop-api',
         workingAgents: 3,
@@ -216,7 +223,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
         }),
       ],
     });
-    const [card] = runningNowCards(o);
+    const [card] = runningNowCards(o, null, 'all').shown;
     expect(card?.tokens).toMatchObject({ spent: 84_000, budget: 350_000 });
     expect(Math.round(((card?.tokens.spent ?? 0) / (card?.tokens.budget ?? 1)) * 100)).toBe(24);
   });
@@ -231,7 +238,10 @@ describe('lib/homeView.ts runningNowCards()', () => {
         }),
       ],
     });
-    expect(runningNowCards(o)[0]?.tokens).toMatchObject({ spent: 10, budget: 100 });
+    expect(runningNowCards(o, null, 'all').shown[0]?.tokens).toMatchObject({
+      spent: 10,
+      budget: 100,
+    });
   });
 
   it('treats an outlier epic exactly as the Budget panel does: out of the ratio, counted apart', () => {
@@ -239,7 +249,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
     const o = overview({
       projects: [summary({ epicsActivelyRunning: ['a', 'wild'], tokensByEpic: epics })],
     });
-    const card = runningNowCards(o)[0];
+    const card = runningNowCards(o, null, 'all').shown[0];
     const panel = budgetSummary(epics);
     expect(card?.tokens).toEqual({
       spent: panel.spent,
@@ -256,11 +266,14 @@ describe('lib/homeView.ts runningNowCards()', () => {
       epicsActivelyRunning: ['a'],
       tokensByEpic: [epic('a', 10, 100), epic('closed-one', 9_000, 20_000)],
     });
-    expect(runningNowCards(o, 'p')[0]?.tokens).toMatchObject({ spent: 10, budget: 100 });
+    expect(runningNowCards(o, null, 'all', 'p').shown[0]?.tokens).toMatchObject({
+      spent: 10,
+      budget: 100,
+    });
   });
 
   it('shows no card for a selected project with nothing running', () => {
-    expect(runningNowCards(overview({}), 'shop-api')).toEqual([]);
+    expect(runningNowCards(overview({}), null, 'all', 'shop-api').shown).toEqual([]);
   });
 
   it('shows no card for a selected project whose only open epic is escalated (F1)', () => {
@@ -269,73 +282,254 @@ describe('lib/homeView.ts runningNowCards()', () => {
       epicsInFlight: ['stuck-1'],
       epicsActivelyRunning: [],
     });
-    expect(runningNowCards(o, 'shop-api')).toEqual([]);
+    expect(runningNowCards(o, null, 'all', 'shop-api').shown).toEqual([]);
   });
 });
 
-describe('lib/homeView.ts budgetPanel()', () => {
-  it('counts only the running epics: an idle or closed epic adds nothing, unmeasured steps and outliers included', () => {
+describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
+  function proj(
+    project: string,
+    store: string | undefined,
+    workingAgentCount: number,
+    epics: string[],
+  ) {
+    return {
+      project,
+      ...(store ? { store: { id: store, label: store } } : {}),
+      liveAgentCount: workingAgentCount,
+      workingAgentCount,
+      epicsInFlight: epics,
+      epicsActivelyRunning: epics,
+      epicsIdle: [],
+      tokensSpent: 0,
+      tokensBudget: null,
+      unmeasured: 0,
+      tokensByEpic: epics.map((e) => epic(e, 10, 100)),
+      alerts: { escalations: 0, pendingWaivers: 0 },
+    };
+  }
+  function scope(
+    projects: { storeId: string; project: string; agentsWorking: number }[],
+    over: Partial<ActiveScopeResult> = {},
+  ): ActiveScopeResult {
+    return {
+      measured: true,
+      readAt: '2026-10-07T10:00:00Z',
+      liveSessions: projects.length,
+      unlinkedSessions: 0,
+      projects: projects.map((p) => ({ ...p, liveSessions: 1 })),
+      epics: [],
+      factorySessions: [],
+      ...over,
+    };
+  }
+  const two = overview({
+    projects: [
+      proj('project-a', undefined, 2, ['epic-a']),
+      proj('project-b', undefined, 3, ['epic-b']),
+    ],
+  });
+  const onlyA = scope([{ storeId: 'home', project: 'project-a', agentsWorking: 1 }]);
+
+  it('hides a project with running epics but no live session under Active, counted quiet', () => {
+    const r = runningNowCards(two, onlyA, 'active');
+    expect(r.shown.map((c) => c.project)).toEqual(['project-a']);
+    expect(r.quiet.map((c) => c.project)).toEqual(['project-b']);
+  });
+
+  it('shows it muted under All', () => {
+    const r = runningNowCards(two, onlyA, 'all');
+    expect(r.shown.map((c) => [c.project, c.quiet === true])).toEqual([
+      ['project-a', false],
+      ['project-b', true],
+    ]);
+    expect(r.quiet).toEqual([]);
+  });
+
+  it('gives an active project that isRunning drops no card and does not count it quiet', () => {
     const o = overview({
-      epicsInFlight: ['run-a', 'run-wild', 'idle-a'],
-      epicsActivelyRunning: ['run-a', 'run-wild'],
-      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
-      tokensByEpic: [
-        epic('run-a', 40, 100, 2),
-        epic('run-wild', 11_000, 1_000, 1),
-        epic('idle-a', 500, 600, 7),
-        epic('closed-a', 9_000, 20_000, 5),
+      projects: [proj('project-a', undefined, 0, []), proj('project-b', undefined, 3, ['epic-b'])],
+    });
+    const r = runningNowCards(
+      o,
+      scope([{ storeId: 'home', project: 'project-a', agentsWorking: 0 }]),
+      'active',
+    );
+    expect(r.shown).toEqual([]);
+    expect(r.quiet.map((c) => c.project)).toEqual(['project-b']);
+  });
+
+  it('keys by store: only the store the session is on is active', () => {
+    const o = overview({
+      projects: [
+        proj('project-a', undefined, 1, ['epic-a']),
+        proj('project-a', 'store-b', 1, ['epic-x']),
       ],
     });
-    expect(budgetPanel(o)).toEqual({
-      spent: 40,
+    const r = runningNowCards(
+      o,
+      scope([{ storeId: 'store-b', project: 'project-a', agentsWorking: 1 }]),
+      'active',
+    );
+    expect(r.shown.map((c) => c.store?.id)).toEqual(['store-b']);
+    expect(r.quiet.map((c) => c.store?.id)).toEqual([undefined]);
+  });
+
+  it('shows an active card the scope agentsWorking, the same under Active and All; a quiet card keeps workingAgents', () => {
+    const active = runningNowCards(two, onlyA, 'active').shown[0];
+    const all = runningNowCards(two, onlyA, 'all').shown;
+    expect(active?.workingAgents).toBe(1);
+    expect(all[0]?.workingAgents).toBe(1);
+    expect(all[1]?.workingAgents).toBe(3);
+  });
+
+  it('treats an unmeasured scope as All: every card, none muted, nothing quiet', () => {
+    const r = runningNowCards(two, scope([], { measured: false }), 'active');
+    expect(r.shown.map((c) => c.project)).toEqual(['project-a', 'project-b']);
+    expect(r.shown.some((c) => c.quiet)).toBe(false);
+    expect(r.quiet).toEqual([]);
+    expect(runningNowCards(two, null, 'active').shown).toHaveLength(2);
+  });
+
+  it('applies the scope to the single selected-project card', () => {
+    const o = overview({
+      workingAgentCount: 3,
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 1, 2)],
+    });
+    expect(runningNowCards(o, onlyA, 'active', 'project-b').quiet).toHaveLength(1);
+    expect(runningNowCards(o, onlyA, 'active', 'project-a').shown).toHaveLength(1);
+  });
+
+  it('matches the merged ?project= card by name: a live session in another store makes it active', () => {
+    const o = overview({
+      workingAgentCount: 3,
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 1, 2)],
+    });
+    const r = runningNowCards(
+      o,
+      scope([{ storeId: 'store-b', project: 'project-a', agentsWorking: 2 }]),
+      'active',
+      'project-a',
+    );
+    expect(r.quiet).toEqual([]);
+    expect(r.shown).toHaveLength(1);
+    expect(r.shown[0]?.workingAgents).toBe(2);
+  });
+
+  it('counts the merged ?project= card agents over every store that names it', () => {
+    const o = overview({
+      workingAgentCount: 3,
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 1, 2)],
+    });
+    const r = runningNowCards(
+      o,
+      scope([
+        { storeId: 'home', project: 'project-a', agentsWorking: 1 },
+        { storeId: 'store-b', project: 'project-a', agentsWorking: 2 },
+      ]),
+      'active',
+      'project-a',
+    );
+    expect(r.shown[0]?.workingAgents).toBe(3);
+  });
+});
+
+function card(epics: string[], tokens: Partial<RunningCard['tokens']>): RunningCard {
+  return {
+    project: 'project-a',
+    workingAgents: 1,
+    epics,
+    tokens: { spent: 0, budget: null, unmeasured: 0, outliers: [], ...tokens },
+  };
+}
+
+describe('lib/homeView.ts budgetPanel()', () => {
+  it('sums the cards on screen: spend, budget, unmeasured steps and outliers', () => {
+    expect(
+      budgetPanel([
+        card(['a'], { spent: 40, budget: 100, unmeasured: 2, outliers: ['wild'] }),
+        card(['b'], { spent: 30, budget: 200, unmeasured: 1 }),
+        card(['c'], { spent: 5, budget: null }),
+      ]),
+    ).toEqual({ spent: 75, budget: 300, unmeasured: 3, outliers: ['wild'] });
+  });
+
+  it('has a null budget when no card declares one', () => {
+    expect(budgetPanel([card(['a'], { spent: 5 })])).toMatchObject({ spent: 5, budget: null });
+  });
+
+  it('is the sum over the shown cards epics: Active narrows it, All is every card', () => {
+    const two = overview({
+      projects: [
+        {
+          project: 'project-a',
+          liveAgentCount: 1,
+          workingAgentCount: 1,
+          epicsInFlight: ['epic-a'],
+          epicsActivelyRunning: ['epic-a'],
+          epicsIdle: [],
+          tokensSpent: 10,
+          tokensBudget: 100,
+          unmeasured: 0,
+          tokensByEpic: [epic('epic-a', 10, 100)],
+          alerts: { escalations: 0, pendingWaivers: 0 },
+        },
+        {
+          project: 'project-b',
+          liveAgentCount: 1,
+          workingAgentCount: 1,
+          epicsInFlight: ['epic-b'],
+          epicsActivelyRunning: ['epic-b'],
+          epicsIdle: [],
+          tokensSpent: 20,
+          tokensBudget: 200,
+          unmeasured: 0,
+          tokensByEpic: [epic('epic-b', 20, 200)],
+          alerts: { escalations: 0, pendingWaivers: 0 },
+        },
+      ],
+    });
+    const live: ActiveScopeResult = {
+      measured: true,
+      readAt: '',
+      liveSessions: 1,
+      unlinkedSessions: 0,
+      projects: [{ storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 1 }],
+      epics: [],
+      factorySessions: [],
+    };
+    expect(budgetPanel(runningNowCards(two, live, 'active').shown)).toMatchObject({
+      spent: 10,
       budget: 100,
-      unmeasured: 2,
-      outliers: ['run-wild'],
+    });
+    expect(budgetPanel(runningNowCards(two, live, 'all').shown)).toMatchObject({
+      spent: 30,
+      budget: 300,
     });
   });
 
-  it('is the sum of what the Running-now cards show for the same epics', () => {
-    const o = overview({
-      epicsActivelyRunning: ['a', 'b'],
-      tokensByEpic: [epic('a', 10, 100), epic('b', 20, 200), epic('idle-a', 999, 999)],
-    });
-    expect(budgetPanel(o)).toMatchObject({ spent: 30, budget: 300 });
-  });
-
-  it('has no panel figures when no epic is running, never a zero', () => {
-    const o = overview({
-      epicsInFlight: ['idle-a'],
-      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
-      tokensByEpic: [epic('idle-a', 500, 600)],
-    });
-    expect(budgetPanel(o)).toBeNull();
+  it('has no panel figures when no card has a running epic, never a zero', () => {
+    expect(budgetPanel([])).toBeNull();
+    expect(budgetPanel([card([], { spent: 0 })])).toBeNull();
   });
 });
 
 describe('lib/homeView.ts budgetView()', () => {
   it('is the quiet line and no figures when no epic is running', () => {
-    const o = overview({
-      epicsInFlight: ['idle-a'],
-      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
-      tokensByEpic: [epic('idle-a', 500, 600), epic('closed-a', 9_000, 20_000)],
-    });
-    expect(budgetView(o)).toEqual({ kind: 'none', text: 'No epic is running.' });
+    expect(budgetView([], null)).toEqual({ kind: 'none', text: 'No epic is running.' });
   });
 
-  it('shows figures over the running epics only, with a mix of running, idle and closed', () => {
-    const o = overview({
-      epicsInFlight: ['run-a', 'run-b', 'idle-a'],
-      epicsActivelyRunning: ['run-a', 'run-b'],
-      epicsIdle: [{ epicId: 'idle-a', idleDays: 18 }],
-      tokensByEpic: [
-        epic('run-a', 40_000, 100_000, 2),
-        epic('run-b', 10_000, 100_000),
-        epic('idle-a', 500_000, 600_000, 7),
-        epic('closed-a', 9_000_000, 20_000_000, 5),
+  it('shows figures over the cards, with the overview delta', () => {
+    const view = budgetView(
+      [
+        card(['run-a'], { spent: 40_000, budget: 100_000, unmeasured: 2 }),
+        card(['run-b'], { spent: 10_000, budget: 100_000 }),
       ],
-      budgetUsedPctPointDelta1h: 4,
-    });
-    const view = budgetView(o);
+      4,
+    );
     if (view.kind !== 'figures') throw new Error('expected figures');
     expect(view.ring).toEqual({
       value: 50_000,
@@ -349,11 +543,10 @@ describe('lib/homeView.ts budgetView()', () => {
   });
 
   it('names a running outlier and keeps it out of the ring', () => {
-    const o = overview({
-      epicsActivelyRunning: ['run-a', 'run-wild'],
-      tokensByEpic: [epic('run-a', 40, 100), epic('run-wild', 11_000, 1_000)],
-    });
-    const view = budgetView(o);
+    const view = budgetView(
+      [card(['run-a', 'run-wild'], { spent: 40, budget: 100, outliers: ['run-wild'] })],
+      null,
+    );
     if (view.kind !== 'figures') throw new Error('expected figures');
     expect(view.ring).toMatchObject({ value: 40, max: 100 });
     expect(view.outlierSentence).toBe(outlierSentence(['run-wild']));
@@ -361,13 +554,27 @@ describe('lib/homeView.ts budgetView()', () => {
   });
 
   it('draws no ring when no running epic reported its cost', () => {
-    const o = overview({
-      epicsActivelyRunning: ['run-a'],
-      tokensByEpic: [epic('run-a', 0, 100, 3)],
-    });
-    const view = budgetView(o);
+    const view = budgetView([card(['run-a'], { spent: 0, budget: 100, unmeasured: 3 })], null);
     if (view.kind !== 'figures') throw new Error('expected figures');
     expect(view.ring).toBeNull();
+  });
+
+  it('drops the whole-factory delta when Active hides a card, keeps it when not narrowed', () => {
+    const cards = [card(['run-a'], { spent: 40, budget: 100 })];
+    const narrowed = budgetView(cards, 4, true);
+    if (narrowed.kind !== 'figures') throw new Error('expected figures');
+    expect(narrowed.deltaSentence).toBeNull();
+    const all = budgetView(cards, 4, false);
+    if (all.kind !== 'figures') throw new Error('expected figures');
+    expect(all.deltaSentence).toBe('4 points higher than an hour ago');
+  });
+
+  it('says no epic runs on an active project when narrowed, and no epic runs when not', () => {
+    expect(budgetView([], 4, true)).toEqual({
+      kind: 'none',
+      text: 'No epic is running on an active project.',
+    });
+    expect(budgetView([], 4, false)).toEqual({ kind: 'none', text: 'No epic is running.' });
   });
 });
 

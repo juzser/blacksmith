@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
-import { isActiveEpic, isActiveProject, isActiveSession } from '../src/lib/activeScope.js';
+import {
+  isActiveEpic,
+  isActiveProject,
+  isActiveProjectName,
+  isActiveSession,
+} from '../src/lib/activeScope.js';
 import type { ActiveScopeResult } from '../src/lib/api.js';
 
 const scope: ActiveScopeResult = {
@@ -33,6 +38,18 @@ describe('active-scope predicates', () => {
   it('an unmeasured or missing scope is never active', () => {
     expect(isActiveEpic({ ...scope, measured: false }, home, 'epic-a')).toBe(false);
     expect(isActiveEpic(null, home, 'epic-a')).toBe(false);
+  });
+
+  it('isActiveProjectName matches a project by name in any store, for the merged ?project= view', () => {
+    const elsewhere: ActiveScopeResult = {
+      ...scope,
+      projects: [{ storeId: 'st-b', project: 'project-a', liveSessions: 1, agentsWorking: 1 }],
+    };
+    expect(isActiveProject(elsewhere, {}, 'project-a')).toBe(false);
+    expect(isActiveProjectName(elsewhere, 'project-a')).toBe(true);
+    expect(isActiveProjectName(elsewhere, 'project-b')).toBe(false);
+    expect(isActiveProjectName({ ...elsewhere, measured: false }, 'project-a')).toBe(false);
+    expect(isActiveProjectName(null, 'project-a')).toBe(false);
   });
 });
 

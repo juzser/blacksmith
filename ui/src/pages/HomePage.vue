@@ -14,6 +14,7 @@ const seenInFlight = new Set<string>();
 import { Activity, MonitorPlay } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import LiveSessionCard from '../components/LiveSessionCard.vue';
 import NeedsYouInbox from '../components/NeedsYouInbox.vue';
 import Banner from '../components/kit/Banner.vue';
@@ -24,10 +25,14 @@ import ProgressRing from '../components/kit/ProgressRing.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
+import { useActiveScope } from '../composables/useActiveScope.js';
+import { useActivityScope } from '../composables/useActivityScope.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { isActiveProjectName } from '../lib/activeScope.js';
 import {
+  type ActiveScopeResult,
   type ActivityEntry,
   type ClosedEpic,
   fetchCliSessions,
@@ -63,6 +68,21 @@ const RECENT_ACTIVITY_SHOWN = 8;
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
 const router = useRouter();
+const { scope: mode, scopeTo } = useActivityScope();
+const { scope: activeScope, settled: activeScopeSettled } = useActiveScope();
+
+// A failed read counts as unmeasured, never as "nothing is active"; null only
+// while the first answer is still in flight (same rule as Sessions and Kanban).
+const UNMEASURED: ActiveScopeResult = {
+  measured: false,
+  readAt: '',
+  liveSessions: 0,
+  unlinkedSessions: 0,
+  projects: [],
+  epics: [],
+  factorySessions: [],
+};
+const liveScope = computed(() => activeScope.value ?? (activeScopeSettled.value ? UNMEASURED : null));
 
 const overview = ref<OverviewResult | null>(null);
 const overviewFailed = ref(false);
@@ -139,9 +159,25 @@ watch([project, sessionKey], () => {
 });
 usePoll(load, POLL_MS);
 
-const cards = computed(() => (overview.value ? runningNowCards(overview.value, project.value) : []));
+// While the first scope answer is in flight under Active, Running now and
+// Budget keep their loading state: never draw every card and then narrow them.
+const scopePending = computed(() => mode.value === 'active' && liveScope.value === null);
+const running = computed(() =>
+  overview.value
+    ? runningNowCards(overview.value, liveScope.value, mode.value, project.value)
+    : { shown: [], quiet: [] },
+);
+const cards = computed(() => running.value.shown);
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
-const budget = computed(() => (overview.value ? budgetView(overview.value) : null));
+const budget = computed(() =>
+  overview.value
+    ? budgetView(
+        cards.value,
+        overview.value.budgetUsedPctPointDelta1h ?? null,
+        running.value.quiet.length > 0,
+      )
+    : null,
+);
 
 // Same causal-chain walk ActivityPage.vue uses for ctxFor(), scoped to this
 // page's own 8-row list rather than the whole feed.
@@ -162,6 +198,36 @@ function recentActivityCtx(entry: ActivityEntry) {
   const causedCount = causedCountByPromptId.value.get(entry.eventId);
   return { promptTs, causedCount };
 }
+
+// The Active edge lines replace the card list; each is one muted line, with
+// Sessions' rules and copy.
+const activeView = computed(() => mode.value === 'active' && liveScope.value?.measured === true);
+const noLiveSessions = computed(() => activeView.value && liveScope.value?.liveSessions === 0);
+// Like Kanban's, only when no card is shown: a session linked to a project
+// before its epic opens draws a card but is neither unlinked nor a factory one.
+const noneOnAnEpic = computed(() => {
+  const l = liveScope.value;
+  return (
+    activeView.value &&
+    l !== null &&
+    l.factorySessions.length === 0 &&
+    l.unlinkedSessions > 0 &&
+    cards.value.length === 0
+  );
+});
+const noSessionOnProject = computed(
+  () =>
+    activeView.value &&
+    project.value !== undefined &&
+    !isActiveProjectName(liveScope.value, project.value),
+);
+const unmeasuredNote = computed(() => mode.value === 'active' && liveScope.value?.measured === false);
+const quietLine = computed(() => {
+  const hidden = running.value.quiet;
+  return hidden.length === 1
+    ? { text: `${hidden[0]?.project} is quiet`, link: 'Show it' }
+    : { text: pluralize(hidden.length, 'quiet project'), link: 'Show all' };
+});
 
 function workLink(p: string) {
   return { path: '/work/kanban', query: { project: p } };
@@ -267,12 +333,35 @@ function becauseOf(promptId: string) {
     <Banner v-if="overviewFailed" show-retry @retry="loadOverview">Could not load Home.</Banner>
 
     <section class="bs-home__section" aria-labelledby="running-heading">
-      <h2 id="running-heading" class="bs-section-title">Running now</h2>
-      <Skeleton v-if="overview === null && !overviewFailed" :height="96" />
+      <div class="bs-home__section-head bs-home__section-head--flush">
+        <h2 id="running-heading" class="bs-section-title">Running now</h2>
+        <ActivityScopeToggle />
+      </div>
+      <p v-if="unmeasuredNote" class="bs-sessions__quiet">Live sessions can't be read here</p>
+      <Skeleton v-if="(overview === null && !overviewFailed) || scopePending" :height="96" />
       <template v-else-if="overview !== null">
-        <p v-if="cards.length === 0" class="bs-home__quiet">Nothing is running right now.</p>
-        <div v-else class="bs-home__cards">
-          <Card v-for="c in cards" :key="storeKey(c, c.project)" :title="c.project">
+        <p v-if="noLiveSessions" class="bs-sessions__quiet">
+          Nothing is active right now. ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-else-if="noneOnAnEpic" class="bs-sessions__quiet">
+          {{ pluralize(liveScope?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-else-if="noSessionOnProject" class="bs-sessions__quiet">
+          No live session is on this project ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-else-if="cards.length === 0 && running.quiet.length === 0" class="bs-home__quiet">
+          Nothing is running right now.
+        </p>
+        <div v-if="cards.length > 0" class="bs-home__cards">
+          <Card
+            v-for="c in cards"
+            :key="storeKey(c, c.project)"
+            :title="c.project"
+            :class="{ 'bs-home__card--quiet': c.quiet }"
+          >
             <template #action>
               <RouterLink
                 class="bs-btn bs-btn--link bs-btn--sm"
@@ -290,7 +379,9 @@ function becauseOf(promptId: string) {
               </RouterLink>
             </template>
             <div class="bs-home__card-body">
-              <p class="bs-home__stat">{{ pluralize(c.workingAgents, 'agent') }} working</p>
+              <p v-if="c.workingAgents > 0" class="bs-home__stat">
+                {{ pluralize(c.workingAgents, 'agent') }} working
+              </p>
               <p class="bs-home__stat">{{ pluralize(c.epics.length, 'epic') }} in flight</p>
               <div class="bs-home__tokens">
                 <ProgressRing
@@ -308,6 +399,13 @@ function becauseOf(promptId: string) {
             </div>
           </Card>
         </div>
+        <p
+          v-if="running.quiet.length > 0 && !noLiveSessions && !noneOnAnEpic && !noSessionOnProject"
+          class="bs-sessions__quiet"
+        >
+          {{ quietLine.text }} ·
+          <RouterLink :to="scopeTo('all')">{{ quietLine.link }}</RouterLink>
+        </p>
         <div v-if="justFinished.length > 0" class="bs-home__finished">
           <h3 class="bs-home__subhead">Just finished</h3>
           <ul class="bs-home__list">
@@ -345,7 +443,7 @@ function becauseOf(promptId: string) {
 
     <section class="bs-home__section" aria-labelledby="budget-heading">
       <h2 id="budget-heading" class="bs-section-title">Budget</h2>
-      <Skeleton v-if="overview === null && !overviewFailed" :height="48" />
+      <Skeleton v-if="(overview === null && !overviewFailed) || scopePending" :height="48" />
       <p v-else-if="budget?.kind === 'none'" class="bs-home__quiet">{{ budget.text }}</p>
       <template v-else-if="budget?.kind === 'figures'">
         <div class="bs-home__tokens">

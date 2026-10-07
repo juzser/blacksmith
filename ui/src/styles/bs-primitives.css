@@ -2712,6 +2712,15 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
   margin: 0;
 }
+/* A project no live session drives, shown under All: same card, muted text and
+   links, the way Sessions mutes a quiet group. The ProgressRing keeps its
+   colour: it carries the budget state. */
+.bs-home__card--quiet .bs-card__title,
+.bs-home__card--quiet .bs-home__stat,
+.bs-home__card--quiet .bs-home__tokens,
+.bs-home__card--quiet .bs-btn--link {
+  color: var(--bs-text-subtle);
+}
 .bs-home__tokens {
   display: flex;
   align-items: center;
@@ -2917,6 +2926,11 @@ summary.bs-inbox__group-head {
   justify-content: space-between;
   gap: var(--bs-space-2);
   margin-bottom: var(--bs-space-4);
+}
+/* "Running now" sits in a .bs-home__section whose own gap already spaces the
+   head from the cards; the margin above would double it. */
+.bs-home__section-head--flush {
+  margin-bottom: 0;
 }
 /* Fix round item 6 (ds-review.html `.feedbar`): the link's own --sm padding
    otherwise reads as extra right-edge whitespace against the rest of the

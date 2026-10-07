@@ -51,3 +51,10 @@ export function isActiveSession(
     keyOf(row, sessionId),
   );
 }
+
+// The one check by name alone: under `?project=` the overview merges every
+// store that holds the name into one store-less card, so a live session on
+// that name in any store makes it active.
+export function isActiveProjectName(scope: ActiveScopeResult | null, project: string): boolean {
+  return scope?.measured === true && scope.projects.some((p) => p.project === project);
+}
