@@ -220,6 +220,91 @@ describe('computeActiveScope', () => {
     expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: 'project-a' }]);
   });
 
+  describe('an epic the running set does not hold (no task rows yet)', () => {
+    const agent = { role: 'researcher', taskId: null, since: '2026-10-07T11:00:00.000Z' };
+    const taskless = (over: Record<string, unknown> = {}) =>
+      linkedEpic({
+        factorySessionIds: ['f1'],
+        factorySessionLastEventAt: { f1: '2026-10-07T11:00:00.000Z' },
+        workingAgents: [agent],
+        closed: false,
+        ...over,
+      });
+
+    it('is active when this CLI session wrote into it since it started, within the idle window', () => {
+      const out = fold(cli([session({ epics: [taskless()] })]), [store({ activelyRunning: [] })]);
+      expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: 'project-a' }]);
+      expect(out.factorySessions).toEqual([{ storeId: 'home', sessionId: 'f1' }]);
+      expect(out.projects).toEqual([
+        { storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 1 },
+      ]);
+      expect(out.unlinkedSessions).toBe(0);
+    });
+
+    it('is not active when this CLI session wrote into it only before it started', () => {
+      const out = fold(
+        cli([
+          session({
+            epics: [taskless({ factorySessionLastEventAt: { f1: '2026-10-07T09:00:00.000Z' } })],
+          }),
+        ]),
+        [store({ activelyRunning: [] })],
+      );
+      expect(out.epics).toEqual([]);
+      expect(out.factorySessions).toEqual([]);
+      expect(out.projects).toEqual([]);
+    });
+
+    it('is not active when its newest write since start is older than the idle window', () => {
+      const run = (at: string) =>
+        fold(
+          cli([
+            session(
+              { epics: [taskless({ factorySessionLastEventAt: { f1: at } })] },
+              { startedAt: '2026-09-20T00:00:00.000Z' },
+            ),
+          ]),
+          [store({ activelyRunning: [] })],
+        ).epics.map((e) => e.epicId);
+      // NOW is 2026-10-07T12:00Z: exactly 7 days back is still inside, as for
+      // the overview's idle rule; a millisecond more is outside.
+      expect(run('2026-09-30T12:00:00.000Z')).toEqual(['epic-a']);
+      expect(run('2026-09-30T11:59:59.999Z')).toEqual([]);
+      expect(run('2026-09-29T11:00:00.000Z')).toEqual([]);
+    });
+
+    it('is not active when the store closed it, even with a fresh write', () => {
+      const out = fold(cli([session({ epics: [taskless({ closed: true })] })]), [
+        store({ activelyRunning: [] }),
+      ]);
+      expect(out.epics).toEqual([]);
+      expect(out.factorySessions).toEqual([]);
+      expect(out.projects).toEqual([]);
+    });
+
+    it.each([null, 'not-a-time'])(
+      'is not active by a fresh write when startedAt is %s',
+      (startedAt) => {
+        const out = fold(cli([session({ epics: [taskless()] }, { startedAt })]), [
+          store({ activelyRunning: [] }),
+        ]);
+        expect(out.epics).toEqual([]);
+        expect(out.projects).toEqual([]);
+      },
+    );
+
+    it('with no project it is listed, makes no project row and leaves the session linked', () => {
+      const out = fold(cli([session({ epics: [taskless({ project: null })] })]), [
+        store({ activelyRunning: [] }),
+      ]);
+      expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: null }]);
+      expect(out.factorySessions).toEqual([{ storeId: 'home', sessionId: 'f1' }]);
+      expect(out.projects).toEqual([]);
+      expect(out.unlinkedSessions).toBe(0);
+      expect(out.liveSessions).toBe(1);
+    });
+  });
+
   it('the body carries no prompt, doingNow, transcript, cwd or name keys at any depth', () => {
     const out = fold(
       cli([

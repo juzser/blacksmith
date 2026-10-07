@@ -2300,4 +2300,53 @@ describe('GET /api/cli-sessions', () => {
       closeApp(handle);
     }
   });
+
+  it('GET /api/active-scope lists an epic with no task rows the live session dispatches into', async () => {
+    const opts = { stateDir, cliSessionId: CLI_ID };
+    const started = await startSession('sess-research', opts);
+    await appendEvent(
+      {
+        session_id: 'sess-research',
+        actor: 'planner',
+        event_type: 'dispatch_decision',
+        plan_version: 1,
+        causal_parent: started.event_id,
+        project: 'project-b',
+        payload: {
+          agent_role: 'researcher',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet-5',
+          spec_ref: 'specs/research.json',
+          reason: 'research before the plan',
+          epic_id: 'epic-b',
+        },
+      },
+      opts,
+    );
+    const handle = serve();
+    try {
+      const headers = { host: '127.0.0.1:4680' };
+      const overview = await json<{ epicsActivelyRunning: string[] }>(
+        await handle.app.request('/api/overview', { headers }),
+      );
+      expect(overview.epicsActivelyRunning).not.toContain('epic-b');
+      const scope = await json<{
+        epics: { storeId: string; epicId: string; project: string | null }[];
+        factorySessions: { sessionId: string }[];
+        projects: { project: string }[];
+        unlinkedSessions: number;
+      }>(await handle.app.request('/api/active-scope', { headers }));
+      expect(scope.epics).toContainEqual({
+        storeId: 'home',
+        epicId: 'epic-b',
+        project: 'project-b',
+      });
+      expect(scope.factorySessions.map((f) => f.sessionId)).toContain('sess-research');
+      expect(scope.projects.map((p) => p.project)).toContain('project-b');
+      expect(scope.unlinkedSessions).toBe(0);
+    } finally {
+      closeApp(handle);
+    }
+  });
 });

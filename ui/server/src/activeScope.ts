@@ -5,6 +5,7 @@
 // Prompt-free by construction: the result is built field by field from ids,
 // project names, store ids and counts, so no session name, cwd, prompt or
 // transcript text can ride along.
+import { EPIC_IDLE_MS } from '../../../factory/orchestrator/dist/db/queries.js';
 import { type CliSessionsResponse, HOME_STORE_ID, type StoreRef } from './cliSessions.js';
 
 /** The slice of the cli-sessions read this fold uses. */
@@ -18,6 +19,8 @@ export interface ActiveScopeCli {
         store: StoreRef;
         epicId: string | null;
         project: string | null;
+        /** The store closed this epic; it never counts as active. */
+        closed: boolean;
         factorySessionIds: string[];
         /** Per member, the newest event THIS CLI session wrote into it. */
         factorySessionLastEventAt: Record<string, string>;
@@ -83,6 +86,7 @@ export function computeActiveScope(
       return;
     }
     const startedMs = s.startedAt === null ? Number.NaN : Date.parse(s.startedAt);
+    const nowMs = Date.parse(nowIso);
     for (const e of entries) {
       const st = byStore.get(e.store.id);
       const projectOf = (): string | null =>
@@ -93,7 +97,18 @@ export function computeActiveScope(
       if (e.epicId === null) {
         project = projectOf();
       } else {
-        if (st === undefined || !st.activelyRunning.includes(e.epicId)) continue;
+        // Active: not closed, and either the store's running set holds it, or
+        // this CLI session is writing into it now (an epic with no task rows
+        // yet, in its research step, is in no running set).
+        const running = st?.activelyRunning.includes(e.epicId) === true;
+        if (
+          e.closed ||
+          !(
+            running ||
+            writtenSinceStart(e.factorySessionIds, e.factorySessionLastEventAt, startedMs, nowMs)
+          )
+        )
+          continue;
         project = projectOf();
         const key = `${e.store.id}\u0000${e.epicId}`;
         if (!epics.has(key)) epics.set(key, { storeId: e.store.id, epicId: e.epicId, project });
@@ -140,6 +155,27 @@ export function computeActiveScope(
     epics: [...epics.values()],
     factorySessions: [...factory.values()],
   };
+}
+
+/**
+ * Whether this CLI session wrote into one of the members at or after it
+ * started (the test pickFactorySessions makes), with the newest such write
+ * inside the overview's idle window of now. No known start: no.
+ */
+function writtenSinceStart(
+  ids: readonly string[],
+  lastEventAt: Readonly<Record<string, string>>,
+  startedMs: number,
+  nowMs: number,
+): boolean {
+  if (Number.isNaN(startedMs)) return false;
+  let newest = Number.NaN;
+  for (const id of ids) {
+    const t = lastEventAt[id];
+    const at = t === undefined ? Number.NaN : Date.parse(t);
+    if (at >= startedMs && (Number.isNaN(newest) || at > newest)) newest = at;
+  }
+  return !Number.isNaN(newest) && nowMs - newest <= EPIC_IDLE_MS;
 }
 
 /**
