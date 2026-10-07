@@ -74,6 +74,34 @@ test.describe('Task detail', () => {
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
   });
 
+  // A 375px phone is the narrowest supported width. The page's own scrollWidth
+  // stays 375 even when the content column has grown wider (the shell clips
+  // it, so cards are cut off on the right), so this measures the column and
+  // the tab strip's right edge too. The committed baselines are 390px wide and
+  // never showed it.
+  test('375px: no tab makes the content column wider than the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    const rights: Record<string, number> = {};
+    for (const task of [DEMO_HUB_COMPLETED_TASK, DEMO_HUB_WAIVABLE_TASK]) {
+      await page.goto(`/tasks/${encodeURIComponent(task)}`);
+      for (const name of ['What was asked', 'Findings', 'Outputs', 'History']) {
+        await page.getByRole('tab', { name }).click();
+        const m = await page.evaluate(() => {
+          const right = (sel: string) =>
+            Math.round(document.querySelector(sel)?.getBoundingClientRect().right ?? 0);
+          return {
+            page: document.documentElement.scrollWidth,
+            column: right('.bs-task-detail__layout > *'),
+            tabs: right('.bs-tabs__list'),
+          };
+        });
+        rights[`${task} ${name}`] = Math.max(m.page, m.column, m.tabs);
+        console.log(`task-detail 375px ${task} ${name}: ${JSON.stringify(m)}`);
+      }
+    }
+    for (const right of Object.values(rights)) expect(right).toBeLessThanOrEqual(375);
+  });
+
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
   // meta text (dispatch rows have no tokens yet, so metaOverride is '') used
   // to render no meta line at all on phone, so it showed no time.

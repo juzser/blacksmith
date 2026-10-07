@@ -506,6 +506,9 @@ a:hover {
   }
   .bs-timeline-row__ts--meta {
     display: inline;
+    /* The time never breaks inside itself; the meta text beside it gives way. */
+    flex: none;
+    white-space: nowrap;
   }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
@@ -3459,7 +3462,9 @@ summary.bs-inbox__group-head {
    scroll sideways, so it drops under the tabs instead. */
 @media (max-width: 640px) {
   .bs-task-detail__layout {
-    grid-template-columns: 1fr;
+    /* minmax(0, ...): a bare 1fr floors at the content's min-content width, so
+       the tab strip or a wide table stretched the column past a 375px phone. */
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .bs-task-detail__overview {

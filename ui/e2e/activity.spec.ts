@@ -539,6 +539,34 @@ test.describe('Activity', () => {
     );
   });
 
+  // The meta line ends with the time on phone. A long meta text used to squeeze
+  // it until "11 min ago" broke across two lines; the time never breaks inside
+  // itself, the meta text ellipsizes instead.
+  test('375px: the meta-line time stays on one line beside a long meta text', async ({ page }) => {
+    const longMeta = {
+      ...synthEntry('phone-long-meta', 11),
+      eventType: 'finding-raised',
+      payload: {
+        summary: 'synthetic finding',
+        agent_role: 'spec-reviewer',
+        round: 2,
+        overall: 'a very long verdict summary that keeps going well past the width of a phone',
+      },
+    };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longMeta], nextBefore: null, newestId: longMeta.eventId },
+      });
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity');
+    const time = page.locator('.bs-timeline-row__ts--meta:visible').first();
+    await expect(time).toBeVisible();
+    const lineHeight = await time.evaluate((el) => Number.parseFloat(getComputedStyle(el).lineHeight));
+    const box = await time.boundingBox();
+    expect(box?.height ?? 0).toBeLessThanOrEqual(lineHeight + 2);
+  });
+
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
   // is one line, ellipsised -- the app used to wrap a long title to 2-3
   // lines in bold. The full title stays reachable: it is still the
