@@ -312,7 +312,7 @@ test.describe('Work switcher', () => {
     }) => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto('/work/kanban');
-      const segctl = page.locator('.bs-segctl');
+      const segctl = page.locator('#bs-work-view-switch .bs-segctl');
       const refresh = page
         .locator('.bs-kanban-page__toolbar')
         .getByRole('button', { name: 'Refresh', exact: true });
