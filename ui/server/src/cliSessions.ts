@@ -157,7 +157,7 @@ export interface CliSessionCard {
   nameSource: string | null;
   startedAt: string | null;
   cwdLabel: string;
-  /** The newest open linked epic's project; null when unlinked or every linked epic is closed. */
+  /** The focus epic's project: the newest open linked epic with an id; null when there is none. */
   project: string | null;
   inScopeBy: 'cwd' | 'stamped' | 'heuristic';
   status: CliSessionStatus;
@@ -1367,7 +1367,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         nameSource: e.nameSource,
         startedAt: e.startedAt,
         cwdLabel: labelFor(cwd, hit),
-        project: epics.find((x) => !x.closed)?.project ?? null,
+        project: epics.find((x) => x.epicId !== null && !x.closed)?.project ?? null,
         inScopeBy: by,
         status,
         statusSince: e.statusSince,

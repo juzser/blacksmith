@@ -1685,6 +1685,16 @@ describe('cliSessions reader', () => {
           ]);
         });
 
+        it('takes the card project from the focus epic when the newest group has no epic', async () => {
+          const a = await factorySession('sess-a', SID_B);
+          await a.addTask('epic-a', 'epic-a/task-1', {}, 'app-a');
+          await pause();
+          await factorySession('sess-b', SID_B);
+          const card = await cardOf(222);
+          expect(card.focus?.epicId).toBe('epic-a');
+          expect(card.project).toBe('app-a');
+        });
+
         it('is not linked when its only epic is closed', async () => {
           const b = await factorySession('sess-b', SID_B);
           await b.addTask('epic-b', 'epic-b/task-1', {}, 'app-b');
