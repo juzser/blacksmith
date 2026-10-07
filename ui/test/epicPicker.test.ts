@@ -5,8 +5,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { ActiveScopeResult } from '../src/lib/api.js';
 import {
   ALL_EPICS,
+  activeSelection,
   EPIC_LIST_UNAVAILABLE,
   epicOptions,
   idleLabel,
@@ -162,5 +164,81 @@ describe('RoadmapProjectSection.vue picker value', () => {
       'utf8',
     );
     expect(sfc).toMatch(/:model-value="effectivePickerValue"/);
+  });
+});
+
+describe('activeSelection()', () => {
+  const scopeOf = (epics: { storeId: string; epicId: string }[], measured = true) =>
+    ({
+      measured,
+      readAt: '',
+      liveSessions: epics.length,
+      unlinkedSessions: 0,
+      projects: [],
+      epics: epics.map((e) => ({ ...e, project: null })),
+      factorySessions: [],
+    }) as ActiveScopeResult;
+  const home = { id: 'home', label: 'home' };
+  const other = { id: 'store-b', label: 'store-b' };
+  // epic-b is idle and epic-c closed: neither is in `scope.epics`.
+  const list = ['epic-a', 'epic-b', 'epic-c'];
+  const inFlight = [
+    { epicId: 'epic-a', store: home },
+    { epicId: 'epic-b', store: home },
+  ];
+  const scope = scopeOf([{ storeId: 'home', epicId: 'epic-a' }]);
+
+  it('keeps only the epics a live session drives; idle and closed ones are absent', () => {
+    expect(activeSelection(list, inFlight, scope, 'active', '')).toEqual(['epic-a']);
+  });
+
+  it('matches through the epic store, not by id alone', () => {
+    const tags = [
+      { epicId: 'epic-a', store: home },
+      { epicId: 'epic-a', store: other },
+    ];
+    const only = (storeId: string) => scopeOf([{ storeId, epicId: 'epic-a' }]);
+    expect(activeSelection(['epic-a'], tags, only('store-b'), 'active', '')).toEqual(['epic-a']);
+    expect(
+      activeSelection(
+        ['epic-a'],
+        [{ epicId: 'epic-a', store: home }],
+        only('store-b'),
+        'active',
+        '',
+      ),
+    ).toEqual([]);
+  });
+
+  it('counts an untagged in-flight epic as the home store', () => {
+    expect(activeSelection(['epic-a'], [{ epicId: 'epic-a' }], scope, 'active', '')).toEqual([
+      'epic-a',
+    ]);
+  });
+
+  it("returns today's list, unchanged, under All", () => {
+    expect(activeSelection(list, inFlight, scope, 'all', '')).toEqual(list);
+  });
+
+  it('keeps a pinned epic that is not active, and ignores a pin the overview does not know', () => {
+    expect(activeSelection(list, inFlight, scope, 'active', 'epic-b')).toEqual([
+      'epic-a',
+      'epic-b',
+    ]);
+    expect(activeSelection(list, inFlight, scope, 'active', 'epic-zzz')).toEqual(['epic-a']);
+  });
+
+  it('never answers "nothing active" for an unmeasured or missing scope', () => {
+    expect(activeSelection(list, inFlight, scopeOf([], false), 'active', '')).toEqual(list);
+    expect(activeSelection(list, inFlight, null, 'active', '')).toEqual(list);
+  });
+});
+
+describe('epicOptions() without the all-epics choice', () => {
+  it('lists only the epics, idle label kept', () => {
+    expect(epicOptions(['epic-a', 'epic-b'], [{ epicId: 'epic-b', idleDays: 9 }], false)).toEqual([
+      { value: 'epic-a', label: 'epic-a' },
+      { value: 'epic-b', label: 'epic-b · idle 9d' },
+    ]);
   });
 });

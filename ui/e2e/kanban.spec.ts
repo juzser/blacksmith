@@ -1,4 +1,5 @@
 import type { KanbanTask } from '../src/lib/api.js';
+import { activeScopeBody, stubActiveScope } from './activeScopeStub.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -157,6 +158,294 @@ function fourColumnBoard(card: ReturnType<typeof task>) {
     { taskStatus: 'completed', tasks: [task('epic-1/task-4', 'completed')] },
   ];
 }
+
+test.describe('Kanban: the Active/All scope', () => {
+  const picker = (page: import('@playwright/test').Page) =>
+    page.getByLabel('Epic', { exact: true });
+  const optionValues = (page: import('@playwright/test').Page) =>
+    picker(page)
+      .locator('option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+  const toggle = (page: import('@playwright/test').Page) =>
+    page.getByRole('navigation', { name: 'Activity scope' });
+
+  test('Active offers only the active epic, no "All epics", and boards its tasks', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect(await optionValues(page)).toEqual(['epic-9']);
+    await expect(picker(page)).toHaveValue('epic-9');
+    await expect(page.getByRole('option', { name: 'All epics' })).toHaveCount(0);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
+  });
+
+  test('All restores the full list with "All epics" first; Active drops scope from the URL', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await toggle(page).getByRole('link', { name: 'All' }).click();
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect
+      .poll(() => optionValues(page))
+      .toEqual(expect.arrayContaining(['', 'epic-1', 'epic-9']));
+    expect((await optionValues(page))[0]).toBe('');
+    await toggle(page).getByRole('link', { name: 'Active' }).click();
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect.poll(() => optionValues(page)).toEqual(['epic-9']);
+  });
+
+  test('a pinned ?epic= that is not active stays listed, selected and rendered', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban?epic=epic-1');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    await expect(picker(page)).toHaveValue('epic-1');
+  });
+
+  test('no live session: the empty line, and Show all works', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+    await expect(page.getByText(/^\d+ tasks$/)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Show all' }).click();
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+  });
+
+  // Sessions' own rule: no factory session drives anything, and some live
+  // session is unlinked. Only then is "none on an epic" true.
+  test('live sessions but none on an epic: says so, with Show all', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 2,
+      unlinkedSessions: 2,
+      factorySessions: [],
+    });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('2 live sessions, none on an epic · Show all')).toBeVisible();
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+  });
+
+  test('a single unlinked session reads in the singular', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 1, unlinkedSessions: 1 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('1 live session, none on an epic · Show all')).toBeVisible();
+  });
+
+  // Sessions elsewhere drive epics of another project, one session drives
+  // nothing: "3 live sessions, none on an epic" would be false here.
+  test('live sessions on another project: the project line, not "none on an epic"', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9'], {
+      liveSessions: 3,
+      unlinkedSessions: 1,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban?project=blacksmith');
+    await expect(page.getByText('No active epic in this project · Show all')).toBeVisible();
+    await expect(page.getByText(/none on an epic/)).toHaveCount(0);
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+  });
+
+  test('no project selected and nothing offered: the view line', async ({ page }) => {
+    await stubActiveScope(page, ['epic-not-in-the-list'], {
+      liveSessions: 2,
+      unlinkedSessions: 1,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('No active epic in this view · Show all')).toBeVisible();
+    await expect(page.getByText(/none on an epic/)).toHaveCount(0);
+  });
+
+  test('the picker is disabled until the first scope answer lands', async ({ page }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const body = activeScopeBody(['epic-9']);
+    await page.route('**/api/active-scope*', async (route) => {
+      await gate;
+      await route.fulfill({ json: body });
+    });
+    await page.goto('/work/kanban');
+    await expect(picker(page)).toBeDisabled();
+    release();
+    await expect(picker(page)).toBeEnabled();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect(await optionValues(page)).toEqual(['epic-9']);
+  });
+
+  test('an empty Active offer keeps "All epics" in the picker when nothing is on the edge line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    await page.goto('/work/kanban');
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page).locator('option:checked')).toHaveText('All epics');
+  });
+
+  // Drives the scope answer and the overview from the test, then clicks the
+  // shell's "Refresh now", which wakes every poller (the pulse, and with it the
+  // scope read, and this page's own load), so no test sleeps.
+  async function steerable(page: import('@playwright/test').Page, epics: string[]) {
+    const state = { epics, overviewUp: true };
+    await page.route('**/api/active-scope*', (route) =>
+      route.fulfill({
+        json: activeScopeBody(state.epics, {
+          liveSessions: 2,
+          factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+        }),
+      }),
+    );
+    await page.route('**/api/overview*', (route) =>
+      state.overviewUp ? route.fallback() : route.abort('failed'),
+    );
+    return state;
+  }
+  // Refresh now is aria-disabled while live, so the first call pauses updates.
+  const refresh = async (page: import('@playwright/test').Page) => {
+    const pause = page.getByRole('button', { name: 'Pause updates' });
+    if (await pause.count()) await pause.click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+  };
+
+  test('a selection the scope stops offering falls back to "All epics", and the board follows', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['epic-9']);
+    const kanbanUrls: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/kanban')) kanbanUrls.push(r.url());
+    });
+    await page.goto('/work/kanban');
+    await expect(picker(page)).toHaveValue('epic-9');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+
+    state.epics = [];
+    state.overviewUp = false;
+    await refresh(page);
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page).locator('option:checked')).toHaveText('All epics');
+    await expect
+      .poll(() => new URL(kanbanUrls.at(-1) ?? 'http://x/').searchParams.has('epic'))
+      .toBe(false);
+  });
+
+  test('a ?epic= pin survives a fall back to "All epics"', async ({ page }) => {
+    const state = await steerable(page, ['epic-1', 'epic-9']);
+    state.overviewUp = false;
+    await page.goto('/work/kanban?epic=epic-9');
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    state.overviewUp = true;
+    await refresh(page);
+    await expect
+      .poll(() => optionValues(page))
+      .toEqual(expect.arrayContaining(['epic-1', 'epic-9']));
+    await expect(picker(page)).toHaveValue('epic-9');
+  });
+
+  test('a pinned link never fetches the all-epics board while the overview is still in flight', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-1']);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/overview*', async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    const kanbanUrls: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/kanban')) kanbanUrls.push(r.url());
+    });
+    const scopeAnswered = page.waitForResponse('**/api/active-scope*');
+    await page.goto('/work/kanban?epic=epic-1');
+    // The overview stays held until the scope answer has landed.
+    await scopeAnswered;
+    release();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await expect(picker(page)).toHaveValue('epic-1');
+    expect(kanbanUrls.length).toBeGreaterThan(0);
+    for (const url of kanbanUrls) {
+      expect(new URL(url).searchParams.get('epic')).toBe('epic-1');
+    }
+  });
+
+  test('a project switch re-narrows the picker to that project’s active epics', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9', 'epic-1']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await expect(page).toHaveURL(/[?&]project=blacksmith/);
+    await expect.poll(() => optionValues(page)).toEqual(['epic-1']);
+    await expect(picker(page)).toHaveValue('epic-1');
+  });
+
+  test('a project switch to a project with nothing active shows the project line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9'], {
+      liveSessions: 2,
+      unlinkedSessions: 0,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await expect(page.getByText('No active epic in this project · Show all')).toBeVisible();
+  });
+
+  test('unmeasured: the full picker and board, plus a note', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page))[0]).toBe('');
+    await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
+    await expect(toggle(page)).toBeVisible();
+  });
+
+  test('phone: no horizontal scroll, and the toggle and Show all are 44px tall', async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    for (const name of ['Active', 'All']) {
+      const box = await toggle(page).getByRole('link', { name }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+    const noScroll = () =>
+      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(await noScroll()).toBe(true);
+
+    await page.unroute('**/api/active-scope*');
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    const show = page.getByRole('link', { name: 'Show all' });
+    await expect(show).toBeVisible();
+    expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await noScroll()).toBe(true);
+  });
+});
 
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
@@ -916,11 +1205,12 @@ test.describe('Kanban', () => {
   test('screenshot epic list unavailable', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
+    await stubActiveScope(page, ['epic-9']);
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     const aborted = page.waitForEvent('requestfailed', (req) =>
       req.url().includes('/api/overview'),
     );
-    await page.goto('/work/kanban');
+    await page.goto('/work/kanban?scope=all');
     await expect(page.locator('h1')).toHaveText('Work');
     await aborted;
     await page.waitForTimeout(150);
@@ -982,13 +1272,81 @@ test.describe('Kanban', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto('/work/kanban');
+        await stubActiveScope(page, ['epic-9']);
+        await page.goto('/work/kanban?scope=all');
         await expect(page.locator('h1')).toHaveText('Work');
         await settleForShot(page, page.locator('.bs-kanban-card').first());
         await shoot(page, `work-kanban-${vpName}-${theme}`);
       });
     }
   }
+
+  // The Active states, each on its own baseline (the board baselines above
+  // open ?scope=all, so they show the plain board).
+  const activeShots: [string, { width: number; height: number }, 'light' | 'dark'][] = [
+    ['desktop', VIEWPORTS.desktop, 'light'],
+    ['desktop', VIEWPORTS.desktop, 'dark'],
+    ['phone375', NARROW_VIEWPORT, 'light'],
+  ];
+  for (const [vpName, viewport, theme] of activeShots) {
+    test(`screenshot active epic ${vpName}/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(viewport);
+      await stubActiveScope(page, ['epic-9']);
+      await page.goto('/work/kanban');
+      await settleForShot(page, page.locator('.bs-kanban-card').first());
+      await shoot(page, `work-kanban-active-${vpName}-${theme}`);
+    });
+  }
+
+  test('screenshot nothing active phone375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await settleForShot(page, page.getByText('Nothing is active right now. ·'));
+    await shoot(page, 'work-kanban-active-none-phone375-light');
+  });
+
+  test('screenshot unmeasured desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await settleForShot(page, page.locator('.bs-kanban-card').first());
+    await shoot(page, 'work-kanban-active-unmeasured-desktop-light');
+  });
+
+  // The note is a sibling of the epic-list banner and, on a phone, of the
+  // status tabs; it must not sit flush against either.
+  test('the unmeasured note keeps a gap above and below it', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    // Named neighbours, not DOM order: above is the epic-list banner; below is
+    // the board (`.bs-kanban-board`), whose first row is the toolbar-less status
+    // tab strip on a phone and the first column on desktop.
+    const note = page.getByText("Live sessions can't be read here");
+    const banner = page.locator('.bs-banner', { hasText: 'Epic list unavailable' });
+    const board = page.locator('.bs-kanban-board');
+    const box = async (l: import('@playwright/test').Locator) => {
+      const b = await l.boundingBox();
+      if (!b) throw new Error('element has no box');
+      return b;
+    };
+    const gapAbove = async () =>
+      (await box(note)).y - ((await box(banner)).y + (await box(banner)).height);
+    const gapBelow = async () =>
+      (await box(board)).y - ((await box(note)).y + (await box(note)).height);
+    for (const viewport of [VIEWPORTS.desktop, NARROW_VIEWPORT]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/work/kanban');
+      await expect(note).toBeVisible();
+      await expect(banner).toBeVisible();
+      await expect(board).toBeVisible();
+      expect(await gapAbove()).toBeGreaterThanOrEqual(15);
+      expect(await gapBelow()).toBeGreaterThanOrEqual(15);
+    }
+  });
 
   // S2 (ds-spec.md §3.1 Work/Kanban row): the phone tab row shows one column
   // at a time, and clicking a second tab switches which one is on screen.
@@ -1211,7 +1569,8 @@ test.describe('Kanban', () => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await mockBoard(page, richFollowupBoard());
-        await page.goto('/work/kanban');
+        await stubActiveScope(page, ['epic-9']);
+        await page.goto('/work/kanban?scope=all');
         // The first (three-fix) group stays collapsed; the seven-fix one opens.
         const groups = page.locator('.bs-kanban-group');
         await expect(groups).toHaveCount(2);
@@ -1229,7 +1588,8 @@ test.describe('Kanban', () => {
     test(`screenshot mobile/tab2/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.mobile);
-      await page.goto('/work/kanban');
+      await stubActiveScope(page, ['epic-9']);
+      await page.goto('/work/kanban?scope=all');
       const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
       await expect(tablist).toBeVisible();
       // Pick a tab that is not already the default-selected one, so the

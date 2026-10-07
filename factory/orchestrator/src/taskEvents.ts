@@ -1,3 +1,4 @@
+import type { EffortTier } from './effortTiers.js';
 import {
   appendEdge,
   appendEvent,
@@ -534,6 +535,18 @@ export async function emitEdgesRecorded(
  */
 export interface WaveAdmissionBudget {
   status: string;
+  /**
+   * The effort tier the gate admitted the wave under (`small` / `medium` /
+   * `huge`): the plan's `effort` after effort.yml's security floor, else
+   * effort.yml's `default_tier`, exactly as the gate resolved it. budgets.yml
+   * holds one cap per tier, so a reader of the log alone cannot tell which
+   * tier a cap number belongs to without this. `cap_tokens` is that tier's
+   * cap unless the box's env overrides it: a `_<TIER>` variant names this
+   * tier, but a bare name pins every tier to one number. Absent on admissions
+   * logged before it existed; a reader must treat it as unknown there, not as
+   * any one tier.
+   */
+  tier: EffortTier;
   cap_tokens: number;
   projected_tokens: number;
   wave_tokens: number;

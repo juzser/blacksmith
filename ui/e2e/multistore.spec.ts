@@ -296,7 +296,8 @@ test.describe('a foreign store in the dashboard', () => {
   test('B2: a foreign Kanban card peeks its own task and opens the store-scoped page', async ({
     page,
   }) => {
-    await page.goto(`${origin}/work/kanban`);
+    // All: this is about a foreign card, and no live session drives its epic.
+    await page.goto(`${origin}/work/kanban?scope=all`);
     const card = page.getByRole('link', { name: /Foreign config loader/ });
     await expect(card).toBeVisible();
     await card.click();

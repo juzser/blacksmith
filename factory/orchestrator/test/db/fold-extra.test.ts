@@ -230,6 +230,39 @@ describe('foldTasks — wave-scoped events (D-23 / P9-12)', () => {
     ]);
     expect(rows).toHaveLength(0);
   });
+
+  // `budget.tier` joined the admission's budget block after logs already
+  // existed without it. The fold reads `task_ids`, never `budget`, so an
+  // admission written before the tier and one written after fold alike.
+  it('folds an admission whose budget block predates budget.tier like one that has it', () => {
+    const budget = {
+      status: 'ok',
+      cap_tokens: 4_000_000,
+      projected_tokens: 0,
+      wave_tokens: 2000,
+      headroom_tokens: 4_000_000,
+    };
+    const admitted = (withTier: boolean) =>
+      foldTasks([
+        event({
+          event_id: 'e1',
+          event_type: 'wave-admitted',
+          ts: '2026-08-01T00:00:00.000Z',
+          payload: {
+            epic_id: 'epic-1',
+            task_ids: ['epic-1/task-1', 'epic-1/task-2'],
+            budget: withTier ? { ...budget, tier: 'small' } : budget,
+          },
+        }),
+      ]);
+
+    const before = admitted(false);
+    expect(before.map((r) => [r.taskId, r.taskStatus])).toEqual([
+      ['epic-1/task-1', 'ready'],
+      ['epic-1/task-2', 'ready'],
+    ]);
+    expect(admitted(true)).toEqual(before);
+  });
 });
 
 describe('foldTasks — branch (D-23 / P9-12)', () => {

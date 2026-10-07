@@ -254,6 +254,62 @@ describe('checkWaveBudget', () => {
   });
 });
 
+// A cap is a number for one effort tier (budgets.yml `epic.cap_tokens` per
+// tier), so the check hands back the tier beside the cap it compared against:
+// that pair is what `wave-admitted`'s `budget` block records, and a reader of
+// the log cannot tell a small epic's cap from a huge one's by the number alone.
+describe('checkWaveBudget — the tier the cap was sized for', () => {
+  const SMALL: BudgetPolicy = { ...POLICY, tier: 'small' };
+
+  it("reports the policy's tier on every status, not-applicable included", () => {
+    seq = 0;
+    const fits = checkWaveBudget([], SMALL, [proposed('epic-1/task-1', 1_000)], OPTS);
+    expect(fits.status).toBe('ok');
+    expect(fits.tier).toBe('small');
+
+    const refused = checkWaveBudget([], SMALL, [proposed('epic-1/task-1', 2_000_000)], OPTS);
+    expect(refused.status).toBe('refused');
+    expect(refused.tier).toBe('small');
+
+    const unchecked = checkWaveBudget([], SMALL, [proposed('epic-1/task-1', 1_000)], {
+      sessionId: '',
+      epicId: 'epic-1',
+    });
+    expect(unchecked.status).toBe('unchecked');
+    expect(unchecked.tier).toBe('small');
+
+    const noEpic = checkWaveBudget([], SMALL, [proposed('task-1', 1_000)], {
+      sessionId: 'sess-1',
+      epicId: '',
+    });
+    expect(noEpic.status).toBe('not-applicable');
+    expect(noEpic.tier).toBe('small');
+  });
+
+  it('still counts an admission logged before budget.tier existed as in flight', () => {
+    // Every wave-admitted written before the tier was recorded carries a
+    // budget block without it. The log is append-only, so those events are
+    // read forever; the in-flight count must not depend on the new key.
+    seq = 0;
+    const before = stored('wave-admitted', {
+      epic_id: 'epic-1',
+      wave: 1,
+      task_ids: ['task-1'],
+      budget: {
+        status: 'ok',
+        cap_tokens: 1_000_000,
+        projected_tokens: 0,
+        wave_tokens: 1_000,
+        headroom_tokens: 1_000_000,
+      },
+    });
+    expect(inFlightTasks([before], 'epic-1')).toEqual(['task-1']);
+    const check = checkWaveBudget([before], POLICY, [proposed('epic-1/task-2', 1_000)], OPTS);
+    expect(check.inFlightTasks).toBe(1);
+    expect(check.status).toBe('ok');
+  });
+});
+
 describe('blocksAdmission', () => {
   const ALL: WaveBudgetStatus[] = [
     'ok',
