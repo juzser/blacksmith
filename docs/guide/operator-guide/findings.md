@@ -117,6 +117,19 @@ printed a warning and cut the version anyway. Since D-127 `amendPlan` itself
 refuses an amendment that adds and supersedes nothing, before the version
 exists: the cited finding would have had nothing to wait on.
 
+A `supersede` key may name a task of the plan or one the event log added
+(`task-added` follow-ups); a log-added one gets a `superseded` stub record in
+the new version, so ingest retires it. The diff records that stub as
+superseded, never as added work, and it is not an obligation. A key naming
+neither is refused with `plan.unknown-task` before anything is written.
+
+Several keys may fold into one task by carrying the same replacement record;
+the new version holds one live copy. Any other way of landing a second live
+record under one id — two keys with different records for it, or a
+replacement or added task whose id another task of the plan still holds
+live — is refused with `plan.duplicate-live-task`; the id of a live task only
+the event log added is not checked yet.
+
 The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
 
