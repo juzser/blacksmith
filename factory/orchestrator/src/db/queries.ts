@@ -2550,7 +2550,8 @@ export interface TimelineEntry {
   /**
    * DS6 PR4b — the session's title (same resolution `sessionTitles()` gives
    * `runningSessions()`: the earliest dispatch's epic id, or the session id
-   * when it extends that epic id), falling back to the raw session id when neither exists.
+   * when it extends that epic id), falling back to the raw session id when
+   * neither exists.
    */
   sessionTitle: string;
 }
