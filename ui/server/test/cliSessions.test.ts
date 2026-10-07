@@ -1702,6 +1702,54 @@ describe('cliSessions reader', () => {
         expect(epics.map((e) => [e.epicId, e.project])).toEqual([['epic-a', 'project-b']]);
       });
     });
+    describe('which epic a CLI session links to in a continued lineage', () => {
+      const pause = () => new Promise((r) => setTimeout(r, 5));
+      const research = (s: Awaited<ReturnType<typeof factorySession>>, epicId: string) =>
+        s.dispatch(null, { agent_role: 'researcher', epic_id: epicId });
+      /** Session `sess-a` drove epic-a (waves, tasks); `sess-b` continues it into epic-b (one agent). */
+      async function twoEpics(cliA: string | null, cliB: string | null) {
+        const a = await factorySession('sess-a', cliA);
+        await a.addTask('epic-a', 'epic-a/task-1');
+        await a.add('wave-admitted', { epic_id: 'epic-a', task_ids: ['epic-a/task-1'] });
+        await pause();
+        const b = await factorySession('sess-b', cliB, a.last());
+        await research(b, 'epic-b');
+        return { a, b };
+      }
+
+      it('links to the epic of the only member this CLI session wrote to (second)', async () => {
+        await twoEpics(null, SID_B);
+        const epics = await linkedEpics(180, SID_B);
+        expect(epics.map((e) => e.epicId)).toEqual(['epic-b']);
+      });
+
+      it('links to the epic of the only member this CLI session wrote to (first)', async () => {
+        await twoEpics(SID_B, null);
+        const epics = await linkedEpics(181, SID_B);
+        expect(epics.map((e) => e.epicId)).toEqual(['epic-a']);
+      });
+
+      it('prefers the newest-written member, whichever way the lineage runs', async () => {
+        const { a } = await twoEpics(SID_B, SID_B);
+        await pause();
+        await a.add('note', {});
+        expect((await linkedEpics(182, SID_B)).map((e) => e.epicId)).toEqual(['epic-a']);
+      });
+
+      it('prefers the newest-written member (second newer)', async () => {
+        await twoEpics(SID_B, SID_B);
+        expect((await linkedEpics(183, SID_B)).map((e) => e.epicId)).toEqual(['epic-b']);
+      });
+
+      it('falls back to the whole lineage when no written member has an attribution', async () => {
+        const a = await factorySession('sess-a', null);
+        await a.addTask('epic-a', 'epic-a/task-1');
+        await a.add('wave-admitted', { epic_id: 'epic-a', task_ids: ['epic-a/task-1'] });
+        const b = await factorySession('sess-b', SID_B, a.last());
+        await b.add('note', {});
+        expect((await linkedEpics(184, SID_B)).map((e) => e.epicId)).toEqual(['epic-a']);
+      });
+    });
     describe('focus (Now / Next)', () => {
       const pause = () => new Promise((r) => setTimeout(r, 3));
       const none = () => path.join(tmp, 'none.md');

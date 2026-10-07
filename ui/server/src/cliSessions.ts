@@ -1033,7 +1033,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           | undefined;
         return row?.e ?? null;
       };
-      const epicId =
+      const lineageEpic =
         waves.filter((w) => w.epicId !== null).at(-1)?.epicId ??
         pick(
           `select epic_id as e from tasks where epic_id is not null and session_id in (${marks}) order by updated_at desc limit 1`,
@@ -1041,6 +1041,29 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         pick(
           `select epic_id as e from agents where epic_id is not null and session_id in (${marks}) order by dispatched_at desc limit 1`,
         );
+      // What this CLI session writes to decides first: its members, newest
+      // write first, each read for its OWN epic (admission, task row, agent).
+      // A lineage continued into a new epic is rooted in the old one, so the
+      // whole-lineage pick above only serves when no written member has one.
+      const own = (sql: string, sid: string): string | null =>
+        (handle.sqlite.prepare(sql).get(sid) as { e: string | null } | undefined)?.e ?? null;
+      let writtenEpic: string | null = null;
+      for (const sid of [...new Set(g.ids)].sort((x, y) =>
+        (g.memberAt[y] ?? '').localeCompare(g.memberAt[x] ?? ''),
+      )) {
+        writtenEpic =
+          waves.filter((w) => w.sessionId === sid && w.epicId !== null).at(-1)?.epicId ??
+          own(
+            'select epic_id as e from tasks where epic_id is not null and session_id = ? order by updated_at desc limit 1',
+            sid,
+          ) ??
+          own(
+            'select epic_id as e from agents where epic_id is not null and session_id = ? order by dispatched_at desc limit 1',
+            sid,
+          );
+        if (writtenEpic !== null) break;
+      }
+      const epicId = writtenEpic ?? lineageEpic;
 
       let progress: StatusCounts | null = null;
       let followUps: number | null = null;
