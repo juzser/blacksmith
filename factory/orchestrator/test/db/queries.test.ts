@@ -3475,147 +3475,84 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     expect(entries.every((a) => a.sessionId === SESSION_ID)).toBe(true);
   });
 
-  it('titles a session from its earliest prompt, trimmed; null with neither a prompt nor a dispatch', async () => {
+  async function sessionWith(id: string, prompt: string | null, taskId: string | null) {
+    const start = await appendEvent(
+      {
+        session_id: id,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    if (prompt !== null) {
+      await recordUserPrompt(
+        prompt,
+        { sessionId: id, planVersion: 1, causalParent: start.event_id },
+        { stateDir },
+      );
+    }
+    if (taskId !== null) {
+      await appendEvent(
+        {
+          session_id: id,
+          actor: 'system',
+          event_type: 'dispatch_decision',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: start.event_id,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet',
+          },
+        },
+        { stateDir },
+      );
+    }
+  }
+
+  it('titles a session by its epic, never by its prompt text', async () => {
+    await sessionWith(
+      'sess-title-a',
+      'Build the widget and fix the flaky import.',
+      'epic-a/task-1',
+    );
     handle = await project();
     const result = overview(handle.db);
-    const fixture = result.runningSessions.find((s) => s.sessionId === SESSION_ID);
-    expect(fixture?.title).toBe('Build the widget and fix the flaky import.');
-    const other = result.runningSessions.find((s) => s.sessionId === OTHER);
+    expect(result.runningSessions.find((s) => s.sessionId === 'sess-title-a')?.title).toBe(
+      'epic-a',
+    );
+    // The fixture session has a prompt and a dispatch of epic-1.
+    expect(result.runningSessions.find((s) => s.sessionId === SESSION_ID)?.title).toBe('epic-1');
+  });
+
+  it('titles a session by its own id when the id starts with the epic id and a dash', async () => {
+    await sessionWith('epic-a-w3-2026-01-02', 'continue', 'epic-a/task-1');
+    handle = await project();
+    const found = overview(handle.db).runningSessions.find(
+      (s) => s.sessionId === 'epic-a-w3-2026-01-02',
+    );
+    expect(found?.title).toBe('epic-a-w3-2026-01-02');
+  });
+
+  it('does not treat an id that merely begins with the epic id as a sibling session', async () => {
+    await sessionWith('epic-ab-w3', null, 'epic-a/task-1');
+    handle = await project();
+    const found = overview(handle.db).runningSessions.find((s) => s.sessionId === 'epic-ab-w3');
+    expect(found?.title).toBe('epic-a');
+  });
+
+  it('gives a session with only prompts and no dispatch a null title', async () => {
+    await sessionWith('sess-title-none', 'Build the widget.', null);
+    handle = await project();
+    const other = overview(handle.db).runningSessions.find(
+      (s) => s.sessionId === 'sess-title-none',
+    );
     expect(other?.title).toBeNull();
-  });
-
-  it('trims a long first prompt line to about 80 chars, and falls back to the epic id with no prompt at all', async () => {
-    const longLine = `${'x'.repeat(90)}\nsecond line never shown`;
-    const longSession = 'sess-title-long';
-    const longStart = await appendEvent(
-      {
-        session_id: longSession,
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    await recordUserPrompt(
-      longLine,
-      { sessionId: longSession, planVersion: 1, causalParent: longStart.event_id },
-      { stateDir },
-    );
-
-    const noPromptSession = 'sess-title-fallback';
-    const start = await appendEvent(
-      {
-        session_id: noPromptSession,
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    await appendEvent(
-      {
-        session_id: noPromptSession,
-        actor: 'system',
-        event_type: 'dispatch_decision',
-        task_id: 'epic-title/task-1',
-        plan_version: 1,
-        causal_parent: start.event_id,
-        payload: {
-          agent_role: 'coder',
-          provider: 'claude',
-          model_tier: 'mid',
-          model: 'claude-sonnet',
-        },
-      },
-      { stateDir },
-    );
-
-    handle = await project();
-    const result = overview(handle.db);
-    const long = result.runningSessions.find((s) => s.sessionId === longSession);
-    expect(long?.title).toBe(`${'x'.repeat(80)}…`);
-    const fallback = result.runningSessions.find((s) => s.sessionId === noPromptSession);
-    expect(fallback?.title).toBe('epic-title');
-  });
-
-  it('skips a leading blank line and trims indentation to title from the first non-blank line', async () => {
-    const blankLedSession = 'sess-title-blank-led';
-    const start = await appendEvent(
-      {
-        session_id: blankLedSession,
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    await recordUserPrompt(
-      '\n   Build the widget renderer.\nsecond line never shown',
-      { sessionId: blankLedSession, planVersion: 1, causalParent: start.event_id },
-      { stateDir },
-    );
-
-    handle = await project();
-    const result = overview(handle.db);
-    const blankLed = result.runningSessions.find((s) => s.sessionId === blankLedSession);
-    expect(blankLed?.title).toBe('Build the widget renderer.');
-  });
-
-  it('falls back to the epic id when the prompt is all whitespace', async () => {
-    const whitespaceSession = 'sess-title-whitespace';
-    const start = await appendEvent(
-      {
-        session_id: whitespaceSession,
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    // Bypasses recordUserPrompt's own-input guard to cover a row already on
-    // the timeline before that guard existed — the projector still has to
-    // fall back rather than title the session with an empty string.
-    await appendEvent(
-      {
-        session_id: whitespaceSession,
-        actor: 'user',
-        event_type: 'user_prompt',
-        plan_version: 1,
-        causal_parent: start.event_id,
-        payload: { prompt: '   \n   \n  ' },
-      },
-      { stateDir },
-    );
-    await appendEvent(
-      {
-        session_id: whitespaceSession,
-        actor: 'system',
-        event_type: 'dispatch_decision',
-        task_id: 'epic-whitespace/task-1',
-        plan_version: 1,
-        causal_parent: start.event_id,
-        payload: {
-          agent_role: 'coder',
-          provider: 'claude',
-          model_tier: 'mid',
-          model: 'claude-sonnet',
-        },
-      },
-      { stateDir },
-    );
-
-    handle = await project();
-    const result = overview(handle.db);
-    const whitespace = result.runningSessions.find((s) => s.sessionId === whitespaceSession);
-    expect(whitespace?.title).toBe('epic-whitespace');
   });
 });
 

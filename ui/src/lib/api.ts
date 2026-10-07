@@ -97,8 +97,8 @@ export interface RunningSession {
    */
   projects: string[];
   /**
-   * The session's earliest prompt, trimmed to ~80 chars, else the first
-   * dispatched agent's epic id, else null (DS8 plan §2.2).
+   * The session id when it starts with the first dispatched agent's epic
+   * id plus a dash, else that epic id, else null; never prompt text.
    */
   title?: string | null;
 }
