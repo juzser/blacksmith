@@ -118,8 +118,12 @@ const hasPromptLink = computed(
 // has no meta line and no chevron." metaFor() returns '' for exactly that
 // case, so an empty meta is also the signal that there is nothing to expand.
 // A gate row whose meta de-duplicated away still has Task/Session to expand.
+// A rail row with an explicit outcome tag always has the Outcome pair to show.
 const hasDetails = computed(
-  () => meta.value !== '' || (kind.value === 'gate' && props.variant !== 'rail'),
+  () =>
+    meta.value !== '' ||
+    (kind.value === 'gate' && props.variant !== 'rail') ||
+    (props.variant === 'rail' && !!props.tag),
 );
 
 // Deep-links into SessionsPage's own `?session=<id>` marker
@@ -197,6 +201,10 @@ function onBecauseOf() {
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
              on TaskDetailPage), and TaskRun carries no taskId. An event with no
              task (epic-level, a prompt) has nothing to show, so no Task pair. -->
+        <template v-if="variant === 'rail' && tag">
+          <dt>Outcome</dt>
+          <dd>{{ tag.label }}</dd>
+        </template>
         <template v-if="variant !== 'rail'">
           <template v-if="entry.taskId">
             <dt>Task</dt>
