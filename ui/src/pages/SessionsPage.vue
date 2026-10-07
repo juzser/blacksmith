@@ -24,6 +24,7 @@ import EmptyState from '../components/kit/EmptyState.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
 import SessionRow from '../components/kit/SessionRow.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
+import { useActiveScope } from '../composables/useActiveScope.js';
 import { useActivityScope } from '../composables/useActivityScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
@@ -32,6 +33,7 @@ import { useViewport } from '../composables/useViewport.js';
 import { scopeQuery } from '../lib/activityScope.js';
 import { hasWorkingAgents } from '../lib/agentStatus.js';
 import {
+  type ActiveScopeResult,
   fetchSessionAgents,
   fetchSessions,
   type RunningSession,
@@ -43,6 +45,7 @@ import {
   activeFirst,
   isSessionActive,
   isStaleResponse,
+  otherStoreProjects,
   selectedSessionFromQuery,
   sessionsByProject,
   sessionsInScope,
@@ -54,6 +57,7 @@ const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
 const { isPhoneWidth } = useViewport();
 const { scope, scopeTo } = useActivityScope();
+const { scope: activeScope, settled: activeScopeSettled } = useActiveScope();
 
 // Same cadence as every other polling page (design-spec.md §8).
 const POLL_MS = 5000;
@@ -67,22 +71,45 @@ const agents = ref<SessionAgentsResult | null>(null);
 const agentsLoadedFor = ref<string | null>(null);
 const agentsError = ref<string | null>(null);
 
-const activeCount = () => sessions.value.filter(isSessionActive).length;
+// What "active" means here: a live CLI session is writing into the session
+// (GET /api/active-scope), not a working agent. Null while the first answer is
+// still in flight; a failed read counts as unmeasured, never as "nothing".
+const UNMEASURED: ActiveScopeResult = {
+  measured: false,
+  readAt: '',
+  liveSessions: 0,
+  unlinkedSessions: 0,
+  projects: [],
+  epics: [],
+  factorySessions: [],
+};
+const live = () => activeScope.value ?? (activeScopeSettled.value ? UNMEASURED : null);
+const measured = () => live()?.measured === true;
 
-// Active shows only running sessions (plus a quiet selection, pinned); All
-// also reveals the quiet ones, which render muted after the active ones.
-const visible = () => sessionsInScope(sessions.value, scope.value, selectedId.value);
+// Active shows only sessions a live CLI session drives (plus a quiet
+// selection, pinned); All also reveals the quiet ones, which render muted
+// after the active ones. Unmeasured, Active shows the full list.
+const visible = () => sessionsInScope(sessions.value, scope.value, selectedId.value, live());
 // Quiet sessions Active leaves out: a pinned selection is shown, so not counted.
 const hiddenQuietCount = () => sessions.value.length - visible().length;
+
+// The edge lines under Active; each is one muted line (see ds-spec §4.6).
+const noLiveSessions = () => measured() && live()?.liveSessions === 0;
+const noneOnAnEpic = () => {
+  const l = live();
+  return measured() && l !== null && l.factorySessions.length === 0 && l.unlinkedSessions > 0;
+};
+const otherStores = () => otherStoreProjects(live());
 
 // Unscoped (no project in context, SessionsPage never pre-selects one):
 // group the visible list by project, newest group first, active rows ahead of
 // quiet ones inside a group. Scoped to one project, every row already
 // belongs to it, so no header renders and the list is flat.
 const groups = () =>
-  sessionsByProject(visible()).map((g) => ({ ...g, sessions: activeFirst(g.sessions) }));
-const flat = () => activeFirst(visible());
-const isQuiet = (s: RunningSession) => !isSessionActive(s);
+  sessionsByProject(visible()).map((g) => ({ ...g, sessions: activeFirst(g.sessions, live()) }));
+const flat = () => activeFirst(visible(), live());
+// Unmeasured, nothing can be called quiet: muting every row would be a claim.
+const isQuiet = (s: RunningSession) => measured() && !isSessionActive(live(), s);
 
 // Gates the poll: a selected run with nothing left working (live and inside
 // the stale window) has nothing left to learn by asking again every 5s.
@@ -175,6 +202,15 @@ function breadcrumbLabel() {
 onMounted(async () => {
   setBreadcrumb([{ label: breadcrumbLabel() }]);
   await loadSessions();
+  // The deep link's widen-to-All rule below needs the scope answer.
+  await new Promise<void>((resolve) => {
+    if (live() !== null) return resolve();
+    const stop = watch(live, (v) => {
+      if (v === null) return;
+      stop();
+      resolve();
+    });
+  });
   const deepLinked = selectedSessionFromQuery(route.query, sessions.value);
   if (deepLinked) {
     selectedId.value = deepLinked;
@@ -257,7 +293,7 @@ function refresh() {
       {{ sessionsError }}
     </Banner>
 
-    <Skeleton v-if="!sessionsLoaded" height="200" />
+    <Skeleton v-if="!sessionsLoaded || live() === null" height="200" />
 
     <template v-else-if="canClaimEmpty(sessionsLoaded, sessions.length)">
       <EmptyState
@@ -314,13 +350,27 @@ function refresh() {
           />
         </li>
       </ul>
-      <p v-if="scope === 'active' && activeCount() === 0" class="bs-sessions__quiet">
-        Nothing is active right now.
-      </p>
-      <p v-if="scope === 'active' && hiddenQuietCount() > 0" class="bs-sessions__quiet">
-        {{ pluralize(hiddenQuietCount(), 'quiet session') }} ·
-        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
-      </p>
+      <template v-if="scope === 'active'">
+        <p v-if="noLiveSessions()" class="bs-sessions__quiet">
+          Nothing is active right now. ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-else-if="noneOnAnEpic()" class="bs-sessions__quiet">
+          {{ pluralize(live()?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-else-if="!measured()" class="bs-sessions__quiet">Live sessions can't be read here</p>
+        <p v-else-if="hiddenQuietCount() > 0" class="bs-sessions__quiet">
+          {{ pluralize(hiddenQuietCount(), 'quiet session') }} ·
+          <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+        </p>
+        <p v-if="otherStores().length > 0" class="bs-sessions__quiet">
+          {{ pluralize(otherStores().length, 'active project') }}
+          {{ otherStores().length === 1 ? 'is' : 'are' }} in another store
+          ({{ otherStores().join(', ') }}) ·
+          <RouterLink to="/overview">see Home</RouterLink>
+        </p>
+      </template>
 
       <Banner v-if="agentsError" tone="danger" show-retry @retry="loadAgents">
         {{ agentsError }}

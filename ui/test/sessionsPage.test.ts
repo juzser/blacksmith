@@ -28,7 +28,7 @@ describe('SessionsPage.vue', () => {
 
   // The Active/All scope itself is tested as behaviour: sessionsInScope and
   // activeFirst in sessionsSelection.test.ts, the page flows in e2e/sessions.spec.ts.
-  it('decides active on workingAgentCount, never liveAgentCount, with no finished-runs toggle left', () => {
+  it('decides active on the live-session scope, never liveAgentCount, with no finished-runs toggle left', () => {
     expect(PAGE).toMatch(/sessionsInScope\(/);
     expect(PAGE).not.toMatch(/liveAgentCount/);
     expect(PAGE).not.toMatch(/showFinished/);

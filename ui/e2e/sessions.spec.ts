@@ -1,4 +1,9 @@
-import type { RunningSession, SessionAgent, SessionAgentsResult } from '../src/lib/api.js';
+import type {
+  ActiveScopeResult,
+  RunningSession,
+  SessionAgent,
+  SessionAgentsResult,
+} from '../src/lib/api.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
@@ -131,7 +136,30 @@ const SESSIONS: RunningSession[] = [
   }),
 ];
 
-async function serveSessions(page: import('@playwright/test').Page) {
+// `/api/active-scope` is what the page's Active view reads: a session is
+// active when a live CLI session drives it, not when an agent is working.
+// Every test that shows the list stubs it, so each state is reachable.
+type Page = import('@playwright/test').Page;
+async function stubActiveScope(
+  page: Page,
+  activeIds: string[],
+  over: Partial<ActiveScopeResult> = {},
+) {
+  const body: ActiveScopeResult = {
+    measured: true,
+    readAt: FIXTURE_NOW_ISO,
+    liveSessions: activeIds.length,
+    unlinkedSessions: 0,
+    projects: [],
+    epics: [],
+    factorySessions: activeIds.map((sessionId) => ({ storeId: 'home', sessionId })),
+    ...over,
+  };
+  await page.route('**/api/active-scope*', (route) => route.fulfill({ json: body }));
+}
+
+async function serveSessions(page: Page) {
+  await stubActiveScope(page, ['run-active']);
   await page.route('**/api/sessions*', (route) => route.fulfill({ json: SESSIONS }));
   await page.route('**/api/sessions/run-active/agents*', (route) =>
     route.fulfill({ json: AGENTS_ACTIVE }),
@@ -244,6 +272,7 @@ test.describe('Sessions', () => {
     page,
   }) => {
     await page.route('**/api/sessions*', (route) => route.fulfill({ json: GROUPED_SESSIONS }));
+    await stubActiveScope(page, ['grp-newest', 'grp-middle', 'grp-older']);
     await page.goto('/sessions');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
     const titles = await page.locator('.bs-sessionrow__title').allTextContents();
@@ -257,6 +286,7 @@ test.describe('Sessions', () => {
     page,
   }) => {
     await page.route('**/api/sessions*', (route) => route.fulfill({ json: [MULTI_GROUP_SESSION] }));
+    await stubActiveScope(page, ['grp-multi']);
     await page.goto('/sessions');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
     await expect(
@@ -273,6 +303,7 @@ test.describe('Sessions', () => {
     page,
   }) => {
     await page.route('**/api/sessions*', (route) => route.fulfill({ json: [MULTI_GROUP_SESSION] }));
+    await stubActiveScope(page, ['grp-multi']);
     await page.goto('/sessions?session=grp-multi');
     const lists = page.locator('.bs-sessions__list');
     await expect(lists).toHaveCount(2);
@@ -284,9 +315,10 @@ test.describe('Sessions', () => {
 
   test('a session with live-but-stale agents lands in finished, not running', async ({ page }) => {
     await page.route('**/api/sessions*', (route) => route.fulfill({ json: STALE_SESSIONS }));
+    await stubActiveScope(page, []);
     await page.goto('/sessions');
     await expect(page.getByText('Nothing is active right now.')).toBeVisible();
-    await expect(page.getByText('1 quiet session ·')).toBeVisible();
+    await expect(page.getByText('Stale ghost run')).toHaveCount(0);
     await page.getByRole('link', { name: 'Show all' }).click();
     await expect(page.getByText('Stale ghost run')).toBeVisible();
   });
@@ -372,7 +404,8 @@ test.describe('Sessions', () => {
       title: 'Quiet only in proj-b',
     }),
   ];
-  async function serveScope(page: import('@playwright/test').Page) {
+  async function serveScope(page: Page) {
+    await stubActiveScope(page, ['sc-active']);
     await page.route('**/api/sessions*', (route) => {
       const project = new URL(route.request().url()).searchParams.get('project');
       return route.fulfill({
@@ -436,6 +469,92 @@ test.describe('Sessions', () => {
     await expect(page).toHaveURL(/project=proj-a/);
     await expect(page).not.toHaveURL(/scope=/);
   });
+
+  // S5: "Active" means a live CLI session drives the session. Each edge line
+  // of ds-spec §4.6 gets one test; /api/active-scope is stubbed in each.
+  test('a session with no working agent shows under Active when a live CLI session drives it', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await stubActiveScope(page, ['sc-quiet-newer']);
+    await page.goto('/sessions');
+    expect(await titles(page)).toEqual(['Quiet newer in proj-a']);
+    await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(0);
+    await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
+  });
+
+  test('measured with no live CLI session: "Nothing is active right now." with Show all', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/sessions');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await page.getByRole('link', { name: 'Show all' }).click();
+    expect(await titles(page)).toHaveLength(3);
+  });
+
+  test('live sessions but none on an epic: "N live sessions, none on an epic"', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
+    await page.goto('/sessions');
+    await expect(page.getByText('2 live sessions, none on an epic · Show all')).toBeVisible();
+    await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
+  });
+
+  test('unmeasured: Active lists everything, unmuted, and says live sessions cannot be read', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/sessions');
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    expect(await titles(page)).toHaveLength(3);
+    await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(0);
+    await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
+  });
+
+  test('a failed active-scope read counts as unmeasured', async ({ page }) => {
+    await serveScope(page);
+    await page.route('**/api/active-scope*', (route) => route.fulfill({ status: 500, body: 'no' }));
+    await page.goto('/sessions');
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    expect(await titles(page)).toHaveLength(3);
+  });
+
+  test('an active project in another store gets a line beside the list, linking to Home', async ({
+    page,
+  }) => {
+    await serveScope(page);
+    await stubActiveScope(page, ['sc-active'], {
+      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+    });
+    await page.goto('/sessions');
+    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(
+      page.getByText('1 active project is in another store (project-b) ·'),
+    ).toBeVisible();
+    await page.getByRole('link', { name: 'see Home' }).click();
+    await expect(page).toHaveURL(/\/overview/);
+  });
+
+  for (const link of ['Show all', 'see Home']) {
+    test(`phone: the "${link}" edge link is a 44px target`, async ({ page }) => {
+      await serveScope(page);
+      await stubActiveScope(page, [], {
+        liveSessions: 0,
+        projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      });
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/sessions');
+      const box = await page.getByRole('link', { name: link }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+    });
+  }
 
   const SHOW_ALL_FONTS: { label: string; css: string | null }[] = [
     { label: '', css: null },
@@ -510,11 +629,19 @@ test.describe('Sessions', () => {
     page,
   }) => {
     let quiet = false;
-    await page.route('**/api/sessions*', (route) =>
+    await page.route('**/api/sessions*', (route) => route.fulfill({ json: SCOPE_SESSIONS }));
+    // The live CLI session moves off sc-active; the shell pulse (5s) re-reads it.
+    await page.route('**/api/active-scope*', (route) =>
       route.fulfill({
-        json: SCOPE_SESSIONS.map((x) =>
-          x.sessionId === 'sc-active' && quiet ? { ...x, workingAgentCount: 0 } : x,
-        ),
+        json: {
+          measured: true,
+          readAt: FIXTURE_NOW_ISO,
+          liveSessions: 1,
+          unlinkedSessions: 0,
+          projects: [],
+          epics: [],
+          factorySessions: quiet ? [] : [{ storeId: 'home', sessionId: 'sc-active' }],
+        } satisfies ActiveScopeResult,
       }),
     );
     await page.route('**/api/sessions/*/agents*', (route) =>
@@ -524,7 +651,9 @@ test.describe('Sessions', () => {
     await page.getByText('Active in proj-a').click();
     quiet = true;
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible();
+    await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible({
+      timeout: 15_000,
+    });
     // Three quiet sessions now; the pinned one is shown, so only two are counted.
     await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
   });
@@ -695,6 +824,7 @@ test.describe('Sessions', () => {
         await page.route('**/api/sessions*', (route) =>
           route.fulfill({ json: GROUPED_WITH_NO_PROJECT_SESSIONS }),
         );
+        await stubActiveScope(page, ['grp-np-a', 'grp-np-b', 'grp-np-none']);
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await page.goto('/sessions');
@@ -722,6 +852,7 @@ test.describe('Sessions', () => {
       // running row.
       test(`screenshot ${vpName}/${theme}/quiet`, async ({ page }) => {
         await page.route('**/api/sessions*', (route) => route.fulfill({ json: QUIET_SESSIONS }));
+        await stubActiveScope(page, []);
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await page.goto('/sessions');
