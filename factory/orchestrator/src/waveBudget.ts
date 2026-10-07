@@ -28,6 +28,7 @@
 // become pressure on the work.
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import type { BudgetPolicy } from './budgets.js';
+import type { EffortTier } from './effortTiers.js';
 import type { StoredEvent } from './events.js';
 import { bareTaskId } from './taskId.js';
 
@@ -64,6 +65,13 @@ export interface ProposedWaveBudget {
 
 export interface WaveBudgetCheck {
   epicId: string | null;
+  /**
+   * The effort tier `capTokens` was sized for: the policy's own `tier`, never
+   * resolved a second time here. A cap is one number per tier in budgets.yml,
+   * so the number alone cannot say whether it belongs to a small epic or a
+   * huge one.
+   */
+  tier: EffortTier;
   capTokens: number;
   /** What the log recorded for this epic. A floor on the bill, never the bill. */
   measuredTokens: number;
@@ -228,6 +236,7 @@ export function checkWaveBudget(
   if (options.epicId.trim().length === 0) {
     return {
       epicId: null,
+      tier: policy.tier,
       capTokens,
       measuredTokens: 0,
       projectedTokens: 0,
@@ -266,6 +275,7 @@ export function checkWaveBudget(
 
   const base = {
     epicId,
+    tier: policy.tier,
     capTokens,
     measuredTokens,
     projectedTokens,

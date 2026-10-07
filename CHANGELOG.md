@@ -37,6 +37,16 @@ than appearing in it.
 
 ### Added
 
+- **`wave-admitted` says which tier its cap was sized for.** The `budget`
+  block every admission writes now carries `tier` (`small` / `medium` /
+  `huge`) beside `cap_tokens`: the plan's `effort` after `effort.yml`'s
+  security floor, else `default_tier`, taken from the same budget policy
+  the cap came from rather than resolved a second time. `budgets.yml` holds
+  one cap per tier, so until now a reader of the log alone could not tell a
+  small epic's cap from a huge one's. `bs wave check` prints the tier in its
+  `budget` output too, `--dry` and session-less included. Admissions logged
+  earlier have no `tier`; no reader in the factory or the dashboard reads
+  the `budget` block, so they fold exactly as before.
 - **The factory's own project is `blacksmith`, not `black-smith`.** Every
   row that falls back to the factory default, every roadmap milestone of
   the factory, and a self-audit now read as `blacksmith`. History stays
