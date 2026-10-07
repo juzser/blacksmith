@@ -60,4 +60,33 @@ describe('useActiveScope', () => {
     await nextTick();
     expect(fetchActiveScope).toHaveBeenCalledTimes(2);
   });
+
+  it('reload() re-reads once; a reload during an in-flight read runs one more read after it', async () => {
+    let release: () => void = () => {};
+    let gate = false;
+    const fetchActiveScope = vi.fn(async () => {
+      if (gate) await new Promise<void>((r) => (release = r));
+      return scope;
+    });
+    vi.doMock('../src/lib/api.js', async (orig) => ({
+      ...(await orig<typeof import('../src/lib/api.js')>()),
+      fetchActiveScope,
+    }));
+    const { useActiveScope } = await import('../src/composables/useActiveScope.js');
+    const a = useActiveScope();
+    await vi.waitFor(() => expect(a.scope.value).toEqual(scope));
+    expect(fetchActiveScope).toHaveBeenCalledTimes(1);
+    await a.reload();
+    expect(fetchActiveScope).toHaveBeenCalledTimes(2);
+    gate = true;
+    const first = a.reload();
+    await vi.waitFor(() => expect(fetchActiveScope).toHaveBeenCalledTimes(3));
+    const second = a.reload();
+    const third = a.reload();
+    expect(fetchActiveScope).toHaveBeenCalledTimes(3);
+    gate = false;
+    release();
+    await Promise.all([first, second, third]);
+    expect(fetchActiveScope).toHaveBeenCalledTimes(4);
+  });
 });

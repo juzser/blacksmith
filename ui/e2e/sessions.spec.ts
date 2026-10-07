@@ -651,9 +651,7 @@ test.describe('Sessions', () => {
     await page.getByText('Active in proj-a').click();
     quiet = true;
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(page.locator('.bs-sessionrow--selected.bs-sessionrow--quiet')).toBeVisible();
     // Three quiet sessions now; the pinned one is shown, so only two are counted.
     await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
   });
