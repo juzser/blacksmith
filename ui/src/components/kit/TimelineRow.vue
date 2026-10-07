@@ -7,7 +7,7 @@
 // expandedRows.ts), not owned here, so "Expand all" can flip every row's
 // state from one place.
 import { ChevronDown, ChevronRight, CircleCheck, CircleX } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { formatTime } from '../../lib/format.js';
 import { isPastStaleWindow } from '../../lib/liveness.js';
 // DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
@@ -82,17 +82,21 @@ const title = computed(() => props.titleOverride ?? titleFor(props.entry));
 // (ds-spec.md §4.3). Only this one row kind/state needs a clock, so the
 // interval lives here rather than hoisting `now` through the whole feed.
 // Past the stale window the meta reads "No result after …" and stops ticking.
+const tickNow = ref(new Date().toISOString());
 const stillRunning = computed(
   () =>
     kind.value === 'dispatch' &&
     props.entry.run?.runStatus == null &&
-    !isPastStaleWindow(props.entry.ts, props.ctx?.now ?? new Date().toISOString()),
+    !isPastStaleWindow(props.entry.ts, props.ctx?.now ?? tickNow.value),
 );
-const tickNow = ref(new Date().toISOString());
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   if (stillRunning.value)
     timer = setInterval(() => (tickNow.value = new Date().toISOString()), 1000);
+});
+// A row open across the stale window stops its own clock.
+watch(stillRunning, (running) => {
+  if (!running) clearInterval(timer);
 });
 onBeforeUnmount(() => clearInterval(timer));
 
