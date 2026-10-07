@@ -27,6 +27,8 @@ import {
   type CliFs,
   type CliSessionsResponse,
   createCliSessionsReader,
+  liveSessionCwds,
+  parsePsStarts,
 } from '../src/cliSessions.js';
 
 const SID_A = '11111111-1111-4111-8111-111111111111';
@@ -155,6 +157,7 @@ describe('cliSessions reader', () => {
       roots: [root],
       nowIso: () => NOW,
       isAlive: (pid) => alive.has(pid),
+      procStartOf: async () => new Map(),
       listWorktrees: async () => [],
       cacheMs: 0,
       ...over,
@@ -323,6 +326,87 @@ describe('cliSessions reader', () => {
       expect(s.doingNow?.assistant?.length).toBeLessThanOrEqual(280);
       expect(JSON.stringify(s)).not.toContain('\\u0007');
       expect(s.next?.length).toBeLessThanOrEqual(280);
+    });
+
+    describe('reused pids', () => {
+      const START = 'Mon Oct  6 10:00:00 2026';
+      const reg = { procStart: START, pidDomain: process.platform };
+      const starts = (m: [number, string][]) => async () => new Map(m);
+
+      it('keeps a session whose process start matches, ignoring whitespace', async () => {
+        await session(130, reg);
+        await transcript(root, SID_A, jsonl([user('go')]));
+        const r = await read({ procStartOf: starts([[130, 'Mon Oct 6   10:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+        expect(r.hidden.dead).toBe(0);
+      });
+
+      it('counts a live pid with another process start as dead', async () => {
+        await session(131, reg);
+        const r = await read({ procStartOf: starts([[131, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(0);
+        expect(r.hidden.dead).toBe(1);
+      });
+
+      it('asks ps once for every comparable pid together', async () => {
+        await session(132, reg);
+        await session(133, { ...reg, sessionId: SID_B });
+        const procStartOf = vi.fn(async (_pids: number[]) => new Map<number, string>());
+        await read({ procStartOf });
+        expect(procStartOf).toHaveBeenCalledTimes(1);
+        expect(procStartOf.mock.calls[0]?.[0]?.slice().sort()).toEqual([132, 133]);
+      });
+
+      it('lets kill(0) decide without a procStart', async () => {
+        await session(134, { procStart: undefined, pidDomain: process.platform });
+        const r = await read({ procStartOf: starts([[134, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide for another pid domain', async () => {
+        await session(135, { procStart: START, pidDomain: 'other-os' });
+        const r = await read({ procStartOf: starts([[135, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide when ps fails', async () => {
+        await session(136, reg);
+        const r = await read({
+          procStartOf: async () => {
+            throw new Error('ps timed out');
+          },
+        });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide when ps has no line for the pid', async () => {
+        await session(137, reg);
+        const r = await read({ procStartOf: starts([[999, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('does not follow a reused pid in liveSessionCwds', async () => {
+        await session(138, reg);
+        await session(139, { ...reg, sessionId: SID_B, cwd: outside });
+        const alivePid = (pid: number) => alive.has(pid);
+        const cwds = await liveSessionCwds(
+          config,
+          alivePid,
+          starts([
+            [138, START],
+            [139, 'Wed Oct  7 01:00:00 2026'],
+          ]),
+        );
+        expect(cwds).toEqual([root]);
+      });
+
+      it('parses ps pid and lstart lines', () => {
+        const out = '  101 Tue Oct  6 02:44:00 2026\n12345 Mon Oct  5 23:01:09 2026\n\nnoise\n';
+        expect([...parsePsStarts(out)]).toEqual([
+          [101, 'Tue Oct  6 02:44:00 2026'],
+          [12345, 'Mon Oct  5 23:01:09 2026'],
+        ]);
+      });
     });
 
     describe('background subagents', () => {

@@ -194,6 +194,12 @@ export interface CliSessionsDeps {
   nowIso: () => string;
   /** `process.kill(pid, 0)` by default (EPERM = alive). */
   isAlive?: (pid: number) => boolean;
+  /**
+   * Start time (`ps -o lstart=` text, UTC) of each given pid that `ps` knows,
+   * in one call. A live pid whose start differs from the registry's
+   * `procStart` was reused by another process. `ps` by default.
+   */
+  procStartOf?: (pids: number[]) => Promise<Map<number, string>>;
   fs?: CliFs;
   /** Hand-made worktrees; `git worktree list` (cached 5 min) by default. */
   listWorktrees?: () => Promise<string[]>;
@@ -537,8 +543,65 @@ interface RegistryEntry {
   statusSince: string | null;
   waitingFor: string | null;
   version: string | null;
+  /** `ps -o lstart=` text of the process start (UTC), when the registry has it. */
+  procStart: string | null;
+  /** Where `procStart` was taken (`process.platform` of the writer), when present. */
+  pidDomain: string | null;
   /** One `<field>: invalid` per registry field that was present but dropped. */
   parseIssues: string[];
+}
+
+/** `ps -o pid=,lstart=` output as pid to start text. Lines it cannot read are skipped. */
+export function parsePsStarts(out: string): Map<number, string> {
+  const starts = new Map<number, string>();
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\S.*?)\s*$/.exec(line);
+    if (m?.[1] && m[2]) starts.set(Number.parseInt(m[1], 10), m[2]);
+  }
+  return starts;
+}
+
+function defaultProcStartOf(pids: number[]): Promise<Map<number, string>> {
+  return new Promise((resolve) => {
+    execFile(
+      'ps',
+      ['-o', 'pid=,lstart=', '-p', pids.join(',')],
+      { env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' }, timeout: 2000 },
+      // ps exits non-zero when any pid is gone yet still prints the others.
+      (_err, out) => resolve(parsePsStarts(typeof out === 'string' ? out : '')),
+    );
+  });
+}
+
+const sameStart = (a: string, b: string) =>
+  a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+
+/**
+ * The pids among `live` (already alive by `kill(0)`) whose process start no
+ * longer matches the registry: the pid was reused. One `ps` call for all of
+ * them. Anything that cannot be compared (no `procStart`, another pid domain,
+ * `ps` failing, no line for the pid) is left to `kill(0)`, i.e. not reused.
+ */
+async function reusedPids(
+  live: readonly RegistryEntry[],
+  procStartOf: (pids: number[]) => Promise<Map<number, string>>,
+): Promise<Set<number>> {
+  const comparable = live.filter((e) => e.procStart !== null && e.pidDomain === process.platform);
+  const reused = new Set<number>();
+  if (comparable.length === 0) return reused;
+  let starts: Map<number, string>;
+  try {
+    starts = await procStartOf(comparable.map((e) => e.pid));
+  } catch {
+    return reused;
+  }
+  for (const e of comparable) {
+    const now = starts.get(e.pid);
+    if (now !== undefined && e.procStart !== null && !sameStart(now, e.procStart)) {
+      reused.add(e.pid);
+    }
+  }
+  return reused;
 }
 
 // 8.64e15 ms is the largest instant a Date can hold; past it toISOString throws.
@@ -593,6 +656,8 @@ function parseRegistry(
     statusSince: isoOrNull(j.statusUpdatedAt),
     waitingFor,
     version,
+    procStart: strOrNull(j.procStart),
+    pidDomain: strOrNull(j.pidDomain),
     parseIssues: [],
   };
   // A field that is absent is not an issue; one that is present and was
@@ -626,6 +691,7 @@ interface TranscriptRead {
 export async function liveSessionCwds(
   configDir: string | undefined,
   isAlive: (pid: number) => boolean = defaultIsAlive,
+  procStartOf: (pids: number[]) => Promise<Map<number, string>> = defaultProcStartOf,
 ): Promise<string[]> {
   if (configDir === undefined) return [];
   const sessionsDir = path.join(configDir, 'sessions');
@@ -635,7 +701,7 @@ export async function liveSessionCwds(
   } catch {
     return [];
   }
-  const cwds = new Set<string>();
+  const live: RegistryEntry[] = [];
   for (const name of names.filter((n) => /^\d+\.json$/.test(n))) {
     const filePid = Number.parseInt(name, 10);
     try {
@@ -644,12 +710,13 @@ export async function liveSessionCwds(
       const parsed = parseRegistry(filePid, buf.toString('utf8'));
       if (parsed === null || !isAlive(filePid)) continue;
       if (parsed.kind !== null && parsed.kind !== 'interactive') continue;
-      cwds.add(parsed.entry.cwd);
+      live.push(parsed.entry);
     } catch {
       // An unreadable registry file is one session fewer, never an error.
     }
   }
-  return [...cwds];
+  const reused = await reusedPids(live, procStartOf);
+  return [...new Set(live.filter((e) => !reused.has(e.pid)).map((e) => e.cwd))];
 }
 
 /** A task's label on a card: its title, else the first line of its objective, never an id. */
@@ -670,6 +737,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
 } {
   const fs = deps.fs ?? nodeFs;
   const isAlive = deps.isAlive ?? defaultIsAlive;
+  const procStartOf = deps.procStartOf ?? defaultProcStartOf;
   const cacheMs = deps.cacheMs ?? 1000;
   const missTtlMs = deps.missTtlMs ?? 30_000;
   const clock = deps.clock ?? Date.now;
@@ -1325,6 +1393,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     }
 
     const entries: RegistryEntry[] = [];
+    const aliveByPid: { entry: RegistryEntry; kind: string | null }[] = [];
     const unparsedPids = new Set<number>();
     // Filtered by name before any open: a `.key` sibling is never touched.
     for (const name of names.filter((n) => /^\d+\.json$/.test(n))) {
@@ -1349,11 +1418,23 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         unparsedPids.add(filePid);
       } else if (!isAlive(filePid)) {
         hidden.dead += 1;
+      } else {
+        aliveByPid.push(parsed);
+      }
+    }
+    // One ps call for every live pid together; a reused pid is a dead session.
+    const reused = await reusedPids(
+      aliveByPid.map((p) => p.entry),
+      procStartOf,
+    );
+    for (const parsed of aliveByPid) {
+      if (reused.has(parsed.entry.pid)) {
+        hidden.dead += 1;
       } else if (parsed.kind !== null && parsed.kind !== 'interactive') {
         hidden.nonInteractive += 1;
       } else {
         entries.push(parsed.entry);
-        pidFileOf.set(parsed.entry.cliSessionId, filePid);
+        pidFileOf.set(parsed.entry.cliSessionId, parsed.entry.pid);
       }
     }
 

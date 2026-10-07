@@ -171,6 +171,8 @@ export interface AppOpts {
   knownRoots?: string[];
   /** Injection seams for tests of the route. */
   cliIsAlive?: (pid: number) => boolean;
+  /** Test seam for the reused-pid check; `ps` by default. */
+  cliProcStartOf?: (pids: number[]) => Promise<Map<number, string>>;
   cliListWorktrees?: () => Promise<string[]>;
   /**
    * Extra state homes to read besides the live sessions' own (`ui serve
@@ -756,7 +758,7 @@ export function createApp(opts: AppOpts): AppHandle {
     homeEventsDir: opts.stateDir ?? STATE_EVENTS_DIR,
     cacheDir: path.join(path.dirname(opts.dbPath), 'ui-stores'),
     extra: opts.stores ?? [],
-    liveCwds: () => liveSessionCwds(opts.claudeConfigDir, opts.cliIsAlive),
+    liveCwds: () => liveSessionCwds(opts.claudeConfigDir, opts.cliIsAlive, opts.cliProcStartOf),
     makeRefresher: createRefresher,
     refreshMs: opts.storeRefreshMs ?? 5000,
   });
@@ -1010,6 +1012,7 @@ export function createApp(opts: AppOpts): AppHandle {
     roots: opts.knownRoots && opts.knownRoots.length > 0 ? opts.knownRoots : [REPO_ROOT],
     nowIso: () => opts.nowIso ?? new Date().toISOString(),
     ...(opts.cliIsAlive ? { isAlive: opts.cliIsAlive } : {}),
+    ...(opts.cliProcStartOf ? { procStartOf: opts.cliProcStartOf } : {}),
     ...(opts.cliListWorktrees ? { listWorktrees: opts.cliListWorktrees } : {}),
   });
   app.get('/api/cli-sessions', async (c) => c.json(await cliSessions.read(readable(c))));
