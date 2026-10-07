@@ -17,8 +17,9 @@ const emit = defineEmits<{ 'update:modelValue': [id: string] }>();
 const list = ref<HTMLElement | null>(null);
 
 // A selection changed from outside must not leave the strip scrolled past it.
-// Only the list's own scrollLeft moves: scrollIntoView would scroll every
-// scrollable ancestor too, jumping the page when the strip is off-screen.
+// Only the list's own scrollLeft moves: the element-level scroll call would
+// scroll every scrollable ancestor too, jumping the page when the strip is
+// off-screen.
 watch(
   () => props.modelValue,
   async (id) => {
