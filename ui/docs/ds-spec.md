@@ -902,23 +902,22 @@ Sections, in order:
    only hides or mutes them. A project is active iff a live CLI session drives it
    (`GET /api/active-scope`, the Sessions rule), not because of a time window. Under `?project=`
    the project is active when a live session drives it in any store (the view merges every
-   store). Active shows only
-   active cards plus one muted line under them, "N quiet projects · Show all" (singular "1 quiet
-   project"; "<project> is quiet · Show it" when one project is hidden; hidden at 0; the link
-   is a 44px tap target on phone) that links to `?scope=all`. An active card's agents line counts
-   the agents on epics a live session drives, the same number under All, and is hidden at 0
-   (never an unhelpful "0 agents working"); a quiet card keeps its working-agent count. Active
-   edge lines replace the cards, each one muted line with "Show all": nothing live, "Nothing is
-   active right now."; only unlinked sessions, "N live sessions, none on an epic" (only when no
-   card is shown, Kanban's rule); a `?project=`
-   with no live session, "No live session is on this project". Unmeasured (live sessions cannot
-   be read here) draws every card, with "Live sessions can't be read here" under the heading and
-   never a "none active" line. While the first scope answer is in flight under Active the
-   section keeps its loading state. All lists every card, the quiet ones in `--bs-text-subtle`.
-   "Just finished" is not scoped: a closed epic carries no project, and the scope lists only
-   running epics. The Budget panel follows the cards on screen. It keeps its loading state while
-   the first scope answer is in flight; when Active hides a card it drops the one-hour change
-   sentence, and its empty line reads "No epic is running on an active project."
+   store). Active shows only active cards plus one muted line under them, "N quiet projects ·
+   Show all" (singular "1 quiet project"; "<project> is quiet · Show it" when one project is
+   hidden; hidden at 0; the link is a 44px tap target on phone) that links to `?scope=all`. An
+   active card's agents line counts the agents on epics a live session drives, the same number
+   under All, and is hidden at 0 (never an unhelpful "0 agents working"); a quiet card keeps its
+   working-agent count. Active edge lines replace the cards, each one muted line with "Show
+   all": nothing live, "Nothing is active right now."; only unlinked sessions, "N live sessions,
+   none on an epic" (only when no card is shown, Kanban's rule); a `?project=` with no live
+   session, "No live session is on this project". Unmeasured (live sessions cannot be read here)
+   draws every card, with "Live sessions can't be read here" under the heading and never a "none
+   active" line. While the first scope answer is in flight under Active the section keeps its
+   loading state. All lists every card, the quiet ones in `--bs-text-subtle`. "Just finished" is
+   not scoped: a closed epic carries no project, and the scope lists only running epics. The
+   Budget panel follows the cards on screen. It keeps its loading state while the first scope
+   answer is in flight; when Active hides a card it drops the one-hour change sentence, and its
+   empty line reads "No epic is running on an active project."
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
    audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
    double-checking another model's review" style, from `/api/overview`'s
