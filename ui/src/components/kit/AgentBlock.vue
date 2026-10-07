@@ -4,6 +4,7 @@
 // the canvas entirely. Pulls in no `@vue-flow/core` dependency anywhere on
 // this page.
 import { computed } from 'vue';
+import { useNow } from '../../composables/useNow.js';
 import { lastStepLabel, tokenDisplay } from '../../lib/agentStatus.js';
 import type { SessionAgent } from '../../lib/api.js';
 import { roleLabel } from '../../lib/roleLabels.js';
@@ -18,13 +19,15 @@ const props = defineProps<{
   now?: string;
 }>();
 
+const liveNow = useNow();
+
 // Computed once per agent rather than re-reading tokenDisplay()/
 // lastStepLabel() from the template on every access.
 const rows = computed(() =>
   props.agents.map((agent) => ({
     agent,
     doing: lastStepLabel(agent.lastEventType),
-    tokens: tokenDisplay(agent),
+    tokens: tokenDisplay(agent, props.now ?? liveNow.value),
   })),
 );
 </script>

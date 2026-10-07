@@ -108,17 +108,26 @@ export type AgentActivity = 'working' | 'stalled' | 'unknown';
  */
 export const AGENT_STALE_AFTER_MS = 4 * 60 * 60 * 1000;
 
+/**
+ * True when `fromIso` is more than AGENT_STALE_AFTER_MS before `nowIso`. The
+ * one spelling of the stale boundary (`>`, clamped at 0); an unreadable
+ * timestamp is not evidence of staleness, so it answers false.
+ */
+export function isPastStaleWindow(fromIso: string, nowIso: string): boolean {
+  const then = new Date(fromIso).getTime();
+  const nowMs = new Date(nowIso).getTime();
+  if (Number.isNaN(then) || Number.isNaN(nowMs)) return false;
+  return Math.max(0, nowMs - then) > AGENT_STALE_AFTER_MS;
+}
+
 export function agentActivity(entry: LiveAgentEntry, nowIso: string): AgentActivity {
   const then = new Date(entry.dispatchedAt).getTime();
   const nowMs = new Date(nowIso).getTime();
   if (Number.isNaN(then) || Number.isNaN(nowMs)) return 'unknown';
-  // Clamped like livenessLevel(): a browser clock a moment behind the server
-  // must not turn a just-dispatched agent into four hours of runtime.
-  const ageMs = Math.max(0, nowMs - then);
-  // `>`, not `>=` — detectStale() uses `liveHours > staleHours`, and an
-  // off-by-one at the boundary would make the two disagree about the same
-  // agent at exactly 4h.
-  return ageMs > AGENT_STALE_AFTER_MS ? 'stalled' : 'working';
+  // `>`, not `>=` (see isPastStaleWindow) — detectStale() uses
+  // `liveHours > staleHours`, and an off-by-one at the boundary would make the
+  // two disagree about the same agent at exactly 4h.
+  return isPastStaleWindow(entry.dispatchedAt, nowIso) ? 'stalled' : 'working';
 }
 
 /** How many of these agents are actually working — the count the pulse claims. */

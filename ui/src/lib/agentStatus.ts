@@ -4,7 +4,7 @@
 // line should say. Kept as pure functions so the badge mapping is
 // unit-tested without mounting AgentStatusBadge.vue.
 import type { SessionAgent } from './api.js';
-import { AGENT_STALE_AFTER_MS } from './liveness.js';
+import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { titleFor } from './timelineDisplay.js';
 
@@ -22,8 +22,8 @@ export interface AgentStatus {
  * row (no heartbeat), same limit liveness.ts's agentActivity() documents.
  * SessionAgent is not a LiveAgentEntry (no sessionId, provider is
  * nullable), so the age check is reimplemented here rather than called
- * through — but it reuses liveness.ts's AGENT_STALE_AFTER_MS, the one 4h
- * constant this dashboard is allowed to have.
+ * through — but it shares liveness.ts's isPastStaleWindow(), the one spelling
+ * of the 4h boundary this dashboard is allowed to have.
  */
 export function agentStatus(agent: SessionAgent, nowIso: string): AgentStatus {
   if (agent.status === 'done') return { state: 'done', label: 'Done', tone: 'done' };
@@ -31,11 +31,7 @@ export function agentStatus(agent: SessionAgent, nowIso: string): AgentStatus {
   if (agent.status === 'superseded' || agent.status === 'abandoned') {
     return { state: 'stopped', label: 'Stopped', tone: 'neutral' };
   }
-  const then = new Date(agent.dispatchedAt).getTime();
-  const nowMs = new Date(nowIso).getTime();
-  const ageMs = Number.isNaN(then) || Number.isNaN(nowMs) ? 0 : Math.max(0, nowMs - then);
-  // `>`, not `>=` — same boundary rule as liveness.ts's agentActivity().
-  if (ageMs > AGENT_STALE_AFTER_MS) {
+  if (isPastStaleWindow(agent.dispatchedAt, nowIso)) {
     return { state: 'no-result', label: 'No result after 4h', tone: 'warning' };
   }
   return { state: 'working', label: 'Working', tone: 'progress' };
@@ -50,16 +46,31 @@ export type TokenDisplay =
  * `unmeasured` never renders as 0 (D-169's "say the absence" rule): it gets
  * the word "not measured" instead of a number. `pending` says "Running" —
  * the agent is still working and tokens have not landed yet, which is a
- * different fact from "this provider never reports them".
+ * different fact from "this provider never reports them". A pending row past
+ * the stale window says nothing: the badge beside it already reads "No result
+ * after 4h", and "Running" would contradict it.
  */
-export function tokenDisplay(agent: SessionAgent): TokenDisplay {
+export function tokenDisplay(agent: SessionAgent, nowIso: string): TokenDisplay {
   const tokens = agent.tokens;
   if (tokens.state === 'measured') {
     return { kind: 'measured', input: tokens.input, output: tokens.output };
   }
   if (tokens.state === 'unmeasured') return { kind: 'text', text: 'not measured' };
-  if (tokens.state === 'pending') return { kind: 'text', text: 'Running' };
+  if (tokens.state === 'pending' && !isPastStaleWindow(agent.dispatchedAt, nowIso)) {
+    return { kind: 'text', text: 'Running' };
+  }
   return { kind: 'none' };
+}
+
+/**
+ * Gates the Sessions poll: only a live row still inside the stale window can
+ * change by asking again; a weeks-old dead row would keep the poll alive forever.
+ */
+export function hasWorkingAgents(
+  roles: readonly { agents: readonly SessionAgent[] }[],
+  nowIso: string,
+): boolean {
+  return roles.some((r) => r.agents.some((a) => agentStatus(a, nowIso).state === 'working'));
 }
 
 /**

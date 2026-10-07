@@ -43,6 +43,16 @@ describe('kit/TimelineRow.vue rail variant', () => {
     expect(TIMELINE_ROW).toMatch(/<RelativeTime class="bs-timeline-row__ts" :iso="entry\.ts" \/>/);
   });
 
+  it('hides the dl "Task" pair on rows with no task, instead of "not measured"', () => {
+    expect(TIMELINE_ROW).toMatch(/<template v-if="entry\.taskId">\s*<dt>Task<\/dt>/);
+    expect(TIMELINE_ROW).toMatch(/<dd>\{\{ entry\.taskId \}\}<\/dd>/);
+    expect(TIMELINE_ROW).not.toMatch(/not measured/);
+  });
+
+  it('stops the 1 s tick once the dispatch is past the stale window', () => {
+    expect(TIMELINE_ROW).toMatch(/isPastStaleWindow\(props\.entry\.ts/);
+  });
+
   it('skips the dl "Task" row on rail rows (TaskRun carries no taskId)', () => {
     expect(TIMELINE_ROW).toMatch(/<template v-if="variant !== 'rail'">/);
   });
