@@ -3063,6 +3063,12 @@ summary.bs-inbox__group-head {
   flex-wrap: wrap;
   margin-bottom: var(--bs-space-4);
 }
+/* The Active scope's unmeasured note: .bs-sessions__quiet has no margin of its
+   own (Sessions' list gap spaces it), so here it takes the toolbar's own gap
+   above and below, clear of the epic-list banner and the phone status tabs. */
+.bs-kanban-page__note {
+  margin: var(--bs-space-4) 0;
+}
 .bs-kanban-page__toolbar-field {
   display: flex;
   align-items: center;

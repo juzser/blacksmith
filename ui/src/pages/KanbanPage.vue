@@ -106,7 +106,11 @@ const activeView = () => mode.value === 'active' && live()?.measured === true;
 const offered = computed(() =>
   activeSelection(epics.value, inFlight.value, live(), mode.value, pinnedEpic()),
 );
-const pickerOptions = computed(() => epicOptions(offered.value, idleEpics.value, !activeView()));
+// "All epics" stays whenever Active has nothing to offer, so the select always
+// names what the board shows instead of going blank.
+const pickerOptions = computed(() =>
+  epicOptions(offered.value, idleEpics.value, !activeView() || offered.value.length === 0),
+);
 
 // Active has no "All epics" choice, so a selection it does not offer (including
 // the default) moves to the first epic it does.
@@ -177,6 +181,16 @@ const noneOnAnEpic = computed(
     !epicsFailed.value &&
     offered.value.length === 0,
 );
+// Sessions' exact rule for "none on an epic": no factory session drives
+// anything and some live session is unlinked. Otherwise live sessions exist
+// but none drives an epic *here*, and the line says only that.
+const noneLine = computed(() => {
+  const l = live();
+  if (l && l.factorySessions.length === 0 && l.unlinkedSessions > 0) {
+    return `${pluralize(l.unlinkedSessions, 'live session')}, none on an epic`;
+  }
+  return project.value ? 'No active epic in this project' : 'No active epic in this view';
+});
 const edgeEmpty = computed(() => noLiveSessions.value || noneOnAnEpic.value);
 const scopePending = computed(() => mode.value === 'active' && live() === null);
 const unmeasuredNote = computed(() => mode.value === 'active' && live()?.measured === false);
@@ -216,7 +230,7 @@ function goToTask(taskId: string, storeId?: string) {
     <div class="bs-kanban-page__toolbar">
       <label v-if="!edgeEmpty" class="bs-kanban-page__toolbar-field">
         <span class="bs-kanban-page__count">Epic</span>
-        <Select v-model="selectedEpic" :options="pickerOptions" aria-label="Epic" />
+        <Select v-model="selectedEpic" :options="pickerOptions" :disabled="scopePending" aria-label="Epic" />
       </label>
       <ActivityScopeToggle />
       <span v-if="!edgeEmpty && !scopePending" class="bs-kanban-page__count">{{ taskCount }} tasks</span>
@@ -239,7 +253,7 @@ function goToTask(taskId: string, storeId?: string) {
     <Banner v-if="!error && epicsFailed" tone="warning" show-retry @retry="loadEpics">
       {{ EPIC_LIST_UNAVAILABLE }}
     </Banner>
-    <p v-if="unmeasuredNote" class="bs-sessions__quiet">Live sessions can't be read here</p>
+    <p v-if="unmeasuredNote" class="bs-sessions__quiet bs-kanban-page__note">Live sessions can't be read here</p>
     <Banner v-if="error" tone="danger" show-retry @retry="loadBoard">{{ error }}</Banner>
 
     <template v-else-if="loading || scopePending">
@@ -257,7 +271,7 @@ function goToTask(taskId: string, storeId?: string) {
       <RouterLink :to="scopeTo('all')">Show all</RouterLink>
     </p>
     <p v-else-if="noneOnAnEpic" class="bs-sessions__quiet">
-      {{ pluralize(live()?.liveSessions ?? 0, 'live session') }}, none on an epic ·
+      {{ noneLine }} ·
       <RouterLink :to="scopeTo('all')">Show all</RouterLink>
     </p>
 

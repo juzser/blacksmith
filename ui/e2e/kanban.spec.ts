@@ -1,5 +1,5 @@
-import type { ActiveScopeResult, KanbanTask } from '../src/lib/api.js';
-import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import type { KanbanTask } from '../src/lib/api.js';
+import { activeScopeBody, stubActiveScope } from './activeScopeStub.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -159,27 +159,6 @@ function fourColumnBoard(card: ReturnType<typeof task>) {
   ];
 }
 
-// The picker follows the Active/All scope (`?scope=`). `/api/active-scope` is
-// stubbed per test: which epics a live CLI session drives is not something the
-// fixture db can say.
-async function stubActiveScope(
-  page: import('@playwright/test').Page,
-  activeEpics: string[],
-  over: Partial<ActiveScopeResult> = {},
-) {
-  const body: ActiveScopeResult = {
-    measured: true,
-    readAt: FIXTURE_NOW_ISO,
-    liveSessions: activeEpics.length,
-    unlinkedSessions: 0,
-    projects: [],
-    epics: activeEpics.map((epicId) => ({ storeId: 'home', epicId, project: null })),
-    factorySessions: [],
-    ...over,
-  };
-  await page.route('**/api/active-scope*', (route) => route.fulfill({ json: body }));
-}
-
 test.describe('Kanban: the Active/All scope', () => {
   const picker = (page: import('@playwright/test').Page) =>
     page.getByLabel('Epic', { exact: true });
@@ -240,11 +219,106 @@ test.describe('Kanban: the Active/All scope', () => {
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
   });
 
+  // Sessions' own rule: no factory session drives anything, and some live
+  // session is unlinked. Only then is "none on an epic" true.
   test('live sessions but none on an epic: says so, with Show all', async ({ page }) => {
-    await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
+    await stubActiveScope(page, [], {
+      liveSessions: 2,
+      unlinkedSessions: 2,
+      factorySessions: [],
+    });
     await page.goto('/work/kanban');
     await expect(page.getByText('2 live sessions, none on an epic · Show all')).toBeVisible();
     await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+  });
+
+  test('a single unlinked session reads in the singular', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 1, unlinkedSessions: 1 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('1 live session, none on an epic · Show all')).toBeVisible();
+  });
+
+  // Sessions elsewhere drive epics of another project, one session drives
+  // nothing: "3 live sessions, none on an epic" would be false here.
+  test('live sessions on another project: the project line, not "none on an epic"', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9'], {
+      liveSessions: 3,
+      unlinkedSessions: 1,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban?project=blacksmith');
+    await expect(page.getByText('No active epic in this project · Show all')).toBeVisible();
+    await expect(page.getByText(/none on an epic/)).toHaveCount(0);
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+  });
+
+  test('no project selected and nothing offered: the view line', async ({ page }) => {
+    await stubActiveScope(page, ['epic-not-in-the-list'], {
+      liveSessions: 2,
+      unlinkedSessions: 1,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('No active epic in this view · Show all')).toBeVisible();
+    await expect(page.getByText(/none on an epic/)).toHaveCount(0);
+  });
+
+  test('the picker is disabled until the first scope answer lands', async ({ page }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const body = activeScopeBody(['epic-9']);
+    await page.route('**/api/active-scope*', async (route) => {
+      await gate;
+      await route.fulfill({ json: body });
+    });
+    await page.goto('/work/kanban');
+    await expect(picker(page)).toBeDisabled();
+    release();
+    await expect(picker(page)).toBeEnabled();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect(await optionValues(page)).toEqual(['epic-9']);
+  });
+
+  test('an empty Active offer keeps "All epics" in the picker when nothing is on the edge line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    await page.goto('/work/kanban');
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page).locator('option:checked')).toHaveText('All epics');
+  });
+
+  test('a project switch re-narrows the picker to that project’s active epics', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9', 'epic-1']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await expect(page).toHaveURL(/[?&]project=blacksmith/);
+    await expect.poll(() => optionValues(page)).toEqual(['epic-1']);
+    await expect(picker(page)).toHaveValue('epic-1');
+  });
+
+  test('a project switch to a project with nothing active shows the project line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9'], {
+      liveSessions: 2,
+      unlinkedSessions: 0,
+      factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    });
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await expect(page.getByText('No active epic in this project · Show all')).toBeVisible();
   });
 
   test('unmeasured: the full picker and board, plus a note', async ({ page }) => {
@@ -1040,11 +1114,12 @@ test.describe('Kanban', () => {
   test('screenshot epic list unavailable', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
+    await stubActiveScope(page, ['epic-9']);
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     const aborted = page.waitForEvent('requestfailed', (req) =>
       req.url().includes('/api/overview'),
     );
-    await page.goto('/work/kanban');
+    await page.goto('/work/kanban?scope=all');
     await expect(page.locator('h1')).toHaveText('Work');
     await aborted;
     await page.waitForTimeout(150);
@@ -1106,13 +1181,83 @@ test.describe('Kanban', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto('/work/kanban');
+        await stubActiveScope(page, ['epic-9']);
+        await page.goto('/work/kanban?scope=all');
         await expect(page.locator('h1')).toHaveText('Work');
         await settleForShot(page, page.locator('.bs-kanban-card').first());
         await shoot(page, `work-kanban-${vpName}-${theme}`);
       });
     }
   }
+
+  // The Active states, each on its own baseline (the board baselines above
+  // open ?scope=all, so they show the plain board).
+  const activeShots: [string, { width: number; height: number }, 'light' | 'dark'][] = [
+    ['desktop', VIEWPORTS.desktop, 'light'],
+    ['desktop', VIEWPORTS.desktop, 'dark'],
+    ['phone375', NARROW_VIEWPORT, 'light'],
+  ];
+  for (const [vpName, viewport, theme] of activeShots) {
+    test(`screenshot active epic ${vpName}/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(viewport);
+      await stubActiveScope(page, ['epic-9']);
+      await page.goto('/work/kanban');
+      await settleForShot(page, page.locator('.bs-kanban-card').first());
+      await shoot(page, `work-kanban-active-${vpName}-${theme}`);
+    });
+  }
+
+  test('screenshot nothing active phone375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await settleForShot(page, page.getByText('Nothing is active right now. ·'));
+    await shoot(page, 'work-kanban-active-none-phone375-light');
+  });
+
+  test('screenshot unmeasured desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await settleForShot(page, page.locator('.bs-kanban-card').first());
+    await shoot(page, 'work-kanban-active-unmeasured-desktop-light');
+  });
+
+  // The note is a sibling of the epic-list banner and, on a phone, of the
+  // status tabs; it must not sit flush against either.
+  test('the unmeasured note keeps a gap above and below it', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    const gapBelow = async () =>
+      page.evaluate(() => {
+        const note = [...document.querySelectorAll('p')].find((p) =>
+          p.textContent?.includes("Live sessions can't be read here"),
+        );
+        const next = note?.nextElementSibling;
+        if (!note || !next) throw new Error('no note or no sibling after it');
+        return next.getBoundingClientRect().top - note.getBoundingClientRect().bottom;
+      });
+    const gapAbove = async () =>
+      page.evaluate(() => {
+        const note = [...document.querySelectorAll('p')].find((p) =>
+          p.textContent?.includes("Live sessions can't be read here"),
+        );
+        const prev = note?.previousElementSibling;
+        if (!note || !prev) throw new Error('no note or no sibling before it');
+        return note.getBoundingClientRect().top - prev.getBoundingClientRect().bottom;
+      });
+    for (const viewport of [VIEWPORTS.desktop, NARROW_VIEWPORT]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/work/kanban');
+      await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+      await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+      expect(await gapAbove()).toBeGreaterThanOrEqual(15);
+      expect(await gapBelow()).toBeGreaterThanOrEqual(15);
+    }
+  });
 
   // S2 (ds-spec.md §3.1 Work/Kanban row): the phone tab row shows one column
   // at a time, and clicking a second tab switches which one is on screen.
@@ -1335,7 +1480,8 @@ test.describe('Kanban', () => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await mockBoard(page, richFollowupBoard());
-        await page.goto('/work/kanban');
+        await stubActiveScope(page, ['epic-9']);
+        await page.goto('/work/kanban?scope=all');
         // The first (three-fix) group stays collapsed; the seven-fix one opens.
         const groups = page.locator('.bs-kanban-group');
         await expect(groups).toHaveCount(2);
@@ -1353,7 +1499,8 @@ test.describe('Kanban', () => {
     test(`screenshot mobile/tab2/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.mobile);
-      await page.goto('/work/kanban');
+      await stubActiveScope(page, ['epic-9']);
+      await page.goto('/work/kanban?scope=all');
       const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
       await expect(tablist).toBeVisible();
       // Pick a tab that is not already the default-selected one, so the

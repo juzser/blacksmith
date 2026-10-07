@@ -128,7 +128,6 @@ export function mergeOverview(
     epicsInFlight: strings('epicsInFlight'),
     epicsActivelyRunning: strings('epicsActivelyRunning'),
     epicsInFlightByStore: withStore('epicsInFlight'),
-    epicsActivelyRunningByStore: withStore('epicsActivelyRunning'),
     closedEpics: sorted(
       rows('closedEpics'),
       (a, b) => newest(a.closedAt, b.closedAt) || byStore(a, b),
