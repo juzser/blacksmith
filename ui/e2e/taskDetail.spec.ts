@@ -135,6 +135,26 @@ test.describe('Task detail', () => {
     });
   }
 
+  // ds-review.html `.mtabs`: on the phone the selected tab is weight 600 with a
+  // text-coloured underline and the rest are weight 400; desktop is unchanged.
+  test('selected tab styling: phone follows the mock, desktop keeps its look', async ({ page }) => {
+    const tabStyle = (name: string) =>
+      page.getByRole('tab', { name }).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { weight: cs.fontWeight, color: cs.color, underline: cs.borderBottomColor };
+      });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    const phoneSelected = await tabStyle('What was asked');
+    expect(phoneSelected.weight).toBe('600');
+    expect(phoneSelected.underline).toBe(phoneSelected.color);
+    expect((await tabStyle('History')).weight).toBe('400');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const desktopSelected = await tabStyle('What was asked');
+    expect(desktopSelected.weight).toBe('500');
+    expect(desktopSelected.underline).not.toBe(desktopSelected.color);
+  });
+
   // Tabs.vue scrolls its own list, never the page, when the selection changes
   // from outside. Navigation is made client-side the way a router link does:
   // pushState + popstate.
