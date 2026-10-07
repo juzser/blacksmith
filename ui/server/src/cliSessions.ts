@@ -97,6 +97,8 @@ export interface LinkedEpic {
   rootSessionId: string;
   epicId: string | null;
   project: string | null;
+  /** The store's `epics` row (the projected `epic-closed`) says this epic is closed. */
+  closed: boolean;
   factorySessionIds: string[];
   /** The newest event this CLI session wrote into any of `factorySessionIds`. */
   lastEventAt: string;
@@ -155,7 +157,7 @@ export interface CliSessionCard {
   nameSource: string | null;
   startedAt: string | null;
   cwdLabel: string;
-  /** The first linked epic's project; null when unlinked. */
+  /** The newest open linked epic's project; null when unlinked or every linked epic is closed. */
   project: string | null;
   inScopeBy: 'cwd' | 'stamped' | 'heuristic';
   status: CliSessionStatus;
@@ -1176,11 +1178,17 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         };
       }
 
+      const closed =
+        epicId !== null &&
+        handle.sqlite
+          .prepare("select 1 as c from epics where epic_id = ? and epic_status = 'closed'")
+          .get(epicId) !== undefined;
       out.push({
         store: { id: store.id, label: store.label },
         rootSessionId: ownerId,
         epicId,
         project,
+        closed,
         factorySessionIds: [...new Set(g.ids)].sort(),
         lastEventAt: g.lastEventAt,
         openWaves,
@@ -1203,7 +1211,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     status: CliSessionStatus,
     registryWaiting: boolean,
   ): CliSessionFocus | null {
-    const epic = epics.find((x) => x.epicId !== null);
+    const epic = epics.find((x) => x.epicId !== null && !x.closed);
     if (epic === undefined || epic.epicId === null) return null;
     const { wave, nowTitles, nextTask, remaining } = epic.focusParts;
     const now = epic.workingAgents.map((a, i) => ({ ...a, taskTitle: nowTitles[i] ?? null }));
@@ -1359,7 +1367,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         nameSource: e.nameSource,
         startedAt: e.startedAt,
         cwdLabel: labelFor(cwd, hit),
-        project: linked?.epics[0]?.project ?? null,
+        project: epics.find((x) => !x.closed)?.project ?? null,
         inScopeBy: by,
         status,
         statusSince: e.statusSince,

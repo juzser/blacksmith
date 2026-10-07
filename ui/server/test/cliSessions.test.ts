@@ -1657,12 +1657,51 @@ describe('cliSessions reader', () => {
         });
       });
 
+      describe('closed epics', () => {
+        const closeEpic = (
+          f: { add: (t: string, p: Record<string, unknown>) => Promise<void> },
+          epic: string,
+        ) =>
+          f.add('epic-closed', {
+            epic_id: epic,
+            epic_status: 'closed',
+            closed_by: 'operator-override',
+            override_rationale: 'abandoned',
+          });
+
+        it('skips a newer closed epic and focuses the older open one', async () => {
+          const a = await factorySession('sess-a', SID_B);
+          await a.addTask('epic-a', 'epic-a/task-1', {}, 'app-a');
+          await pause();
+          const b = await factorySession('sess-b', SID_B);
+          await b.addTask('epic-b', 'epic-b/task-1', {}, 'app-b');
+          await closeEpic(b, 'epic-b');
+          const card = await cardOf(220);
+          expect(card.focus).toMatchObject({ epicId: 'epic-a', project: 'app-a' });
+          expect(card.project).toBe('app-a');
+          expect(card.linked?.epics.map((e) => [e.epicId, e.closed])).toEqual([
+            ['epic-b', true],
+            ['epic-a', false],
+          ]);
+        });
+
+        it('is not linked when its only epic is closed', async () => {
+          const b = await factorySession('sess-b', SID_B);
+          await b.addTask('epic-b', 'epic-b/task-1', {}, 'app-b');
+          await closeEpic(b, 'epic-b');
+          const card = await cardOf(221);
+          expect(card.focus).toBeNull();
+          expect(card.project).toBeNull();
+          expect(card.linked?.epics.map((e) => [e.epicId, e.closed])).toEqual([['epic-b', true]]);
+        });
+      });
+
       describe('across stores', () => {
         let foreignDir: string;
         let foreignDb: string;
 
         /** A foreign project's epic, written to its own event dir and projection. */
-        async function foreignEpic(epic: string, project?: string) {
+        async function foreignEpic(epic: string, project?: string, closed = false) {
           const homeDir = stateDir;
           stateDir = foreignDir;
           try {
@@ -1670,6 +1709,13 @@ describe('cliSessions reader', () => {
             await f.addTask(epic, `${epic}/task-1`, { title: 'Foreign task' }, project);
             await f.add('wave-admitted', { epic_id: epic, task_ids: [`${epic}/task-1`] });
             await f.dispatch(`${epic}/task-1`, { agent_role: 'coder' });
+            if (closed)
+              await f.add('epic-closed', {
+                epic_id: epic,
+                epic_status: 'closed',
+                closed_by: 'operator-override',
+                override_rationale: 'abandoned',
+              });
           } finally {
             stateDir = homeDir;
           }
@@ -1731,6 +1777,18 @@ describe('cliSessions reader', () => {
             ['home', 'epic-h'],
           ]);
           expect(card.project).toBe('app-f');
+        });
+
+        it('skips a newer closed epic of one store for an older open epic of another', async () => {
+          await homeEpic('epic-h');
+          await pause();
+          await foreignEpic('epic-f', 'app-f', true);
+          const card = await readStores();
+          expect(card.focus).toMatchObject({ store: { id: 'home' }, epicId: 'epic-h' });
+          expect(card.linked?.epics.map((e) => [e.epicId, e.closed])).toEqual([
+            ['epic-f', true],
+            ['epic-h', false],
+          ]);
         });
 
         it('keeps the other stores when one store cannot be read', async () => {
