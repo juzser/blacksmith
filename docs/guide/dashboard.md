@@ -66,7 +66,8 @@ Home lists one card per live, in-scope Claude Code CLI session, from
 `<project> · <epic> · wave N`, with a status tag, a **Now** line per working agent
 (role and task title) and a **Next** line (the next task's title, or "Waiting on
 you"). The title links to the epic on the Kanban board. A session linked to no epic
-shows its working folder and name only.
+shows its working folder and name only; so does a session whose only epics are
+closed.
 
 The wave number comes from the newest session named `<epic>-w<N>-…` (a re-run,
 `<epic>-w<N>r-…`, is still wave N) that is not older than the newest open wave; when

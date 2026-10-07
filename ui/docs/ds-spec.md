@@ -871,7 +871,7 @@ Sections, in order:
    per live, in-scope CLI session from `GET /api/cli-sessions`, titled
    `<project> · <epic id> · wave N` (the title opens the epic's Kanban board), with a status
    tag, a Now line per working agent (role + task title, max 2 then "+ N more"), and a Next
-   line (the first open task of the current wave, in the wave's order; "Waiting on you" when the CLI is blocked on the operator or idle with no agent working; omitted when unknown, including an unnamed first task). The wave number is omitted unless a wave session name or a single admission fixes it. Unlinked sessions fall
+   line (the first open task of the current wave, in the wave's order; "Waiting on you" when the CLI is blocked on the operator or idle with no agent working; omitted when unknown, including an unnamed first task). The wave number is omitted unless a wave session name or a single admission fixes it. A session whose only epics are closed counts as unlinked. Unlinked sessions fall
    back to the working-folder label and session name. Empty state: "No live Blacksmith
    sessions" with "N other sessions hidden" when sessions were filtered out; when the CLI session registry does not exist on the machine it shows the same title with the body "Session tracking is not set up on this machine." and no count. Needs new data:
    a `focus` object on each card (`project`, `epicId`, `wave`, `now`, `next`).
