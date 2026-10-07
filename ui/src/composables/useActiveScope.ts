@@ -3,7 +3,7 @@
 // however many components call useActiveScope() there is one ref and one fetch
 // per shell pulse (usePulse bumps `pulseTick` after each successful poll).
 // Nothing mounts a poll of its own.
-import { ref, watch } from 'vue';
+import { effectScope, ref, watch } from 'vue';
 import { type ActiveScopeResult, fetchActiveScope } from '../lib/api.js';
 import { pulseTick } from './usePulse.js';
 
@@ -26,7 +26,9 @@ async function load(): Promise<void> {
 export function useActiveScope() {
   if (!started) {
     started = true;
-    watch(pulseTick, () => void load());
+    // Detached scope: the first caller's component must not own the watcher,
+    // or it stops when that component unmounts and the scope never refreshes.
+    effectScope(true).run(() => watch(pulseTick, () => void load()));
     void load();
   }
   return { scope };
