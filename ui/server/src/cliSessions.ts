@@ -1045,7 +1045,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       // write first, each read for its OWN epic (admission, task row, agent).
       // A lineage continued into a new epic is rooted in the old one, so the
       // whole-lineage pick above only serves when no written member has one.
-      const own = (sql: string, sid: string): string | null =>
+      const ownEpic = (sql: string, sid: string): string | null =>
         (handle.sqlite.prepare(sql).get(sid) as { e: string | null } | undefined)?.e ?? null;
       let writtenEpic: string | null = null;
       for (const sid of [...new Set(g.ids)].sort((x, y) =>
@@ -1053,11 +1053,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       )) {
         writtenEpic =
           waves.filter((w) => w.sessionId === sid && w.epicId !== null).at(-1)?.epicId ??
-          own(
+          ownEpic(
             'select epic_id as e from tasks where epic_id is not null and session_id = ? order by updated_at desc limit 1',
             sid,
           ) ??
-          own(
+          ownEpic(
             'select epic_id as e from agents where epic_id is not null and session_id = ? order by dispatched_at desc limit 1',
             sid,
           );

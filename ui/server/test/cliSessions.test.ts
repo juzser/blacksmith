@@ -1730,7 +1730,10 @@ describe('cliSessions reader', () => {
       });
 
       it('prefers the newest-written member, whichever way the lineage runs', async () => {
-        const { a } = await twoEpics(SID_B, SID_B);
+        const { a, b } = await twoEpics(SID_B, SID_B);
+        // The lineage's newest admission is epic-b's; the newest write is sess-a's.
+        await b.addTask('epic-b', 'epic-b/task-1');
+        await b.add('wave-admitted', { epic_id: 'epic-b', task_ids: ['epic-b/task-1'] });
         await pause();
         await a.add('note', {});
         expect((await linkedEpics(182, SID_B)).map((e) => e.epicId)).toEqual(['epic-a']);
