@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { MilestoneProgress, ProjectOverviewSummary } from '../src/lib/api.js';
+import type {
+  ActiveScopeResult,
+  MilestoneProgress,
+  ProjectOverviewSummary,
+} from '../src/lib/api.js';
 import { defaultSelection } from '../src/lib/roadmapSelection.js';
 
 function milestone(overrides: Partial<MilestoneProgress>): MilestoneProgress {
@@ -123,6 +127,31 @@ describe('defaultSelection', () => {
     it('lands in the filtered project when a project filter is set', () => {
       const result = defaultSelection(phased, ['epic-z'], [], {}, [epicOnly], 'project-a');
       expect(result).toEqual({ phaseId: 'phase-1', epicId: null });
+    });
+
+    it('lands on the first section Active keeps, not on the idle one that sorts first', () => {
+      const milestones = [
+        milestone({
+          milestoneId: 'a-1',
+          project: 'project-a',
+          startedAt: '2026-01-10T00:00:00.000Z',
+        }),
+        milestone({ milestoneId: 'b-1', project: 'project-b', epicIds: ['epic-b'] }),
+      ];
+      const scope: ActiveScopeResult = {
+        measured: true,
+        readAt: '2026-01-15T00:00:00.000Z',
+        liveSessions: 1,
+        unlinkedSessions: 0,
+        projects: [{ storeId: 'home', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+        epics: [],
+        factorySessions: [],
+      };
+      expect(defaultSelection(milestones, [], [], {}, undefined, null).phaseId).toBe('a-1');
+      expect(defaultSelection(milestones, [], [], {}, undefined, null, scope)).toEqual({
+        phaseId: 'b-1',
+        epicId: null,
+      });
     });
   });
 });

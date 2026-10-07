@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
-import { stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
+import { stubActiveScope, stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {
@@ -151,7 +151,8 @@ test.describe('Roadmap', () => {
     test(`screenshot phase desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?scope=all');
       await expect(page.locator('h1')).toHaveText('Work');
       await settleForShot(page, page.locator('.lane').first());
       await shoot(page, `work-roadmap-phase-desktop-${theme}`);
@@ -166,7 +167,8 @@ test.describe('Roadmap', () => {
   test('screenshot swimlane 768/light', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto('/work/roadmap');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?scope=all');
     await expect(page.locator('h1')).toHaveText('Work');
     await settleForShot(page, page.locator('.lane').first());
     await shoot(page, 'work-roadmap-swimlane-768-light');
@@ -242,7 +244,8 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
     test(`screenshot epic mode desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap?epic=epic-9');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?epic=epic-9&scope=all');
       await settleForShot(page, page.locator('.wave-list'));
       await shoot(page, `work-roadmap-epic-desktop-${theme}`);
     });
@@ -251,7 +254,8 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
   test('screenshot epic mode 768/light', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto('/work/roadmap?epic=epic-9');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?epic=epic-9&scope=all');
     await settleForShot(page, page.locator('.wave-list'));
     await shoot(page, 'work-roadmap-epic-768-light');
   });
@@ -366,7 +370,8 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     test(`screenshot epic header server reads desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap?epic=epic-9');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?epic=epic-9&scope=all');
       await settleForShot(page, page.locator('.esec-head'));
       await shoot(page, `work-roadmap-epic-header-desktop-${theme}`);
     });
@@ -413,7 +418,8 @@ test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2,
   }) => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto('/work/roadmap?phase=phase-6b');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?phase=phase-6b&scope=all');
     // epic-9 (In progress) defaults open; epic-10 (Done) defaults closed.
     await settleForShot(page, page.locator('.esec', { hasText: 'epic-9' }).locator('.wave-list'));
     await shoot(page, 'work-roadmap-phase-waves-desktop-light');
@@ -588,7 +594,8 @@ test.describe('Roadmap window (spec Part 2)', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot window desktop/${theme}: earlier side expanded`, async ({ page }) => {
       await setTheme(page, theme);
-      await page.goto('/work/roadmap');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?scope=all');
       await earlierToggle(page).click();
       await settleForShot(page, page.locator('#rm-window-project-a-earlier .lrow').first());
       await shoot(page, `work-roadmap-window-desktop-${theme}`);
@@ -776,7 +783,8 @@ test.describe('Roadmap: status tones and legend', () => {
   });
   // The window hides lanes before the current one; open them so all four show.
   const openAllLanes = async (page: Page) => {
-    await page.goto('/work/roadmap');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?scope=all');
     await expect(page.locator('.rm-legend')).toBeVisible();
     const earlier = page.locator('button[aria-controls="rm-window-project-a-earlier"]');
     if ((await earlier.count()) > 0) await earlier.click();
@@ -894,5 +902,316 @@ test.describe('Roadmap: status tones and legend', () => {
     await page.goto('/work/roadmap');
     await expect(page.locator('.bs-roadmap-mobile__phase-select').first()).toBeVisible();
     await expect(page.locator('.rm-legend')).toHaveCount(0);
+  });
+});
+
+// S7 — Roadmap's Active scope. project-a (newest activity, so first under All)
+// has no live session; project-b does. Sections key by project name.
+test.describe('Roadmap: Active scope (S7)', () => {
+  const sectionNames = (page: Page) => page.locator('.rm-section__head');
+  const quiet = (page: Page) => page.locator('.bs-sessions__quiet');
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubWindowRoadmap(page);
+  });
+
+  test('Active shows the live project only; ?scope=all shows every section', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(1);
+    await expect(sectionNames(page)).toContainText('project-b');
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    await expect(page.getByRole('link', { name: 'Show all' })).toHaveAttribute('href', /scope=all/);
+
+    await page.goto('/work/roadmap?scope=all');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(quiet(page)).toHaveCount(0);
+  });
+
+  test('the default selection lands on the live project, not the first section of All', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 10');
+  });
+
+  test('a ?phase= in a hidden project switches to All and shows that phase', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 1');
+  });
+
+  test('a ?phase= inside the live project stays under Active', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?phase=phase-10');
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 10');
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect(sectionNames(page)).toHaveCount(1);
+  });
+
+  test('nothing live: one line, no sections', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('Nothing is active right now. · Show all');
+    await expect(sectionNames(page)).toHaveCount(0);
+  });
+
+  test('live sessions none on an epic: counts them, singular for one', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 1, unlinkedSessions: 1, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('1 live session, none on an epic · Show all');
+    await page.unroute('**/api/active-scope*');
+    await stubActiveScope(page, [], { liveSessions: 3, unlinkedSessions: 3, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('3 live sessions, none on an epic · Show all');
+  });
+
+  test('none-on-an-epic stays quiet when a factory session is live', async ({ page }) => {
+    await stubActiveScope(page, ['project-z'], { unlinkedSessions: 2 });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText(
+      'No live session is on a project with a roadmap · Show all',
+    );
+    await expect(quiet(page)).not.toContainText('none on an epic');
+  });
+
+  test('scoped to a project that is not live: says so', async ({ page }) => {
+    await page.route('**/api/roadmap**', (route) =>
+      route.fulfill({
+        json: WINDOW_ROADMAP.filter(
+          (m) => m.project === new URL(route.request().url()).searchParams.get('project'),
+        ),
+      }),
+    );
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?project=project-a');
+    await expect(quiet(page)).toHaveText('No live session is on this project · Show all');
+  });
+
+  test('unmeasured: All stays, with a note, and the toggle stays', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(quiet(page)).toHaveText("Live sessions can't be read here");
+    await expect(page.getByRole('link', { name: 'All', exact: true })).toBeVisible();
+  });
+
+  test('while the scope answer is in flight, the All list never renders under Active', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['project-b'], {}, 1500);
+    const overview = page.waitForResponse((r) => r.url().includes('/api/overview'));
+    await page.goto('/work/roadmap');
+    await overview;
+    await page.waitForTimeout(400);
+    await expect(sectionNames(page)).toHaveCount(0);
+    await expect(sectionNames(page)).toHaveCount(1, { timeout: 5000 });
+    await expect(sectionNames(page)).toContainText('project-b');
+  });
+
+  test('phone: the toggle is a 44px target and the page does not scroll sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(1);
+    const toggle = page.getByRole('link', { name: 'All', exact: true });
+    const box = await toggle.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflows).toBe(false);
+  });
+
+  // Three projects; the scope is steered from the test and answered again by
+  // the shell's "Refresh now", which wakes the scope read, so nothing sleeps.
+  async function steerable(page: Page, liveProjects: string[]) {
+    const state = { live: liveProjects };
+    const projectC = WINDOW_ROADMAP.filter((m) => m.project === 'project-b').map((m) => ({
+      ...m,
+      milestoneId: m.milestoneId.replace('phase-', 'phase-c'),
+      name: m.name.replace('Phase', 'Phase c'),
+      project: 'project-c',
+    }));
+    await page.route('**/api/roadmap**', (route) =>
+      route.fulfill({ json: [...WINDOW_ROADMAP, ...projectC] }),
+    );
+    await page.route('**/api/active-scope*', (route) =>
+      route.fulfill({
+        json: {
+          measured: true,
+          readAt: '2026-01-15T00:00:00.000Z',
+          liveSessions: 2,
+          unlinkedSessions: 0,
+          projects: state.live.map((project) => ({
+            storeId: 'home',
+            project,
+            liveSessions: 1,
+            agentsWorking: 0,
+          })),
+          epics: [],
+          factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+        },
+      }),
+    );
+    return state;
+  }
+  const refresh = async (page: Page) => {
+    const pause = page.getByRole('button', { name: 'Pause updates' });
+    if (await pause.count()) await pause.click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+  };
+  const sectionOf = (page: Page, name: string) =>
+    page.locator('.rm-section', { has: page.locator('.rm-section__head', { hasText: name }) });
+  const selectedRow = (page: Page) => page.locator('.lrow[aria-current="true"]');
+
+  test('the section being read stays when its project goes quiet, until another lane is picked', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['project-a', 'project-b', 'project-c']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(3);
+    await expect(quiet(page)).toHaveCount(0);
+    await sectionOf(page, 'project-a').locator('.lrow', { hasText: 'Phase 3' }).click();
+    await expect(page).toHaveURL(/phase=phase-3/);
+    await expect(selectedRow(page)).toContainText('Phase 3');
+
+    state.live = ['project-b'];
+    await refresh(page);
+    // Two projects are quiet now, but the one being read is not counted: it stays.
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(sectionOf(page, 'project-a')).toBeVisible();
+    await expect(selectedRow(page)).toContainText('Phase 3');
+    await expect(page).toHaveURL(/phase=phase-3/);
+    // The detail still sits right after the section holding it.
+    const stackKids = await page
+      .locator('.rm-stack > *')
+      .evaluateAll((els) => els.map((e) => e.className));
+    expect(stackKids[0]).toContain('rm-section');
+    expect(stackKids[1]).not.toContain('rm-section');
+
+    await sectionOf(page, 'project-b').locator('.lrow', { hasText: 'Phase 10' }).click();
+    await expect(sectionNames(page)).toHaveCount(1);
+    await expect(sectionNames(page)).toContainText('project-b');
+    await expect(quiet(page)).toHaveText('2 quiet projects · Show all');
+  });
+
+  test('a reload for a project or session change never widens to All on its own', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['project-a', 'project-b', 'project-c']);
+    await page.goto('/work/roadmap');
+    await sectionOf(page, 'project-a').locator('.lrow', { hasText: 'Phase 3' }).click();
+    await expect(page).toHaveURL(/phase=phase-3/);
+    state.live = ['project-b'];
+    await refresh(page);
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    // Settle the reload's own reads before the assertions, so the stub is not
+    // torn down mid-fetch.
+    const reloaded = page.waitForResponse(
+      (r) => r.url().includes('/api/overview') && r.url().includes('project=blacksmith'),
+    );
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await reloaded;
+    await expect(page).toHaveURL(/project=blacksmith/);
+    await expect(page).not.toHaveURL(/scope=all/);
+    await expect(selectedRow(page)).toHaveCount(1);
+    await expect(
+      page.getByRole('navigation', { name: 'Activity scope' }).locator('[aria-current="page"]'),
+    ).toHaveText('Active');
+  });
+
+  test('a failed first load keeps its deep link, so Retry widens to All', async ({ page }) => {
+    await steerable(page, ['project-b']);
+    let failed = false;
+    await page.route('**/api/roadmap**', (route) => {
+      if (failed) return route.fallback();
+      failed = true;
+      return route.fulfill({ status: 500, json: { error: 'boom' } });
+    });
+    await page.goto('/work/roadmap?phase=phase-1');
+    const banner = page.locator('.bs-banner');
+    await expect(banner).toBeVisible();
+    await banner.getByRole('button', { name: 'Retry' }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(page).toHaveURL(/phase=phase-1/);
+    await expect(
+      page.getByRole('navigation', { name: 'Activity scope' }).locator('[aria-current="page"]'),
+    ).toHaveText('All');
+    await expect(sectionOf(page, 'project-a').locator('.lrow[aria-current="true"]')).toHaveCount(1);
+  });
+
+  test('the unmeasured note sits under the toolbar, a gap clear of it and of the first section', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    const note = page.getByText("Live sessions can't be read here");
+    const toolbar = page.locator('.bs-roadmap-page__toolbar');
+    const first = page.locator('.rm-section').first();
+    const box = async (l: ReturnType<Page['locator']>) => {
+      const b = await l.boundingBox();
+      if (!b) throw new Error('element has no box');
+      return b;
+    };
+    for (const viewport of [VIEWPORTS.desktop, { width: 375, height: 812 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/work/roadmap');
+      await expect(note).toBeVisible();
+      await expect(first).toBeVisible();
+      const n = await box(note);
+      const t = await box(toolbar);
+      const f = await box(first);
+      expect(n.y - (t.y + t.height)).toBeGreaterThanOrEqual(15);
+      expect(f.y - (n.y + n.height)).toBeGreaterThanOrEqual(15);
+      const before = await page.evaluate(() => {
+        const n = [...document.querySelectorAll('.bs-sessions__quiet')][0];
+        const s = document.querySelector('.rm-section');
+        return !!n && !!s && !!(n.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      expect(before).toBe(true);
+    }
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot active project among several desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await stubActiveScope(page, ['project-b']);
+      await page.goto('/work/roadmap');
+      await settleForShot(page, page.locator('.lane').first());
+      await shoot(page, `work-roadmap-active-desktop-${theme}`);
+    });
+  }
+
+  test('screenshot active project among several phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await settleForShot(page, page.locator('.rm-section').first());
+    await shoot(page, 'work-roadmap-active-phone-375-light');
+  });
+
+  test('screenshot nothing active phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, [], { liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await settleForShot(page, quiet(page));
+    await shoot(page, 'work-roadmap-none-active-phone-375-light');
+  });
+
+  test('screenshot unmeasured desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await settleForShot(page, quiet(page));
+    await shoot(page, 'work-roadmap-unmeasured-desktop-light');
   });
 });

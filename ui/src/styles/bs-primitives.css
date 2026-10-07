@@ -3725,6 +3725,16 @@ summary.bs-inbox__group-head {
   flex-direction: column;
   gap: var(--bs-space-4);
 }
+/* The Active-scope edge line: Sessions' `.bs-sessions__quiet` has no margin of
+   its own, so on Roadmap it gets the stack's gap above it. */
+.rm-quiet {
+  margin: var(--bs-space-4) 0 0;
+}
+/* The unmeasured note, under the toolbar: the same gap above and below as
+   Kanban's note (.bs-kanban-page__note). */
+.rm-note {
+  margin: var(--bs-space-4) 0;
+}
 
 /* UI spec Part 2 — one section per project (RoadmapProjectSection.vue). The
    head reuses NeedsYouInbox's `.bs-inbox__group-head` one level up (an h2,

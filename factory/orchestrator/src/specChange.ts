@@ -21,7 +21,7 @@ import {
   validatePlan,
 } from './plan.js';
 import { type CompiledSchemaSet, compileSchemas, validateRecord } from './schemas.js';
-import { amendPlan } from './spec.js';
+import { amendPlan, resolveSupersedeKeys } from './spec.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 /**
@@ -277,8 +277,16 @@ export async function proposeSpecChange(
   // The same check `amendPlan` runs on its own draft (D-21), one step earlier.
   // Plans are immutable and nothing deletes one, so the cost of finding this
   // out after the write is unrecoverable; the cost of finding it out here is a
-  // refusal the worker can still answer.
-  const draft = draftNextVersion(plan, request.changes ?? {});
+  // refusal the worker can still answer. The supersede keys resolve first, as
+  // `amendPlan` resolves them, so a key naming a task only the log added
+  // drafts the same version — and records the same diff — approval will.
+  const { changes, loggedStubs } = await resolveSupersedeKeys(
+    plan,
+    request.changes ?? {},
+    ctx,
+    opts,
+  );
+  const draft = draftNextVersion(plan, changes, loggedStubs);
   const validation = validatePlan(draft, { ...opts, previous: plan });
   if (!validation.valid) {
     throw new SpecChangeError(
@@ -289,14 +297,14 @@ export async function proposeSpecChange(
   }
 
   const diff = diffPlans(plan, draft);
-  // Mirrors `amendPlan`'s obligation rule: added tasks, plus superseded ones
-  // that are still live in the draft. A proposal that obligates nothing would
-  // be approved into a finding that discharges the instant it is parked — an
+  // Mirrors `amendPlan`'s obligation rule: added and superseded tasks that are
+  // still live in the draft. A proposal that obligates nothing would be
+  // approved into a finding that discharges the instant it is parked — an
   // amendment nobody has to build, which is another way of saying no
   // amendment at all.
   const live = new Set(livePlanTasks(draft).map((t) => t.task_id));
   const obligations = [
-    ...new Set([...diff.added, ...diff.superseded.filter((id) => live.has(id))]),
+    ...new Set([...diff.added, ...diff.superseded].filter((id) => live.has(id))),
   ];
   if (obligations.length === 0) {
     throw new SpecChangeError(

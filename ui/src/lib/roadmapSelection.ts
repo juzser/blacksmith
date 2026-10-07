@@ -5,8 +5,8 @@
 // first) — the phase holding an actively running epic, else the first
 // declared phase by `sequence` that is not completed, else the last phase;
 // and a no-phase project's actively running epic, else its first selectable.
-import type { MilestoneProgress, ProjectOverviewSummary } from './api.js';
-import { buildRoadmapSections } from './roadmapWindow.js';
+import type { ActiveScopeResult, MilestoneProgress, ProjectOverviewSummary } from './api.js';
+import { buildRoadmapSections, filterActiveSections } from './roadmapWindow.js';
 
 export interface RoadmapSelection {
   phaseId: string | null;
@@ -23,16 +23,21 @@ export function defaultSelection(
   /** The page's own section inputs, so the default lands in the section shown first. */
   overviewProjects?: readonly ProjectOverviewSummary[],
   projectFilter: string | null = null,
+  /** Under Active: the scope answer, so the default lands in a section that survives the filter. */
+  activeScope: ActiveScopeResult | null = null,
 ): RoadmapSelection {
   if (routeQuery.phase) return { phaseId: routeQuery.phase, epicId: null };
   if (routeQuery.epic) return { phaseId: null, epicId: routeQuery.epic };
 
-  const first = buildRoadmapSections(
-    milestones,
-    selectableEpics,
-    activeEpics,
-    projectFilter ? undefined : overviewProjects,
-    projectFilter,
+  const first = filterActiveSections(
+    buildRoadmapSections(
+      milestones,
+      selectableEpics,
+      activeEpics,
+      projectFilter ? undefined : overviewProjects,
+      projectFilter,
+    ),
+    activeScope,
   )[0];
   if (first?.kind === 'phase') {
     return { phaseId: first.window.current?.milestoneId ?? null, epicId: null };
