@@ -76,6 +76,120 @@ test.describe('Task detail', () => {
     ).toBeVisible();
   });
 
+  // A 375px phone is the narrowest supported width. The page's own scrollWidth
+  // stays 375 even when the content column has grown wider (the shell clips
+  // it, so cards are cut off on the right), so this measures the column and
+  // the tab strip's right edge too. The committed baselines are 390px wide and
+  // never showed it.
+  test('375px: no tab makes the content column wider than the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    const rights: Record<string, number> = {};
+    for (const task of [DEMO_HUB_COMPLETED_TASK, DEMO_HUB_WAIVABLE_TASK]) {
+      await page.goto(`/tasks/${encodeURIComponent(task)}`);
+      for (const name of ['What was asked', 'Findings', 'Outputs', 'History']) {
+        await page.getByRole('tab', { name }).click();
+        const m = await page.evaluate(() => {
+          const right = (sel: string) =>
+            Math.round(document.querySelector(sel)?.getBoundingClientRect().right ?? 0);
+          return {
+            page: document.documentElement.scrollWidth,
+            column: right('.bs-task-detail__layout > *'),
+            tabs: right('.bs-tabs__list'),
+          };
+        });
+        rights[`${task} ${name}`] = Math.max(m.page, m.column, m.tabs);
+        console.log(`task-detail 375px ${task} ${name}: ${JSON.stringify(m)}`);
+      }
+    }
+    for (const right of Object.values(rights)) expect(right).toBeLessThanOrEqual(375);
+  });
+
+  // ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
+  // within itself, so it is never cut at the content column's edge with empty
+  // page padding beyond it.
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`${viewport.width}px: the tab strip runs edge to edge and keeps the selected tab whole`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+      const list = page.getByRole('tablist', { name: 'Task detail sections' });
+      const wholeInViewport = async (name: string) => {
+        const box = await page.getByRole('tab', { name }).boundingBox();
+        expect(box, `${name} tab box`).not.toBeNull();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+      };
+      const listBox = await list.boundingBox();
+      expect(listBox?.x).toBe(0);
+      expect(listBox?.width).toBe(viewport.width);
+      await wholeInViewport('What was asked');
+      await page.getByRole('tab', { name: 'History' }).click();
+      await wholeInViewport('History');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        viewport.width,
+      );
+    });
+  }
+
+  // ds-review.html `.mtabs`: on the phone the selected tab is weight 600 with a
+  // text-coloured underline and the rest are weight 400; desktop is unchanged.
+  test('selected tab styling: phone follows the mock, desktop keeps its look', async ({ page }) => {
+    const tabStyle = (name: string) =>
+      page.getByRole('tab', { name }).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { weight: cs.fontWeight, color: cs.color, underline: cs.borderBottomColor };
+      });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    const phoneSelected = await tabStyle('What was asked');
+    expect(phoneSelected.weight).toBe('600');
+    expect(phoneSelected.underline).toBe(phoneSelected.color);
+    expect((await tabStyle('History')).weight).toBe('400');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const desktopSelected = await tabStyle('What was asked');
+    expect(desktopSelected.weight).toBe('500');
+    expect(desktopSelected.underline).not.toBe(desktopSelected.color);
+  });
+
+  // Tabs.vue scrolls its own list, never the page, when the selection changes
+  // from outside. Navigation is made client-side the way a router link does:
+  // pushState + popstate.
+  const navigateInApp = (page: import('@playwright/test').Page, path: string) =>
+    page.evaluate((to) => {
+      history.pushState({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+
+  test('375px: an outside reset never moves the page', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    await page.evaluate(() => {
+      const pad = document.createElement('div');
+      pad.id = 'e2e-pad';
+      pad.style.height = '3000px';
+      document.body.append(pad);
+      window.scrollTo(0, 600);
+    });
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    const strip = await page
+      .getByRole('tablist', { name: 'Task detail sections' })
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    expect(strip).toBeLessThan(0);
+    await navigateInApp(page, `/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
+
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
   // meta text (dispatch rows have no tokens yet, so metaOverride is '') used
   // to render no meta line at all on phone, so it showed no time.

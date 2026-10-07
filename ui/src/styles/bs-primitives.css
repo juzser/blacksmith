@@ -506,6 +506,9 @@ a:hover {
   }
   .bs-timeline-row__ts--meta {
     display: inline;
+    /* The time never breaks inside itself; the meta text beside it gives way. */
+    flex: none;
+    white-space: nowrap;
   }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
@@ -1659,9 +1662,27 @@ a:hover {
 /* ≤640px: tab padding settles under --bs-touch (visual-qa phase B round 2) —
    min-height and min-width floor, label/underline keep their own size. */
 @media (max-width: 640px) {
+  .bs-tabs__list {
+    gap: 0;
+  }
   .bs-tabs__tab {
     min-height: var(--bs-touch);
     min-width: var(--bs-touch);
+    font-weight: var(--bs-font-weight-normal);
+  }
+  /* ds-review.html `.mtabs a[aria-current]`: the selected tab is 600 with a
+     text-coloured underline (desktop keeps the medium weight and accent). */
+  .bs-tabs__tab[aria-selected='true'] {
+    font-weight: var(--bs-font-weight-semibold);
+    border-bottom-color: var(--bs-text);
+  }
+  /* ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
+     within itself. Every page that hosts tabs (Task detail, Lessons, Activity)
+     is an `.app-page`, whose side padding is --bs-space-5 on every width, so
+     the bleed is that same token. */
+  .app-page .bs-tabs__list {
+    margin-inline: calc(-1 * var(--bs-space-5));
+    padding-inline: var(--bs-space-5);
   }
 }
 
@@ -3479,7 +3500,9 @@ summary.bs-inbox__group-head {
    scroll sideways, so it drops under the tabs instead. */
 @media (max-width: 640px) {
   .bs-task-detail__layout {
-    grid-template-columns: 1fr;
+    /* minmax(0, ...): a bare 1fr floors at the content's min-content width, so
+       the tab strip or a wide table stretched the column past a 375px phone. */
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .bs-task-detail__overview {

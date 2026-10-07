@@ -374,7 +374,7 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
 });
 
 // DS4 S3 §2: phase mode's per-epic "Show waves" toggle — open by default on
-// an In-progress epic, closed on Done/To do (phase-6b, global-setup.ts: an
+// an In-progress epic, closed on Done/Todo (phase-6b, global-setup.ts: an
 // in-progress phase with demo-hub's epic-9/epic-10/epic-11).
 test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2, §5)', () => {
   test('flips aria-expanded and the WaveList with it', async ({ page }) => {
@@ -709,7 +709,7 @@ test.describe('Roadmap: label column and shared track column', () => {
 // Bar colour follows status (not dates), and one legend explains the four tones.
 test.describe('Roadmap: status tones and legend', () => {
   const TONES = ['done', 'review', 'in-progress', 'todo'] as const;
-  const LABELS = ['Done', 'In review', 'In progress', 'To do'];
+  const LABELS = ['Done', 'In review', 'In progress', 'Todo'];
   const counts = (c: Partial<(typeof WINDOW_ROADMAP)[number]['statusCounts']>) => ({
     done: 0,
     review: 0,
@@ -719,7 +719,7 @@ test.describe('Roadmap: status tones and legend', () => {
     ...c,
   });
   // One project-a phase per tone. Finished phases are past (dimmed) but keep
-  // their tone; the To do phase starts after the pinned clock (a stub bar).
+  // their tone; the Todo phase starts after the pinned clock (a stub bar).
   const TONE_ROADMAP = [
     {
       ...WINDOW_ROADMAP[0],

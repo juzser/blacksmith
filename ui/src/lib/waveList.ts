@@ -47,7 +47,7 @@ export function epicStatusFromFlow(flow: Pick<FlowGraph, 'nodes'>): EpicStatus {
   return {
     statusTone: status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral',
     statusLabel:
-      status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
+      status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'Todo',
   };
 }
 
@@ -90,7 +90,7 @@ const SERVER_EPIC_STATUS: Record<ServerEpicStatus, EpicStatus> = {
   done: { statusTone: 'done', statusLabel: 'Done' },
   review: { statusTone: 'review', statusLabel: 'In review' },
   in_progress: { statusTone: 'progress', statusLabel: 'In progress' },
-  todo: { statusTone: 'todo', statusLabel: 'To do' },
+  todo: { statusTone: 'todo', statusLabel: 'Todo' },
 };
 
 /**

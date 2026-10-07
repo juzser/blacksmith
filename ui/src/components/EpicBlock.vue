@@ -125,7 +125,7 @@ const emit = defineEmits<{
 
 // Phase mode's per-epic "Show waves" toggle (spec §2): not persisted to the
 // URL, so plain local component state keyed by epicId is enough. Opened by
-// default for an In-progress epic, closed for Done/To do, and never shown
+// default for an In-progress epic, closed for Done/Todo, and never shown
 // at all for a zero-task epic (`epics` loop below gates the button on that).
 const openWaves = reactive<Record<string, boolean>>({});
 function isOpen(epic: EpicSection): boolean {
