@@ -8,8 +8,10 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'componen
 const BADGE = readFileSync(join(KIT, 'AgentStatusBadge.vue'), 'utf8');
 
 describe('kit/AgentStatusBadge.vue', () => {
+  // Only the two fields agentStatus() reads, so Task detail's agents rows
+  // (no tokens, no lastEventType) render through the same badge.
   it('declares an agent prop and a now test seam', () => {
-    expect(BADGE).toMatch(/agent:\s*SessionAgent/);
+    expect(BADGE).toMatch(/agent:\s*Pick<SessionAgent, 'status' \| 'dispatchedAt'>/);
     expect(BADGE).toMatch(/now\?:\s*string/);
   });
 

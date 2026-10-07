@@ -219,10 +219,10 @@ export function taskStatusKitTone(status: string): KitTone {
 
 /**
  * DS3 item 4 (Task detail rebuild) — the old `Tone` vocabulary
- * (info/success/warning/danger/discovery/neutral) read by `severityTone()`,
- * `findingStatusTone()` and `agentStatusTone()` onto the kit `Tag`'s `KitTone`
- * set, so those three existing maps don't need a second, parallel copy of
- * their own value lists just to target a different component.
+ * (info/success/warning/danger/discovery/neutral) read by `severityTone()`
+ * and `findingStatusTone()` onto the kit `Tag`'s `KitTone` set, so those
+ * existing maps don't need a second, parallel copy of their own value lists
+ * just to target a different component.
  */
 const TONE_TO_KIT_TONE: Record<Tone, KitTone> = {
   info: 'progress',
@@ -242,11 +242,6 @@ export function severityKitTone(severity: string): { tone: KitTone; variant: 'su
 /** finding_status -> kit `Tag` tone. */
 export function findingStatusKitTone(status: string): KitTone {
   return TONE_TO_KIT_TONE[findingStatusTone(status)];
-}
-
-/** agents.status -> kit `Tag` tone (NOT run_status — see `agentStatusTone`'s comment). */
-export function agentStatusKitTone(status: string): KitTone {
-  return TONE_TO_KIT_TONE[agentStatusTone(status)];
 }
 
 /** roadmap.md milestone status -> kit `Tag` tone (DS4 S2, Roadmap's EpicBlock). */
