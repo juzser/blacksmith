@@ -89,6 +89,53 @@ test.describe('Task detail', () => {
     }
   });
 
+  // A verifier / spec-reviewer run ends with a judge-verdict event; the History
+  // tab must list it with the agent's role and its verdict, not stop at the
+  // dispatch row. The response is routed so no shared fixture changes.
+  test('Run history lists a judge-verdict row with the verifier label and its outcome', async ({
+    page,
+  }) => {
+    await page.route('**/api/tasks/*/runs*', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              eventId: 'verdict-1',
+              ts: '2029-06-01T00:02:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: 'refute',
+            },
+            {
+              eventId: 'dispatch-1',
+              ts: '2029-06-01T00:01:00.000Z',
+              kind: 'dispatch',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: null,
+            },
+          ],
+          totals: {
+            tokens: null,
+            agentTimeMs: null,
+            elapsedMs: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        },
+      }),
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toContainText('Finding checker');
+    await expect(rows.first().getByText('refute', { exact: true })).toBeVisible();
+  });
+
   // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries
   // token_usage (1300 total across both runs) and a dispatch-to-result span,
   // so tokens and elapsed render; agent time stays absent (no run writes a

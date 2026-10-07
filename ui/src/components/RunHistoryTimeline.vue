@@ -25,12 +25,13 @@ import TimelineRow from './kit/TimelineRow.vue';
 defineProps<{ runs: TaskRun[] }>();
 
 // Item 2 of the mock-conformance brief: one row style across the History tab.
-// TaskRun's four kinds map onto TimelineRow's nine (kindFor() in
+// TaskRun's five kinds map onto TimelineRow's nine (kindFor() in
 // timelineDisplay.ts) the same way dispatch_decision/judge-verdict/
 // task-result-recorded/error-logged do there.
 const KIND_FOR_RUN: Record<TaskRun['kind'], EventKind> = {
   dispatch: 'dispatch',
   'judge-report': 'feedback',
+  'judge-verdict': 'feedback',
   result: 'returned',
   error: 'error',
 };

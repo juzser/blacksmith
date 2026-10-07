@@ -273,6 +273,7 @@ export function milestoneStatusLabel(status: string): string {
 const RUN_KIND_DEFAULT_KIT_TONE: Record<string, KitTone> = {
   dispatch: 'progress',
   'judge-report': 'review',
+  'judge-verdict': 'review',
   result: 'done',
   error: 'danger',
 };

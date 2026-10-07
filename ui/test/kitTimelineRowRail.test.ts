@@ -76,6 +76,10 @@ describe('RunHistoryTimeline.vue rail rendering', () => {
     expect(RUN_HISTORY).toMatch(/:tag="outcomeTag\(run\)"/);
   });
 
+  it('maps a judge-verdict run to the feedback row kind', () => {
+    expect(RUN_HISTORY).toMatch(/'judge-verdict': 'feedback'/);
+  });
+
   it('keeps list semantics (role="list", TimelineRow renders the <li>s)', () => {
     expect(RUN_HISTORY).toMatch(
       /<ol v-if="runs\.length > 0" class="bs-run-history timeline-feed" role="list">/,

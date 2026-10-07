@@ -266,6 +266,11 @@ describe('lib/taxonomy.ts — runOutcomeKitTone() (RunHistoryTimeline part 2 fix
     expect(runOutcomeKitTone('judge-report', '2-findings')).toBe('review');
   });
 
+  it('a judge-verdict row keeps the review tone unless its outcome names a failure', () => {
+    expect(runOutcomeKitTone('judge-verdict', 'refute')).toBe('review');
+    expect(runOutcomeKitTone('judge-verdict', null)).toBe('review');
+  });
+
   it('falls back to neutral for an unknown kind', () => {
     expect(runOutcomeKitTone('invented', null)).toBe('neutral');
   });
