@@ -253,6 +253,52 @@ describe('specChange — a worker proposes, the operator decides', () => {
       expect(amended?.record.payload.diff).toEqual(proposal.diff);
     });
 
+    it('refuses a supersede key naming neither a plan task nor a log-added one, before anything is written', async () => {
+      // The keys resolve up front, as `amendPlan` resolves them. Unresolved, a
+      // key naming nothing matched nothing in the draft and its replacement
+      // landed as added work, so the proposal went through and recorded a
+      // diff approval would then refuse. The log holds a follow-up, so the
+      // key is unknown to both halves, not to an empty log.
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'system',
+          event_type: 'task-added',
+          task_id: 'envkit/followup-1',
+          plan_version: 1,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            case: 'bugfix',
+            origin: 'escalation',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Follow-up 1.',
+            claims: ['src/other.ts'],
+            budget_tokens: 4000,
+          },
+        },
+        { stateDir },
+      );
+      const task = planFixture().tasks[0];
+      if (task === undefined) throw new Error('unreachable');
+      const changes: PlanChanges = {
+        supersede: { 'task-9-nowhere': { ...task, task_id: 'envkit/task-9b' } },
+      };
+
+      await expect(
+        proposeSpecChange(proposeInput({ changes }), rootCtx(), opts()),
+      ).rejects.toMatchObject({ code: 'plan.unknown-task' });
+
+      // The session-start root and the follow-up, nothing else: no proposal,
+      // and no anchor finding left waiting on an amendment nobody will cut.
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      expect(events.filter((e) => e.record.event_type === SPEC_CHANGE_PROPOSED_EVENT)).toHaveLength(
+        0,
+      );
+      expect(events).toHaveLength(2);
+    });
+
     it('refuses a proposal that names no criterion', async () => {
       await expect(
         proposeSpecChange(proposeInput({ criterion_ref: '  ' }), rootCtx(), opts()),

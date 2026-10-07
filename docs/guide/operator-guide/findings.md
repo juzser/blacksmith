@@ -126,8 +126,9 @@ neither is refused with `plan.unknown-task` before anything is written.
 Several keys may fold into one task by carrying the same replacement record;
 the new version holds one live copy. Any other way of landing a second live
 record under one id — two keys with different records for it, or a
-replacement or added task whose id another task still holds live — is
-refused with `plan.duplicate-live-task`.
+replacement or added task whose id another task of the plan still holds
+live — is refused with `plan.duplicate-live-task`; the id of a live task only
+the event log added is not checked yet.
 
 The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
