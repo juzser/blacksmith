@@ -1668,6 +1668,26 @@ describe('db/queries.ts', () => {
       const runs = await runsFor('sess-verdict-null', 'epic-v/task-2', { verdict: null, round: 5 });
       expect(runs[0]).toMatchObject({ kind: 'judge-verdict', round: 5, outcome: null });
     });
+
+    it('words a verdict that never ran like the Activity feed: failed with its error code', async () => {
+      const runs = await runsFor('sess-verdict-fail', 'epic-v/task-3', {
+        ok: false,
+        verdict: null,
+        error_code: 'provider.missing-api-key',
+      });
+      expect(runs[0]).toMatchObject({
+        kind: 'judge-verdict',
+        outcome: 'failed: provider.missing-api-key',
+      });
+    });
+
+    it('says plain failed when the failed verdict carries no error code', async () => {
+      const runs = await runsFor('sess-verdict-fail-nocode', 'epic-v/task-4', {
+        ok: false,
+        verdict: null,
+      });
+      expect(runs[0]).toMatchObject({ kind: 'judge-verdict', outcome: 'failed' });
+    });
   });
 
   describe('taskDetail() artifacts order (newest first, task detail Outputs tab)', () => {

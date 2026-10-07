@@ -101,6 +101,15 @@ test.describe('Task detail', () => {
         json: {
           runs: [
             {
+              eventId: 'verdict-2',
+              ts: '2029-06-01T00:03:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 3,
+              tokensTotal: null,
+              outcome: 'failed: provider.missing-api-key',
+            },
+            {
               eventId: 'verdict-1',
               ts: '2029-06-01T00:02:00.000Z',
               kind: 'judge-verdict',
@@ -132,9 +141,12 @@ test.describe('Task detail', () => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
     const rows = page.locator('.bs-run-history .bs-timeline-row');
-    await expect(rows).toHaveCount(2);
+    await expect(rows).toHaveCount(3);
     await expect(rows.first()).toContainText('Finding checker');
-    await expect(rows.first().getByText('refute', { exact: true })).toBeVisible();
+    await expect(
+      rows.first().getByText('failed: provider.missing-api-key', { exact: true }),
+    ).toBeVisible();
+    await expect(rows.nth(1).getByText('refute', { exact: true })).toBeVisible();
   });
 
   // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries

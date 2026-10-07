@@ -237,6 +237,11 @@ describe('lib/taxonomy.ts — runOutcomeKitTone() (RunHistoryTimeline part 2 fix
     expect(runOutcomeKitTone('error', null)).toBe('danger');
   });
 
+  it('a judge verdict that failed is danger; a refute keeps the review default', () => {
+    expect(runOutcomeKitTone('judge-verdict', 'failed: provider.missing-api-key')).toBe('danger');
+    expect(runOutcomeKitTone('judge-verdict', 'refute')).toBe('review');
+  });
+
   it('dispatch and judge-report keep their own default tone when outcome names no failure', () => {
     expect(runOutcomeKitTone('dispatch', null)).toBe('progress');
     expect(runOutcomeKitTone('judge-report', 'no-findings')).toBe('review');

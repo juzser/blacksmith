@@ -3705,13 +3705,21 @@ function outcomeFromPayload(eventType: string, payload: Record<string, unknown>)
   if (eventType === ERROR_EVENT_TYPE && typeof payload.error === 'string') return payload.error;
   if (eventType === JUDGE_REPORT_EVENT_TYPE) {
     // judge-reported carries no accept/dismiss verdict of its own (that is a
-    // separate judge-verdict event, handled below) — the closest the report payload has to an outcome is whether it attested
-    // "no findings" rather than naming a finding count.
+    // separate judge-verdict event, handled below) — the closest the report
+    // payload has to an outcome is whether it attested "no findings" rather
+    // than naming a finding count.
     if (payload.attested_by !== undefined && payload.attested_by !== null) return 'no-findings';
     if (typeof payload.finding_count === 'number') return `${payload.finding_count}-findings`;
   }
-  if (eventType === JUDGE_VERDICT_EVENT_TYPE && typeof payload.verdict === 'string')
-    return payload.verdict;
+  if (eventType === JUDGE_VERDICT_EVENT_TYPE) {
+    // A verdict that never ran reads like the Activity feed's title: `failed`,
+    // with the error code when the payload names one.
+    if (payload.ok === false)
+      return typeof payload.error_code === 'string' && payload.error_code !== ''
+        ? `failed: ${payload.error_code}`
+        : 'failed';
+    if (typeof payload.verdict === 'string') return payload.verdict;
+  }
   return null;
 }
 
@@ -3734,7 +3742,11 @@ export interface TaskRun {
   round: number | null;
   /** From the event's own `token_usage.total_tokens`, never backfilled; null when not measured. */
   tokensTotal: number | null;
-  /** `run_status` for a result, the error class for an error, the verdict for a judge report; null otherwise. */
+  /**
+   * `run_status` for a result, the error class for an error, the finding count
+   * for a judge report, the verdict word (or `failed[: code]` when the run
+   * reached none) for a judge verdict; null otherwise.
+   */
   outcome: string | null;
 }
 
