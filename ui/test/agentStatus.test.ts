@@ -44,7 +44,7 @@ describe('agentStatus', () => {
     expect(agentStatus(stale, now)).toEqual({
       state: 'no-result',
       label: 'No result after 4h',
-      tone: 'warning',
+      tone: 'blocked',
     });
   });
 

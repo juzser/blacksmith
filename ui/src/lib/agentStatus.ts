@@ -9,7 +9,7 @@ import { roleLabel } from './roleLabels.js';
 import { titleFor } from './timelineDisplay.js';
 
 export type AgentStatusState = 'working' | 'no-result' | 'done' | 'failed' | 'stopped';
-export type AgentStatusTone = 'progress' | 'warning' | 'done' | 'danger' | 'neutral';
+export type AgentStatusTone = 'progress' | 'blocked' | 'done' | 'danger' | 'neutral';
 
 export interface AgentStatus {
   state: AgentStatusState;
@@ -32,7 +32,7 @@ export function agentStatus(agent: SessionAgent, nowIso: string): AgentStatus {
     return { state: 'stopped', label: 'Stopped', tone: 'neutral' };
   }
   if (isPastStaleWindow(agent.dispatchedAt, nowIso)) {
-    return { state: 'no-result', label: 'No result after 4h', tone: 'warning' };
+    return { state: 'no-result', label: 'No result after 4h', tone: 'blocked' };
   }
   return { state: 'working', label: 'Working', tone: 'progress' };
 }
