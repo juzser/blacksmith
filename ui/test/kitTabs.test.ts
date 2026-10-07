@@ -53,3 +53,12 @@ describe('kit/Tabs.vue', () => {
     expect(TABS).not.toMatch(/v-if="modelValue === tab\.id"/);
   });
 });
+
+describe('kit/Tabs.vue outside-selection scroll', () => {
+  // scrollIntoView scrolls every scrollable ancestor, the page included, so a
+  // selection change while the strip is off-screen would jump the page.
+  it('scrolls only its own list, never through scrollIntoView', () => {
+    expect(TABS).not.toMatch(/scrollIntoView/);
+    expect(TABS).toMatch(/ref="list"/);
+  });
+});

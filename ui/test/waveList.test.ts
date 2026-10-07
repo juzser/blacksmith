@@ -93,10 +93,10 @@ describe('buildWaveList() (DS4 S3 §2)', () => {
 });
 
 describe('epicStatusFromFlow() (DS4 S1/S3 shared status logic)', () => {
-  it('reads "To do" for an epic with no tasks', () => {
+  it('reads "Todo" for an epic with no tasks', () => {
     expect(epicStatusFromFlow({ nodes: [] })).toEqual({
       statusTone: 'neutral',
-      statusLabel: 'To do',
+      statusLabel: 'Todo',
     });
   });
 
@@ -165,7 +165,7 @@ describe('epicStatusFromServerStatus() (DS4 S5c §2)', () => {
     });
     expect(epicStatusFromServerStatus('todo')).toEqual({
       statusTone: 'todo',
-      statusLabel: 'To do',
+      statusLabel: 'Todo',
     });
   });
 });
@@ -254,7 +254,7 @@ describe('epicPhase() (DS4 S4 R1)', () => {
 describe('mobileEpicStatusLine() (DS4 S4 §1)', () => {
   it('reads "No tasks tracked" for a zero-task epic', () => {
     expect(
-      mobileEpicStatusLine({ statusLabel: 'To do', tasksTotal: 0, tasksCompleted: 0, waves: [] }),
+      mobileEpicStatusLine({ statusLabel: 'Todo', tasksTotal: 0, tasksCompleted: 0, waves: [] }),
     ).toBe('No tasks tracked');
   });
 

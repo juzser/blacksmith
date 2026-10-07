@@ -42,8 +42,8 @@ function tokensItem(run: DispatchRun | undefined): string | null {
   return `${formatCompactNumber(total)} tokens`;
 }
 
-// Visual pass round 4, item 2: `duration_ms` is never stamped by any writer
-// in this codebase today (durationMsFromPayload's own doc comment, same
+// Visual pass round 4, item 2: `duration_ms` is carried by only some
+// results (durationMsFromPayload's own doc comment, same
 // "not recorded anywhere" status ds-spec.md §4.3 gives Effort — which the
 // spec hides rather than labels "not measured"). Showing the literal string
 // on every single terminal dispatch/returned row, next to a real measured
@@ -689,7 +689,7 @@ export function titleFor(entry: TimelineEntry): string {
       // empty check), so only a row with no verdict field spells that out.
       return gateVerdict(entry) !== 'unrecorded' && p.detail
         ? `Dependency check: ${String(p.detail)}`
-        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
+        : `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]})${p.detail ? `: ${String(p.detail)}` : ''}`;
     case 'budget-check-result': {
       const overruns = Array.isArray(p.overruns) ? p.overruns : [];
       if (p.status === 'checked') {
@@ -907,8 +907,8 @@ function humanizeEventType(eventType: string): string {
  * field the kind IS supposed to carry but this particular row's payload
  * came back null for (D-169's own "say the absence" rule, one level down:
  * a null counts, a field that doesn't exist for this kind never did).
- * Two exceptions, both visual pass round 4 item 2: `duration_ms` (no writer
- * stamps it anywhere today) and an unresolved "because of" prompt link (the
+ * Two exceptions, both visual pass round 4 item 2: `duration_ms` (only some results
+ * carry it) and an unresolved "because of" prompt link (the
  * prompt exists, the caller just couldn't resolve it from what it has in
  * hand) are both omitted rather than labelled — see `durationItem` and
  * `becauseOfItem`.

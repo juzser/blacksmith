@@ -71,7 +71,123 @@ test.describe('Task detail', () => {
     const rows = page.locator('.bs-run-history .bs-timeline-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
-    await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('.bs-run-history .bs-timeline-row__status').getByText('done', { exact: true }),
+    ).toBeVisible();
+  });
+
+  // A 375px phone is the narrowest supported width. The page's own scrollWidth
+  // stays 375 even when the content column has grown wider (the shell clips
+  // it, so cards are cut off on the right), so this measures the column and
+  // the tab strip's right edge too. The committed baselines are 390px wide and
+  // never showed it.
+  test('375px: no tab makes the content column wider than the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    const rights: Record<string, number> = {};
+    for (const task of [DEMO_HUB_COMPLETED_TASK, DEMO_HUB_WAIVABLE_TASK]) {
+      await page.goto(`/tasks/${encodeURIComponent(task)}`);
+      for (const name of ['What was asked', 'Findings', 'Outputs', 'History']) {
+        await page.getByRole('tab', { name }).click();
+        const m = await page.evaluate(() => {
+          const right = (sel: string) =>
+            Math.round(document.querySelector(sel)?.getBoundingClientRect().right ?? 0);
+          return {
+            page: document.documentElement.scrollWidth,
+            column: right('.bs-task-detail__layout > *'),
+            tabs: right('.bs-tabs__list'),
+          };
+        });
+        rights[`${task} ${name}`] = Math.max(m.page, m.column, m.tabs);
+        console.log(`task-detail 375px ${task} ${name}: ${JSON.stringify(m)}`);
+      }
+    }
+    for (const right of Object.values(rights)) expect(right).toBeLessThanOrEqual(375);
+  });
+
+  // ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
+  // within itself, so it is never cut at the content column's edge with empty
+  // page padding beyond it.
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`${viewport.width}px: the tab strip runs edge to edge and keeps the selected tab whole`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+      const list = page.getByRole('tablist', { name: 'Task detail sections' });
+      const wholeInViewport = async (name: string) => {
+        const box = await page.getByRole('tab', { name }).boundingBox();
+        expect(box, `${name} tab box`).not.toBeNull();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+      };
+      const listBox = await list.boundingBox();
+      expect(listBox?.x).toBe(0);
+      expect(listBox?.width).toBe(viewport.width);
+      await wholeInViewport('What was asked');
+      await page.getByRole('tab', { name: 'History' }).click();
+      await wholeInViewport('History');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        viewport.width,
+      );
+    });
+  }
+
+  // ds-review.html `.mtabs`: on the phone the selected tab is weight 600 with a
+  // text-coloured underline and the rest are weight 400; desktop is unchanged.
+  test('selected tab styling: phone follows the mock, desktop keeps its look', async ({ page }) => {
+    const tabStyle = (name: string) =>
+      page.getByRole('tab', { name }).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { weight: cs.fontWeight, color: cs.color, underline: cs.borderBottomColor };
+      });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    const phoneSelected = await tabStyle('What was asked');
+    expect(phoneSelected.weight).toBe('600');
+    expect(phoneSelected.underline).toBe(phoneSelected.color);
+    expect((await tabStyle('History')).weight).toBe('400');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const desktopSelected = await tabStyle('What was asked');
+    expect(desktopSelected.weight).toBe('500');
+    expect(desktopSelected.underline).not.toBe(desktopSelected.color);
+  });
+
+  // Tabs.vue scrolls its own list, never the page, when the selection changes
+  // from outside. Navigation is made client-side the way a router link does:
+  // pushState + popstate.
+  const navigateInApp = (page: import('@playwright/test').Page, path: string) =>
+    page.evaluate((to) => {
+      history.pushState({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+
+  test('375px: an outside reset never moves the page', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    await page.evaluate(() => {
+      const pad = document.createElement('div');
+      pad.id = 'e2e-pad';
+      pad.style.height = '3000px';
+      document.body.append(pad);
+      window.scrollTo(0, 600);
+    });
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    const strip = await page
+      .getByRole('tablist', { name: 'Task detail sections' })
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    expect(strip).toBeLessThan(0);
+    await navigateInApp(page, `/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
   });
 
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
@@ -88,6 +204,118 @@ test.describe('Task detail', () => {
     for (let i = 0; i < 2; i++) {
       await expect(rows.nth(i).locator('.bs-timeline-row__ts:visible')).toHaveCount(1);
     }
+  });
+
+  // A verifier / spec-reviewer run ends with a judge-verdict event; the History
+  // tab must list it with the agent's role and its verdict, not stop at the
+  // dispatch row. The response is routed so no shared fixture changes.
+  test('Run history lists a judge-verdict row with the verifier label and its outcome', async ({
+    page,
+  }) => {
+    await page.route('**/api/tasks/*/runs*', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              eventId: 'verdict-2',
+              ts: '2029-06-01T00:03:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 3,
+              tokensTotal: null,
+              outcome: 'failed: provider.missing-api-key',
+            },
+            {
+              eventId: 'verdict-1',
+              ts: '2029-06-01T00:02:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: 'refute',
+            },
+            {
+              eventId: 'dispatch-1',
+              ts: '2029-06-01T00:01:00.000Z',
+              kind: 'dispatch',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: null,
+            },
+          ],
+          totals: {
+            tokens: null,
+            agentTimeMs: null,
+            elapsedMs: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        },
+      }),
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toContainText('Finding checker');
+    await expect(
+      rows
+        .first()
+        .locator('.bs-timeline-row__status', { hasText: 'failed: provider.missing-api-key' }),
+    ).toBeVisible();
+    await expect(
+      rows.nth(1).locator('.bs-timeline-row__status', { hasText: 'refute' }),
+    ).toBeVisible();
+  });
+
+  // At phone width a long outcome tag must not squeeze the title to nothing:
+  // the tag shrinks and ellipsises, the title keeps a usable width, and the
+  // full outcome stays reachable in the expanded details.
+  test('Phone History row keeps its title when the outcome tag is long', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.route('**/api/tasks/*/runs*', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              eventId: 'verdict-long',
+              ts: '2029-06-01T00:03:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 3,
+              tokensTotal: null,
+              outcome: 'failed: provider.missing-api-key',
+            },
+          ],
+          totals: {
+            tokens: null,
+            agentTimeMs: null,
+            elapsedMs: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        },
+      }),
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title');
+    await expect(title).toBeVisible();
+    const titleBox = await title.boundingBox();
+    expect(titleBox?.width ?? 0).toBeGreaterThanOrEqual(64);
+    const rowBox = await row.boundingBox();
+    const tagBox = await row.locator('.bs-timeline-row__status').boundingBox();
+    expect((tagBox?.x ?? 0) + (tagBox?.width ?? 0)).toBeLessThanOrEqual(
+      (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
+    await row.getByRole('button', { name: 'Show details' }).click();
+    await expect(row.locator('dd', { hasText: 'failed: provider.missing-api-key' })).toBeVisible();
+    await expect(row.locator('dt', { hasText: 'Outcome' })).toBeVisible();
   });
 
   // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries

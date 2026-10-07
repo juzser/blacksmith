@@ -253,4 +253,40 @@ describe('taskTotals() (DS6 PR2)', () => {
       handle.sqlite.close();
     }
   });
+
+  it('a judge-verdict row moves none of the totals', async () => {
+    const task = 'epic-totals/task-9';
+    const base =
+      tiedLine('dispatch_decision', '2029-06-01T00:00:00.000Z', {
+        task_id: task,
+        agent_role: 'verifier',
+        provider: 'claude',
+        model_tier: 'mid',
+      }) +
+      tiedLine('task-result-recorded', '2029-06-01T00:10:00.000Z', {
+        task_id: task,
+        run_status: 'done',
+        token_usage: { total_tokens: 100 },
+        duration_ms: 1000,
+      });
+    const verdict = tiedLine('judge-verdict', '2029-06-01T00:20:00.000Z', {
+      task_id: task,
+      agent: 'verifier',
+      verdict: 'refute',
+      token_usage: { total_tokens: 7 },
+      duration_ms: 5,
+    });
+    const handle = await buildHandle(base + verdict);
+    try {
+      expect(taskTotals(handle.db, task)).toEqual({
+        tokens: 100,
+        agentTimeMs: 1000,
+        elapsedMs: 600000,
+        startedAt: '2029-06-01T00:00:00.000Z',
+        endedAt: '2029-06-01T00:10:00.000Z',
+      });
+    } finally {
+      handle.sqlite.close();
+    }
+  });
 });

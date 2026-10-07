@@ -1365,7 +1365,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'schema-check-result': ['Schema check: no verdict recorded', ''],
       'artifact-check-result': ['Artifact check result', ''],
       'commit-check-result': ['Commit check result', ''],
-      'deps-check-result': ['Dependency check (no verdict recorded): ', ''],
+      'deps-check-result': ['Dependency check (no verdict recorded)', ''],
       'judges-outstanding': ['Judges outstanding', ''],
       'grader-verdict': ['Grader verdict', ''],
       'budget-check-result': ['Budget check result', ''],
