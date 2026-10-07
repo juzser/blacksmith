@@ -49,6 +49,7 @@ import {
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.js';
+import { normalizeProjectName } from '../../../factory/orchestrator/dist/projectName.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
@@ -1222,6 +1223,20 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           ).map((r) => r.s),
         ]);
         ownerId = g.lineage.find((id) => owners.has(id)) ?? rootId;
+        // No task row names a project (an epic in its research step has no
+        // task rows yet): the newest project stamped on this epic's own
+        // events, from its owner session on. Earlier sessions of a lineage
+        // continued from another epic never lend theirs.
+        if (project === null) {
+          const own = g.lineage.slice(Math.max(0, g.lineage.indexOf(ownerId)));
+          const ownMarks = own.map(() => '?').join(',');
+          const stamped = handle.sqlite
+            .prepare(
+              `select project as p from events_raw where project is not null and session_id in (${ownMarks}) order by ts desc, event_id desc limit 1`,
+            )
+            .get(...own) as { p: string | null } | undefined;
+          project = stamped?.p ? normalizeProjectName(stamped.p) : null;
+        }
 
         // Really working now: live, dispatched inside the same window the rest
         // of the read side calls "working", on this epic, on a task that is

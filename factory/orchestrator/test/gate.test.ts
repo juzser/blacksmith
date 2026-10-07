@@ -2456,6 +2456,23 @@ describe('gate.ts budget check (P9-18)', () => {
     expect(event).not.toHaveProperty('tokensUsed');
   });
 
+  it('never writes an unmeasured placeholder 0/0/0 as tokensUsed', async () => {
+    await commitLines(20);
+    const outcome = await runGate(
+      budgetInput({
+        result: resultFixture({
+          token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        }),
+        budget: { tokens: 1000, diff_lines: 400 },
+      }),
+      ctx(),
+      { stateDir },
+    );
+
+    expect(outcome.budgetCheck).not.toHaveProperty('tokensUsed');
+    expect(await budgetEvent()).not.toHaveProperty('tokensUsed');
+  });
+
   it('emits the event even when no budget was declared, saying so', async () => {
     const outcome = await runGate(budgetInput(), ctx(), { stateDir });
 

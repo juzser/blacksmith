@@ -1646,6 +1646,62 @@ describe('cliSessions reader', () => {
       const current = epics.find((e) => e.epicId === 'epic-new');
       expect(current?.rootSessionId).toBe('sess-second');
     });
+
+    describe('project of an epic with no task rows yet', () => {
+      /** A research dispatch into `epicId`, stamped with `project` when given. */
+      const research = (
+        s: Awaited<ReturnType<typeof factorySession>>,
+        epicId: string,
+        project?: string,
+      ) =>
+        s.add(
+          'dispatch_decision',
+          {
+            agent_role: 'researcher',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            spec_ref: 'specs/thing.json',
+            reason: 'research the thing',
+            epic_id: epicId,
+          },
+          { actor: 'planner', ...(project ? { project } : {}) },
+        );
+
+      it('reads the newest project stamped on its own events', async () => {
+        const s = await factorySession('sess-research', SID_B);
+        await research(s, 'epic-a', 'project-b');
+        await new Promise((r) => setTimeout(r, 5));
+        await research(s, 'epic-a', 'project-a');
+        await research(s, 'epic-a');
+
+        const epics = await linkedEpics(171, SID_B);
+        expect(epics.map((e) => [e.epicId, e.project])).toEqual([['epic-a', 'project-a']]);
+      });
+
+      it('does not borrow the project of the epic its lineage continues from', async () => {
+        const prev = await factorySession('sess-a', SID_B);
+        await research(prev, 'epic-a', 'project-a');
+        await new Promise((r) => setTimeout(r, 5));
+        const next = await factorySession('sess-b', SID_B, prev.last());
+        await research(next, 'epic-b');
+
+        const epics = await linkedEpics(172, SID_B);
+        const current = epics.find((e) => e.epicId === 'epic-b');
+        expect(current?.rootSessionId).toBe('sess-b');
+        expect(current?.project).toBeNull();
+      });
+
+      it('lets task rows win over a project stamped on its events', async () => {
+        const s = await factorySession('sess-tasks', SID_B);
+        await s.addTask('epic-a', 'epic-a/task-1', {}, 'project-b');
+        await new Promise((r) => setTimeout(r, 5));
+        await research(s, 'epic-a', 'project-a');
+
+        const epics = await linkedEpics(173, SID_B);
+        expect(epics.map((e) => [e.epicId, e.project])).toEqual([['epic-a', 'project-b']]);
+      });
+    });
     describe('focus (Now / Next)', () => {
       const pause = () => new Promise((r) => setTimeout(r, 3));
       const none = () => path.join(tmp, 'none.md');

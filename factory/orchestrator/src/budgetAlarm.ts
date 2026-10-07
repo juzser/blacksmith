@@ -259,11 +259,8 @@ export function readMeasuredSpend(events: readonly StoredEvent[]): Map<string, n
     const { payload, event_type: eventType } = event.record;
 
     if (eventType === 'task-result-recorded') {
-      const usage = payload.token_usage;
-      if (usage !== null && typeof usage === 'object') {
-        const total = payloadNumber(usage as Record<string, unknown>, 'total_tokens');
-        if (total !== null && isPlausibleTokenCount(total)) record(taskId, total);
-      }
+      const read = readTokenUsage(payload.token_usage);
+      if (read.measured) record(taskId, read.total);
       continue;
     }
 
@@ -591,5 +588,30 @@ export function checkBudgetAlarm(
     unattributedDispatches,
     unattributedRoles: [...unattributedRoles].sort(),
     ok: epics.every((epic) => epic.status === 'under'),
+  };
+}
+
+export type TokenUsageRead =
+  | { measured: true; total: number; input: number | null; output: number | null }
+  | { measured: false };
+
+/**
+ * The one rule for "was this result's token count measured". Lives beside
+ * `isPlausibleTokenCount` so every reader (this alarm, db/queries.ts, the
+ * gate) imports one module that already owns the floor. Measured means an
+ * object whose `total_tokens` is a plausible number; a bare number, a
+ * `{measured: false}`, a missing total and a placeholder under the floor are
+ * all unmeasured.
+ */
+export function readTokenUsage(tokenUsage: unknown): TokenUsageRead {
+  if (tokenUsage === null || typeof tokenUsage !== 'object') return { measured: false };
+  const usage = tokenUsage as Record<string, unknown>;
+  const total = payloadNumber(usage, 'total_tokens');
+  if (total === null || !isPlausibleTokenCount(total)) return { measured: false };
+  return {
+    measured: true,
+    total,
+    input: payloadNumber(usage, 'input_tokens'),
+    output: payloadNumber(usage, 'output_tokens'),
   };
 }
