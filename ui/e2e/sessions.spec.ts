@@ -437,6 +437,30 @@ test.describe('Sessions', () => {
     await expect(page).not.toHaveURL(/scope=/);
   });
 
+  const SHOW_ALL_FONTS: { label: string; css: string | null }[] = [
+    { label: '', css: null },
+    { label: ' (Arial metrics)', css: ':root { --bs-font-sans: Arial, sans-serif; }' },
+  ];
+  for (const font of SHOW_ALL_FONTS) {
+    test(`phone: the quiet line "Show all" link is a 44px target${font.label}`, async ({
+      page,
+    }) => {
+      await serveScope(page);
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/sessions');
+      if (font.css) await page.addStyleTag({ content: font.css });
+      const link = page.getByRole('link', { name: 'Show all' });
+      await expect(link).toBeVisible();
+      const box = await link.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+      const noScroll = await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      );
+      expect(noScroll).toBe(true);
+    });
+  }
+
   test('a deep link to a quiet session widens the scope so its row is visible', async ({
     page,
   }) => {
