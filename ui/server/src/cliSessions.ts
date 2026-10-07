@@ -253,9 +253,14 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f]+/g;
 
 function clean(value: string): string {
   const flat = value.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
-  // Cut on code points, so a surrogate pair is never split.
+  // Cut on code points, so a surrogate pair is never split. A cut text ends
+  // with an ellipsis so it never reads as a complete sentence.
   const points = Array.from(flat);
-  return points.length > TEXT_MAX ? points.slice(0, TEXT_MAX).join('') : flat;
+  if (points.length <= TEXT_MAX) return flat;
+  return `${points
+    .slice(0, TEXT_MAX - 1)
+    .join('')
+    .trimEnd()}…`;
 }
 
 async function readSlice(fs: CliFs, file: string, pos: number, len: number): Promise<Buffer> {

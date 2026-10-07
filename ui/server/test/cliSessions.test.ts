@@ -299,6 +299,29 @@ describe('cliSessions reader', () => {
       expect(s.next?.length).toBeLessThanOrEqual(280);
     });
 
+    it('keeps text of exactly 280 code points and marks a 281-point text as cut', async () => {
+      await session(114, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('go'), asst(text('y'.repeat(280)))]));
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe('y'.repeat(280));
+      await transcript(root, SID_A, jsonl([user('go'), asst(text('y'.repeat(281)))]));
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe(`${'y'.repeat(279)}…`);
+    });
+
+    it('trims whitespace before the ellipsis and never leaves a lone surrogate', async () => {
+      await session(115, { status: 'idle' });
+      await transcript(
+        root,
+        SID_A,
+        jsonl([user('go'), asst(text(`${'y'.repeat(278)} ${'z'.repeat(10)}`))]),
+      );
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe(`${'y'.repeat(278)}…`);
+      const emoji = '\u{1F600}';
+      await transcript(root, SID_A, jsonl([user('go'), asst(text(emoji.repeat(300)))]));
+      const out = must(must((await read()).sessions[0]).doingNow?.assistant);
+      expect(out).toBe(`${emoji.repeat(279)}…`);
+      expect(out.isWellFormed()).toBe(true);
+    });
+
     it('sets formatWarning for an unseen version and null for a known one', async () => {
       await session(114);
       expect((await read()).formatWarning).toBeNull();
