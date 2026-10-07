@@ -562,7 +562,9 @@ test.describe('Activity', () => {
     await page.goto('/activity');
     const time = page.locator('.bs-timeline-row__ts--meta:visible').first();
     await expect(time).toBeVisible();
-    const lineHeight = await time.evaluate((el) => Number.parseFloat(getComputedStyle(el).lineHeight));
+    const lineHeight = await time.evaluate((el) =>
+      Number.parseFloat(getComputedStyle(el).lineHeight),
+    );
     const box = await time.boundingBox();
     expect(box?.height ?? 0).toBeLessThanOrEqual(lineHeight + 2);
   });
