@@ -338,29 +338,69 @@ describe('bar tone follows status, not dates', () => {
     expect(lane.rows.find((r) => r.id === 'epic-a')?.bar?.tone).toBe('done');
   });
 
-  it('a phase of review + done tasks only folds to review', () => {
-    expect(phaseTone({ tasksTotal: 3, statusCounts: counts({ done: 1, review: 2 }) })).toBe(
-      'review',
-    );
+  it('a phase with no tasks takes its declared status', () => {
+    expect(phaseTone({ status: 'completed' })).toBe('done');
+    expect(phaseTone({ status: 'in-progress' })).toBe('in-progress');
+    expect(phaseTone({ status: 'planned' })).toBe('todo');
   });
 
-  it('a phase with every live task done is done even with superseded tasks', () => {
-    expect(phaseTone({ tasksTotal: 5, statusCounts: counts({ done: 3, superseded: 2 }) })).toBe(
-      'done',
-    );
-  });
-
-  it('a phase with every task superseded is todo', () => {
-    expect(phaseTone({ tasksTotal: 2, statusCounts: counts({ superseded: 2 }) })).toBe('todo');
-  });
-
-  it('a phase with some todo and some in progress is in-progress', () => {
+  it('a completed phase with every task superseded is done', () => {
     expect(
-      phaseTone({ tasksTotal: 3, statusCounts: counts({ todo: 1, inProgress: 1, done: 1 }) }),
+      phaseTone({ status: 'completed', tasksTotal: 2, statusCounts: counts({ superseded: 2 }) }),
+    ).toBe('done');
+  });
+
+  it('an in-progress phase of review + done tasks only is review', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 3,
+        statusCounts: counts({ done: 1, review: 2 }),
+      }),
+    ).toBe('review');
+  });
+
+  it('an in-progress phase with every live task done stays in-progress', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 5,
+        statusCounts: counts({ done: 3, superseded: 2 }),
+      }),
     ).toBe('in-progress');
   });
 
-  it('phaseStatusFromCounts mirrors the server fold', () => {
+  it('an in-progress phase with todo and in-progress tasks is in-progress', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 3,
+        statusCounts: counts({ todo: 1, inProgress: 1, done: 1 }),
+      }),
+    ).toBe('in-progress');
+  });
+
+  it('a completed phase with a task still in review is done', () => {
+    expect(
+      phaseTone({
+        status: 'completed',
+        tasksTotal: 2,
+        statusCounts: counts({ done: 1, review: 1 }),
+      }),
+    ).toBe('done');
+  });
+
+  it('a planned phase with a task in progress is todo', () => {
+    expect(
+      phaseTone({
+        status: 'planned',
+        tasksTotal: 2,
+        statusCounts: counts({ inProgress: 1, todo: 1 }),
+      }),
+    ).toBe('todo');
+  });
+
+  it('phaseStatusFromCounts still mirrors the server fold (its todo for no counts stays right)', () => {
     expect(phaseStatusFromCounts(counts({}), 0)).toBe('todo');
     expect(phaseStatusFromCounts(counts({ done: 2 }), 2)).toBe('done');
   });

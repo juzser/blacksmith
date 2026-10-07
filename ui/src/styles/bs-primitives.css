@@ -3869,7 +3869,8 @@ h2.rm-section__head {
 .rm-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--bs-space-2) var(--bs-space-4);
+  margin-top: var(--bs-space-2);
+  gap: var(--bs-space-1) var(--bs-space-3);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
 }

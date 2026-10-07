@@ -31,6 +31,21 @@ export function phaseStatusFromCounts(counts: StatusCounts, tasksTotal: number):
   return 'todo';
 }
 
+/**
+ * A phase bar's tone. The declared milestone status wins, so the bar agrees
+ * with the header's "N of M phases done" (`doneCountLabel`, roadmapWindow.ts)
+ * and the phase badge (`milestoneStatusLabel` / `milestoneStatusKitTone`,
+ * taxonomy.ts). Task counts only split an in-progress phase into review vs
+ * in progress.
+ */
+export function phaseTone(m: MilestoneProgress): BarTone {
+  if (m.status === 'completed') return 'done';
+  if (m.status !== 'in-progress') return 'todo';
+  const live = m.tasksTotal - m.statusCounts.superseded;
+  if (live > 0 && phaseStatusFromCounts(m.statusCounts, m.tasksTotal) === 'review') return 'review';
+  return 'in-progress';
+}
+
 export interface DateRange {
   startedAt: string | null;
   finishedAt: string | null;
@@ -279,13 +294,7 @@ export function buildSwimlane(milestones: MilestoneProgress[], now: Date): Swiml
       kind: 'phase',
       id: m.milestoneId,
       label: m.name,
-      bar: computeBar(
-        phaseRange,
-        barState(phaseRange, now),
-        TONE_BY_STATUS[phaseStatusFromCounts(m.statusCounts, m.tasksTotal)],
-        bounds,
-        now,
-      ),
+      bar: computeBar(phaseRange, barState(phaseRange, now), phaseTone(m), bounds, now),
     });
     for (const epicId of m.epicIds) {
       const found = m.epics.find((e) => e.epicId === epicId);

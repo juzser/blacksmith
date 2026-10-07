@@ -246,11 +246,9 @@ const hostSection = computed(
     ) ?? null,
 );
 
-/** The one status legend sits under the first section, and only when some
- * section is a phase one (a phase-less section's rows carry no bars). */
-const legendSection = computed(() =>
-  sections.value.some((s) => s.kind === 'phase') ? (sections.value[0] ?? null) : null,
-);
+/** The one status legend sits under the first section that has phase bars
+ * (a phase-less section's rows carry no bars). */
+const legendSection = computed(() => sections.value.find((s) => s.kind === 'phase') ?? null);
 
 /**
  * The page's stack: every section, with the selection's EpicBlock right

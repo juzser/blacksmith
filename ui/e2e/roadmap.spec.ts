@@ -735,6 +735,7 @@ test.describe('Roadmap: status tones and legend', () => {
       milestoneId: 'phase-2',
       name: 'Phase 2',
       sequence: 2,
+      status: 'in-progress',
       tasksTotal: 3,
       statusCounts: counts({ done: 1, review: 2 }),
       startedAt: '2025-12-22T09:00:00.000Z',
@@ -855,6 +856,34 @@ test.describe('Roadmap: status tones and legend', () => {
       await shoot(page, `work-roadmap-tones-desktop-${theme}`);
     });
   }
+
+  test('each phase bar agrees with the phase badge and the header count', async ({ page }) => {
+    await stubWindowRoadmap(page);
+    await page.goto('/work/roadmap');
+    const doneBars = page.locator('.rm-section').first().locator('.lrow:not(.sub) .lbar--done');
+    await page.locator('button[aria-controls="rm-window-project-a-earlier"]').click();
+    const head = await page.locator('.rm-section__head').first().innerText();
+    const declaredDone = Number(/(\d+) of \d+ phases done/.exec(head)?.[1]);
+    // The window shows 6 of the 8 phases; the 2 hidden later ones are planned.
+    await expect(doneBars).toHaveCount(declaredDone);
+    for (const phase of ['phase-3', 'phase-4']) {
+      await page.goto(`/work/roadmap?phase=${phase}`);
+      const badge = (
+        await page
+          .locator('.bs-tag')
+          .filter({ hasText: /^(Done|In progress)$/ })
+          .first()
+          .innerText()
+      ).trim();
+      const row = page
+        .locator('.lrow:not(.sub)')
+        .filter({ hasText: `Phase ${phase.slice(6)}` })
+        .first();
+      const cls = (await row.locator('.lbar').first().getAttribute('class')) ?? '';
+      if (badge === 'Done') expect(cls).toContain('lbar--done');
+      else expect(cls).toMatch(/lbar--(in-progress|review)/);
+    }
+  });
 
   test('the legend is hidden at 375px', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
