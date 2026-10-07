@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Tabs (WAI-ARIA Tabs pattern) — roving tabindex, Left/Right (and Home/End)
 // move focus AND selection between tabs.
-import { nextTick, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { nextRovingTabId } from '../../lib/rovingTabs.js';
 
 export interface TabItem {
@@ -14,13 +14,22 @@ export interface TabItem {
 const props = defineProps<{ modelValue: string; tabs: TabItem[]; ariaLabel: string }>();
 const emit = defineEmits<{ 'update:modelValue': [id: string] }>();
 
-// A selection changed from outside (e.g. Task detail resetting to its first
-// tab on navigation) must not leave the strip scrolled past it.
+const list = ref<HTMLElement | null>(null);
+
+// A selection changed from outside must not leave the strip scrolled past it.
+// Only the list's own scrollLeft moves: scrollIntoView would scroll every
+// scrollable ancestor too, jumping the page when the strip is off-screen.
 watch(
   () => props.modelValue,
   async (id) => {
     await nextTick();
-    document.getElementById(`tab-${id}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    const box = list.value;
+    const tab = document.getElementById(`tab-${id}`);
+    if (!box || !tab) return;
+    const b = box.getBoundingClientRect();
+    const t = tab.getBoundingClientRect();
+    if (t.left < b.left) box.scrollLeft += t.left - b.left;
+    else if (t.right > b.right) box.scrollLeft += t.right - b.right;
   },
 );
 
@@ -40,7 +49,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div>
-    <div class="bs-tabs__list" role="tablist" :aria-label="ariaLabel" @keydown="onKeydown">
+    <div ref="list" class="bs-tabs__list" role="tablist" :aria-label="ariaLabel" @keydown="onKeydown">
       <button
         v-for="tab in tabs"
         :id="`tab-${tab.id}`"

@@ -133,6 +133,41 @@ test.describe('Task detail', () => {
     });
   }
 
+  // Tabs.vue scrolls its own list, never the page, when the selection changes
+  // from outside. Navigation is made client-side the way a router link does:
+  // pushState + popstate.
+  const navigateInApp = (page: import('@playwright/test').Page, path: string) =>
+    page.evaluate((to) => {
+      history.pushState({}, '', to);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+
+  test('375px: an outside reset never moves the page', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    await page.evaluate(() => {
+      const pad = document.createElement('div');
+      pad.id = 'e2e-pad';
+      pad.style.height = '3000px';
+      document.body.append(pad);
+      window.scrollTo(0, 600);
+    });
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    const strip = await page
+      .getByRole('tablist', { name: 'Task detail sections' })
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    expect(strip).toBeLessThan(0);
+    await navigateInApp(page, `/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
+
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
   // meta text (dispatch rows have no tokens yet, so metaOverride is '') used
   // to render no meta line at all on phone, so it showed no time.
