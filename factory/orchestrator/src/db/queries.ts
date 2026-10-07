@@ -1593,7 +1593,7 @@ function activeEpics(
 }
 
 /** An epic with no activity for longer than this is idle (7 x 24 h; exactly 7 days is not). */
-const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+export const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** One group of `events_raw` rows: the newest `ts` per (task id, payload epic id, project). */
 interface ActivityRow {
