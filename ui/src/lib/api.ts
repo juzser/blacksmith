@@ -415,7 +415,7 @@ export interface TaskDetail {
 export interface TaskRun {
   eventId: string;
   ts: string;
-  kind: 'dispatch' | 'judge-report' | 'result' | 'error';
+  kind: 'dispatch' | 'judge-report' | 'judge-verdict' | 'result' | 'error';
   agentRole: string | null;
   round: number | null;
   tokensTotal: number | null;

@@ -71,7 +71,9 @@ test.describe('Task detail', () => {
     const rows = page.locator('.bs-run-history .bs-timeline-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
-    await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('.bs-run-history .bs-timeline-row__status').getByText('done', { exact: true }),
+    ).toBeVisible();
   });
 
   // A 375px phone is the narrowest supported width. The page's own scrollWidth
@@ -182,6 +184,118 @@ test.describe('Task detail', () => {
     for (let i = 0; i < 2; i++) {
       await expect(rows.nth(i).locator('.bs-timeline-row__ts:visible')).toHaveCount(1);
     }
+  });
+
+  // A verifier / spec-reviewer run ends with a judge-verdict event; the History
+  // tab must list it with the agent's role and its verdict, not stop at the
+  // dispatch row. The response is routed so no shared fixture changes.
+  test('Run history lists a judge-verdict row with the verifier label and its outcome', async ({
+    page,
+  }) => {
+    await page.route('**/api/tasks/*/runs*', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              eventId: 'verdict-2',
+              ts: '2029-06-01T00:03:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 3,
+              tokensTotal: null,
+              outcome: 'failed: provider.missing-api-key',
+            },
+            {
+              eventId: 'verdict-1',
+              ts: '2029-06-01T00:02:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: 'refute',
+            },
+            {
+              eventId: 'dispatch-1',
+              ts: '2029-06-01T00:01:00.000Z',
+              kind: 'dispatch',
+              agentRole: 'verifier',
+              round: 2,
+              tokensTotal: null,
+              outcome: null,
+            },
+          ],
+          totals: {
+            tokens: null,
+            agentTimeMs: null,
+            elapsedMs: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        },
+      }),
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toContainText('Finding checker');
+    await expect(
+      rows
+        .first()
+        .locator('.bs-timeline-row__status', { hasText: 'failed: provider.missing-api-key' }),
+    ).toBeVisible();
+    await expect(
+      rows.nth(1).locator('.bs-timeline-row__status', { hasText: 'refute' }),
+    ).toBeVisible();
+  });
+
+  // At phone width a long outcome tag must not squeeze the title to nothing:
+  // the tag shrinks and ellipsises, the title keeps a usable width, and the
+  // full outcome stays reachable in the expanded details.
+  test('Phone History row keeps its title when the outcome tag is long', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.route('**/api/tasks/*/runs*', (route) =>
+      route.fulfill({
+        json: {
+          runs: [
+            {
+              eventId: 'verdict-long',
+              ts: '2029-06-01T00:03:00.000Z',
+              kind: 'judge-verdict',
+              agentRole: 'verifier',
+              round: 3,
+              tokensTotal: null,
+              outcome: 'failed: provider.missing-api-key',
+            },
+          ],
+          totals: {
+            tokens: null,
+            agentTimeMs: null,
+            elapsedMs: null,
+            startedAt: null,
+            endedAt: null,
+          },
+        },
+      }),
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    const title = row.locator('.bs-timeline-row__title');
+    await expect(title).toBeVisible();
+    const titleBox = await title.boundingBox();
+    expect(titleBox?.width ?? 0).toBeGreaterThanOrEqual(64);
+    const rowBox = await row.boundingBox();
+    const tagBox = await row.locator('.bs-timeline-row__status').boundingBox();
+    expect((tagBox?.x ?? 0) + (tagBox?.width ?? 0)).toBeLessThanOrEqual(
+      (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
+    await row.getByRole('button', { name: 'Show details' }).click();
+    await expect(row.locator('dd', { hasText: 'failed: provider.missing-api-key' })).toBeVisible();
+    await expect(row.locator('dt', { hasText: 'Outcome' })).toBeVisible();
   });
 
   // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries

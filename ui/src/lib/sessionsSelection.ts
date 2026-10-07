@@ -1,4 +1,7 @@
+import { isActiveSession } from './activeScope.js';
 import type { ActivityScope } from './activityScope.js';
+import type { ActiveScopeResult } from './api.js';
+import { HOME_STORE_ID } from './storeKey.js';
 
 // SessionsPage's deep link (DS8 PR3 item 4): `?session=<id>` is this page's
 // own "which run is open" marker, read and written only here -- unlike
@@ -17,17 +20,21 @@ export function selectedSessionFromQuery(
 }
 
 /**
- * The list a scope shows: Active keeps working sessions plus the selected one
- * (pinned, so a session that turns quiet under an open detail does not lose
- * its row); All keeps everything. A selected id not in the list adds nothing.
+ * The list a scope shows: Active keeps the sessions a live CLI session drives
+ * plus the selected one (pinned, so a session that turns quiet under an open
+ * detail does not lose its row); All keeps everything. An unmeasured (or not
+ * yet loaded) `live` cannot tell active from quiet, so Active shows everything
+ * rather than claim nothing is active. A selected id not in the list adds
+ * nothing.
  */
-export function sessionsInScope<T extends { sessionId: string; workingAgentCount: number }>(
+export function sessionsInScope<T extends { sessionId: string }>(
   sessions: readonly T[],
   scope: ActivityScope,
   selectedId: string | null,
+  live: ActiveScopeResult | null,
 ): T[] {
-  if (scope === 'all') return [...sessions];
-  return sessions.filter((s) => isSessionActive(s) || s.sessionId === selectedId);
+  if (scope === 'all' || live?.measured !== true) return [...sessions];
+  return sessions.filter((s) => isSessionActive(live, s) || s.sessionId === selectedId);
 }
 
 // SessionsPage.loadAgents() runs for both the poll path and the click path.
@@ -39,14 +46,24 @@ export function isStaleResponse(responseId: string, currentSelectedId: string | 
 }
 
 // The active/quiet split, as its own helper rather than inlined in
-// SessionsPage.vue: `liveAgentCount > 0` includes stale ghosts (an agent row
-// still `live` because its run crashed before a terminal event landed), the
-// exact trap documented at api.ts's RunningSession.workingAgentCount and the
-// design spec §2. A session is active only while an agent is working within
-// the factory's own 4h staleness window (`workingAgentCount`), so one with
-// live-but-stale agents (liveAgentCount > 0, workingAgentCount 0) is quiet.
-export function isSessionActive(session: { workingAgentCount: number }): boolean {
-  return session.workingAgentCount > 0;
+// SessionsPage.vue. A session is active when a live CLI session is writing
+// into it (`/api/active-scope`'s factorySessions), not when an agent row says
+// `live` or `working`: those come from the factory's own 4h staleness window
+// and read zero while a CLI session is plainly at work. `/api/sessions` reads
+// the home store only, so its rows carry no `store` and match the home store.
+export function isSessionActive(
+  live: ActiveScopeResult | null,
+  session: { sessionId: string },
+): boolean {
+  return isActiveSession(live, {}, session.sessionId);
+}
+
+/** Names of active projects living outside the home store, each once. */
+export function otherStoreProjects(live: ActiveScopeResult | null): string[] {
+  if (live?.measured !== true) return [];
+  return [
+    ...new Set(live.projects.filter((p) => p.storeId !== HOME_STORE_ID).map((p) => p.project)),
+  ];
 }
 
 /** One project's slice of the Sessions list, newest session first. */
@@ -89,9 +106,13 @@ export function sessionsByProject<T extends { lastEventAt: string; projects: rea
 }
 
 /** Newest first, then a stable split: active sessions ahead of quiet ones. */
-export function activeFirst<T extends { lastEventAt: string; workingAgentCount: number }>(
+export function activeFirst<T extends { sessionId: string; lastEventAt: string }>(
   sessions: readonly T[],
+  live: ActiveScopeResult | null,
 ): T[] {
   const ordered = [...sessions].sort(byRecency);
-  return [...ordered.filter(isSessionActive), ...ordered.filter((s) => !isSessionActive(s))];
+  return [
+    ...ordered.filter((s) => isSessionActive(live, s)),
+    ...ordered.filter((s) => !isSessionActive(live, s)),
+  ];
 }

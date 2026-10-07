@@ -614,6 +614,26 @@ a:hover {
     white-space: nowrap;
   }
 }
+/* G3c: a rail row's outcome tag can be long (`failed: provider.missing-api-key`)
+   and `.bs-tag` never shrinks, so on a phone it took the whole head and the
+   title collapsed to 0. The tag may shrink to at most half the head and
+   ellipsises on one line (block, not inline-flex, so text-overflow applies;
+   a rail tag carries no icon). The title keeps a 64px floor. The full outcome
+   is the tag's whole text content and the row's details (`dl` "Outcome"). */
+@media (max-width: 640px) {
+  .bs-timeline-row--rail .bs-timeline-row__head .bs-timeline-row__status {
+    display: block;
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: 50%;
+    line-height: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .bs-timeline-row--rail .bs-timeline-row__head .bs-timeline-row__title {
+    min-width: 64px;
+  }
+}
 /* Fix round 4 item 3 (ds-review.html `.mrow.tlrow .mq`): a prompt row's
    title is the verbatim prompt text (titleFor), which plays the mock's
    `.mq` role, not `.mt` -- so on phone it clamps to 2 lines instead of 1,

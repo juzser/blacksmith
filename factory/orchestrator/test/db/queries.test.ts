@@ -22,6 +22,7 @@ import {
   pulse,
   requestQuoteForTask,
   sessionAgents,
+  type TaskRun,
   taskDetail,
   taskRuns,
   timeline,
@@ -1608,6 +1609,84 @@ describe('db/queries.ts', () => {
       } finally {
         runsHandle.sqlite.close();
       }
+    });
+  });
+
+  describe('taskRuns() judge-verdict rows', () => {
+    async function runsFor(
+      session: string,
+      task: string,
+      verdictPayload: Record<string, unknown>,
+    ): Promise<TaskRun[]> {
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', '2029-06-01T00:00:00.000Z', { task_id: task }, session) +
+          tiedLine(
+            'dispatch_decision',
+            '2029-06-01T00:01:00.000Z',
+            {
+              task_id: task,
+              agent_role: 'verifier',
+              round: 2,
+              provider: 'claude',
+              model_tier: 'mid',
+            },
+            session,
+          ) +
+          tiedLine(
+            'judge-verdict',
+            '2029-06-01T00:02:00.000Z',
+            { task_id: task, agent: 'verifier', ok: true, ...verdictPayload },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, `${session}.db`);
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        return taskRuns(h.db, task);
+      } finally {
+        h.sqlite.close();
+      }
+    }
+
+    it('lists a verifier verdict with role and round from the agents row', async () => {
+      const runs = await runsFor('sess-verdict', 'epic-v/task-1', { verdict: 'refute' });
+      expect(runs.map((r) => r.kind)).toEqual(['judge-verdict', 'dispatch']);
+      expect(runs[0]).toMatchObject({
+        kind: 'judge-verdict',
+        agentRole: 'verifier',
+        round: 2,
+        outcome: 'refute',
+        tokensTotal: null,
+      });
+    });
+
+    it('prefers the payload round, and gives outcome null when there is no verdict value', async () => {
+      const runs = await runsFor('sess-verdict-null', 'epic-v/task-2', { verdict: null, round: 5 });
+      expect(runs[0]).toMatchObject({ kind: 'judge-verdict', round: 5, outcome: null });
+    });
+
+    it('words a verdict that never ran like the Activity feed: failed with its error code', async () => {
+      const runs = await runsFor('sess-verdict-fail', 'epic-v/task-3', {
+        ok: false,
+        verdict: null,
+        error_code: 'provider.missing-api-key',
+      });
+      expect(runs[0]).toMatchObject({
+        kind: 'judge-verdict',
+        outcome: 'failed: provider.missing-api-key',
+      });
+    });
+
+    it('says plain failed when the failed verdict carries no error code', async () => {
+      const runs = await runsFor('sess-verdict-fail-nocode', 'epic-v/task-4', {
+        ok: false,
+        verdict: null,
+      });
+      expect(runs[0]).toMatchObject({ kind: 'judge-verdict', outcome: 'failed' });
     });
   });
 
