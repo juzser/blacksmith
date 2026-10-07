@@ -1642,9 +1642,20 @@ a:hover {
 /* ≤640px: tab padding settles under --bs-touch (visual-qa phase B round 2) —
    min-height and min-width floor, label/underline keep their own size. */
 @media (max-width: 640px) {
+  .bs-tabs__list {
+    gap: 0;
+  }
   .bs-tabs__tab {
     min-height: var(--bs-touch);
     min-width: var(--bs-touch);
+  }
+  /* ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
+     within itself. Every page that hosts tabs (Task detail, Lessons, Activity)
+     is an `.app-page`, whose side padding is --bs-space-5 on every width, so
+     the bleed is that same token. */
+  .app-page .bs-tabs__list {
+    margin-inline: calc(-1 * var(--bs-space-5));
+    padding-inline: var(--bs-space-5);
   }
 }
 

@@ -225,6 +225,19 @@ test.describe('Lessons', () => {
   // short title is the case the acceptance criterion names -- a title long
   // enough to outgrow even half the row still ellipsis-truncates by design,
   // same as the tag beside it.
+  test('375px: the status tab strip runs edge to edge with no horizontal page scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/lessons');
+    const box = await page.getByRole('tablist', { name: 'Lesson status' }).boundingBox();
+    expect(box?.x).toBe(0);
+    expect(box?.width).toBe(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
+  });
+
   test('compact phone row renders a short title in full, above the meta', async ({ page }) => {
     await page.route('**/api/lessons*', (route) =>
       route.fulfill({

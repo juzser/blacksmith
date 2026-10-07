@@ -102,6 +102,37 @@ test.describe('Task detail', () => {
     for (const right of Object.values(rights)) expect(right).toBeLessThanOrEqual(375);
   });
 
+  // ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
+  // within itself, so it is never cut at the content column's edge with empty
+  // page padding beyond it.
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`${viewport.width}px: the tab strip runs edge to edge and keeps the selected tab whole`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+      const list = page.getByRole('tablist', { name: 'Task detail sections' });
+      const wholeInViewport = async (name: string) => {
+        const box = await page.getByRole('tab', { name }).boundingBox();
+        expect(box, `${name} tab box`).not.toBeNull();
+        expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+      };
+      const listBox = await list.boundingBox();
+      expect(listBox?.x).toBe(0);
+      expect(listBox?.width).toBe(viewport.width);
+      await wholeInViewport('What was asked');
+      await page.getByRole('tab', { name: 'History' }).click();
+      await wholeInViewport('History');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        viewport.width,
+      );
+    });
+  }
+
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a run row with no
   // meta text (dispatch rows have no tokens yet, so metaOverride is '') used
   // to render no meta line at all on phone, so it showed no time.

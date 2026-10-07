@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Tabs (WAI-ARIA Tabs pattern) — roving tabindex, Left/Right (and Home/End)
 // move focus AND selection between tabs.
+import { nextTick, watch } from 'vue';
 import { nextRovingTabId } from '../../lib/rovingTabs.js';
 
 export interface TabItem {
@@ -12,6 +13,16 @@ export interface TabItem {
 
 const props = defineProps<{ modelValue: string; tabs: TabItem[]; ariaLabel: string }>();
 const emit = defineEmits<{ 'update:modelValue': [id: string] }>();
+
+// A selection changed from outside (e.g. Task detail resetting to its first
+// tab on navigation) must not leave the strip scrolled past it.
+watch(
+  () => props.modelValue,
+  async (id) => {
+    await nextTick();
+    document.getElementById(`tab-${id}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  },
+);
 
 function select(id: string) {
   emit('update:modelValue', id);

@@ -539,6 +539,19 @@ test.describe('Activity', () => {
     );
   });
 
+  test('375px: the kind tab strip runs edge to edge with no horizontal page scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity');
+    const box = await page.getByRole('tablist').first().boundingBox();
+    expect(box?.x).toBe(0);
+    expect(box?.width).toBe(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
+  });
+
   // The meta line ends with the time on phone. A long meta text used to squeeze
   // it until "11 min ago" broke across two lines; the time never breaks inside
   // itself, the meta text ellipsizes instead.
