@@ -8,6 +8,7 @@ import {
   buildSwimlane,
   chooseTickUnit,
   hasRoadmapContent,
+  phaseStatusFromCounts,
   taskCountLabel,
 } from '../src/lib/roadmapSwimlane.js';
 
@@ -284,5 +285,128 @@ describe('hasRoadmapContent (audit item 7)', () => {
 
   it('is false only when both sources are empty', () => {
     expect(hasRoadmapContent([], [])).toBe(false);
+  });
+});
+
+describe('bar tone follows status, not dates', () => {
+  const counts = (c: Partial<EpicDates['statusCounts']>) => ({
+    done: 0,
+    review: 0,
+    inProgress: 0,
+    todo: 0,
+    superseded: 0,
+    ...c,
+  });
+  const phaseTone = (m: Partial<MilestoneProgress>) =>
+    buildSwimlane([milestone({ startedAt: '2026-01-01T00:00:00.000Z', epicIds: [], ...m })], NOW)
+      .rows[0]?.bar?.tone;
+
+  it('an in-progress epic with a past date range keeps its tone and the past state', () => {
+    const lane = buildSwimlane(
+      [
+        milestone({
+          epicIds: ['epic-a'],
+          epics: [
+            epic({
+              epicId: 'epic-a',
+              startedAt: '2025-12-01T00:00:00.000Z',
+              finishedAt: '2025-12-20T00:00:00.000Z',
+              status: 'in_progress',
+            }),
+          ],
+        }),
+      ],
+      NOW,
+    );
+    const bar = lane.rows.find((r) => r.id === 'epic-a')?.bar;
+    expect(bar?.tone).toBe('in-progress');
+    expect(bar?.state).toBe('past');
+  });
+
+  it('a done epic that starts in the future is tone done', () => {
+    const lane = buildSwimlane(
+      [
+        milestone({
+          epicIds: ['epic-a'],
+          epics: [
+            epic({ epicId: 'epic-a', startedAt: '2026-06-01T00:00:00.000Z', status: 'done' }),
+          ],
+        }),
+      ],
+      NOW,
+    );
+    expect(lane.rows.find((r) => r.id === 'epic-a')?.bar?.tone).toBe('done');
+  });
+
+  it('a phase with no tasks takes its declared status', () => {
+    expect(phaseTone({ status: 'completed' })).toBe('done');
+    expect(phaseTone({ status: 'in-progress' })).toBe('in-progress');
+    expect(phaseTone({ status: 'planned' })).toBe('todo');
+  });
+
+  it('a completed phase with every task superseded is done', () => {
+    expect(
+      phaseTone({ status: 'completed', tasksTotal: 2, statusCounts: counts({ superseded: 2 }) }),
+    ).toBe('done');
+  });
+
+  it('an in-progress phase of review + done tasks only is review', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 3,
+        statusCounts: counts({ done: 1, review: 2 }),
+      }),
+    ).toBe('review');
+  });
+
+  it('an in-progress phase with every live task done stays in-progress', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 5,
+        statusCounts: counts({ done: 3, superseded: 2 }),
+      }),
+    ).toBe('in-progress');
+  });
+
+  it('an in-progress phase with todo and in-progress tasks is in-progress', () => {
+    expect(
+      phaseTone({
+        status: 'in-progress',
+        tasksTotal: 3,
+        statusCounts: counts({ todo: 1, inProgress: 1, done: 1 }),
+      }),
+    ).toBe('in-progress');
+  });
+
+  it('a completed phase with a task still in review is done', () => {
+    expect(
+      phaseTone({
+        status: 'completed',
+        tasksTotal: 2,
+        statusCounts: counts({ done: 1, review: 1 }),
+      }),
+    ).toBe('done');
+  });
+
+  it('a planned phase with a task in progress is todo', () => {
+    expect(
+      phaseTone({
+        status: 'planned',
+        tasksTotal: 2,
+        statusCounts: counts({ inProgress: 1, todo: 1 }),
+      }),
+    ).toBe('todo');
+  });
+
+  it('phaseStatusFromCounts still mirrors the server fold (its todo for no counts stays right)', () => {
+    expect(phaseStatusFromCounts(counts({}), 0)).toBe('todo');
+    expect(phaseStatusFromCounts(counts({ done: 2 }), 2)).toBe('done');
+  });
+
+  it('a not-scheduled row still has no bar', () => {
+    const lane = buildSwimlane([milestone({})], NOW);
+    expect(lane.rows[0]?.bar).toBeNull();
   });
 });
