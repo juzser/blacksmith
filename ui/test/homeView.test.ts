@@ -400,6 +400,41 @@ describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
     expect(runningNowCards(o, onlyA, 'active', 'project-b').quiet).toHaveLength(1);
     expect(runningNowCards(o, onlyA, 'active', 'project-a').shown).toHaveLength(1);
   });
+
+  it('matches the merged ?project= card by name: a live session in another store makes it active', () => {
+    const o = overview({
+      workingAgentCount: 3,
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 1, 2)],
+    });
+    const r = runningNowCards(
+      o,
+      scope([{ storeId: 'store-b', project: 'project-a', agentsWorking: 2 }]),
+      'active',
+      'project-a',
+    );
+    expect(r.quiet).toEqual([]);
+    expect(r.shown).toHaveLength(1);
+    expect(r.shown[0]?.workingAgents).toBe(2);
+  });
+
+  it('counts the merged ?project= card agents over every store that names it', () => {
+    const o = overview({
+      workingAgentCount: 3,
+      epicsActivelyRunning: ['e1'],
+      tokensByEpic: [epic('e1', 1, 2)],
+    });
+    const r = runningNowCards(
+      o,
+      scope([
+        { storeId: 'home', project: 'project-a', agentsWorking: 1 },
+        { storeId: 'store-b', project: 'project-a', agentsWorking: 2 },
+      ]),
+      'active',
+      'project-a',
+    );
+    expect(r.shown[0]?.workingAgents).toBe(3);
+  });
 });
 
 function card(epics: string[], tokens: Partial<RunningCard['tokens']>): RunningCard {
@@ -522,6 +557,24 @@ describe('lib/homeView.ts budgetView()', () => {
     const view = budgetView([card(['run-a'], { spent: 0, budget: 100, unmeasured: 3 })], null);
     if (view.kind !== 'figures') throw new Error('expected figures');
     expect(view.ring).toBeNull();
+  });
+
+  it('drops the whole-factory delta when Active hides a card, keeps it when not narrowed', () => {
+    const cards = [card(['run-a'], { spent: 40, budget: 100 })];
+    const narrowed = budgetView(cards, 4, true);
+    if (narrowed.kind !== 'figures') throw new Error('expected figures');
+    expect(narrowed.deltaSentence).toBeNull();
+    const all = budgetView(cards, 4, false);
+    if (all.kind !== 'figures') throw new Error('expected figures');
+    expect(all.deltaSentence).toBe('4 points higher than an hour ago');
+  });
+
+  it('says no epic runs on an active project when narrowed, and no epic runs when not', () => {
+    expect(budgetView([], 4, true)).toEqual({
+      kind: 'none',
+      text: 'No epic is running on an active project.',
+    });
+    expect(budgetView([], 4, false)).toEqual({ kind: 'none', text: 'No epic is running.' });
   });
 });
 

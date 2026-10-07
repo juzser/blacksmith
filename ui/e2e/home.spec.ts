@@ -1,4 +1,4 @@
-import { stubActiveScope } from './activeScopeStub.js';
+import { activeScopeBody, stubActiveScope } from './activeScopeStub.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, shootElement, VIEWPORTS } from './helpers.js';
@@ -1135,6 +1135,15 @@ test.describe('Home: Running now follows Active/All (S8)', () => {
   const running = (page: Page) => page.locator('section[aria-labelledby="running-heading"]');
   const oneOfTwo = (page: Page) =>
     stubActiveScope(page, [], { liveSessions: 1, projects: [activeProject('blacksmith')] });
+  const budget = (page: Page) => page.locator('section[aria-labelledby="budget-heading"]');
+  // Pins the overview's one-hour budget change to a known figure, whatever the fixture holds.
+  const withDelta = (page: Page, delta: number) =>
+    page.route('**/api/overview*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.budgetUsedPctPointDelta1h = delta;
+      await route.fulfill({ response, json: body });
+    });
 
   test('Active hides the quiet project and offers it back; All shows it muted', async ({
     page,
@@ -1231,6 +1240,93 @@ test.describe('Home: Running now follows Active/All (S8)', () => {
     await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toHaveCount(0);
   });
 
+  test('while the scope answer is delayed, Budget keeps its loading state too', async ({
+    page,
+  }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/active-scope*', async (route) => {
+      await gate;
+      await route.fulfill({
+        json: activeScopeBody([], { liveSessions: 1, projects: [activeProject('blacksmith')] }),
+      });
+    });
+    await page.goto('/overview');
+    // Home has mounted (its decisions list starts in its loading state), and
+    // the overview is in once that list has left it; only the scope is held.
+    await expect(page.getByRole('heading', { name: 'Budget' })).toBeVisible();
+    await expect(
+      page.locator('section[aria-labelledby="decisions-heading"] .bs-skeleton'),
+    ).toHaveCount(0);
+    await expect(budget(page).locator('.bs-skeleton')).toBeVisible();
+    await expect(budget(page).locator('.bs-home__tokens')).toHaveCount(0);
+    release();
+    await expect(budget(page).locator('.bs-home__tokens')).toBeVisible();
+    await expect(budget(page).locator('.bs-skeleton')).toHaveCount(0);
+  });
+
+  test('a ?project= whose only live session is in another store is active', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 1,
+      projects: [{ ...activeProject('demo-hub'), storeId: 'store-b' }],
+    });
+    await page.goto('/overview?project=demo-hub');
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toBeVisible();
+    await expect(page.getByText('No live session is on this project')).toHaveCount(0);
+  });
+
+  test('Active with a hidden card drops the one-hour change; All keeps it', async ({ page }) => {
+    await oneOfTwo(page);
+    await withDelta(page, 4);
+    await page.goto('/overview');
+    await expect(budget(page).locator('.bs-home__tokens')).toBeVisible();
+    await expect(budget(page).getByText('4 points higher than an hour ago')).toHaveCount(0);
+    await page.goto('/overview?scope=all');
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+    await expect(budget(page).getByText('4 points higher than an hour ago')).toBeVisible();
+  });
+
+  test('Active with every card hidden: Budget says no epic runs on an active project', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/overview');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await expect(budget(page).getByText('No epic is running on an active project.')).toBeVisible();
+  });
+
+  test('a session on a project before its epic opens: its card shows, no "none on an epic" line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 2,
+      unlinkedSessions: 1,
+      factorySessions: [],
+      projects: [activeProject('blacksmith')],
+    });
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
+    await expect(running(page).getByText('none on an epic')).toHaveCount(0);
+  });
+
+  test('an active card with no agent working hides the agents line, keeps the epics line', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 1,
+      projects: [activeProject('blacksmith', 0)],
+    });
+    await page.goto('/overview');
+    const card = running(page).locator('.bs-card', {
+      has: page.getByRole('link', { name: 'View blacksmith in Work' }),
+    });
+    await expect(card).toBeVisible();
+    await expect(card.getByText(/epics? in flight/)).toBeVisible();
+    await expect(card.getByText(/agents? working/)).toHaveCount(0);
+  });
+
   test('phone 375px: the toggle and the quiet-line link are 44px targets, no sideways scroll', async ({
     page,
   }) => {
@@ -1282,5 +1378,68 @@ test.describe('Home: Running now follows Active/All (S8)', () => {
     await page.goto('/overview');
     await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
     await shootElement(running(page), 'home-running-now-scope-unmeasured-desktop-light');
+  });
+
+  // All with one muted card and one active card whose agents line is hidden at 0.
+  const allMutedAndIdle = (page: Page) =>
+    stubActiveScope(page, [], { liveSessions: 1, projects: [activeProject('blacksmith', 0)] });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot All, one muted card and one with no agent working, desktop/${theme}`, async ({
+      page,
+    }) => {
+      await setTheme(page, theme);
+      await allMutedAndIdle(page);
+      await page.goto('/overview?scope=all');
+      await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+      await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+      await shootElement(running(page), `home-running-now-scope-all-desktop-${theme}`);
+    });
+  }
+
+  test('screenshot All, one muted card and one with no agent working, phone 375/light', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(PHONE);
+    await allMutedAndIdle(page);
+    await page.goto('/overview?scope=all');
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-all-phone-light');
+  });
+
+  test('screenshot only unlinked sessions, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
+    await page.goto('/overview');
+    await settleForShot(page, page.getByText('2 live sessions, none on an epic · Show all'));
+    await shootElement(running(page), 'home-running-now-scope-unlinked-desktop-light');
+  });
+
+  test('screenshot no live session on the project, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await oneOfTwo(page);
+    await page.goto('/overview?project=demo-hub');
+    await settleForShot(page, page.getByText('No live session is on this project · Show all'));
+    await shootElement(running(page), 'home-running-now-scope-no-session-desktop-light');
+  });
+
+  test('screenshot none active, phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(PHONE);
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/overview');
+    await settleForShot(page, page.getByText('Nothing is active right now. ·'));
+    await shootElement(running(page), 'home-running-now-scope-none-phone-light');
+  });
+
+  test('screenshot unmeasured, phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(PHONE);
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/overview');
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-unmeasured-phone-light');
   });
 });

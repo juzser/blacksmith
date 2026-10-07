@@ -1,7 +1,7 @@
 // HomePage's pure half (ds-spec.md §4.1 points 2-4): the "Running now"
 // cards, the "Just finished" rule, the decision lines and the Budget
 // numbers, kept out of the .vue file so the DOM-free unit suite covers them.
-import { isActiveProject } from './activeScope.js';
+import { isActiveProject, isActiveProjectName } from './activeScope.js';
 import type { ActivityScope } from './activityScope.js';
 import type {
   ActiveScopeResult,
@@ -155,10 +155,24 @@ export type BudgetView =
       outlierSentence: string | null;
     };
 
-/** The Budget panel's decision, so HomePage.vue only renders it. */
-export function budgetView(cards: RunningCard[], delta: number | null): BudgetView {
+/**
+ * The Budget panel's decision, so HomePage.vue only renders it. `narrowed`:
+ * Active hides at least one card, so the whole-factory one-hour change no
+ * longer describes the figures (dropped), and an empty panel says only that
+ * no active project runs an epic.
+ */
+export function budgetView(
+  cards: RunningCard[],
+  delta: number | null,
+  narrowed = false,
+): BudgetView {
   const panel = budgetPanel(cards);
-  if (panel === null) return { kind: 'none', text: 'No epic is running.' };
+  if (panel === null) {
+    return {
+      kind: 'none',
+      text: narrowed ? 'No epic is running on an active project.' : 'No epic is running.',
+    };
+  }
   return {
     kind: 'figures',
     ring:
@@ -170,7 +184,7 @@ export function budgetView(cards: RunningCard[], delta: number | null): BudgetVi
           }
         : null,
     tokensText: cardTokensText(panel),
-    deltaSentence: budgetDeltaSentence(delta),
+    deltaSentence: narrowed ? null : budgetDeltaSentence(delta),
     unmeasuredSentence: unmeasuredSentence(panel.unmeasured),
     outlierSentence: outlierSentence(panel.outliers),
   };
@@ -239,14 +253,30 @@ export function runningNowCards(
   const measured = active?.measured === true;
   const shown: RunningCard[] = [];
   const quiet: RunningCard[] = [];
+  // The `?project=` card merges every store, so it matches by name and counts
+  // every store's entries; any other card carries its own store.
+  const matches = (card: RunningCard) =>
+    (active?.projects ?? []).filter(
+      (p) =>
+        p.project === card.project &&
+        (project !== undefined || p.storeId === (card.store?.id ?? HOME_STORE_ID)),
+    );
   for (const card of candidateCards(o, project)) {
     if (!measured) {
       shown.push(card);
-    } else if (isActiveProject(active, card, card.project)) {
-      const entry = active?.projects.find(
-        (p) => p.storeId === (card.store?.id ?? HOME_STORE_ID) && p.project === card.project,
-      );
-      shown.push({ ...card, workingAgents: entry?.agentsWorking ?? card.workingAgents });
+    } else if (
+      project !== undefined
+        ? isActiveProjectName(active, card.project)
+        : isActiveProject(active, card, card.project)
+    ) {
+      const entries = matches(card);
+      shown.push({
+        ...card,
+        workingAgents:
+          entries.length > 0
+            ? entries.reduce((sum, p) => sum + p.agentsWorking, 0)
+            : card.workingAgents,
+      });
     } else if (scope === 'all') {
       shown.push({ ...card, quiet: true });
     } else {

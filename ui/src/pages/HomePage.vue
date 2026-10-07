@@ -30,7 +30,7 @@ import { useActivityScope } from '../composables/useActivityScope.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
-import { isActiveProject } from '../lib/activeScope.js';
+import { isActiveProjectName } from '../lib/activeScope.js';
 import {
   type ActiveScopeResult,
   type ActivityEntry,
@@ -159,8 +159,8 @@ watch([project, sessionKey], () => {
 });
 usePoll(load, POLL_MS);
 
-// While the first scope answer is in flight under Active, Running now keeps
-// its loading state: never draw every card and then narrow them.
+// While the first scope answer is in flight under Active, Running now and
+// Budget keep their loading state: never draw every card and then narrow them.
 const scopePending = computed(() => mode.value === 'active' && liveScope.value === null);
 const running = computed(() =>
   overview.value
@@ -169,7 +169,15 @@ const running = computed(() =>
 );
 const cards = computed(() => running.value.shown);
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
-const budget = computed(() => (overview.value ? budgetView(cards.value, overview.value.budgetUsedPctPointDelta1h ?? null) : null));
+const budget = computed(() =>
+  overview.value
+    ? budgetView(
+        cards.value,
+        overview.value.budgetUsedPctPointDelta1h ?? null,
+        running.value.quiet.length > 0,
+      )
+    : null,
+);
 
 // Same causal-chain walk ActivityPage.vue uses for ctxFor(), scoped to this
 // page's own 8-row list rather than the whole feed.
@@ -195,20 +203,23 @@ function recentActivityCtx(entry: ActivityEntry) {
 // Sessions' rules and copy.
 const activeView = computed(() => mode.value === 'active' && liveScope.value?.measured === true);
 const noLiveSessions = computed(() => activeView.value && liveScope.value?.liveSessions === 0);
+// Like Kanban's, only when no card is shown: a session linked to a project
+// before its epic opens draws a card but is neither unlinked nor a factory one.
 const noneOnAnEpic = computed(() => {
   const l = liveScope.value;
   return (
     activeView.value &&
     l !== null &&
     l.factorySessions.length === 0 &&
-    l.unlinkedSessions > 0
+    l.unlinkedSessions > 0 &&
+    cards.value.length === 0
   );
 });
 const noSessionOnProject = computed(
   () =>
     activeView.value &&
     project.value !== undefined &&
-    !isActiveProject(liveScope.value, {}, project.value),
+    !isActiveProjectName(liveScope.value, project.value),
 );
 const unmeasuredNote = computed(() => mode.value === 'active' && liveScope.value?.measured === false);
 const quietLine = computed(() => {
@@ -432,7 +443,7 @@ function becauseOf(promptId: string) {
 
     <section class="bs-home__section" aria-labelledby="budget-heading">
       <h2 id="budget-heading" class="bs-section-title">Budget</h2>
-      <Skeleton v-if="overview === null && !overviewFailed" :height="48" />
+      <Skeleton v-if="(overview === null && !overviewFailed) || scopePending" :height="48" />
       <p v-else-if="budget?.kind === 'none'" class="bs-home__quiet">{{ budget.text }}</p>
       <template v-else-if="budget?.kind === 'figures'">
         <div class="bs-home__tokens">
