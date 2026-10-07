@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.js';
 import {
   agentStatus,
   hasWorkingAgents,
@@ -29,6 +30,26 @@ function agent(overrides: Partial<SessionAgent> = {}): SessionAgent {
     ...overrides,
   };
 }
+
+describe('agentStatus drift guard', () => {
+  // One row per store status agentStatus() has a branch for. A new status in
+  // agents-registry.ts fails the first test until agentStatus() handles it.
+  const EXPECTED_LABEL: Record<string, string> = {
+    live: 'Working',
+    done: 'Done',
+    error: 'Failed',
+    superseded: 'Stopped',
+    abandoned: 'Stopped',
+  };
+
+  it('has a branch for exactly the agents-registry.ts AGENT_STATUSES', () => {
+    expect([...AGENT_STATUSES].sort()).toEqual(Object.keys(EXPECTED_LABEL).sort());
+  });
+
+  it.each([...AGENT_STATUSES])('labels store status %s', (status) => {
+    expect(agentStatus(agent({ status }), now).label).toBe(EXPECTED_LABEL[status]);
+  });
+});
 
 describe('agentStatus', () => {
   it('reports a live agent dispatched recently as Working', () => {

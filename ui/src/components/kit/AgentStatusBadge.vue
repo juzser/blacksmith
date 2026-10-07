@@ -12,7 +12,7 @@ import type { SessionAgent } from '../../lib/api.js';
 import Tag from './Tag.vue';
 
 const props = defineProps<{
-  agent: SessionAgent;
+  agent: Pick<SessionAgent, 'status' | 'dispatchedAt'>;
   now?: string;
 }>();
 

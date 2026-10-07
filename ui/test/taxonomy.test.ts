@@ -2,12 +2,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.js';
 import { MILESTONE_STATUSES } from '../../factory/orchestrator/src/roadmap.js';
 import {
-  AGENT_STATUS_TONE,
-  agentStatusKitTone,
-  agentStatusTone,
   errorGroupIcon,
   findingStatusKitTone,
   findingStatusTone,
@@ -158,17 +154,6 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(milestoneStatusLabel('unknown-status')).toBe('unknown-status');
   });
 
-  it('maps agents.status (live/done/error/superseded) — NOT run_status', () => {
-    expect(agentStatusTone('live')).toBe('info');
-    expect(agentStatusTone('done')).toBe('success');
-    expect(agentStatusTone('error')).toBe('danger');
-    expect(agentStatusTone('superseded')).toBe('neutral');
-  });
-
-  it('AGENT_STATUS_TONE covers agents-registry.ts AGENT_STATUSES exactly (fails on drift)', () => {
-    expect(Object.keys(AGENT_STATUS_TONE).sort()).toEqual([...AGENT_STATUSES].sort());
-  });
-
   it('maps every error group to an icon per §3.7, never a colour', () => {
     expect(errorGroupIcon('spec')).toBe('file-text');
     expect(errorGroupIcon('contract')).toBe('file-check');
@@ -214,7 +199,7 @@ describe('lib/taxonomy.ts — taskStatusKitTone() (DS3 §1.1 kit Tag tone)', () 
   });
 });
 
-describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone/agentStatusKitTone (DS3 item 4)', () => {
+describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone (DS3 item 4)', () => {
   it('maps severity to kit tone + variant, S1 alone is bold', () => {
     expect(severityKitTone('S1-stop-the-line')).toEqual({ tone: 'danger', variant: 'bold' });
     expect(severityKitTone('S2-major')).toEqual({ tone: 'danger', variant: 'subtle' });
@@ -235,14 +220,6 @@ describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone/agentStatusKi
     expect(findingStatusKitTone('waived')).toBe('done');
     expect(findingStatusKitTone('refuted')).toBe('neutral');
     expect(findingStatusKitTone('expired')).toBe('neutral');
-  });
-
-  it('maps agents.status onto the kit tone set — NOT run_status', () => {
-    expect(agentStatusKitTone('live')).toBe('progress');
-    expect(agentStatusKitTone('done')).toBe('done');
-    expect(agentStatusKitTone('error')).toBe('danger');
-    expect(agentStatusKitTone('superseded')).toBe('neutral');
-    expect(agentStatusKitTone('abandoned')).toBe('neutral');
   });
 });
 

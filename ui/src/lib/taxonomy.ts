@@ -92,23 +92,6 @@ export const MILESTONE_STATUS_TONE: Record<string, Tone> = {
   completed: 'success',
 };
 
-/**
- * Fix-round (uiux S2 #5, caught while building the Task detail rail):
- * agents-registry.ts's `AgentStatus` (`live`/`done`/`error`/`superseded`/
- * `abandoned`) is ALSO not `run_status` (`queued`/`running`/`done`/`dead`) — same
- * "different vocabulary, same-looking name" trap as #3 above. Exported +
- * drift-tested against `agents-registry.ts`'s `AGENT_STATUSES`.
- */
-export const AGENT_STATUS_TONE: Record<string, Tone> = {
-  live: 'info',
-  done: 'success',
-  error: 'danger',
-  superseded: 'neutral',
-  // Open when its epic closed (D-187): bookkeeping the run outran, not a
-  // failure of the agent — same neutral reading as a supersede.
-  abandoned: 'neutral',
-};
-
 export function taskStatusTone(status: string): Tone {
   return TASK_STATUS_TONE[status] ?? 'neutral';
 }
@@ -172,10 +155,6 @@ export function planStatusTone(status: string): Tone {
 export function milestoneStatusTone(status: string): Tone {
   return MILESTONE_STATUS_TONE[status] ?? 'neutral';
 }
-/** agents.status (see `AGENT_STATUSES`) -> tone — NOT run_status. */
-export function agentStatusTone(status: string): Tone {
-  return AGENT_STATUS_TONE[status] ?? 'neutral';
-}
 export function runStatusTone(status: string): Tone {
   return RUN_STATUS_TONE[status] ?? 'neutral';
 }
@@ -219,10 +198,10 @@ export function taskStatusKitTone(status: string): KitTone {
 
 /**
  * DS3 item 4 (Task detail rebuild) — the old `Tone` vocabulary
- * (info/success/warning/danger/discovery/neutral) read by `severityTone()`,
- * `findingStatusTone()` and `agentStatusTone()` onto the kit `Tag`'s `KitTone`
- * set, so those three existing maps don't need a second, parallel copy of
- * their own value lists just to target a different component.
+ * (info/success/warning/danger/discovery/neutral) read by `severityTone()`
+ * and `findingStatusTone()` onto the kit `Tag`'s `KitTone` set, so those
+ * existing maps don't need a second, parallel copy of their own value lists
+ * just to target a different component.
  */
 const TONE_TO_KIT_TONE: Record<Tone, KitTone> = {
   info: 'progress',
@@ -242,11 +221,6 @@ export function severityKitTone(severity: string): { tone: KitTone; variant: 'su
 /** finding_status -> kit `Tag` tone. */
 export function findingStatusKitTone(status: string): KitTone {
   return TONE_TO_KIT_TONE[findingStatusTone(status)];
-}
-
-/** agents.status -> kit `Tag` tone (NOT run_status — see `agentStatusTone`'s comment). */
-export function agentStatusKitTone(status: string): KitTone {
-  return TONE_TO_KIT_TONE[agentStatusTone(status)];
 }
 
 /** roadmap.md milestone status -> kit `Tag` tone (DS4 S2, Roadmap's EpicBlock). */

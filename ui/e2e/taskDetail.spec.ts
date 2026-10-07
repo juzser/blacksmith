@@ -1,3 +1,4 @@
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -284,6 +285,67 @@ test.describe('Task detail', () => {
 
     await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
     await expect(page.locator('button.bs-timeline-row__title')).toHaveCount(0);
+  });
+
+  // An agent dispatched and never answered stays `live` in the store forever,
+  // so the rail's Agents card printed the raw word "live" days later while
+  // the Sessions badge and the timelines already said "No result after 4h".
+  // The card now reads the same agentStatus() mapping as the Sessions page.
+  // Real task payload, agents swapped for one row per badge state, read at
+  // the harness's pinned clock.
+  test('Agents card: a live agent past the 4h window reads "No result after 4h", never "live"', async ({
+    page,
+  }) => {
+    const now = Date.parse(FIXTURE_NOW_ISO);
+    const minutesAgo = (m: number) => new Date(now - m * 60_000).toISOString();
+    const row = (id: string, agentRole: string, status: string, dispatchedAt: string) => ({
+      id,
+      sessionId: 'session-a',
+      taskId: DEMO_HUB_COMPLETED_TASK,
+      epicId: 'epic-9',
+      agentId: null,
+      agentRole,
+      round: 1,
+      provider: 'anthropic',
+      modelTier: 'sonnet',
+      dispatchedAt,
+      terminalEventId: status === 'live' ? null : `${id}-end`,
+      terminalAt: status === 'live' ? null : minutesAgo(1),
+      terminalType: null,
+      status,
+    });
+    const agents = [
+      row('a-stale', 'coder', 'live', minutesAgo(5 * 60)),
+      row('a-fresh', 'tester', 'live', minutesAgo(30)),
+      row('a-done', 'reviewer', 'done', minutesAgo(90)),
+      row('a-error', 'grader', 'error', minutesAgo(90)),
+      row('a-superseded', 'uiux', 'superseded', minutesAgo(90)),
+    ];
+    const detailPath = `/api/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`;
+    await page.route(
+      (url) => url.pathname === detailPath,
+      async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        await route.fulfill({ response, json: { ...body, agents } });
+      },
+    );
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+
+    const rows = page.locator('.bs-task-detail__agent-row');
+    await expect(rows).toHaveCount(5);
+    const expected: [string, string][] = [
+      ['Builder', 'No result after 4h'],
+      ['Tester', 'Working'],
+      ['Code reviewer', 'Done'],
+      ['Quality grader', 'Failed'],
+      ['Designer', 'Stopped'],
+    ];
+    for (const [i, [role, label]] of expected.entries()) {
+      await expect(rows.nth(i)).toContainText(role);
+      await expect(rows.nth(i).locator('.bs-tag')).toHaveText(label);
+    }
+    await expect(page.locator('.bs-task-detail__agent-list').getByText('live')).toHaveCount(0);
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {

@@ -10,6 +10,9 @@
 // Deviations from §4.7 (no backing data, rendered absent per the brief):
 // - No per-agent summary table: `agents-registry` rows (role/provider/tier/
 //   status) stay a plain rail list, same shape as before, not a new Table.
+//   Each row's status is an AgentStatusBadge, the Sessions page's own
+//   mapping: the store never closes an agent that sent no result, so its
+//   raw `live` would read as working days later.
 //
 // DS6 PR4: the pattern-11 totals bar above RunHistoryTimeline now renders
 // from `/api/tasks/:id/runs`' `totals` (queries.ts `taskTotals()`). A field
@@ -34,6 +37,7 @@ import {
 } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import AgentChip from '../components/AgentChip.vue';
+import AgentStatusBadge from '../components/kit/AgentStatusBadge.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import Card from '../components/kit/Card.vue';
@@ -69,12 +73,7 @@ import { formatDurationMs, formatElapsedRange, taskLabel } from '../lib/format.j
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
-import {
-  agentStatusKitTone,
-  findingStatusKitTone,
-  severityKitTone,
-  taskStatusKitTone,
-} from '../lib/taxonomy.js';
+import { findingStatusKitTone, severityKitTone, taskStatusKitTone } from '../lib/taxonomy.js';
 import { type ActivityEntry, groupByDay } from '../lib/timelineDisplay.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
@@ -562,7 +561,7 @@ const factsRowText = computed(() => {
             <ul v-if="detail.agents.length > 0" class="bs-task-detail__agent-list">
               <li v-for="a in detail.agents" :key="a.id" class="bs-task-detail__agent-row">
                 <span>{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}</span>
-                <Tag :tone="agentStatusKitTone(a.status)" size="sm">{{ a.status }}</Tag>
+                <AgentStatusBadge :agent="a" />
               </li>
             </ul>
             <EmptyState v-else :icon="Bot" title="No agents yet." body="Agents dispatched to this task will appear here." />
