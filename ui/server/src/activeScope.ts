@@ -165,7 +165,7 @@ function pickFactorySessions(
   let newest: string | undefined;
   for (const id of ids) {
     if (newest === undefined) newest = id;
-    else if (Number.isNaN(at(id))) continue;
+    else if (Number.isNaN(at(id)) && !Number.isNaN(at(newest))) continue;
     else if (Number.isNaN(at(newest)) || at(id) >= at(newest)) newest = id;
   }
   return newest === undefined ? [] : [newest];

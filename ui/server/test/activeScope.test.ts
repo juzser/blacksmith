@@ -189,6 +189,19 @@ describe('computeActiveScope', () => {
     expect(out.factorySessions.map((f) => f.sessionId)).toEqual(['a']);
   });
 
+  it('with no time known for any member, the last one listed is the newest', () => {
+    const out = fold(
+      cli([
+        session(
+          { epics: [linkedEpic({ factorySessionIds: ['b', 'c'], factorySessionLastEventAt: {} })] },
+          { startedAt: '2026-10-07T10:00:00.000Z' },
+        ),
+      ]),
+      [store({ activelyRunning: ['epic-a'] })],
+    );
+    expect(out.factorySessions.map((f) => f.sessionId)).toEqual(['c']);
+  });
+
   it('two live sessions on one project make one entry; a shared working agent counts once', () => {
     const agent = { role: 'coder', taskId: 't1', since: '2026-10-07T11:00:00.000Z' };
     const out = fold(
