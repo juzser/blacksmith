@@ -296,6 +296,7 @@ interface Block {
   name?: string;
   id?: string;
   tool_use_id?: string;
+  content?: unknown;
   input?: { command?: unknown };
 }
 
@@ -416,6 +417,47 @@ interface Analysis {
   next: string | null;
   lastTool: string | null;
   bsMention: boolean;
+  /**
+   * Background subagents launched in the main thread and not yet reported
+   * ended, by agent id, with the launch timestamp (ms, null when unreadable).
+   * Only what the transcript tail shows: a launch outside the tail is not
+   * seen, so the count is a floor. Shells and monitors are not tracked.
+   */
+  pendingAgents: Map<string, number | null>;
+}
+
+const NOTIFICATION_END = /<status>\s*(?:completed|failed|killed|stopped)\s*<\/status>/;
+
+/** The agent id of an async subagent launch record, else null. */
+function launchedAgentId(e: Record<string, unknown>, blocks: Block[]): string | null {
+  const r = e.toolUseResult;
+  if (r !== null && typeof r === 'object') {
+    const t = r as Record<string, unknown>;
+    if (t.isAsync === true && typeof t.agentId === 'string' && t.agentId !== '') return t.agentId;
+    return null;
+  }
+  for (const b of blocks) {
+    if (b.type !== 'tool_result') continue;
+    const body = typeof b.content === 'string' ? b.content : '';
+    if (!body.startsWith('Async agent launched successfully.')) continue;
+    const m = /^agentId: (\S+)/m.exec(body);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+/** The task id of a notification that reports a subagent finished, else null. */
+function endedAgentId(e: Record<string, unknown>): string | null {
+  const origin = e.origin as { kind?: unknown } | undefined;
+  if (origin?.kind !== 'task-notification') return null;
+  const raw = blocksOf(e)
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text ?? '')
+    .join('\n');
+  if (!raw.trimStart().startsWith('<task-notification>') || !NOTIFICATION_END.test(raw)) {
+    return null;
+  }
+  return /<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(raw)?.[1] ?? null;
 }
 
 function analyse(entries: Record<string, unknown>[]): Analysis {
@@ -428,11 +470,21 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     next: null,
     lastTool: null,
     bsMention: mentionsBs(entries),
+    pendingAgents: new Map(),
   };
   for (const e of entries) {
-    if (e.isSidechain === true || e.isMeta === true || e.isCompactSummary === true) continue;
+    if (e.isSidechain === true) continue;
+    // A subagent's end notification counts even on a record flagged meta.
+    const ended = e.type === 'user' ? endedAgentId(e) : null;
+    if (ended !== null) a.pendingAgents.delete(ended);
+    if (e.isMeta === true || e.isCompactSummary === true) continue;
     if (e.type === 'user') {
       const blocks = blocksOf(e);
+      const launched = launchedAgentId(e, blocks);
+      if (launched !== null) {
+        const ts = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : Number.NaN;
+        a.pendingAgents.set(launched, Number.isNaN(ts) ? null : ts);
+      }
       if (blocks.some((b) => b.type === 'tool_result')) {
         a.meaningful = true;
         a.last = 'tool_result';
@@ -822,6 +874,13 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     if (e.status !== 'idle') return e.status;
     if (a === null || t.state !== 'ok') return 'idle';
     if (a.pendingAsk !== null) return 'waiting_answer';
+    // The turn ended while its own background subagents still run: the
+    // session wakes when they report, so it is not waiting for the operator.
+    // A launch from before this process started belongs to a process that is gone.
+    const startedMs = e.startedAt === null ? Number.NaN : Date.parse(e.startedAt);
+    for (const ts of a.pendingAgents.values()) {
+      if (ts === null || Number.isNaN(startedMs) || ts >= startedMs) return 'working';
+    }
     if (a.last === 'assistant_text') return 'waiting_operator';
     return 'idle';
   }
