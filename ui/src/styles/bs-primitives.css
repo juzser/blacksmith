@@ -3852,20 +3852,50 @@ h2.rm-section__head {
   height: 100%;
   border-radius: var(--bs-radius-sm);
 }
-/* Fix round 2 #2 / fix round 4 #2: a near-transparent fill with a border
-   read as an empty, unstarted box (the opposite of "done"). Spec §1: "past:
-   a faded solid bar" — the same chart token as the "now" bar, muted by the
-   past-opacity token, not a second colour (the mock agrees). */
-.lbar.past {
+/* A bar's colour is the status of its row (done / review / in progress /
+   todo), not where its dates sit in time; the dates only set left and width.
+   A finished bar keeps its tone, dimmed by the past-opacity token. The legend
+   swatches (RoadmapLegend.vue) share these rules, so bar and swatch cannot
+   drift. */
+.lbar--done {
+  background: var(--bs-tone-done-text);
+}
+.lbar--review {
+  background: var(--bs-tone-review-text);
+}
+.lbar--in-progress {
   background: var(--bs-tone-progress-text);
+}
+.lbar--todo {
+  background: var(--bs-tone-todo-subtle);
+  border: 1px dashed var(--bs-tone-todo-text);
+}
+.lbar.past {
   opacity: var(--bs-roadmap-bar-past-opacity);
 }
-.lbar.now {
-  background: var(--bs-tone-progress-text);
+/* Legend (ds-review.html .legend): a wrapping row of 10px swatches + labels. */
+.rm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: var(--bs-space-2);
+  gap: var(--bs-space-1) var(--bs-space-3);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
 }
-.lbar.up {
-  background: var(--bs-tone-progress-subtle);
-  border: 1px dashed var(--bs-tone-progress-text);
+.rm-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+}
+.rm-legend__swatch {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  /* ds-allow-hardcode: 10px swatch, as in ds-review.html's .legend */
+  width: 10px;
+  /* ds-allow-hardcode: 10px swatch, as in ds-review.html's .legend */
+  height: 10px;
+  /* ds-allow-hardcode: 2px swatch corner, as in ds-review.html's .legend i */
+  border-radius: 2px;
 }
 .lbar-unscheduled {
   display: inline-flex;

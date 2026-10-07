@@ -27,6 +27,8 @@ import {
   type CliFs,
   type CliSessionsResponse,
   createCliSessionsReader,
+  liveSessionCwds,
+  parsePsStarts,
 } from '../src/cliSessions.js';
 
 const SID_A = '11111111-1111-4111-8111-111111111111';
@@ -51,6 +53,32 @@ const toolResult = (id: string) => ({
   type: 'user',
   message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] },
 });
+const launchRec = (agentId: string, timestamp = '2026-10-06T11:00:00.000Z') => ({
+  type: 'user',
+  timestamp,
+  message: {
+    role: 'user',
+    content: [
+      {
+        type: 'tool_result',
+        tool_use_id: `tu-${agentId}`,
+        content: `Async agent launched successfully.\nagentId: ${agentId}`,
+      },
+    ],
+  },
+  toolUseResult: { isAsync: true, status: 'async_launched', agentId },
+});
+const notifyRec = (agentId: string, status: string | null, asBlock = false) => {
+  const body = `<task-notification>\n<task-id>${agentId}</task-id>\n${
+    status === null ? '' : `<status>${status}</status>\n`
+  }</task-notification>`;
+  return {
+    type: 'user',
+    timestamp: '2026-10-06T11:20:00.000Z',
+    origin: { kind: 'task-notification' },
+    message: { role: 'user', content: asBlock ? [{ type: 'text', text: body }] : body },
+  };
+};
 /** Narrows a value a test needs; fails loudly instead of asserting with `!`. */
 function must<T>(x: T | null | undefined): T {
   if (x === null || x === undefined) throw new Error('expected a value');
@@ -129,6 +157,7 @@ describe('cliSessions reader', () => {
       roots: [root],
       nowIso: () => NOW,
       isAlive: (pid) => alive.has(pid),
+      procStartOf: async () => new Map(),
       listWorktrees: async () => [],
       cacheMs: 0,
       ...over,
@@ -297,6 +326,183 @@ describe('cliSessions reader', () => {
       expect(s.doingNow?.assistant?.length).toBeLessThanOrEqual(280);
       expect(JSON.stringify(s)).not.toContain('\\u0007');
       expect(s.next?.length).toBeLessThanOrEqual(280);
+    });
+
+    describe('reused pids', () => {
+      const START = 'Mon Oct  6 10:00:00 2026';
+      const reg = { procStart: START, pidDomain: process.platform };
+      const starts = (m: [number, string][]) => async () => new Map(m);
+
+      it('keeps a session whose process start matches, ignoring whitespace', async () => {
+        await session(130, reg);
+        await transcript(root, SID_A, jsonl([user('go')]));
+        const r = await read({ procStartOf: starts([[130, 'Mon Oct 6   10:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+        expect(r.hidden.dead).toBe(0);
+      });
+
+      it('counts a live pid with another process start as dead', async () => {
+        await session(131, reg);
+        const r = await read({ procStartOf: starts([[131, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(0);
+        expect(r.hidden.dead).toBe(1);
+      });
+
+      it('asks ps once for every comparable pid together', async () => {
+        await session(132, reg);
+        await session(133, { ...reg, sessionId: SID_B });
+        const procStartOf = vi.fn(async (_pids: number[]) => new Map<number, string>());
+        await read({ procStartOf });
+        expect(procStartOf).toHaveBeenCalledTimes(1);
+        expect(procStartOf.mock.calls[0]?.[0]?.slice().sort()).toEqual([132, 133]);
+      });
+
+      it('lets kill(0) decide without a procStart', async () => {
+        await session(134, { procStart: undefined, pidDomain: process.platform });
+        const r = await read({ procStartOf: starts([[134, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide for another pid domain', async () => {
+        await session(135, { procStart: START, pidDomain: 'other-os' });
+        const r = await read({ procStartOf: starts([[135, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide when ps fails', async () => {
+        await session(136, reg);
+        const r = await read({
+          procStartOf: async () => {
+            throw new Error('ps timed out');
+          },
+        });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('lets kill(0) decide when ps has no line for the pid', async () => {
+        await session(137, reg);
+        const r = await read({ procStartOf: starts([[999, 'Wed Oct  7 01:00:00 2026']]) });
+        expect(r.sessions).toHaveLength(1);
+      });
+
+      it('does not follow a reused pid in liveSessionCwds', async () => {
+        await session(138, reg);
+        await session(139, { ...reg, sessionId: SID_B, cwd: outside });
+        const alivePid = (pid: number) => alive.has(pid);
+        const cwds = await liveSessionCwds(
+          config,
+          alivePid,
+          starts([
+            [138, START],
+            [139, 'Wed Oct  7 01:00:00 2026'],
+          ]),
+        );
+        expect(cwds).toEqual([root]);
+      });
+
+      it('parses ps pid and lstart lines', () => {
+        const out = '  101 Tue Oct  6 02:44:00 2026\n12345 Mon Oct  5 23:01:09 2026\n\nnoise\n';
+        expect([...parsePsStarts(out)]).toEqual([
+          [101, 'Tue Oct  6 02:44:00 2026'],
+          [12345, 'Mon Oct  5 23:01:09 2026'],
+        ]);
+      });
+    });
+
+    describe('background subagents', () => {
+      const tail = (...extra: unknown[]) =>
+        jsonl([user('go'), launchRec('ag1'), asst(text('Launched, waiting.')), ...extra]);
+
+      it('is working, not waiting, while a launched subagent is pending', async () => {
+        await session(120, { status: 'idle' });
+        await transcript(root, SID_A, tail());
+        expect(must((await read()).sessions[0]).status).toBe('working');
+      });
+
+      it.each([
+        ['completed', false],
+        ['failed', false],
+        ['killed', true],
+        ['stopped', true],
+      ])('a %s notification ends the pending subagent', async (status, asBlock) => {
+        await session(121, { status: 'idle' });
+        await transcript(root, SID_A, tail(notifyRec('ag1', status, asBlock)));
+        expect(must((await read()).sessions[0]).status).toBe('waiting_operator');
+      });
+
+      it('a notification with no status does not end the subagent', async () => {
+        await session(122, { status: 'idle' });
+        await transcript(root, SID_A, tail(notifyRec('ag1', null)));
+        expect(must((await read()).sessions[0]).status).toBe('working');
+      });
+
+      it('a notification with a status ends it even on a meta record', async () => {
+        await session(123, { status: 'idle' });
+        await transcript(root, SID_A, tail({ ...notifyRec('ag1', 'completed'), isMeta: true }));
+        expect(must((await read()).sessions[0]).status).toBe('waiting_operator');
+      });
+
+      it('ignores a launch made before the registry startedAt', async () => {
+        await session(124, { status: 'idle' });
+        await transcript(
+          root,
+          SID_A,
+          jsonl([
+            user('go'),
+            launchRec('ag1', '2026-10-06T09:00:00.000Z'),
+            asst(text('Launched, waiting.')),
+          ]),
+        );
+        expect(must((await read()).sessions[0]).status).toBe('waiting_operator');
+      });
+
+      it('falls back to the agentId line when toolUseResult is absent', async () => {
+        await session(125, { status: 'idle' });
+        const { toolUseResult: _drop, ...bare } = launchRec('ag1');
+        await transcript(root, SID_A, jsonl([user('go'), bare, asst(text('Waiting.'))]));
+        expect(must((await read()).sessions[0]).status).toBe('working');
+      });
+
+      it('a pending AskUserQuestion still wins', async () => {
+        await session(126, { status: 'idle' });
+        await transcript(
+          root,
+          SID_A,
+          jsonl([user('go'), launchRec('ag1'), asst(toolUse('AskUserQuestion', 'q1'))]),
+        );
+        expect(must((await read()).sessions[0]).status).toBe('waiting_answer');
+      });
+
+      it('registry waiting still gives waiting_operator', async () => {
+        await session(127, { status: 'waiting', waitingFor: 'input needed' });
+        await transcript(root, SID_A, tail());
+        expect(must((await read()).sessions[0]).status).toBe('waiting_operator');
+      });
+    });
+
+    it('keeps text of exactly 280 code points and marks a 281-point text as cut', async () => {
+      await session(114, { status: 'idle' });
+      await transcript(root, SID_A, jsonl([user('go'), asst(text('y'.repeat(280)))]));
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe('y'.repeat(280));
+      await transcript(root, SID_A, jsonl([user('go'), asst(text('y'.repeat(281)))]));
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe(`${'y'.repeat(279)}…`);
+    });
+
+    it('trims whitespace before the ellipsis and never leaves a lone surrogate', async () => {
+      await session(115, { status: 'idle' });
+      await transcript(
+        root,
+        SID_A,
+        jsonl([user('go'), asst(text(`${'y'.repeat(278)} ${'z'.repeat(10)}`))]),
+      );
+      expect(must((await read()).sessions[0]).doingNow?.assistant).toBe(`${'y'.repeat(278)}…`);
+      const emoji = '\u{1F600}';
+      await transcript(root, SID_A, jsonl([user('go'), asst(text(emoji.repeat(300)))]));
+      const out = must(must((await read()).sessions[0]).doingNow?.assistant);
+      expect(out).toBe(`${emoji.repeat(279)}…`);
+      expect(out).not.toMatch(
+        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+      );
     });
 
     it('sets formatWarning for an unseen version and null for a known one', async () => {
@@ -1572,6 +1778,18 @@ describe('cliSessions reader', () => {
         const card = await cardOf(199, { status: 'waiting', waitingFor: 'input needed' });
         expect(card.status).toBe('waiting_operator');
         expect(card.focus?.next).toEqual({ kind: 'waiting_on_you' });
+      });
+
+      it('does not say waiting on you while the session waits on its own subagents', async () => {
+        await epicWithWaves(2, [], 0);
+        await transcript(
+          outside,
+          SID_B,
+          jsonl([user('go'), launchRec('ag1'), asst(text('Launched, waiting.'))]),
+        );
+        const card = await cardOf(202, { status: 'idle' });
+        expect(card.status).toBe('working');
+        expect(card.focus?.next).not.toEqual({ kind: 'waiting_on_you' });
       });
 
       it('says waiting on you for an idle session with nothing working', async () => {

@@ -406,9 +406,9 @@ export interface RunningSession {
    */
   projects: string[];
   /**
-   * The session's earliest prompt (first line, trimmed to about 80 chars),
-   * else the epic id of its first dispatched agent, else null — so a row
-   * never has to fall back to the bare session id alone (plan B, DS8).
+   * The session id when it starts with the epic id of its first dispatched
+   * agent plus a dash, else that epic id, else null. Never prompt text — so
+   * a row rarely has to fall back to the bare session id alone (plan B, DS8).
    */
   title: string | null;
 }
@@ -1269,45 +1269,16 @@ function sessionProjects(db: SmithDb, scope: Scope): Map<string, Set<string>> {
   return bySession;
 }
 
-const SESSION_TITLE_MAX_LEN = 80;
-
 /**
- * First non-blank line of `text`, trimmed, then cut to about
- * `SESSION_TITLE_MAX_LEN` chars. `null` when `text` has no non-blank line at
- * all, so the caller's epic-id fallback applies instead of an empty title.
- */
-function trimSessionTitle(text: string): string | null {
-  const firstLine = text.split('\n').find((line) => line.trim() !== '');
-  if (firstLine === undefined) return null;
-  const trimmed = firstLine.trim();
-  return trimmed.length > SESSION_TITLE_MAX_LEN
-    ? `${trimmed.slice(0, SESSION_TITLE_MAX_LEN)}…`
-    : trimmed;
-}
-
-/**
- * One grouped query per field, not one query per session (plan B, DS8): the
- * earliest prompt per session, falling back to the epic id of the earliest
- * dispatched agent for a session with no prompt at all.
+ * One grouped query, not one query per session (plan B, DS8). A title never
+ * comes from prompt text (a prompt is whatever the operator typed). It is
+ * derived from the epic of the session's earliest dispatched agent: the
+ * session id itself when it starts with that epic id and a dash (it names
+ * the epic and tells sibling sessions of one epic apart), else the epic id.
+ * A session with no dispatched agent has no title.
  */
 function sessionTitles(db: SmithDb, scope: Scope): Map<string, string> {
   const titles = new Map<string, string>();
-
-  const promptCond = scopedToSessions(prompts.sessionId, scope);
-  const promptRows = promptCond
-    ? db.select().from(prompts).where(promptCond).all()
-    : db.select().from(prompts).all();
-  const promptsBySession = new Map<string, (typeof prompts.$inferSelect)[]>();
-  for (const p of promptRows) {
-    const list = promptsBySession.get(p.sessionId) ?? [];
-    list.push(p);
-    promptsBySession.set(p.sessionId, list);
-  }
-  for (const [sessionId, rows] of promptsBySession) {
-    const earliest = inLogOrder(rows)[0];
-    const title = earliest ? trimSessionTitle(earliest.prompt) : null;
-    if (title !== null) titles.set(sessionId, title);
-  }
 
   const agentCond = scopedToSessions(agents.sessionId, scope);
   const agentRows = agentCond
@@ -1315,7 +1286,6 @@ function sessionTitles(db: SmithDb, scope: Scope): Map<string, string> {
     : db.select().from(agents).all();
   const agentsBySession = new Map<string, (typeof agents.$inferSelect)[]>();
   for (const a of agentRows) {
-    if (titles.has(a.sessionId)) continue;
     const list = agentsBySession.get(a.sessionId) ?? [];
     list.push(a);
     agentsBySession.set(a.sessionId, list);
@@ -1324,7 +1294,9 @@ function sessionTitles(db: SmithDb, scope: Scope): Map<string, string> {
     const earliest = inLogOrder(
       rows.map((a) => ({ ts: a.dispatchedAt, eventId: a.id, row: a })),
     )[0];
-    if (earliest?.row.epicId) titles.set(sessionId, earliest.row.epicId);
+    const epicId = earliest?.row.epicId;
+    if (!epicId) continue;
+    titles.set(sessionId, sessionId.startsWith(`${epicId}-`) ? sessionId : epicId);
   }
 
   return titles;
@@ -2577,8 +2549,9 @@ export interface TimelineEntry {
   sessionId: string;
   /**
    * DS6 PR4b — the session's title (same resolution `sessionTitles()` gives
-   * `runningSessions()`: earliest prompt, else the earliest dispatch's epic
-   * id), falling back to the raw session id when neither exists.
+   * `runningSessions()`: the earliest dispatch's epic id, or the session id
+   * when it extends that epic id), falling back to the raw session id when
+   * neither exists.
    */
   sessionTitle: string;
 }
