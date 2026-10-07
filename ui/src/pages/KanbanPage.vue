@@ -85,6 +85,9 @@ const loading = ref(true);
 // Awaiting this unguarded ahead of loadBoard() is what left the page on the
 // skeleton forever with `error` still null (D-222).
 const epicsFailed = ref(false);
+// True once loadEpics has answered or failed at least once. Before that an
+// empty offer means "not known yet", not "nothing offered".
+const epicsSettled = ref(false);
 
 async function loadEpics() {
   try {
@@ -96,6 +99,8 @@ async function loadEpics() {
     epicsFailed.value = false;
   } catch {
     epicsFailed.value = true;
+  } finally {
+    epicsSettled.value = true;
   }
 }
 
@@ -120,7 +125,9 @@ const pickerOptions = computed(() =>
 function resolveSelection() {
   if (!activeView()) return;
   if (offered.value.length === 0) {
-    selectedEpic.value = ALL_EPICS;
+    // Until the epic list has settled the offer is empty only because nothing
+    // is known yet; resetting now would fetch the all-epics board first.
+    if (epicsSettled.value) selectedEpic.value = ALL_EPICS;
     return;
   }
   if (offered.value.includes(selectedEpic.value)) return;

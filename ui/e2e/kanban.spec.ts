@@ -356,6 +356,35 @@ test.describe('Kanban: the Active/All scope', () => {
     await expect(picker(page)).toHaveValue('epic-9');
   });
 
+  test('a pinned link never fetches the all-epics board while the overview is still in flight', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-1']);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/overview*', async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    const kanbanUrls: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/kanban')) kanbanUrls.push(r.url());
+    });
+    const scopeAnswered = page.waitForResponse('**/api/active-scope*');
+    await page.goto('/work/kanban?epic=epic-1');
+    // The overview stays held until the scope answer has landed.
+    await scopeAnswered;
+    release();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await expect(picker(page)).toHaveValue('epic-1');
+    expect(kanbanUrls.length).toBeGreaterThan(0);
+    for (const url of kanbanUrls) {
+      expect(new URL(url).searchParams.get('epic')).toBe('epic-1');
+    }
+  });
+
   test('a project switch re-narrows the picker to that project’s active epics', async ({
     page,
   }) => {
