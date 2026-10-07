@@ -11,19 +11,23 @@
 // (either the selected epic, or "All epics" when chosen from the picker).
 import { Kanban, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import Select from '../components/kit/Select.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
+import { useActiveScope } from '../composables/useActiveScope.js';
+import { useActivityScope } from '../composables/useActivityScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
 import {
+  type ActiveScopeResult,
   fetchKanban,
   fetchOverview,
   type IdleEpic,
@@ -31,8 +35,16 @@ import {
   selectableEpics,
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
+import {
+  ALL_EPICS,
+  activeSelection,
+  EPIC_LIST_UNAVAILABLE,
+  epicOptions,
+  retainedEpic,
+} from '../lib/epicPicker.js';
+import { pluralize } from '../lib/format.js';
 import { visibleTaskCount } from '../lib/kanban.js';
+import type { StoreRef } from '../lib/storeKey.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -41,8 +53,24 @@ setBreadcrumb([{ label: 'Kanban' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
 const { isPhoneWidth } = useViewport();
+const { scope: mode, scopeTo } = useActivityScope();
+const { scope: activeScope, settled: activeScopeSettled } = useActiveScope();
+
+// A failed read counts as unmeasured, never as "nothing is active"; null only
+// while the first answer is still in flight (same rule as SessionsPage).
+const UNMEASURED: ActiveScopeResult = {
+  measured: false,
+  readAt: '',
+  liveSessions: 0,
+  unlinkedSessions: 0,
+  projects: [],
+  epics: [],
+  factorySessions: [],
+};
+const live = () => activeScope.value ?? (activeScopeSettled.value ? UNMEASURED : null);
 
 const epics = ref<string[]>([]);
+const inFlight = ref<{ epicId: string; store?: StoreRef }[]>([]);
 const idleEpics = ref<IdleEpic[]>([]);
 const selectedEpic = ref<string>(ALL_EPICS);
 /** Null until a fetch lands. That distinction is the whole guard on the empty state below. */
@@ -62,11 +90,29 @@ async function loadEpics() {
   try {
     const overview = await fetchOverview(sessionScope.value, project.value);
     epics.value = selectableEpics(overview);
+    inFlight.value =
+      overview.epicsInFlightByStore ?? overview.epicsInFlight.map((epicId) => ({ epicId }));
     idleEpics.value = overview.epicsIdle;
     epicsFailed.value = false;
   } catch {
     epicsFailed.value = true;
   }
+}
+
+// What the picker offers: under Active with a measured scope, only the epics a
+// live CLI session drives (plus the one `?epic=` names); otherwise every epic.
+const pinnedEpic = () => (typeof route.query.epic === 'string' ? route.query.epic : '');
+const activeView = () => mode.value === 'active' && live()?.measured === true;
+const offered = computed(() =>
+  activeSelection(epics.value, inFlight.value, live(), mode.value, pinnedEpic()),
+);
+const pickerOptions = computed(() => epicOptions(offered.value, idleEpics.value, !activeView()));
+
+// Active has no "All epics" choice, so a selection it does not offer (including
+// the default) moves to the first epic it does.
+function resolveSelection() {
+  if (!activeView() || offered.value.length === 0) return;
+  if (!offered.value.includes(selectedEpic.value)) selectedEpic.value = offered.value[0] ?? '';
 }
 
 async function loadBoard() {
@@ -90,6 +136,7 @@ async function loadBoard() {
 
 async function load() {
   await loadEpics();
+  resolveSelection();
   await loadBoard();
 }
 
@@ -106,6 +153,8 @@ onMounted(() => {
 });
 const { refresh } = usePoll(load, 15000);
 watch(selectedEpic, loadBoard);
+// The scope answer (each shell pulse) and the Active/All switch both change what is offered.
+watch([offered, mode], resolveSelection);
 // Same split as the retired FlowPage's, for the same reason: `loadBoard()` fetches only
 // /api/kanban, so a project switch left the picker listing the previous
 // project's epics. Here the 15s poll re-ran `load()` and healed it eventually
@@ -114,8 +163,23 @@ watch(selectedEpic, loadBoard);
 watch([project, sessionKey], async () => {
   await loadEpics();
   selectedEpic.value = retainedEpic(selectedEpic.value, epics.value);
+  resolveSelection();
   await loadBoard();
 });
+
+// The Active edge states: each is one muted line instead of a board.
+const noLiveSessions = computed(() => activeView() && live()?.liveSessions === 0);
+const noneOnAnEpic = computed(
+  () =>
+    activeView() &&
+    !noLiveSessions.value &&
+    !loading.value &&
+    !epicsFailed.value &&
+    offered.value.length === 0,
+);
+const edgeEmpty = computed(() => noLiveSessions.value || noneOnAnEpic.value);
+const scopePending = computed(() => mode.value === 'active' && live() === null);
+const unmeasuredNote = computed(() => mode.value === 'active' && live()?.measured === false);
 
 const milestoneFilter = ref<string | null>(null);
 const displayedColumns = computed(() => {
@@ -150,11 +214,12 @@ function goToTask(taskId: string, storeId?: string) {
 <template>
   <div>
     <div class="bs-kanban-page__toolbar">
-      <label class="bs-kanban-page__toolbar-field">
+      <label v-if="!edgeEmpty" class="bs-kanban-page__toolbar-field">
         <span class="bs-kanban-page__count">Epic</span>
-        <Select v-model="selectedEpic" :options="epicOptions(epics, idleEpics)" aria-label="Epic" />
+        <Select v-model="selectedEpic" :options="pickerOptions" aria-label="Epic" />
       </label>
-      <span class="bs-kanban-page__count">{{ taskCount }} tasks</span>
+      <ActivityScopeToggle />
+      <span v-if="!edgeEmpty && !scopePending" class="bs-kanban-page__count">{{ taskCount }} tasks</span>
       <div class="bs-kanban-page__toolbar-actions">
         <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
           Clear milestone filter
@@ -174,9 +239,10 @@ function goToTask(taskId: string, storeId?: string) {
     <Banner v-if="!error && epicsFailed" tone="warning" show-retry @retry="loadEpics">
       {{ EPIC_LIST_UNAVAILABLE }}
     </Banner>
+    <p v-if="unmeasuredNote" class="bs-sessions__quiet">Live sessions can't be read here</p>
     <Banner v-if="error" tone="danger" show-retry @retry="loadBoard">{{ error }}</Banner>
 
-    <template v-else-if="loading">
+    <template v-else-if="loading || scopePending">
       <!-- ds-allow-hardcode:start — Skeleton width matches .bs-kanban-col's own
            280px flex-basis (bs-primitives.css), a board-layout constant,
            not a spacing/sizing design token. -->
@@ -185,6 +251,15 @@ function goToTask(taskId: string, storeId?: string) {
       </div>
       <!-- ds-allow-hardcode:end -->
     </template>
+
+    <p v-else-if="noLiveSessions" class="bs-sessions__quiet">
+      Nothing is active right now. ·
+      <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+    </p>
+    <p v-else-if="noneOnAnEpic" class="bs-sessions__quiet">
+      {{ pluralize(live()?.liveSessions ?? 0, 'live session') }}, none on an epic ·
+      <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+    </p>
 
     <EmptyState
       v-else-if="canClaimEmpty(columns !== null, taskCount)"

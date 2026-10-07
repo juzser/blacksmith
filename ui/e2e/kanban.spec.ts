@@ -1,4 +1,5 @@
-import type { KanbanTask } from '../src/lib/api.js';
+import type { ActiveScopeResult, KanbanTask } from '../src/lib/api.js';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -157,6 +158,129 @@ function fourColumnBoard(card: ReturnType<typeof task>) {
     { taskStatus: 'completed', tasks: [task('epic-1/task-4', 'completed')] },
   ];
 }
+
+// The picker follows the Active/All scope (`?scope=`). `/api/active-scope` is
+// stubbed per test: which epics a live CLI session drives is not something the
+// fixture db can say.
+async function stubActiveScope(
+  page: import('@playwright/test').Page,
+  activeEpics: string[],
+  over: Partial<ActiveScopeResult> = {},
+) {
+  const body: ActiveScopeResult = {
+    measured: true,
+    readAt: FIXTURE_NOW_ISO,
+    liveSessions: activeEpics.length,
+    unlinkedSessions: 0,
+    projects: [],
+    epics: activeEpics.map((epicId) => ({ storeId: 'home', epicId, project: null })),
+    factorySessions: [],
+    ...over,
+  };
+  await page.route('**/api/active-scope*', (route) => route.fulfill({ json: body }));
+}
+
+test.describe('Kanban: the Active/All scope', () => {
+  const picker = (page: import('@playwright/test').Page) =>
+    page.getByLabel('Epic', { exact: true });
+  const optionValues = (page: import('@playwright/test').Page) =>
+    picker(page)
+      .locator('option')
+      .evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value));
+  const toggle = (page: import('@playwright/test').Page) =>
+    page.getByRole('navigation', { name: 'Activity scope' });
+
+  test('Active offers only the active epic, no "All epics", and boards its tasks', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect(await optionValues(page)).toEqual(['epic-9']);
+    await expect(picker(page)).toHaveValue('epic-9');
+    await expect(page.getByRole('option', { name: 'All epics' })).toHaveCount(0);
+    await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
+  });
+
+  test('All restores the full list with "All epics" first; Active drops scope from the URL', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await toggle(page).getByRole('link', { name: 'All' }).click();
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect
+      .poll(() => optionValues(page))
+      .toEqual(expect.arrayContaining(['', 'epic-1', 'epic-9']));
+    expect((await optionValues(page))[0]).toBe('');
+    await toggle(page).getByRole('link', { name: 'Active' }).click();
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect.poll(() => optionValues(page)).toEqual(['epic-9']);
+  });
+
+  test('a pinned ?epic= that is not active stays listed, selected and rendered', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban?epic=epic-1');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    await expect(picker(page)).toHaveValue('epic-1');
+  });
+
+  test('no live session: the empty line, and Show all works', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+    await expect(page.getByText(/^\d+ tasks$/)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Show all' }).click();
+    await expect(page).toHaveURL(/[?&]scope=all\b/);
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+  });
+
+  test('live sessions but none on an epic: says so, with Show all', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText('2 live sessions, none on an epic · Show all')).toBeVisible();
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(0);
+  });
+
+  test('unmeasured: the full picker and board, plus a note', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
+    await page.goto('/work/kanban');
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    expect((await optionValues(page))[0]).toBe('');
+    await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
+    await expect(toggle(page)).toBeVisible();
+  });
+
+  test('phone: no horizontal scroll, and the toggle and Show all are 44px tall', async ({
+    page,
+  }) => {
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await stubActiveScope(page, ['epic-9']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    for (const name of ['Active', 'All']) {
+      const box = await toggle(page).getByRole('link', { name }).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+    }
+    const noScroll = () =>
+      page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(await noScroll()).toBe(true);
+
+    await page.unroute('**/api/active-scope*');
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await page.goto('/work/kanban');
+    const show = page.getByRole('link', { name: 'Show all' });
+    await expect(show).toBeVisible();
+    expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await noScroll()).toBe(true);
+  });
+});
 
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {

@@ -230,6 +230,9 @@ export interface OverviewResult {
   epicsActivelyRunning: string[];
   /** The in-flight epics left out of `epicsActivelyRunning` for being idle over 7 days. */
   epicsIdle: IdleEpic[];
+  /** `epicsInFlight` and `epicsActivelyRunning` with the store each epic lives in; absent from an older single-store payload. */
+  epicsInFlightByStore?: { epicId: string; store: StoreRef }[];
+  epicsActivelyRunningByStore?: { epicId: string; store: StoreRef }[];
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
