@@ -1,10 +1,18 @@
 // HomePage's pure half (ds-spec.md §4.1 points 2-4): the "Running now"
 // cards, the "Just finished" rule, the decision lines and the Budget
 // numbers, kept out of the .vue file so the DOM-free unit suite covers them.
-import type { ClosedEpic, EpicTokenSpend, OverviewResult, RecentDispatch } from './api.js';
+import { isActiveProject } from './activeScope.js';
+import type { ActivityScope } from './activityScope.js';
+import type {
+  ActiveScopeResult,
+  ClosedEpic,
+  EpicTokenSpend,
+  OverviewResult,
+  RecentDispatch,
+} from './api.js';
 import { formatCompactNumber, pluralize, taskLabel } from './format.js';
 import { dispatchDecisionLine } from './roleLabels.js';
-import type { StoreRef } from './storeKey.js';
+import { HOME_STORE_ID, type StoreRef } from './storeKey.js';
 
 export interface TokenTotals {
   spent: number;
@@ -100,6 +108,8 @@ export interface RunningCard {
   workingAgents: number;
   epics: string[];
   tokens: CardTokens;
+  /** Measured scope and no live session drives this project: drawn muted. */
+  quiet?: boolean;
 }
 
 /**
@@ -116,14 +126,20 @@ function cardTokens(all: EpicTokenSpend[], inFlight: string[]): CardTokens {
 }
 
 /**
- * The Budget panel: the figures the Running-now cards show, over the same
- * epic set (`epicsActivelyRunning`, which the server already scopes to the
- * selected project). Null when no epic is running, so the panel says so
- * rather than drawing a zero.
+ * The Budget panel: the sum of the figures the Running-now cards on screen
+ * show, so the panel and the cards never disagree. Null when no card has an
+ * epic running, so the panel says so rather than drawing a zero.
  */
-export function budgetPanel(o: OverviewResult): CardTokens | null {
-  if (o.epicsActivelyRunning.length === 0) return null;
-  return cardTokens(o.tokensByEpic, o.epicsActivelyRunning);
+export function budgetPanel(cards: RunningCard[]): CardTokens | null {
+  if (cards.every((c) => c.epics.length === 0)) return null;
+  const sum = (pick: (t: CardTokens) => number) => cards.reduce((n, c) => n + pick(c.tokens), 0);
+  const budgets = cards.map((c) => c.tokens.budget).filter((b): b is number => b !== null);
+  return {
+    spent: sum((t) => t.spent),
+    budget: budgets.length > 0 ? budgets.reduce((n, b) => n + b, 0) : null,
+    unmeasured: sum((t) => t.unmeasured),
+    outliers: cards.flatMap((c) => c.tokens.outliers),
+  };
 }
 
 /** What the Budget panel renders: one quiet line, or the figures. */
@@ -140,8 +156,8 @@ export type BudgetView =
     };
 
 /** The Budget panel's decision, so HomePage.vue only renders it. */
-export function budgetView(o: OverviewResult): BudgetView {
-  const panel = budgetPanel(o);
+export function budgetView(cards: RunningCard[], delta: number | null): BudgetView {
+  const panel = budgetPanel(cards);
   if (panel === null) return { kind: 'none', text: 'No epic is running.' };
   return {
     kind: 'figures',
@@ -154,7 +170,7 @@ export function budgetView(o: OverviewResult): BudgetView {
           }
         : null,
     tokensText: cardTokensText(panel),
-    deltaSentence: budgetDeltaSentence(o.budgetUsedPctPointDelta1h ?? null),
+    deltaSentence: budgetDeltaSentence(delta),
     unmeasuredSentence: unmeasuredSentence(panel.unmeasured),
     outlierSentence: outlierSentence(panel.outliers),
   };
@@ -182,12 +198,7 @@ function isRunning(workingAgents: number, epics: string[]): boolean {
   return workingAgents > 0 || epics.length > 0;
 }
 
-/**
- * One card per project with work in flight or agents working. Unscoped, the
- * overview carries a per-project summary; scoped to one project it does not,
- * so that project's single card is built from the scoped per-epic spend.
- */
-export function runningNowCards(o: OverviewResult, project?: string): RunningCard[] {
+function candidateCards(o: OverviewResult, project?: string): RunningCard[] {
   if (project !== undefined) {
     if (!isRunning(o.workingAgentCount, o.epicsActivelyRunning)) return [];
     return [
@@ -208,6 +219,41 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
       epics: p.epicsActivelyRunning,
       tokens: cardTokens(p.tokensByEpic, p.epicsActivelyRunning),
     }));
+}
+
+/**
+ * One card per project with work in flight or agents working (the scope never
+ * adds a card). Under Active with a measured scope, only projects a live CLI
+ * session drives are `shown`; the rest are `quiet`. Under All they are all
+ * shown, the quiet ones marked. An unmeasured scope is "unknown": All, nothing
+ * muted. An active card counts the agents on epics a live session drives.
+ * Scoped to one project the overview carries no per-project summary, so that
+ * project's single card is built from the scoped per-epic spend.
+ */
+export function runningNowCards(
+  o: OverviewResult,
+  active: ActiveScopeResult | null,
+  scope: ActivityScope,
+  project?: string,
+): { shown: RunningCard[]; quiet: RunningCard[] } {
+  const measured = active?.measured === true;
+  const shown: RunningCard[] = [];
+  const quiet: RunningCard[] = [];
+  for (const card of candidateCards(o, project)) {
+    if (!measured) {
+      shown.push(card);
+    } else if (isActiveProject(active, card, card.project)) {
+      const entry = active?.projects.find(
+        (p) => p.storeId === (card.store?.id ?? HOME_STORE_ID) && p.project === card.project,
+      );
+      shown.push({ ...card, workingAgents: entry?.agentsWorking ?? card.workingAgents });
+    } else if (scope === 'all') {
+      shown.push({ ...card, quiet: true });
+    } else {
+      quiet.push(card);
+    }
+  }
+  return { shown, quiet };
 }
 
 /** How long a closed epic stays under "Just finished" on a fresh load (F3). */

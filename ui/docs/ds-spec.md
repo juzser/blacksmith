@@ -896,7 +896,24 @@ Sections, in order:
    days) is not running: it leaves the card and the Budget, stays in `epicsInFlight`,
    and reads "idle 18d" wherever its name is still listed: the Kanban epic picker, and
    on the Roadmap the swimlane rows, the phone picker, the phone epic rows, the phase
-   mode epic sections and the epic-mode header.
+   mode epic sections and the epic-mode header. **Scope:** the shared Active/All
+   `ActivityScopeToggle` sits on this section's heading row, right side (it scopes only this
+   section; phone keeps it, 44px items). Which projects get a card does not change; the scope
+   only hides or mutes them. A project is active iff a live CLI session drives it
+   (`GET /api/active-scope`, the Sessions rule), not because of a time window. Active shows only
+   active cards plus one muted line under them, "N quiet projects · Show all" (singular "1 quiet
+   project"; "<project> is quiet · Show it" when one project is hidden; hidden at 0; the link
+   is a 44px tap target on phone) that links to `?scope=all`. An active card's agents line counts
+   the agents on epics a live session drives, the same number under All, and is hidden at 0
+   (never an unhelpful "0 agents working"); a quiet card keeps its working-agent count. Active
+   edge lines replace the cards, each one muted line with "Show all": nothing live, "Nothing is
+   active right now."; only unlinked sessions, "N live sessions, none on an epic"; a `?project=`
+   with no live session, "No live session is on this project". Unmeasured (live sessions cannot
+   be read here) draws every card, with "Live sessions can't be read here" under the heading and
+   never a "none active" line. While the first scope answer is in flight under Active the
+   section keeps its loading state. All lists every card, the quiet ones in `--bs-text-subtle`.
+   "Just finished" is not scoped: a closed epic carries no project, and the scope lists only
+   running epics. The Budget panel follows the cards on screen.
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
    audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
    double-checking another model's review" style, from `/api/overview`'s

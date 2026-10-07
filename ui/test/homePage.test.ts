@@ -67,7 +67,9 @@ describe('HomePage.vue', () => {
   });
 
   it('builds Running now and Just finished from lib/homeView.ts', () => {
-    expect(SRC).toMatch(/runningNowCards\(overview\.value, project\.value\)/);
+    expect(SRC).toMatch(
+      /runningNowCards\(\s*overview\.value,\s*liveScope\.value,\s*mode\.value,\s*project\.value/,
+    );
     expect(SRC).toMatch(/trackJustFinished\(seenInFlight, o\)/);
     expect(TEMPLATE).toContain('Just finished');
   });
