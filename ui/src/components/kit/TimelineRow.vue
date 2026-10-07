@@ -7,8 +7,9 @@
 // expandedRows.ts), not owned here, so "Expand all" can flip every row's
 // state from one place.
 import { ChevronDown, ChevronRight, CircleCheck, CircleX } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { formatTime } from '../../lib/format.js';
+import { isPastStaleWindow } from '../../lib/liveness.js';
 // DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
 // replaces HH:MM everywhere this row renders (Activity, task History, Home
 // compact); RelativeTime itself carries the absolute time in its tooltip.
@@ -80,14 +81,22 @@ const title = computed(() => props.titleOverride ?? titleFor(props.entry));
 // "Running for N s" ticks live while a Dispatched row has no run result yet
 // (ds-spec.md §4.3). Only this one row kind/state needs a clock, so the
 // interval lives here rather than hoisting `now` through the whole feed.
-const stillRunning = computed(
-  () => kind.value === 'dispatch' && props.entry.run?.runStatus == null,
-);
+// Past the stale window the meta reads "No result after …" and stops ticking.
 const tickNow = ref(new Date().toISOString());
+const stillRunning = computed(
+  () =>
+    kind.value === 'dispatch' &&
+    props.entry.run?.runStatus == null &&
+    !isPastStaleWindow(props.entry.ts, props.ctx?.now ?? tickNow.value),
+);
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
   if (stillRunning.value)
     timer = setInterval(() => (tickNow.value = new Date().toISOString()), 1000);
+});
+// A row open across the stale window stops its own clock.
+watch(stillRunning, (running) => {
+  if (!running) clearInterval(timer);
 });
 onBeforeUnmount(() => clearInterval(timer));
 
@@ -186,11 +195,13 @@ function onBecauseOf() {
           <dd>{{ meta }}</dd>
         </template>
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
-             on TaskDetailPage): a "Task" row here would only ever read 'not
-             measured', since TaskRun carries no taskId. -->
+             on TaskDetailPage), and TaskRun carries no taskId. An event with no
+             task (epic-level, a prompt) has nothing to show, so no Task pair. -->
         <template v-if="variant !== 'rail'">
-          <dt>Task</dt>
-          <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+          <template v-if="entry.taskId">
+            <dt>Task</dt>
+            <dd>{{ entry.taskId }}</dd>
+          </template>
           <dt>Session</dt>
           <dd>
             <!-- SessionsPage's `?session=<id>` deep link (sessionsSelection.ts)

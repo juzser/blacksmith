@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
-import { taskTotals } from '../../src/db/queries.js';
+import { taskRuns, taskTotals } from '../../src/db/queries.js';
 
 const SESSION_ID = 'sess-totals';
 
@@ -81,6 +81,29 @@ describe('taskTotals() (DS6 PR2)', () => {
       expect(totals.agentTimeMs).toBe(1000);
       // first dispatch 00:00:00 -> result 00:10:00 == 600000ms
       expect(totals.elapsedMs).toBe(600000);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('a 1/1/2 placeholder result is unmeasured: its run tokensTotal is null and the total is the real result only', async () => {
+    const task = 'epic-totals/task-a';
+    const handle = await buildHandle(
+      tiedLine('task-result-recorded', '2029-06-01T00:10:00.000Z', {
+        task_id: task,
+        run_status: 'done',
+        token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      }) +
+        tiedLine('task-result-recorded', '2029-06-01T00:20:00.000Z', {
+          task_id: task,
+          run_status: 'done',
+          token_usage: { input_tokens: 4000, output_tokens: 1000, total_tokens: 5000 },
+        }),
+    );
+    try {
+      expect(taskTotals(handle.db, task).tokens).toBe(5000);
+      const runs = taskRuns(handle.db, task);
+      expect(runs.map((r) => r.tokensTotal)).toEqual([5000, null]);
     } finally {
       handle.sqlite.close();
     }

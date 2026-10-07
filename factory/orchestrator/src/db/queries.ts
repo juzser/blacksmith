@@ -21,7 +21,7 @@ import {
   type TerminalType,
 } from '../agents-registry.js';
 import { isAuditAxisRowId } from '../audit.js';
-import { isPlausibleTokenCount } from '../budgetAlarm.js';
+import { readTokenUsage } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
 import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
@@ -648,7 +648,7 @@ export interface OverviewResult {
 
 interface TaskResultPayload {
   task_id?: string;
-  token_usage?: { total_tokens?: number };
+  token_usage?: unknown;
 }
 
 /** Every `tasks` row for `scope`, session-filtered in SQL and project-filtered in JS. */
@@ -796,9 +796,9 @@ function epicTokenMaps(
   for (const row of taskResultRows(db, scope)) {
     const epicId = epicOf(resultTaskId(row));
     if (!epicId) continue;
-    const total = row.payload.token_usage?.total_tokens;
-    if (typeof total === 'number' && isPlausibleTokenCount(total)) {
-      spentByEpic.set(epicId, (spentByEpic.get(epicId) ?? 0) + total);
+    const usage = readTokenUsage(row.payload.token_usage);
+    if (usage.measured) {
+      spentByEpic.set(epicId, (spentByEpic.get(epicId) ?? 0) + usage.total);
     } else {
       spentByEpic.set(epicId, spentByEpic.get(epicId) ?? 0);
       unmeasuredByEpic.set(epicId, (unmeasuredByEpic.get(epicId) ?? 0) + 1);
@@ -2045,8 +2045,8 @@ function tokensSpentAt(
   for (const r of rows) {
     const payload = JSON.parse(r.payload) as TaskResultPayload;
     if (!epicOf(resultTaskId({ payload, envelopeTaskId: r.taskId }))) continue;
-    const tokens = payload.token_usage?.total_tokens;
-    if (typeof tokens === 'number' && isPlausibleTokenCount(tokens)) total += tokens;
+    const usage = readTokenUsage(payload.token_usage);
+    if (usage.measured) total += usage.total;
   }
   return total;
 }
@@ -2905,12 +2905,10 @@ function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
     const resultPayload = agent.terminalEventId
       ? resultPayloadByEventId.get(agent.terminalEventId)
       : undefined;
-    const usage = resultPayload?.token_usage as
-      | { input_tokens?: number; output_tokens?: number }
-      | undefined;
+    const usage = readTokenUsage(resultPayload?.token_usage);
     entry.run = {
-      tokensIn: typeof usage?.input_tokens === 'number' ? usage.input_tokens : null,
-      tokensOut: typeof usage?.output_tokens === 'number' ? usage.output_tokens : null,
+      tokensIn: usage.measured ? usage.input : null,
+      tokensOut: usage.measured ? usage.output : null,
       durationMs: durationMsFromPayload(resultPayload ?? {}),
       runStatus:
         typeof resultPayload?.run_status === 'string'
@@ -3694,8 +3692,8 @@ const RUN_KIND_BY_EVENT_TYPE: Record<string, TaskRun['kind']> = {
 };
 
 function tokensTotalFromPayload(payload: Record<string, unknown>): number | null {
-  const usage = payload.token_usage as { total_tokens?: number } | undefined;
-  return typeof usage?.total_tokens === 'number' ? usage.total_tokens : null;
+  const usage = readTokenUsage(payload.token_usage);
+  return usage.measured ? usage.total : null;
 }
 
 function outcomeFromPayload(eventType: string, payload: Record<string, unknown>): string | null {
@@ -3841,19 +3839,9 @@ export type AgentTokenUsage =
 
 /** `tokensTotalFromPayload` reads `total_tokens` only; this reads the full measured triple. */
 function tokenUsageFromPayload(payload: Record<string, unknown>): AgentTokenUsage {
-  const usage = payload.token_usage as
-    | { input_tokens?: number; output_tokens?: number; total_tokens?: number }
-    | undefined;
-  const input = usage?.input_tokens;
-  const output = usage?.output_tokens;
-  const total = usage?.total_tokens;
-  if (
-    typeof input === 'number' &&
-    typeof output === 'number' &&
-    typeof total === 'number' &&
-    isPlausibleTokenCount(total)
-  ) {
-    return { state: 'measured', input, output, total };
+  const usage = readTokenUsage(payload.token_usage);
+  if (usage.measured && usage.input !== null && usage.output !== null) {
+    return { state: 'measured', input: usage.input, output: usage.output, total: usage.total };
   }
   return { state: 'unmeasured' };
 }
@@ -4348,7 +4336,7 @@ interface ResultPayloadForCost {
   provider?: string;
   model_tier?: string;
   agent?: string;
-  token_usage?: { total_tokens?: number };
+  token_usage?: unknown;
 }
 
 interface SeverityDecisionsPayloadForAnalytics {
@@ -4437,10 +4425,9 @@ export function analytics(
     const key = `${p.model_tier}|${p.provider}`;
     const bucket = costBuckets.get(key) ?? { taskCount: 0, totalTokens: 0, unmeasuredTaskCount: 0 };
     bucket.taskCount += 1;
-    const tokens = p.token_usage?.total_tokens;
-    const measured = typeof tokens === 'number' && isPlausibleTokenCount(tokens);
-    if (measured) {
-      bucket.totalTokens += tokens as number;
+    const usage = readTokenUsage(p.token_usage);
+    if (usage.measured) {
+      bucket.totalTokens += usage.total;
     } else {
       bucket.unmeasuredTaskCount += 1;
     }
@@ -4454,11 +4441,11 @@ export function analytics(
         tokensByModelTier: new Map<string, number>(),
         unmeasuredRunCount: 0,
       };
-      if (measured) {
-        daily.tokensByRole.set(role, (daily.tokensByRole.get(role) ?? 0) + (tokens as number));
+      if (usage.measured) {
+        daily.tokensByRole.set(role, (daily.tokensByRole.get(role) ?? 0) + usage.total);
         daily.tokensByModelTier.set(
           p.model_tier,
-          (daily.tokensByModelTier.get(p.model_tier) ?? 0) + (tokens as number),
+          (daily.tokensByModelTier.get(p.model_tier) ?? 0) + usage.total,
         );
       } else {
         daily.unmeasuredRunCount += 1;
@@ -4472,8 +4459,8 @@ export function analytics(
         unmeasuredRunCount: 0,
       };
       roleTier.runCount += 1;
-      if (measured) {
-        roleTier.tokens += tokens as number;
+      if (usage.measured) {
+        roleTier.tokens += usage.total;
       } else {
         roleTier.unmeasuredRunCount += 1;
       }

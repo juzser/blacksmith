@@ -8,6 +8,7 @@ import {
   bySessionRecency,
   hiddenAgentsLabel,
   hiddenSessionsLabel,
+  isPastStaleWindow,
   isSessionRunning,
   lastEventLabel,
   livenessLabel,
@@ -478,5 +479,23 @@ describe('lib/liveness.ts hiddenAgentsLabel()', () => {
 
   it('still names unreadable-timestamp agents when no stalled ones were hidden', () => {
     expect(hiddenAgentsLabel(0, 1)).toBe('1 agent with an unreadable timestamp not shown');
+  });
+});
+
+describe('isPastStaleWindow', () => {
+  const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+
+  it('answers false for an unparseable timestamp on either side', () => {
+    expect(isPastStaleWindow('not-a-date', now)).toBe(false);
+    expect(isPastStaleWindow(now, 'not-a-date')).toBe(false);
+  });
+
+  it('answers false for a start in the future', () => {
+    expect(isPastStaleWindow(at(60_000), now)).toBe(false);
+  });
+
+  it('answers false at exactly the window and true 1 ms past it', () => {
+    expect(isPastStaleWindow(at(-AGENT_STALE_AFTER_MS), now)).toBe(false);
+    expect(isPastStaleWindow(at(-AGENT_STALE_AFTER_MS - 1), now)).toBe(true);
   });
 });

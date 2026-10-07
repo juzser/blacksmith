@@ -24,7 +24,7 @@ describe('kit/AgentBlock.vue', () => {
   it('shows each agent doing its last step, a RelativeTime duration, tokens, and a status badge', () => {
     expect(BLOCK).toMatch(/lastStepLabel\(agent\.lastEventType\)/);
     expect(BLOCK).toMatch(/<RelativeTime[^>]*:iso="row\.agent\.dispatchedAt"/);
-    expect(BLOCK).toMatch(/tokenDisplay\(agent\)/);
+    expect(BLOCK).toMatch(/tokenDisplay\(agent, props\.now \?\? liveNow\.value\)/);
     expect(BLOCK).toMatch(/<AgentStatusBadge[^>]*:agent="row\.agent"/);
   });
 

@@ -4,6 +4,7 @@
 // the kind colour alone.
 import type { DispatchRun, TimelineEntry } from './api.js';
 import { formatCompactNumber, formatElapsed, formatTime, taskLabel } from './format.js';
+import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
 
@@ -939,7 +940,10 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
         // 12 s"); formatElapsed's own terse "12s" is right for every other
         // unit, so only that one case gets split back apart.
         const elapsed = formatElapsed(entry.ts, ctx.now).replace(/^(\d+)s$/, '$1 s');
-        parts.push(`Running for ${elapsed}`);
+        // Past the stale window the session almost certainly died without a
+        // terminal event, so "Running" would be a claim nobody can back.
+        const stalled = isPastStaleWindow(entry.ts, ctx.now ?? new Date().toISOString());
+        parts.push(stalled ? `No result after ${elapsed}` : `Running for ${elapsed}`);
       } else {
         parts.push(tokensItem(entry.run));
         parts.push(durationItem(entry.run.durationMs));

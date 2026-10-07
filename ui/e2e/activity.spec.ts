@@ -1,3 +1,4 @@
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -157,6 +158,45 @@ test.describe('Activity', () => {
     await expect(detail).toBeHidden();
     await page.getByRole('button', { name: 'Expand all' }).click();
     await expect(detail).toBeVisible();
+  });
+
+  // A Dispatched row with no run result reads "Running for" inside the 4h
+  // stale window and "No result after" past it (timelineDisplay.ts metaFor),
+  // never both. The browser clock is moved past the window before navigation;
+  // the fixture's agents never report a result, so the same row flips.
+  test('a Dispatched row with no result reads "Running for" inside the window', async ({
+    page,
+  }) => {
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row[data-kind="dispatch"]').filter({
+      hasText: 'Running for',
+    });
+    await expect(row.first()).toBeVisible();
+    await expect(row.first()).not.toContainText('No result after');
+  });
+
+  test('past the 4h window the same Dispatched row reads "No result after", never "Running for"', async ({
+    page,
+  }) => {
+    await page.goto('/activity');
+    const running = page.locator('.bs-timeline-row[data-kind="dispatch"]').filter({
+      hasText: 'Running for',
+    });
+    await expect(running.first()).toBeVisible();
+    const id = await running.first().getAttribute('id');
+    await page.clock.setFixedTime(new Date(Date.parse(FIXTURE_NOW_ISO) + 5 * 60 * 60 * 1000));
+    await page.reload();
+    await expect(page.locator(`[id="${id}"]`)).toContainText('No result after');
+    await expect(page.getByText('Running for')).toHaveCount(0);
+  });
+
+  // A row with no task (a prompt) offers no Task term in its details.
+  test('a prompt row, which has no task, shows no Task term when expanded', async ({ page }) => {
+    await page.goto('/activity?kind=prompt');
+    await page.getByRole('button', { name: 'Expand all' }).click();
+    const detail = page.locator('.bs-timeline-row__detail').first();
+    await expect(detail).toBeVisible();
+    await expect(detail.locator('dt', { hasText: /^Task$/ })).toHaveCount(0);
   });
 
   // A prompt row names its speaker in the meta line, not the title

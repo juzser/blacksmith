@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { agentStatus, lastStepLabel, tokenDisplay } from '../src/lib/agentStatus.js';
+import {
+  agentStatus,
+  hasWorkingAgents,
+  lastStepLabel,
+  tokenDisplay,
+} from '../src/lib/agentStatus.js';
 import type { SessionAgent } from '../src/lib/api.js';
 
 const now = '2026-08-05T12:00:00.000Z';
@@ -39,7 +44,7 @@ describe('agentStatus', () => {
     expect(agentStatus(stale, now)).toEqual({
       state: 'no-result',
       label: 'No result after 4h',
-      tone: 'warning',
+      tone: 'blocked',
     });
   });
 
@@ -84,26 +89,39 @@ describe('agentStatus', () => {
 describe('tokenDisplay', () => {
   it('shows CompactNumber-ready input/output when measured', () => {
     expect(
-      tokenDisplay(agent({ tokens: { state: 'measured', input: 1200, output: 340, total: 1540 } })),
+      tokenDisplay(
+        agent({ tokens: { state: 'measured', input: 1200, output: 340, total: 1540 } }),
+        now,
+      ),
     ).toEqual({ kind: 'measured', input: 1200, output: 340 });
   });
 
   it('shows "not measured" text, never 0, when unmeasured', () => {
-    expect(tokenDisplay(agent({ tokens: { state: 'unmeasured' } }))).toEqual({
+    expect(tokenDisplay(agent({ tokens: { state: 'unmeasured' } }), now)).toEqual({
       kind: 'text',
       text: 'not measured',
     });
   });
 
   it('shows "Running" text when pending', () => {
-    expect(tokenDisplay(agent({ tokens: { state: 'pending' } }))).toEqual({
+    expect(tokenDisplay(agent({ tokens: { state: 'pending' } }), now)).toEqual({
       kind: 'text',
       text: 'Running',
     });
   });
 
+  it('shows nothing for a pending row past the stale window (the badge already says so)', () => {
+    const old = agent({ tokens: { state: 'pending' }, dispatchedAt: '2026-08-05T07:00:00.000Z' });
+    expect(tokenDisplay(old, now)).toEqual({ kind: 'none' });
+  });
+
+  it('keeps "Running" at exactly the boundary (> rule)', () => {
+    const edge = agent({ tokens: { state: 'pending' }, dispatchedAt: '2026-08-05T08:00:00.000Z' });
+    expect(tokenDisplay(edge, now)).toEqual({ kind: 'text', text: 'Running' });
+  });
+
   it('shows nothing when none', () => {
-    expect(tokenDisplay(agent({ tokens: { state: 'none' } }))).toEqual({ kind: 'none' });
+    expect(tokenDisplay(agent({ tokens: { state: 'none' } }), now)).toEqual({ kind: 'none' });
   });
 });
 
@@ -128,5 +146,22 @@ describe('lastStepLabel', () => {
 
   it('never prints "(/)" for a dispatch the API gave no detail for', () => {
     expect(lastStepLabel('dispatch_decision')).not.toMatch(/\(\/\)|\/\)/);
+  });
+});
+
+describe('hasWorkingAgents (Sessions poll gate)', () => {
+  const roles = (...agents: SessionAgent[]) => [{ agentRole: 'coder', agents }];
+  const old = { status: 'live', dispatchedAt: '2026-08-01T00:00:00.000Z' } as const;
+
+  it('does not poll when every live row is past the stale window', () => {
+    expect(hasWorkingAgents(roles(agent(old), agent({ ...old, id: 'a2' })), now)).toBe(false);
+  });
+
+  it('polls while one live row is within the window', () => {
+    expect(hasWorkingAgents(roles(agent(old), agent({ id: 'a2' })), now)).toBe(true);
+  });
+
+  it('ignores rows that are not live', () => {
+    expect(hasWorkingAgents(roles(agent({ status: 'done' })), now)).toBe(false);
   });
 });

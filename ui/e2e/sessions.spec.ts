@@ -583,6 +583,24 @@ test.describe('Sessions', () => {
     await expect(failedTokens).toHaveText('');
   });
 
+  // The agent that reads Working at the pinned clock is 30 minutes old; five
+  // hours later it is past the 4h window, so it reads as no-result and its
+  // token line stops claiming it is running.
+  test('past the 4h window a Working agent reads "No result after 4h", not Running', async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(new Date(Date.parse(FIXTURE_NOW_ISO) + 5 * 60 * 60 * 1000));
+    await serveSessions(page);
+    await page.goto('/sessions?session=run-active');
+    const rows = page.locator('.bs-agentblock__row');
+    await expect(rows.filter({ hasText: 'Working' })).toHaveCount(0);
+    const stalled = rows.filter({ hasText: 'No result after 4h' });
+    await expect(stalled).toHaveCount(2);
+    await expect(
+      stalled.locator('.bs-agentblock__tokens').filter({ hasText: 'Running' }),
+    ).toHaveCount(0);
+  });
+
   // Fix round 2 item 2: the selected background (--bs-surface-selected) is
   // an aria-current cue, not a focus cue -- the :focus-visible ring
   // (bs-sessionrow--clickable:focus-visible) must stay off a mouse click and

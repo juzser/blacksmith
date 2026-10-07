@@ -45,6 +45,23 @@ describe('timeline() run + gate join (DS6 PR2)', () => {
     });
   });
 
+  it('a placeholder 0/0/0 result is not a measured run: tokensIn and tokensOut are null', async () => {
+    await openFixture();
+    const before = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_1 });
+    const dispatch = before.find((e) => e.eventType === 'dispatch_decision');
+    const placeholder = JSON.stringify({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+    handle.sqlite
+      .prepare(
+        "UPDATE events_raw SET payload = json_set(payload, '$.token_usage', json(?)) WHERE event_type = 'task-result-recorded' AND task_id = ?",
+      )
+      .run(placeholder, TASK_1);
+    const after = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_1 });
+    const run = after.find((e) => e.eventId === dispatch?.eventId)?.run;
+    expect(run?.runStatus).toBe('done');
+    expect(run?.tokensIn).toBeNull();
+    expect(run?.tokensOut).toBeNull();
+  });
+
   it('a still-running Dispatched row has runStatus null, every token field null, and dispatchedAt set', async () => {
     await openFixture();
     const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_4 });
