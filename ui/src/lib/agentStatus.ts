@@ -25,7 +25,10 @@ export interface AgentStatus {
  * through — but it shares liveness.ts's isPastStaleWindow(), the one spelling
  * of the 4h boundary this dashboard is allowed to have.
  */
-export function agentStatus(agent: SessionAgent, nowIso: string): AgentStatus {
+export function agentStatus(
+  agent: Pick<SessionAgent, 'status' | 'dispatchedAt'>,
+  nowIso: string,
+): AgentStatus {
   if (agent.status === 'done') return { state: 'done', label: 'Done', tone: 'done' };
   if (agent.status === 'error') return { state: 'failed', label: 'Failed', tone: 'danger' };
   if (agent.status === 'superseded' || agent.status === 'abandoned') {
