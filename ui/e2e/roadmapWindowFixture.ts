@@ -6,6 +6,8 @@
 // `/api/overview`'s per-project summaries are emptied too, so the fixture's
 // own projects do not come back as phase-less epic sections around the stub.
 import type { Page } from '@playwright/test';
+import type { ActiveScopeResult } from '../src/lib/api.js';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 
 interface StubPhase {
   milestoneId: string;
@@ -127,5 +129,35 @@ export async function stubWindowRoadmap(page: Page): Promise<void> {
     const body = await response.json();
     body.projects = [];
     await route.fulfill({ response, json: body });
+  });
+}
+
+// `/api/active-scope` as the Roadmap's Active view reads it. The e2e server has
+// no CLI session registry, so unstubbed it answers "unmeasured"; a test that
+// needs a measured answer says which projects a live session is on.
+export async function stubActiveScope(
+  page: Page,
+  activeProjects: string[] = [],
+  over: Partial<ActiveScopeResult> = {},
+  delayMs = 0,
+): Promise<void> {
+  const body: ActiveScopeResult = {
+    measured: true,
+    readAt: FIXTURE_NOW_ISO,
+    liveSessions: Math.max(1, activeProjects.length),
+    unlinkedSessions: 0,
+    projects: activeProjects.map((project) => ({
+      storeId: 'home',
+      project,
+      liveSessions: 1,
+      agentsWorking: 0,
+    })),
+    epics: [],
+    factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+    ...over,
+  };
+  await page.route('**/api/active-scope*', async (route) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await route.fulfill({ json: body });
   });
 }
