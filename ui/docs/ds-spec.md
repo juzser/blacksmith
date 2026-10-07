@@ -1226,10 +1226,19 @@ yet" replacing the raw `rule`/`principle`/`provenanceEventIds` JSON dump.
 Live CLI sessions are shown on Home (§4.1 item 1a), not on this page.
 
 `SessionRow` list scoped by the shared Active/All toggle (`?scope=`, Active by default and
-never written to the URL) beside Refresh. Active lists sessions with an agent working in
-the last 4h and a muted "N quiet sessions · Show all" line (the link is a default
-`--bs-link-text` link: no underline at rest, underline on hover/focus; the line is hidden at
-0); All adds the quiet sessions, muted by title colour only, after the active ones. A
+never written to the URL) beside Refresh. Active lists the sessions a live CLI session is
+writing into (`GET /api/active-scope`'s `factorySessions`), not sessions with a working
+agent: a session with no working agent but a live CLI session is active, one with working
+agents and no live CLI session is quiet. Under the list, one muted line, the link a default
+`--bs-link-text` link (no underline at rest, underline on hover/focus): "N quiet sessions ·
+Show all" (hidden at 0); with no live CLI session at all, "Nothing is active right now. ·
+Show all"; with live sessions but none on an epic, "N live sessions, none on an epic · Show
+all" (while either of these two lines shows, the quiet count is not shown, so the line
+carries the page's one Show all); when the live sessions cannot be read, Active lists everything unmuted, as All does,
+with "Live sessions can't be read here" (the toggle stays); and, beside the list, "N active
+projects are in another store (names) · see Home" for active projects the page cannot list.
+Until the first answer arrives the page shows its loading skeleton, never an empty claim.
+All adds the quiet sessions, muted by title colour only, after the active ones. A
 selected session that turns quiet while Active stays listed (muted, not counted in the quiet
 line) until another row is selected or the scope changes; narrowing All to Active with a
 quiet session open clears the selection and `?session=`. Browser back/forward restores the

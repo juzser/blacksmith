@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { ActiveScopeResult } from '../src/lib/api.js';
 import {
   activeFirst,
   isSessionActive,
   isStaleResponse,
+  otherStoreProjects,
   selectedSessionFromQuery,
   sessionsByProject,
   sessionsInScope,
@@ -49,17 +51,53 @@ describe('isStaleResponse', () => {
   });
 });
 
+const live = (over: Partial<ActiveScopeResult> = {}): ActiveScopeResult => ({
+  measured: true,
+  readAt: '2026-10-07T12:00:00.000Z',
+  liveSessions: 1,
+  unlinkedSessions: 0,
+  projects: [],
+  epics: [],
+  factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+  ...over,
+});
+
 describe('isSessionActive', () => {
-  it('is active when workingAgentCount is above zero', () => {
-    expect(isSessionActive({ workingAgentCount: 1 })).toBe(true);
+  const row = (sessionId: string, workingAgentCount: number) => ({ sessionId, workingAgentCount });
+  it('is active when a live CLI session drives it, whatever workingAgentCount says', () => {
+    expect(isSessionActive(live(), row('session-a', 0))).toBe(true);
   });
 
-  it('is not active when workingAgentCount is zero, even with live-but-stale agents', () => {
-    // liveAgentCount > 0 but workingAgentCount 0: a ghost run whose agents
-    // dispatched outside the 4h staleness window -- counts as quiet, not
-    // running (operator directive: workingAgentCount, never liveAgentCount).
-    const ghost = { workingAgentCount: 0, liveAgentCount: 3 };
-    expect(isSessionActive(ghost)).toBe(false);
+  it('is quiet when no live CLI session drives it, even with working agents', () => {
+    expect(isSessionActive(live(), row('session-b', 3))).toBe(false);
+  });
+
+  it('is not active for a session of another store with the same id', () => {
+    const other = live({ factorySessions: [{ storeId: 'store-b', sessionId: 'session-a' }] });
+    expect(isSessionActive(other, row('session-a', 1))).toBe(false);
+  });
+});
+
+describe('otherStoreProjects', () => {
+  const p = (storeId: string, project: string) => ({
+    storeId,
+    project,
+    liveSessions: 1,
+    agentsWorking: 0,
+  });
+
+  it('names the active projects that live outside the home store, once each', () => {
+    const scope = live({
+      projects: [p('home', 'project-a'), p('store-b', 'project-b'), p('store-b', 'project-b')],
+    });
+    expect(otherStoreProjects(scope)).toEqual(['project-b']);
+  });
+
+  it('is empty when unmeasured or not loaded', () => {
+    expect(otherStoreProjects(live({ measured: false, projects: [p('store-b', 'x')] }))).toEqual(
+      [],
+    );
+    expect(otherStoreProjects(null)).toEqual([]);
   });
 });
 
@@ -122,53 +160,67 @@ describe('sessionsByProject', () => {
 
 describe('sessionsInScope', () => {
   const mk = (sessionId: string, workingAgentCount: number) => ({ sessionId, workingAgentCount });
-  const list = [mk('a', 1), mk('q1', 0), mk('q2', 0)];
+  // 'a' has no working agent but a live CLI session drives it; 'q1' has three
+  // working agents and no live session.
+  const list = [mk('a', 0), mk('q1', 3), mk('q2', 0)];
+  const scope = live({ factorySessions: [{ storeId: 'home', sessionId: 'a' }] });
   const ids = (xs: readonly { sessionId: string }[]) => xs.map((s) => s.sessionId);
 
-  it('active keeps only sessions with a working agent', () => {
-    expect(ids(sessionsInScope(list, 'active', null))).toEqual(['a']);
+  it('active keeps only sessions a live CLI session drives', () => {
+    expect(ids(sessionsInScope(list, 'active', null, scope))).toEqual(['a']);
   });
 
   it('all keeps every session', () => {
-    expect(ids(sessionsInScope(list, 'all', null))).toEqual(['a', 'q1', 'q2']);
+    expect(ids(sessionsInScope(list, 'all', null, scope))).toEqual(['a', 'q1', 'q2']);
   });
 
   it('active keeps a quiet selected session pinned, and only that one', () => {
-    expect(ids(sessionsInScope(list, 'active', 'q2'))).toEqual(['a', 'q2']);
+    expect(ids(sessionsInScope(list, 'active', 'q2', scope))).toEqual(['a', 'q2']);
   });
 
   it('a selected id that no longer exists adds nothing', () => {
-    expect(ids(sessionsInScope(list, 'active', 'gone'))).toEqual(['a']);
+    expect(ids(sessionsInScope(list, 'active', 'gone', scope))).toEqual(['a']);
   });
 
   it('the hidden quiet count excludes a pinned session', () => {
-    expect(list.length - sessionsInScope(list, 'active', null).length).toBe(2);
-    expect(list.length - sessionsInScope(list, 'active', 'q1').length).toBe(1);
-    expect(list.length - sessionsInScope(list, 'all', 'q1').length).toBe(0);
+    expect(list.length - sessionsInScope(list, 'active', null, scope).length).toBe(2);
+    expect(list.length - sessionsInScope(list, 'active', 'q1', scope).length).toBe(1);
+    expect(list.length - sessionsInScope(list, 'all', 'q1', scope).length).toBe(0);
+  });
+
+  it('unmeasured: active returns the full list, as all does', () => {
+    const unmeasured = live({ measured: false, factorySessions: [] });
+    expect(ids(sessionsInScope(list, 'active', null, unmeasured))).toEqual(['a', 'q1', 'q2']);
+    expect(ids(sessionsInScope(list, 'active', null, null))).toEqual(['a', 'q1', 'q2']);
   });
 });
 
 describe('activeFirst', () => {
-  const mk = (sessionId: string, lastEventAt: string, workingAgentCount: number) => ({
-    sessionId,
-    lastEventAt,
-    workingAgentCount,
+  const mk = (sessionId: string, lastEventAt: string) => ({ sessionId, lastEventAt });
+  const scope = live({
+    factorySessions: [
+      { storeId: 'home', sessionId: 'a-old' },
+      { storeId: 'home', sessionId: 'a-new' },
+    ],
   });
 
   it('puts active ahead of quiet, each group newest first', () => {
-    const out = activeFirst([
-      mk('q-new', '2026-01-04', 0),
-      mk('a-old', '2026-01-01', 1),
-      mk('q-old', '2026-01-02', 0),
-      mk('a-new', '2026-01-03', 2),
-    ]);
+    const out = activeFirst(
+      [
+        mk('q-new', '2026-01-04'),
+        mk('a-old', '2026-01-01'),
+        mk('q-old', '2026-01-02'),
+        mk('a-new', '2026-01-03'),
+      ],
+      scope,
+    );
     expect(out.map((s) => s.sessionId)).toEqual(['a-new', 'a-old', 'q-new', 'q-old']);
   });
 
   it('is stable for equal keys and does not mutate its input', () => {
-    const input = [mk('x', '2026-01-01', 1), mk('y', '2026-01-01', 1), mk('z', '2026-01-01', 0)];
+    const input = [mk('a-new', '2026-01-01'), mk('a-old', '2026-01-01'), mk('z', '2026-01-01')];
     const copy = [...input];
-    expect(activeFirst(input).map((s) => s.sessionId)).toEqual(['x', 'y', 'z']);
+    expect(activeFirst(input, scope).map((s) => s.sessionId)).toEqual(['a-new', 'a-old', 'z']);
     expect(input).toEqual(copy);
   });
 });
