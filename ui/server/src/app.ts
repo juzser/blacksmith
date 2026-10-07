@@ -1034,9 +1034,6 @@ export function createApp(opts: AppOpts): AppHandle {
                   p.epicsInFlight.map((epicId) => [epicId, p.project] as const),
                 ),
               ),
-              sessionLastEventAt: Object.fromEntries(
-                data.runningSessions.map((r) => [r.sessionId, r.lastEventAt] as const),
-              ),
             }),
           )
         : [];

@@ -999,6 +999,42 @@ describe('cliSessions reader', () => {
       expect(epics[1]?.lastEventAt).toBe(await lastTs('sess-e1'));
     });
 
+    it('carries, per factory session, the newest time this CLI session wrote there', async () => {
+      const root = await factorySession('sess-root', SID_B);
+      await root.addTask('epic-7', 'epic-7/task-1');
+      await new Promise((r) => setTimeout(r, 5));
+      const wave = await factorySession('sess-wave', SID_B, root.last());
+      await wave.add('wave-admitted', { epic_id: 'epic-7', task_ids: ['epic-7/task-1'] });
+      const lastTs = async (sid: string) => (await readEvents(sid, { stateDir })).at(-1)?.record.ts;
+
+      const [epic] = await linkedEpics(190, SID_B);
+      expect(epic?.factorySessionLastEventAt).toEqual({
+        'sess-root': await lastTs('sess-root'),
+        'sess-wave': await lastTs('sess-wave'),
+      });
+    });
+
+    it("keeps one CLI session's time when another CLI session writes later into the same factory session", async () => {
+      const root = await factorySession('sess-root', SID_B);
+      await root.addTask('epic-7', 'epic-7/task-1');
+      const mine = (await readEvents('sess-root', { stateDir })).at(-1)?.record.ts;
+      await new Promise((r) => setTimeout(r, 5));
+      await appendEvent(
+        {
+          session_id: 'sess-root',
+          actor: 'system',
+          event_type: 'wave-admitted',
+          plan_version: 1,
+          causal_parent: root.last(),
+          payload: { epic_id: 'epic-7', task_ids: ['epic-7/task-1'] },
+        },
+        { stateDir, cliSessionId: SID_A },
+      );
+
+      const [epic] = await linkedEpics(191, SID_B);
+      expect(epic?.factorySessionLastEventAt).toEqual({ 'sess-root': mine });
+    });
+
     it('does not report a wave merged under bare task ids as open', async () => {
       const root = await factorySession('sess-q', SID_B);
       await root.addTask('epic-6', 'epic-6/task-1');

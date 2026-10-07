@@ -12,7 +12,6 @@ function store(over: Partial<ActiveScopeStore> & { id?: string; label?: string }
     store: { id: over.id ?? 'home', label: over.label ?? 'home' },
     activelyRunning: over.activelyRunning ?? [],
     epicProjects: over.epicProjects ?? {},
-    sessionLastEventAt: over.sessionLastEventAt ?? {},
   } satisfies ActiveScopeStore;
 }
 
@@ -23,6 +22,7 @@ function linkedEpic(over: Record<string, unknown> = {}) {
     epicId: 'epic-a',
     project: 'project-a',
     factorySessionIds: ['f1'],
+    factorySessionLastEventAt: {} as Record<string, string>,
     workingAgents: [] as { role: string; taskId: string | null; since: string }[],
     ...over,
   };
@@ -127,17 +127,66 @@ describe('computeActiveScope', () => {
 
   it('factorySessions drops lineage members older than the CLI session; none qualifying keeps the newest', () => {
     const ids = ['f-old', 'f-new', 'f-mid'];
-    const sessionLastEventAt = {
+    const factorySessionLastEventAt = {
       'f-old': '2026-10-07T09:00:00.000Z',
       'f-new': '2026-10-07T11:00:00.000Z',
       'f-mid': '2026-10-07T10:30:00.000Z',
     };
     const run = (startedAt: string) =>
-      fold(cli([session({ epics: [linkedEpic({ factorySessionIds: ids })] }, { startedAt })]), [
-        store({ activelyRunning: ['epic-a'], sessionLastEventAt }),
-      ]).factorySessions.map((f) => f.sessionId);
+      fold(
+        cli([
+          session(
+            { epics: [linkedEpic({ factorySessionIds: ids, factorySessionLastEventAt })] },
+            { startedAt },
+          ),
+        ]),
+        [store({ activelyRunning: ['epic-a'] })],
+      ).factorySessions.map((f) => f.sessionId);
     expect(run('2026-10-07T10:00:00.000Z').sort()).toEqual(['f-mid', 'f-new']);
     expect(run('2026-10-07T11:30:00.000Z')).toEqual(['f-new']);
+  });
+
+  it('a member this CLI session wrote before it started does not count, whoever wrote it last', () => {
+    const out = fold(
+      cli([
+        session(
+          {
+            epics: [
+              linkedEpic({
+                factorySessionIds: ['m1', 'm2'],
+                factorySessionLastEventAt: {
+                  m1: '2026-10-07T09:00:00.000Z',
+                  m2: '2026-10-07T11:00:00.000Z',
+                },
+              }),
+            ],
+          },
+          { startedAt: '2026-10-07T10:00:00.000Z' },
+        ),
+      ]),
+      [store({ activelyRunning: ['epic-a'] })],
+    );
+    expect(out.factorySessions.map((f) => f.sessionId)).toEqual(['m2']);
+  });
+
+  it('a member with no known time never displaces one that has a time', () => {
+    const out = fold(
+      cli([
+        session(
+          {
+            epics: [
+              linkedEpic({
+                factorySessionIds: ['a', 'b'],
+                factorySessionLastEventAt: { a: '2026-10-07T09:00:00.000Z' },
+              }),
+            ],
+          },
+          { startedAt: '2026-10-07T10:00:00.000Z' },
+        ),
+      ]),
+      [store({ activelyRunning: ['epic-a'] })],
+    );
+    expect(out.factorySessions.map((f) => f.sessionId)).toEqual(['a']);
   });
 
   it('two live sessions on one project make one entry; a shared working agent counts once', () => {

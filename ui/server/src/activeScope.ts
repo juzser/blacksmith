@@ -5,7 +5,7 @@
 // Prompt-free by construction: the result is built field by field from ids,
 // project names, store ids and counts, so no session name, cwd, prompt or
 // transcript text can ride along.
-import type { CliSessionsResponse, StoreRef } from './cliSessions.js';
+import { type CliSessionsResponse, HOME_STORE_ID, type StoreRef } from './cliSessions.js';
 
 /** The slice of the cli-sessions read this fold uses. */
 export interface ActiveScopeCli {
@@ -19,6 +19,8 @@ export interface ActiveScopeCli {
         epicId: string | null;
         project: string | null;
         factorySessionIds: string[];
+        /** Per member, the newest event THIS CLI session wrote into it. */
+        factorySessionLastEventAt: Record<string, string>;
         workingAgents: { role: string; taskId: string | null; since: string }[];
       }[];
     } | null;
@@ -32,8 +34,6 @@ export interface ActiveScopeStore {
   activelyRunning: string[];
   /** epic id -> project, from the overview's per-project `epicsInFlight`. */
   epicProjects: Record<string, string>;
-  /** factory session id -> its last event's time, from `overview().runningSessions`. */
-  sessionLastEventAt: Record<string, string>;
 }
 
 export interface ActiveScope {
@@ -45,8 +45,6 @@ export interface ActiveScope {
   epics: { storeId: string; epicId: string; project: string | null }[];
   factorySessions: { storeId: string; sessionId: string }[];
 }
-
-const HOME_STORE_ID = 'home';
 
 export function computeActiveScope(
   cli: ActiveScopeCli,
@@ -99,7 +97,11 @@ export function computeActiveScope(
         project = projectOf();
         const key = `${e.store.id}\u0000${e.epicId}`;
         if (!epics.has(key)) epics.set(key, { storeId: e.store.id, epicId: e.epicId, project });
-        for (const id of pickFactorySessions(e.factorySessionIds, st, startedMs)) {
+        for (const id of pickFactorySessions(
+          e.factorySessionIds,
+          e.factorySessionLastEventAt,
+          startedMs,
+        )) {
           factory.set(`${e.store.id}\u0000${id}`, { storeId: e.store.id, sessionId: id });
         }
       }
@@ -145,9 +147,13 @@ export function computeActiveScope(
  * start. With none qualifying, the lineage's newest member (the last one
  * listed when no time is known).
  */
-function pickFactorySessions(ids: readonly string[], st: ActiveScopeStore, startedMs: number) {
+function pickFactorySessions(
+  ids: readonly string[],
+  lastEventAt: Readonly<Record<string, string>>,
+  startedMs: number,
+) {
   const at = (id: string): number => {
-    const t = st.sessionLastEventAt[id];
+    const t = lastEventAt[id];
     return t === undefined ? Number.NaN : Date.parse(t);
   };
   if (!Number.isNaN(startedMs)) {
@@ -158,7 +164,9 @@ function pickFactorySessions(ids: readonly string[], st: ActiveScopeStore, start
   }
   let newest: string | undefined;
   for (const id of ids) {
-    if (newest === undefined || !(at(id) < at(newest))) newest = id;
+    if (newest === undefined) newest = id;
+    else if (Number.isNaN(at(id))) continue;
+    else if (Number.isNaN(at(newest)) || at(id) >= at(newest)) newest = id;
   }
   return newest === undefined ? [] : [newest];
 }
