@@ -1269,6 +1269,14 @@ a:hover {
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
 }
+@media (max-width: 640px) {
+  .bs-sessions__quiet a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
+  }
+}
 /* A quiet session (no agent working within the window): same row, muted text. */
 .bs-sessionrow--quiet .bs-sessionrow__title,
 .bs-sessions__group--quiet .bs-sessions__group-title,
