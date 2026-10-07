@@ -36,6 +36,9 @@ import { triggerGlobalRefresh, usePoll } from './usePoll.js';
 /** Matches Home's own interval — the shell should not read staler. */
 export const PULSE_POLL_MS = 5000;
 
+/** Bumped after every successful poll: what shell-level readers (useActiveScope) follow. */
+export const pulseTick = ref(0);
+
 const state = ref<PulseState>(EMPTY_PULSE_STATE);
 const lastUpdatedAt = ref<string | null>(null);
 /** The nav item currently on screen, which by definition has nothing unread. */
@@ -46,6 +49,7 @@ async function load(project: string | undefined): Promise<void> {
     const next = await fetchPulse(undefined, project);
     state.value = applyPulse(state.value, next, project ?? '', currentNavId.value);
     lastUpdatedAt.value = new Date().toISOString();
+    pulseTick.value += 1;
   } catch {
     // Deliberately leaves `lastUpdatedAt` alone. Its whole job is to let a
     // failed poll show up as age: stamping it here would make a dead server
