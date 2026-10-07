@@ -112,11 +112,20 @@ const pickerOptions = computed(() =>
   epicOptions(offered.value, idleEpics.value, !activeView() || offered.value.length === 0),
 );
 
-// Active has no "All epics" choice, so a selection it does not offer (including
-// the default) moves to the first epic it does.
+// Active has no "All epics" choice while it offers something, so a selection it
+// does not offer (including the default) moves to the `?epic=` pin when that is
+// offered, else to the first epic. With nothing offered the picker lists only
+// "All epics", so that is the selection: the select never holds a value it has
+// no option for.
 function resolveSelection() {
-  if (!activeView() || offered.value.length === 0) return;
-  if (!offered.value.includes(selectedEpic.value)) selectedEpic.value = offered.value[0] ?? '';
+  if (!activeView()) return;
+  if (offered.value.length === 0) {
+    selectedEpic.value = ALL_EPICS;
+    return;
+  }
+  if (offered.value.includes(selectedEpic.value)) return;
+  const pin = pinnedEpic();
+  selectedEpic.value = offered.value.includes(pin) ? pin : (offered.value[0] ?? '');
 }
 
 async function loadBoard() {

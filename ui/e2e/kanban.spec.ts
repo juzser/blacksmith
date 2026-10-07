@@ -294,6 +294,68 @@ test.describe('Kanban: the Active/All scope', () => {
     await expect(picker(page).locator('option:checked')).toHaveText('All epics');
   });
 
+  // Drives the scope answer and the overview from the test, then clicks the
+  // shell's "Refresh now", which wakes every poller (the pulse, and with it the
+  // scope read, and this page's own load), so no test sleeps.
+  async function steerable(page: import('@playwright/test').Page, epics: string[]) {
+    const state = { epics, overviewUp: true };
+    await page.route('**/api/active-scope*', (route) =>
+      route.fulfill({
+        json: activeScopeBody(state.epics, {
+          liveSessions: 2,
+          factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+        }),
+      }),
+    );
+    await page.route('**/api/overview*', (route) =>
+      state.overviewUp ? route.fallback() : route.abort('failed'),
+    );
+    return state;
+  }
+  // Refresh now is aria-disabled while live, so the first call pauses updates.
+  const refresh = async (page: import('@playwright/test').Page) => {
+    const pause = page.getByRole('button', { name: 'Pause updates' });
+    if (await pause.count()) await pause.click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+  };
+
+  test('a selection the scope stops offering falls back to "All epics", and the board follows', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['epic-9']);
+    const kanbanUrls: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/api/kanban')) kanbanUrls.push(r.url());
+    });
+    await page.goto('/work/kanban');
+    await expect(picker(page)).toHaveValue('epic-9');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+
+    state.epics = [];
+    state.overviewUp = false;
+    await refresh(page);
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page).locator('option:checked')).toHaveText('All epics');
+    await expect
+      .poll(() => new URL(kanbanUrls.at(-1) ?? 'http://x/').searchParams.has('epic'))
+      .toBe(false);
+  });
+
+  test('a ?epic= pin survives a fall back to "All epics"', async ({ page }) => {
+    const state = await steerable(page, ['epic-1', 'epic-9']);
+    state.overviewUp = false;
+    await page.goto('/work/kanban?epic=epic-9');
+    await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+    await expect(picker(page)).toHaveValue('');
+    state.overviewUp = true;
+    await refresh(page);
+    await expect
+      .poll(() => optionValues(page))
+      .toEqual(expect.arrayContaining(['epic-1', 'epic-9']));
+    await expect(picker(page)).toHaveValue('epic-9');
+  });
+
   test('a project switch re-narrows the picker to that project’s active epics', async ({
     page,
   }) => {
@@ -1231,29 +1293,27 @@ test.describe('Kanban', () => {
   test('the unmeasured note keeps a gap above and below it', async ({ page }) => {
     await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
     await page.route('**/api/overview*', (route) => route.abort('failed'));
-    const gapBelow = async () =>
-      page.evaluate(() => {
-        const note = [...document.querySelectorAll('p')].find((p) =>
-          p.textContent?.includes("Live sessions can't be read here"),
-        );
-        const next = note?.nextElementSibling;
-        if (!note || !next) throw new Error('no note or no sibling after it');
-        return next.getBoundingClientRect().top - note.getBoundingClientRect().bottom;
-      });
+    // Named neighbours, not DOM order: above is the epic-list banner; below is
+    // the board (`.bs-kanban-board`), whose first row is the toolbar-less status
+    // tab strip on a phone and the first column on desktop.
+    const note = page.getByText("Live sessions can't be read here");
+    const banner = page.locator('.bs-banner', { hasText: 'Epic list unavailable' });
+    const board = page.locator('.bs-kanban-board');
+    const box = async (l: import('@playwright/test').Locator) => {
+      const b = await l.boundingBox();
+      if (!b) throw new Error('element has no box');
+      return b;
+    };
     const gapAbove = async () =>
-      page.evaluate(() => {
-        const note = [...document.querySelectorAll('p')].find((p) =>
-          p.textContent?.includes("Live sessions can't be read here"),
-        );
-        const prev = note?.previousElementSibling;
-        if (!note || !prev) throw new Error('no note or no sibling before it');
-        return note.getBoundingClientRect().top - prev.getBoundingClientRect().bottom;
-      });
+      (await box(note)).y - ((await box(banner)).y + (await box(banner)).height);
+    const gapBelow = async () =>
+      (await box(board)).y - ((await box(note)).y + (await box(note)).height);
     for (const viewport of [VIEWPORTS.desktop, NARROW_VIEWPORT]) {
       await page.setViewportSize(viewport);
       await page.goto('/work/kanban');
-      await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
-      await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
+      await expect(note).toBeVisible();
+      await expect(banner).toBeVisible();
+      await expect(board).toBeVisible();
       expect(await gapAbove()).toBeGreaterThanOrEqual(15);
       expect(await gapBelow()).toBeGreaterThanOrEqual(15);
     }
