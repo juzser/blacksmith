@@ -3877,7 +3877,7 @@ h2.rm-section__head {
 .rm-legend__item {
   display: inline-flex;
   align-items: center;
-  gap: var(--bs-space-2);
+  gap: var(--bs-space-1);
 }
 .rm-legend__swatch {
   flex-shrink: 0;
@@ -3886,7 +3886,8 @@ h2.rm-section__head {
   width: 10px;
   /* ds-allow-hardcode: 10px swatch, as in ds-review.html's .legend */
   height: 10px;
-  border-radius: var(--bs-radius-sm);
+  /* ds-allow-hardcode: 2px swatch corner, as in ds-review.html's .legend i */
+  border-radius: 2px;
 }
 .lbar-unscheduled {
   display: inline-flex;
