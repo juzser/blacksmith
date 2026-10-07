@@ -1029,6 +1029,136 @@ test.describe('Roadmap: Active scope (S7)', () => {
     expect(overflows).toBe(false);
   });
 
+  // Three projects; the scope is steered from the test and answered again by
+  // the shell's "Refresh now", which wakes the scope read, so nothing sleeps.
+  async function steerable(page: Page, liveProjects: string[]) {
+    const state = { live: liveProjects };
+    const projectC = WINDOW_ROADMAP.filter((m) => m.project === 'project-b').map((m) => ({
+      ...m,
+      milestoneId: m.milestoneId.replace('phase-', 'phase-c'),
+      name: m.name.replace('Phase', 'Phase c'),
+      project: 'project-c',
+    }));
+    await page.route('**/api/roadmap**', (route) =>
+      route.fulfill({ json: [...WINDOW_ROADMAP, ...projectC] }),
+    );
+    await page.route('**/api/active-scope*', (route) =>
+      route.fulfill({
+        json: {
+          measured: true,
+          readAt: '2026-01-15T00:00:00.000Z',
+          liveSessions: 2,
+          unlinkedSessions: 0,
+          projects: state.live.map((project) => ({
+            storeId: 'home',
+            project,
+            liveSessions: 1,
+            agentsWorking: 0,
+          })),
+          epics: [],
+          factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
+        },
+      }),
+    );
+    return state;
+  }
+  const refresh = async (page: Page) => {
+    const pause = page.getByRole('button', { name: 'Pause updates' });
+    if (await pause.count()) await pause.click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+  };
+  const sectionOf = (page: Page, name: string) =>
+    page.locator('.rm-section', { has: page.locator('.rm-section__head', { hasText: name }) });
+  const selectedRow = (page: Page) => page.locator('.lrow[aria-current="true"]');
+
+  test('the section being read stays when its project goes quiet, until another lane is picked', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['project-a', 'project-b', 'project-c']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(3);
+    await expect(quiet(page)).toHaveCount(0);
+    await sectionOf(page, 'project-a').locator('.lrow', { hasText: 'Phase 3' }).click();
+    await expect(page).toHaveURL(/phase=phase-3/);
+    await expect(selectedRow(page)).toContainText('Phase 3');
+
+    state.live = ['project-b'];
+    await refresh(page);
+    // Two projects are quiet now, but the one being read is not counted: it stays.
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(sectionOf(page, 'project-a')).toBeVisible();
+    await expect(selectedRow(page)).toContainText('Phase 3');
+    await expect(page).toHaveURL(/phase=phase-3/);
+    // The detail still sits right after the section holding it.
+    const stackKids = await page
+      .locator('.rm-stack > *')
+      .evaluateAll((els) => els.map((e) => e.className));
+    expect(stackKids[0]).toContain('rm-section');
+    expect(stackKids[1]).not.toContain('rm-section');
+
+    await sectionOf(page, 'project-b').locator('.lrow', { hasText: 'Phase 10' }).click();
+    await expect(sectionNames(page)).toHaveCount(1);
+    await expect(sectionNames(page)).toContainText('project-b');
+    await expect(quiet(page)).toHaveText('2 quiet projects · Show all');
+  });
+
+  test('a reload for a project or session change never widens to All on its own', async ({
+    page,
+  }) => {
+    const state = await steerable(page, ['project-a', 'project-b', 'project-c']);
+    await page.goto('/work/roadmap');
+    await sectionOf(page, 'project-a').locator('.lrow', { hasText: 'Phase 3' }).click();
+    await expect(page).toHaveURL(/phase=phase-3/);
+    state.live = ['project-b'];
+    await refresh(page);
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    // Settle the reload's own reads before the assertions, so the stub is not
+    // torn down mid-fetch.
+    const reloaded = page.waitForResponse(
+      (r) => r.url().includes('/api/overview') && r.url().includes('project=blacksmith'),
+    );
+    await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
+    await reloaded;
+    await expect(page).toHaveURL(/project=blacksmith/);
+    await expect(page).not.toHaveURL(/scope=all/);
+    await expect(selectedRow(page)).toHaveCount(1);
+    await expect(
+      page.getByRole('navigation', { name: 'Activity scope' }).locator('[aria-current="page"]'),
+    ).toHaveText('Active');
+  });
+
+  test('the unmeasured note sits under the toolbar, a gap clear of it and of the first section', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    const note = page.getByText("Live sessions can't be read here");
+    const toolbar = page.locator('.bs-roadmap-page__toolbar');
+    const first = page.locator('.rm-section').first();
+    const box = async (l: ReturnType<Page['locator']>) => {
+      const b = await l.boundingBox();
+      if (!b) throw new Error('element has no box');
+      return b;
+    };
+    for (const viewport of [VIEWPORTS.desktop, { width: 375, height: 812 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto('/work/roadmap');
+      await expect(note).toBeVisible();
+      await expect(first).toBeVisible();
+      const n = await box(note);
+      const t = await box(toolbar);
+      const f = await box(first);
+      expect(n.y - (t.y + t.height)).toBeGreaterThanOrEqual(15);
+      expect(f.y - (n.y + n.height)).toBeGreaterThanOrEqual(15);
+      const before = await page.evaluate(() => {
+        const n = [...document.querySelectorAll('.bs-sessions__quiet')][0];
+        const s = document.querySelector('.rm-section');
+        return !!n && !!s && !!(n.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      expect(before).toBe(true);
+    }
+  });
+
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot active project among several desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);

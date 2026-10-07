@@ -3713,6 +3713,11 @@ summary.bs-inbox__group-head {
 .rm-quiet {
   margin: var(--bs-space-4) 0 0;
 }
+/* The unmeasured note, under the toolbar: the same gap above and below as
+   Kanban's note (.bs-kanban-page__note). */
+.rm-note {
+  margin: var(--bs-space-4) 0;
+}
 
 /* UI spec Part 2 — one section per project (RoadmapProjectSection.vue). The
    head reuses NeedsYouInbox's `.bs-inbox__group-head` one level up (an h2,

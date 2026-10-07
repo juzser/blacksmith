@@ -244,15 +244,19 @@ export function buildRoadmapSections(
  * section also counts when one of its epics is active, which is how the
  * unscoped "Epics" fallback (no project) qualifies. A null or unmeasured
  * scope is "unknown", not "nothing active": the sections come back as they are.
+ * `keepProject` names the section the user is reading: it stays listed when its
+ * project turns quiet (Sessions' rule), in its place.
  */
 export function filterActiveSections(
   sections: readonly RoadmapSection[],
   scope: ActiveScopeResult | null,
+  keepProject: string | null = null,
 ): RoadmapSection[] {
   if (scope?.measured !== true) return [...sections];
   const projects = new Set(scope.projects.map((p) => p.project));
   const epics = new Set(scope.epics.map((e) => e.epicId));
   return sections.filter((s) => {
+    if (keepProject !== null && s.project === keepProject) return true;
     if (s.project !== '' && projects.has(s.project)) return true;
     if (s.kind !== 'epic') return false;
     const { earlier, visible, later } = s.window;

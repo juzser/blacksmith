@@ -15,7 +15,7 @@
 // open its side, and drops the EpicBlock into the section holding the
 // selection.
 import { Map as MapIcon } from '@lucide/vue';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import EpicBlock from '../components/EpicBlock.vue';
@@ -188,23 +188,44 @@ function ensureEpicFlowsLoaded(epicIds: string[]) {
 
 // Under Active the page waits for the first scope answer (`loading` holds the
 // Skeleton meanwhile), so the All list never shows before it is narrowed.
+// The wait is made after an await, outside setup, so Vue would never stop its
+// watcher: unmount releases it, and `load()` returns once the page is gone.
+let unmounted = false;
+let releaseScopeWait: (() => void) | null = null;
+onUnmounted(() => {
+  unmounted = true;
+  releaseScopeWait?.();
+});
+
 function scopeAnswered(): Promise<void> {
   if (live() !== null) return Promise.resolve();
   return new Promise((resolve) => {
     const stop = watch(live, (v) => {
       if (v === null) return;
-      stop();
-      resolve();
+      release();
     });
+    const release = () => {
+      stop();
+      releaseScopeWait = null;
+      resolve();
+    };
+    releaseScopeWait = release;
   });
 }
 
+// Only the first load after mount may read ?phase=/?epic= as a deep link and
+// widen to All for it; a later reload keeps what is shown.
+let firstLoad = true;
+
 async function load() {
+  const deepLink = firstLoad;
+  firstLoad = false;
   try {
     const [roadmap, overview] = await Promise.all([
       fetchRoadmap(sessionScope.value, project.value),
       fetchOverview(sessionScope.value, project.value),
     ]);
+    if (unmounted) return;
     milestones.value = roadmap;
     epics.value = selectableEpics(overview);
     activeEpics.value = overview.epicsActivelyRunning;
@@ -212,6 +233,7 @@ async function load() {
     overviewProjects.value = overview.projects ?? [];
     error.value = null;
     if (scope.value === 'active') await scopeAnswered();
+    if (unmounted) return;
 
     const fromQuery = {
       phase: typeof route.query.phase === 'string' ? route.query.phase : null,
@@ -228,15 +250,33 @@ async function load() {
     );
     selectedPhase.value = selection.phaseId;
     selectedEpic.value = selection.epicId;
-    // A deep link to a lane Active hides: widen to All instead of a blank page.
     if (
       (fromQuery.phase || fromQuery.epic) &&
       filterScope() !== null &&
       !hostSection.value &&
       allSections.value.some((sec) => sectionHolds(sec, selection))
     ) {
-      await router.replace(scopeTo('all'));
+      if (deepLink) {
+        // A deep link to a lane Active hides: widen to All instead of a blank page.
+        await router.replace(scopeTo('all'));
+        if (unmounted) return;
+      } else {
+        // A reload never widens: fall back to what is shown, drop the stale query.
+        const next = defaultSelection(
+          roadmap,
+          activeEpics.value,
+          epics.value,
+          {},
+          overviewProjects.value,
+          project.value ?? null,
+          filterScope(),
+        );
+        selectedPhase.value = next.phaseId;
+        selectedEpic.value = next.epicId;
+        void router.replace({ query: { ...route.query, phase: undefined, epic: undefined } });
+      }
     }
+    syncKeep();
     ensureEpicFlowsLoaded(epicIdsForPhase(selectedPhase.value));
     if (selectedEpic.value) loadEpicModeFlow();
   } catch (e) {
@@ -246,18 +286,35 @@ async function load() {
   }
   // Only once `loading` drops: until then the render reads nothing else, so
   // no flush is queued and nextTick would resolve before the rows exist.
-  if (error.value === null) await revealSelection();
+  if (error.value === null && !unmounted) await revealSelection();
 }
 
 onMounted(load);
 watch([project, sessionKey], load);
+
+// The project of the section the user is reading. Under Active it stays listed
+// when that project turns quiet, until another lane is picked or the scope flips.
+const keepProject = ref<string | null>(null);
+let lastScope = scope.value;
+function syncKeep() {
+  const pick = { phaseId: selectedPhase.value, epicId: selectedEpic.value };
+  keepProject.value = allSections.value.find((sec) => sectionHolds(sec, pick))?.project ?? null;
+}
 
 // Narrowing to Active can hide the lane the selection sits in: fall back to
 // the default of what is shown, and drop the now-stale ?phase=/?epic=.
 watch(
   () => `${scope.value}:${measured()}`,
   () => {
-    if (loading.value || hostSection.value || (!selectedPhase.value && !selectedEpic.value)) return;
+    if (scope.value !== lastScope) {
+      // A flip, not a data change: the kept section goes, Sessions' rule.
+      lastScope = scope.value;
+      keepProject.value = null;
+    }
+    if (loading.value || hostSection.value || (!selectedPhase.value && !selectedEpic.value)) {
+      syncKeep();
+      return;
+    }
     const next = defaultSelection(
       milestones.value ?? [],
       activeEpics.value,
@@ -272,12 +329,14 @@ watch(
     ensureEpicFlowsLoaded(next.epicId ? [next.epicId] : epicIdsForPhase(next.phaseId));
     if (next.epicId) loadEpicModeFlow();
     void router.replace({ query: { ...route.query, phase: undefined, epic: undefined } });
+    syncKeep();
   },
 );
 
 function selectPhase(phaseId: string) {
   selectedPhase.value = phaseId;
   selectedEpic.value = null;
+  syncKeep();
   router.replace({ query: { ...route.query, phase: phaseId, epic: undefined } });
   ensureEpicFlowsLoaded(epicIdsForPhase(phaseId));
 }
@@ -285,6 +344,7 @@ function selectPhase(phaseId: string) {
 function selectEpic(epicId: string) {
   selectedEpic.value = epicId;
   selectedPhase.value = null;
+  syncKeep();
   router.replace({ query: { ...route.query, epic: epicId, phase: undefined } });
   ensureEpicFlowsLoaded([epicId]);
   epicPlanVersion.value = '';
@@ -309,7 +369,9 @@ const allSections = computed(() =>
   ),
 );
 // Active keeps the sections a live session is on (roadmapWindow.ts).
-const sections = computed(() => filterActiveSections(allSections.value, filterScope()));
+const sections = computed(() =>
+  filterActiveSections(allSections.value, filterScope(), keepProject.value),
+);
 const hiddenCount = () => allSections.value.length - sections.value.length;
 
 // The edge lines under Active; one muted line each, same copy as Sessions.
@@ -540,6 +602,14 @@ async function closePeek() {
       </div>
     </div>
 
+    <!-- Qualifies the toggle above, so it sits right under it, not below the stack. -->
+    <p
+      v-if="!error && !loading && scope === 'active' && live() !== null && !measured()"
+      class="bs-sessions__quiet rm-note"
+    >
+      Live sessions can't be read here
+    </p>
+
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
     <template v-else-if="loading || (scope === 'active' && live() === null)">
@@ -604,9 +674,6 @@ async function closePeek() {
       <p v-else-if="noneOnAnEpic()" class="bs-sessions__quiet rm-quiet">
         {{ pluralize(live()?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
-      </p>
-      <p v-else-if="!measured()" class="bs-sessions__quiet rm-quiet">
-        Live sessions can't be read here
       </p>
       <p v-else-if="noneSurvive()" class="bs-sessions__quiet rm-quiet">
         {{ project ? 'No live session is on this project' : 'No live session is on a project with a roadmap' }} ·

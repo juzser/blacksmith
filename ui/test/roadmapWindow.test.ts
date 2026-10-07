@@ -516,4 +516,22 @@ describe('filterActiveSections', () => {
     const withEpic = scope({ epics: [{ storeId: 'home', epicId: 'epic-y', project: null }] });
     expect(filterActiveSections(fallback, withEpic)).toEqual(fallback);
   });
+
+  // Sessions' rule: a section the user is reading stays listed when its
+  // project turns quiet, until another section is picked or the scope flips.
+  it('keeps the named quiet section, in its place, when asked', () => {
+    const shown = filterActiveSections(all, scope(), 'project-a');
+    expect(shown.map((s) => s.project)).toEqual(['project-a', 'project-b', 'project-c']);
+  });
+
+  it('a kept project that is live, unknown or null changes nothing', () => {
+    const plain = ['project-b', 'project-c'];
+    expect(filterActiveSections(all, scope(), 'project-b').map((s) => s.project)).toEqual(plain);
+    expect(filterActiveSections(all, scope(), 'project-z').map((s) => s.project)).toEqual(plain);
+    expect(filterActiveSections(all, scope(), null).map((s) => s.project)).toEqual(plain);
+  });
+
+  it('an unmeasured scope still returns every section when a project is kept', () => {
+    expect(filterActiveSections(all, scope({ measured: false }), 'project-a')).toEqual(all);
+  });
 });
