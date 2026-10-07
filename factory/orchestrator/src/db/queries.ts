@@ -648,7 +648,7 @@ export interface OverviewResult {
 
 interface TaskResultPayload {
   task_id?: string;
-  token_usage?: { total_tokens?: number };
+  token_usage?: unknown;
 }
 
 /** Every `tasks` row for `scope`, session-filtered in SQL and project-filtered in JS. */
@@ -4336,7 +4336,7 @@ interface ResultPayloadForCost {
   provider?: string;
   model_tier?: string;
   agent?: string;
-  token_usage?: { total_tokens?: number };
+  token_usage?: unknown;
 }
 
 interface SeverityDecisionsPayloadForAnalytics {
