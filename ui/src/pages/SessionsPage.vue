@@ -30,6 +30,7 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useViewport } from '../composables/useViewport.js';
 import { scopeQuery } from '../lib/activityScope.js';
+import { hasWorkingAgents } from '../lib/agentStatus.js';
 import {
   fetchSessionAgents,
   fetchSessions,
@@ -83,10 +84,10 @@ const groups = () =>
 const flat = () => activeFirst(visible());
 const isQuiet = (s: RunningSession) => !isSessionActive(s);
 
-// Gates the poll: a selected run with nothing left live has nothing left to
-// learn by asking again every 5s.
+// Gates the poll: a selected run with nothing left working (live and inside
+// the stale window) has nothing left to learn by asking again every 5s.
 function hasLiveAgents(): boolean {
-  return agents.value?.roles.some((r) => r.agents.some((a) => a.status === 'live')) ?? false;
+  return hasWorkingAgents(agents.value?.roles ?? [], new Date().toISOString());
 }
 
 function errorMessage(e: unknown): string {

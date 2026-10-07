@@ -1089,6 +1089,16 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     // before "s" is inserted to match ds-spec.md §4.3's own wording.)
   });
 
+  it('says "No result after" for a runless dispatch past the stale window', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 2 } });
+    const at = (ms: number) => new Date(Date.parse(e.ts) + ms).toISOString();
+    const H = 3_600_000;
+    expect(metaFor(e, { now: at(5 * H) })).toBe('round 2 · No result after 5h');
+    expect(metaFor(e, { now: at(3 * H) })).toBe('round 2 · Running for 3h');
+    expect(metaFor(e, { now: at(4 * H) })).toContain('Running for');
+    expect(metaFor(e, { now: at(4 * H + 1000) })).toContain('No result after');
+  });
+
   it("shows a finished dispatch's tokens and duration", () => {
     const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
     (e as unknown as { run: unknown }).run = {

@@ -46,7 +46,7 @@ describe('SessionsPage.vue', () => {
   });
 
   it('polls only while the selected run still has a live agent', () => {
-    expect(PAGE).toMatch(/function hasLiveAgents\(\)/);
+    expect(PAGE).toMatch(/hasWorkingAgents\(agents\.value\?\.roles/);
     expect(PAGE).toMatch(/if \(hasLiveAgents\(\)\) void loadAgents\(\);/);
   });
 
