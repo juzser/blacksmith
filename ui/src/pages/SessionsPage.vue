@@ -14,7 +14,7 @@
 // all: lib/sessionsSelection.ts's selectedSessionFromQuery() only ever
 // selects an id this page's own history list already knows about.
 import { Play, RefreshCw } from '@lucide/vue';
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import AgentBlock from '../components/kit/AgentBlock.vue';
@@ -57,7 +57,11 @@ const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
 const { isPhoneWidth } = useViewport();
 const { scope, scopeTo } = useActivityScope();
-const { scope: activeScope, settled: activeScopeSettled } = useActiveScope();
+const {
+  scope: activeScope,
+  settled: activeScopeSettled,
+  reload: reloadActiveScope,
+} = useActiveScope();
 
 // Same cadence as every other polling page (design-spec.md §8).
 const POLL_MS = 5000;
@@ -199,18 +203,32 @@ function breadcrumbLabel() {
   return project.value ? `${project.value} · Sessions` : 'Sessions';
 }
 
+// A watch made after an await is not owned by the component, so the deep-link
+// wait below checks this flag after each await and stops its own watcher.
+let gone = false;
+let abandonWait = () => {};
+onBeforeUnmount(() => {
+  gone = true;
+  abandonWait();
+});
+
 onMounted(async () => {
   setBreadcrumb([{ label: breadcrumbLabel() }]);
   await loadSessions();
+  if (gone) return;
   // The deep link's widen-to-All rule below needs the scope answer.
   await new Promise<void>((resolve) => {
     if (live() !== null) return resolve();
     const stop = watch(live, (v) => {
       if (v === null) return;
+      abandonWait();
+    });
+    abandonWait = () => {
       stop();
       resolve();
-    });
+    };
   });
+  if (gone) return;
   const deepLinked = selectedSessionFromQuery(route.query, sessions.value);
   if (deepLinked) {
     selectedId.value = deepLinked;
@@ -276,6 +294,7 @@ usePoll(() => {
 
 function refresh() {
   void loadSessions();
+  void reloadActiveScope();
   if (selectedId.value) void loadAgents();
 }
 </script>

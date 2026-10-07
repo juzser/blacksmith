@@ -1233,7 +1233,8 @@ agents and no live CLI session is quiet. Under the list, one muted line, the lin
 `--bs-link-text` link (no underline at rest, underline on hover/focus): "N quiet sessions ·
 Show all" (hidden at 0); with no live CLI session at all, "Nothing is active right now. ·
 Show all"; with live sessions but none on an epic, "N live sessions, none on an epic · Show
-all"; when the live sessions cannot be read, Active lists everything unmuted, as All does,
+all" (while either of these two lines shows, the quiet count is not shown, so the line
+carries the page's one Show all); when the live sessions cannot be read, Active lists everything unmuted, as All does,
 with "Live sessions can't be read here" (the toggle stays); and, beside the list, "N active
 projects are in another store (names) · see Home" for active projects the page cannot list.
 Until the first answer arrives the page shows its loading skeleton, never an empty claim.
