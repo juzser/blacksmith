@@ -373,7 +373,8 @@ export interface TaskDetail {
     agentRole: string;
     provider: string;
     modelTier: string;
-    status: string;
+    dispatchedAt: string;
+    status: SessionAgent['status'];
   }>;
   findings: Array<{
     findingId: string;
