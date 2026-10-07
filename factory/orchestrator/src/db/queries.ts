@@ -16,6 +16,7 @@ import {
   liveAgents as foldLiveAgents,
   isWorkingAt,
   JUDGE_REPORT_EVENT_TYPE,
+  JUDGE_VERDICT_EVENT_TYPE,
   REGISTRY_EVENT_TYPES,
   TASK_RESULT_EVENT_TYPE,
   type TerminalType,
@@ -2533,7 +2534,7 @@ export interface TimelineEntry {
    * server-side through `agents.terminalEventId` to the `task_run_result`
    * payload. Present only on `Dispatched` rows; `undefined` on every other
    * kind. Fields the run did not measure are `null`, never 0 — including
-   * `durationMs`, which no writer in this codebase stamps yet (same "not
+   * `durationMs`, which only some results carry (same "not
    * recorded anywhere" status the spec table already gives `effort`).
    */
   run?: DispatchRun;
@@ -2966,7 +2967,7 @@ function joinGateCounts(page: TimelineEntry[]): void {
   }
 }
 
-/** DS6 PR2 — a run's `duration_ms`, or null when the payload carries none (no writer stamps it today). */
+/** DS6 PR2 — a run's `duration_ms`, or null when the payload carries none (only some results carry it). */
 function durationMsFromPayload(payload: Record<string, unknown>): number | null {
   return typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
 }
@@ -3682,6 +3683,7 @@ const RUN_EVENT_TYPES = [
   JUDGE_REPORT_EVENT_TYPE,
   TASK_RESULT_EVENT_TYPE,
   ERROR_EVENT_TYPE,
+  JUDGE_VERDICT_EVENT_TYPE,
 ] as const;
 
 const RUN_KIND_BY_EVENT_TYPE: Record<string, TaskRun['kind']> = {
@@ -3689,6 +3691,7 @@ const RUN_KIND_BY_EVENT_TYPE: Record<string, TaskRun['kind']> = {
   [JUDGE_REPORT_EVENT_TYPE]: 'judge-report',
   [TASK_RESULT_EVENT_TYPE]: 'result',
   [ERROR_EVENT_TYPE]: 'error',
+  [JUDGE_VERDICT_EVENT_TYPE]: 'judge-verdict',
 };
 
 function tokensTotalFromPayload(payload: Record<string, unknown>): number | null {
@@ -3702,12 +3705,13 @@ function outcomeFromPayload(eventType: string, payload: Record<string, unknown>)
   if (eventType === ERROR_EVENT_TYPE && typeof payload.error === 'string') return payload.error;
   if (eventType === JUDGE_REPORT_EVENT_TYPE) {
     // judge-reported carries no accept/dismiss verdict of its own (that is a
-    // separate judge-verdict event, outside Slice A's event-type list) — the
-    // closest the report payload has to an outcome is whether it attested
+    // separate judge-verdict event, handled below) — the closest the report payload has to an outcome is whether it attested
     // "no findings" rather than naming a finding count.
     if (payload.attested_by !== undefined && payload.attested_by !== null) return 'no-findings';
     if (typeof payload.finding_count === 'number') return `${payload.finding_count}-findings`;
   }
+  if (eventType === JUDGE_VERDICT_EVENT_TYPE && typeof payload.verdict === 'string')
+    return payload.verdict;
   return null;
 }
 
@@ -3724,7 +3728,7 @@ function outcomeFromPayload(eventType: string, payload: Record<string, unknown>)
 export interface TaskRun {
   eventId: string;
   ts: string;
-  kind: 'dispatch' | 'judge-report' | 'result' | 'error';
+  kind: 'dispatch' | 'judge-report' | 'judge-verdict' | 'result' | 'error';
   agentRole: string | null;
   /** Dispatch round, or null when the event carries none (results/errors). */
   round: number | null;
@@ -3749,17 +3753,34 @@ export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
   // reads "first dispatch" / "last result" off that order); newest-first is
   // this function's own output shape, so the rows are reversed here, once.
   const rows = fetchTaskRunRows(db, taskId).slice().reverse();
+  // A judge-verdict names neither role nor (mostly) round; the agents row it
+  // terminated does. One query for the page.
+  const verdictIds = rows
+    .filter((r) => r.eventType === JUDGE_VERDICT_EVENT_TYPE)
+    .map((r) => r.eventId);
+  const agentByTerminal = new Map(
+    verdictIds.length === 0
+      ? []
+      : db
+          .select({ t: agents.terminalEventId, role: agents.agentRole, round: agents.round })
+          .from(agents)
+          .where(inArray(agents.terminalEventId, verdictIds))
+          .all()
+          .map((a) => [a.t, a] as const),
+  );
   return rows.flatMap((r) => {
     const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
     if (!kind) return [];
     const payload = JSON.parse(r.payload) as Record<string, unknown>;
-    const round = typeof payload.round === 'number' ? payload.round : null;
+    const agentRow = agentByTerminal.get(r.eventId);
+    const round = typeof payload.round === 'number' ? payload.round : (agentRow?.round ?? null);
     return [
       {
         eventId: r.eventId,
         ts: r.ts,
         kind,
-        agentRole: typeof payload.agent_role === 'string' ? payload.agent_role : null,
+        agentRole:
+          typeof payload.agent_role === 'string' ? payload.agent_role : (agentRow?.role ?? null),
         round: round ?? (r.eventType === DISPATCH_EVENT_TYPE ? 1 : null),
         tokensTotal: tokensTotalFromPayload(payload),
         outcome: outcomeFromPayload(r.eventType, payload),
@@ -3772,7 +3793,7 @@ export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
 export interface TaskTotals {
   /** Sum of every run's `token_usage.total_tokens`; null when none of them measured it. */
   tokens: number | null;
-  /** Sum of every run's `duration_ms`; null when none of them carries one (no writer stamps it today). */
+  /** Sum of every run's `duration_ms`; null when none of them carries one (only some results do). */
   agentTimeMs: number | null;
   /** First `dispatch` run's ts to the last `result`/`error` run's ts; null while no run has ended yet. */
   elapsedMs: number | null;
@@ -3797,6 +3818,8 @@ export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
   let startTs: string | null = null;
   let endTs: string | null = null;
   for (const r of rows) {
+    // A verdict is history-only: the totals never counted it, and still don't.
+    if (r.eventType === JUDGE_VERDICT_EVENT_TYPE) continue;
     const payload = JSON.parse(r.payload) as Record<string, unknown>;
     const tokens = tokensTotalFromPayload(payload);
     if (tokens !== null) {
