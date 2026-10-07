@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { type TaskBudget, unreadTaskBudgetFields } from './budgets.js';
 import { type ClaimedTask, claimCoversPath } from './claims.js';
 import { EFFORT_TIERS, type EffortTier, isEffortTier } from './effortTiers.js';
@@ -801,7 +802,100 @@ function readAddedList(epicId: string, version: number, added: unknown): TaskSpe
   return added as TaskSpecRecord[];
 }
 
-export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile {
+/**
+ * The replacement and added records a draft lands, at most one live record
+ * under any id. `liveSpec` reads the last live record under an id, so a second
+ * one fails nothing: it quietly wins, and ingest sees one task where the
+ * author wrote two.
+ *
+ * Several supersede keys folding into one task is the legitimate way to name
+ * one id twice. Their replacements are identical, so one copy is carried.
+ * Anything else that lands a second live record is refused: two keys with
+ * different records under one id, or a replacement or added id that a carried
+ * task still holds live, that a replacement already declares, or that an
+ * earlier added entry declares. Dead records may share an id freely; a task
+ * superseded under its own id (D-121) already leaves one of each.
+ */
+function oneLiveRecordPerId(
+  prev: PlanFile,
+  version: number,
+  carried: readonly TaskSpecRecord[],
+  supersede: Record<string, TaskSpecRecord>,
+  addedList: readonly TaskSpecRecord[],
+): { replacements: TaskSpecRecord[]; added: TaskSpecRecord[] } {
+  const refuse = (taskId: string, why: string, details: Record<string, unknown>) =>
+    new PlanError(
+      'plan.duplicate-live-task',
+      `Refusing to draft plan "${prev.epic_id}" v${version}: ${why}`,
+      { epicId: prev.epic_id, version, taskId, ...details },
+    );
+  const ownId = (taskId: string) =>
+    `Give the new task an id of its own, or supersede "${taskId}" in the same amendment.`;
+  const liveCarried = new Set(
+    carried.filter((t) => t.task_status !== 'superseded').map((t) => t.task_id),
+  );
+
+  const replacements: TaskSpecRecord[] = [];
+  const keyOf = new Map<string, string>();
+  for (const [key, t] of Object.entries(supersede)) {
+    const record = { ...t, plan_version: version };
+    const firstKey = keyOf.get(record.task_id);
+    if (firstKey === undefined) {
+      if (liveCarried.has(record.task_id)) {
+        throw refuse(
+          record.task_id,
+          `changes.supersede["${key}"] replaces into "${record.task_id}", which v${prev.version} still holds live and this amendment does not supersede. ${ownId(record.task_id)}`,
+          { key },
+        );
+      }
+      keyOf.set(record.task_id, key);
+      replacements.push(record);
+      continue;
+    }
+    const first = replacements.find((r) => r.task_id === record.task_id);
+    if (!isDeepStrictEqual(first, record)) {
+      throw refuse(
+        record.task_id,
+        `changes.supersede["${firstKey}"] and changes.supersede["${key}"] both replace into "${record.task_id}" with different records. Keys fold into one task only when they carry the same replacement.`,
+        { keys: [firstKey, key] },
+      );
+    }
+  }
+
+  const added: TaskSpecRecord[] = [];
+  const addedAt = new Map<string, number>();
+  addedList.forEach((t, index) => {
+    const where = liveCarried.has(t.task_id)
+      ? `v${prev.version} still holds it live. ${ownId(t.task_id)}`
+      : keyOf.has(t.task_id)
+        ? `changes.supersede["${keyOf.get(t.task_id)}"] already replaces into it. Give the new task an id of its own.`
+        : addedAt.has(t.task_id)
+          ? `changes.added[${addedAt.get(t.task_id)}] already declares it. Give the new task an id of its own.`
+          : undefined;
+    if (where !== undefined) {
+      throw refuse(t.task_id, `changes.added[${index}] declares "${t.task_id}", and ${where}`, {
+        index,
+      });
+    }
+    addedAt.set(t.task_id, index);
+    added.push({ ...t, plan_version: version });
+  });
+  return { replacements, added };
+}
+
+export function draftNextVersion(
+  prev: PlanFile,
+  changes: PlanChanges,
+  /**
+   * Dead records for tasks the plan never listed — ones only the event log
+   * added — that `changes.supersede` retires. Built by the caller from the
+   * log (`supersededStubFromLog`), because this function does no I/O. Each
+   * must already be `superseded` at the new version; they are carried beside
+   * the plan's own records so ingest has something to emit
+   * `task-superseded` from.
+   */
+  loggedStubs: readonly TaskSpecRecord[] = [],
+): PlanFile {
   const newVersion = prev.version + 1;
   const supersede = readSupersedeMap(prev.epic_id, newVersion, changes.supersede);
 
@@ -817,11 +911,15 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
     carried.push({ ...t, plan_version: newVersion });
   }
 
-  const replacements = Object.values(supersede).map((t) => ({ ...t, plan_version: newVersion }));
-  const added = readAddedList(prev.epic_id, newVersion, changes.added).map((t) => ({
-    ...t,
-    plan_version: newVersion,
-  }));
+  carried.push(...loggedStubs);
+
+  const { replacements, added } = oneLiveRecordPerId(
+    prev,
+    newVersion,
+    carried,
+    supersede,
+    readAddedList(prev.epic_id, newVersion, changes.added),
+  );
 
   const tasks = [...carried, ...replacements, ...added];
   // An edge may only name a task this version declares -- `validatePlan`'s own
@@ -911,8 +1009,13 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
  * is not: a caller that could write half of a version could write a version
  * no event explains.
  */
-export function nextVersion(prev: PlanFile, changes: PlanChanges, opts: PlanOpts = {}): PlanFile {
-  const newPlan = draftNextVersion(prev, changes);
+export function nextVersion(
+  prev: PlanFile,
+  changes: PlanChanges,
+  opts: PlanOpts = {},
+  loggedStubs: readonly TaskSpecRecord[] = [],
+): PlanFile {
+  const newPlan = draftNextVersion(prev, changes, loggedStubs);
   writePlanFile(newPlan, opts);
   return newPlan;
 }
@@ -998,6 +1101,12 @@ function specSignature(t: TaskSpecRecord): string {
  * keyed by task_id and a replacement that keeps its id — the shape every real
  * amendment has used — leaves the plan holding a dead record and a live one
  * under the same key.
+ *
+ * An id new to B is `added` only if B holds it live. One that arrives already
+ * dead is a task B retired without A ever recording it — a task only the event
+ * log added, which `draftNextVersion` carries as a superseded stub — so it is
+ * `superseded`, after the ids A knew. Reading it as added would make a dead
+ * record look like new work to land.
  */
 export function diffPlans(vA: PlanFile, vB: PlanFile): PlanDiff {
   const aIds = new Set(vA.tasks.map((t) => t.task_id));
@@ -1007,9 +1116,11 @@ export function diffPlans(vA: PlanFile, vB: PlanFile): PlanDiff {
   const superseded: string[] = [];
   const carried: string[] = [];
   const removed: string[] = [];
+  const deadOnArrival: string[] = [];
 
   for (const id of bIds) {
-    if (!aIds.has(id)) added.push(id);
+    if (aIds.has(id)) continue;
+    (liveSpec(vB, id) === undefined ? deadOnArrival : added).push(id);
   }
 
   for (const id of aIds) {
@@ -1027,6 +1138,7 @@ export function diffPlans(vA: PlanFile, vB: PlanFile): PlanDiff {
         : liveB !== undefined && specSignature(liveA) === specSignature(liveB);
     (same ? carried : superseded).push(id);
   }
+  superseded.push(...deadOnArrival);
 
   return { added, removed, superseded, carried };
 }

@@ -32,12 +32,15 @@ import {
   nextVersion,
   type PlanChanges,
   type PlanDiff,
+  PlanError,
   type PlanFile,
   type PlanOpts,
   planRefTaskId,
+  resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
 } from './plan.js';
+import { readAddedTasks, supersededStubFromLog } from './taskEvents.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -504,6 +507,71 @@ export interface AmendPlanResult {
 }
 
 /**
+ * Resolve every `changes.supersede` key to the task it names, before anything
+ * is drafted: the plan's own task, or one only the epic's log added.
+ *
+ * A key the plan does not list used to match nothing in `draftNextVersion` and
+ * its replacement was appended anyway, so a follow-up the gate minted (a
+ * `task-added` and no plan record) stayed live beside the task meant to
+ * replace it, and a typo did the same. The key now goes through
+ * `resolveTaskId` with the log's ids as `alsoKnown`, so a bare and a qualified
+ * spelling both work and a key naming nothing is `plan.unknown-task`, refused
+ * before a plan file exists. A key resolving to a plan task is rewritten to
+ * that task's own id. A key resolving to a log-only task yields the dead
+ * record `draftNextVersion` carries for it (`supersededStubFromLog`).
+ *
+ * The log is read lineage-wide and narrowed to this epic, the way the
+ * follow-up splice in `wave next` narrows it: another epic's row is not a
+ * task of this plan.
+ *
+ * Exported for `proposeSpecChange`, whose pre-check drafts the same version
+ * approval will cut: a draft built from unresolved keys would record a diff
+ * that approval then contradicts.
+ */
+export async function resolveSupersedeKeys(
+  plan: PlanFile,
+  changes: PlanChanges,
+  ctx: EventContext,
+  opts: EventOpts,
+): Promise<{ changes: PlanChanges; loggedStubs: TaskSpecRecord[] }> {
+  const supersede: unknown = changes.supersede;
+  // A shape no map-shaped read can make is `draftNextVersion`'s to refuse,
+  // with its own message.
+  if (typeof supersede !== 'object' || supersede === null || Array.isArray(supersede)) {
+    return { changes, loggedStubs: [] };
+  }
+  const keys = Object.keys(supersede);
+  if (keys.length === 0) return { changes, loggedStubs: [] };
+
+  const logged = (await readAddedTasks({ sessionId: ctx.sessionId }, opts)).filter(
+    (t) => t.epicId === plan.epic_id,
+  );
+  const planIds = new Set(plan.tasks.map((t) => t.task_id));
+  const resolved: Record<string, TaskSpecRecord> = {};
+  const loggedStubs = new Map<string, TaskSpecRecord>();
+  for (const [key, replacement] of Object.entries(supersede as Record<string, TaskSpecRecord>)) {
+    const id = resolveTaskId(
+      plan,
+      key,
+      logged.map((t) => t.taskId),
+    );
+    if (id in resolved) {
+      throw new PlanError(
+        'plan.ambiguous-task',
+        `changes.supersede names "${id}" twice (as "${key}" and under another spelling); one task is superseded once.`,
+        { epicId: plan.epic_id, version: plan.version, typed: key, candidates: [id] },
+      );
+    }
+    resolved[id] = replacement;
+    const added = planIds.has(id) ? undefined : logged.find((t) => t.taskId === id);
+    if (added !== undefined) {
+      loggedStubs.set(id, supersededStubFromLog(added, plan.epic_id, plan.version + 1));
+    }
+  }
+  return { changes: { ...changes, supersede: resolved }, loggedStubs: [...loggedStubs.values()] };
+}
+
+/**
  * The one legitimate way to change an immutable plan.
  *
  * Three guards make this an amendment rather than a rewrite: it must cite at
@@ -610,7 +678,8 @@ export async function amendPlan(
   // `draftNextVersion` is for: "everything validates before anything acts"
   // only holds if this check can run before a plan file exists, and nothing in
   // this codebase deletes a plan file (D-127).
-  const draft = draftNextVersion(plan, input.changes ?? {});
+  const { changes, loggedStubs } = await resolveSupersedeKeys(plan, input.changes ?? {}, ctx, opts);
+  const draft = draftNextVersion(plan, changes, loggedStubs);
 
   // D-21: a malformed `--changes` file can still produce a draft that reads
   // fine structurally (every entry a plain object with a string task_id) but
@@ -648,9 +717,12 @@ export async function amendPlan(
   // replacement is in `added`, so the obligation survives the rename; keeping
   // the dead id too would make the finding undischargeable, which is the
   // failure this whole defect is about, reached from the other side.
+  // `added` goes through the same filter: `diffPlans` already reports an id
+  // that arrives dead (a log-only task's stub) as superseded, and the filter
+  // keeps any dead id from becoming an obligation or covering a named site.
   const live = new Set(livePlanTasks(draft).map((t) => t.task_id));
   const obligations = [
-    ...new Set([...diff.added, ...diff.superseded.filter((id) => live.has(id))]),
+    ...new Set([...diff.added, ...diff.superseded].filter((id) => live.has(id))),
   ];
   if (obligations.length === 0) {
     const shape =
@@ -704,8 +776,8 @@ export async function amendPlan(
     (f) => OPEN_FINDING_STATUSES.has(f.finding_status) && !citedIds.has(f.finding_id),
   );
   const changedSpecs: TaskSpecRecord[] = [
-    ...(input.changes?.added ?? []),
-    ...Object.values(input.changes?.supersede ?? {}),
+    ...(changes.added ?? []),
+    ...Object.values(changes.supersede ?? {}),
   ];
   const changedObjectives = changedSpecs
     .map((spec) => spec.objective)
@@ -727,7 +799,7 @@ export async function amendPlan(
   // goes through `nextVersion` rather than from `draft`: `draftNextVersion` is
   // pure, so the two agree by construction, and there stays exactly one
   // function in this codebase that puts a plan version on disk.
-  const amended = nextVersion(plan, input.changes ?? {}, opts);
+  const amended = nextVersion(plan, changes, opts, loggedStubs);
 
   // Old id -> replacement id, for the rename-supersede case only: a same-id
   // supersede needs no pairing (the row already carries the work forward
@@ -735,7 +807,7 @@ export async function amendPlan(
   // is the reader — this is the one place an old task_id and its replacement
   // are ever paired (PlanChanges.supersede), so it is recorded here or lost.
   const successors: Record<string, string> = {};
-  for (const [oldId, replacement] of Object.entries(input.changes?.supersede ?? {})) {
+  for (const [oldId, replacement] of Object.entries(changes.supersede ?? {})) {
     if (replacement.task_id !== oldId) successors[oldId] = replacement.task_id;
   }
 
