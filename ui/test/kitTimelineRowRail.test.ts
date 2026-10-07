@@ -76,6 +76,10 @@ describe('RunHistoryTimeline.vue rail rendering', () => {
     expect(RUN_HISTORY).toMatch(/:tag="outcomeTag\(run\)"/);
   });
 
+  it('maps a judge-verdict run to the feedback row kind', () => {
+    expect(RUN_HISTORY).toMatch(/'judge-verdict': 'feedback'/);
+  });
+
   it('keeps list semantics (role="list", TimelineRow renders the <li>s)', () => {
     expect(RUN_HISTORY).toMatch(
       /<ol v-if="runs\.length > 0" class="bs-run-history timeline-feed" role="list">/,
@@ -98,6 +102,11 @@ describe('RunHistoryTimeline.vue rail rendering', () => {
   });
 
   it('keeps the chevron on a gate row whose meta is empty (Task/Session still show)', () => {
-    expect(TIMELINE_ROW).toMatch(/meta\.value !== '' \|\| \(kind\.value === 'gate'/);
+    expect(TIMELINE_ROW).toMatch(/meta\.value !== '' \|\|\s*\(kind\.value === 'gate'/);
+  });
+
+  it('keeps the chevron on a rail row with an outcome tag so Outcome is reachable', () => {
+    expect(TIMELINE_ROW).toMatch(/props\.variant === 'rail' && !!props\.tag/);
+    expect(TIMELINE_ROW).toMatch(/<dt>Outcome<\/dt>/);
   });
 });
