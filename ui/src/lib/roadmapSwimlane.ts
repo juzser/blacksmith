@@ -2,9 +2,34 @@
 // from the UI audit). Kept out of RoadmapSwimlane.vue/EpicBlock.vue so the
 // bar-state and layout math run under vitest's node environment, same split
 // as the old roadmapFlow.ts this slice replaces.
-import type { MilestoneProgress } from './api.js';
+import type { EpicStatus, MilestoneProgress, StatusCounts } from './api.js';
 
 export type BarState = 'past' | 'now' | 'upcoming' | 'not-scheduled';
+
+/** The bar's colour: how the work stands, not where it sits in time. */
+export type BarTone = 'done' | 'review' | 'in-progress' | 'todo';
+
+const TONE_BY_STATUS: Record<EpicStatus, BarTone> = {
+  done: 'done',
+  review: 'review',
+  in_progress: 'in-progress',
+  todo: 'todo',
+};
+
+/**
+ * A phase's status from its own task counts. Mirrors the orchestrator's
+ * `epicStatusFromCounts` (db/queries.ts) rule for an epic: all live tasks
+ * done is `done`; otherwise any review or in-progress is `review` when
+ * nothing is in progress or todo, else `in_progress`; otherwise `todo`.
+ */
+export function phaseStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
+  const live = tasksTotal - counts.superseded;
+  if (live > 0 && counts.done === live) return 'done';
+  if (counts.review > 0 || counts.inProgress > 0) {
+    return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
+  }
+  return 'todo';
+}
 
 export interface DateRange {
   startedAt: string | null;
@@ -28,6 +53,7 @@ export function barState(range: DateRange, now: Date): BarState {
 
 export interface SwimlaneBar {
   state: BarState;
+  tone: BarTone;
   /** Percent (0-100) from the lane's left edge. */
   left: number;
   /** Percent (0-100) width. */
@@ -216,6 +242,7 @@ export function buildAxisMarks(bounds: { start: number; end: number }): MonthMar
 function computeBar(
   range: DateRange,
   state: BarState,
+  tone: BarTone,
   bounds: { start: number; end: number },
   now: Date,
 ): SwimlaneBar | null {
@@ -224,15 +251,15 @@ function computeBar(
     const startT = range.startedAt !== null ? Date.parse(range.startedAt) : bounds.start;
     const left = clamp(pct(startT, bounds));
     const right = clamp(pct(Date.parse(range.finishedAt as string), bounds));
-    return { state, left, width: Math.max(right - left, MIN_BAR_WIDTH) };
+    return { state, tone, left, width: Math.max(right - left, MIN_BAR_WIDTH) };
   }
   const left = clamp(pct(Date.parse(range.startedAt as string), bounds));
   if (state === 'now') {
     const right = clamp(pct(now.getTime(), bounds));
-    return { state, left, width: Math.max(right - left, MIN_BAR_WIDTH) };
+    return { state, tone, left, width: Math.max(right - left, MIN_BAR_WIDTH) };
   }
   // upcoming — no end date is known yet, so the bar is a fixed-width stub.
-  return { state, left, width: Math.min(UPCOMING_STUB_WIDTH, 100 - left) };
+  return { state, tone, left, width: Math.min(UPCOMING_STUB_WIDTH, 100 - left) };
 }
 
 /** One row per phase, plus one indented sub-row per epic (always visible —
@@ -252,19 +279,28 @@ export function buildSwimlane(milestones: MilestoneProgress[], now: Date): Swiml
       kind: 'phase',
       id: m.milestoneId,
       label: m.name,
-      bar: computeBar(phaseRange, barState(phaseRange, now), bounds, now),
+      bar: computeBar(
+        phaseRange,
+        barState(phaseRange, now),
+        TONE_BY_STATUS[phaseStatusFromCounts(m.statusCounts, m.tasksTotal)],
+        bounds,
+        now,
+      ),
     });
     for (const epicId of m.epicIds) {
-      const dates = m.epics.find((e) => e.epicId === epicId) ?? {
-        epicId,
-        startedAt: null,
-        finishedAt: null,
-      };
+      const found = m.epics.find((e) => e.epicId === epicId);
+      const dates = found ?? { epicId, startedAt: null, finishedAt: null };
       rows.push({
         kind: 'epic',
         id: epicId,
         label: epicId,
-        bar: computeBar(dates, barState(dates, now), bounds, now),
+        bar: computeBar(
+          dates,
+          barState(dates, now),
+          TONE_BY_STATUS[found?.status ?? 'todo'],
+          bounds,
+          now,
+        ),
       });
     }
   }

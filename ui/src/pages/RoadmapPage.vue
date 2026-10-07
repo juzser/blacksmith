@@ -246,6 +246,12 @@ const hostSection = computed(
     ) ?? null,
 );
 
+/** The one status legend sits under the first section, and only when some
+ * section is a phase one (a phase-less section's rows carry no bars). */
+const legendSection = computed(() =>
+  sections.value.some((s) => s.kind === 'phase') ? (sections.value[0] ?? null) : null,
+);
+
 /**
  * The page's stack: every section, with the selection's EpicBlock right
  * after the section holding it (last when none does), so the detail reads
@@ -478,6 +484,7 @@ async function closePeek() {
           :selected-epic="selectedEpic"
           :hosts-selection="item.section === hostSection"
           :picker-label="pickerLabel(item.section)"
+          :show-legend="item.section === legendSection"
           :idle-labels="idleLabels"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
           @select-phase="selectPhase"

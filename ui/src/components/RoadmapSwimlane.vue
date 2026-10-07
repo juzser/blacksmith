@@ -111,7 +111,7 @@ const scrollLabel = computed(() =>
               <span
                 v-if="row.bar"
                 class="lbar"
-                :class="row.bar.state === 'upcoming' ? 'up' : row.bar.state"
+                :class="[`lbar--${row.bar.tone}`, { past: row.bar.state === 'past' }]"
                 :style="{ left: `${row.bar.left}%`, width: `${row.bar.width}%` }"
               />
               <span v-else class="lbar-unscheduled">Not scheduled</span>

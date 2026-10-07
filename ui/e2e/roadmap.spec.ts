@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
-import { stubWindowRoadmap } from './roadmapWindowFixture.js';
+import { stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {
@@ -55,10 +55,10 @@ test.describe('Roadmap', () => {
     const pastBar = page.locator('.lrow.sub', { hasText: 'epic-10' }).locator('.lbar.past');
     await expect(pastBar).toBeVisible();
     await expect(
-      page.locator('.lrow.sub', { hasText: 'epic-9' }).locator('.lbar.now'),
+      page.locator('.lrow.sub', { hasText: 'epic-9' }).locator('.lbar:not(.past)'),
     ).toBeVisible();
     await expect(
-      page.locator('.lrow.sub', { hasText: 'epic-11' }).locator('.lbar.up'),
+      page.locator('.lrow.sub', { hasText: 'epic-11' }).locator('.lbar:not(.past)'),
     ).toBeVisible();
     await expect(page.getByText('Not scheduled').first()).toBeVisible();
 
@@ -703,5 +703,163 @@ test.describe('Roadmap: label column and shared track column', () => {
     await page.goto('/work/roadmap');
     const box = await page.locator('.lrow:not(.sub) .track').first().boundingBox();
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(430);
+  });
+});
+
+// Bar colour follows status (not dates), and one legend explains the four tones.
+test.describe('Roadmap: status tones and legend', () => {
+  const TONES = ['done', 'review', 'in-progress', 'todo'] as const;
+  const LABELS = ['Done', 'In review', 'In progress', 'To do'];
+  const counts = (c: Partial<(typeof WINDOW_ROADMAP)[number]['statusCounts']>) => ({
+    done: 0,
+    review: 0,
+    inProgress: 0,
+    todo: 0,
+    superseded: 0,
+    ...c,
+  });
+  // One project-a phase per tone. Finished phases are past (dimmed) but keep
+  // their tone; the To do phase starts after the pinned clock (a stub bar).
+  const TONE_ROADMAP = [
+    {
+      ...WINDOW_ROADMAP[0],
+      milestoneId: 'phase-1',
+      name: 'Phase 1',
+      tasksTotal: 2,
+      statusCounts: counts({ done: 2 }),
+      startedAt: '2025-12-01T09:00:00.000Z',
+      finishedAt: '2025-12-20T09:00:00.000Z',
+    },
+    {
+      ...WINDOW_ROADMAP[0],
+      milestoneId: 'phase-2',
+      name: 'Phase 2',
+      sequence: 2,
+      tasksTotal: 3,
+      statusCounts: counts({ done: 1, review: 2 }),
+      startedAt: '2025-12-22T09:00:00.000Z',
+      finishedAt: '2026-01-05T09:00:00.000Z',
+    },
+    {
+      ...WINDOW_ROADMAP[0],
+      milestoneId: 'phase-3',
+      name: 'Phase 3',
+      sequence: 3,
+      status: 'in-progress',
+      tasksTotal: 3,
+      statusCounts: counts({ done: 1, inProgress: 1, todo: 1 }),
+      startedAt: '2026-01-06T09:00:00.000Z',
+      finishedAt: null,
+    },
+    {
+      ...WINDOW_ROADMAP[0],
+      milestoneId: 'phase-4',
+      name: 'Phase 4',
+      sequence: 4,
+      status: 'planned',
+      tasksTotal: 2,
+      statusCounts: counts({ todo: 2 }),
+      startedAt: '2026-02-01T09:00:00.000Z',
+      finishedAt: null,
+    },
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubWindowRoadmap(page);
+    await page.route('**/api/roadmap**', (route) => route.fulfill({ json: TONE_ROADMAP }));
+  });
+  // The window hides lanes before the current one; open them so all four show.
+  const openAllLanes = async (page: Page) => {
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.rm-legend')).toBeVisible();
+    const earlier = page.locator('button[aria-controls="rm-window-project-a-earlier"]');
+    if ((await earlier.count()) > 0) await earlier.click();
+  };
+
+  test('one legend lists the four tones in order, each swatch styled like its bar', async ({
+    page,
+  }) => {
+    await openAllLanes(page);
+    const legend = page.locator('.rm-legend');
+    await expect(legend).toHaveCount(1);
+    await expect(legend).toBeVisible();
+    await expect(legend.locator('.rm-legend__item')).toHaveText(LABELS);
+    const style = (loc: import('@playwright/test').Locator) =>
+      loc.evaluate((el) => {
+        const c = getComputedStyle(el);
+        return {
+          bg: c.backgroundColor,
+          borderStyle: c.borderTopStyle,
+          borderColor: c.borderTopColor,
+        };
+      });
+    for (const tone of TONES) {
+      const bar = page.locator(`.lbar.lbar--${tone}`).first();
+      await expect(bar).toBeVisible();
+      const swatch = legend.locator(`.rm-legend__swatch.lbar--${tone}`);
+      const barStyle = await style(bar);
+      const swatchStyle = await style(swatch);
+      expect(swatchStyle.bg).toBe(barStyle.bg);
+      if (tone === 'todo') {
+        expect(swatchStyle.borderStyle).toBe('dashed');
+        expect(barStyle.borderStyle).toBe('dashed');
+        expect(swatchStyle.borderColor).toBe(barStyle.borderColor);
+      }
+    }
+    // A finished bar keeps its tone but is dimmed.
+    const dim = await page
+      .locator('.lbar.lbar--done.past')
+      .first()
+      .evaluate((el) => Number(getComputedStyle(el).opacity));
+    expect(dim).toBeLessThan(1);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`fill tones reach 3:1 against the surface (${theme})`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.goto('/work/roadmap');
+      const legend = page.locator('.rm-legend');
+      await expect(legend).toBeVisible();
+      const surface = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.style.background = 'var(--bs-surface)';
+        document.body.append(probe);
+        const bg = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return bg;
+      });
+      const rgb = (css: string) => (css.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => {
+        const f = (v: number) => {
+          const c = (v ?? 0) / 255;
+          return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * f(r as number) + 0.7152 * f(g as number) + 0.0722 * f(b as number);
+      };
+      for (const tone of ['done', 'review', 'in-progress'] as const) {
+        const bg = await legend
+          .locator(`.rm-legend__swatch.lbar--${tone}`)
+          .evaluate((el) => getComputedStyle(el).backgroundColor);
+        const [a, b] = [lum(rgb(bg)), lum(rgb(surface))];
+        const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+        console.log(`contrast ${tone} ${theme}: ${ratio.toFixed(2)}`);
+        expect(ratio).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    test(`screenshot status tones desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await openAllLanes(page);
+      await settleForShot(page, page.locator('.rm-legend'));
+      await shoot(page, `work-roadmap-tones-desktop-${theme}`);
+    });
+  }
+
+  test('the legend is hidden at 375px', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.bs-roadmap-mobile__phase-select').first()).toBeVisible();
+    await expect(page.locator('.rm-legend')).toHaveCount(0);
   });
 });

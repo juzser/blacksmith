@@ -24,6 +24,7 @@ import {
   windowRegionId,
 } from '../lib/roadmapWindow.js';
 import Select from './kit/Select.vue';
+import RoadmapLegend from './RoadmapLegend.vue';
 import RoadmapSwimlane from './RoadmapSwimlane.vue';
 
 const props = defineProps<{
@@ -36,6 +37,8 @@ const props = defineProps<{
   /** The selection's lane is in this section, shown or hidden: open on phone. */
   hostsSelection: boolean;
   pickerLabel: string;
+  /** The page's one status legend sits under this section. */
+  showLegend?: boolean;
   /** Epic id -> "idle 18d", for the idle epics only. */
   idleLabels: Record<string, string>;
 }>();
@@ -157,5 +160,7 @@ const later = computed(() => disclosure('later'));
     >
       {{ later.label }}
     </button>
+
+    <RoadmapLegend v-if="showLegend" />
   </component>
 </template>
