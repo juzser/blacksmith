@@ -418,8 +418,9 @@ test.describe('Sessions', () => {
   }
   const toggle = (page: import('@playwright/test').Page) =>
     page.getByRole('navigation', { name: 'Activity scope' });
-  const titles = (page: import('@playwright/test').Page) =>
-    page.locator('.bs-sessionrow__title').allTextContents();
+  // A locator, so every check retries: the rows render only once the first
+  // active-scope answer lands, which is after goto() returns.
+  const titles = (page: import('@playwright/test').Page) => page.locator('.bs-sessionrow__title');
 
   test('the bare URL is Active: only active rows, the quiet count, "Active" current', async ({
     page,
@@ -427,7 +428,7 @@ test.describe('Sessions', () => {
     await serveScope(page);
     await page.goto('/sessions');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a']);
-    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(titles(page)).toHaveText(['Active in proj-a']);
     await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
     await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
   });
@@ -440,7 +441,7 @@ test.describe('Sessions', () => {
     await toggle(page).getByRole('link', { name: 'All' }).click();
     await expect(page).toHaveURL(/[?&]scope=all\b/);
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(['proj-a', 'proj-b']);
-    expect(await titles(page)).toEqual([
+    await expect(titles(page)).toHaveText([
       'Active in proj-a',
       'Quiet newer in proj-a',
       'Quiet only in proj-b',
@@ -452,7 +453,7 @@ test.describe('Sessions', () => {
 
     await page.goBack();
     await expect(page).not.toHaveURL(/scope=/);
-    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(titles(page)).toHaveText(['Active in proj-a']);
     await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
   });
 
@@ -463,7 +464,7 @@ test.describe('Sessions', () => {
     await page.getByRole('link', { name: 'Show all' }).click();
     await expect(page).toHaveURL(/project=proj-a/);
     await expect(page).toHaveURL(/scope=all/);
-    expect(await titles(page)).toEqual(['Active in proj-a', 'Quiet newer in proj-a']);
+    await expect(titles(page)).toHaveText(['Active in proj-a', 'Quiet newer in proj-a']);
     await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('All');
     await toggle(page).getByRole('link', { name: 'Active' }).click();
     await expect(page).toHaveURL(/project=proj-a/);
@@ -478,7 +479,7 @@ test.describe('Sessions', () => {
     await serveScope(page);
     await stubActiveScope(page, ['sc-quiet-newer']);
     await page.goto('/sessions');
-    expect(await titles(page)).toEqual(['Quiet newer in proj-a']);
+    await expect(titles(page)).toHaveText(['Quiet newer in proj-a']);
     await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(0);
     await expect(page.getByText('2 quiet sessions · Show all')).toBeVisible();
   });
@@ -491,7 +492,7 @@ test.describe('Sessions', () => {
     await page.goto('/sessions');
     await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
     await page.getByRole('link', { name: 'Show all' }).click();
-    expect(await titles(page)).toHaveLength(3);
+    await expect(titles(page)).toHaveCount(3);
   });
 
   test('live sessions but none on an epic: "N live sessions, none on an epic"', async ({
@@ -511,7 +512,7 @@ test.describe('Sessions', () => {
     await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
     await page.goto('/sessions');
     await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
-    expect(await titles(page)).toHaveLength(3);
+    await expect(titles(page)).toHaveCount(3);
     await expect(page.locator('.bs-sessionrow--quiet')).toHaveCount(0);
     await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
     await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
@@ -522,7 +523,7 @@ test.describe('Sessions', () => {
     await page.route('**/api/active-scope*', (route) => route.fulfill({ status: 500, body: 'no' }));
     await page.goto('/sessions');
     await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
-    expect(await titles(page)).toHaveLength(3);
+    await expect(titles(page)).toHaveCount(3);
   });
 
   test('an active project in another store gets a line beside the list, linking to Home', async ({
@@ -533,7 +534,7 @@ test.describe('Sessions', () => {
       projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
     });
     await page.goto('/sessions');
-    expect(await titles(page)).toEqual(['Active in proj-a']);
+    await expect(titles(page)).toHaveText(['Active in proj-a']);
     await expect(
       page.getByText('1 active project is in another store (project-b) ·'),
     ).toBeVisible();
