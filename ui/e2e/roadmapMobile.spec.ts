@@ -1,6 +1,6 @@
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot } from './helpers.js';
-import { stubWindowRoadmap } from './roadmapWindowFixture.js';
+import { stubActiveScope, stubWindowRoadmap } from './roadmapWindowFixture.js';
 
 // DS4 S4 — the phone Roadmap (<=640px). phase-6b (demo-hub: epic-9/10/11,
 // global-setup.ts) is the phase-mode fixture; epic-9 is the epic-mode
@@ -262,7 +262,8 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     test(`screenshot phone phase mode/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize({ width: 375, height: 812 });
-      await page.goto('/work/roadmap?phase=phase-6b');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?phase=phase-6b&scope=all');
       await settleForShot(page, page.locator('.bs-roadmap-mobile__list'));
       await shoot(page, `work-roadmap-mobile-phase-${theme}`);
     });
@@ -270,7 +271,8 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     test(`screenshot phone epic mode/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize({ width: 375, height: 812 });
-      await page.goto('/work/roadmap?epic=epic-9');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?epic=epic-9&scope=all');
       await settleForShot(page, page.locator('.wave-list'));
       await shoot(page, `work-roadmap-mobile-epic-${theme}`);
     });
@@ -348,7 +350,8 @@ test.describe('Roadmap window mobile (spec Part 2)', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot window phone 390/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
-      await page.goto('/work/roadmap');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?scope=all');
       await settleForShot(page, page.getByLabel('project-a phase', { exact: true }));
       await shoot(page, `work-roadmap-window-mobile-390-${theme}`);
     });

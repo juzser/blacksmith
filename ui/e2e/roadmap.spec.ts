@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
-import { stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
+import { stubActiveScope, stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {
@@ -151,7 +151,8 @@ test.describe('Roadmap', () => {
     test(`screenshot phase desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?scope=all');
       await expect(page.locator('h1')).toHaveText('Work');
       await settleForShot(page, page.locator('.lane').first());
       await shoot(page, `work-roadmap-phase-desktop-${theme}`);
@@ -166,7 +167,8 @@ test.describe('Roadmap', () => {
   test('screenshot swimlane 768/light', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto('/work/roadmap');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?scope=all');
     await expect(page.locator('h1')).toHaveText('Work');
     await settleForShot(page, page.locator('.lane').first());
     await shoot(page, 'work-roadmap-swimlane-768-light');
@@ -242,7 +244,8 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
     test(`screenshot epic mode desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap?epic=epic-9');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?epic=epic-9&scope=all');
       await settleForShot(page, page.locator('.wave-list'));
       await shoot(page, `work-roadmap-epic-desktop-${theme}`);
     });
@@ -251,7 +254,8 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
   test('screenshot epic mode 768/light', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize({ width: 768, height: 1024 });
-    await page.goto('/work/roadmap?epic=epic-9');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?epic=epic-9&scope=all');
     await settleForShot(page, page.locator('.wave-list'));
     await shoot(page, 'work-roadmap-epic-768-light');
   });
@@ -366,7 +370,8 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     test(`screenshot epic header server reads desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.desktop);
-      await page.goto('/work/roadmap?epic=epic-9');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?epic=epic-9&scope=all');
       await settleForShot(page, page.locator('.esec-head'));
       await shoot(page, `work-roadmap-epic-header-desktop-${theme}`);
     });
@@ -413,7 +418,8 @@ test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2,
   }) => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto('/work/roadmap?phase=phase-6b');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?phase=phase-6b&scope=all');
     // epic-9 (In progress) defaults open; epic-10 (Done) defaults closed.
     await settleForShot(page, page.locator('.esec', { hasText: 'epic-9' }).locator('.wave-list'));
     await shoot(page, 'work-roadmap-phase-waves-desktop-light');
@@ -588,7 +594,8 @@ test.describe('Roadmap window (spec Part 2)', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot window desktop/${theme}: earlier side expanded`, async ({ page }) => {
       await setTheme(page, theme);
-      await page.goto('/work/roadmap');
+      await stubActiveScope(page);
+      await page.goto('/work/roadmap?scope=all');
       await earlierToggle(page).click();
       await settleForShot(page, page.locator('#rm-window-project-a-earlier .lrow').first());
       await shoot(page, `work-roadmap-window-desktop-${theme}`);
@@ -776,7 +783,8 @@ test.describe('Roadmap: status tones and legend', () => {
   });
   // The window hides lanes before the current one; open them so all four show.
   const openAllLanes = async (page: Page) => {
-    await page.goto('/work/roadmap');
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?scope=all');
     await expect(page.locator('.rm-legend')).toBeVisible();
     const earlier = page.locator('button[aria-controls="rm-window-project-a-earlier"]');
     if ((await earlier.count()) > 0) await earlier.click();
@@ -894,5 +902,166 @@ test.describe('Roadmap: status tones and legend', () => {
     await page.goto('/work/roadmap');
     await expect(page.locator('.bs-roadmap-mobile__phase-select').first()).toBeVisible();
     await expect(page.locator('.rm-legend')).toHaveCount(0);
+  });
+});
+
+// S7 — Roadmap's Active scope. project-a (newest activity, so first under All)
+// has no live session; project-b does. Sections key by project name.
+test.describe('Roadmap: Active scope (S7)', () => {
+  const sectionNames = (page: Page) => page.locator('.rm-section__head');
+  const quiet = (page: Page) => page.locator('.bs-sessions__quiet');
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubWindowRoadmap(page);
+  });
+
+  test('Active shows the live project only; ?scope=all shows every section', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(1);
+    await expect(sectionNames(page)).toContainText('project-b');
+    await expect(quiet(page)).toHaveText('1 quiet project · Show all');
+    await expect(page.getByRole('link', { name: 'Show all' })).toHaveAttribute('href', /scope=all/);
+
+    await page.goto('/work/roadmap?scope=all');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(quiet(page)).toHaveCount(0);
+  });
+
+  test('the default selection lands on the live project, not the first section of All', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 10');
+  });
+
+  test('a ?phase= in a hidden project switches to All and shows that phase', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?phase=phase-1');
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 1');
+  });
+
+  test('a ?phase= inside the live project stays under Active', async ({ page }) => {
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?phase=phase-10');
+    await expect(page.locator('.lrow[aria-current="true"]')).toContainText('Phase 10');
+    await expect(page).not.toHaveURL(/scope=/);
+    await expect(sectionNames(page)).toHaveCount(1);
+  });
+
+  test('nothing live: one line, no sections', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('Nothing is active right now. · Show all');
+    await expect(sectionNames(page)).toHaveCount(0);
+  });
+
+  test('live sessions none on an epic: counts them, singular for one', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 1, unlinkedSessions: 1, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('1 live session, none on an epic · Show all');
+    await page.unroute('**/api/active-scope*');
+    await stubActiveScope(page, [], { liveSessions: 3, unlinkedSessions: 3, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText('3 live sessions, none on an epic · Show all');
+  });
+
+  test('none-on-an-epic stays quiet when a factory session is live', async ({ page }) => {
+    await stubActiveScope(page, ['project-z'], { unlinkedSessions: 2 });
+    await page.goto('/work/roadmap');
+    await expect(quiet(page)).toHaveText(
+      'No live session is on a project with a roadmap · Show all',
+    );
+    await expect(quiet(page)).not.toContainText('none on an epic');
+  });
+
+  test('scoped to a project that is not live: says so', async ({ page }) => {
+    await page.route('**/api/roadmap**', (route) =>
+      route.fulfill({
+        json: WINDOW_ROADMAP.filter(
+          (m) => m.project === new URL(route.request().url()).searchParams.get('project'),
+        ),
+      }),
+    );
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap?project=project-a');
+    await expect(quiet(page)).toHaveText('No live session is on this project · Show all');
+  });
+
+  test('unmeasured: All stays, with a note, and the toggle stays', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(2);
+    await expect(quiet(page)).toHaveText("Live sessions can't be read here");
+    await expect(page.getByRole('link', { name: 'All', exact: true })).toBeVisible();
+  });
+
+  test('while the scope answer is in flight, the All list never renders under Active', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['project-b'], {}, 1500);
+    const overview = page.waitForResponse((r) => r.url().includes('/api/overview'));
+    await page.goto('/work/roadmap');
+    await overview;
+    await page.waitForTimeout(400);
+    await expect(sectionNames(page)).toHaveCount(0);
+    await expect(sectionNames(page)).toHaveCount(1, { timeout: 5000 });
+    await expect(sectionNames(page)).toContainText('project-b');
+  });
+
+  test('phone: the toggle is a 44px target and the page does not scroll sideways', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await expect(sectionNames(page)).toHaveCount(1);
+    const toggle = page.getByRole('link', { name: 'All', exact: true });
+    const box = await toggle.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflows).toBe(false);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot active project among several desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await stubActiveScope(page, ['project-b']);
+      await page.goto('/work/roadmap');
+      await settleForShot(page, page.locator('.lane').first());
+      await shoot(page, `work-roadmap-active-desktop-${theme}`);
+    });
+  }
+
+  test('screenshot active project among several phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, ['project-b']);
+    await page.goto('/work/roadmap');
+    await settleForShot(page, page.locator('.rm-section').first());
+    await shoot(page, 'work-roadmap-active-phone-375-light');
+  });
+
+  test('screenshot nothing active phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubActiveScope(page, [], { liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await settleForShot(page, quiet(page));
+    await shoot(page, 'work-roadmap-none-active-phone-375-light');
+  });
+
+  test('screenshot unmeasured desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await stubActiveScope(page, [], { measured: false, liveSessions: 0, factorySessions: [] });
+    await page.goto('/work/roadmap');
+    await settleForShot(page, quiet(page));
+    await shoot(page, 'work-roadmap-unmeasured-desktop-light');
   });
 });

@@ -4,7 +4,7 @@
 // rest. Pure, like roadmapSwimlane.ts beside it, so the current-lane rule and
 // the window cut run under vitest's node environment; RoadmapPage.vue and
 // RoadmapProjectSection.vue are wiring.
-import type { MilestoneProgress, ProjectOverviewSummary } from './api.js';
+import type { ActiveScopeResult, MilestoneProgress, ProjectOverviewSummary } from './api.js';
 import {
   buildEpicOnlySwimlane,
   buildSwimlane,
@@ -235,6 +235,29 @@ export function buildRoadmapSections(
     );
   }
   return sections.sort(compareSections);
+}
+
+/**
+ * Active scope: keep the sections a live CLI session is on. Sections key by
+ * project name (milestones are home-only; a foreign-store project arrives
+ * through `overview.projects`), so the match is by name. A phase-less epic
+ * section also counts when one of its epics is active, which is how the
+ * unscoped "Epics" fallback (no project) qualifies. A null or unmeasured
+ * scope is "unknown", not "nothing active": the sections come back as they are.
+ */
+export function filterActiveSections(
+  sections: readonly RoadmapSection[],
+  scope: ActiveScopeResult | null,
+): RoadmapSection[] {
+  if (scope?.measured !== true) return [...sections];
+  const projects = new Set(scope.projects.map((p) => p.project));
+  const epics = new Set(scope.epics.map((e) => e.epicId));
+  return sections.filter((s) => {
+    if (s.project !== '' && projects.has(s.project)) return true;
+    if (s.kind !== 'epic') return false;
+    const { earlier, visible, later } = s.window;
+    return [...earlier, ...visible, ...later].some((e) => epics.has(e));
+  });
 }
 
 export interface RoadmapPick {

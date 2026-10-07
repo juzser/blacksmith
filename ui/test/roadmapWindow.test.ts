@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { EpicDates, MilestoneProgress, ProjectOverviewSummary } from '../src/lib/api.js';
+import type {
+  ActiveScopeResult,
+  EpicDates,
+  MilestoneProgress,
+  ProjectOverviewSummary,
+} from '../src/lib/api.js';
 import {
   buildRoadmapSections,
   currentLaneIndex,
   cutWindow,
   disclosureLabel,
   doneCountLabel,
+  filterActiveSections,
   groupByProject,
   laneOptions,
   type RoadmapSection,
@@ -458,5 +464,56 @@ describe('window ids', () => {
     expect(windowRegionId(fallback?.project ?? 'x', 'later')).not.toBe(
       windowRegionId('epics', 'later'),
     );
+  });
+});
+
+// S7 — Active keeps only the sections a live CLI session is on; All, a null
+// scope and an unmeasured one change nothing.
+describe('filterActiveSections', () => {
+  const scope = (over: Partial<ActiveScopeResult> = {}): ActiveScopeResult => ({
+    measured: true,
+    readAt: '2026-01-15T00:00:00.000Z',
+    liveSessions: 2,
+    unlinkedSessions: 0,
+    projects: [
+      { storeId: 'home', project: 'project-b', liveSessions: 1, agentsWorking: 0 },
+      { storeId: 'other', project: 'project-c', liveSessions: 1, agentsWorking: 0 },
+    ],
+    epics: [],
+    factorySessions: [],
+    ...over,
+  });
+  const milestones = [
+    milestone({
+      milestoneId: 'a-1',
+      project: 'project-a',
+      epicIds: ['epic-a'],
+      startedAt: '2026-01-10T00:00:00.000Z',
+    }),
+    milestone({ milestoneId: 'b-1', project: 'project-b', epicIds: ['epic-b'] }),
+  ];
+  const foreign = {
+    project: 'project-c',
+    epicsInFlight: ['epic-c'],
+    epicsActivelyRunning: ['epic-c'],
+  } as unknown as ProjectOverviewSummary;
+  const all = buildRoadmapSections(milestones, [], [], [foreign], null);
+
+  it('hides the idle project that sorts first under All', () => {
+    expect(all[0]?.project).toBe('project-a');
+    const shown = filterActiveSections(all, scope());
+    expect(shown.map((s) => s.project)).toEqual(['project-b', 'project-c']);
+  });
+
+  it('returns the sections unchanged for a null or unmeasured scope', () => {
+    expect(filterActiveSections(all, null)).toEqual(all);
+    expect(filterActiveSections(all, scope({ measured: false, projects: [] }))).toEqual(all);
+  });
+
+  it('counts the phase-less "Epics" section active when one of its epics is', () => {
+    const fallback = buildRoadmapSections([], ['epic-x', 'epic-y'], [], undefined, null);
+    expect(filterActiveSections(fallback, scope())).toEqual([]);
+    const withEpic = scope({ epics: [{ storeId: 'home', epicId: 'epic-y', project: null }] });
+    expect(filterActiveSections(fallback, withEpic)).toEqual(fallback);
   });
 });
