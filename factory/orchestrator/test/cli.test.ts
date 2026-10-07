@@ -7323,7 +7323,18 @@ describe('cli.ts (built binary)', () => {
           task_status: 'todo',
         };
 
-        async function amendOverLoggedFollowUps(name: string, supersedeKeys: string[]) {
+        async function amendOverLoggedFollowUps(
+          name: string,
+          supersedeKeys: string[],
+          {
+            sites = ['src/bar/thing.ts'],
+            replacementFor = (i: number) => ({
+              ...REPLACEMENT,
+              task_id: `epic-1/folded-${i}`,
+              claims: [`src/fold${i}/*.ts`],
+            }),
+          }: { sites?: string[]; replacementFor?: (i: number) => Record<string, unknown> } = {},
+        ) {
           const { sessionId, eventsDir, planPath } = await session();
           ingest(planPath, sessionId, eventsDir);
           for (const [i, claim] of ['src/qux/*.ts', 'src/quux/*.ts'].entries()) {
@@ -7349,10 +7360,7 @@ describe('cli.ts (built binary)', () => {
             changesPath,
             JSON.stringify({
               supersede: Object.fromEntries(
-                supersedeKeys.map((key, i) => [
-                  key,
-                  { ...REPLACEMENT, task_id: `epic-1/folded-${i}`, claims: [`src/fold${i}/*.ts`] },
-                ]),
+                supersedeKeys.map((key, i) => [key, replacementFor(i)]),
               ),
             }),
           );
@@ -7366,7 +7374,7 @@ describe('cli.ts (built binary)', () => {
             '--rationale',
             'fold the follow-ups into one planned task each',
             '--sites',
-            'src/bar/thing.ts',
+            sites.join(','),
             '--changes',
             changesPath,
             '--specs-dir',
@@ -7383,9 +7391,86 @@ describe('cli.ts (built binary)', () => {
             sessionId,
             eventsDir,
             specsDir,
+            findingId,
             v2Path: path.join(specsDir, 'epic-1', 'plan-v2.json'),
           };
         }
+
+        // The stub a log-only key leaves behind is dead on arrival: it is new
+        // to v2 only because the old version never had a record for it. It is
+        // what the amendment retired, so the diff calls it superseded, the
+        // finding does not wait on it, and its claims cover no named site.
+        it('records a renamed-away log-only task as superseded, never as added work', async () => {
+          const { result, sessionId, eventsDir, findingId } = await amendOverLoggedFollowUps(
+            'spec-amend-logged-diff',
+            ['followup-0', 'epic-1/followup-1'],
+            // Claimed by followup-0 alone; neither replacement claims it.
+            { sites: ['src/qux/a.ts'] },
+          );
+          expect(result.stderr).toBe('');
+          expect(result.status).toBe(0);
+
+          const records = tail(sessionId, eventsDir);
+          const amended = records.filter((r) => r.event_type === 'plan-version-created');
+          expect(amended).toHaveLength(1);
+          const diff = amended[0]?.payload.diff as Record<string, string[]>;
+          expect([...(diff.added ?? [])].sort()).toEqual(['epic-1/folded-0', 'epic-1/folded-1']);
+          expect([...(diff.superseded ?? [])].sort()).toEqual([
+            'epic-1/followup-0',
+            'epic-1/followup-1',
+          ]);
+
+          const transitioned = records.filter(
+            (r) => r.event_type === 'finding-transitioned' && r.payload.finding_id === findingId,
+          );
+          expect(transitioned).toHaveLength(1);
+          expect(
+            [...((transitioned[0]?.payload.amends_task_ids ?? []) as string[])].sort(),
+          ).toEqual(['epic-1/folded-0', 'epic-1/folded-1']);
+
+          expect(amended[0]?.payload.sites_unclaimed).toEqual(['src/qux/a.ts']);
+          expect(JSON.parse(result.stdout).sitesUnclaimed).toEqual(['src/qux/a.ts']);
+        });
+
+        // Several tasks folded into one: every key names the same replacement.
+        // v2 carries that replacement once, live, beside a dead record per key.
+        it('folds three keys into one identical replacement: one live record, keys superseded', async () => {
+          const { result, sessionId, eventsDir, findingId, v2Path } =
+            await amendOverLoggedFollowUps(
+              'spec-amend-logged-fold',
+              ['followup-0', 'epic-1/followup-1', 'task-1'],
+              { replacementFor: () => ({ ...REPLACEMENT }) },
+            );
+          expect(result.stderr).toBe('');
+          expect(result.status).toBe(0);
+
+          const v2 = JSON.parse(await readFile(v2Path, 'utf8')) as {
+            tasks: { task_id: string; task_status: string }[];
+          };
+          expect(v2.tasks.filter((t) => t.task_id === 'epic-1/folded')).toEqual([
+            expect.objectContaining({ task_status: 'todo' }),
+          ]);
+          for (const id of ['epic-1/followup-0', 'epic-1/followup-1', 'epic-1/task-1']) {
+            expect(v2.tasks.filter((t) => t.task_id === id)).toEqual([
+              expect.objectContaining({ task_status: 'superseded' }),
+            ]);
+          }
+          expect(runCli(['plan', 'validate', v2Path]).status).toBe(0);
+
+          const records = tail(sessionId, eventsDir);
+          const diff = records.find((r) => r.event_type === 'plan-version-created')?.payload
+            .diff as Record<string, string[]>;
+          expect(diff.added).toEqual(['epic-1/folded']);
+          expect([...(diff.superseded ?? [])].sort()).toEqual([
+            'epic-1/followup-0',
+            'epic-1/followup-1',
+            'epic-1/task-1',
+          ]);
+          const transitioned = records.find(
+            (r) => r.event_type === 'finding-transitioned' && r.payload.finding_id === findingId,
+          );
+          expect(transitioned?.payload.amends_task_ids).toEqual(['epic-1/folded']);
+        });
 
         it('retires a bare and a qualified key: stub validates, ingest supersedes once, no reader sees them live', async () => {
           const { result, sessionId, eventsDir, v2Path } = await amendOverLoggedFollowUps(

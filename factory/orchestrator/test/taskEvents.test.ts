@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { foldTasks } from '../src/db/projector.js';
 import { appendEvent, readEvents } from '../src/events.js';
-import type { PlanFile } from '../src/plan.js';
+import { draftNextVersion, type PlanFile } from '../src/plan.js';
 import {
   emitEdgesRecorded,
   emitFollowUpTask,
@@ -244,6 +244,31 @@ describe('taskEvents', () => {
       const superseded = await typesFor('task-superseded');
       expect(superseded).toHaveLength(1);
       expect(superseded[0]?.task_id).toBe('epic-1/task-1');
+    });
+
+    it('ingests a supersede that renames a task: the old id retires, only the new one is added', async () => {
+      const v1 = planWith(task());
+      await emitTasksAdded(v1, ctx, { stateDir });
+
+      // The v2 an amendment writes when task-1's replacement takes a new id:
+      // a dead task-1 record and a live task-1b, nothing live under task-1.
+      const v2 = draftNextVersion(v1, {
+        supersede: {
+          'epic-1/task-1': task({ task_id: 'epic-1/task-1b' }) as PlanFile['tasks'][number],
+        },
+      });
+      await emitTasksAdded(v2, { ...ctx, planVersion: 2 }, { stateDir });
+
+      const added = await typesFor('task-added');
+      expect(added.map((r) => r.task_id)).toEqual(['epic-1/task-1', 'epic-1/task-1b']);
+      const superseded = await typesFor('task-superseded');
+      expect(superseded.map((r) => r.task_id)).toEqual(['epic-1/task-1']);
+
+      const rows = foldTasks(await readEvents(sessionId, { stateDir }));
+      expect(rows.map((r) => [r.taskId, r.taskStatus])).toEqual([
+        ['epic-1/task-1', 'superseded'],
+        ['epic-1/task-1b', 'todo'],
+      ]);
     });
 
     // D-184. `draftNextVersion` keeps each superseded copy of a task *beside*
@@ -763,6 +788,9 @@ describe('taskEvents', () => {
           epicId: 'epic-1',
         },
       ]);
+      // The payload is the record a superseded stub is built from, so it has
+      // to be the one the log holds, not just an object.
+      expect(added[1]?.payload.objective).toBe(followUp().objective);
     });
 
     it('is empty for a session that has added nothing', async () => {

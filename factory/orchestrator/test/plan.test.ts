@@ -839,6 +839,35 @@ describe('plan.ts', () => {
       expect(diff.carried).toEqual(['epic-1/task-1']);
       expect(diff.superseded).toEqual([]);
     });
+
+    // A task only the event log added has no record in A. Retiring it leaves
+    // B a dead stub under an id A never held — retired work, not new work.
+    it('reports an id new to B that arrives already superseded as superseded, not added', () => {
+      const vA: PlanFile = {
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task({ task_id: 'epic-1/task-1' })],
+        edges: [],
+      };
+      const vB: PlanFile = {
+        epic_id: 'epic-1',
+        version: 2,
+        status: 'active',
+        tasks: [
+          task({ task_id: 'epic-1/task-1', task_status: 'superseded', plan_version: 2 }),
+          task({ task_id: 'epic-1/followup-0', task_status: 'superseded', plan_version: 2 }),
+          task({ task_id: 'epic-1/folded', plan_version: 2 }),
+        ],
+        edges: [],
+      };
+
+      const diff = diffPlans(vA, vB);
+      expect(diff.added).toEqual(['epic-1/folded']);
+      expect(diff.superseded).toEqual(['epic-1/task-1', 'epic-1/followup-0']);
+      expect(diff.carried).toEqual([]);
+      expect(diff.removed).toEqual([]);
+    });
   });
 
   // D-46/P9-29: the dogfood's phantom task row came from one human typing
@@ -1439,6 +1468,109 @@ describe('draftNextVersion still works for the correct supersede map shape (D-21
       'Do the thing better.',
     );
     expect(copies.every((t) => t.plan_version === 2)).toBe(true);
+  });
+});
+
+describe('draftNextVersion keeps one live record per task id', () => {
+  // `liveSpec` reads the LAST live record under an id. A second live record
+  // would not fail anything: it would quietly win, and ingest would see one
+  // task where the author wrote two.
+  function planWith(ids: string[]): PlanFile {
+    return {
+      epic_id: 'epic-1',
+      version: 1,
+      status: 'active',
+      tasks: ids.map((id) => task({ task_id: id })),
+      edges: [],
+    };
+  }
+
+  function refusal(run: () => unknown): PlanError {
+    try {
+      run();
+    } catch (e) {
+      if (e instanceof PlanError) return e;
+      throw e;
+    }
+    throw new Error('expected draftNextVersion to refuse');
+  }
+
+  it('folds three keys carrying the same replacement into one live record', () => {
+    const v1 = planWith(['epic-1/task-1', 'epic-1/task-2', 'epic-1/task-3']);
+    // Three equal objects, not one shared reference: a parsed --changes file
+    // gives each key a copy of its own.
+    const folded = () => task({ task_id: 'epic-1/folded', objective: 'Do all three.' });
+
+    const v2 = draftNextVersion(v1, {
+      supersede: {
+        'epic-1/task-1': folded(),
+        'epic-1/task-2': folded(),
+        'epic-1/task-3': folded(),
+      },
+    });
+
+    expect(v2.tasks.filter((t) => t.task_id === 'epic-1/folded')).toHaveLength(1);
+    expect(livePlanTasks(v2).map((t) => t.task_id)).toEqual(['epic-1/folded']);
+    expect(v2.tasks.filter((t) => t.task_status === 'superseded').map((t) => t.task_id)).toEqual([
+      'epic-1/task-1',
+      'epic-1/task-2',
+      'epic-1/task-3',
+    ]);
+    expect(validatePlan(v2)).toEqual({ valid: true });
+  });
+
+  it('refuses two keys replacing into one id with different records', () => {
+    const v1 = planWith(['epic-1/task-1', 'epic-1/task-2']);
+    const err = refusal(() =>
+      draftNextVersion(v1, {
+        supersede: {
+          'epic-1/task-1': task({ task_id: 'epic-1/folded', objective: 'One reading.' }),
+          'epic-1/task-2': task({ task_id: 'epic-1/folded', objective: 'Another reading.' }),
+        },
+      }),
+    );
+    expect(err.code).toBe('plan.duplicate-live-task');
+    expect(err.message).toContain('epic-1/folded');
+  });
+
+  it('refuses a replacement whose id another task still holds live', () => {
+    const v1 = planWith(['epic-1/task-1', 'epic-1/task-2']);
+    const err = refusal(() =>
+      draftNextVersion(v1, { supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-2' }) } }),
+    );
+    expect(err.code).toBe('plan.duplicate-live-task');
+    expect(err.message).toContain('epic-1/task-2');
+  });
+
+  it('refuses an added task whose id is already live, in the plan or in this amendment', () => {
+    const v1 = planWith(['epic-1/task-1', 'epic-1/task-2']);
+    for (const changes of [
+      { added: [task({ task_id: 'epic-1/task-2' })] },
+      {
+        supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1b' }) },
+        added: [task({ task_id: 'epic-1/task-1b' })],
+      },
+      { added: [task({ task_id: 'epic-1/task-3' }), task({ task_id: 'epic-1/task-3' })] },
+    ]) {
+      expect(refusal(() => draftNextVersion(v1, changes)).code).toBe('plan.duplicate-live-task');
+    }
+  });
+
+  it('lets superseded records share an id with each other and with the live one', () => {
+    // v2 kept task-1's id across a supersede (D-121), so v2 already holds a
+    // dead and a live record under it. Superseding it again under the same id
+    // adds a second dead one; only the live count is one.
+    const v1 = planWith(['epic-1/task-1']);
+    const v2 = draftNextVersion(v1, {
+      supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1', objective: 'Second.' }) },
+    });
+    const v3 = draftNextVersion(v2, {
+      supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1', objective: 'Third.' }) },
+    });
+
+    const copies = v3.tasks.filter((t) => t.task_id === 'epic-1/task-1');
+    expect(copies.map((t) => t.task_status)).toEqual(['superseded', 'superseded', 'todo']);
+    expect(livePlanTasks(v3).map((t) => t.objective)).toEqual(['Third.']);
   });
 });
 

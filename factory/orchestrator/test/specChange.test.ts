@@ -197,6 +197,62 @@ describe('specChange — a worker proposes, the operator decides', () => {
       expect(proposal.evidence).toContain('never rewinds');
     });
 
+    it('supersedes a task only the log added, and records the diff approval will', async () => {
+      // A follow-up the factory added mid-run lives in the event log, never in
+      // the plan file. `amendPlan` resolves such a key against the log and
+      // carries a dead stub for it; the proposal has to draft the same version,
+      // or the diff an operator approves is not the diff approval records.
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'system',
+          event_type: 'task-added',
+          task_id: 'envkit/followup-1',
+          plan_version: 1,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            case: 'bugfix',
+            origin: 'escalation',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Follow-up 1.',
+            claims: ['src/other.ts'],
+            budget_tokens: 4000,
+          },
+        },
+        { stateDir },
+      );
+      const task = planFixture().tasks[0];
+      if (task === undefined) throw new Error('unreachable');
+      const changes: PlanChanges = {
+        supersede: {
+          'followup-1': { ...task, task_id: 'envkit/followup-1b', claims: ['src/other.ts'] },
+        },
+      };
+
+      const proposal = await proposeSpecChange(
+        proposeInput({ changes, sites: ['src/other.ts'] }),
+        rootCtx(),
+        opts(),
+      );
+      expect(proposal.diff).toEqual({
+        added: ['envkit/followup-1b'],
+        removed: [],
+        superseded: ['envkit/followup-1'],
+        carried: [TASK_ID],
+      });
+
+      await approveSpecChange(
+        { proposalId: proposal.proposalId, plan: planFixture(), decidedBy: 'operator' },
+        rootCtx(),
+        opts(),
+      );
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const amended = events.find((e) => e.record.event_type === PLAN_AMENDED_EVENT);
+      expect(amended?.record.payload.diff).toEqual(proposal.diff);
+    });
+
     it('refuses a proposal that names no criterion', async () => {
       await expect(
         proposeSpecChange(proposeInput({ criterion_ref: '  ' }), rootCtx(), opts()),

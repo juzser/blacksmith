@@ -523,8 +523,12 @@ export interface AmendPlanResult {
  * The log is read lineage-wide and narrowed to this epic, the way the
  * follow-up splice in `wave next` narrows it: another epic's row is not a
  * task of this plan.
+ *
+ * Exported for `proposeSpecChange`, whose pre-check drafts the same version
+ * approval will cut: a draft built from unresolved keys would record a diff
+ * that approval then contradicts.
  */
-async function resolveSupersedeKeys(
+export async function resolveSupersedeKeys(
   plan: PlanFile,
   changes: PlanChanges,
   ctx: EventContext,
@@ -713,9 +717,12 @@ export async function amendPlan(
   // replacement is in `added`, so the obligation survives the rename; keeping
   // the dead id too would make the finding undischargeable, which is the
   // failure this whole defect is about, reached from the other side.
+  // `added` goes through the same filter: `diffPlans` already reports an id
+  // that arrives dead (a log-only task's stub) as superseded, and the filter
+  // keeps any dead id from becoming an obligation or covering a named site.
   const live = new Set(livePlanTasks(draft).map((t) => t.task_id));
   const obligations = [
-    ...new Set([...diff.added, ...diff.superseded.filter((id) => live.has(id))]),
+    ...new Set([...diff.added, ...diff.superseded].filter((id) => live.has(id))),
   ];
   if (obligations.length === 0) {
     const shape =
