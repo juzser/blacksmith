@@ -1128,6 +1128,26 @@ test.describe('Roadmap: Active scope (S7)', () => {
     ).toHaveText('Active');
   });
 
+  test('a failed first load keeps its deep link, so Retry widens to All', async ({ page }) => {
+    await steerable(page, ['project-b']);
+    let failed = false;
+    await page.route('**/api/roadmap**', (route) => {
+      if (failed) return route.fallback();
+      failed = true;
+      return route.fulfill({ status: 500, json: { error: 'boom' } });
+    });
+    await page.goto('/work/roadmap?phase=phase-1');
+    const banner = page.locator('.bs-banner');
+    await expect(banner).toBeVisible();
+    await banner.getByRole('button', { name: 'Retry' }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect(page).toHaveURL(/phase=phase-1/);
+    await expect(
+      page.getByRole('navigation', { name: 'Activity scope' }).locator('[aria-current="page"]'),
+    ).toHaveText('All');
+    await expect(sectionOf(page, 'project-a').locator('.lrow[aria-current="true"]')).toHaveCount(1);
+  });
+
   test('the unmeasured note sits under the toolbar, a gap clear of it and of the first section', async ({
     page,
   }) => {

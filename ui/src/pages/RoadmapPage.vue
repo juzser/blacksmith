@@ -191,10 +191,10 @@ function ensureEpicFlowsLoaded(epicIds: string[]) {
 // The wait is made after an await, outside setup, so Vue would never stop its
 // watcher: unmount releases it, and `load()` returns once the page is gone.
 let unmounted = false;
-let releaseScopeWait: (() => void) | null = null;
+const scopeWaits = new Set<() => void>();
 onUnmounted(() => {
   unmounted = true;
-  releaseScopeWait?.();
+  for (const release of [...scopeWaits]) release();
 });
 
 function scopeAnswered(): Promise<void> {
@@ -206,26 +206,27 @@ function scopeAnswered(): Promise<void> {
     });
     const release = () => {
       stop();
-      releaseScopeWait = null;
+      scopeWaits.delete(release);
       resolve();
     };
-    releaseScopeWait = release;
+    scopeWaits.add(release);
   });
 }
 
 // Only the first load after mount may read ?phase=/?epic= as a deep link and
-// widen to All for it; a later reload keeps what is shown.
+// widen to All for it; a later reload keeps what is shown. A load that fails
+// leaves it set, so Retry is still the first load.
 let firstLoad = true;
 
 async function load() {
   const deepLink = firstLoad;
-  firstLoad = false;
   try {
     const [roadmap, overview] = await Promise.all([
       fetchRoadmap(sessionScope.value, project.value),
       fetchOverview(sessionScope.value, project.value),
     ]);
     if (unmounted) return;
+    firstLoad = false;
     milestones.value = roadmap;
     epics.value = selectableEpics(overview);
     activeEpics.value = overview.epicsActivelyRunning;
@@ -460,6 +461,7 @@ async function revealSelection() {
     saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
   }
   await nextTick();
+  if (unmounted) return;
   const row = document.querySelector<HTMLElement>('.lrow[aria-current="true"]');
   row?.scrollIntoView({ block: 'nearest' });
   row?.focus();
