@@ -2,11 +2,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.js';
 import { MILESTONE_STATUSES } from '../../factory/orchestrator/src/roadmap.js';
 import {
-  AGENT_STATUS_TONE,
-  agentStatusTone,
   errorGroupIcon,
   findingStatusKitTone,
   findingStatusTone,
@@ -155,17 +152,6 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(milestoneStatusLabel('in-progress')).toBe('In progress');
     expect(milestoneStatusLabel('completed')).toBe('Done');
     expect(milestoneStatusLabel('unknown-status')).toBe('unknown-status');
-  });
-
-  it('maps agents.status (live/done/error/superseded) — NOT run_status', () => {
-    expect(agentStatusTone('live')).toBe('info');
-    expect(agentStatusTone('done')).toBe('success');
-    expect(agentStatusTone('error')).toBe('danger');
-    expect(agentStatusTone('superseded')).toBe('neutral');
-  });
-
-  it('AGENT_STATUS_TONE covers agents-registry.ts AGENT_STATUSES exactly (fails on drift)', () => {
-    expect(Object.keys(AGENT_STATUS_TONE).sort()).toEqual([...AGENT_STATUSES].sort());
   });
 
   it('maps every error group to an icon per §3.7, never a colour', () => {

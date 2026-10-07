@@ -92,23 +92,6 @@ export const MILESTONE_STATUS_TONE: Record<string, Tone> = {
   completed: 'success',
 };
 
-/**
- * Fix-round (uiux S2 #5, caught while building the Task detail rail):
- * agents-registry.ts's `AgentStatus` (`live`/`done`/`error`/`superseded`/
- * `abandoned`) is ALSO not `run_status` (`queued`/`running`/`done`/`dead`) — same
- * "different vocabulary, same-looking name" trap as #3 above. Exported +
- * drift-tested against `agents-registry.ts`'s `AGENT_STATUSES`.
- */
-export const AGENT_STATUS_TONE: Record<string, Tone> = {
-  live: 'info',
-  done: 'success',
-  error: 'danger',
-  superseded: 'neutral',
-  // Open when its epic closed (D-187): bookkeeping the run outran, not a
-  // failure of the agent — same neutral reading as a supersede.
-  abandoned: 'neutral',
-};
-
 export function taskStatusTone(status: string): Tone {
   return TASK_STATUS_TONE[status] ?? 'neutral';
 }
@@ -171,10 +154,6 @@ export function planStatusTone(status: string): Tone {
 /** roadmap.md milestone status -> tone (NOT plan_status — see MILESTONE_STATUS_TONE's comment). */
 export function milestoneStatusTone(status: string): Tone {
   return MILESTONE_STATUS_TONE[status] ?? 'neutral';
-}
-/** agents.status (see `AGENT_STATUSES`) -> tone — NOT run_status. */
-export function agentStatusTone(status: string): Tone {
-  return AGENT_STATUS_TONE[status] ?? 'neutral';
 }
 export function runStatusTone(status: string): Tone {
   return RUN_STATUS_TONE[status] ?? 'neutral';
