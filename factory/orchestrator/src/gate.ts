@@ -4,6 +4,7 @@ import path from 'node:path';
 import { TASK_RESULT_EVENT_TYPE } from './agents-registry.js';
 import { type ArtifactDecl, type ArtifactIssue, checkArtifacts } from './artifacts.js';
 import { type RoutedFinding, recordReattribution, routeFindings } from './attribution.js';
+import { readTokenUsage } from './budgetAlarm.js';
 import { type BudgetOverrun, checkTaskBudget, type TaskBudget } from './budgets.js';
 import type { ClaimedTask } from './claims.js';
 import { type CommitCertificate, certifyCommit } from './commit.js';
@@ -1590,10 +1591,10 @@ export async function runGate(
   );
 }
 
-/** Real token spend off the already-schema-valid result, or undefined if absent. */
+/** Real token spend off the already-schema-valid result; undefined when absent or an unmeasured placeholder. */
 function tokensSpent(result: unknown): number | undefined {
-  const usage = (result as { token_usage?: { total_tokens?: unknown } } | null)?.token_usage;
-  return typeof usage?.total_tokens === 'number' ? usage.total_tokens : undefined;
+  const read = readTokenUsage((result as { token_usage?: unknown } | null)?.token_usage);
+  return read.measured ? read.total : undefined;
 }
 
 /**

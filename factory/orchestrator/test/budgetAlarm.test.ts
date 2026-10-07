@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { checkBudgetAlarm, readEpicMembership, readMeasuredSpend } from '../src/budgetAlarm.js';
+import {
+  checkBudgetAlarm,
+  readEpicMembership,
+  readMeasuredSpend,
+  readTokenUsage,
+} from '../src/budgetAlarm.js';
 import type { BudgetPolicy } from '../src/budgets.js';
 import type { StoredEvent } from '../src/events.js';
 
@@ -740,5 +745,34 @@ describe('the cap that was not a bound (D-188)', () => {
     );
     expect(report.epics[0]?.tasksOverPrice).toEqual([]);
     expect(report.epics[0]?.status).toBe('under');
+  });
+});
+
+describe('readTokenUsage (one rule for "measured")', () => {
+  it('reads a plausible full triple as measured', () => {
+    expect(readTokenUsage({ input_tokens: 4000, output_tokens: 1000, total_tokens: 5000 })).toEqual(
+      { measured: true, total: 5000, input: 4000, output: 1000 },
+    );
+  });
+
+  it('reads a total-only object as measured with null input/output', () => {
+    expect(readTokenUsage({ total_tokens: 5000 })).toEqual({
+      measured: true,
+      total: 5000,
+      input: null,
+      output: null,
+    });
+  });
+
+  it.each([
+    ['0/0/0 placeholder', { input_tokens: 0, output_tokens: 0, total_tokens: 0 }],
+    ['1/1/2 placeholder', { input_tokens: 1, output_tokens: 1, total_tokens: 2 }],
+    ['{measured: false}', { measured: false }],
+    ['a bare number', 5000],
+    ['null', null],
+    ['absent', undefined],
+    ['an empty object', {}],
+  ])('reads %s as unmeasured', (_label, value) => {
+    expect(readTokenUsage(value)).toEqual({ measured: false });
   });
 });
