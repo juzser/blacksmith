@@ -414,6 +414,10 @@ function refresh() {
           <span>started <RelativeTime :iso="selected.startedAt" /></span>
         </p>
         <Skeleton v-if="agentsLoadedFor !== selectedKey" height="120" />
+        <!-- A live session that has dispatched nothing yet is normal, not an error. -->
+        <p v-else-if="agents && agents.roles.length === 0" class="bs-sessions__quiet">
+          No agents yet.
+        </p>
         <template v-else-if="agents">
           <AgentBlock
             v-for="r in agents.roles"

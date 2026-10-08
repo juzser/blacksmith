@@ -115,6 +115,15 @@ describe('SessionsPage', () => {
     expect(page).toContain('...(store ? { store } : {})');
   });
 
+  it('shows a selected session with no agents as one plain muted line, never a Banner or a count', () => {
+    const detail = page.slice(page.indexOf('<section v-if="selectedKey"'));
+    expect(detail).toMatch(
+      /<p v-else-if="agents && agents\.roles\.length === 0" class="bs-sessions__quiet">\s*No agents yet\.\s*<\/p>/,
+    );
+    expect(detail).not.toContain('<Banner');
+    expect(detail).not.toMatch(/0 agents/);
+  });
+
   it('no longer prints the other-store line', () => {
     expect(page).not.toMatch(/otherStore/);
     expect(page).not.toContain('another store');

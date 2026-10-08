@@ -1057,6 +1057,27 @@ describe('multi-store dashboard reads', () => {
       expect(unknown.status).toBe(404);
       expect((await json<{ error: { code: string } }>(unknown)).error.code).toBe('store.not-found');
     });
+
+    it('a session its store knows but that has no agents has an empty roster, not a 404', async () => {
+      await extra(eventsB, 'sess-b-quiet');
+      const a = app();
+      const id = await foreignId(a);
+      const known = await a.app.request(`/api/sessions/sess-b-quiet/agents?store=${id}`);
+      expect(known.status).toBe(200);
+      expect(await json<{ sessionId: string; roles: unknown[] }>(known)).toEqual({
+        sessionId: 'sess-b-quiet',
+        roles: [],
+      });
+      // The same id in a store that does not know it, an unknown id, and a
+      // project that is not the session's all stay 404.
+      for (const route of [
+        '/api/sessions/sess-b-quiet/agents',
+        `/api/sessions/sess-nobody/agents?store=${id}`,
+        `/api/sessions/sess-b-quiet/agents?store=${id}&project=project-a`,
+      ]) {
+        expect([route, (await a.app.request(route)).status]).toEqual([route, 404]);
+      }
+    });
   });
 
   describe('a task of a foreign store', () => {

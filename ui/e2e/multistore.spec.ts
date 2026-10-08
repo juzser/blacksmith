@@ -960,8 +960,9 @@ test.describe('a foreign store in the dashboard', () => {
           await expect(link).toHaveCount(1);
           const m = await page.evaluate((name) => {
             const scroll = document.querySelector('.app-scroll') as HTMLElement;
-            const link = [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')]
-              .find((a) => a.textContent?.trim() === name) as HTMLElement;
+            const link = [
+              ...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a'),
+            ].find((a) => a.textContent?.trim() === name) as HTMLElement;
             const label = (link.querySelector('span') ?? link) as HTMLElement;
             const page = document.querySelector('.app-page') as HTMLElement;
             const pr = page.getBoundingClientRect();
@@ -970,7 +971,12 @@ test.describe('a foreign store in the dashboard', () => {
             const lh = parseFloat(getComputedStyle(label).lineHeight);
             // The previous focusable target above this header.
             const above = [...document.querySelectorAll<HTMLElement>('a, button')]
-              .filter((o) => o !== link && !link.contains(o) && o.getBoundingClientRect().bottom <= lr.top + 60)
+              .filter(
+                (o) =>
+                  o !== link &&
+                  !link.contains(o) &&
+                  o.getBoundingClientRect().bottom <= lr.top + 60,
+              )
               .map((o) => o.getBoundingClientRect().bottom)
               .filter((b) => b > 0 && b <= lr.top + 60);
             return {
@@ -1047,6 +1053,23 @@ test.describe('a foreign store in the dashboard', () => {
         .filter({ hasText: 'sess-extra' })
         .click();
       await expect(line(page)).toContainText('No project');
+    });
+
+    test('selecting a session that has no agents yet shows a plain line, not an error', async ({
+      page,
+    }) => {
+      // The home store's `sess-extra` only ever got notes; the foreign one's
+      // agent (ensureExtraAgent) lives in another store under the same id.
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'No project')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(page).toHaveURL(/[?&]session=sess-extra(&|$)/);
+      await expect(roster(page).getByText('No agents yet.', { exact: true })).toBeVisible();
+      await expect(roster(page).locator('.bs-agentblock')).toHaveCount(0);
+      await expect(page.locator('.bs-banner')).toHaveCount(0);
+      await expect(page.getByText('0 agents')).toHaveCount(0);
     });
 
     test('a selected session that drops out of the list keeps its roster, without a head line', async ({
