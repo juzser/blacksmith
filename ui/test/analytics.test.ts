@@ -875,3 +875,20 @@ describe('AnalyticsPage.vue — phone not-measured values (mock .mstat .v.nd)', 
     expect(rule).toContain('color: var(--bs-text-subtle)');
   });
 });
+
+describe('bs-primitives.css — phone stat cards (mock .mstats / .mstat)', () => {
+  const rule = (sel: string) => PRIMITIVES.match(new RegExp(`\\.${sel} \\{([^}]*)\\}`))?.[1] ?? '';
+  it('lays the stats out as a two-column grid with the mock gap', () => {
+    const grid = rule('bs-analytics-page__phone-metrics');
+    expect(grid).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    expect(grid).toContain('gap: var(--bs-space-2)');
+  });
+  it('draws each stat as a bordered raised card', () => {
+    const card = rule('bs-analytics-page__phone-stat');
+    expect(card).toContain('border: 1px solid var(--bs-border)');
+    expect(card).toContain('border-radius: var(--bs-radius-md)');
+    expect(card).toContain('background: var(--bs-surface-raised)');
+    expect(card).toContain('padding: var(--bs-m-card-pad)');
+    expect(card).toContain('min-width: 0');
+  });
+});

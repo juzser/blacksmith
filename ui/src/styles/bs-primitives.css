@@ -1734,12 +1734,20 @@ a:hover {
     border-bottom-color: var(--bs-text);
   }
   /* ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
-     within itself. Every page that hosts tabs (Task detail, Lessons, Activity)
-     is an `.app-page`, whose side padding is --bs-space-5 on every width, so
-     the bleed is that same token. */
-  .app-page .bs-tabs__list {
-    margin-inline: calc(-1 * var(--bs-space-5));
-    padding-inline: var(--bs-space-5);
+     within itself. Every page that hosts tabs (Task detail, Lessons, Activity,
+     Cost & quality's period tabs) is an `.app-page`, whose side padding is
+     --bs-m-gutter on phone, so the bleed is that same token. */
+  .app-page .bs-tabs__list,
+  .app-page .bs-periodswitch--tabs {
+    margin-inline: calc(-1 * var(--bs-m-gutter));
+    padding-inline: var(--bs-m-gutter);
+  }
+  /* Cost & quality's toolbar is a wrapping flex row, so the period tabs were
+     sized to their content. A full-width basis (bleed included) gives them the
+     whole line and wraps the toolbar actions beneath. */
+  .bs-analytics-page__toolbar > .bs-periodswitch--tabs {
+    flex: 0 0 calc(100% + 2 * var(--bs-m-gutter));
+    min-width: 0;
   }
 }
 
@@ -2184,6 +2192,14 @@ a:hover {
 }
 .app-page--full-bleed {
   max-width: none;
+}
+/* ds-review.html `.ph-body`: on phone the page body has the mobile gutter and
+   the mobile gap between sections, not the desktop 24px. */
+@media (max-width: 640px) {
+  .app-page {
+    padding: var(--bs-m-gutter);
+    gap: var(--bs-m-gap);
+  }
 }
 
 /* ---- SidebarNav (§2.2), collapsible rail + off-canvas Sheet ---- */
@@ -3635,6 +3651,8 @@ summary.bs-inbox__group-head {
     /* minmax(0, ...): a bare 1fr floors at the content's min-content width, so
        the tab strip or a wide table stretched the column past a 375px phone. */
     grid-template-columns: minmax(0, 1fr);
+    /* The stacked rail is one more page section: the mobile gap, as .app-page. */
+    gap: var(--bs-m-gap);
   }
 }
 .bs-task-detail__overview {
@@ -4641,13 +4659,19 @@ h2.rm-section__head {
    role list with small bars and a % share of total tokens. */
 .bs-analytics-page__phone-metrics {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--bs-space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--bs-space-2);
 }
+/* The mock's .mstat: a bordered, raised card. */
 .bs-analytics-page__phone-stat {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-1);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  padding: var(--bs-m-card-pad);
+  min-width: 0;
 }
 .bs-analytics-page__phone-stat-label {
   color: var(--bs-text-subtle);
