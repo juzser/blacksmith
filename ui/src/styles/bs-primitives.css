@@ -56,6 +56,20 @@ a:hover {
 .bs-tooltip-trigger {
   display: inline-flex;
 }
+/* The relative time is a tap target (its tooltip trigger has its own tab
+   stop). On phone its hit box reaches --bs-touch without moving anything:
+   padding sized from the line box, cancelled by an equal negative margin, so
+   layout is that of the bare text (the house pattern of
+   .bs-timeline-row__title--link). The inline axis gets a fixed 4px each side
+   for text narrower than the floor. */
+@media (max-width: 640px) {
+  .bs-reltime {
+    padding-block: calc((var(--bs-touch) - 1lh) / 2);
+    margin-block: calc((var(--bs-touch) - 1lh) / -2);
+    padding-inline: var(--bs-space-1);
+    margin-inline: calc(-1 * var(--bs-space-1));
+  }
+}
 .bs-tooltip-bubble {
   position: fixed;
   z-index: 60;
@@ -512,6 +526,11 @@ a:hover {
     /* The time never breaks inside itself; the meta text beside it gives way. */
     flex: none;
     white-space: nowrap;
+    /* No taller hit box here: the row is 65px and already holds the title
+       button's 44px box above this line, so a second 44px box would sit on
+       the title's own text. */
+    padding-block: 0;
+    margin-block: 0;
   }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
@@ -682,8 +701,19 @@ a:hover {
 .bs-timeline-row__detail dt {
   color: var(--bs-text-subtle);
 }
-.bs-timeline-row--highlight {
-  background: var(--bs-accent-subtle);
+/* The Session link is a tap target: on phone its box reaches --bs-touch
+   without moving the detail list (padding cancelled by an equal negative
+   margin; the min-width only matters for a title shorter than the floor, and
+   nothing sits to its right). The extra height goes above the text, over the
+   plain-text Task/Project lines; below it is the next row's title button,
+   whose own box reaches up into this row. */
+@media (max-width: 640px) {
+  .bs-timeline-row__detail a {
+    display: inline-block;
+    min-width: var(--bs-touch);
+    padding-top: calc(var(--bs-touch) - 1lh);
+    margin-top: calc(1lh - var(--bs-touch));
+  }
 }
 /* rail variant (DS6 PR3 r3, ds-spec.md §1.5/§2.2): the rail dot replaces the
    3px stripe. Geometry from the shared --tl-* tokens (bs-tokens.css) so the
