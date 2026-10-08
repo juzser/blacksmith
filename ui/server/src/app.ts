@@ -51,6 +51,7 @@ import {
   projectedLineage,
   pulse,
   roadmapPage,
+  runningSessions,
   sessionAgents,
   taskDetail,
   taskRuns,
@@ -1235,10 +1236,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const result = sessionAgents(db, sessionId, clock);
     // Its row in the store's session list, the same one the page lists it
     // from (running or ended), tells "no agents yet" from "no such session".
-    if (
-      result.roles.length === 0 &&
-      overview(db, { sessionId }, clock).runningSessions.length === 0
-    ) {
+    if (result.roles.length === 0 && runningSessions(db, { sessionId }, clock).length === 0) {
       throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
     }
     return c.json(only.home ? result : relabelProject(result, only.label));
