@@ -22,9 +22,9 @@ import { runProcess } from './helpers/process.js';
 // None of those fail loudly at install time; they fail in an operator's
 // session, which is too late. They fail here instead.
 //
-// The marketplace lists a second plugin, bs-mod, the live HUD. It is a plugin
-// module, not skills and agents, so it lives in `mods/bs-mod/` rather than
-// `.claude/`: a module's entry point is `hooks/hooks.json`, the one file the
+// The marketplace lists two more plugins, bs-mod (the live HUD) and pr-mod (the
+// open PRs). Each is a plugin module, not skills and agents, so it lives in
+// `mods/<name>/` rather than `.claude/`: a module's entry point is `hooks/hooks.json`, the one file the
 // blacksmith payload must not ship.
 // ---------------------------------------------------------------------------
 
@@ -108,6 +108,7 @@ describe('marketplace', () => {
       return typeof readJson(manifest).types === 'string';
     });
     expect(typed.map((e) => e.name)).toContain('bs-mod');
+    expect(typed.map((e) => e.name)).toContain('pr-mod');
     for (const entry of typed) {
       const manifest = path.join(entry.source, '.claude-plugin/plugin.json');
       const types = path.join(entry.source, readJson(manifest).types as string);
@@ -115,25 +116,28 @@ describe('marketplace', () => {
     }
   });
 
-  it('lists bs-mod at a source whose hooks.json names modules that exist', () => {
-    // bs-mod is a plugin module: the engine loads only what `hooks/hooks.json`
-    // names, so a renamed entry file installs a plugin that draws nothing.
-    const entry = entryNamed('bs-mod');
-    expect(entry).toBeDefined();
-    if (!entry) return;
-    expect(entry.source).toBe('./mods/bs-mod');
+  it.each(['bs-mod', 'pr-mod'])(
+    'lists %s at a source whose hooks.json names modules that exist',
+    (name) => {
+      // A plugin module: the engine loads only what `hooks/hooks.json` names,
+      // so a renamed entry file installs a plugin that draws nothing.
+      const entry = entryNamed(name);
+      expect(entry).toBeDefined();
+      if (!entry) return;
+      expect(entry.source).toBe(`./mods/${name}`);
 
-    const hooksDir = path.join(REPO_ROOT, entry.source, 'hooks');
-    const hooks = JSON.parse(readFileSync(path.join(hooksDir, 'hooks.json'), 'utf8')) as {
-      modules?: unknown;
-    };
-    expect(Array.isArray(hooks.modules)).toBe(true);
-    const modules = hooks.modules as string[];
-    expect(modules.length).toBeGreaterThan(0);
-    for (const mod of modules) {
-      expect(existsSync(path.join(hooksDir, mod)), `${mod} is named but absent`).toBe(true);
-    }
-  });
+      const hooksDir = path.join(REPO_ROOT, entry.source, 'hooks');
+      const hooks = JSON.parse(readFileSync(path.join(hooksDir, 'hooks.json'), 'utf8')) as {
+        modules?: unknown;
+      };
+      expect(Array.isArray(hooks.modules)).toBe(true);
+      const modules = hooks.modules as string[];
+      expect(modules.length).toBeGreaterThan(0);
+      for (const mod of modules) {
+        expect(existsSync(path.join(hooksDir, mod)), `${mod} is named but absent`).toBe(true);
+      }
+    },
+  );
 });
 
 describe('plugin payload', () => {

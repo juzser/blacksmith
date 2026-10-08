@@ -37,3 +37,5 @@ blob-report/
 # would pin one build's API. mods/bs-mod/types/ is the mod's own state
 # contract and stays tracked.
 /mods/bs-mod/.claude-plugin/types/
+# pr-mod: the same engine-written folder, for the same reason.
+/mods/pr-mod/.claude-plugin/types/

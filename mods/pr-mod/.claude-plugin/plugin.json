@@ -1,9 +1,14 @@
 {
   "name": "pr-mod",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "The repo's open pull requests in a pane and a band line: CI and merge state, merge, update branch, and fix-conflict / fix-CI prompts.",
   "author": {
-    "name": "juzser"
+    "name": "juzser",
+    "url": "https://github.com/juzser"
   },
+  "homepage": "https://github.com/juzser/blacksmith/tree/main/mods/pr-mod",
+  "repository": "https://github.com/juzser/blacksmith",
+  "license": "MIT",
+  "keywords": ["pull-requests", "github", "ci"],
   "types": "./types/index.d.ts"
 }
