@@ -777,10 +777,9 @@ export function createApp(opts: AppOpts): AppHandle {
    * session, lineage, causalChainFor) or with `store`, since those ids repeat
    * across projects. Returns whether the request asked for it.
    */
-  function allStoresScope(c: Context, code: string): boolean {
+  function allStoresScope(c: Context, bad: (message: string) => Error): boolean {
     const mode = c.req.query('stores');
     if (mode === undefined) return false;
-    const bad = (message: string) => new BadRequestError(code, message);
     if (mode !== 'all') throw bad(`Query parameter "stores" must be "all", not "${mode}".`);
     for (const name of ['task', 'epic', 'session', 'lineage', 'causalChainFor', 'store']) {
       if (c.req.query(name) !== undefined) {
@@ -1033,7 +1032,7 @@ export function createApp(opts: AppOpts): AppHandle {
       );
     }
 
-    if (allStoresScope(c, 'timeline.bad-request')) {
+    if (allStoresScope(c, (m) => new BadRequestError('timeline.bad-request', m))) {
       return c.json(
         timelineAllStores(c, {
           project,
@@ -1292,7 +1291,7 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');
-    if (allStoresScope(c, 'errors.bad-request')) {
+    if (allStoresScope(c, (m) => new BadRequestError('scope.bad-request', m))) {
       const sessions = qualifiedSessions(c);
       const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
       const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));

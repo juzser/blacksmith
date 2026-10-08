@@ -1196,8 +1196,8 @@ the row is foreign. No store label is drawn. Each edge line is one muted line in
 style, ending in a "Show all" link, and takes the page's own gap, as Sessions' lines do:
 with no live CLI session at all, "Nothing is active right now. · Show all"; with live
 sessions but none on an epic, "N live sessions, none on an epic · Show all"; with a
-measured answer but no active session in the served store, "No active session in this
-view · Show all". While one of these shows, no feed or error card is drawn and no request
+measured answer but no active session in any store, "No active session in this view ·
+Show all". While one of these shows, no feed or error card is drawn and no request
 is made. When the live sessions cannot be read, Active shows everything as All does, with
 "Live sessions can't be read here" (the toggle stays). When more than 200 sessions are
 active in the served store, Active also shows everything, with "Too many active sessions
