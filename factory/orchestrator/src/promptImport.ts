@@ -69,6 +69,14 @@ function answerOf(result: Obj): { prompt: string; answers: Obj[]; response?: str
   return { prompt, answers: rows, ...(free === undefined ? {} : { response: free }) };
 }
 
+/** `/name args` (or just `/name`) from a command echo; null without a command name. */
+function commandText(content: string): string | null {
+  const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(content)?.[1]?.trim();
+  if (name === undefined || name === '') return null;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim() ?? '';
+  return args === '' ? name : `${name} ${args}`;
+}
+
 type Classified = Candidate | 'harness' | 'afk' | null;
 
 function classify(l: Obj): Classified {
@@ -132,7 +140,12 @@ function classify(l: Obj): Classified {
   if (l.type === 'user') {
     const message = isObj(l.message) ? l.message : {};
     if (origin !== 'human' || flagged || typeof message.content !== 'string') return null;
-    return text('prompt_id', str(l.promptId) ?? uuid, message.content);
+    const opening = message.content.trimStart();
+    const typedCommand =
+      opening.startsWith('<command-message') || opening.startsWith('<command-name')
+        ? commandText(message.content)
+        : null;
+    return text('prompt_id', str(l.promptId) ?? uuid, typedCommand ?? message.content);
   }
   if (l.type === 'attachment') {
     const a = isObj(l.attachment) ? l.attachment : {};
@@ -144,10 +157,8 @@ function classify(l: Obj): Classified {
   }
   if (l.type === 'system' && l.subtype === 'local_command') {
     const content = str(l.content) ?? '';
-    const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(content)?.[1]?.trim();
-    if (name === undefined || name === '' || uuid === undefined) return null;
-    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(content)?.[1]?.trim() ?? '';
-    const t = args === '' ? name : `${name} ${args}`;
+    const t = commandText(content);
+    if (t === null || uuid === undefined) return null;
     const command = commandOf(t);
     return {
       ...base,

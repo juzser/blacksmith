@@ -71,6 +71,11 @@ const slash = (n: number, name: string, args: string) =>
     content: `<command-name>${name}</command-name>\n<command-message>x</command-message>\n<command-args>${args}</command-args>`,
   });
 
+const echo = (name: string, args?: string): string =>
+  `<command-message>${name.slice(1)}</command-message>\n<command-name>${name}</command-name>${
+    args === undefined ? '' : `\n<command-args>${args}</command-args>`
+  }`;
+
 const answer = (n: number, extra: Record<string, unknown> = {}) =>
   line(n, {
     type: 'user',
@@ -178,6 +183,64 @@ describe('importTranscript: what counts as a prompt', () => {
     const { summary } = await run();
     expect(summary.imported).toBe(1);
     expect(summary.skipped).toEqual({ duplicate: 0, older: 0, harness: 1, afk: 1 });
+  });
+});
+
+describe('importTranscript: typed slash commands', () => {
+  it('imports a typed /bs command as one backfill prompt', async () => {
+    write(typed(1, echo('/bs', 'run acme-1'), { promptId: 'p-cmd' }));
+    const { summary } = await run();
+    expect(summary.imported).toBe(1);
+    expect(summary.skipped.harness).toBe(0);
+    const [, ev] = await stored();
+    expect(ev?.payload).toMatchObject({
+      prompt: '/bs run acme-1',
+      command: 'bs',
+      prompt_id: 'p-cmd',
+      source: 'backfill',
+    });
+  });
+
+  it('drops the trailing space when args are empty or the tag is missing', async () => {
+    write(typed(1, echo('/insights', '')), typed(2, echo('/insights')));
+    const { summary } = await run();
+    expect(summary.imported).toBe(2);
+    const events = (await stored()).slice(1);
+    expect(events.map((e) => (e.payload as { prompt: string }).prompt)).toEqual([
+      '/insights',
+      '/insights',
+    ]);
+  });
+
+  it('a second run counts the typed command as duplicate', async () => {
+    write(typed(1, echo('/bs', 'run acme-1')));
+    await run();
+    const second = await run();
+    expect(second.summary.imported).toBe(0);
+    expect(second.summary.skipped.duplicate).toBe(1);
+  });
+
+  it('M3: a typed /bs line alone makes a bare work root count', async () => {
+    const root = path.join(base, 'pkg');
+    mkdirSync(path.join(root, '.git'), { recursive: true });
+    mkdirSync(path.join(root, 'state', 'events'), { recursive: true });
+    write(typed(1, echo('/bs', 'status')));
+    const { summary } = await run(true, ctx({ env: {}, isClone: true }));
+    expect(summary.imported).toBe(1);
+  });
+
+  it('ignores the echo on a line that is not human, and does not count it', async () => {
+    write(typed(1, echo('/bs', 'status'), { origin: undefined }), typed(2, 'Real.'));
+    const { summary } = await run();
+    expect(summary.imported).toBe(1);
+    expect(summary.skipped.harness).toBe(0);
+  });
+
+  it('keeps a command-message without a command-name as harness', async () => {
+    write(typed(1, '<command-message>bs</command-message>'));
+    const { summary } = await run();
+    expect(summary.imported).toBe(0);
+    expect(summary.skipped.harness).toBe(1);
   });
 });
 
