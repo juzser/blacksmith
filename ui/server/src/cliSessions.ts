@@ -1010,24 +1010,32 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           ts: string;
           payload: string;
         }[]
-      ).flatMap((r) => {
-        try {
-          const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
-          return [
-            {
-              sessionId: r.session_id,
-              admittedEventId: r.event_id,
-              admittedAt: r.ts,
-              epicId: typeof p.epic_id === 'string' ? p.epic_id : null,
-              taskIds: Array.isArray(p.task_ids)
-                ? p.task_ids.filter((t): t is string => typeof t === 'string')
-                : [],
-            },
-          ];
-        } catch {
-          return [];
-        }
-      });
+      )
+        .flatMap((r) => {
+          try {
+            const p = JSON.parse(r.payload) as { epic_id?: unknown; task_ids?: unknown };
+            return [
+              {
+                sessionId: r.session_id,
+                admittedEventId: r.event_id,
+                admittedAt: r.ts,
+                epicId: typeof p.epic_id === 'string' ? p.epic_id : null,
+                taskIds: Array.isArray(p.task_ids)
+                  ? p.task_ids.filter((t): t is string => typeof t === 'string')
+                  : [],
+              },
+            ];
+          } catch {
+            return [];
+          }
+        })
+        // Log order: event ids tie-break by number, which SQL cannot do on text.
+        .sort((a, b) =>
+          compareLogOrder(
+            { ts: a.admittedAt, eventId: a.admittedEventId },
+            { ts: b.admittedAt, eventId: b.admittedEventId },
+          ),
+        );
       const pick = (sql: string): string | null => {
         const row = handle.sqlite.prepare(sql).get(...g.lineage) as
           | { e: string | null }
@@ -1341,12 +1349,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           )
           .sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id))[0];
         const numbered: { eventId: string; taskIds: string[]; n: number }[] = [];
-        for (const w of [...epicWaves].sort((a, b) =>
-          compareLogOrder(
-            { ts: a.admittedAt, eventId: a.admittedEventId },
-            { ts: b.admittedAt, eventId: b.admittedEventId },
-          ),
-        )) {
+        for (const w of epicWaves) {
           const same = numbered.find(
             (x) =>
               x.taskIds.length === w.taskIds.length &&
@@ -1367,15 +1370,25 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         const busy = (t: string): boolean =>
           workingAgents.some((a) => a.taskId !== null && taskIdsMatch(a.taskId, t));
         let nextTask: { taskId: string; taskTitle: string } | null = null;
-        // The newest open wave's first unstarted, unclosed task is next.
-        // Otherwise (every wave merged, or its tasks all in progress) the first
-        // unfinished plan task in plan order: the order the log first added
-        // the tasks in. A task with no label means unknown, never a later one.
+        // Next is work still to do that nobody is on: a task in the todo or
+        // in-progress bucket (the set `remaining` counts), not closed, no live
+        // agent. One in review is not left. The newest open wave's first such
+        // task is next; otherwise (every wave merged, or none qualifies) the
+        // first one in plan order: the order the log first added the tasks in.
+        // A task with no label means unknown, never a later one.
+        const undone = (t: string): boolean => {
+          const r = row(t);
+          if (r !== undefined) {
+            const b = statusBucketForTaskStatus(r.taskStatus);
+            if (b !== 'todo' && b !== 'inProgress') return false;
+          }
+          return !isClosed(t) && !busy(t);
+        };
         const pick = (t: string): void => {
           const label = row(t)?.label;
           if (label) nextTask = { taskId: row(t)?.taskId ?? t, taskTitle: label };
         };
-        const inWave = (newestOpen?.taskIds ?? []).find((t) => !isClosed(t) && !busy(t));
+        const inWave = (newestOpen?.taskIds ?? []).find(undone);
         if (inWave !== undefined) pick(inWave);
         else {
           const added = (
@@ -1395,7 +1408,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             .map((t) => ({ t, at: position(t) }))
             .sort((a, b) => a.at - b.at)
             .map((x) => x.t.taskId)
-            .find((t) => !isClosed(t) && !busy(t));
+            .find(undone);
           if (first !== undefined) pick(first);
         }
         focusParts = {

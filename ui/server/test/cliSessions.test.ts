@@ -1952,6 +1952,100 @@ describe('cliSessions reader', () => {
           });
         });
 
+        // A gate outcome is what moves a task into review (waivers pending:
+        // reviewing, pass: merging); the admission itself sets it to ready.
+        const gate = (root: Awaited<ReturnType<typeof planned>>, n: number, outcome: string) =>
+          root.add('gate-outcome', { outcome }, { taskId: `epic-a/task-${n}` });
+
+        /** Pads to event #8 so the next two admissions are `#9` and `#10`, and gives every event one timestamp. */
+        async function tiedAdmissions(
+          root: Awaited<ReturnType<typeof planned>>,
+          first: number[],
+          second: number[],
+        ) {
+          while (!root.last().endsWith('#8')) await root.add('note', {});
+          await admit(root, ...first);
+          await admit(root, ...second);
+          expect(root.last().endsWith('#10')).toBe(true);
+          const file = path.join(stateDir, 'sess-root.jsonl');
+          await writeFile(
+            file,
+            (await readFile(file, 'utf8')).replace(
+              /"ts":"[^"]*"/g,
+              '"ts":"2026-01-01T00:00:00.000Z"',
+            ),
+          );
+        }
+
+        it('orders two admissions at one timestamp by event number, not event text: #10 is newer than #9', async () => {
+          const root = await planned(4);
+          await tiedAdmissions(root, [1, 2], [3, 4]);
+          const focus = (await cardOf(240)).focus;
+          expect(focus?.wave).toBe(2);
+          expect(focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-3' });
+        });
+
+        it('gives a task re-admitted at one timestamp to the #10 admission, not #9', async () => {
+          const root = await planned(3);
+          await tiedAdmissions(root, [1, 2], [2]);
+          const focus = (await cardOf(241)).focus;
+          expect(focus?.wave).toBe(2);
+          expect(focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-2' });
+        });
+
+        it('skips a task in review for Next inside the open wave', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'reviewing',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', { title: 'Task 2' });
+          await admit(root, 1, 2);
+          await gate(root, 1, 'pass-with-waivers-pending');
+          expect((await cardOf(242)).focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+            taskTitle: 'Task 2',
+          });
+        });
+
+        it('with every wave merged, takes the first todo or in-progress plan task, not one in review', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'merging',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', {
+            title: 'Task 2',
+            task_status: 'in-progress',
+          });
+          await root.addTask('epic-a', 'epic-a/task-3', { title: 'Task 3' });
+          await root.addTask('epic-a', 'epic-a/task-4', { title: 'Task 4' });
+          await admit(root, 4);
+          await merge(root, 4);
+          expect((await cardOf(243)).focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+            taskTitle: 'Task 2',
+          });
+        });
+
+        it('says nothing is left when only tasks in review remain', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'reviewing',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', {
+            title: 'Task 2',
+            task_status: 'merging',
+          });
+          await admit(root, 1, 2);
+          await gate(root, 1, 'pass-with-waivers-pending');
+          await gate(root, 2, 'pass');
+          expect((await cardOf(244)).focus?.next).toEqual({ kind: 'none' });
+        });
+
         it('leaves Next unknown and keeps the project for an epic with no task rows', async () => {
           const s = await factorySession('sess-research', SID_B);
           await s.add(
