@@ -77,3 +77,12 @@ export function activeHomeSessionIds(scope: ActiveScopeResult | null): string[] 
   ].sort();
   return ids;
 }
+
+// Activity reads every store: every store's factory session ids, each
+// qualified `<storeId>/<sessionId>` (the server's `stores=all` spelling), so
+// two stores that reuse a session id stay apart. Same null / empty / never
+// truncated rules as activeHomeSessionIds.
+export function activeSessionIds(scope: ActiveScopeResult | null): string[] | null {
+  if (scope?.measured !== true) return null;
+  return [...new Set(scope.factorySessions.map((s) => `${s.storeId}/${s.sessionId}`))].sort();
+}

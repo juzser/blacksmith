@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
+import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
@@ -426,6 +427,75 @@ test.describe('a foreign store in the dashboard', () => {
     await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}?store=${foreignId}`);
     await expect(page.getByRole('dialog', { name: 'Waive finding' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Waive' })).toHaveCount(0);
+  });
+
+  test.describe('Activity reads every store', () => {
+    const rows = (page: Page) =>
+      page.getByRole('feed', { name: 'Activity' }).locator('.bs-timeline-row__title');
+    // Both stores replay one fixture, so every event id repeats; a row's DOM id
+    // is `activity-row-<storeId>:<eventId>`, which is how the stores tell apart.
+    const rowsOf = (page: Page, storeId: string) =>
+      page.locator(`li[id^="activity-row-${storeId}:"]`);
+
+    test('C1: no filter fetches stores=all and shows both stores, without an other-store line', async ({
+      page,
+    }) => {
+      const reads: string[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.search);
+      });
+      await page.goto(`${origin}/activity?scope=all`);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      expect(reads.length).toBeGreaterThan(0);
+      for (const read of reads) expect(new URLSearchParams(read).get('stores')).toBe('all');
+      await expect(page.getByText(/in another store/i)).toHaveCount(0);
+      // No two rows may share a DOM id even though event ids repeat.
+      const ids = await page
+        .locator('li[id^="activity-row-"]')
+        .evaluateAll((els) => els.map((e) => e.id));
+      expect(ids.length).toBeGreaterThan(1);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    test('C2: a foreign row opens its own store task, and an explicit filter keeps the old request', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/activity?scope=all`);
+      const link = rowsOf(page, foreignId)
+        .filter({ hasText: TASK_1 })
+        .locator('.bs-timeline-row__title--link')
+        .first();
+      await expect(link).toBeVisible();
+      await link.click();
+      await expect(page).toHaveURL(new RegExp(`/tasks/epic-1%2Ftask-1\\?store=${foreignId}$`));
+      await expect(title(page)).toHaveText(FOREIGN_TITLE_1);
+
+      const reads: string[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.search);
+      });
+      await page.goto(`${origin}/activity?task=${encodeURIComponent(TASK_1)}`);
+      await expect(rows(page).first()).toBeVisible();
+      expect(reads.length).toBeGreaterThan(0);
+      for (const read of reads) expect(new URLSearchParams(read).has('stores')).toBe(false);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop-light', VIEWPORTS.desktop],
+      ['phone-light', { width: 375, height: 812 }],
+    ] as const) {
+      test(`screenshot two stores ${name}`, async ({ page }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/activity?scope=all`);
+        await expect(rowsOf(page, foreignId).first()).toBeVisible();
+        await settleForShot(page, rowsOf(page, 'home').first());
+        await shoot(page, `activity-two-stores-${name}`);
+      });
+    }
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which

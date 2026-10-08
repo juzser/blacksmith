@@ -35,6 +35,7 @@ import type {
   AnalyticsResult,
   EventKind,
   Scope,
+  TimelineEntry,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
   analytics,
@@ -57,6 +58,7 @@ import {
   timeline,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
+import { compareLogOrder } from '../../../factory/orchestrator/dist/eventOrder.js';
 import type { EventOpts } from '../../../factory/orchestrator/dist/events.js';
 import { requireSession } from '../../../factory/orchestrator/dist/events.js';
 import type { EventContext } from '../../../factory/orchestrator/dist/findings.js';
@@ -73,6 +75,14 @@ import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/schedule
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 import { type ActiveScopeStore, computeActiveScope } from './activeScope.js';
+import {
+  decodeCursor,
+  encodeCursor,
+  mergeErrors,
+  mergePages,
+  type StorePage,
+  sessionsByStore,
+} from './activityFanout.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
 import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
@@ -705,7 +715,10 @@ export function createApp(opts: AppOpts): AppHandle {
    * (`decisionsOnly`) can afford to be lenient about its spelling; a widening
    * one cannot.
    */
-  function sessionScope(c: Context): Pick<Scope, 'sessionId' | 'sessionIds'> {
+  function sessionScope(
+    c: Context,
+    db: SmithDb = handle.db,
+  ): Pick<Scope, 'sessionId' | 'sessionIds'> {
     const sessionId = c.req.query('session');
     const lineage = c.req.query('lineage');
     if (lineage !== undefined && lineage !== 'true' && lineage !== 'false') {
@@ -722,7 +735,7 @@ export function createApp(opts: AppOpts): AppHandle {
         'Query parameter "lineage" needs a "session" to widen: a lineage is resolved from a session, and every session at once is not one.',
       );
     }
-    return { sessionId, sessionIds: projectedLineage(handle.db, sessionId) };
+    return { sessionId, sessionIds: projectedLineage(db, sessionId) };
   }
 
   /**
@@ -756,6 +769,98 @@ export function createApp(opts: AppOpts): AppHandle {
       }
     }
     return { sessionIds: [...new Set(values)] };
+  }
+
+  /**
+   * `?stores=all` (Activity): read every store. Only `all` is a value, and it
+   * cannot be combined with a filter that names one store's ids (task, epic,
+   * session, lineage, causalChainFor) or with `store`, since those ids repeat
+   * across projects. Returns whether the request asked for it.
+   */
+  function allStoresScope(c: Context, code: string): boolean {
+    const mode = c.req.query('stores');
+    if (mode === undefined) return false;
+    const bad = (message: string) => new BadRequestError(code, message);
+    if (mode !== 'all') throw bad(`Query parameter "stores" must be "all", not "${mode}".`);
+    for (const name of ['task', 'epic', 'session', 'lineage', 'causalChainFor', 'store']) {
+      if (c.req.query(name) !== undefined) {
+        throw bad(`Query parameter "stores=all" cannot be combined with "${name}".`);
+      }
+    }
+    return true;
+  }
+
+  const qualifiedSessions = (c: Context): Map<string, string[]> | undefined => {
+    const values = c.req.queries('sessions');
+    if (values === undefined) return undefined;
+    return sessionsByStore(values, (m) => new BadRequestError('scope.bad-request', m));
+  };
+
+  /** A foreign store's rows read as that store's project and carry its tag. */
+  const foreignRows = (only: StoreEntry, rows: TimelineEntry[]) =>
+    relabelProject(rows, only.label).map((r) => ({
+      ...r,
+      store: { id: only.id, label: only.label },
+    }));
+
+  interface AllStoresFilter {
+    project: string | undefined;
+    limit: number | undefined;
+    before: string | undefined;
+    after: string | undefined;
+    eventTypes: string[] | undefined;
+    decisionsOnly: boolean;
+    kinds: EventKind[] | undefined;
+  }
+
+  /** `/api/timeline?stores=all`: each store's page, merged (see activityFanout.ts). */
+  function timelineAllStores(c: Context, f: AllStoresFilter): unknown {
+    const bad = (m: string) => new BadRequestError('timeline.bad-request', m);
+    const sessions = qualifiedSessions(c);
+    const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
+    const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
+    const filter = (db: SmithDb, p: string | undefined) => ({
+      ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
+      ...(p ? { project: p } : {}),
+      ...(f.eventTypes ? { eventTypes: f.eventTypes } : {}),
+      ...(f.decisionsOnly ? { decisionsOnly: true } : {}),
+      ...(f.kinds ? { kinds: f.kinds } : {}),
+    });
+    const paged = f.limit !== undefined || f.before !== undefined || f.after !== undefined;
+    if (!paged) {
+      const rows = fanOut(entries, f.project, (db, p) => timeline(db, filter(db, p))).flatMap(
+        (part) => part.data.map((r) => ({ ...r, store: part.store })),
+      );
+      return rows.sort((a, b) => compareLogOrder(a, b) || a.store.id.localeCompare(b.store.id));
+    }
+    const before = f.before === undefined ? new Map<string, string>() : decodeCursor(f.before, bad);
+    const after = f.after === undefined ? new Map<string, string>() : decodeCursor(f.after, bad);
+    const direction = f.after === undefined ? 'before' : 'after';
+    const limit = f.limit ?? 100;
+    const parts = fanOut(entries, f.project, (db, p) => {
+      const id = idOf.get(db) as string;
+      const b = before.get(id);
+      const a = after.get(id);
+      const rows = timeline(db, {
+        ...filter(db, p),
+        ...(b ? { before: b } : {}),
+        ...(a ? { after: a } : {}),
+        limit,
+      });
+      const oldest = rows[rows.length - 1];
+      const more =
+        direction === 'before' &&
+        oldest !== undefined &&
+        timeline(db, { ...filter(db, p), before: oldest.eventId, limit: 1 }).length > 0;
+      return { rows, more };
+    });
+    const pages: StorePage[] = parts.map((part) => ({ store: part.store, ...part.data }));
+    const merged = mergePages(pages, direction, limit, direction === 'before' ? before : after);
+    return {
+      entries: merged.entries,
+      nextBefore: merged.nextBefore ? encodeCursor(merged.nextBefore) : null,
+      newestId: merged.entries.length > 0 ? encodeCursor(merged.newest) : null,
+    };
   }
 
   const app = new Hono();
@@ -928,6 +1033,19 @@ export function createApp(opts: AppOpts): AppHandle {
       );
     }
 
+    if (allStoresScope(c, 'timeline.bad-request')) {
+      return c.json(
+        timelineAllStores(c, {
+          project,
+          limit,
+          before: beforeParam,
+          after: afterParam,
+          eventTypes: eventTypesParam ? eventTypesParam.split(',').filter(Boolean) : undefined,
+          decisionsOnly: decisionsOnly === 'true',
+          kinds,
+        }),
+      );
+    }
     const sessions = sessionsScope(c);
     if (causalChainFor && sessions.sessionIds) {
       throw new BadRequestError(
@@ -937,8 +1055,14 @@ export function createApp(opts: AppOpts): AppHandle {
     }
 
     const paged = limit !== undefined || beforeParam !== undefined || afterParam !== undefined;
-    const entries = timeline(handle.db, {
-      ...sessionScope(c),
+    // `?store=<id>` reads that one store (404 when none answers to it); the
+    // served store answers as it always has, rows untagged.
+    const only = storeOf(c);
+    const { db } = only.handle;
+    const answer = (rows: TimelineEntry[]): TimelineEntry[] =>
+      only.home ? rows : foreignRows(only, rows);
+    const entries = timeline(db, {
+      ...sessionScope(c, db),
       ...sessions,
       ...(taskId ? { taskId } : {}),
       ...(epicId ? { epicId } : {}),
@@ -952,12 +1076,12 @@ export function createApp(opts: AppOpts): AppHandle {
       ...(afterParam !== undefined ? { after: afterParam } : {}),
     });
 
-    if (!paged) return c.json(entries);
+    if (!paged) return c.json(answer(entries));
 
     const oldest = entries[entries.length - 1];
     const nextBefore = oldest
-      ? timeline(handle.db, {
-          ...sessionScope(c),
+      ? timeline(db, {
+          ...sessionScope(c, db),
           ...sessions,
           ...(taskId ? { taskId } : {}),
           ...(epicId ? { epicId } : {}),
@@ -971,7 +1095,11 @@ export function createApp(opts: AppOpts): AppHandle {
         ? oldest.eventId
         : null
       : null;
-    return c.json({ entries, nextBefore, newestId: entries[0]?.eventId ?? null });
+    return c.json({
+      entries: answer(entries),
+      nextBefore,
+      newestId: entries[0]?.eventId ?? null,
+    });
   });
 
   app.get('/api/kanban', (c) => {
@@ -1164,13 +1292,34 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');
-    return c.json(
-      errorsPage(
-        handle.db,
-        { ...sessionScope(c), ...sessionsScope(c), ...(project ? { project } : {}) },
-        clock,
-      ),
+    if (allStoresScope(c, 'errors.bad-request')) {
+      const sessions = qualifiedSessions(c);
+      const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
+      const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
+      return c.json(
+        mergeErrors(
+          fanOut(entries, project, (db, p) =>
+            errorsPage(
+              db,
+              {
+                ...(sessions
+                  ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] }
+                  : {}),
+                ...(p ? { project: p } : {}),
+              },
+              clock,
+            ),
+          ),
+        ),
+      );
+    }
+    const only = storeOf(c);
+    const result = errorsPage(
+      only.handle.db,
+      { ...sessionScope(c, only.handle.db), ...sessionsScope(c), ...(project ? { project } : {}) },
+      clock,
     );
+    return c.json(only.home ? result : relabelProject(result, only.label));
   });
 
   const ANALYTICS_PERIODS: readonly AnalyticsPeriod[] = ['7d', '30d', '90d'];
