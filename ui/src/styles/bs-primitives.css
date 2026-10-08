@@ -3089,6 +3089,12 @@ summary.bs-inbox__group-head {
   position: relative;
   z-index: 1;
 }
+/* A fix row's copy button ends about 8px into the time's text line below it.
+   Both sit at z-index 1 and the time comes later, so the time would take the
+   taps on the copy button's bottom edge; the copy button paints above it. */
+.bs-kanban-group__row-title .bs-kanban-card__title-copy {
+  z-index: 2;
+}
 .bs-kanban-card__row {
   display: flex;
   align-items: center;
