@@ -781,6 +781,121 @@ describe('multi-store dashboard reads', () => {
     });
   });
 
+  describe('Sessions read every store', () => {
+    type Sess = {
+      sessionId: string;
+      lastEventAt: string;
+      projects: string[];
+      store?: Store;
+    };
+    const eventsHome = (): string => path.join(projectA, 'state', 'events');
+    const foreignId = async (a: AppHandle): Promise<string> => {
+      const projects = await get<{ project: string; store: Store }[]>(a, '/api/projects');
+      return projects.find((p) => p.store.label === 'project-b')?.store.id as string;
+    };
+    // One extra session per store, so the merged list has more than the shared id.
+    const extra = async (dir: string, sessionId: string): Promise<void> => {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir: dir },
+      );
+    };
+
+    it('stores=all lists both stores, tagged, the shared id once per store', async () => {
+      await extra(eventsB, 'sess-b-only');
+      await extra(eventsHome(), 'sess-home-only');
+      const a = app();
+      const id = await foreignId(a);
+      const rows = await get<(Sess & { store: Store })[]>(a, '/api/sessions?stores=all');
+      const shared = rows.filter((r) => r.sessionId === 'sess-fixture');
+      expect(shared.map((r) => r.store.id).sort()).toEqual(['home', id].sort());
+      expect(rows.find((r) => r.sessionId === 'sess-b-only')?.store).toEqual({
+        id,
+        label: 'project-b',
+      });
+      expect(rows.find((r) => r.sessionId === 'sess-home-only')?.store.id).toBe('home');
+      // A foreign row's project reads as its store's label.
+      expect(shared.find((r) => r.store.id === id)?.projects).toContain('project-b');
+      expect(shared.find((r) => r.store.id === 'home')?.projects).not.toContain('project-b');
+    });
+
+    it('merges in the order one store uses: newest event first, then session id, then store id', async () => {
+      await extra(eventsB, 'sess-b-only');
+      await extra(eventsHome(), 'sess-home-only');
+      const a = app();
+      const rows = await get<(Sess & { store: Store })[]>(a, '/api/sessions?stores=all');
+      expect(rows.length).toBeGreaterThanOrEqual(4);
+      const sorted = [...rows].sort(
+        (x, y) =>
+          y.lastEventAt.localeCompare(x.lastEventAt) ||
+          x.sessionId.localeCompare(y.sessionId) ||
+          x.store.id.localeCompare(y.store.id),
+      );
+      expect(rows.map((r) => `${r.store.id}/${r.sessionId}`)).toEqual(
+        sorted.map((r) => `${r.store.id}/${r.sessionId}`),
+      );
+    });
+
+    it('narrows to the stores named by qualified sessions', async () => {
+      await extra(eventsB, 'sess-b-only');
+      const a = app();
+      const id = await foreignId(a);
+      const rows = await get<(Sess & { store: Store })[]>(
+        a,
+        `/api/sessions?stores=all&sessions=${id}/sess-b-only`,
+      );
+      expect(rows.map((r) => `${r.store.id}/${r.sessionId}`)).toEqual([`${id}/sess-b-only`]);
+    });
+
+    it('refuses what Activity refuses with a 400', async () => {
+      const a = app();
+      const id = await foreignId(a);
+      for (const route of [
+        '/api/sessions?stores=all&session=sess-fixture',
+        '/api/sessions?stores=all&epic=epic-1',
+        '/api/sessions?stores=all&task=epic-1/task-1',
+        `/api/sessions?stores=all&store=${id}`,
+        '/api/sessions?stores=x',
+        '/api/sessions?stores=all&sessions=zz/sess-fixture',
+      ]) {
+        expect([route, (await a.app.request(route)).status]).toEqual([route, 400]);
+      }
+    });
+
+    it('answers without stores=all exactly as before: home rows, untagged', async () => {
+      await extra(eventsB, 'sess-b-only');
+      const a = app();
+      const rows = await get<Sess[]>(a, '/api/sessions');
+      expect(rows.map((r) => r.sessionId)).toEqual(['sess-fixture']);
+      expect(rows[0]?.store).toBeUndefined();
+    });
+
+    it('the roster of ?store=<id> comes from that store, an unknown store is a 404', async () => {
+      const a = app();
+      const id = await foreignId(a);
+      // Only the foreign store holds sessions of project-b.
+      const plain = await a.app.request('/api/sessions/sess-fixture/agents?project=project-b');
+      expect(plain.status).toBe(404);
+      const foreign = await get<{ roles: unknown[] }>(
+        a,
+        `/api/sessions/sess-fixture/agents?project=project-b&store=${id}`,
+      );
+      expect(foreign.roles.length).toBeGreaterThan(0);
+      const home = await get<{ roles: unknown[] }>(a, '/api/sessions/sess-fixture/agents');
+      expect(home.roles.length).toBeGreaterThan(0);
+      const unknown = await a.app.request('/api/sessions/sess-fixture/agents?store=nope');
+      expect(unknown.status).toBe(404);
+      expect((await json<{ error: { code: string } }>(unknown)).error.code).toBe('store.not-found');
+    });
+  });
+
   describe('a task of a foreign store', () => {
     const task = encodeURIComponent(TASK_1);
     const foreignId = async (a: AppHandle): Promise<string> => {

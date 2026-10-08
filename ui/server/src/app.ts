@@ -1144,6 +1144,34 @@ export function createApp(opts: AppOpts): AppHandle {
   // review queue alongside, on every route change, to be thrown away.
   app.get('/api/sessions', (c) => {
     const project = c.req.query('project');
+    if (allStoresScope(c, (m) => new BadRequestError('scope.bad-request', m))) {
+      // Each store's own list (queries.ts runningSessions: newest event first,
+      // then session id), tagged, then merged on the same keys with the store
+      // id breaking a tie; the sort is stable, so one store keeps its own order.
+      const sessions = qualifiedSessions(c);
+      const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
+      const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
+      const parts = fanOut(entries, project, (db, p) =>
+        overview(
+          db,
+          {
+            ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
+            ...(p ? { project: p } : {}),
+          },
+          clock,
+        ),
+      );
+      return c.json(
+        parts
+          .flatMap(({ store, data }) => data.runningSessions.map((r) => ({ ...r, store })))
+          .sort(
+            (a, b) =>
+              b.lastEventAt.localeCompare(a.lastEventAt) ||
+              a.sessionId.localeCompare(b.sessionId) ||
+              a.store.id.localeCompare(b.store.id),
+          ),
+      );
+    }
     const result = overview(
       handle.db,
       {
@@ -1162,17 +1190,20 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/sessions/:sessionId/agents', (c) => {
     const sessionId = c.req.param('sessionId');
     const project = c.req.query('project');
+    // `?store=<id>` reads that store (a session id repeats between stores).
+    const only = storeOf(c);
+    const { db } = only.handle;
     if (project) {
-      const session = overview(handle.db, { sessionId, project }, clock).runningSessions[0];
+      const session = overview(db, { sessionId, project }, clock).runningSessions[0];
       if (!session) {
         throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
       }
     }
-    const result = sessionAgents(handle.db, sessionId, clock);
+    const result = sessionAgents(db, sessionId, clock);
     if (result.roles.length === 0) {
       throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
     }
-    return c.json(result);
+    return c.json(only.home ? result : relabelProject(result, only.label));
   });
 
   // Live Claude Code CLI sessions (name, working/waiting/idle, doing now,
