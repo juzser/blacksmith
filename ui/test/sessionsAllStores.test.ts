@@ -12,6 +12,7 @@ import {
   isStaleResponse,
   selectedSessionFromQuery,
   sessionsInScope,
+  shouldPollEmptyRoster,
 } from '../src/lib/sessionsSelection.js';
 import { storeKey } from '../src/lib/storeKey.js';
 
@@ -96,6 +97,35 @@ describe('a session id that repeats between stores', () => {
     };
     expect(isSessionActive(live, rows[1] as Row)).toBe(true);
     expect(isSessionActive(live, rows[0] as Row)).toBe(false);
+  });
+});
+
+describe('empty roster polling', () => {
+  const live: ActiveScopeResult = {
+    measured: true,
+    readAt: '',
+    liveSessions: 1,
+    unlinkedSessions: 0,
+    projects: [],
+    epics: [],
+    factorySessions: [{ storeId: 'ab12cd34', sessionId: 'sess-a' }],
+  };
+  it('polls a loaded, empty roster only while its session is active', () => {
+    expect(shouldPollEmptyRoster({ roles: [] }, live, rows[1] as Row)).toBe(true);
+    // quiet session: asking again cannot change the answer
+    expect(shouldPollEmptyRoster({ roles: [] }, live, rows[0] as Row)).toBe(false);
+    // hidden deep link
+    expect(shouldPollEmptyRoster({ roles: [] }, live, null)).toBe(false);
+    // not loaded yet, or already has roles (hasLiveAgents decides then)
+    expect(shouldPollEmptyRoster(null, live, rows[1] as Row)).toBe(false);
+    expect(
+      shouldPollEmptyRoster({ roles: [{ agentRole: 'coder', agents: [] }] }, live, rows[1] as Row),
+    ).toBe(false);
+  });
+  it('the page polls through that gate', () => {
+    expect(page).toContain(
+      'if (hasLiveAgents() || emptyRosterOfActiveSession()) void loadAgents();',
+    );
   });
 });
 

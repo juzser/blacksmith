@@ -53,6 +53,7 @@ import {
   selectedSessionFromQuery,
   sessionsByProject,
   sessionsInScope,
+  shouldPollEmptyRoster,
 } from '../lib/sessionsSelection.js';
 import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 
@@ -127,6 +128,12 @@ const selected = computed(
 // the stale window) has nothing left to learn by asking again every 5s.
 function hasLiveAgents(): boolean {
   return hasWorkingAgents(agents.value?.roles ?? [], new Date().toISOString());
+}
+
+// A loaded empty roster is never "working", so hasLiveAgents() alone would
+// freeze "No agents yet." even after a live session dispatches its first agent.
+function emptyRosterOfActiveSession(): boolean {
+  return shouldPollEmptyRoster(agents.value, live(), selected.value);
 }
 
 function errorMessage(e: unknown): string {
@@ -301,7 +308,7 @@ watch(project, () => {
 });
 
 usePoll(() => {
-  if (hasLiveAgents()) void loadAgents();
+  if (hasLiveAgents() || emptyRosterOfActiveSession()) void loadAgents();
 }, POLL_MS);
 
 function refresh() {

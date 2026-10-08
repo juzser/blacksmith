@@ -68,6 +68,25 @@ export function isSessionActive(
   return isActiveSession(live, session, session.sessionId);
 }
 
+/**
+ * Whether a loaded, empty roster is worth asking for again: only while a live
+ * CLI session is writing into the selected session, since its first agent can
+ * appear at any moment. A quiet or ended session, or a deep link hidden from
+ * the list (`selected` null), cannot change by asking every few seconds.
+ */
+export function shouldPollEmptyRoster(
+  agents: { roles: unknown[] } | null,
+  live: ActiveScopeResult | null,
+  selected: { sessionId: string; store?: StoreRef } | null,
+): boolean {
+  return (
+    agents !== null &&
+    agents.roles.length === 0 &&
+    selected !== null &&
+    isSessionActive(live, selected)
+  );
+}
+
 /** Names of active projects living outside the home store, each once. */
 export function otherStoreProjects(live: ActiveScopeResult | null): string[] {
   if (live?.measured !== true) return [];

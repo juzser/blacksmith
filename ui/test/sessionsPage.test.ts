@@ -50,7 +50,9 @@ describe('SessionsPage.vue', () => {
 
   it('polls only while the selected run still has a live agent', () => {
     expect(PAGE).toMatch(/hasWorkingAgents\(agents\.value\?\.roles/);
-    expect(PAGE).toMatch(/if \(hasLiveAgents\(\)\) void loadAgents\(\);/);
+    expect(PAGE).toMatch(
+      /if \(hasLiveAgents\(\) \|\| emptyRosterOfActiveSession\(\)\) void loadAgents\(\);/,
+    );
   });
 
   it('resolves the deep link through the page-local selection helper, not sessionScope', () => {
