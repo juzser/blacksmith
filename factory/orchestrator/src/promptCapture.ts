@@ -142,7 +142,7 @@ export function resolveLine(cwd: string, ctx: CaptureContext): string | null {
   });
 }
 
-const CLI_ID = /^[0-9a-f-]{8,64}$/i;
+export const CLI_ID = /^[0-9a-f-]{8,64}$/i;
 const COMMAND_NAME = /^[A-Za-z0-9_.:-]+$/;
 const MAIN_THREAD = new Set(['user', 'operator', 'orchestrator']);
 /** Wave logs belong to their wave-runner node (architecture §18 rule 4). */
@@ -152,13 +152,13 @@ const DEDUPE_MS = 10_000;
 const SCAN_LIMIT = 20;
 
 /** `/bs-mod off` -> `bs-mod`; no `command` for text that is not a command name. */
-function commandOf(text: string): string | undefined {
+export function commandOf(text: string): string | undefined {
   if (!text.startsWith('/')) return undefined;
   const token = /^\/(\S*)/.exec(text)?.[1] ?? '';
   return COMMAND_NAME.test(token) ? token : undefined;
 }
 
-const newestMain = (events: readonly StoredEvent[], cli: string): StoredEvent | undefined =>
+export const newestMain = (events: readonly StoredEvent[], cli: string): StoredEvent | undefined =>
   [...events]
     .reverse()
     .find((e) => e.record.cli_session_id === cli && MAIN_THREAD.has(e.record.actor));

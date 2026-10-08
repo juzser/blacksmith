@@ -2249,4 +2249,71 @@ describe('events.ts', () => {
       expect(emitted).toEqual(['sess-follow#1', 'sess-follow#2']);
     });
   });
+
+  describe('appendWithin keepTs: a backfill keeps its own timestamps', () => {
+    const log = 'prompts-0a1b2c3d-0000-4000-8000-000000000001';
+    const root = (ts?: string) => ({
+      session_id: log,
+      actor: 'system',
+      event_type: 'session-start',
+      plan_version: 1,
+      causal_parent: null,
+      payload: { kind: 'prompt-log' },
+      ...(ts === undefined ? {} : { ts }),
+    });
+    const note = (parent: string, ts: string) => ({
+      session_id: log,
+      actor: 'user',
+      event_type: 'user_prompt',
+      plan_version: 1,
+      causal_parent: parent,
+      payload: { prompt: 'Add the beta-app export.' },
+      ts,
+    });
+
+    it('keeps each input ts', async () => {
+      const stored = await appendWithin(
+        log,
+        () => [root('2026-01-01T00:00:00.000Z'), note(`${log}#0`, '2026-01-01T00:00:05.000Z')],
+        { stateDir, keepTs: true },
+      );
+      expect(stored.map((e) => e.record.ts)).toEqual([
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:05.000Z',
+      ]);
+    });
+
+    it('throws on a log that is not a prompts- log', async () => {
+      await expect(
+        appendWithin(
+          'sess-epic',
+          () => [{ ...root('2026-01-01T00:00:00.000Z'), session_id: 'sess-epic' }],
+          { stateDir, keepTs: true },
+        ),
+      ).rejects.toThrow(/prompts-/);
+      expect(existsSync(path.join(stateDir, 'sess-epic.jsonl'))).toBe(false);
+    });
+
+    it('throws on a ts that does not parse, is in the future, or predates the newest event', async () => {
+      await appendWithin(log, () => [root('2026-01-01T00:00:10.000Z')], {
+        stateDir,
+        keepTs: true,
+      });
+      const future = new Date(Date.now() + 3_600_000).toISOString();
+      for (const ts of ['yesterday', future, '2026-01-01T00:00:09.000Z']) {
+        await expect(
+          appendWithin(log, () => [note(`${log}#0`, ts)], { stateDir, keepTs: true }),
+        ).rejects.toThrow(/ts/);
+      }
+      expect(await readEvents(log, { stateDir })).toHaveLength(1);
+    });
+
+    it('stamps "now" without keepTs, even when the input carries a ts', async () => {
+      const before = Date.now();
+      const [stored] = await appendWithin(log, () => [root('2020-01-01T00:00:00.000Z')], {
+        stateDir,
+      });
+      expect(Date.parse(stored?.record.ts ?? '')).toBeGreaterThanOrEqual(before);
+    });
+  });
 });
