@@ -28,7 +28,7 @@ interface Box {
 
 // Runs in the page: the box of every visible match, the height of the card or
 // row holding it, and the other targets whose box it intersects by over 1px.
-function measure(args: { selector: string; neighbours: string }): Box[] {
+function measure(args: { selector: string; neighbours: string; exempt: string }): Box[] {
   const out: Box[] = [];
   // The hit box: the bare box, or the ::after centred on it when that grows it.
   const hit = (e: Element) => {
@@ -66,8 +66,11 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       const w = Math.min(r.right, b.right) - Math.max(r.left, b.left);
       const h = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top);
       if (w > 1 && h > 1) {
-        const text = (o.textContent ?? '').trim().slice(0, 30);
-        overlaps.push(`${o.tagName.toLowerCase()} "${text}" ${w.toFixed(1)}x${h.toFixed(1)}`);
+        const text = (o.getAttribute('aria-label') ?? o.textContent ?? '').trim().slice(0, 30);
+        const cls = String(o.className).slice(0, 40);
+        overlaps.push(
+          `${o.tagName.toLowerCase()}.${cls} "${text}" ${w.toFixed(1)}x${h.toFixed(1)}`,
+        );
       }
     }
     out.push({
@@ -75,7 +78,7 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       h: r.height,
       holder: holder?.getBoundingClientRect().height ?? 0,
       overlaps,
-      inRow: el.matches('.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime'),
+      inRow: el.matches(args.exempt),
     });
   }
   return out;
@@ -109,6 +112,8 @@ async function touchFloor(page: Page): Promise<number> {
 // must not move: the hit box is an absolutely positioned ::after.
 const HOLDER_HEIGHTS: Record<string, number[]> = {
   kanban: [102],
+  'kanban-group': [272, 60, 61, 61],
+  errors: [20, 64],
   activity: [...Array(49).fill(65), 64],
   overview: [65, 65, 65, 65, ...Array(8).fill(40)],
   sessions: [98, 98],
@@ -139,7 +144,7 @@ function widthsFor(args: { selector: string; texts: string[] }): Record<string, 
   const time = el?.querySelector('time');
   if (!el || !time) throw new Error(`no time for ${args.selector}`);
   const out: Record<string, number> = {};
-  // The hit box: the bare box, or the ::after centred on it when that grows it.
+  // Same as `hit` in `measure`: a page.evaluate body cannot share a closure.
   const hit = (e: Element) => {
     const r = e.getBoundingClientRect();
     const cs = getComputedStyle(e, '::after');
@@ -169,6 +174,7 @@ function tapMisses(args: {
   const sizes: { w: number; h: number }[] = [];
   const exempt: boolean[] = [];
   const misses: string[][] = [];
+  // Same as `hit` in `measure`: a page.evaluate body cannot share a closure.
   const hit = (e: Element) => {
     const r = e.getBoundingClientRect();
     const cs = getComputedStyle(e, '::after');
@@ -239,14 +245,87 @@ async function serveLiveCards(page: Page): Promise<void> {
   );
 }
 
-const EXEMPT = '.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime';
+const EXEMPT =
+  '.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime, .bs-kanban-group__row-meta .bs-reltime';
 
 const PAGES = [
   ['kanban', '/kanban'],
+  ['kanban-group', '/work/kanban?scope=all'],
   ['activity', '/activity'],
+  ['errors', '/activity?kind=errors'],
   ['overview', '/overview'],
   ['sessions', '/sessions'],
 ] as const;
+
+// A follow-up group with short titles, so each row's copy button sits right
+// above its time, and the Errors lens with one class card (its "Last seen").
+function fixRow(name: string, title: string) {
+  return {
+    taskId: `epic-a/followup-${name}`,
+    taskStatus: 'todo',
+    title: `Fix: ${title}`,
+    agentRole: null,
+    agentModelTier: null,
+    agentActivity: null,
+    milestoneId: null,
+    tags: { case: null, origin: null, severity: null },
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    project: null,
+    attemptCount: 0,
+    judgeRound: null,
+    commentCount: 0,
+    prUrl: null,
+    dependencies: [],
+    epicLabel: null,
+    hasRequest: false,
+    requestFirstLine: null,
+    parentTaskId: 'epic-a/task-1',
+    parentTitle: 'Settings layout',
+  };
+}
+
+// Stubs the data a page needs, before it loads.
+async function prepare(page: Page, name: string): Promise<void> {
+  if (name === 'kanban-group')
+    await page.route('**/api/kanban*', (route) =>
+      route.fulfill({
+        json: [
+          {
+            taskStatus: 'todo',
+            tasks: [fixRow('a1', 'Wrap labels'), fixRow('b2', 'ab'), fixRow('c3', 'a')],
+          },
+        ],
+      }),
+    );
+  if (name === 'errors')
+    await page.route('**/api/errors*', (route) =>
+      route.fulfill({
+        json: {
+          byClass: [],
+          byDay: [],
+          classSummary: [
+            {
+              id: 'spec.wrong-criterion',
+              errorGroup: 'spec',
+              errorClass: 'wrong-criterion',
+              count: 1,
+              severityMix: { 'S4-nit': 1 },
+              lastSeen: '2026-01-01T00:00:00.000Z',
+              projects: ['project-a'],
+              trend7d: [0, 1, 0, 2],
+            },
+          ],
+        },
+      }),
+    );
+}
+
+// Opens what a page keeps closed until asked.
+async function reveal(page: Page, name: string): Promise<void> {
+  if (name !== 'kanban-group') return;
+  await page.locator('.bs-kanban-group summary').first().click();
+  await expect(page.locator('.bs-kanban-group__row-meta .bs-reltime').first()).toBeVisible();
+}
 
 test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target', () => {
   for (const font of FONT_VARIANTS) {
@@ -254,13 +333,19 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
       test(`${name}: every relative time is at least --bs-touch square, moves nothing, covers no target${font.label}`, async ({
         page,
       }) => {
+        await prepare(page, name);
         await page.setViewportSize(VIEWPORTS.mobile);
         await page.goto(path);
         if (font.css) await page.addStyleTag({ content: font.css });
         await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        await reveal(page, name);
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
         const floor = await touchFloor(page);
-        const boxes = await page.evaluate(measure, { selector: TIME, neighbours: NEIGHBOURS });
+        const boxes = await page.evaluate(measure, {
+          selector: TIME,
+          neighbours: NEIGHBOURS,
+          exempt: EXEMPT,
+        });
         expect(boxes.length).toBeGreaterThan(0);
         // A hit box wider than the text must not widen the page.
         expect(
@@ -269,10 +354,11 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           ),
         ).toBeLessThanOrEqual(0);
         for (const b of boxes) {
-          // Only the meta-line time of a timeline row and the live card's status time
-          // keep their text height (bs-primitives.css): a neighbour's 44px box sits
-          // right against them (the row's title button, the card's head link), so a
-          // second 44px box would lie on it. Their width is still a floor.
+          // Only these three keep their text height (bs-primitives.css): a
+          // neighbour's 44px box sits right against each (a row's title button, the
+          // live card's head link, a fix row's copy button above and next open
+          // button below), so a second 44px box would lie on it. Their width is
+          // still a floor.
           if (b.inRow) {
             expect(b.w, `${name}: a row's time is narrower than --bs-touch`).toBeGreaterThanOrEqual(
               floor,
@@ -332,11 +418,13 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
       test(`${name}: a tap inside every relative time's hit box lands on it${font.label}`, async ({
         page,
       }) => {
+        await prepare(page, name);
         if (path === '/overview') await serveLiveCards(page);
         await page.setViewportSize(VIEWPORTS.mobile);
         await page.goto(path);
         if (font.css) await page.addStyleTag({ content: font.css });
         await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        await reveal(page, name);
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
         const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
         expect(real.misses.length).toBeGreaterThan(0);
@@ -363,6 +451,42 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
     }
   }
 
+  // A fix row's copy button sits right above its time. A tap on the lower half
+  // of the copy button must stay on the copy button, not open the tooltip.
+  for (const font of FONT_VARIANTS) {
+    test(`kanban-group: a tap on the lower half of a fix row's copy button lands on it${font.label}`, async ({
+      page,
+    }) => {
+      await prepare(page, 'kanban-group');
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/work/kanban?scope=all');
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+      await reveal(page, 'kanban-group');
+      const stolen = await page.evaluate(() => {
+        const out: string[] = [];
+        const copies = Array.from(document.querySelectorAll('.bs-kanban-group__row-title button'));
+        for (const c of copies) {
+          c.scrollIntoView({ block: 'center' });
+          const r = c.getBoundingClientRect();
+          // Every point in the lower half, 2px in from the left, bottom and right.
+          for (const [x, y] of [
+            [r.left + 2, r.bottom - 2],
+            [r.left + r.width / 2, r.bottom - 2],
+            [r.right - 2, r.bottom - 2],
+            [r.left + 2, r.top + r.height * 0.75],
+          ] as const) {
+            const hit = document.elementFromPoint(x, y);
+            if (!hit || !c.contains(hit)) out.push(`${(hit?.className ?? 'nothing').toString()}`);
+          }
+        }
+        return { copies: copies.length, out };
+      });
+      expect(stolen.copies).toBeGreaterThanOrEqual(2);
+      expect(stolen.out, 'a tap on a copy button lands elsewhere').toEqual([]);
+    });
+  }
+
   // An expanded timeline row's Session link, on Activity and on a task's
   // History tab. The row keeps the height it had before the link grew: the
   // same rows are measured again with the hit-box rules switched off.
@@ -387,6 +511,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const boxes = await page.evaluate(measure, {
           selector: SESSION_LINK,
           neighbours: NEIGHBOURS,
+          exempt: EXEMPT,
         });
         for (const b of boxes) {
           const at = `${where}: the Session link measures ${b.w.toFixed(1)}x${b.h.toFixed(1)}`;
@@ -401,6 +526,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const before = await page.evaluate(measure, {
           selector: SESSION_LINK,
           neighbours: NEIGHBOURS,
+          exempt: EXEMPT,
         });
         expect(boxes.map((b) => round(b.holder))).toEqual(before.map((b) => round(b.holder)));
       });
