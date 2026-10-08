@@ -2907,8 +2907,11 @@ summary.bs-inbox__group-head {
   }
   /* The status row's time keeps its text height: the head link's grown hit
      box ends right above it and the title's starts right below, so a 44px
-     box here would sit on both. Its width still reaches the floor. */
-  .bs-live-card__status .bs-reltime::after {
+     box here would sit on both. Its width still reaches the floor. A follow-up
+     fix row's time (.bs-kanban-group__row-meta) is the same: the row's copy
+     button sits right above it and the next row's open button right below. */
+  .bs-live-card__status .bs-reltime::after,
+  .bs-kanban-group__row-meta .bs-reltime::after {
     height: 100%;
   }
   .bs-live-card__head {
