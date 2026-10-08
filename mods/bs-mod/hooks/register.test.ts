@@ -103,6 +103,27 @@ function prompted(): Map<string, string> {
   return files
 }
 
+/** The eight extra tasks wave5() adds. */
+const EXTRA = Array.from({ length: 8 }, (_, i) => `web-ux-4/task-${30 + i}-extra-${i}`)
+
+/**
+ * prompted() and then a wave 5 of task-18 and eight more, admitted from a third prompt (line 15): eleven open tasks
+ * (task-16 and task-17 still open from wave 4) and three prompts, more than a band body holds.
+ */
+function wave5(): Map<string, string> {
+  const files = prompted()
+  files.set(EPIC_F, (files.get(EPIC_F) ?? '') + [
+    ...EXTRA.map(id => line(EPIC_S, SID, 'task-added', id, T0 - 6 * MIN, { title: `Extra work ${id.slice(-1)}` }, promptRef(5))),
+    line(EPIC_S, SID, 'user_prompt', null, T0 - 4 * MIN, { prompt: 'Run wave 5 now' }),
+    line(EPIC_S, SID, 'wave-admitted', null, T0 - 3 * MIN, {
+      epic_id: 'web-ux-4',
+      task_ids: [T18, ...EXTRA],
+      budget: { cap_tokens: 16_000_000, projected_tokens: 9_100_000, status: 'ok', tier: 'medium' },
+    }, promptRef(15)),
+  ].join(''))
+  return files
+}
+
 /** The session's own subagents, as `$.agent.list()` answers them. */
 function agent(id: string, status: AgentInfo['status']): AgentInfo {
   return { id, description: id, type: 'general-purpose', status }
@@ -132,6 +153,8 @@ type World = {
   statuses: (string | undefined)[]
   opened: string[]
   commands: string[]
+  /** called when a session.start reaches the engine, beneath every plugin */
+  onStart?: () => void
   /** the paths of each `grep -m1 -oE` call, in call order */
   resolves: string[][]
   /** a file's mtime when not T0 */
@@ -207,7 +230,10 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     w.commands.push(e.name)
     return { value: { command: e.name } }
   })
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', ($, e) => {
+    w.onStart?.()
+    return { cwd: e.cwd }
+  })
   on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: '' }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
@@ -262,7 +288,7 @@ describe('band', () => {
     })
   }
 
-  test('Current lists the open tasks of the wave, the prompt that asked for them and the wave progress', async ($, on) => {
+  test('Current draws one head row (phase, wave bar, agents, spend), then a Tasks and a Prompts section', async ($, on) => {
     world(on, prompted())
     const clock = mock.clock(on, { now: T0 })
     mock.store(on)
@@ -271,20 +297,22 @@ describe('band', () => {
 
     const ui = await mountBand($)
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toBe('wave 4')
-    expect(await rowText(ui, `task:${T16}`)).toMatch(/task-16.*Phone toolbar hits.*coder.*12m/)
-    expect(await rowText(ui, `task:${T17}`)).toMatch(/task-17.*Remote error and phone header/)
-    const text = await shown(ui)
-    expect(text.indexOf('task-16')).toBeLessThan(text.indexOf('task-17'))
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T16}`, `task:${T17}`, 'section:prompts', `prompt:${promptRef(0)}`])
+    // the wave's 1/3 done, its coder and wave-runner, the epic's projected spend: no Wave or Tokens row below
+    expect(await rowText(ui, 'head')).toMatch(/^wave 4  [█░]{10} 1\/3 · ●● 2 · 9\.1M\/16M 57%$/)
+    expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
+    // the title column is as wide as the widest title, so the role and the time line up after it
+    expect(await rowText(ui, `task:${T16}`)).toBe(`● task-16  Phone toolbar hits${' '.repeat(11)}  coder  12m`)
+    expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  Remote error and phone header')
+    expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
     // ASK_1, reached through the admission's and the tasks' causal_parent
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m ago ${ASK_1}`)
-    expect(await rowText(ui, 'wave')).toMatch(/1\/3 done.*2 agents on this wave/)
-    expect(await rowText(ui, 'spend')).toMatch(/9\.1M \/ 16M projected · epic.*57%/)
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m  ${ASK_1}`)
+    const text = await shown(ui)
     expect(text).not.toContain('task-18')
     expect(text).not.toContain(ASK_2)
   })
 
-  test('Next lists the open tasks no wave took, with their prompts', async ($, on) => {
+  test('Next draws its head, then a Tasks and a Prompts section of the open tasks no wave took', async ($, on) => {
     world(on, prompted())
     const clock = mock.clock(on, { now: T0 })
     mock.store(on)
@@ -293,12 +321,67 @@ describe('band', () => {
 
     const ui = await mountBand($)
     await ui.press({ key: 'tab:next' })
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T18}`, 'section:prompts', `prompt:${promptRef(5)}`])
     expect(await rowText(ui, 'head')).toBe('after wave 4')
-    expect(await rowText(ui, `task:${T18}`)).toMatch(/task-18.*Phone tab bar/)
-    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m ago ${ASK_2}`)
+    expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
+    expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
+    expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
+    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2}`)
     const text = await shown(ui)
     expect(text).not.toContain('task-16')
     expect(text).not.toContain('task-17')
+  })
+
+  test('Current\'s task rows line up their role and time columns', async ($, on) => {
+    const files = prompted()
+    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'dispatch_decision', T17, T0 - 3 * MIN, { agent_role: 'reviewer', model: 'opus' }))
+    world(on, files)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+
+    const ui = await mountBand($)
+    await ui.press({ key: 'tab:current' })
+    const t16 = await rowText(ui, `task:${T16}`)
+    const t17 = await rowText(ui, `task:${T17}`)
+    expect(t16).toBe(`● task-16  Phone toolbar hits${' '.repeat(11)}  coder     12m`)
+    expect(t17).toBe('● task-17  Remote error and phone header  reviewer  3m')
+    expect(t16.indexOf('coder')).toBe(t17.indexOf('reviewer'))
+    expect(t16.indexOf('12m')).toBe(t17.indexOf('3m'))
+    // the padding is a run of its own, so the role keeps its color and nothing else
+    expect((await ui.find({ type: 'Text', text: /^reviewer$/ }))?.props).toEqual({ color: 'ide', bold: true })
+    expect((await ui.find({ type: 'Text', text: /^coder$/ }))?.props).toEqual({ color: 'claude', bold: true })
+  })
+
+  test('at a narrow width no Current or Next row runs past it, and the dividers fill it', async ($, on) => {
+    world(on, prompted())
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+
+    const width = 24
+    const ui = await mountBand($, 'terminal', { ...BAND, bodyColumns: width })
+    for (const tab of ['current', 'next']) {
+      await ui.press({ key: `tab:${tab}` })
+      const keys = await rowKeys(ui)
+      expect(keys).toContain('section:tasks')
+      // the tab's own rows, after the tab row (its Buttons are the band's, not this tab's)
+      for (const key of keys.slice(keys.indexOf('tabs') + 1)) expect([...(await rowText(ui, key))].length).toBeLessThanOrEqual(width)
+      expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(width - 9)}`)
+      expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(width - 11)}`)
+    }
+    await ui.press({ key: 'tab:current' })
+    // the head keeps the phase and the wave, the spend and then the agents dropped
+    expect(await rowText(ui, 'head')).toMatch(/^wave 4  [█░]{10} 1\/3$/)
+    // the role and the time keep their columns; the title gives way
+    expect(await rowText(ui, `task:${T16}`)).toBe('● task-16  …  coder  12m')
+    expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  …')
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe('❝ 1h10m  Group by tag (…')
+    // with no role column the title runs to the edge
+    await ui.press({ key: 'tab:next' })
+    expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
   })
 
   test('Past groups the done work by wave, newest first, with each wave\'s prompts', async ($, on) => {
@@ -332,7 +415,7 @@ describe('band', () => {
 
     const ui = await mountBand($)
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toBe('wave 5')
+    expect(await rowText(ui, 'head')).toMatch(/^wave 5  /)
     expect(await rowText(ui, `task:${T17}`)).toContain('task-17')
     expect(await rowText(ui, `task:${T18}`)).toContain('task-18')
     await ui.press({ key: 'tab:next' })
@@ -412,25 +495,40 @@ describe('band', () => {
 
     const ui = await mountBand($)
     const props = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
-    expect((await props(/^─+$/))?.color).toBe('claude')
-    expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'claude', color: 'inverseText', bold: true })
+    // the Overview is the soft label color; only the epic chip keeps the claude color
+    expect((await props(/^─+$/))?.color).toBe('inactive')
+    expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'inactive', color: 'inverseText', bold: true })
     expect(await props(/^ web-ux-4 $/)).toEqual({ backgroundColor: 'claude', color: 'inverseText', bold: true })
     expect(await props(/^wave 4$/)).toEqual({ color: 'permission', bold: true })
     expect(await props(/^tier medium$/)).toEqual({ color: 'ide', bold: true })
-    for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'claude', bold: true })
-    // 1 done, 1 active, 2 todo across ten cells
+    for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'inactive', bold: true })
+    // 1 done, 1 active, 2 todo across ten cells; active is teal, in the bar and in its tally
     const cells = await ui.findAll({ type: 'Text', text: /^[█░]+$/ })
-    expect(cells.map(c => c.props.color)).toEqual(['success', 'claude', 'inactive'])
+    expect(cells.map(c => c.props.color)).toEqual(['success', '#14b8a6', 'inactive'])
+    expect((await props(/^● $/))?.color).toBe('#14b8a6')
+    expect((await props(/^ active$/))?.color).toBe('#14b8a6')
     expect((await props(/^57%$/))?.color).toBe('success')
     expect((await props(/^1\/4 done$/))).toEqual({ color: 'success', bold: true })
 
     await ui.press({ key: 'tab:current' })
     expect((await props(/^─+$/))?.color).toBe('permission')
     expect(await props(/^ Current $/)).toEqual({ backgroundColor: 'permission', color: 'inverseText', bold: true })
+    // the head row: done/total in success, the spend in its budget tone, the percent bold
+    expect(await props(/^1\/3$/)).toEqual({ color: 'success', bold: true })
+    expect((await props(/^9\.1M\/16M$/))?.color).toBe('success')
+    expect(await props(/^57%$/)).toEqual({ color: 'success', bold: true })
+    // a section divider: the rule subtle, the name in the soft label color, bold
+    expect(await props(/^── $/)).toEqual({ color: 'subtle' })
+    expect(await props(/^Tasks$/)).toEqual({ color: 'inactive', bold: true })
+    expect(await props(/^Prompts$/)).toEqual({ color: 'inactive', bold: true })
+    // the role keeps its own color; the in-progress mark is teal, after the head's role dots
     expect((await props(/^coder$/))?.color).toBe('claude')
-    // a prompt is drawn apart from the task rows, its time dim
+    expect((await props(/^12m$/))?.dimColor).toBe(true)
+    const marks = await ui.findAll({ type: 'Text', text: /^●$/ })
+    expect(marks[marks.length - 1]?.props.color).toBe('#14b8a6')
+    // a prompt is drawn apart from the task rows, its age dim
     expect((await props(new RegExp(`^${ASK_1.replace(/[()]/g, '\\$&')}$`)))?.color).toBe('remember')
-    expect((await props(/^1h10m ago$/))?.dimColor).toBe(true)
+    expect(await props(/^1h10m$/)).toEqual({ dimColor: true })
   })
 
   for (const [projected, tone] of [[11_200_000, 'warning'], [14_400_000, 'error']] as const) {
@@ -448,19 +546,8 @@ describe('band', () => {
     })
   }
 
-  test('the Current tab at maxRows 12 keeps its header, two tasks, one prompt and the progress rows', async ($, on) => {
-    const files = prompted()
-    const extra = Array.from({ length: 8 }, (_, i) => `web-ux-4/task-${30 + i}-extra-${i}`)
-    files.set(EPIC_F, (files.get(EPIC_F) ?? '') + [
-      ...extra.map(id => line(EPIC_S, SID, 'task-added', id, T0 - 6 * MIN, { title: `Extra work ${id.slice(-1)}` }, promptRef(5))),
-      line(EPIC_S, SID, 'user_prompt', null, T0 - 4 * MIN, { prompt: 'Run wave 5 now' }),
-      line(EPIC_S, SID, 'wave-admitted', null, T0 - 3 * MIN, {
-        epic_id: 'web-ux-4',
-        task_ids: [T18, ...extra],
-        budget: { cap_tokens: 16_000_000, projected_tokens: 9_100_000, status: 'ok', tier: 'medium' },
-      }, promptRef(15)),
-    ].join(''))
-    world(on, files)
+  test('the Current tab at maxRows 12 keeps its head, three tasks and their cut, and the two newest prompts', async ($, on) => {
+    world(on, wave5())
     const clock = mock.clock(on, { now: T0 })
     mock.store(on)
     mock.env(on, { HOME: '/home/u' })
@@ -468,15 +555,65 @@ describe('band', () => {
 
     const ui = await mountBand($, 'terminal', { ...BAND, maxRows: 12, scroll: { offset: 0, bodyRows: 12 } })
     await ui.press({ key: 'tab:current' })
-    expect((await rowKeys(ui)).length).toBeLessThanOrEqual(12)
-    expect(await rowText(ui, 'head')).toBe('wave 5')
-    expect((await ui.findAll({ type: 'Text', text: /^task-\d+$/ })).length).toBeGreaterThanOrEqual(2)
-    expect((await ui.findAll({ type: 'Text', text: /^❝ $/ })).length).toBeGreaterThanOrEqual(1)
-    expect(await rowText(ui, 'wave')).toMatch(/done/)
-    expect(await rowText(ui, 'spend')).toMatch(/projected/)
-    // 11 open tasks and 3 prompts cannot all fit: the cut says how many it left out
-    expect((await ui.findAll({ type: 'Text', text: /^\+\d+ more$/ })).length).toBeGreaterThanOrEqual(1)
+    const keys = await rowKeys(ui)
+    expect(keys.length).toBe(12)
+    const tasks = keys.filter(k => k.startsWith('task:'))
+    expect(tasks.length).toBe(3)
+    // 11 open tasks cannot all fit: the cut says how many it left out; the prompts get no such row
+    expect(keys).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', ...tasks, 'more:tasks', 'section:prompts', `prompt:${promptRef(15)}`, `prompt:${promptRef(5)}`])
+    expect(await rowText(ui, 'more:tasks')).toBe('+8 more')
+    expect(await rowText(ui, 'head')).toMatch(/^wave 5/)
+    expect(await shown(ui)).not.toContain(ASK_1)
   })
+
+  test('Current shows only the two newest prompts, with no more row for the rest', async ($, on) => {
+    world(on, wave5())
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+
+    const ui = await mountBand($, 'terminal', { ...BAND, maxRows: 20, scroll: { offset: 0, bodyRows: 20 } })
+    await ui.press({ key: 'tab:current' })
+    const keys = await rowKeys(ui)
+    expect(keys.filter(k => k.startsWith('prompt:'))).toEqual([`prompt:${promptRef(15)}`, `prompt:${promptRef(5)}`])
+    expect(keys.filter(k => k.startsWith('task:')).length).toBe(11)
+    expect(keys).not.toContain('more:prompts')
+    expect(keys).not.toContain('more:tasks')
+    expect(await shown(ui)).not.toContain(ASK_1)
+  })
+
+  // the body rows after the head row, at each small height: task 1, task 2, prompt 1, prompt 2, then the rest of the tasks
+  const SMALL: readonly (readonly [number, readonly string[]])[] = [
+    [4, []],
+    [5, ['more']],
+    [6, ['more']],
+    [7, ['section:tasks', 'task', 'more:tasks']],
+    [8, ['section:tasks', 'task', 'task', 'more:tasks']],
+    [9, ['section:tasks', 'task', 'task', 'task', 'more:tasks']],
+    [10, ['section:tasks', 'task', 'task', 'more:tasks', 'section:prompts', 'prompt']],
+    [11, ['section:tasks', 'task', 'task', 'more:tasks', 'section:prompts', 'prompt', 'prompt']],
+  ]
+  for (const [maxRows, body] of SMALL) {
+    test(`at maxRows ${maxRows} Current's sections take ${body.length} rows after its head and never more than the band holds`, async ($, on) => {
+      world(on, wave5())
+      const clock = mock.clock(on, { now: T0 })
+      mock.store(on)
+      mock.env(on, { HOME: '/home/u' })
+      await boot($, clock)
+
+      const ui = await mountBand($, 'terminal', { ...BAND, maxRows, scroll: { offset: 0, bodyRows: maxRows } })
+      await ui.press({ key: 'tab:current' })
+      const keys = await rowKeys(ui)
+      expect(keys.length).toBeLessThanOrEqual(maxRows)
+      expect(keys.slice(0, 4)).toEqual(['blank', 'rule', 'tabs', 'head'])
+      expect(keys.slice(4).map(k => k.replace(/:web-ux-4\/.*$|:web-ux-4-.*$/, ''))).toEqual(body)
+      const tasks = keys.filter(k => k.startsWith('task:')).length
+      // nothing fits but a single cut: it counts every task and both prompts
+      if (body[0] === 'more') expect(await rowText(ui, 'more')).toBe('+13 more')
+      if (body.includes('more:tasks')) expect(await rowText(ui, 'more:tasks')).toBe(`+${11 - tasks} more`)
+    })
+  }
 
   test('every row fits bodyColumns, a long one cut with …', async ($, on) => {
     world(on, prompted())
@@ -576,12 +713,12 @@ describe('band always', () => {
       expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
       expect(await rowText(ui, 'blank')).toBe(' ')
       expect(await rowText(ui, 'rule')).toBe('─'.repeat(115))
-      expect((await ui.find({ type: 'Text', text: /^─+$/ }))?.props).toEqual({ color: 'claude' })
+      expect((await ui.find({ type: 'Text', text: /^─+$/ }))?.props).toEqual({ color: 'inactive' })
       expect(await rowText(ui, 'tabs')).toBe(' Overview ')
-      expect((await ui.find({ type: 'Text', text: /^ Overview $/ }))?.props).toEqual({ backgroundColor: 'claude', color: 'inverseText', bold: true })
+      expect((await ui.find({ type: 'Text', text: /^ Overview $/ }))?.props).toEqual({ backgroundColor: 'inactive', color: 'inverseText', bold: true })
       expect(await ui.findAll({ type: 'Button' })).toEqual([])
       expect(await rowText(ui, 'agents')).toBe('Agents  0 in this session')
-      expect((await ui.find({ type: 'Text', text: /^Agents$/ }))?.props).toEqual({ color: 'claude', bold: true })
+      expect((await ui.find({ type: 'Text', text: /^Agents$/ }))?.props).toEqual({ color: 'inactive', bold: true })
       expect((await ui.find({ type: 'Text', text: /^0$/ }))?.props).toEqual({ bold: true })
       expect(await rowText(ui, 'idle')).toBe(IDLE_LINE)
       expect((await ui.find({ type: 'Text', text: /^no running epic/ }))?.props).toEqual({ dimColor: true })
@@ -745,7 +882,7 @@ describe('pane', () => {
     expect(text).toContain('Remote error and phone header')
     expect(text).toContain('✔ merged task-15')
     expect((await pane.find({ type: 'Text', text: /^coder$/ }))?.props.color).toBe('claude')
-    expect((await pane.find({ type: 'Text', text: /^in-progress$/ }))?.props.color).toBe('claude')
+    expect((await pane.find({ type: 'Text', text: /^in-progress$/ }))?.props.color).toBe('#14b8a6')
     expect((await pane.find({ type: 'Text', text: /Agents/ }))?.props.color).toBe('claude')
     expect((await pane.find({ type: 'Text', text: /^ web-ux-4 $/ }))?.props.backgroundColor).toBe('claude')
   })
@@ -952,7 +1089,7 @@ describe('live log', () => {
     expect(await rowText(ui, 'head')).toMatch(/web-ux-4\s+· wave 5/)
     // the old band's `Now tester task-17` is a Current row
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toBe('wave 5')
+    expect(await rowText(ui, 'head')).toMatch(/^wave 5/)
     expect(await rowText(ui, `task:${T17}`)).toMatch(/task-17.*tester/)
   })
 
@@ -1048,10 +1185,9 @@ describe('file epics', () => {
     const ui = await $.ui.mount({ plugin: 'bs-mod', surface: 'terminal', component: 'AbovePrompt', props: BAND })
     expect(await rowText(ui, 'head')).toMatch(/web-audit-5\s+· wave 4/)
     expect(w.statuses[w.statuses.length - 1]).toBe('web-audit-5 · w4 · 1/2')
-    // Current's Wave bar counts the tasks wave 4's session worked
+    // Current's head row carries the wave bar, which counts the tasks wave 4's session worked
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toMatch(/wave 4/)
-    expect(await rowText(ui, 'wave')).toMatch(/0\/1 done/)
+    expect(await rowText(ui, 'head')).toMatch(/^wave 4  [█░]+ 0\/1/)
   })
 
   test('a close session the content names for its epic brings in the epic\'s other files', async ($, on) => {
@@ -1184,7 +1320,7 @@ describe('watching', () => {
     expect((await ui.find({ type: 'Text', text: /^wave 4$/ }))?.props).toEqual({ color: 'permission', bold: true })
     // the old band's `Now coder task-16 (12m)` is a Current row, the watched epic still marked dim
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toBe('wave 4 · watching web-ux-4')
+    expect(await rowText(ui, 'head')).toMatch(/^wave 4  .* · watching web-ux-4$/)
     expect((await ui.find({ type: 'Text', text: /^watching web-ux-4$/ }))?.props).toEqual({ dimColor: true })
     expect(await rowText(ui, `task:${T16}`)).toMatch(/task-16.*coder.*12m/)
     expect((await ui.find({ type: 'Text', text: /^coder$/ }))?.props.color).toBe('claude')
@@ -1438,4 +1574,134 @@ describe('plan tier', () => {
     expect(tiers.value).toEqual({ 'web-ux-4': { version: 0, tier: null } })
     expect(tiers.sets).toBe(1)
   })
+})
+
+/** The `/config` theme row, as `$.config.list()` answers it; and a writer beneath bs-mod, so a `config.set` lands. */
+function themed(on: On, theme: string): void {
+  on('config.list', () => ({
+    value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: theme, provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
+  }))
+  on('config.set', ($, e) => ({ value: e.value }))
+}
+
+describe('palette', () => {
+  type Ui = Awaited<ReturnType<typeof mountBand>>
+  const prompt = new RegExp(`^${ASK_1.replace(/[()]/g, '\\$&')}$`)
+
+  /** The colors at the spots a theme repaints: a done and an active bar cell, the Current accent, a prompt, a done mark. */
+  async function spots(ui: Ui) {
+    const color = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
+    const cells = await ui.findAll({ type: 'Text', text: /^[█░]+$/ })
+    const out = { done: cells[0]?.props.color, active: cells[1]?.props.color, current: undefined as unknown, rule: undefined as unknown, prompt: undefined as unknown, mark: undefined as unknown }
+    await ui.press({ key: 'tab:current' })
+    out.current = (await color(/^ Current $/))?.backgroundColor
+    out.rule = (await color(/^─+$/))?.color
+    out.prompt = (await color(prompt))?.color
+    await ui.press({ key: 'tab:past' })
+    out.mark = (await color(/^✔$/))?.color
+    await ui.press({ key: 'tab:overview' })
+    return out
+  }
+
+  async function up($: Engine, on: On, theme: string | null): Promise<Ui> {
+    world(on, prompted())
+    if (theme !== null) themed(on, theme)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    return mountBand($)
+  }
+
+  const CASES = [
+    ['dark', { done: '#a6e3a1', active: '#94e2d5', current: '#89b4fa', rule: '#89b4fa', prompt: '#b4befe', mark: '#a6e3a1' }],
+    ['dark-ansi', { done: '#a6e3a1', active: '#94e2d5', current: '#89b4fa', rule: '#89b4fa', prompt: '#b4befe', mark: '#a6e3a1' }],
+    ['light', { done: '#40a02b', active: '#179299', current: '#1e66f5', rule: '#1e66f5', prompt: '#7287fd', mark: '#40a02b' }],
+    ['dark-daltonized', { done: 'success', active: '#14b8a6', current: 'permission', rule: 'permission', prompt: 'remember', mark: 'success' }],
+  ] as const
+
+  for (const [theme, want] of CASES) {
+    test(`under ${theme} the done, active, Current and prompt spots carry its palette`, async ($, on) => {
+      const ui = await up($, on, theme)
+      expect(await spots(ui)).toEqual(want)
+    })
+  }
+
+  test('a theme set from dark to light turns the Mocha colors Latte on the next draw', async ($, on) => {
+    const ui = await up($, on, 'dark')
+    expect((await spots(ui)).active).toBe('#94e2d5')
+
+    const set = await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+    expect(set).toEqual({ value: 'light' })
+    expect(await spots(ui)).toEqual(CASES[2][1])
+  })
+
+  test('a denied theme write leaves the palette as it was', async ($, on) => {
+    world(on, prompted())
+    on('config.list', () => ({
+      value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: 'dark', provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
+    }))
+    on('config.set', () => ({ deny: 'locked by policy' }))
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    const ui = await mountBand($)
+
+    expect(await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })).toEqual({ deny: 'locked by policy' })
+    expect((await spots(ui)).active).toBe('#94e2d5')
+  })
+
+  test('a theme that cannot be read leaves the theme keys and the band drawn', async ($, on) => {
+    world(on, prompted())
+    on('config.list', () => {
+      throw new Error('config unavailable')
+    })
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    const ui = await mountBand($)
+    expect(await rowKeys(ui)).toContain('head')
+    expect(await spots(ui)).toEqual(CASES[3][1])
+  })
+
+  test('a theme write that fails leaves the palette as it was', async ($, on) => {
+    on('state.set', { plugin: 'bs-mod', key: 'theme' }, ($, e, next) => {
+      return e.value === 'light' ? { deny: 'state unavailable' } : next(e)
+    })
+    const ui = await up($, on, 'dark')
+    const set = await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+    expect(set).toEqual({ value: 'light' })
+    expect((await spots(ui)).active).toBe('#94e2d5')
+  })
+
+  test('session.start goes down the chain before the theme is read', async ($, on) => {
+    const order: string[] = []
+    on('state.set', { plugin: 'bs-mod', key: 'theme' }, ($, e, next) => {
+      order.push('theme')
+      return next(e)
+    })
+    const w = world(on, prompted())
+    w.onStart = () => order.push('engine')
+    themed(on, 'dark')
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    expect(order).toEqual(['engine', 'theme'])
+  })
+
+  // the soft label color per palette: Mocha subtext0, Latte subtext0, the theme key
+  for (const [theme, soft] of [['dark', '#a6adc8'], ['light', '#6c6f85'], ['dark-daltonized', 'inactive'], [null, 'inactive']] as const) {
+    test(`the Overview accent and labels take the soft label color ${soft} under ${theme ?? 'no theme'}`, async ($, on) => {
+      const ui = await up($, on, theme)
+      const props = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
+      expect((await props(/^─+$/))?.color).toBe(soft)
+      expect(await props(/^ Overview $/)).toEqual({ backgroundColor: soft, color: 'inverseText', bold: true })
+      for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: soft, bold: true })
+      await ui.press({ key: 'tab:current' })
+      for (const name of ['Tasks', 'Prompts']) expect(await props(new RegExp(`^${name}$`))).toEqual({ color: soft, bold: true })
+    })
+  }
 })

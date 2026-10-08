@@ -19,10 +19,16 @@ shows it once installed.
   row and a separator, then a row of tabs.
   - With an epic in view, the band has four tabs.
     - **Overview** shows active agents, tasks done, budget, the current wave
-      or phase, and the epic's tier.
-    - **Current** shows the work in flight: its wave and the prompts you gave
-      for it, with progress, agents, budget and tokens spent.
-    - **Next** shows what comes next, with its wave and prompts.
+      or phase, and the epic's tier. Its tab and labels are soft white under Mocha and Latte, and the theme's grey otherwise.
+    - **Current** shows the work in flight. One head row carries the wave
+      or phase, a progress bar with tasks done, the live agents and the
+      spend against the cap. Below it, a **Tasks** section lists the wave's
+      tasks in aligned columns (status, id, title, role, time), and a
+      **Prompts** section shows the two newest prompts you gave for it.
+    - **Next** shows what comes next, with the same Tasks and Prompts
+      sections.
+    - Active work is marked in teal, in the bar, the tallies and the task
+      marks.
     - **Past** shows what is done, grouped by the wave that merged it.
   - The letters `o`, `c`, `n` and `p` switch tabs while the band has focus.
   - With no epic, the band is idle. It shows this session's agent count and a
@@ -35,6 +41,14 @@ shows it once installed.
   pinned one, never from a watched one. The log a session starts on, and any
   event older than two minutes, never toasts, so opening a session on a long
   log stays quiet.
+- **Colors.** The band and the pane color by meaning in Catppuccin pastels:
+  Mocha under a dark `/config` theme (`dark-ansi` too), Latte under a light
+  one. A daltonized theme, `auto`, or a theme the HUD cannot read keeps the
+  terminal theme's own colors, with active work in teal. Neutral body text stays in
+  the theme's colors. The Overview tab, its labels and the Tasks and Prompts
+  dividers take a soft white under Mocha and Latte, and the theme's `inactive`
+  grey otherwise. Changing the theme repaints
+  the HUD at once.
 - **Watching.** Normally the HUD follows the epics whose events name this
   session. When nothing is pinned and the session has no such epic, it
   watches the newest running epic under the session's own roots instead, and

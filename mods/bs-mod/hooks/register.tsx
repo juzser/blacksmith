@@ -24,6 +24,7 @@ import {
   newestRunning,
   nextModel,
   overviewModel,
+  paletteOf,
   parseBsRoots,
   pastModel,
   pickEpic,
@@ -37,7 +38,7 @@ import {
   STATUS_RANK,
   summarize,
 } from './fold'
-import type { BsEvent, Cells, Phase, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
+import type { BsEvent, Cells, Palette, PaletteRole, Phase, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
 
 const PANE = 'bs-mod'
 const TICK_MS = 4000
@@ -60,6 +61,8 @@ const BAND_BAR = 10
 const BAND_GAUGE = 8
 const PANE_BAR = 24
 const MAX_DOTS = 8
+/** the prompts Current and Next show, newest first; no `+N more` row for the rest */
+const BAND_PROMPTS = 2
 const BS_COMMAND = /\bbs\b|smith|cli\.js|BS_HOME|SMITH_HOME/
 const EPIC_ID = /^[A-Za-z0-9][\w.-]*$/
 
@@ -71,10 +74,13 @@ const watchedAtom = atom({ plugin: 'bs-mod', key: 'watched' } as const, null)
 const planTiersAtom = atom({ plugin: 'bs-mod', key: 'planTiers' } as const, {} as Record<string, PlanTier>)
 /** the band's active tab, in `$.state` so a reload of the band keeps it; Overview until a tab is picked */
 const tabAtom = atom({ plugin: 'bs-mod', key: 'tab' } as const, 'overview' as BandTab)
+/** the `/config` theme, which picks the palette (fold.ts paletteOf); null until read, so the theme keys draw */
+const themeAtom = atom({ plugin: 'bs-mod', key: 'theme' } as const, null as string | null)
 
 type Entry = { path: string; name: string; size: number; mtimeMs: number }
 /** a folded line, with the epic of the file it came from */
 type Line = { ev: BsEvent; ref: string; ts: number; isNewFile: boolean; fileEpic: string }
+/** `color` and `bg`: a palette role (fold.ts PaletteRole, `active` the in-progress teal) or a neutral theme key */
 type Look = { color?: string; bg?: string; bold?: boolean; dim?: boolean }
 /** a stretch of text drawn in one style; `shrink`: the run a band row cuts first when it is too wide */
 type Run = Look & { text: string; shrink?: boolean }
@@ -95,10 +101,15 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-function style(p: Look): TextProps {
+/** A palette role in the theme's palette; a neutral theme key stays itself. */
+function paint(pal: Palette, color: string): string {
+  return Object.hasOwn(pal, color) ? pal[color as PaletteRole] : color
+}
+
+function style(p: Look, pal: Palette): TextProps {
   const out: TextProps = {}
-  if (p.color) out.color = p.color
-  if (p.bg) out.backgroundColor = p.bg
+  if (p.color) out.color = paint(pal, p.color)
+  if (p.bg) out.backgroundColor = paint(pal, p.bg)
   if (p.bold) out.bold = true
   if (p.dim) out.dimColor = true
   return out
@@ -116,7 +127,7 @@ function partWidth(p: Part): number {
   return p.runs.reduce((n, r) => n + r.text.length, 0)
 }
 
-/** Each role keeps one theme color, wherever it is drawn. */
+/** Each role keeps one palette color, wherever it is drawn; verifier and scribe keep their theme keys. */
 const ROLE_COLOR: Record<string, string> = {
   coder: 'claude',
   tester: 'planMode',
@@ -160,7 +171,7 @@ function barRuns(c: Cells): Run[] {
   return [
     run('█'.repeat(c.done), { color: 'success' }),
     run('█'.repeat(c.review), { color: 'ide' }),
-    run('█'.repeat(c.active), { color: 'claude' }),
+    run('█'.repeat(c.active), { color: 'active' }),
     run('░'.repeat(c.todo), { color: 'inactive' }),
   ].filter(r => r.text)
 }
@@ -186,7 +197,7 @@ function budgetRuns(b: NonNullable<Summary['budget']>, width: number): Run[] {
 function tallyParts(c: Summary['counts']): Part[] {
   const out: Part[] = []
   if (c.review) out.push(part(3, run(`◐ ${c.review} review`, { color: 'ide' })))
-  if (c.active) out.push(part(3, run(`● ${c.active} active`, { color: 'claude' })))
+  if (c.active) out.push(part(3, run(`● ${c.active} active`, { color: 'active' })))
   if (c.todo) out.push(part(4, run(`○ ${c.todo} todo`, { dim: true })))
   return out
 }
@@ -229,7 +240,7 @@ function glyph(status: string): Look & { mark: string } {
     case 'escalated':
       return { mark: '⚑', color: 'warning' }
     case 'in-progress':
-      return { mark: '●', color: 'claude' }
+      return { mark: '●', color: 'active' }
     case 'reviewing':
     case 'merging':
       return { mark: '◐', color: 'ide' }
@@ -271,7 +282,7 @@ function toneColor(tone: string): string | undefined {
  * digit would switch tabs from the prompt; a letter fires only while the band holds the focus.
  */
 type TabSpec = { id: BandTab; label: string; hotkey: string; accent: string }
-const OVERVIEW_TAB: TabSpec = { id: 'overview', label: 'Overview', hotkey: 'o', accent: 'claude' }
+const OVERVIEW_TAB: TabSpec = { id: 'overview', label: 'Overview', hotkey: 'o', accent: 'label' }
 const TABS: readonly TabSpec[] = [
   OVERVIEW_TAB,
   { id: 'current', label: 'Current', hotkey: 'c', accent: 'permission' },
@@ -364,23 +375,23 @@ function dots(roles: readonly string[]): Run[] {
 function bandTallies(c: Cells): Part[] {
   const out: Part[] = []
   if (c.review) out.push(part(3, run('◐ ', { color: 'ide' }), num(c.review, { color: 'ide' }), run(' review', { color: 'ide' })))
-  if (c.active) out.push(part(3, run('● ', { color: 'claude' }), num(c.active, { color: 'claude' }), run(' active', { color: 'claude' })))
+  if (c.active) out.push(part(3, run('● ', { color: 'active' }), num(c.active, { color: 'active' }), run(' active', { color: 'active' })))
   if (c.todo) out.push(part(4, run('○ ', { color: 'inactive' }), num(c.todo, { color: 'inactive' }), run(' todo', { color: 'inactive' })))
   return out
 }
 
 /**
- * A spend row: the label, the gauge in the budget tone, `projected / cap`, whose spend (`scope`) and the percent;
- * `projected` left out when the row is too narrow for it.
+ * A spend row: the label, the gauge in the budget tone, `projected / cap` and the percent; `projected` left out
+ * when the row is too narrow for it.
  */
-function spendRow(key: string, name: string, accent: string, b: Spend, width: number, scope = ''): BandRow {
+function spendRow(key: string, name: string, accent: string, b: Spend, width: number): BandRow {
   const tone = budgetColor(b.pct)
   const runs = (basis: string) => [
     ...label(name, accent),
     ...gaugeRuns(b.pct, BAND_GAUGE),
     run(' '),
     run(`${fmtTok(b.projected)} / ${fmtTok(b.cap)}`, { color: tone, bold: true }),
-    run(`${basis}${scope}`, { color: 'subtle' }),
+    run(basis, { color: 'subtle' }),
     run(' '),
     run(`${b.pct}%`, { color: tone, bold: true }),
   ]
@@ -402,12 +413,16 @@ function taskRuns(t: TaskRow): Run[] {
   return runs
 }
 
-/** An operator prompt, apart from the task rows: `❝`, how long ago, the text on one line. */
-function promptRuns(p: PromptRow, now: number): Run[] {
+/**
+ * An operator prompt, apart from the task rows: `❝`, how long ago, the text on one line. `ago`: Past's `5m ago `;
+ * Current's and Next's Prompts sections draw the bare age and two spaces.
+ */
+function promptRuns(p: PromptRow, now: number, ago = true): Run[] {
+  const age = fmtElapsed(Math.max(0, now - p.ts))
   return [
     run('❝ ', { color: 'remember' }),
-    run(`${fmtElapsed(Math.max(0, now - p.ts))} ago`, { dim: true }),
-    run(' '),
+    run(ago ? `${age} ago` : age, { dim: true }),
+    run(ago ? ' ' : '  '),
     shrink(run(oneLine(p.text), { color: 'remember' })),
   ]
 }
@@ -451,10 +466,99 @@ function listRows(tasks: readonly TaskRow[], prompts: readonly PromptRow[], budg
   return rows.slice(0, Math.max(0, budget))
 }
 
-/** The head row of Current, Next and Past: the header in the tab's accent, a watched epic marked dim. */
+/** The head row of Next and Past: the header in the tab's accent, a watched epic marked dim. */
 function headRow(key: string, header: string, accent: string, watched: string | null): BandRow {
   const mark = watched ? [run(SEP, { color: 'subtle' }), run(`watching ${watched}`, { dim: true })] : []
   return { key, runs: [run(header, { color: accent, bold: true }), ...mark] }
+}
+
+/** A section divider of Current and Next, `── Tasks ───…`, as wide as the band like the rule. */
+function sectionRow(key: string, name: string, width: number): BandRow {
+  return {
+    key,
+    runs: [
+      run('── ', { color: 'subtle' }),
+      run(name, { color: 'label', bold: true }),
+      run(` ${'─'.repeat(Math.max(0, width - 3 - cols(name) - 1))}`, { color: 'subtle' }),
+    ],
+  }
+}
+
+/** `text` in at most `n` columns, ending in `…` when it was cut. */
+function ellipsize(text: string, n: number): string {
+  if (cols(text) <= n) return text
+  return n < 1 ? '' : `${cut(text, n - 1).trimEnd()}…`
+}
+
+function spaces(n: number): Run {
+  return run(' '.repeat(Math.max(0, n)))
+}
+
+/**
+ * A task list in columns: the mark, the short id padded to the widest, the title cut with `…` to the room left and
+ * padded, then, when a row has them, the role padded to the widest and the elapsed time. With no role or time in the
+ * list the title runs to the edge; no row is wider than `width`.
+ */
+function columnRows(tasks: readonly TaskRow[], width: number): BandRow[] {
+  const widest = (f: (t: TaskRow) => string) => Math.max(0, ...tasks.map(t => cols(f(t))))
+  const idW = widest(t => t.short)
+  const roleW = widest(t => t.role ?? '')
+  const timeW = widest(t => t.elapsed ?? '')
+  const right = (roleW ? 2 + roleW : 0) + (timeW ? 2 + timeW : 0)
+  const titleW = Math.min(widest(t => oneLine(t.title)), Math.max(0, width - 2 - idW - 2 - right))
+  return tasks.map(t => {
+    const g = glyph(t.status)
+    const runs: Run[] = [run(g.mark, { color: g.color ?? 'inactive' }), run(' '), run(t.short, { bold: true }), spaces(idW - cols(t.short))]
+    if (titleW > 0) {
+      const title = ellipsize(oneLine(t.title), titleW)
+      runs.push(run('  '), shrink(run(title)), spaces(titleW - cols(title)))
+    }
+    if (roleW) runs.push(run('  '), run(t.role ?? '', { color: roleColor(t.role ?? ''), bold: true }), spaces(roleW - cols(t.role ?? '')))
+    if (timeW) runs.push(run('  '), run(t.elapsed ?? '', { dim: true }))
+    // a row with no role or time ends at its title
+    while (runs.at(-1)?.text.trim() === '') runs.pop()
+    return { key: `task:${t.id}`, runs }
+  })
+}
+
+/**
+ * How many tasks and prompts Current's and Next's sections show in `budget` rows: a task, a second task, a prompt, a
+ * second prompt, then the rest of the tasks. A section costs its divider, a cut task list its `+N more`. With tasks
+ * to show and not one that fits, no section shows: the prompts never stand in for the tasks.
+ */
+function allotSections(budget: number, tasks: number, prompts: number): [number, number] {
+  const total: [number, number] = [tasks, prompts]
+  const n: [number, number] = [0, 0]
+  const cost = () => (n[0] ? 1 + n[0] + (n[0] < tasks ? 1 : 0) : 0) + (n[1] ? 1 + n[1] : 0)
+  const wants: [0 | 1, number][] = [[0, 1], [0, 2], [1, 1], [1, 2], [0, tasks]]
+  for (const [i, target] of wants) {
+    while (n[i] < Math.min(target, total[i])) {
+      n[i] += 1
+      if (cost() > budget) {
+        n[i] -= 1
+        break
+      }
+    }
+  }
+  return tasks > 0 && n[0] === 0 ? [0, 0] : n
+}
+
+/** Current's and Next's lists in `budget` rows: a Tasks section and its `+N more` when cut, then a Prompts section. */
+function sectionRows(tasks: readonly TaskRow[], prompts: readonly PromptRow[], budget: number, width: number, now: number): BandRow[] {
+  const [t, p] = allotSections(budget, tasks.length, prompts.length)
+  // not even one section: one count for both lists
+  if (t === 0 && p === 0) return budget >= 1 && tasks.length + prompts.length > 0 ? [moreRow('more', tasks.length + prompts.length)] : []
+  const rows: BandRow[] = []
+  if (t > 0) {
+    const shown = capped(tasks, t)
+    rows.push(sectionRow('section:tasks', 'Tasks', width), ...columnRows(shown.rows, width))
+    if (shown.more) rows.push(moreRow('more:tasks', shown.more))
+  }
+  if (p > 0) {
+    rows.push(sectionRow('section:prompts', 'Prompts', width))
+    rows.push(...prompts.slice(0, p).map(r => ({ key: `prompt:${r.ref}`, runs: promptRuns(r, now, false) })))
+  }
+  return rows.slice(0, Math.max(0, budget))
 }
 
 type BandInput = { epic: EpicView; now: number; rows: number; width: number; watched: boolean; effort: Tier | null; sessionAgents: number }
@@ -507,7 +611,7 @@ function drawable(node: RenderNode | null | undefined): boolean {
 
 function overviewRows(b: BandInput): BandRow[] {
   const m = overviewModel(b.epic, b.now, b.effort)
-  const accent = 'claude'
+  const accent = OVERVIEW_TAB.accent
   const name = b.watched ? [run('watching', { dim: true }), run(' '), run(m.epicId, { dim: true })] : [chip(m.epicId)]
   const head = [part(0, ...name), part(0, run(m.phase.label, { color: PHASE_COLOR[m.phase.kind], bold: true }))]
   if (m.tier.tier) head.push(part(1, run(`tier ${m.tier.tier}`, { color: TIER_COLOR[m.tier.tier], bold: true })))
@@ -529,35 +633,34 @@ function overviewRows(b: BandInput): BandRow[] {
   return rows
 }
 
+/**
+ * Current: one head row (the phase, the wave bar and done/total, the live agents on the wave, the spend, a watched
+ * epic), then a Tasks and a Prompts section. A narrow band drops the spend first, then the agents, then the watch.
+ */
 function currentRows(b: BandInput): BandRow[] {
-  const m = currentModel(b.epic, b.now)
+  const m = currentModel(b.epic, b.now, { prompts: BAND_PROMPTS })
   const accent = 'permission'
-  const progress: BandRow[] = []
-  if (m.wave) {
-    const w = m.wave
-    const n = m.agents.count
-    progress.push({
-      key: 'wave',
-      runs: joinParts([
-        part(0, ...label('Wave', accent), ...barRuns(segments(w, BAND_BAR)), run(' '), run(`${w.done}/${w.total} done`, { color: 'success', bold: true })),
-        part(1, ...dots(m.agents.roles), run(m.agents.roles.length ? ' ' : ''), num(n), run(` ${n === 1 ? 'agent' : 'agents'} on this wave`)),
-      ], b.width),
-    })
+  const w = m.wave
+  const progress = w ? [run('  '), ...barRuns(segments(w, BAND_BAR)), run(' '), run(`${w.done}/${w.total}`, { color: 'success', bold: true })] : []
+  const head = [part(0, run(m.header, { color: accent, bold: true }), ...progress)]
+  if (m.agents.count > 0) head.push(part(2, ...dots(m.agents.roles), run(' '), num(m.agents.count)))
+  if (m.tokens) {
+    const tone = budgetColor(m.tokens.pct)
+    head.push(part(3, run(`${fmtTok(m.tokens.projected)}/${fmtTok(m.tokens.cap)}`, { color: tone }), run(' '), run(`${m.tokens.pct}%`, { color: tone, bold: true })))
   }
-  if (m.tokens) progress.push(spendRow('spend', 'Tokens', accent, m.tokens, b.width, `${SEP}${m.tokens.scope}`))
-  const head = headRow('head', m.header, accent, b.watched ? b.epic.epicId : null)
+  if (b.watched) head.push(part(1, run(`watching ${b.epic.epicId}`, { dim: true })))
   const empty = m.tasks.rows.length === 0 && m.prompts.rows.length === 0
   const lists = empty
     ? [{ key: 'empty', runs: [run('nothing running', { color: 'inactive' })] }]
-    : listRows(m.tasks.rows, m.prompts.rows, b.rows - 1 - progress.length, b.now)
-  return [head, ...lists, ...progress]
+    : sectionRows(m.tasks.rows, m.prompts.rows, b.rows - 1, b.width, b.now)
+  return [{ key: 'head', runs: joinParts(head, b.width) }, ...lists]
 }
 
 function nextRows(b: BandInput): BandRow[] {
-  const m = nextModel(b.epic, b.now)
+  const m = nextModel(b.epic, b.now, { prompts: BAND_PROMPTS })
   const head = headRow('head', m.header, 'planMode', b.watched ? b.epic.epicId : null)
   if (m.tasks.rows.length === 0) return [head, { key: 'empty', runs: [run('nothing planned', { color: 'inactive' })] }]
-  return [head, ...listRows(m.tasks.rows, m.prompts.rows, b.rows - 1, b.now)]
+  return [head, ...sectionRows(m.tasks.rows, m.prompts.rows, b.rows - 1, b.width, b.now)]
 }
 
 function pastRows(b: BandInput): BandRow[] {
@@ -955,8 +1058,29 @@ export const register: Register = on => {
     st.timer?.cancel()
     st.timer = $.clock.every(TICK_MS, () => void kick($, st))
     void kick($, st)
-    return next(e)
+    const started = await next(e)
+    try {
+      const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
+      await update($, themeAtom, () => (typeof theme === 'string' ? theme : null))
+    } catch {
+      // no theme read: the theme keys draw until a theme is set
+    }
+    return started
   })
+
+  // A theme written from /config or a plugin repaints the band and the pane; a deny or a failed write keeps the palette.
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const set = await next(e)
+    if (set.deny === undefined && typeof set.value === 'string') {
+      const theme = set.value
+      try {
+        await update($, themeAtom, () => theme)
+      } catch {
+        // the palette stays as it was
+      }
+    }
+    return set
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
@@ -1020,7 +1144,8 @@ export const register: Register = on => {
     const stacked = drawable(below)
     const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
-    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r)}>{r.text}</Text>)
+    const pal = paletteOf(await read($, themeAtom))
+    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r, pal)}>{r.text}</Text>)
     const liveAgents = async () => {
       try {
         return activeSessionAgents(await $.agent.list()).length
@@ -1062,7 +1187,7 @@ export const register: Register = on => {
       waiting ? run(`⚑ ${waiting} waiting on you`, { color: 'warning', bold: true }) : null,
       s.blockers.total ? run(`✖ ${s.blockers.total} S1/S2 open`, { color: 'error', bold: true }) : null,
     ]) {
-      if (r) side.push({ w: cols(r.text), el: <Text {...style(r)}>{r.text}</Text> })
+      if (r) side.push({ w: cols(r.text), el: <Text {...style(r, pal)}>{r.text}</Text> })
     }
     side.push({ w: cols('Details') + BUTTON_CHROME_W, el: <Button key="details" label="Details" dimColor onPress={() => openPane($, epic.epicId)} /> })
     const tabsW = (gap: number) =>
@@ -1074,7 +1199,7 @@ export const register: Register = on => {
       if (t.id === active.id) return texts([badge(t)])[0]
       return (
         <Box key={`tabbox:${t.id}`}>
-          <Button key={`tab:${t.id}`} label={t.label} hotkey={t.hotkey} plain hover={{ color: t.accent, bold: true }} onPress={() => update($, tabAtom, () => t.id)} />
+          <Button key={`tab:${t.id}`} label={t.label} hotkey={t.hotkey} plain hover={{ color: paint(pal, t.accent), bold: true }} onPress={() => update($, tabAtom, () => t.id)} />
         </Box>
       )
     })
@@ -1102,6 +1227,7 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const view = await viewOf($)
     await read($, minuteAtom)
+    const pal = paletteOf(await read($, themeAtom))
     if (!view) {
       return (
         <Box flexDirection="column">
@@ -1115,7 +1241,7 @@ export const register: Register = on => {
     const rows: RenderElement[] = []
     const gap = () => rows.push(<Text> </Text>)
     const row = (...runs: Run[]) =>
-      rows.push(<Box flexDirection="row">{runs.filter(r => r.text).map(r => <Text {...style(r)}>{r.text}</Text>)}</Box>)
+      rows.push(<Box flexDirection="row">{runs.filter(r => r.text).map(r => <Text {...style(r, pal)}>{r.text}</Text>)}</Box>)
     const heading = (title: string, color: string, extra = '') => {
       gap()
       row(run('▍', { color }), run(title, { color, bold: true }), run(extra, { dim: true }))
@@ -1182,10 +1308,10 @@ export const register: Register = on => {
       rows.push(
         <Box flexDirection="row" columnGap={1}>
           <Text>{' '}</Text>
-          <Text {...style(g)}>{g.mark}</Text>
+          <Text {...style(g, pal)}>{g.mark}</Text>
           <Text bold={!isDone} dimColor={isDone}>{shortTask(id)}</Text>
           {title ? <Text wrap="truncate-end" dimColor={isDone}>{title}</Text> : null}
-          <Text {...style(isDone ? { dim: true } : g)}>{t.status}</Text>
+          <Text {...style(isDone ? { dim: true } : g, pal)}>{t.status}</Text>
         </Box>,
       )
     }
@@ -1197,7 +1323,7 @@ export const register: Register = on => {
         rows.push(
           <Box flexDirection="row" columnGap={1}>
             <Text dimColor>{`${fmtElapsed(now - a.ts)} ago`.padStart(10)}</Text>
-            <Text {...style({ color: toneColor(a.tone) })}>{a.text}</Text>
+            <Text {...style({ color: toneColor(a.tone) }, pal)}>{a.text}</Text>
           </Box>,
         )
       }
@@ -1205,7 +1331,7 @@ export const register: Register = on => {
 
     gap()
     rows.push(<Text dimColor>/bs-mod {'<epic-id>'} pins · auto follows this session · off hides the band</Text>)
-    if (st.lastError) rows.push(<Text color="error">{`last read failed: ${st.lastError}`}</Text>)
+    if (st.lastError) rows.push(<Text {...style({ color: 'error' }, pal)}>{`last read failed: ${st.lastError}`}</Text>)
     return <Box flexDirection="column">{rows}</Box>
   })
 }

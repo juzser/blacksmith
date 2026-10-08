@@ -14,9 +14,12 @@ import {
   fmtElapsed,
   fmtTok,
   foldEvent,
+  LATTE,
+  MOCHA,
   newestRunning,
   nextModel,
   overviewModel,
+  paletteOf,
   pastModel,
   parseBsHome,
   parseBsRoots,
@@ -38,6 +41,7 @@ import {
   walkToPrompt,
   PROMPT_HOPS,
   PROMPT_CHARS,
+  THEME_KEYS,
   type BsEvent,
   type Link,
 } from './fold'
@@ -1724,5 +1728,40 @@ describe('tab models', () => {
     const list: AgentInfo[] = statuses.map(status => ({ id: `a-${status}`, description: status, type: 'general-purpose', status }))
     expect(activeSessionAgents(list).map(a => a.id)).toEqual(['a-pending', 'a-running', 'a-waiting'])
     expect(activeSessionAgents([])).toEqual([])
+  })
+})
+
+describe('palette', () => {
+  const mocha = {
+    active: '#94e2d5', success: '#a6e3a1', error: '#f38ba8', warning: '#f9e2af', permission: '#89b4fa', planMode: '#cba6f7',
+    remember: '#b4befe', claude: '#fab387', ide: '#89dceb', merged: '#f5c2e7', autoAccept: '#f2cdcd', suggestion: '#74c7ec', label: '#a6adc8',
+  }
+  const latte = {
+    active: '#179299', success: '#40a02b', error: '#d20f39', warning: '#df8e1d', permission: '#1e66f5', planMode: '#8839ef',
+    remember: '#7287fd', claude: '#fe640b', ide: '#04a5e5', merged: '#ea76cb', autoAccept: '#dd7878', suggestion: '#209fb5', label: '#6c6f85',
+  }
+  // today's colours: each role is the theme key it stood for, and active is the teal constant
+  const keys = {
+    active: '#14b8a6', success: 'success', error: 'error', warning: 'warning', permission: 'permission', planMode: 'planMode',
+    remember: 'remember', claude: 'claude', ide: 'ide', merged: 'merged', autoAccept: 'autoAccept', suggestion: 'suggestion', label: 'inactive',
+  }
+
+  test('the three palettes carry Catppuccin Mocha, Latte and the theme keys', async () => {
+    expect(MOCHA).toEqual(mocha)
+    expect(LATTE).toEqual(latte)
+    expect(THEME_KEYS).toEqual(keys)
+  })
+
+  test('a dark theme picks Mocha, a light one Latte, dark-ansi and light-ansi included', async () => {
+    expect(paletteOf('dark')).toEqual(mocha)
+    expect(paletteOf('dark-ansi')).toEqual(mocha)
+    expect(paletteOf('light')).toEqual(latte)
+    expect(paletteOf('light-ansi')).toEqual(latte)
+  })
+
+  test('a daltonized, auto, unknown or absent theme keeps the theme keys', async () => {
+    for (const theme of ['dark-daltonized', 'light-daltonized', 'auto', 'solarized', '', null, undefined]) {
+      expect(paletteOf(theme)).toEqual(keys)
+    }
   })
 })
