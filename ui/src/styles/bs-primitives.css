@@ -1256,6 +1256,13 @@ a:hover {
   font-size: var(--bs-text-sm);
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
+  /* Same rule as the project name below: two lines, then an ellipsis. */
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 .bs-sessionrow__meta {
   display: flex;
@@ -1264,6 +1271,19 @@ a:hover {
   gap: var(--bs-space-2);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
+}
+/* A long project name wraps to two lines, then ellipsizes (the Roadmap lane
+   rule), and breaks an unspaced name anywhere. It may shrink inside the
+   wrapping meta line instead of running past the card's padding. */
+.bs-sessionrow__project {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 .bs-sessionrow__laststep {
   overflow: hidden;

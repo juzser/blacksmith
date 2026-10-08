@@ -949,9 +949,10 @@ test.describe('a foreign store in the dashboard', () => {
           await page.route('**/api/sessions?*', async (route) => {
             const real = await (await route.fetch()).json();
             await route.fulfill({
-              json: real.map((r: { projects: string[] }) => ({
+              json: real.map((r: { projects: string[]; title: string | null }) => ({
                 ...r,
                 projects: r.projects.map((p) => (p === 'project-a' ? longName : p)),
+                title: r.projects.includes('project-a') ? `${longName}-title` : r.title,
               })),
             });
           });
@@ -1001,6 +1002,33 @@ test.describe('a foreign store in the dashboard', () => {
           expect(await link.getAttribute('aria-label')).toBeNull();
           await expect(page.getByRole('link', { name: longName, exact: true })).toHaveCount(1);
           if (width < 640) expect(m.overlap).toBeLessThanOrEqual(1);
+
+          // The same name in a session row's meta line, and the row title.
+          const row = await page.evaluate((name) => {
+            const meta = [
+              ...document.querySelectorAll<HTMLElement>('.bs-sessionrow__meta > span:first-child'),
+            ].find((s) => s.textContent?.trim() === name) as HTMLElement;
+            const card = meta.closest('.bs-sessionrow') as HTMLElement;
+            const title = card.querySelector('.bs-sessionrow__title') as HTMLElement;
+            const cr = card.getBoundingClientRect();
+            const inner = cr.right - parseFloat(getComputedStyle(card).paddingRight);
+            const lh = parseFloat(getComputedStyle(meta).lineHeight);
+            const tlh = parseFloat(getComputedStyle(title).lineHeight);
+            return {
+              overflow: meta.getBoundingClientRect().right - inner,
+              lines: Math.round(meta.getBoundingClientRect().height / lh),
+              title: meta.getAttribute('title'),
+              titleOverflow: title.getBoundingClientRect().right - inner,
+              titleScroll: title.scrollWidth - title.clientWidth,
+              titleLines: Math.round(title.getBoundingClientRect().height / tlh),
+            };
+          }, longName);
+          expect(row.overflow).toBeLessThanOrEqual(0.5);
+          expect(row.lines).toBeLessThanOrEqual(2);
+          expect(row.title).toBe(longName);
+          expect(row.titleOverflow).toBeLessThanOrEqual(0.5);
+          expect(row.titleScroll).toBeLessThanOrEqual(0);
+          expect(row.titleLines).toBeLessThanOrEqual(2);
         });
       }
     }
