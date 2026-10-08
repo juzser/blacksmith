@@ -4651,13 +4651,19 @@ h2.rm-section__head {
    role list with small bars and a % share of total tokens. */
 .bs-analytics-page__phone-metrics {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--bs-space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--bs-space-2);
 }
+/* The mock's .mstat: a bordered, raised card. */
 .bs-analytics-page__phone-stat {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-1);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  padding: var(--bs-m-card-pad);
+  min-width: 0;
 }
 .bs-analytics-page__phone-stat-label {
   color: var(--bs-text-subtle);
