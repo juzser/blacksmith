@@ -1242,8 +1242,11 @@ one-line takeaway underneath:
 3. "How often a re-checked fix held" (recheck pass rate) — same not-enough-data rule.
 4. "Second-opinion reviewers" (was "Cross-check quorum") — "agreed with the main reviewer
    37% of the time", shown as a `ProgressRing` "37%" beside the sentence, with an `Info`
-   icon button whose tooltip defines the metric; from the existing `agree %`/`ms` values, msconverted to seconds
-   ("27 s average").
+   icon button whose tooltip defines the metric; from the existing `agree %`/`ms` values, ms converted to seconds
+   ("27 s average"). With no second-opinion review in the period the ring gives way to
+   "Not enough data yet" and the takeaway reads "No second-opinion reviews in this period." (never 0%).
+   On a phone, any stat value that reads "Not enough data yet" is set at 13px, regular weight,
+   `--bs-text-subtle` (the mock's `.mstat .v.nd`), so it cannot be mistaken for a measured figure.
 
 "Cost per task by provider" is hidden outright when fewer than 2 providers have data (per
 operator decision, plan-ui-friendly.md's decisions list) — confirmed from
@@ -1267,16 +1270,17 @@ session is writing into, as Activity does (§4.3 Scope); All sends no `sessions`
 line is one muted line in Sessions' style, ending in a "Show all" link, and takes the
 page's own gap, as Sessions' lines do: with no live CLI session at all, "Nothing is active
 right now. · Show all"; with live sessions but none on an epic, "N live sessions, none on
-an epic · Show all"; with a measured answer but no active session in the served store, "No
+an epic · Show all"; with a measured answer but no active session in any store, "No
 active session in this view · Show all". While one of these shows, no chart, table or
 metric is drawn and no request is made. When the live sessions cannot be read, Active
 shows everything as All does, with "Live sessions can't be read here" (the toggle stays).
-When more than 200 sessions are active in the served store, Active also shows everything,
+When more than 200 sessions are active, counted across all stores, Active also shows everything,
 with "Too many active sessions to narrow; showing all" (the toggle stays, no `sessions` is
-sent). Beside the page, "N active projects are in another store (names) · see Home" for
-active projects it cannot list. Until the first answer arrives nothing is fetched and
+sent). There is no "in another store" line here: every store is read (`stores=all`, with
+`sessions` qualified by store). Until the first answer arrives nothing is fetched and
 nothing is claimed. Under an explicit filter (`?session=`) the filter wins: the toggle and
-these lines are not shown and no `sessions` is sent. This departs from Kanban, which keeps
+these lines are not shown, no `sessions` is sent, and the request stays on the served store,
+because session ids repeat between stores. This departs from Kanban, which keeps
 its toggle under `?session=`: here the filter already names the scope.
 
 ### 4.5 Lessons

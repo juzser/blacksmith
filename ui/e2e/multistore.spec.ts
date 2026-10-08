@@ -610,6 +610,57 @@ test.describe('a foreign store in the dashboard', () => {
     }
   });
 
+  test.describe('Cost & quality over two stores', () => {
+    // Home holds two recorded runs (2000 + 2 tokens), the foreign store one
+    // (2000): the page must show three runs and about 4K tokens, not either alone.
+    // The server stamps the fixture with the wall clock, so the day labels are
+    // pinned for the screenshot; every figure stays the server's.
+    const pinDays = async (page: Page) => {
+      await page.route('**/api/analytics*', async (route) => {
+        const response = await route.fetch();
+        const body = await response.json();
+        body.tokensByDay = (body.tokensByDay as { day: string }[]).map((d, i) => ({
+          ...d,
+          day: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
+        }));
+        await route.fulfill({ response, json: body });
+      });
+    };
+
+    test('the page asks every store and shows the summed runs', async ({ page }) => {
+      const reads: URL[] = [];
+      page.on('request', (r) => {
+        const u = new URL(r.url());
+        if (u.pathname === '/api/analytics') reads.push(u);
+      });
+      await page.goto(`${origin}/analytics?scope=all`);
+      // The role table: three runs and 4K tokens, the sum of both stores.
+      const row = page.getByRole('row', { name: /^Builder 3 4K tok/ });
+      await expect(row).toBeVisible();
+      expect(reads.every((u) => u.searchParams.get('stores') === 'all')).toBe(true);
+      await expect(page.getByText('in another store')).toHaveCount(0);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop-light', VIEWPORTS.desktop],
+      ['phone-light', { width: 375, height: 812 }],
+    ] as const) {
+      test(`screenshot two stores ${name}`, async ({ page }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize(viewport);
+        await pinDays(page);
+        await page.goto(`${origin}/analytics?scope=all`);
+        await expect(page.locator('h1')).toHaveText('Cost & quality');
+        const marker =
+          name === 'phone-light'
+            ? page.locator('.bs-analytics-page__phone-metrics')
+            : page.locator('.bs-card__title').getByText('Tokens per day', { exact: true });
+        await settleForShot(page, marker);
+        await shoot(page, `analytics-two-stores-${name}`);
+      });
+    }
+  });
+
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which
   // the server has no flag to shorten, so this runs the real window: the store
   // leaves the Kanban board at once and its task page keeps loading.

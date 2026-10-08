@@ -199,6 +199,71 @@ test.describe('Analytics', () => {
       });
     }
   }
+
+  // The second-opinion rate is null with no verdicts and a real 0 when every
+  // verdict disagreed. The page must show "Not enough data yet" and no ring for
+  // the first, and a 0% ring for the second, on both widths.
+  const providerRow = (verdicts: number, agreementRate: number | null) => ({
+    provider: 'codex',
+    runs: verdicts,
+    verdicts,
+    agreementRate,
+    latencySamples: 0,
+    meanLatencyMs: null,
+    schemaFailureRate: 0,
+    transportFailureRate: 0,
+    failuresByCode: {},
+  });
+  async function stubProviderAgreement(page: Page, rows: unknown[]): Promise<void> {
+    await page.route('**/api/analytics*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.providerAgreement = rows;
+      await route.fulfill({ response, json: body });
+    });
+  }
+
+  for (const [name, viewport] of [
+    ['desktop', { width: 1280, height: 900 }],
+    ['phone', { width: 375, height: 812 }],
+  ] as const) {
+    const scope = (page: Page) =>
+      name === 'desktop'
+        ? page.locator('.bs-card').filter({ hasText: 'Second-opinion reviewers' })
+        : page
+            .locator('.bs-analytics-page__phone-stat')
+            .filter({ hasText: 'Second-opinion agreed' });
+
+    test(`${name}: no second-opinion review shows not-enough-data and no ring`, async ({
+      page,
+    }) => {
+      await stubProviderAgreement(page, []);
+      await page.setViewportSize(viewport);
+      await page.goto('/analytics');
+      const box = scope(page);
+      await expect(box).toContainText('Not enough data yet');
+      await expect(box.getByRole('img')).toHaveCount(0);
+      await expect(box).not.toContainText('0%');
+      if (name === 'desktop') {
+        await expect(box).toContainText('No second-opinion reviews in this period.');
+      }
+    });
+
+    test(`${name}: second-opinion reviews that all disagreed show a 0% ring`, async ({ page }) => {
+      await stubProviderAgreement(page, [providerRow(4, 0)]);
+      await page.setViewportSize(viewport);
+      await page.goto('/analytics');
+      const box = scope(page);
+      await expect(
+        box.getByRole('img', { name: /^0% .*agreed with the main reviewer$/ }),
+      ).toBeVisible();
+      await expect(box).not.toContainText('Not enough data yet');
+      if (name === 'desktop') {
+        await expect(box).toContainText('agreed with the main reviewer.');
+        await expect(box).not.toContainText('No second-opinion reviews in this period.');
+      }
+    });
+  }
 });
 
 // S9 (ds-spec.md §4.4 Scope).
@@ -219,9 +284,10 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     await expect(
       page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
     ).toBeVisible();
-    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
-      true,
-    );
+    expect(
+      urls.every((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture'),
+    ).toBe(true);
+    expect(urls.every((u) => u.searchParams.get('stores') === 'all')).toBe(true);
     await page.getByRole('link', { name: 'All', exact: true }).click();
     await expect(page).toHaveURL(/scope=all/);
     await expect.poll(() => urls.some((u) => !u.searchParams.has('sessions'))).toBe(true);
@@ -326,7 +392,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
   });
 
-  test('none on an epic, and the other-store line names the store-b project', async ({ page }) => {
+  test('none on an epic, and no other-store line is drawn', async ({ page }) => {
     await stubActiveScope(page, [], {
       liveSessions: 1,
       unlinkedSessions: 1,
@@ -334,7 +400,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     });
     await page.goto('/analytics');
     await expect(page.getByText('1 live session, none on an epic')).toBeVisible();
-    await expect(page.getByText('1 active project is in another store (project-b)')).toBeVisible();
+    await expect(page.getByText('in another store')).toHaveCount(0);
   });
 
   test('unmeasured: fetches All and says live sessions cannot be read', async ({ page }) => {
@@ -375,9 +441,9 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
     release();
     await expect.poll(() => urls.length).toBeGreaterThan(0);
-    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
-      true,
-    );
+    expect(
+      urls.every((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture'),
+    ).toBe(true);
   });
 
   test('an explicit ?session= wins: no sessions param, no toggle', async ({ page }) => {
@@ -389,6 +455,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     ).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Activity scope' })).toHaveCount(0);
     expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+    expect(urls.every((u) => !u.searchParams.has('stores'))).toBe(true);
   });
 
   test('phone 375: the toggle clears 44px and the toolbar does not scroll sideways', async ({

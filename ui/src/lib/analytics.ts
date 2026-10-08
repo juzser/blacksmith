@@ -131,7 +131,7 @@ export function costPerTask(buckets: readonly CostBucket[]): number | null {
 
 /** "1.2K tok" — or an em dash when no task reported any usage to divide. */
 export function formatTokens(tokens: number | null): string {
-  return tokens === null ? '—' : `${formatCompactNumber(tokens)} tok`;
+  return tokens === null ? '—' : `${formatCompactNumber(tokens)}\u00a0tok`;
 }
 
 /**
@@ -203,7 +203,7 @@ export function ratioTakeaway(ratio: number | null): string {
 
 /** "27 s" — ms rounded to the nearest second, per DS7 §4.4's phone copy. */
 export function formatSeconds(ms: number): string {
-  return `${Math.round(ms / 1000)} s`;
+  return `${Math.round(ms / 1000)}\u00a0s`;
 }
 
 /** The "Second-opinion reviewers" card's two aggregate numbers (DS7 §4.4 item 4). */
@@ -242,8 +242,9 @@ export function secondOpinionSummary(
   };
 }
 
-/** "agreed with the main reviewer; 27 s average." */
+/** "agreed with the main reviewer; 27 s average." Unmeasured says so, never 0%. */
 export function secondOpinionTakeaway(summary: SecondOpinionSummary): string {
+  if (summary.agreementRate === null) return 'No second-opinion reviews in this period.';
   if (summary.meanLatencyMs === null) return 'agreed with the main reviewer.';
   return `agreed with the main reviewer; ${formatSeconds(summary.meanLatencyMs)} average.`;
 }
@@ -477,7 +478,7 @@ export function phoneRoleShare(buckets: readonly RoleModelTierBucket[]): {
 
 /** "1.2K tok", or "not measured" for a pair with no average to report, never 0. */
 export function formatAvgTokensPerRun(avg: number | null): string {
-  return avg === null ? 'not measured' : `${formatCompactNumber(avg)} tok`;
+  return avg === null ? 'not measured' : `${formatCompactNumber(avg)}\u00a0tok`;
 }
 
 /**

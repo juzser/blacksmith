@@ -42,6 +42,10 @@ const SFC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'AnalyticsPage.vue'),
   'utf8',
 );
+const PRIMITIVES = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
 const PERIOD_SWITCH = readFileSync(
   join(
     dirname(fileURLToPath(import.meta.url)),
@@ -231,8 +235,8 @@ describe('lib/analytics.ts — formatTokens', () => {
   });
 
   it('renders a measured cost with its unit, compacted past a thousand', () => {
-    expect(formatTokens(0)).toBe('0 tok');
-    expect(formatTokens(1234)).toBe('1.2K tok');
+    expect(formatTokens(0)).toBe('0\u00a0tok');
+    expect(formatTokens(1234)).toBe('1.2K\u00a0tok');
   });
 });
 
@@ -322,8 +326,8 @@ describe('lib/analytics.ts — frontierMidRatio / ratioTakeaway', () => {
 
 describe('lib/analytics.ts — formatSeconds', () => {
   it('rounds milliseconds to the nearest second', () => {
-    expect(formatSeconds(27400)).toBe('27 s');
-    expect(formatSeconds(500)).toBe('1 s');
+    expect(formatSeconds(27400)).toBe('27\u00a0s');
+    expect(formatSeconds(500)).toBe('1\u00a0s');
   });
 });
 
@@ -368,12 +372,24 @@ describe('lib/analytics.ts — secondOpinionSummary / secondOpinionTakeaway', ()
 
   it('takeaway converts the mean latency to seconds', () => {
     expect(secondOpinionTakeaway({ agreementRate: 0.37, meanLatencyMs: 27000 })).toBe(
-      'agreed with the main reviewer; 27 s average.',
+      'agreed with the main reviewer; 27\u00a0s average.',
     );
   });
 
   it('takeaway drops the latency clause when nothing reported one', () => {
+    expect(secondOpinionTakeaway({ agreementRate: 0.5, meanLatencyMs: null })).toBe(
+      'agreed with the main reviewer.',
+    );
+  });
+
+  it('takeaway says nothing was measured instead of claiming no agreement', () => {
     expect(secondOpinionTakeaway({ agreementRate: null, meanLatencyMs: null })).toBe(
+      'No second-opinion reviews in this period.',
+    );
+    expect(secondOpinionTakeaway({ agreementRate: null, meanLatencyMs: 9000 })).toBe(
+      'No second-opinion reviews in this period.',
+    );
+    expect(secondOpinionTakeaway({ agreementRate: 0, meanLatencyMs: null })).toBe(
       'agreed with the main reviewer.',
     );
   });
@@ -620,7 +636,7 @@ describe('lib/analytics.ts — formatAvgTokensPerRun', () => {
   });
 
   it('renders a real average with its unit', () => {
-    expect(formatAvgTokensPerRun(1234)).toBe('1.2K tok');
+    expect(formatAvgTokensPerRun(1234)).toBe('1.2K\u00a0tok');
   });
 });
 
@@ -628,7 +644,7 @@ describe('lib/analytics.ts — breakdownTokensText', () => {
   it('formats the real total when at least one run was measured', () => {
     expect(
       breakdownTokensText(roleTierBucket({ tokens: 100, runCount: 2, unmeasuredRunCount: 1 })),
-    ).toBe('100 tok');
+    ).toBe('100\u00a0tok');
   });
 
   it('reads "Not measured" when every run in the pair went unmeasured', () => {
@@ -830,5 +846,32 @@ describe('AnalyticsPage.vue — by-role totals chart is horizontal with a Not-me
 describe('AnalyticsPage.vue — phone period switch is the mock tab row (item 4)', () => {
   it('passes variant="tabs" to the period PeriodSwitch only on phone width', () => {
     expect(SFC).toMatch(/:variant="isPhoneWidth \? 'tabs' : 'buttons'"/);
+  });
+});
+
+describe('number and unit never split across a line', () => {
+  it('joins every analytics value and its unit with a non-breaking space', () => {
+    expect(formatSeconds(8000)).toBe('8\u00a0s');
+    expect(formatTokens(1234)).toBe('1.2K\u00a0tok');
+    expect(formatAvgTokensPerRun(1234)).toBe('1.2K\u00a0tok');
+    expect(secondOpinionTakeaway({ agreementRate: 0.5, meanLatencyMs: 8000 })).toContain(
+      '8\u00a0s average',
+    );
+  });
+});
+
+describe('AnalyticsPage.vue — phone not-measured values (mock .mstat .v.nd)', () => {
+  const MOD = 'bs-analytics-page__phone-stat-value--nd';
+  it('marks every phone stat value that can read "Not enough data yet"', () => {
+    const all = SFC.match(/<span\s+class="bs-analytics-page__phone-stat-value"/g) ?? [];
+    expect(all).toHaveLength(4);
+    const marked = SFC.match(new RegExp(`phone-stat-value[^>]*${MOD}`, 'g')) ?? [];
+    expect(marked).toHaveLength(4);
+  });
+  it('styles the modifier with the mock size, weight and colour from tokens', () => {
+    const rule = PRIMITIVES.match(new RegExp(`\\.${MOD} \\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule).toContain('font-size: var(--bs-text-sm)');
+    expect(rule).toContain('font-weight: var(--bs-font-weight-normal)');
+    expect(rule).toContain('color: var(--bs-text-subtle)');
   });
 });

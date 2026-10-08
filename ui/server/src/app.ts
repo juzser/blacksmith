@@ -83,6 +83,7 @@ import {
   type StorePage,
   sessionsByStore,
 } from './activityFanout.js';
+import { mergeAnalytics } from './analyticsFanout.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
 import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
@@ -1333,6 +1334,28 @@ export function createApp(opts: AppOpts): AppHandle {
       );
     }
     const period = periodParam as AnalyticsPeriod | undefined;
+    if (allStoresScope(c, (m) => new BadRequestError('analytics.bad-request', m))) {
+      const sessions = qualifiedSessions(c);
+      const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
+      const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
+      return c.json(
+        mergeAnalytics(
+          fanOut(entries, project, (db, p) =>
+            analytics(
+              db,
+              {
+                ...(sessions
+                  ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] }
+                  : {}),
+                ...(p ? { project: p } : {}),
+              },
+              { ...clock, ...(period ? { period } : {}) },
+            ),
+          ),
+          { period: period !== undefined },
+        ),
+      );
+    }
     const result: AnalyticsResult = analytics(
       handle.db,
       { ...sessionScope(c), ...sessionsScope(c), ...(project ? { project } : {}) },
