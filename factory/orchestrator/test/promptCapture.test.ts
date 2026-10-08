@@ -284,7 +284,8 @@ const hookInput = (over: Record<string, unknown> = {}): string =>
     ...over,
   });
 
-const readLog = (dir: string, session: string): Array<Record<string, any>> =>
+// biome-ignore lint/suspicious/noExplicitAny: parsed fixture rows are read by key
+const readLog = (dir: string, session: string): any[] =>
   readFileSync(path.join(dir, `${session}.jsonl`), 'utf8')
     .trim()
     .split('\n')
