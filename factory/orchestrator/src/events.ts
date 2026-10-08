@@ -47,6 +47,11 @@ export interface EventInput {
    * and validated like any other field.
    */
   cli_session_id?: string;
+  /**
+   * Honoured only under `opts.keepTs` (a `prompts-` backfill); every other
+   * write is stamped "now" and this field is overwritten.
+   */
+  ts?: string;
 }
 
 export interface EventRecord extends EventInput {
@@ -68,6 +73,12 @@ export interface EventOpts {
    * environment", which is what every production caller wants.
    */
   cliSessionId?: string | null;
+  /**
+   * Keep each input's own `ts` instead of stamping "now". Backfill only: the
+   * log must be a `prompts-` log, and each `ts` must parse, be no later than
+   * now and no earlier than the log's newest event.
+   */
+  keepTs?: boolean;
 }
 
 /** The environment variable Claude Code sets in every process it runs. */
@@ -783,6 +794,25 @@ export async function validateEventEnvelope(
   await validateCausalParent(input, opts, existing);
 }
 
+/** The input's own `ts` for a `keepTs` write, or a throw saying which rule it broke. */
+function keptTs(input: EventInput, existing: readonly StoredEvent[]): string {
+  const refuse = (why: string): never => {
+    throw new EventError('events.invalid-record', `keepTs: ${why}`, {
+      session_id: input.session_id,
+      ts: input.ts,
+    });
+  };
+  if (!input.session_id.startsWith('prompts-')) {
+    refuse(`only a "prompts-" log may keep its own ts, not "${input.session_id}".`);
+  }
+  const ms = Date.parse(input.ts ?? '');
+  if (Number.isNaN(ms)) refuse(`ts "${input.ts}" does not parse.`);
+  if (ms > Date.now()) refuse(`ts "${input.ts}" is in the future.`);
+  const newest = existing.reduce((m, e) => Math.max(m, Date.parse(e.record.ts)), -Infinity);
+  if (ms < newest) refuse(`ts "${input.ts}" is earlier than the log's newest event.`);
+  return new Date(ms).toISOString();
+}
+
 async function appendEventLocked(
   input: EventInput,
   opts: EventOpts,
@@ -800,7 +830,8 @@ async function appendEventLocked(
 
   // The CLI-session stamp rides along here, at the one place every write
   // passes through; see cliStamp for why it is neither envelope nor evidence.
-  const record: EventRecord = { ...input, ...cliStamp(input, opts), ts: new Date().toISOString() };
+  const ts = opts.keepTs ? keptTs(input, existing) : new Date().toISOString();
+  const record: EventRecord = { ...input, ...cliStamp(input, opts), ts };
 
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
   const result = validateRecord(schemas, taxonomy, 'event', record);
