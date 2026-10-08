@@ -1,9 +1,21 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveCaptureStore } from '../src/promptCapture.js';
+import { appendEvent } from '../src/events.js';
+import { capturePrompt, resolveCaptureStore, resolveLine } from '../src/promptCapture.js';
 
 // Every tree here is a temp dir. The resolver is read-only, but the fixtures
 // stand in for a factory clone, so none of them may be the real one.
@@ -236,5 +248,339 @@ describe('resolveCaptureStore: M4 and the checkout overlay roadmap (Q5b)', () =>
   it('with no overlay file the result is the clone roadmap result alone', () => {
     expect(resolve(checkout('gamma'))).toBeNull();
     expect(resolve(checkout('acme'))?.project).toBe('acme');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// capturePrompt: the write path both entries share.
+// ---------------------------------------------------------------------------
+
+const CLI = '11111111-2222-4333-8444-555555555555';
+const OTHER_CLI = '99999999-2222-4333-8444-555555555555';
+
+/** A store that M1 finds through BS_HOME, so the capture tests need no git. */
+function homeStore(): { env: Record<string, string>; dir: string; cwd: string } {
+  const home = path.join(base, 'bs-home');
+  const dir = path.join(home, 'state', 'events');
+  mkdirSync(dir, { recursive: true });
+  const cwd = path.join(base, 'anywhere');
+  mkdirSync(cwd, { recursive: true });
+  return { env: { BS_HOME: home }, dir, cwd };
+}
+
+const ctxFor = (env: Record<string, string>, cwd: string) => ({
+  env,
+  cwd,
+  repoRoot: clone,
+  isClone: true,
+  roadmapPath,
+});
+
+const hookInput = (over: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    session_id: CLI,
+    prompt: 'Fix the flaky import.',
+    hook_event_name: 'UserPromptSubmit',
+    ...over,
+  });
+
+const readLog = (dir: string, session: string): Array<Record<string, any>> =>
+  readFileSync(path.join(dir, `${session}.jsonl`), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+
+const seed = (
+  dir: string,
+  session: string,
+  actor: string,
+  type: string,
+  parent: string | null,
+  extra: { cli?: string; plan?: number; project?: string } = {},
+) =>
+  appendEvent(
+    {
+      session_id: session,
+      actor,
+      event_type: type,
+      plan_version: extra.plan ?? 1,
+      causal_parent: parent,
+      payload: {},
+      ...(extra.project === undefined ? {} : { project: extra.project }),
+    },
+    { stateDir: dir, cliSessionId: extra.cli ?? CLI },
+  );
+
+describe('capturePrompt', () => {
+  it('is a no-op in a cwd that is not managed', async () => {
+    const nowhere = path.join(base, 'nowhere');
+    mkdirSync(nowhere);
+    expect(await capturePrompt(hookInput(), ctxFor({}, nowhere))).toBeNull();
+    expect(existsSync(path.join(clone, 'state', 'events', `prompts-${CLI}.jsonl`))).toBe(false);
+  });
+
+  it.each([
+    ['an agent_id', { agent_id: 'sub-1', agent_type: 'coder' }],
+    ['whitespace-only text', { prompt: '  \n\t ' }],
+    ['harness text', { prompt: '<system-reminder>x</system-reminder>' }],
+    ['a task notification', { prompt: '<task-notification>done</task-notification>' }],
+    ['a session id that is not one path segment', { session_id: '../escape' }],
+    ['a missing prompt', { prompt: undefined }],
+  ])('skips %s', async (_n, over) => {
+    const { env, dir, cwd } = homeStore();
+    expect(await capturePrompt(hookInput(over), ctxFor(env, cwd))).toBeNull();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it.each([['not json'], [''], ['[]'], ['null'], ['{"prompt":"x"}']])(
+    'prints nothing for stdin %j',
+    async (raw) => {
+      const { env, dir, cwd } = homeStore();
+      expect(await capturePrompt(raw, ctxFor(env, cwd))).toBeNull();
+      expect(readdirSync(dir)).toEqual([]);
+    },
+  );
+
+  it('creates a home log whose root is a system event with no parent, then the prompt', async () => {
+    const { env, dir, cwd } = homeStore();
+    const out = await capturePrompt(hookInput({ prompt: 'Fix it.\n' }), ctxFor(env, cwd));
+
+    const home = `prompts-${CLI}`;
+    const [root, prompt] = readLog(dir, home);
+    expect(root).toMatchObject({
+      session_id: home,
+      actor: 'system',
+      event_type: 'session-start',
+      causal_parent: null,
+      plan_version: 1,
+      payload: { kind: 'prompt-log' },
+    });
+    expect(root).not.toHaveProperty('project');
+    expect(prompt).toMatchObject({
+      actor: 'user',
+      event_type: 'user_prompt',
+      causal_parent: `${home}#0`,
+      plan_version: 1,
+      cli_session_id: CLI,
+      payload: { prompt: 'Fix it.\n', source: 'hook' },
+    });
+    expect(prompt.payload).not.toHaveProperty('command');
+    expect(prompt.payload).not.toHaveProperty('prompt_id');
+    expect(out).toBe(
+      `bs prompt capture: ${JSON.stringify({ event_id: `${home}#1`, session_id: home })}`,
+    );
+  });
+
+  it('chains the next prompt off the previous one and never continues another log', async () => {
+    const { env, dir, cwd } = homeStore();
+    await capturePrompt(hookInput({ prompt: 'one' }), ctxFor(env, cwd));
+    const out = await capturePrompt(hookInput({ prompt: 'two' }), ctxFor(env, cwd));
+    const log = readLog(dir, `prompts-${CLI}`);
+    expect(log).toHaveLength(3);
+    expect(log[0].causal_parent).toBeNull();
+    expect(log[2].causal_parent).toBe(`prompts-${CLI}#1`);
+    expect(out).toContain(`prompts-${CLI}#2`);
+    expect(log.filter((e) => e.event_type === 'session-start')).toHaveLength(1);
+  });
+
+  it('records prompt_id and the slash command, and keeps the full text', async () => {
+    const { env, dir, cwd } = homeStore();
+    await capturePrompt(
+      hookInput({ prompt: '/bs run acme-1', prompt_id: 'p-1' }),
+      ctxFor(env, cwd),
+    );
+    const p = readLog(dir, `prompts-${CLI}`)[1];
+    expect(p.payload).toEqual({
+      prompt: '/bs run acme-1',
+      source: 'hook',
+      prompt_id: 'p-1',
+      command: 'bs',
+    });
+  });
+
+  it.each([
+    ['/bs-mod off', 'bs-mod'],
+    ['/bs run acme-1', 'bs'],
+    ['/plug:cmd x', 'plug:cmd'],
+    ['/tmp/x.log is broken', undefined],
+    ['/', undefined],
+    ['/ x', undefined],
+    ['plain text', undefined],
+  ])('payload.command for %j is %j', async (prompt, command) => {
+    const { env, dir, cwd } = homeStore();
+    await capturePrompt(hookInput({ prompt }), ctxFor(env, cwd));
+    const p = readLog(dir, `prompts-${CLI}`)[1];
+    expect(p.payload.prompt).toBe(prompt);
+    if (command === undefined) expect(p.payload).not.toHaveProperty('command');
+    else expect(p.payload.command).toBe(command);
+  });
+
+  it('M3 holds for /bs only: /bs-mod in a cwd with no store is a no-op', async () => {
+    const nowhere = path.join(base, 'nowhere');
+    mkdirSync(nowhere);
+    const ctx = ctxFor({}, nowhere);
+    expect(await capturePrompt(hookInput({ prompt: '/bs-mod off' }), ctx)).toBeNull();
+    const out = await capturePrompt(hookInput({ prompt: '/bs new gamma' }), ctx);
+    expect(out).toContain(`prompts-${CLI}#1`);
+    expect(existsSync(path.join(clone, 'state', 'events', `prompts-${CLI}.jsonl`))).toBe(true);
+  });
+
+  describe('target log', () => {
+    it('goes to the epic main log, with its parent and plan_version read from it', async () => {
+      const { env, dir, cwd } = homeStore();
+      const root = await seed(dir, 'acme-1-main', 'operator', 'session-start', null, { plan: 3 });
+      const note = await seed(dir, 'acme-1-main', 'orchestrator', 'progress', root.event_id, {
+        plan: 3,
+      });
+      const out = await capturePrompt(hookInput(), ctxFor(env, cwd));
+
+      const log = readLog(dir, 'acme-1-main');
+      expect(log).toHaveLength(3);
+      expect(log[2]).toMatchObject({
+        causal_parent: note.event_id,
+        plan_version: 3,
+        actor: 'user',
+      });
+      expect(out).toContain('acme-1-main#2');
+      expect(existsSync(path.join(dir, `prompts-${CLI}.jsonl`))).toBe(false);
+    });
+
+    it('the epic main log wins over a wave log stamped with the same CLI id', async () => {
+      const { env, dir, cwd } = homeStore();
+      const root = await seed(dir, 'acme-1-main', 'operator', 'session-start', null);
+      await seed(dir, 'acme-1-main', 'orchestrator', 'progress', root.event_id);
+      const wroot = await seed(dir, 'acme-1-w1', 'wave-runner', 'session-start', null);
+      await seed(dir, 'acme-1-w1', 'orchestrator', 'progress', wroot.event_id);
+      await capturePrompt(hookInput(), ctxFor(env, cwd));
+      expect(readLog(dir, 'acme-1-w1')).toHaveLength(2);
+      expect(readLog(dir, 'acme-1-main')).toHaveLength(3);
+    });
+
+    it('skips a log holding epic-closed', async () => {
+      const { env, dir, cwd } = homeStore();
+      const root = await seed(dir, 'acme-1-main', 'operator', 'session-start', null);
+      await seed(dir, 'acme-1-main', 'operator', 'epic-closed', root.event_id);
+      await capturePrompt(hookInput(), ctxFor(env, cwd));
+      expect(readLog(dir, 'acme-1-main')).toHaveLength(2);
+      expect(readLog(dir, `prompts-${CLI}`)).toHaveLength(2);
+    });
+
+    it('ignores a log stamped with another CLI id', async () => {
+      const { env, dir, cwd } = homeStore();
+      await seed(dir, 'beta-main', 'operator', 'session-start', null, { cli: OTHER_CLI });
+      await capturePrompt(hookInput(), ctxFor(env, cwd));
+      expect(readLog(dir, 'beta-main')).toHaveLength(1);
+      expect(existsSync(path.join(dir, `prompts-${CLI}.jsonl`))).toBe(true);
+    });
+
+    it('ignores a log older than the transcript', async () => {
+      const { env, dir, cwd } = homeStore();
+      await seed(dir, 'acme-1-main', 'operator', 'session-start', null);
+      const old = new Date('2020-01-01T00:00:00Z');
+      utimesSync(path.join(dir, 'acme-1-main.jsonl'), old, old);
+      const transcript = path.join(base, 't.jsonl');
+      writeFileSync(transcript, '');
+      await capturePrompt(hookInput({ transcript_path: transcript }), ctxFor(env, cwd));
+      expect(readLog(dir, 'acme-1-main')).toHaveLength(1);
+      expect(existsSync(path.join(dir, `prompts-${CLI}.jsonl`))).toBe(true);
+    });
+
+    it('two concurrent captures each see the other as parent, inside the lock', async () => {
+      const { env, dir, cwd } = homeStore();
+      const root = await seed(dir, 'acme-1-main', 'operator', 'session-start', null, { plan: 2 });
+      const ctx = ctxFor(env, cwd);
+      const [a, b] = await Promise.all([
+        capturePrompt(hookInput({ prompt: 'a' }), ctx),
+        capturePrompt(hookInput({ prompt: 'b' }), ctx),
+      ]);
+      expect(a).not.toBe(b);
+      const log = readLog(dir, 'acme-1-main');
+      expect(log).toHaveLength(3);
+      expect(log[1].causal_parent).toBe(root.event_id);
+      expect(log[2].causal_parent).toBe('acme-1-main#1');
+      expect(log.map((e) => e.plan_version)).toEqual([2, 2, 2]);
+    });
+  });
+
+  describe('dedupe', () => {
+    it('a repeated prompt_id writes and prints nothing', async () => {
+      const { env, dir, cwd } = homeStore();
+      const ctx = ctxFor(env, cwd);
+      expect(await capturePrompt(hookInput({ prompt_id: 'p-1', prompt: 'a' }), ctx)).not.toBeNull();
+      expect(await capturePrompt(hookInput({ prompt_id: 'p-1', prompt: 'b' }), ctx)).toBeNull();
+      expect(readLog(dir, `prompts-${CLI}`)).toHaveLength(2);
+    });
+
+    it('the same text from the same CLI id within 10 s writes nothing; other text does', async () => {
+      const { env, dir, cwd } = homeStore();
+      const ctx = ctxFor(env, cwd);
+      await capturePrompt(hookInput({ prompt: 'same' }), ctx);
+      expect(await capturePrompt(hookInput({ prompt: 'same' }), ctx)).toBeNull();
+      expect(await capturePrompt(hookInput({ prompt: 'other' }), ctx)).not.toBeNull();
+      expect(readLog(dir, `prompts-${CLI}`)).toHaveLength(3);
+    });
+
+    it('the same text from another CLI id is not a duplicate', async () => {
+      const { env, dir, cwd } = homeStore();
+      const ctx = ctxFor(env, cwd);
+      await capturePrompt(hookInput({ prompt: 'same' }), ctx);
+      expect(
+        await capturePrompt(hookInput({ prompt: 'same', session_id: OTHER_CLI }), ctx),
+      ).not.toBeNull();
+      expect(existsSync(path.join(dir, `prompts-${OTHER_CLI}.jsonl`))).toBe(true);
+    });
+  });
+
+  describe('M4 project', () => {
+    it('a home log created under M4 carries project on its root and its prompts', async () => {
+      const acme = checkout('acme');
+      const out = await capturePrompt(hookInput(), ctxFor({}, acme));
+      const dir = path.join(clone, 'state', 'events');
+      const [root, prompt] = readLog(dir, `prompts-${CLI}`);
+      expect(root.project).toBe('acme');
+      expect(prompt.project).toBe('acme');
+      expect(out).toContain(`prompts-${CLI}#1`);
+    });
+
+    it('an epic main log parent with no project gives way to the declared name; one with a project keeps it', async () => {
+      const acme = checkout('acme');
+      const dir = path.join(clone, 'state', 'events');
+      await seed(dir, 'acme-1-main', 'operator', 'session-start', null);
+      await capturePrompt(hookInput({ prompt: 'one' }), ctxFor({}, acme));
+      const log = readLog(dir, 'acme-1-main');
+      expect(log[1].project).toBe('acme');
+      // The prompt now carries a project, so a later one copies it from the parent.
+      await capturePrompt(hookInput({ prompt: 'two' }), ctxFor({}, acme));
+      expect(readLog(dir, 'acme-1-main')[2].project).toBe('acme');
+
+      await seed(dir, 'beta-main', 'operator', 'session-start', null, {
+        cli: OTHER_CLI,
+        project: 'beta-app',
+      });
+      await capturePrompt(hookInput({ session_id: OTHER_CLI, prompt: 'three' }), ctxFor({}, acme));
+      expect(readLog(dir, 'beta-main')[1].project).toBe('beta-app');
+    });
+  });
+});
+
+describe('resolveLine (--resolve)', () => {
+  it('prints one JSON line for an M4 checkout and nothing for an undeclared one', () => {
+    const line = resolveLine(checkout('acme'), ctxFor({}, base));
+    expect(JSON.parse(line as string)).toEqual({
+      events_dir: path.join(clone, 'state', 'events'),
+      project: 'acme',
+      rule: 'M4',
+    });
+    expect(resolveLine(checkout('beta-app'), ctxFor({}, base))).toBeNull();
+  });
+
+  it('omits project for M2 and writes nothing', () => {
+    const beta = checkout('beta-app', { store: 'overlay' });
+    const before = readdirSync(beta);
+    expect(JSON.parse(resolveLine(beta, ctxFor({}, base)) as string)).toEqual({
+      events_dir: path.join(beta, '.blacksmith', 'state', 'events'),
+      rule: 'M2',
+    });
+    expect(readdirSync(beta)).toEqual(before);
   });
 });
