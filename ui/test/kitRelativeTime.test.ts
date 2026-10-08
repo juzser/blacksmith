@@ -49,7 +49,18 @@ describe('kit/RelativeTime.vue', () => {
   });
 
   it('wraps the <time> in a describe-mode Tooltip carrying the absolute text, not a title attribute', () => {
-    expect(RELATIVE_TIME).toMatch(/<Tooltip\s+mode="describe"\s+:text="absolute"/);
+    expect(RELATIVE_TIME).toMatch(/<Tooltip\s+(?:v-else\s+)?mode="describe"\s+:text="absolute"/);
     expect(RELATIVE_TIME).not.toMatch(/title="/);
+  });
+
+  it('plain renders only the <time datetime>: no Tooltip, no tab stop, no hit-box class', () => {
+    expect(RELATIVE_TIME).toMatch(/plain\?:\s*boolean;/);
+    const plain = RELATIVE_TIME.match(/<time\s+v-if="plain"[^>]*>[^<]*<\/time>/)?.[0];
+    expect(plain).toMatch(/:datetime="iso"/);
+    expect(plain).toMatch(/\{\{\s*relative\s*\}\}/);
+    expect(plain).not.toMatch(/tabindex|class=/);
+    // The plain branch comes first and the Tooltip branch is its v-else.
+    expect(RELATIVE_TIME.indexOf('v-if="plain"')).toBeLessThan(RELATIVE_TIME.indexOf('<Tooltip'));
+    expect(RELATIVE_TIME).toMatch(/<Tooltip\s+v-else\s/);
   });
 });

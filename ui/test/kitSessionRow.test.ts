@@ -51,4 +51,12 @@ describe('kit/SessionRow.vue', () => {
     expect(rule).toBeTruthy();
     expect(rule).toMatch(/background:\s*var\(--bs-surface-selected\);/);
   });
+
+  it('has no focusable descendant: its time is plain, so the row button is the only tab stop', () => {
+    const template = ROW.slice(ROW.indexOf('<template>'));
+    expect(template).toMatch(/<RelativeTime[^>]*\bplain\b/);
+    expect(template).not.toMatch(/<(a|button|input|select|textarea|Tooltip)\b|tabindex/);
+    // The row root itself is the one button; a nested button would be invalid.
+    expect(template.match(/<button\b/g) ?? []).toHaveLength(0);
+  });
 });

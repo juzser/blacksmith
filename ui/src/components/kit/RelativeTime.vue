@@ -18,6 +18,8 @@ const props = defineProps<{
   iso: string;
   now?: string;
   duration?: boolean;
+  /** Only the `<time>`: no Tooltip, so no tab stop, for use inside a control that is itself the target. */
+  plain?: boolean;
 }>();
 
 const liveNow = useNow();
@@ -31,7 +33,8 @@ const absolute = computed(() => formatAbsolute(props.iso));
 </script>
 
 <template>
-  <Tooltip mode="describe" :text="absolute" placement="top">
+  <time v-if="plain" :datetime="iso">{{ relative }}</time>
+  <Tooltip v-else mode="describe" :text="absolute" placement="top">
     <time :datetime="iso">{{ relative }}</time>
   </Tooltip>
 </template>
