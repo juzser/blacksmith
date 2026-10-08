@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
-import { ARIAL_FONT_CSS } from './fontSwitch.js';
+import { ARIAL_FONT_CSS, arialInit } from './fontSwitch.js';
 import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -102,20 +102,6 @@ const errorBodiesRead = (page: Page, part: string) =>
   );
 
 const title = (page: Page) => page.getByRole('heading', { level: 1 });
-// Init script that forces Arial (the way BS_E2E_FONT=arial does) for one test.
-const arialInit = (css: string) => {
-  const attach = () => {
-    if (!document.documentElement) return false;
-    const style = document.createElement('style');
-    style.textContent = css;
-    document.documentElement.appendChild(style);
-    return true;
-  };
-  if (!attach()) {
-    const observer = new MutationObserver(() => attach() && observer.disconnect());
-    observer.observe(document, { childList: true });
-  }
-};
 
 test.describe('a foreign store in the dashboard', () => {
   test.beforeAll(async () => {
@@ -743,39 +729,49 @@ test.describe('a foreign store in the dashboard', () => {
       });
     }
 
-    // After the screenshots: it gives the foreign `sess-extra` an agent that
-    // works for the session itself, so the session still has no epic.
-    test('the foreign project link keeps its session with no epic, and its roster opens', async ({
-      page,
-    }) => {
+    // Gives the foreign `sess-extra` an agent that works for the session
+    // itself, so the session still has no epic. Idempotent: it appends the
+    // `dispatch_decision` only when none is there. Each test that reads the
+    // agent calls it, so none depends on another test's write (a failed test
+    // restarts the worker and `beforeAll` rebuilds the fixtures without it).
+    // The screenshot tests above never call it, so they shoot the no-agent state.
+    const ensureExtraAgent = async () => {
       const { appendEvent, readEvents } = await import(
         path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'events.ts')
       );
       const opts = { stateDir: path.join(tmp, 'project-b', '.blacksmith', 'state', 'events') };
-      const last = (await readEvents('sess-extra', opts)).at(-1);
-      await appendEvent(
-        {
-          session_id: 'sess-extra',
-          actor: 'orchestrator',
-          event_type: 'dispatch_decision',
-          plan_version: 1,
-          causal_parent: last?.event_id ?? null,
-          project: 'project-b',
-          payload: {
-            agent_role: 'researcher',
-            provider: 'claude',
-            model_tier: 'mid',
-            model: 'claude-sonnet-5',
-            reason: 'Look around before any epic.',
+      const events = await readEvents('sess-extra', opts);
+      if (!events.some((e: { event_type: string }) => e.event_type === 'dispatch_decision')) {
+        await appendEvent(
+          {
+            session_id: 'sess-extra',
+            actor: 'orchestrator',
+            event_type: 'dispatch_decision',
+            plan_version: 1,
+            causal_parent: events.at(-1)?.event_id ?? null,
+            project: 'project-b',
+            payload: {
+              agent_role: 'researcher',
+              provider: 'claude',
+              model_tier: 'mid',
+              model: 'claude-sonnet-5',
+              reason: 'Look around before any epic.',
+            },
           },
-        },
-        opts,
-      );
+          opts,
+        );
+      }
       await waitFor(
         async () => (await fetch(`${origin}/api/sessions/sess-extra/agents?store=${foreignId}`)).ok,
         15000,
         'the foreign agent',
       );
+    };
+
+    test('the foreign project link keeps its session with no epic, and its roster opens', async ({
+      page,
+    }) => {
+      await ensureExtraAgent();
       await page.goto(`${origin}/sessions?scope=all`);
       const group = groupOf(page, 'project-b');
       const extra = () => page.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' });
@@ -791,10 +787,10 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(roster(page).locator('.bs-agentblock')).toHaveCount(1);
     });
 
-    // The next tests read the `sess-extra` agent the test above added.
     test('Tab walks from one session row to the next, with no stop on a time inside a row', async ({
       page,
     }) => {
+      await ensureExtraAgent();
       await page.goto(`${origin}/sessions?scope=all`);
       const rows = groupOf(page, 'project-b').locator('button.bs-sessionrow');
       await expect(rows).toHaveCount(2);
@@ -938,6 +934,7 @@ test.describe('a foreign store in the dashboard', () => {
     test('a selected session names where it is from: title, project, start time', async ({
       page,
     }) => {
+      await ensureExtraAgent();
       const line = (p: Page) => roster(p).locator('.bs-sessions__detail-head');
       await page.goto(`${origin}/sessions?scope=all`);
       await groupOf(page, 'project-b')
@@ -961,6 +958,7 @@ test.describe('a foreign store in the dashboard', () => {
     test('a selected session that drops out of the list keeps its roster, without a head line', async ({
       page,
     }) => {
+      await ensureExtraAgent();
       let drop = false;
       await page.route('**/api/sessions?*', async (route) => {
         const real = await (await route.fetch()).json();
