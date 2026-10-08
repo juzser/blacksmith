@@ -1163,7 +1163,17 @@ export function createApp(opts: AppOpts): AppHandle {
       );
       return c.json(
         parts
-          .flatMap(({ store, data }) => data.runningSessions.map((r) => ({ ...r, store })))
+          .flatMap(({ store, data }) =>
+            data.runningSessions.map((r) => ({
+              ...r,
+              // A foreign session that has not reached an epic yet would read
+              // as a home one ("No project"); name its project after the store.
+              ...(store.id !== 'home' && r.projects.length === 0
+                ? { projects: [store.label] }
+                : {}),
+              store,
+            })),
+          )
           .sort(
             (a, b) =>
               b.lastEventAt.localeCompare(a.lastEventAt) ||

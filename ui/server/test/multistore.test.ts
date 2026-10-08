@@ -826,6 +826,18 @@ describe('multi-store dashboard reads', () => {
       expect(shared.find((r) => r.store.id === 'home')?.projects).not.toContain('project-b');
     });
 
+    it('a foreign session with no epic takes its store label; a home one stays unlabelled', async () => {
+      await extra(eventsB, 'sess-b-only');
+      await extra(eventsHome(), 'sess-home-only');
+      const a = app();
+      const id = await foreignId(a);
+      const rows = await get<(Sess & { store: Store })[]>(a, '/api/sessions?stores=all');
+      expect(
+        rows.find((r) => r.sessionId === 'sess-b-only' && r.store.id === id)?.projects,
+      ).toEqual(['project-b']);
+      expect(rows.find((r) => r.sessionId === 'sess-home-only')?.projects).toEqual([]);
+    });
+
     it('merges in the order one store uses: newest event first, then session id, then store id', async () => {
       await extra(eventsB, 'sess-b-only');
       await extra(eventsHome(), 'sess-home-only');
@@ -890,6 +902,8 @@ describe('multi-store dashboard reads', () => {
       expect(foreign.roles.length).toBeGreaterThan(0);
       const home = await get<{ roles: unknown[] }>(a, '/api/sessions/sess-fixture/agents');
       expect(home.roles.length).toBeGreaterThan(0);
+      const explicitHome = await get<unknown>(a, '/api/sessions/sess-fixture/agents?store=home');
+      expect(explicitHome).toEqual(home);
       const unknown = await a.app.request('/api/sessions/sess-fixture/agents?store=nope');
       expect(unknown.status).toBe(404);
       expect((await json<{ error: { code: string } }>(unknown)).error.code).toBe('store.not-found');

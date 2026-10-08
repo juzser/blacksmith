@@ -692,6 +692,17 @@ test.describe('a foreign store in the dashboard', () => {
       expect(rosters).toContain(`/api/sessions/sess-fixture/agents?store=${foreignId}`);
     });
 
+    test('a session with no epic sits under its own store: foreign under its label, home under No project', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/sessions?scope=all`);
+      const extra = (group: ReturnType<Page['locator']>) =>
+        group.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' });
+      await expect(extra(groupOf(page, 'project-b'))).toHaveCount(1);
+      await expect(extra(groupOf(page, 'No project'))).toHaveCount(1);
+      await expect(extra(groupOf(page, 'project-a'))).toHaveCount(0);
+    });
+
     for (const [name, viewport] of [
       ['desktop-light', VIEWPORTS.desktop],
       ['phone-light', { width: 375, height: 812 }],

@@ -18,7 +18,11 @@ export function selectedSessionFromQuery(
 ): string | null {
   const id = typeof query.session === 'string' ? query.session : null;
   if (!id || (query.store !== undefined && typeof query.store !== 'string')) return null;
-  const hit = sessions.find((s) => s.sessionId === id && foreignStoreId(s) === query.store);
+  const hit = sessions.find(
+    (s) =>
+      s.sessionId === id &&
+      foreignStoreId(s) === (query.store === HOME_STORE_ID ? undefined : query.store),
+  );
   return hit ? storeKey(hit, id) : null;
 }
 

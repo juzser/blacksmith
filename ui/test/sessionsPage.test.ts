@@ -68,6 +68,10 @@ describe('SessionsPage.vue', () => {
     expect(matches?.length).toBe(2);
   });
 
+  it('re-derives the selection when either ?session or ?store changes', () => {
+    expect(PAGE).toMatch(/\(\) => \[route\.query\.session, route\.query\.store\],/);
+  });
+
   it('moves focus to the deep-linked row after scrolling it into view', () => {
     expect(PAGE).toMatch(/row\?\.scrollIntoView\(\{ block: 'nearest' \}\);/);
     expect(PAGE).toMatch(/row\?\.querySelector\('button'\)\?\.focus\(\{ preventScroll: true \}\);/);
