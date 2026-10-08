@@ -84,6 +84,7 @@ export function mergeOverview(
     K extends
       | 'liveAgentEntries'
       | 'runningSessions'
+      | 'epicsIdle'
       | 'closedEpics'
       | 'tokensByEpic'
       | 'milestoneProgress'
@@ -128,6 +129,8 @@ export function mergeOverview(
     epicsInFlight: strings('epicsInFlight'),
     epicsActivelyRunning: strings('epicsActivelyRunning'),
     epicsInFlightByStore: withStore('epicsInFlight'),
+    // Each store's own order stands (the sort is stable); the store id orders the stores.
+    epicsIdle: sorted(rows('epicsIdle'), byStore),
     closedEpics: sorted(
       rows('closedEpics'),
       (a, b) => newest(a.closedAt, b.closedAt) || byStore(a, b),

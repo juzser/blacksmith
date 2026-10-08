@@ -28,6 +28,15 @@ describe('lib/epicPicker.ts — idle epics', () => {
     expect(options[1]).toEqual({ value: 'epic-1', label: 'epic-1' });
     expect(options[2]).toEqual({ value: 'epic-2', label: 'epic-2 · idle 18d' });
   });
+
+  it('labels an epic idle in another store, whose merged entry carries a store tag', () => {
+    const foreign = { epicId: 'epic-a', idleDays: 9, store: { id: 'store-b', label: 'project-b' } };
+    const options = epicOptions(['epic-run', 'epic-a'], [foreign], false);
+    expect(options).toEqual([
+      { value: 'epic-run', label: 'epic-run' },
+      { value: 'epic-a', label: 'epic-a · idle 9d' },
+    ]);
+  });
 });
 
 describe('lib/epicPicker.ts — epicOptions', () => {
