@@ -1,3 +1,4 @@
+import type { ActiveScopeResult } from '../src/lib/api.js';
 import { stubActiveScope } from './activeScopeStub.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
@@ -1048,6 +1049,54 @@ test.describe('Activity follows Active/All (S9)', () => {
     for (const u of seen) expect(u.searchParams.getAll('sessions')).toEqual(['sess-a', 'sess-c,x']);
   });
 
+  test('a held All errors answer landing after the switch to Active does not replace it', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const errorsFor = (cls: string) => ({
+      byClass: [],
+      byDay: [],
+      classSummary: [
+        {
+          id: `economy.${cls}`,
+          errorGroup: 'economy',
+          errorClass: cls,
+          count: 5,
+          severityMix: { 'S3-minor': 5 },
+          lastSeen: '2026-09-30T10:00:00.000Z',
+          projects: ['demo'],
+          trend7d: [],
+        },
+      ],
+    });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let heldStarted = false;
+    await page.route('**/api/errors*', async (route) => {
+      if (new URL(route.request().url()).searchParams.has('sessions')) {
+        await route.fulfill({ json: errorsFor('fresh-class') });
+        return;
+      }
+      heldStarted = true;
+      await gate;
+      await route.fulfill({ json: errorsFor('stale-class') });
+    });
+    await page.goto('/activity?kind=error&scope=all');
+    await expect.poll(() => heldStarted).toBe(true);
+    await page
+      .getByRole('navigation', { name: 'Activity scope' })
+      .getByRole('link', { name: 'Active', exact: true })
+      .click();
+    const cards = page.locator('.bs-activity-errors__cards .bs-card');
+    await expect(cards.first()).toContainText('Fresh class');
+    release();
+    await page.waitForTimeout(300);
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first()).toContainText('Fresh class');
+  });
+
   test('phone 375: the toggle clears 44px, sits above the kind tabs, and nothing scrolls sideways', async ({
     page,
   }) => {
@@ -1107,16 +1156,32 @@ test.describe('Activity follows Active/All (S9)', () => {
       '/activity',
       'activity-unmeasured-desktop-light',
     ],
+    [
+      'none in this view desktop light',
+      VIEWPORTS.desktop,
+      {
+        liveSessions: 1,
+        factorySessions: [{ storeId: 'store-b', sessionId: 'f1' }],
+        projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      },
+      '/activity',
+      'activity-none-here-desktop-light',
+    ],
   ] as const) {
     test(`screenshot ${name}`, async ({ page }) => {
-      await stubActiveScope(page, [], scopeOver);
+      await stubActiveScope(page, [], scopeOver as Partial<ActiveScopeResult>);
       await setTheme(page, 'light');
       await page.setViewportSize(viewport);
       await page.goto(path);
-      const marker =
-        scopeOver.liveSessions === 0
-          ? page.locator('.bs-scope-line')
-          : page.getByRole('feed', { name: 'Activity' }).locator('.bs-timeline-row__title').first();
+      const edgeText =
+        'liveSessions' in scopeOver
+          ? scopeOver.liveSessions === 0
+            ? 'Nothing is active right now.'
+            : 'No active session in this view'
+          : null;
+      const marker = edgeText
+        ? page.getByText(edgeText)
+        : page.getByRole('feed', { name: 'Activity' }).locator('.bs-timeline-row__title').first();
       await settleForShot(page, marker);
       await shoot(page, shot);
     });

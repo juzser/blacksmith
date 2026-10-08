@@ -83,10 +83,9 @@ describe('activeHomeSessionIds', () => {
     ).toEqual(['sess-a', 'sess-b']);
   });
 
-  it('is null above the 200-id cap, never a truncated list', () => {
+  it('returns every id, uncapped: the page decides what is too many', () => {
     const many = Array.from({ length: 201 }, (_, i): [string, string] => ['home', `s${i}`]);
-    expect(activeHomeSessionIds(withSessions(many))).toBeNull();
-    expect(activeHomeSessionIds(withSessions(many.slice(0, 200)))).toHaveLength(200);
+    expect(activeHomeSessionIds(withSessions(many))).toHaveLength(201);
   });
 });
 

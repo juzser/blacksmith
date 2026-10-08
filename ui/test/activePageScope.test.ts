@@ -40,11 +40,18 @@ describe('resolveActivePageScope', () => {
     }
   });
 
-  it('Active past the 200-id cap falls back to unmeasured, never a truncated list', () => {
-    const many = Array.from({ length: 201 }, (_, i) => ({ storeId: 'home', sessionId: `s${i}` }));
-    expect(
-      resolveActivePageScope({ ...base, active: measured({ factorySessions: many }) }).mode,
-    ).toBe('unmeasured');
+  it('Active past the 200-id cap is too-many: fetch All, keep the toggle, never unmeasured', () => {
+    const ids = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ storeId: 'home', sessionId: `s${i}` }));
+    const over = resolveActivePageScope({
+      ...base,
+      active: measured({ factorySessions: ids(201) }),
+    });
+    expect(over).toMatchObject({ mode: 'too-many', fetchable: true, showToggle: true });
+    expect(over.sessions).toBeUndefined();
+    const at = resolveActivePageScope({ ...base, active: measured({ factorySessions: ids(200) }) });
+    expect(at.mode).toBe('narrowed');
+    expect(at.sessions).toHaveLength(200);
   });
 
   it('Active with home ids narrows to them', () => {

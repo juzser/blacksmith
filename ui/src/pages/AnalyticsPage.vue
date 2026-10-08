@@ -88,7 +88,12 @@ const data = ref<AnalyticsResult | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
 
+// A response whose request was superseded -- by a scope or period change, or by
+// a call that fetches nothing -- sets nothing. Bumped on every call.
+let loadSeq = 0;
+
 async function load() {
+  const seq = ++loadSeq;
   error.value = null;
   if (!view.value.fetchable) {
     // Holding for the scope read, or Active with nothing in this store: no
@@ -99,16 +104,17 @@ async function load() {
   }
   loading.value = data.value === null;
   try {
-    data.value = await fetchAnalytics(
+    const result = await fetchAnalytics(
       sessionScope.value,
       project.value,
       period.value,
       view.value.sessions,
     );
+    if (seq === loadSeq) data.value = result;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    if (seq === loadSeq) error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
 }
 onMounted(load);
@@ -261,24 +267,27 @@ const phoneRoleHeading = computed(() => {
       </div>
     </div>
 
-    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet bs-scope-line">
+    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet">
       Live sessions can't be read here
     </p>
+    <p v-if="view.mode === 'too-many'" class="bs-sessions__quiet">
+      Too many active sessions to narrow; showing all
+    </p>
     <template v-if="view.mode === 'empty'">
-      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet bs-scope-line">
+      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet">
         Nothing is active right now. ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
-      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet bs-scope-line">
+      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet">
         {{ pluralize(active?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
-      <p v-else class="bs-sessions__quiet bs-scope-line">
+      <p v-else class="bs-sessions__quiet">
         No active session in this view ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
     </template>
-    <p v-if="otherStores.length > 0" class="bs-sessions__quiet bs-scope-line">
+    <p v-if="otherStores.length > 0" class="bs-sessions__quiet">
       {{ pluralize(otherStores.length, 'active project') }}
       {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
       ({{ otherStores.join(', ') }}) ·

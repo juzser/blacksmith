@@ -2,7 +2,7 @@
 // `resolveActivePageScope` is the pure decision; `useActivePageScope` binds it
 // to the route and the shared active-scope read. See ds-spec §4.3 / §4.4 Scope.
 import { computed } from 'vue';
-import { activeHomeSessionIds } from '../lib/activeScope.js';
+import { activeHomeSessionIds, MAX_ACTIVE_SESSION_IDS } from '../lib/activeScope.js';
 import type { ActiveScopeResult } from '../lib/api.js';
 import { otherStoreProjects } from '../lib/sessionsSelection.js';
 import { useActiveScope } from './useActiveScope.js';
@@ -13,6 +13,7 @@ export type ActivePageMode =
   | 'all'
   | 'loading' // Active, the scope read still in flight: hold, fetch nothing
   | 'unmeasured' // Active, live sessions unreadable: fetch All, say so
+  | 'too-many' // Active, measured, more home sessions than the server takes: fetch All, say so
   | 'narrowed' // Active, measured, home-store sessions to narrow to
   | 'empty'; // Active, measured, none in this store: fetch nothing
 
@@ -51,6 +52,7 @@ export function resolveActivePageScope(input: {
   if (input.active === null && !input.settled) return done('loading');
   const ids = activeHomeSessionIds(input.active);
   if (ids === null || input.active === null) return done('unmeasured');
+  if (ids.length > MAX_ACTIVE_SESSION_IDS) return done('too-many');
   if (ids.length > 0)
     return done('narrowed', { sessions: ids, key: `narrowed\n${ids.join('\n')}` });
   const edge: ActiveEdge =

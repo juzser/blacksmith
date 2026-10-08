@@ -161,16 +161,23 @@ const { view, active, otherStores, scopeTo } = useActivePageScope(
 const errorsData = ref<ErrorsResult | null>(null);
 const errorsLoading = ref(false);
 
+// Same rule as the feed's FeedGeneration: a stale answer sets nothing. A plain
+// counter, bumped on every call including the one that fetches nothing.
+let errorsSeq = 0;
+
 async function loadErrorsData() {
+  const seq = ++errorsSeq;
   if (!view.value.fetchable) {
     errorsData.value = null;
+    errorsLoading.value = false;
     return;
   }
   errorsLoading.value = true;
   try {
-    errorsData.value = await fetchErrors(sessionScope.value, project.value, view.value.sessions);
+    const result = await fetchErrors(sessionScope.value, project.value, view.value.sessions);
+    if (seq === errorsSeq) errorsData.value = result;
   } finally {
-    errorsLoading.value = false;
+    if (seq === errorsSeq) errorsLoading.value = false;
   }
 }
 
@@ -498,24 +505,27 @@ function becauseOf(promptId: string) {
       </div>
     </div>
 
-    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet bs-scope-line">
+    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet">
       Live sessions can't be read here
     </p>
+    <p v-if="view.mode === 'too-many'" class="bs-sessions__quiet">
+      Too many active sessions to narrow; showing all
+    </p>
     <template v-if="view.mode === 'empty'">
-      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet bs-scope-line">
+      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet">
         Nothing is active right now. ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
-      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet bs-scope-line">
+      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet">
         {{ pluralize(active?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
-      <p v-else class="bs-sessions__quiet bs-scope-line">
+      <p v-else class="bs-sessions__quiet">
         No active session in this view ·
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
     </template>
-    <p v-if="otherStores.length > 0" class="bs-sessions__quiet bs-scope-line">
+    <p v-if="otherStores.length > 0" class="bs-sessions__quiet">
       {{ pluralize(otherStores.length, 'active project') }}
       {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
       ({{ otherStores.join(', ') }}) ·

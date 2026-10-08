@@ -217,6 +217,93 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     await expect.poll(() => urls.some((u) => !u.searchParams.has('sessions'))).toBe(true);
   });
 
+  // A response that was still in flight when the scope or period changed must
+  // not overwrite the newer answer. `hold` picks the request to park; it is
+  // answered "no usage" after `release()`, every other request with real usage.
+  async function holdAnalytics(page: Page, hold: (u: URL) => boolean) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started = false;
+    let settled = Promise.resolve();
+    await page.route('**/api/analytics*', async (route) => {
+      const isHeld = hold(new URL(route.request().url()));
+      const response = await route.fetch();
+      const body = await response.json();
+      body.tokensByDay = isHeld
+        ? []
+        : [
+            {
+              day: '2026-01-02',
+              tokensByRole: { coder: 100 },
+              tokensByModelTier: { mid: 100 },
+              unmeasuredRunCount: 0,
+            },
+          ];
+      if (isHeld) {
+        started = true;
+        settled = gate;
+        await gate;
+      }
+      await route.fulfill({ response, json: body });
+    });
+    return { release, started: () => started, settled: () => settled };
+  }
+
+  test('a held All answer landing after the switch to Active does not replace it', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const h = await holdAnalytics(page, (u) => !u.searchParams.has('sessions'));
+    await page.goto('/analytics?scope=all');
+    await expect.poll(h.started).toBe(true);
+    await page
+      .getByRole('navigation', { name: 'Activity scope' })
+      .getByRole('link', { name: 'Active', exact: true })
+      .click();
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+    await expect(page.locator('.bs-card__title').getByText('Tokens per day')).toBeVisible();
+    h.release();
+    await h.settled();
+    await page.waitForTimeout(300);
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+  });
+
+  test('a held answer for the old period does not replace the new period', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const h = await holdAnalytics(page, (u) => u.searchParams.get('period') === '30d');
+    await page.goto('/analytics');
+    await expect.poll(h.started).toBe(true);
+    await page.getByRole('button', { name: '7 days' }).click();
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+    await expect(page.locator('.bs-card__title').getByText('Tokens per day')).toBeVisible();
+    h.release();
+    await h.settled();
+    await page.waitForTimeout(300);
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+  });
+
   test('nothing live: only the edge line, no request, no charts or zero totals', async ({
     page,
   }) => {
@@ -339,7 +426,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
     await page.goto('/analytics');
-    await settleForShot(page, page.locator('.bs-scope-line'));
+    await settleForShot(page, page.getByText('Nothing is active right now.'));
     await shoot(page, 'analytics-nothing-active-desktop-light');
   });
 });
