@@ -932,12 +932,30 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(line(page)).toContainText('No project');
     });
 
-    test('a selected session missing from the filtered list shows its roster without a head line', async ({
+    test('a selected session that drops out of the list keeps its roster, without a head line', async ({
       page,
     }) => {
-      await page.goto(`${origin}/sessions?project=project-a&session=sess-extra&store=${foreignId}`);
+      let drop = false;
+      await page.route('**/api/sessions?*', async (route) => {
+        const real = await (await route.fetch()).json();
+        await route.fulfill({
+          json: drop
+            ? real.filter((r: { sessionId: string }) => r.sessionId !== 'sess-extra')
+            : real,
+        });
+      });
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'project-b')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(roster(page).locator('.bs-sessions__detail-head')).toHaveCount(1);
+      drop = true;
+      await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(
+        groupOf(page, 'project-b').locator('.bs-sessionrow').filter({ hasText: 'sess-extra' }),
+      ).toHaveCount(0);
       await expect(roster(page)).toBeVisible();
-      await expect(groupOf(page, 'project-b')).toHaveCount(0);
       await expect(roster(page).locator('.bs-sessions__detail-head')).toHaveCount(0);
     });
   });
