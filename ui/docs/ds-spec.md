@@ -1242,7 +1242,7 @@ one-line takeaway underneath:
 3. "How often a re-checked fix held" (recheck pass rate) — same not-enough-data rule.
 4. "Second-opinion reviewers" (was "Cross-check quorum") — "agreed with the main reviewer
    37% of the time", shown as a `ProgressRing` "37%" beside the sentence, with an `Info`
-   icon button whose tooltip defines the metric; from the existing `agree %`/`ms` values, msconverted to seconds
+   icon button whose tooltip defines the metric; from the existing `agree %`/`ms` values, ms converted to seconds
    ("27 s average"). With no second-opinion review in the period the ring gives way to
    "Not enough data yet" and the takeaway reads "No second-opinion reviews in this period." (never 0%).
    On a phone, any stat value that reads "Not enough data yet" is set at 13px, regular weight,
