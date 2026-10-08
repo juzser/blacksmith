@@ -179,6 +179,7 @@ import {
 } from './policy.js';
 import { factoryProjects } from './projects.js';
 import { captureContext, capturePrompt } from './promptCapture.js';
+import { importTranscript } from './promptImport.js';
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
@@ -2720,6 +2721,20 @@ async function main(): Promise<number> {
     } catch {
       // A capture that fails loses one record; the prompt itself goes through.
     }
+    return 0;
+  }
+
+  // Backfill: replays a Claude Code transcript into the home prompt log the
+  // hook would have written (promptImport.ts). Unlike `capture` it is an
+  // explicit act, so a refusal is exit 1. --dry-run prints each event first.
+  if (namespace === 'prompt' && action === 'import') {
+    const { events, summary } = await importTranscript(
+      requireFlag(flags, 'transcript'),
+      captureContext(process.cwd(), process.env),
+      { dryRun: flags['dry-run'] === 'true' },
+    );
+    if (flags['dry-run'] === 'true') for (const event of events) console.log(JSON.stringify(event));
+    console.log(JSON.stringify(summary));
     return 0;
   }
 

@@ -34,7 +34,7 @@ const absolute = computed(() => formatAbsolute(props.iso));
 
 <template>
   <time v-if="plain" :datetime="iso">{{ relative }}</time>
-  <Tooltip v-else mode="describe" :text="absolute" placement="top">
+  <Tooltip v-else mode="describe" :text="absolute" class="bs-reltime" placement="top">
     <time :datetime="iso">{{ relative }}</time>
   </Tooltip>
 </template>
