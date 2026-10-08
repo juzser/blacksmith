@@ -96,4 +96,26 @@ describe('dist/promptHook.js, the prompt-capture entry point', () => {
       existsSync(path.join(dir, '.blacksmith', 'state', 'events', `prompts-${cli}.jsonl`)),
     ).toBe(true);
   });
+
+  it('answer mode records an AskUserQuestion answer end to end', () => {
+    const dir = managedCheckout();
+    const cli = '11111111-2222-4333-8444-555555555555';
+    const r = run(
+      ['answer'],
+      JSON.stringify({
+        session_id: cli,
+        cwd: dir,
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'toolu_01',
+        tool_response: {
+          questions: [{ question: 'Go?', header: 'Go', options: [], multiSelect: false }],
+          answers: { 'Go?': 'Yes' },
+        },
+      }),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe(
+      `bs prompt capture: {"event_id":"prompts-${cli}#1","session_id":"prompts-${cli}"}`,
+    );
+  });
 });

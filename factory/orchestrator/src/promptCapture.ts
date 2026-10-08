@@ -151,6 +151,41 @@ const FALLBACK_WINDOW_MS = 72 * 3600 * 1000;
 const DEDUPE_MS = 10_000;
 const SCAN_LIMIT = 20;
 
+export type Obj = Record<string, unknown>;
+export const isObj = (v: unknown): v is Obj =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+export const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+
+/** The text an AskUserQuestion result puts on the timeline; null when no one answered. */
+export function answerOf(
+  result: Obj,
+): { prompt: string; answers: Obj[]; response?: string } | null {
+  const answers = isObj(result.answers) ? result.answers : {};
+  const annotations = isObj(result.annotations) ? result.annotations : {};
+  const questions = Array.isArray(result.questions) ? result.questions.filter(isObj) : [];
+  const rows: Obj[] = [];
+  for (const q of questions) {
+    const question = str(q.question);
+    const answer = question === undefined ? undefined : str(answers[question]);
+    if (question === undefined || answer === undefined || answer === '') continue;
+    const notes = isObj(annotations[question])
+      ? str((annotations[question] as Obj).notes)
+      : undefined;
+    rows.push({
+      question,
+      header: str(q.header) ?? question,
+      answer,
+      ...(notes === undefined || notes === '' ? {} : { notes }),
+    });
+  }
+  const response = str(result.response);
+  const free = response === undefined || response === '' ? undefined : response;
+  if (rows.length === 0 && free === undefined) return null;
+  const prompt =
+    rows.length > 0 ? rows.map((r) => `${r.header}: ${r.answer}`).join('\n') : (free as string);
+  return { prompt, answers: rows, ...(free === undefined ? {} : { response: free }) };
+}
+
 /** `/bs-mod off` -> `bs-mod`; no `command` for text that is not a command name. */
 export function commandOf(text: string): string | undefined {
   if (!text.startsWith('/')) return undefined;
@@ -211,8 +246,14 @@ async function findMainLog(
  * Record one UserPromptSubmit hook payload. Returns the single stdout line on
  * a write, null when nothing was written (not managed, skipped, duplicate,
  * malformed). Throws only on a store failure; the entries swallow it.
+ * `answer` mode takes a PostToolUse AskUserQuestion payload instead and files
+ * the operator's answers as a `user_prompt` (design §2.8).
  */
-export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<string | null> {
+export async function capturePrompt(
+  raw: string,
+  ctx: CaptureContext,
+  mode: 'prompt' | 'answer' = 'prompt',
+): Promise<string | null> {
   let input: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -221,12 +262,34 @@ export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<s
   } catch {
     return null;
   }
-  const { session_id: cli, prompt } = input;
+  const { session_id: cli } = input;
   if (typeof cli !== 'string' || !CLI_ID.test(cli)) return null;
-  if (typeof prompt !== 'string' || isHarnessText(prompt)) return null;
   if (input.agent_id !== undefined) return null;
 
-  const command = commandOf(prompt);
+  let prompt: string;
+  let promptId = typeof input.prompt_id === 'string' ? input.prompt_id : undefined;
+  let extra: Record<string, unknown> = {};
+  if (mode === 'answer') {
+    const result = input.tool_response;
+    if (input.tool_name !== 'AskUserQuestion' || !isObj(result)) return null;
+    if (typeof input.tool_use_id !== 'string' || input.tool_use_id === '') return null;
+    // A timeout answered nothing: no human chose.
+    if (result.afkTimeoutMs !== undefined && result.afkTimeoutMs !== null) return null;
+    const got = answerOf(result);
+    if (got === null || isHarnessText(got.prompt)) return null;
+    prompt = got.prompt;
+    promptId = input.tool_use_id;
+    extra = {
+      kind: 'answer',
+      answers: got.answers,
+      ...(got.response === undefined ? {} : { response: got.response }),
+    };
+  } else {
+    if (typeof input.prompt !== 'string' || isHarnessText(input.prompt)) return null;
+    prompt = input.prompt;
+  }
+
+  const command = mode === 'answer' ? undefined : commandOf(prompt);
   const cwd = typeof input.cwd === 'string' ? input.cwd : ctx.cwd;
   const store = resolveCaptureStore({ ...ctx, cwd, command });
   if (store === null) return null;
@@ -242,7 +305,6 @@ export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<s
   }
   const home = `prompts-${cli}`;
   const found = await findMainLog(eventsDir, cli, floorMs);
-  const promptId = typeof input.prompt_id === 'string' ? input.prompt_id : undefined;
 
   const write = (target: string) =>
     appendWithin(
@@ -253,7 +315,8 @@ export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<s
           (e) =>
             e.record.event_type === 'user_prompt' &&
             ((promptId !== undefined && e.record.payload.prompt_id === promptId) ||
-              (e.record.cli_session_id === cli &&
+              (mode === 'prompt' &&
+                e.record.cli_session_id === cli &&
                 e.record.payload.prompt === prompt &&
                 nowMs - Date.parse(e.record.ts) <= DEDUPE_MS)),
         );
@@ -283,6 +346,7 @@ export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<s
           payload: {
             prompt,
             source: 'hook',
+            ...extra,
             ...(promptId === undefined ? {} : { prompt_id: promptId }),
             ...(command === undefined ? {} : { command }),
           },

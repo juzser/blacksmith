@@ -12,11 +12,15 @@ import {
   type StoredEvent,
 } from './events.js';
 import {
+  answerOf,
   type CaptureContext,
   CLI_ID,
   commandOf,
+  isObj,
   newestMain,
+  type Obj,
   resolveCaptureStore,
+  str,
 } from './promptCapture.js';
 import { isHarnessText, PromptError } from './prompts.js';
 
@@ -35,38 +39,6 @@ interface Candidate {
   key: 'prompt_id' | 'transcript_uuid';
   keyValue: string;
   command: string | undefined;
-}
-
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => v !== null && typeof v === 'object' && !Array.isArray(v);
-const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
-
-/** The text an AskUserQuestion result puts on the timeline; null when no one answered. */
-function answerOf(result: Obj): { prompt: string; answers: Obj[]; response?: string } | null {
-  const answers = isObj(result.answers) ? result.answers : {};
-  const annotations = isObj(result.annotations) ? result.annotations : {};
-  const questions = Array.isArray(result.questions) ? result.questions.filter(isObj) : [];
-  const rows: Obj[] = [];
-  for (const q of questions) {
-    const question = str(q.question);
-    const answer = question === undefined ? undefined : str(answers[question]);
-    if (question === undefined || answer === undefined || answer === '') continue;
-    const notes = isObj(annotations[question])
-      ? str((annotations[question] as Obj).notes)
-      : undefined;
-    rows.push({
-      question,
-      header: str(q.header) ?? question,
-      answer,
-      ...(notes === undefined || notes === '' ? {} : { notes }),
-    });
-  }
-  const response = str(result.response);
-  const free = response === undefined || response === '' ? undefined : response;
-  if (rows.length === 0 && free === undefined) return null;
-  const prompt =
-    rows.length > 0 ? rows.map((r) => `${r.header}: ${r.answer}`).join('\n') : (free as string);
-  return { prompt, answers: rows, ...(free === undefined ? {} : { response: free }) };
 }
 
 /** `/name args` (or just `/name`) from a command echo; null without a command name. */
