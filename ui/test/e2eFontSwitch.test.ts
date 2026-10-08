@@ -11,7 +11,8 @@ import { arialSwitchOn } from '../e2e/fontSwitch.js';
 
 const e2eDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'e2e');
 
-const PLAYWRIGHT = '@playwright/test';
+/** Both specifiers export the same `test`. */
+const PLAYWRIGHT = new Set(['@playwright/test', 'playwright/test']);
 
 type AnyNode = { type: string; [key: string]: unknown };
 
@@ -30,6 +31,20 @@ function* walk(root: unknown): Generator<AnyNode> {
   }
 }
 
+/** A string literal, or a template literal with no expressions, naming Playwright. */
+function playwrightSpecifier(node: unknown): string | null {
+  const n = node as AnyNode | null | undefined;
+  let value: unknown = null;
+  if (n?.type === 'StringLiteral') value = n.value;
+  else if (n?.type === 'TemplateLiteral') {
+    const quasis = n.quasis as Array<{ value: { cooked?: string | null } }>;
+    if ((n.expressions as unknown[]).length === 0 && quasis.length === 1) {
+      value = quasis[0]?.value.cooked;
+    }
+  }
+  return typeof value === 'string' && PLAYWRIGHT.has(value) ? value : null;
+}
+
 const isIdentifier = (node: unknown, name: string): boolean =>
   (node as AnyNode | null)?.type === 'Identifier' && (node as AnyNode).name === name;
 
@@ -42,9 +57,9 @@ const isTestName = (node: { name: string } | { value: string }): boolean => {
 /**
  * What a ui/e2e file (path relative to ui/e2e) does wrong with `test`.
  *
- * 1. No .ts file but harness.ts may take Playwright's `test` as a value: not
- *    by a named, renamed, default or dynamic import, not by a namespace import
- *    and not by re-exporting it (`export { test }`, `export *`). Types and
+ * 1. No file but harness.ts may take Playwright's `test` as a value: not by a
+ *    named, renamed, default, dynamic or require()d import, not by a namespace
+ *    import and not by re-exporting it (`export { test }`, `export *`). Types and
  *    `expect` stay allowed.
  * 2. A spec that calls `test(` or `test.` imports `test` from ./harness.js.
  *
@@ -52,42 +67,53 @@ const isTestName = (node: { name: string } | { value: string }): boolean => {
  * import nor fake one.
  */
 function e2eTestImportProblems(file: string, src: string): string[] {
-  const program = babelParse(src, { sourceType: 'module', plugins: ['typescript'] }).program;
+  const program = babelParse(src, {
+    sourceType: 'module',
+    plugins: file.endsWith('x') ? ['typescript', 'jsx'] : ['typescript'],
+  }).program;
   const problems: string[] = [];
-  const flag = (line: number | undefined, how: string) =>
-    problems.push(`${file}:${line ?? '?'}: takes test from ${PLAYWRIGHT} (${how})`);
+  const flag = (line: number | undefined, how: string, from: string) =>
+    problems.push(`${file}:${line ?? '?'}: takes test from ${from} (${how})`);
 
   if (file !== 'harness.ts') {
     for (const stmt of program.body) {
       const line = stmt.loc?.start.line;
       if (stmt.type === 'ImportDeclaration') {
-        if (stmt.source.value !== PLAYWRIGHT || stmt.importKind === 'type') continue;
+        const from = stmt.source.value;
+        if (!PLAYWRIGHT.has(from) || stmt.importKind === 'type') continue;
         for (const spec of stmt.specifiers) {
-          if (spec.type === 'ImportNamespaceSpecifier') flag(line, 'namespace import');
-          else if (spec.type === 'ImportDefaultSpecifier') flag(line, 'default import');
-          else if (spec.importKind !== 'type' && isTestName(spec.imported)) flag(line, 'import');
+          if (spec.type === 'ImportNamespaceSpecifier') flag(line, 'namespace import', from);
+          else if (spec.type === 'ImportDefaultSpecifier') flag(line, 'default import', from);
+          else if (spec.importKind !== 'type' && isTestName(spec.imported)) {
+            flag(line, 'import', from);
+          }
         }
       } else if (stmt.type === 'ExportAllDeclaration') {
-        if (stmt.source.value === PLAYWRIGHT && stmt.exportKind !== 'type') flag(line, 'export *');
+        const from = stmt.source.value;
+        if (PLAYWRIGHT.has(from) && stmt.exportKind !== 'type') flag(line, 'export *', from);
       } else if (stmt.type === 'ExportNamedDeclaration') {
-        if (stmt.source?.value !== PLAYWRIGHT || stmt.exportKind === 'type') continue;
+        const from = stmt.source?.value;
+        if (!from || !PLAYWRIGHT.has(from) || stmt.exportKind === 'type') continue;
         for (const spec of stmt.specifiers) {
-          if (spec.type === 'ExportNamespaceSpecifier') flag(line, 'export * as');
+          if (spec.type === 'ExportNamespaceSpecifier') flag(line, 'export * as', from);
           else if (spec.type === 'ExportSpecifier' && spec.exportKind !== 'type') {
-            if (isTestName(spec.local)) flag(line, 're-export');
+            if (isTestName(spec.local)) flag(line, 're-export', from);
           }
         }
       }
     }
     for (const node of walk(program.body)) {
-      const [arg] = (node.arguments as AnyNode[] | undefined) ?? [];
-      if (
-        node.type === 'CallExpression' &&
-        (node.callee as AnyNode).type === 'Import' &&
-        arg?.type === 'StringLiteral' &&
-        arg.value === PLAYWRIGHT
-      ) {
-        flag((node.loc as { start: { line: number } } | undefined)?.start.line, 'dynamic import');
+      const line = (node.loc as { start: { line: number } } | undefined)?.start.line;
+      if (node.type === 'CallExpression') {
+        const [arg] = (node.arguments as AnyNode[] | undefined) ?? [];
+        const from = playwrightSpecifier(arg);
+        if (from && (node.callee as AnyNode).type === 'Import') flag(line, 'dynamic import', from);
+        else if (from && isIdentifier(node.callee, 'require')) flag(line, 'require', from);
+      } else if (node.type === 'TSImportEqualsDeclaration' && node.importKind !== 'type') {
+        const ref = node.moduleReference as AnyNode;
+        const from =
+          ref.type === 'TSExternalModuleReference' ? playwrightSpecifier(ref.expression) : null;
+        if (from) flag(line, 'import = require', from);
       }
     }
   }
@@ -153,6 +179,27 @@ describe('e2eTestImportProblems', () => {
       'a.spec.ts',
       "const { test } = await import('@playwright/test');\ntest('x', () => {});\n",
     ],
+    ['the playwright/test specifier', 'a.spec.ts', "import { test } from 'playwright/test';\n"],
+    ['a playwright/test re-export', 'shared.ts', "export { test } from 'playwright/test';\n"],
+    ['an import-equals require', 'a.ts', "import pw = require('@playwright/test');\n"],
+    [
+      'an import-equals require of playwright/test',
+      'a.ts',
+      "import pw = require('playwright/test');\n",
+    ],
+    ['a require call', 'a.cjs', "const { test } = require('@playwright/test');\n"],
+    ['a template-literal require call', 'a.cjs', 'const pw = require(`@playwright/test`);\n'],
+    ['a template-literal dynamic import', 'a.ts', 'const pw = await import(`@playwright/test`);\n'],
+    [
+      'a .mts helper that re-exports test',
+      'shared.mts',
+      "export { test } from '@playwright/test';\n",
+    ],
+    [
+      'a .tsx helper that imports test',
+      'shared.tsx',
+      "import { test } from '@playwright/test';\nexport const x = <div />;\n",
+    ],
     [
       'a spec calling test() without the harness import',
       'a.spec.ts',
@@ -167,6 +214,11 @@ describe('e2eTestImportProblems', () => {
 
   const allowed: Array<[label: string, file: string, src: string]> = [
     ['a type-only import', 'a.ts', "import type { Page } from '@playwright/test';\n"],
+    [
+      'a type-only import-equals require',
+      'a.ts',
+      "import type pw = require('@playwright/test');\n",
+    ],
     [
       'expect with type entries in braces',
       'helpers.ts',
@@ -211,7 +263,9 @@ describe('e2eTestImportProblems', () => {
   });
 
   it('finds no file in ui/e2e that takes `test` around the harness', async () => {
-    const files = (await readdir(e2eDir, { recursive: true })).filter((f) => f.endsWith('.ts'));
+    const files = (await readdir(e2eDir, { recursive: true })).filter((f) =>
+      /\.(ts|mts|cts|tsx|js|mjs|cjs)$/.test(f),
+    );
     expect(files.filter((f) => f.endsWith('.spec.ts')).length).toBeGreaterThan(0);
     const problems: string[] = [];
     for (const file of files) {
