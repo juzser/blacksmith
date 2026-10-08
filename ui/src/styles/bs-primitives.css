@@ -704,6 +704,9 @@ a:hover {
 .bs-timeline-row__detail dt {
   color: var(--bs-text-subtle);
 }
+.bs-timeline-row--highlight {
+  background: var(--bs-accent-subtle);
+}
 /* The Session link is a tap target: on phone its box reaches --bs-touch
    without moving the detail list (padding cancelled by an equal negative
    margin; the min-width only matters for a title shorter than the floor, and
