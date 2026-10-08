@@ -6,6 +6,7 @@ import {
   mkdtemp,
   open,
   readdir,
+  readFile,
   realpath,
   rm,
   stat,
@@ -1835,9 +1836,9 @@ describe('cliSessions reader', () => {
         expect((await cardOf(194)).focus?.wave).toBe(1);
       });
 
-      it('has no wave number when no wave session exists and the epic has two admissions', async () => {
+      it('counts admissions when no wave session exists: two admissions, the second open, is wave 2', async () => {
         await epicWithWaves(2, [], 1);
-        expect((await cardOf(195)).focus?.wave).toBeNull();
+        expect((await cardOf(195)).focus?.wave).toBe(2);
       });
 
       it('is wave 1 when no wave session exists and the epic has a single admission', async () => {
@@ -1850,6 +1851,221 @@ describe('cliSessions reader', () => {
         await root.addTask('epic-a', 'epic-a/task-1');
         const card = await cardOf(196);
         expect(card.focus).toMatchObject({ epicId: 'epic-a', wave: null });
+      });
+
+      describe('inline waves and plan order', () => {
+        const ids = (...ns: number[]) => ns.map((n) => `epic-a/task-${n}`);
+        async function planned(count: number) {
+          const root = await factorySession('sess-root', SID_B);
+          for (let n = 1; n <= count; n++)
+            await root.addTask('epic-a', `epic-a/task-${n}`, { title: `Task ${n}` });
+          return root;
+        }
+        const admit = (root: Awaited<ReturnType<typeof planned>>, ...ns: number[]) =>
+          root.add('wave-admitted', { epic_id: 'epic-a', task_ids: ids(...ns) });
+        const merge = (root: Awaited<ReturnType<typeof planned>>, ...ns: number[]) =>
+          root.add('wave-merged', { epic_id: 'epic-a', task_ids: ids(...ns) });
+
+        it('counts inline admissions: wave 3 when the third is the open one', async () => {
+          const root = await planned(5);
+          await admit(root, 1);
+          await merge(root, 1);
+          await admit(root, 2);
+          await merge(root, 2);
+          await admit(root, 3);
+          expect((await cardOf(230)).focus?.wave).toBe(3);
+        });
+
+        it('shows the newest admission when every wave merged, Next the first unfinished plan task', async () => {
+          const root = await planned(5);
+          for (const n of [1, 2, 3]) {
+            await admit(root, n);
+            await merge(root, n);
+          }
+          const focus = (await cardOf(231)).focus;
+          expect(focus?.wave).toBe(3);
+          expect(focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-4',
+            taskTitle: 'Task 4',
+          });
+        });
+
+        it('keeps the number of an identical re-admission and numbers a subset anew', async () => {
+          const root = await planned(5);
+          await admit(root, 1);
+          await merge(root, 1);
+          await admit(root, 2, 3);
+          await admit(root, 4);
+          await merge(root, 4);
+          // Same set as wave 2 (order aside): still wave 2, and it is the open one.
+          await admit(root, 3, 2);
+          expect((await cardOf(232)).focus?.wave).toBe(2);
+          // A subset of wave 2 is another admission: wave 4 (1, 2, 3 taken before).
+          await admit(root, 2);
+          expect((await cardOf(233)).focus?.wave).toBe(4);
+        });
+
+        it('lets a named wave session win over the admission count', async () => {
+          const root = await planned(2);
+          await admit(root, 1);
+          await merge(root, 1);
+          await admit(root, 2);
+          await pause();
+          await factorySession('epic-a-w5-d', null, root.last());
+          expect((await cardOf(234)).focus?.wave).toBe(5);
+        });
+
+        it('moves Next outside an open wave whose only task is in progress', async () => {
+          const root = await planned(3);
+          await admit(root, 1);
+          await root.dispatch('epic-a/task-1', { agent_role: 'coder' });
+          expect((await cardOf(235)).focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+            taskTitle: 'Task 2',
+          });
+        });
+
+        it('follows log order, not id text order, past ten tasks', async () => {
+          // Twelve tasks, only task-2 and task-10 unfinished. Their event ids end
+          // #2 and #10, which sort the other way round as text.
+          const root = await factorySession('sess-root', SID_B);
+          for (let n = 1; n <= 12; n++)
+            await root.addTask('epic-a', `epic-a/task-${n}`, { title: `Task ${n}` });
+          await root.add('wave-merged', {
+            epic_id: 'epic-a',
+            task_ids: ids(1, 3, 4, 5, 6, 7, 8, 9, 11, 12),
+          });
+          // Give every event one timestamp, as a burst within a millisecond does.
+          const file = path.join(stateDir, 'sess-root.jsonl');
+          await writeFile(
+            file,
+            (await readFile(file, 'utf8')).replace(
+              /"ts":"[^"]*"/g,
+              '"ts":"2026-01-01T00:00:00.000Z"',
+            ),
+          );
+          expect((await cardOf(236)).focus?.next).toMatchObject({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+          });
+        });
+
+        // A gate outcome is what moves a task into review (waivers pending:
+        // reviewing, pass: merging); the admission itself sets it to ready.
+        const gate = (root: Awaited<ReturnType<typeof planned>>, n: number, outcome: string) =>
+          root.add('gate-outcome', { outcome }, { taskId: `epic-a/task-${n}` });
+
+        /** Pads to event #8 so the next two admissions are `#9` and `#10`, and gives every event one timestamp. */
+        async function tiedAdmissions(
+          root: Awaited<ReturnType<typeof planned>>,
+          first: number[],
+          second: number[],
+        ) {
+          const index = (): number => Number(root.last().split('#').at(-1));
+          expect(index()).toBeLessThanOrEqual(8);
+          while (index() < 8) await root.add('note', {});
+          await admit(root, ...first);
+          await admit(root, ...second);
+          expect(root.last().endsWith('#10')).toBe(true);
+          const file = path.join(stateDir, 'sess-root.jsonl');
+          await writeFile(
+            file,
+            (await readFile(file, 'utf8')).replace(
+              /"ts":"[^"]*"/g,
+              '"ts":"2026-01-01T00:00:00.000Z"',
+            ),
+          );
+        }
+
+        it('orders two admissions at one timestamp by event number, not event text: #10 is newer than #9', async () => {
+          const root = await planned(4);
+          await tiedAdmissions(root, [1, 2], [3, 4]);
+          const focus = (await cardOf(240)).focus;
+          expect(focus?.wave).toBe(2);
+          expect(focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-3' });
+        });
+
+        it('gives a task re-admitted at one timestamp to the #10 admission, not #9', async () => {
+          const root = await planned(3);
+          await tiedAdmissions(root, [1, 2], [2]);
+          const focus = (await cardOf(241)).focus;
+          expect(focus?.wave).toBe(2);
+          expect(focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-2' });
+        });
+
+        it('skips a task in review for Next inside the open wave', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'reviewing',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', { title: 'Task 2' });
+          await admit(root, 1, 2);
+          await gate(root, 1, 'pass-with-waivers-pending');
+          expect((await cardOf(242)).focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+            taskTitle: 'Task 2',
+          });
+        });
+
+        it('with every wave merged, takes the first todo or in-progress plan task, not one in review', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'merging',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', {
+            title: 'Task 2',
+            task_status: 'in-progress',
+          });
+          await root.addTask('epic-a', 'epic-a/task-3', { title: 'Task 3' });
+          await root.addTask('epic-a', 'epic-a/task-4', { title: 'Task 4' });
+          await admit(root, 4);
+          await merge(root, 4);
+          expect((await cardOf(243)).focus?.next).toEqual({
+            kind: 'task',
+            taskId: 'epic-a/task-2',
+            taskTitle: 'Task 2',
+          });
+        });
+
+        it('says nothing is left when only tasks in review remain', async () => {
+          const root = await factorySession('sess-root', SID_B);
+          await root.addTask('epic-a', 'epic-a/task-1', {
+            title: 'Task 1',
+            task_status: 'reviewing',
+          });
+          await root.addTask('epic-a', 'epic-a/task-2', {
+            title: 'Task 2',
+            task_status: 'merging',
+          });
+          await admit(root, 1, 2);
+          await gate(root, 1, 'pass-with-waivers-pending');
+          await gate(root, 2, 'pass');
+          expect((await cardOf(244)).focus?.next).toEqual({ kind: 'none' });
+        });
+
+        it('leaves Next unknown and keeps the project for an epic with no task rows', async () => {
+          const s = await factorySession('sess-research', SID_B);
+          await s.add(
+            'dispatch_decision',
+            {
+              agent_role: 'researcher',
+              provider: 'claude',
+              model_tier: 'mid',
+              model: 'claude-sonnet-5',
+              spec_ref: 'specs/thing.json',
+              reason: 'research',
+              epic_id: 'epic-a',
+            },
+            { actor: 'planner', project: 'project-a' },
+          );
+          const focus = (await cardOf(237)).focus;
+          expect(focus).toMatchObject({ epicId: 'epic-a', project: 'project-a', next: null });
+        });
       });
 
       it('lists each working agent with its task title, newest first, never a task id', async () => {
@@ -1984,11 +2200,11 @@ describe('cliSessions reader', () => {
         expect(card.focus?.next).toEqual({ kind: 'none' });
       });
 
-      it('leaves next unknown when tasks remain but no open wave names one', async () => {
+      it('falls back to the first plan task when tasks remain but no wave was admitted', async () => {
         const root = await factorySession('sess-root', SID_B);
         await root.addTask('epic-a', 'epic-a/task-1');
         const card = await cardOf(203);
-        expect(card.focus?.next).toBeNull();
+        expect(card.focus?.next).toMatchObject({ kind: 'task', taskId: 'epic-a/task-1' });
       });
 
       describe('read cache', () => {
