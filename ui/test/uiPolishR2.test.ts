@@ -43,8 +43,8 @@ describe('Tag sm/md horizontal padding (ds-spec.md §2.1/§2.5, line ~309)', () 
     expect(Number(match?.[1])).toBeGreaterThanOrEqual(2);
   });
 
-  it('does not change the sm/md tag heights', () => {
-    expect(rule('.bs-tag--sm')).toMatch(/height:\s*16px;/);
+  it("sm and md share the mock's one 20px tag height", () => {
+    expect(rule('.bs-tag--sm')).toMatch(/height:\s*20px;/);
     expect(rule('.bs-tag--md')).toMatch(/height:\s*20px;/);
   });
 });
