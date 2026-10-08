@@ -175,6 +175,10 @@ test.describe('a foreign store in the dashboard', () => {
     // An image output on the home task-4, for the lightbox.
     const homeOpts = { stateDir: homeEvents };
     const homeLast = (await readEvents('sess-fixture', homeOpts)).at(-1);
+    // Stamped after the foreign store's last event: a same-ms tie flipped the Sessions group order.
+    const foreignTs: string = (await readEvents('sess-fixture', { stateDir: foreignEvents })).at(-1)
+      .record.ts;
+    while (new Date().toISOString() <= foreignTs) await new Promise((r) => setTimeout(r, 1));
     await appendEvent(
       {
         session_id: 'sess-fixture',
@@ -713,6 +717,12 @@ test.describe('a foreign store in the dashboard', () => {
         await page.goto(`${origin}/sessions?scope=all`);
         const row = groupOf(page, 'project-b').locator('.bs-sessionrow').first();
         await expect(row).toBeVisible();
+        // Home's last event is the fixture's newest, so its group leads.
+        await expect(page.locator('.bs-sessions__group-title')).toHaveText([
+          'project-a',
+          'project-b',
+          'No project',
+        ]);
         await settleForShot(page, row);
         await shoot(page, `sessions-two-stores-${name}`);
       });
