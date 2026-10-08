@@ -1506,8 +1506,8 @@ describe('tab models', () => {
       { id: T18, short: 'task-18', title: '', status: 'ready', role: null, elapsed: null },
     ])
     expect(c.tasks.more).toBe(0)
-    // the admission's prompt and the wave tasks' prompts, each once, newest first
-    expect(refs(c.prompts.rows)).toEqual(['f#17', 'f#3'])
+    // every prompt the epic kept, linked to this wave or not, newest first
+    expect(refs(c.prompts.rows)).toEqual(['f#17', 'f#11', 'f#3', 'f#0'])
     expect(c.prompts.rows[0]!.text).toBe('"Open wave 7?"="Yes, all three"')
     expect(c.prompts.rows[0]!.ts).toBe(Date.parse(events[17]!.ts!))
     expect(c.wave).toEqual({ number: 7, done: 0, review: 1, active: 1, todo: 1, total: 3 })

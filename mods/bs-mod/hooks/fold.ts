@@ -1,8 +1,10 @@
 // The pure half of bs-mod: folds Blacksmith event-log lines into the views the
 // band and pane draw. Task status mirrors factory/orchestrator/src/db/projector.ts
 // (`foldTasks`); agents, waits and activity are the HUD's own reading.
-import type { AdmissionView, AgentView, EpicView, FindingView, Hud, PromptView, TaskView, Tone, WaveView } from '../types'
+import type { AdmissionView, AgentView, BgState, EpicView, FindingView, Hud, PromptView, TaskItem, TaskView, Tone, WaveView } from '../types'
 import type { AgentInfo, AgentStatus } from 'claude-code'
+
+export type { BgState, TaskItem }
 
 export type BsEvent = {
   session_id?: string
@@ -68,7 +70,10 @@ function stripSession(sid: string): string {
   return sid.replace(/-(?:w|wave-)\d+[a-z]?(?:-[a-z]+)?-\d{4}-\d{2}-\d{2}.*$/, '').replace(/-\d{4}-\d{2}-\d{2}.*$/, '')
 }
 
-/** An event's epic: its payload `epic_id`, its task id's `<epic>/` prefix, the epic its log file names, then its session id. */
+/** A home log's session id prefix (`prompts-<cli id>`): it holds one CLI session's prompts, never an epic's events. */
+const HOME_LOG = 'prompts-'
+
+/** An event's epic: its payload `epic_id`, its task id's `<epic>/` prefix, the epic its log file names, then its session id; a home log has none. */
 export function epicIdOf(ev: BsEvent, fileEpic?: string | null): string | null {
   const fromPayload = str(ev.payload?.epic_id)
   if (fromPayload) return fromPayload
@@ -77,6 +82,7 @@ export function epicIdOf(ev: BsEvent, fileEpic?: string | null): string | null {
   // a session-start names no epic, and a session id may end in a word (`-close-<date>`) no name rule can strip
   if (fileEpic) return fileEpic
   const sid = str(ev.session_id)
+  if (sid?.startsWith(HOME_LOG)) return null
   return sid ? stripSession(sid) : null
 }
 
@@ -129,9 +135,9 @@ export function epicsFromGrep(stdout: string): Map<string, string> {
   return out
 }
 
-/** The epic a log file is named for: its session id less the wave and date. */
-export function epicOfFile(name: string): string {
-  return stripSession(name.replace(/\.jsonl$/, ''))
+/** The epic a log file is named for: its session id less the wave and date; null for a home log. */
+export function epicOfFile(name: string): string | null {
+  return name.startsWith(HOME_LOG) ? null : stripSession(name.replace(/\.jsonl$/, ''))
 }
 
 const CLONE_CLI = /(?:^|[\s;&|(=])([^\s;&|()'"`]*)\/factory\/orchestrator\/dist\/cli\.js\b/g
@@ -411,6 +417,36 @@ function reachPrompt(hud: Hud, epic: EpicView, ref: string): string | null {
   return prompt
 }
 
+/** The newest prompts an epic keeps whether or not any work descends from them. */
+export const EPIC_PROMPTS = 20
+/** The newest prompts of the own home log the idle band keeps. */
+const HOME_PROMPTS = 2
+
+/** A `parent_prompt_id` that names a home-log prompt (`prompts-<id>#<n>`), or null. */
+function homeRef(v: unknown): string | null {
+  return typeof v === 'string' && v.startsWith(HOME_LOG) && /#\d+$/.test(v) ? v : null
+}
+
+/** The home logs some epic named through `parent_prompt_id`: register reads each into the fold. */
+export function promptHomes(hud: Hud): string[] {
+  return hud.homes ?? []
+}
+
+/**
+ * Keeps an epic-log prompt on the epic and drops the oldest past EPIC_PROMPTS. A prompt some admission, task or kept
+ * wave points at stays: Past and Next read it by ref.
+ */
+function keepPrompt(epic: EpicView, ref: string, view: PromptView | undefined): void {
+  if (!view) return
+  const kept = (epic.prompts ??= {})
+  kept[ref] ??= view
+  const refs = Object.keys(kept)
+  if (refs.length <= EPIC_PROMPTS) return
+  const pinned = new Set([...Object.values(epic.taskPrompts ?? {}).flat(), ...(epic.admissions ?? []).map(a => a.prompt)])
+  const oldest = refs.filter(r => !pinned.has(r)).sort((a, b) => kept[a]!.ts - kept[b]!.ts)
+  for (const r of oldest.slice(0, refs.length - EPIC_PROMPTS)) delete kept[r]
+}
+
 /** Folds one event into `hud` in place; returns what is worth a toast. */
 export function foldEvent(hud: Hud, ev: BsEvent, ref: string, sid: string, fileEpic?: string | null): Notice[] {
   const p = ev.payload ?? {}
@@ -420,7 +456,14 @@ export function foldEvent(hud: Hud, ev: BsEvent, ref: string, sid: string, fileE
   ix.links.set(ref, { type: ev.event_type, parent: str(ev.causal_parent) })
   if (ev.event_type === 'user_prompt') ix.prompts.set(ref, { ts, text: promptLine(typeof p.prompt === 'string' ? p.prompt : '') })
   const epicId = epicIdOf(ev, fileEpic)
-  if (!epicId) return []
+  if (!epicId) {
+    // the own home log's newest prompts are the idle band's; no other home log is kept whole
+    if (ev.event_type === 'user_prompt' && sid && ev.session_id === `${HOME_LOG}${sid}`) {
+      const view = ix.prompts.get(ref)
+      if (view) hud.homePrompts = [{ ref, ...view }, ...(hud.homePrompts ?? [])].sort((a, b) => b.ts - a.ts).slice(0, HOME_PROMPTS)
+    }
+    return []
+  }
   const epic = (hud.epics[epicId] ??= newEpic(epicId))
   const notices: Notice[] = []
   const task = str(ev.task_id) ? norm(epicId, ev.task_id as string) : null
@@ -429,6 +472,22 @@ export function foldEvent(hud: Hud, ev: BsEvent, ref: string, sid: string, fileE
     epic.activity.push({ ts, text, tone })
     if (epic.activity.length > ACTIVITY_CAP) epic.activity.splice(0, epic.activity.length - ACTIVITY_CAP)
     if (toast) notices.push({ text, tone })
+  }
+
+  if (ev.event_type === 'user_prompt') keepPrompt(epic, ref, ix.prompts.get(ref))
+  // a prompt typed in another session's home log can open an epic's session or dispatch its work
+  const home = ev.event_type === 'session-start' || ev.event_type === 'dispatch_decision' ? homeRef(p.parent_prompt_id) : null
+  if (home) {
+    const homeSession = home.slice(0, home.lastIndexOf('#'))
+    if (!(hud.homes ??= []).includes(homeSession)) hud.homes.push(homeSession)
+    const view = ix.prompts.get(home)
+    if (view) {
+      ;(epic.prompts ??= {})[home] ??= view
+      if (task && ev.event_type === 'dispatch_decision') {
+        const mine = ((epic.taskPrompts ??= {})[task] ??= [])
+        if (!mine.includes(home)) mine.push(home)
+      }
+    }
   }
 
   if (sid && ev.cli_session_id === sid) epic.isMine = true
@@ -1027,7 +1086,15 @@ export type TaskRow = {
 }
 
 /** An operator prompt as a tab lists it, newest first: `ref` is its `<session id>#<line index>`. */
-export type PromptRow = { ref: string; ts: number; text: string }
+export type PromptRow = {
+  ref: string
+  ts: number
+  text: string
+  /** the first task (lowest number) the prompt led to, `task-16`; absent when no work descends from it */
+  task?: string
+  /** how many more tasks it led to; absent when it led to one or none */
+  more?: number
+}
 
 /**
  * Tokens spent against the cap. The log names one spend, the epic's: the newest `wave-admitted`'s `projected_tokens`,
@@ -1094,9 +1161,18 @@ function promptRows(epic: EpicView, refs: Iterable<string | null | undefined>, c
   const kept = epic.prompts ?? {}
   const rows = distinctPrompts(refs).flatMap(ref => {
     const p = kept[ref]
-    return p && (until === undefined || p.ts <= until) ? [{ ref, ts: p.ts, text: p.text }] : []
+    return p && (until === undefined || p.ts <= until) ? [promptRow(epic, ref, p)] : []
   })
   return capped(rows.sort((a, b) => b.ts - a.ts), cap)
+}
+
+/** A kept prompt as a row, with the first task it led to and how many more. */
+function promptRow(epic: EpicView, ref: string, p: PromptView): PromptRow {
+  const ids = Object.entries(epic.taskPrompts ?? {}).filter(([, refs]) => refs.includes(ref)).map(([id]) => id).sort((a, b) => taskNo(a) - taskNo(b))
+  const row: PromptRow = { ref, ts: p.ts, text: p.text }
+  if (ids[0]) row.task = shortTask(ids[0])
+  if (ids.length > 1) row.more = ids.length - 1
+  return row
 }
 
 function spendOf(epic: EpicView): Spend | null {
@@ -1181,10 +1257,8 @@ export function currentModel(epic: EpicView, now: number, caps: TabCaps = {}): C
   const phase = phaseOf(epic)
   const live = liveAgents(epic, now)
   const ids = currentIds(epic, live)
-  const adm = epic.admissions?.at(-1)
-  const listed = new Set(ids)
-  const asked = (epic.admissions ?? []).filter(a => a.taskIds.some(id => listed.has(id))).map(a => a.prompt)
-  const prompts = promptRows(epic, [adm?.prompt, ...asked, ...ids.flatMap(id => epic.taskPrompts?.[id] ?? [])], caps.prompts)
+  // every prompt the epic kept, linked to work or not: Current answers what the operator asked
+  const prompts = promptRows(epic, Object.keys(epic.prompts ?? {}), caps.prompts)
   const waveTasks = waveIds(epic, phase.wave)
   const inWave = new Set(waveTasks)
   const runs = (label: string) =>
@@ -1307,4 +1381,102 @@ export const ACTIVE_AGENT_STATUSES: ReadonlySet<AgentStatus> = new Set<AgentStat
 /** The agents of a `$.agent.list()` result whose status is in ACTIVE_AGENT_STATUSES, in list order. */
 export function activeSessionAgents(list: readonly AgentInfo[]): AgentInfo[] {
   return list.filter(a => ACTIVE_AGENT_STATUSES.has(a.status))
+}
+
+// ---------------------------------------------------------------------------
+// The session's own task list and background work (§2.9): what the idle band shows outside an epic.
+
+function rec(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+function idOf(v: unknown): string | null {
+  return typeof v === 'string' && v ? v : typeof v === 'number' ? String(v) : null
+}
+
+/**
+ * The task list after one main-loop task tool call: TaskCreate adds, TaskUpdate edits or (status `deleted`) removes,
+ * TaskList and TodoWrite replace the list. `input` and `result` are the call's raw values; a result of another shape,
+ * a failed update or a tool of no interest returns the list as it was.
+ */
+export function foldTaskTool(list: readonly TaskItem[], tool: string, input: unknown, result: unknown): TaskItem[] {
+  const inp = rec(input) ?? {}
+  const out = rec(result)
+  if (!out) return list as TaskItem[]
+  switch (tool) {
+    case 'TaskCreate': {
+      const t = rec(out.task)
+      const id = idOf(t?.id)
+      if (!t || !id) return list as TaskItem[]
+      const subject = str(t.subject) ?? str(inp.subject) ?? id
+      return [...list.filter(x => x.id !== id), { id, subject, activeForm: str(inp.activeForm), status: 'pending' }]
+    }
+    case 'TaskUpdate': {
+      const id = idOf(inp.taskId)
+      if (out.success !== true || !id || !list.some(x => x.id === id)) return list as TaskItem[]
+      if (inp.status === 'deleted') return list.filter(x => x.id !== id)
+      return list.map(x =>
+        x.id !== id ? x : { ...x, status: str(inp.status) ?? x.status, subject: str(inp.subject) ?? x.subject, activeForm: str(inp.activeForm) ?? x.activeForm },
+      )
+    }
+    case 'TaskList': {
+      if (!Array.isArray(out.tasks)) return list as TaskItem[]
+      return out.tasks.flatMap((raw): TaskItem[] => {
+        const t = rec(raw)
+        const id = idOf(t?.id)
+        if (!t || !id) return []
+        return [{ id, subject: str(t.subject) ?? id, activeForm: list.find(x => x.id === id)?.activeForm ?? null, status: str(t.status) ?? 'pending' }]
+      })
+    }
+    case 'TodoWrite': {
+      if (!Array.isArray(out.newTodos)) return list as TaskItem[]
+      return out.newTodos.flatMap((raw, i): TaskItem[] => {
+        const t = rec(raw)
+        const subject = str(t?.content)
+        return t && subject ? [{ id: String(i + 1), subject, activeForm: str(t.activeForm), status: str(t.status) ?? 'pending' }] : []
+      })
+    }
+    default:
+      return list as TaskItem[]
+  }
+}
+
+/** Marks background work `id` (a shell or a monitor the main loop started) as started. */
+export function bgStart(bg: BgState, id: string, kind: 'shell' | 'monitor'): BgState {
+  return { ...bg, started: { ...bg.started, [id]: kind } }
+}
+
+/** Marks background work `id` as ended, once however many times it is told. */
+export function bgEnd(bg: BgState, id: string): BgState {
+  return bg.ended.includes(id) ? bg : { ...bg, ended: [...bg.ended, id] }
+}
+
+/** The task id a `task-notification` prompt reports ended: any status but `running` ends it; null when it names no id. */
+export function notificationEnd(text: string): string | null {
+  const id = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1]?.trim()
+  const status = /<status>([^<]+)<\/status>/.exec(text)?.[1]?.trim()
+  return id && status !== 'running' ? id : null
+}
+
+/** What the idle band's progress row draws: the task list's counts, or the background work's. */
+export type Progress =
+  | { kind: 'list'; done: number; total: number; doing: string | null }
+  | { kind: 'bg'; running: number; done: number; agents: number; shells: number; monitors: number }
+
+/**
+ * The progress of a session with no epic: its task list when it has one, else its background work (running agents from
+ * `agents`, running shells and monitors from `bg`, done = ended ids); null when it has neither.
+ */
+export function progressOf(list: readonly TaskItem[], bg: BgState, agents: readonly AgentInfo[]): Progress | null {
+  if (list.length) {
+    const doing = list.find(t => t.status === 'in_progress')
+    return { kind: 'list', done: list.filter(t => t.status === 'completed').length, total: list.length, doing: doing ? (doing.activeForm ?? doing.subject) : null }
+  }
+  const ended = new Set(bg.ended)
+  const live = activeSessionAgents(agents).filter(a => !ended.has(a.id)).length
+  const running = Object.entries(bg.started).filter(([id]) => !ended.has(id))
+  const shells = running.filter(([, k]) => k === 'shell').length
+  const monitors = running.length - shells
+  const total = live + shells + monitors
+  return total + ended.size === 0 ? null : { kind: 'bg', running: total, done: ended.size, agents: live, shells, monitors }
 }
