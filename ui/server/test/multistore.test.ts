@@ -7,7 +7,7 @@ import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } fr
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
 import { appendEvent } from '../../../factory/orchestrator/src/events.js';
 import {
@@ -385,8 +385,13 @@ describe('multi-store dashboard reads', () => {
     };
     const sessionOf = (r: Row): string => r.eventId.slice(0, r.eventId.lastIndexOf('#'));
     const eventsA = (): string => path.join(projectA, 'state', 'events');
-    const pause = () => new Promise((r) => setTimeout(r, 3));
+    // appendEvent always stamps the wall clock and takes no `ts`, so the clock
+    // itself is pinned: every note gets the next millisecond, strictly after the
+    // last one (and never before the real clock), whatever the timers do.
+    let lastTs = 0;
     const note = async (dir: string, sessionId: string, n: number): Promise<void> => {
+      lastTs = Math.max(Date.now(), lastTs + 1);
+      vi.setSystemTime(lastTs);
       await appendEvent(
         {
           session_id: sessionId,
@@ -398,16 +403,20 @@ describe('multi-store dashboard reads', () => {
         },
         { stateDir: dir },
       );
-      await pause();
     };
     // Three more sessions across the two stores, appended turn by turn so their
     // timestamps interleave with each other and with the fixture's.
     async function interleave(): Promise<void> {
-      for (let n = 0; n < 3; n++) {
-        await note(eventsA(), 'sess-home-2', n);
-        await note(eventsB, 'sess-b-2', n);
-        await note(eventsB, 'sess-b-3', n);
-        await note(eventsA(), 'sess-home-3', n);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        for (let n = 0; n < 3; n++) {
+          await note(eventsA(), 'sess-home-2', n);
+          await note(eventsB, 'sess-b-2', n);
+          await note(eventsB, 'sess-b-3', n);
+          await note(eventsA(), 'sess-home-3', n);
+        }
+      } finally {
+        vi.useRealTimers();
       }
     }
     const foreignStoreId = async (a: AppHandle): Promise<string> => {
