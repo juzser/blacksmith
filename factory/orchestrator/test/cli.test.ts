@@ -12831,6 +12831,75 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    describe('prompt import', () => {
+      const CLI_ID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+      let homes = 0;
+
+      function transcript(): { env: Record<string, string>; eventsDir: string; file: string } {
+        const home = path.join(scratchDir, `prompt-import-home-${homes++}`);
+        const eventsDir = path.join(home, 'state', 'events');
+        mkdirSync(eventsDir, { recursive: true });
+        const file = path.join(home, 'transcript.jsonl');
+        const rows = ['Add the beta-app export.', 'Rename the acme flag.'].map((text, i) => ({
+          type: 'user',
+          sessionId: CLI_ID,
+          cwd: scratchDir,
+          uuid: `uuid-${i}`,
+          timestamp: `2026-01-01T00:00:0${i}.000Z`,
+          origin: { kind: 'human' },
+          promptId: `prompt-${i}`,
+          message: { role: 'user', content: text },
+        }));
+        writeFileSync(file, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+        return { env: { BS_HOME: home }, eventsDir, file };
+      }
+
+      it('imports, ends stdout with the summary line, and a second run imports 0', () => {
+        const { env, eventsDir, file } = transcript();
+        const first = runCli(['prompt', 'import', '--transcript', file], env);
+        expect(first.status).toBe(0);
+        expect(first.stdout.trim()).toBe(
+          `{"session_id":"prompts-${CLI_ID}","imported":2,"skipped":{"duplicate":0,"older":0,"harness":0,"afk":0}}`,
+        );
+        expect(
+          readFileSync(path.join(eventsDir, `prompts-${CLI_ID}.jsonl`), 'utf8')
+            .trim()
+            .split('\n'),
+        ).toHaveLength(3);
+        const second = runCli(['prompt', 'import', '--transcript', file], env);
+        expect(second.stdout.trim()).toBe(
+          `{"session_id":"prompts-${CLI_ID}","imported":0,"skipped":{"duplicate":2,"older":0,"harness":0,"afk":0}}`,
+        );
+      });
+
+      it('--dry-run prints each event, then the summary, and writes nothing', () => {
+        const { env, eventsDir, file } = transcript();
+        const { stdout, status } = runCli(
+          ['prompt', 'import', '--transcript', file, '--dry-run'],
+          env,
+        );
+        expect(status).toBe(0);
+        const out = stdout.trim().split('\n');
+        expect(out).toHaveLength(4);
+        expect(JSON.parse(out[1] as string)).toMatchObject({ event_type: 'user_prompt' });
+        expect(JSON.parse(out[3] as string)).toMatchObject({ imported: 2 });
+        expect(readdirSync(eventsDir)).toEqual([]);
+      });
+
+      it('exits 1 with prompts.import-unmanaged for a cwd outside every store', () => {
+        const { file } = transcript();
+        const { stdout, stderr, status } = runCli(['prompt', 'import', '--transcript', file], {
+          BS_HOME: path.join(scratchDir, 'prompt-import-no-store'),
+        });
+        expect(status).toBe(1);
+        expect(stdout + stderr).toContain('prompts.import-unmanaged');
+      });
+
+      it('requires --transcript', () => {
+        expect(runCli(['prompt', 'import']).status).toBe(1);
+      });
+    });
+
     describe('prompt record (D-142)', () => {
       const promptsDir = () => path.join(scratchDir, 'prompt-record-events');
 

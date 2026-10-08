@@ -404,6 +404,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Read one UserPromptSubmit hook payload on stdin and record it where the cwd is managed. Print one line, or nothing; always exit 0.',
   },
   {
+    command: 'prompt import',
+    positionals: '',
+    flags: '--transcript <file> [--dry-run]',
+    summary:
+      "Replay a Claude Code transcript's prompts and option answers into prompts-<cli session>, keeping their timestamps. Re-running imports nothing; --dry-run prints each event and writes none. Print a summary line.",
+  },
+  {
     command: 'feedback record',
     positionals: '',
     flags: `--task <task-id> [--body <text>|--body-file <file>] [--kind <must-fix|nice-to-have>] [--source <dashboard|github|cli>] [--external-id <id>] [--author <name>] ${EVENTS_DIR}`,
