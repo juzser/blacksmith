@@ -807,6 +807,18 @@ test.describe('a foreign store in the dashboard', () => {
         page,
       }) => {
         await page.setViewportSize(viewport);
+        // One live factory session in the home store (project-a): that group is
+        // not quiet, the other two are, so both colour branches run.
+        await page.route('**/api/active-scope*', async (route) => {
+          const real = await (await route.fetch()).json();
+          await route.fulfill({
+            json: {
+              ...real,
+              measured: true,
+              factorySessions: [{ storeId: 'home', sessionId: 'sess-fixture' }],
+            },
+          });
+        });
         await page.goto(`${origin}/sessions?scope=all`);
         const titles = page.locator('.bs-sessions__group-title');
         await expect(titles).toHaveCount(3);
@@ -837,6 +849,8 @@ test.describe('a foreign store in the dashboard', () => {
             }),
           };
         });
+        expect(read.groups.filter((g) => g.quiet).length).toBe(2);
+        expect(read.groups.filter((g) => !g.quiet).length).toBe(1);
         expect(new Set(read.groups.map((g) => g.size)).size).toBe(1);
         expect(new Set(read.groups.map((g) => g.weight)).size).toBe(1);
         for (const g of read.groups) {
