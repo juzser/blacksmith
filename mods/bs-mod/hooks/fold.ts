@@ -187,27 +187,27 @@ export function fmtElapsed(ms: number): string {
 
 /**
  * The colors the band and the pane draw by meaning, each role named by the theme key it stood for; `active` was a
- * teal constant, no theme key being teal. The neutrals (text, inverseText, inactive, subtle, dim) stay theme keys.
+ * teal constant, no theme key being teal; `label` is the soft white of the labels and the Overview (subtext0). The neutrals (text, inverseText, inactive, subtle, dim) stay theme keys.
  */
-export type PaletteRole = 'active' | 'success' | 'error' | 'warning' | 'permission' | 'planMode' | 'remember' | 'claude' | 'ide' | 'merged' | 'autoAccept' | 'suggestion'
+export type PaletteRole = 'active' | 'success' | 'error' | 'warning' | 'permission' | 'planMode' | 'remember' | 'claude' | 'ide' | 'merged' | 'autoAccept' | 'suggestion' | 'label'
 export type Palette = Readonly<Record<PaletteRole, string>>
 
 /** Catppuccin Mocha, for a dark theme. */
 export const MOCHA: Palette = {
   active: '#94e2d5', success: '#a6e3a1', error: '#f38ba8', warning: '#f9e2af', permission: '#89b4fa', planMode: '#cba6f7',
-  remember: '#b4befe', claude: '#fab387', ide: '#89dceb', merged: '#f5c2e7', autoAccept: '#f2cdcd', suggestion: '#74c7ec',
+  remember: '#b4befe', claude: '#fab387', ide: '#89dceb', merged: '#f5c2e7', autoAccept: '#f2cdcd', suggestion: '#74c7ec', label: '#a6adc8',
 }
 
 /** Catppuccin Latte, for a light theme. */
 export const LATTE: Palette = {
   active: '#179299', success: '#40a02b', error: '#d20f39', warning: '#df8e1d', permission: '#1e66f5', planMode: '#8839ef',
-  remember: '#7287fd', claude: '#fe640b', ide: '#04a5e5', merged: '#ea76cb', autoAccept: '#dd7878', suggestion: '#209fb5',
+  remember: '#7287fd', claude: '#fe640b', ide: '#04a5e5', merged: '#ea76cb', autoAccept: '#dd7878', suggestion: '#209fb5', label: '#6c6f85',
 }
 
 /** The engine's own theme keys, and the teal: what a daltonized, `auto` or unknown theme keeps. */
 export const THEME_KEYS: Palette = {
   active: '#14b8a6', success: 'success', error: 'error', warning: 'warning', permission: 'permission', planMode: 'planMode',
-  remember: 'remember', claude: 'claude', ide: 'ide', merged: 'merged', autoAccept: 'autoAccept', suggestion: 'suggestion',
+  remember: 'remember', claude: 'claude', ide: 'ide', merged: 'merged', autoAccept: 'autoAccept', suggestion: 'suggestion', label: 'inactive',
 }
 
 /**

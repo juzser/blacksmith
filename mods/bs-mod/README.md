@@ -19,7 +19,7 @@ shows it once installed.
   row and a separator, then a row of tabs.
   - With an epic in view, the band has four tabs.
     - **Overview** shows active agents, tasks done, budget, the current wave
-      or phase, and the epic's tier. Its tab and labels are white.
+      or phase, and the epic's tier. Its tab and labels are soft white.
     - **Current** shows the work in flight. One head row carries the wave
       or phase, a progress bar with tasks done, the live agents and the
       spend against the cap. Below it, a **Tasks** section lists the wave's

@@ -490,13 +490,13 @@ describe('band', () => {
 
     const ui = await mountBand($)
     const props = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
-    // the Overview is the theme's foreground; only the epic chip keeps the claude color
-    expect((await props(/^─+$/))?.color).toBe('text')
-    expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'text', color: 'inverseText', bold: true })
+    // the Overview is the soft label color; only the epic chip keeps the claude color
+    expect((await props(/^─+$/))?.color).toBe('inactive')
+    expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'inactive', color: 'inverseText', bold: true })
     expect(await props(/^ web-ux-4 $/)).toEqual({ backgroundColor: 'claude', color: 'inverseText', bold: true })
     expect(await props(/^wave 4$/)).toEqual({ color: 'permission', bold: true })
     expect(await props(/^tier medium$/)).toEqual({ color: 'ide', bold: true })
-    for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'text', bold: true })
+    for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'inactive', bold: true })
     // 1 done, 1 active, 2 todo across ten cells; active is teal, in the bar and in its tally
     const cells = await ui.findAll({ type: 'Text', text: /^[█░]+$/ })
     expect(cells.map(c => c.props.color)).toEqual(['success', '#14b8a6', 'inactive'])
@@ -512,10 +512,10 @@ describe('band', () => {
     expect(await props(/^1\/3$/)).toEqual({ color: 'success', bold: true })
     expect((await props(/^9\.1M\/16M$/))?.color).toBe('success')
     expect(await props(/^57%$/)).toEqual({ color: 'success', bold: true })
-    // a section divider: the rule subtle, the name in the foreground, bold
+    // a section divider: the rule subtle, the name in the soft label color, bold
     expect(await props(/^── $/)).toEqual({ color: 'subtle' })
-    expect(await props(/^Tasks$/)).toEqual({ color: 'text', bold: true })
-    expect(await props(/^Prompts$/)).toEqual({ color: 'text', bold: true })
+    expect(await props(/^Tasks$/)).toEqual({ color: 'inactive', bold: true })
+    expect(await props(/^Prompts$/)).toEqual({ color: 'inactive', bold: true })
     // the role keeps its own color; the in-progress mark is teal, after the head's role dots
     expect((await props(/^coder$/))?.color).toBe('claude')
     expect((await props(/^12m$/))?.dimColor).toBe(true)
@@ -708,12 +708,12 @@ describe('band always', () => {
       expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
       expect(await rowText(ui, 'blank')).toBe(' ')
       expect(await rowText(ui, 'rule')).toBe('─'.repeat(115))
-      expect((await ui.find({ type: 'Text', text: /^─+$/ }))?.props).toEqual({ color: 'text' })
+      expect((await ui.find({ type: 'Text', text: /^─+$/ }))?.props).toEqual({ color: 'inactive' })
       expect(await rowText(ui, 'tabs')).toBe(' Overview ')
-      expect((await ui.find({ type: 'Text', text: /^ Overview $/ }))?.props).toEqual({ backgroundColor: 'text', color: 'inverseText', bold: true })
+      expect((await ui.find({ type: 'Text', text: /^ Overview $/ }))?.props).toEqual({ backgroundColor: 'inactive', color: 'inverseText', bold: true })
       expect(await ui.findAll({ type: 'Button' })).toEqual([])
       expect(await rowText(ui, 'agents')).toBe('Agents  0 in this session')
-      expect((await ui.find({ type: 'Text', text: /^Agents$/ }))?.props).toEqual({ color: 'text', bold: true })
+      expect((await ui.find({ type: 'Text', text: /^Agents$/ }))?.props).toEqual({ color: 'inactive', bold: true })
       expect((await ui.find({ type: 'Text', text: /^0$/ }))?.props).toEqual({ bold: true })
       expect(await rowText(ui, 'idle')).toBe(IDLE_LINE)
       expect((await ui.find({ type: 'Text', text: /^no running epic/ }))?.props).toEqual({ dimColor: true })
@@ -1661,13 +1661,16 @@ describe('palette', () => {
     expect(await spots(ui)).toEqual(CASES[3][1])
   })
 
-  for (const theme of ['dark', 'light', 'dark-daltonized', null]) {
-    test(`the Overview accent and labels stay the theme foreground under ${theme ?? 'no theme'}`, async ($, on) => {
+  // the soft label color per palette: Mocha subtext0, Latte subtext0, the theme key
+  for (const [theme, soft] of [['dark', '#a6adc8'], ['light', '#6c6f85'], ['dark-daltonized', 'inactive'], [null, 'inactive']] as const) {
+    test(`the Overview accent and labels take the soft label color ${soft} under ${theme ?? 'no theme'}`, async ($, on) => {
       const ui = await up($, on, theme)
       const props = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
-      expect((await props(/^─+$/))?.color).toBe('text')
-      expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'text', color: 'inverseText', bold: true })
-      for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'text', bold: true })
+      expect((await props(/^─+$/))?.color).toBe(soft)
+      expect(await props(/^ Overview $/)).toEqual({ backgroundColor: soft, color: 'inverseText', bold: true })
+      for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: soft, bold: true })
+      await ui.press({ key: 'tab:current' })
+      for (const name of ['Tasks', 'Prompts']) expect(await props(new RegExp(`^${name}$`))).toEqual({ color: soft, bold: true })
     })
   }
 })

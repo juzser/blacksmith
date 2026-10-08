@@ -282,7 +282,7 @@ function toneColor(tone: string): string | undefined {
  * digit would switch tabs from the prompt; a letter fires only while the band holds the focus.
  */
 type TabSpec = { id: BandTab; label: string; hotkey: string; accent: string }
-const OVERVIEW_TAB: TabSpec = { id: 'overview', label: 'Overview', hotkey: 'o', accent: 'text' }
+const OVERVIEW_TAB: TabSpec = { id: 'overview', label: 'Overview', hotkey: 'o', accent: 'label' }
 const TABS: readonly TabSpec[] = [
   OVERVIEW_TAB,
   { id: 'current', label: 'Current', hotkey: 'c', accent: 'permission' },
@@ -478,7 +478,7 @@ function sectionRow(key: string, name: string, width: number): BandRow {
     key,
     runs: [
       run('── ', { color: 'subtle' }),
-      run(name, { color: 'text', bold: true }),
+      run(name, { color: 'label', bold: true }),
       run(` ${'─'.repeat(Math.max(0, width - 3 - cols(name) - 1))}`, { color: 'subtle' }),
     ],
   }
