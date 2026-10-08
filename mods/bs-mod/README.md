@@ -41,6 +41,12 @@ shows it once installed.
   pinned one, never from a watched one. The log a session starts on, and any
   event older than two minutes, never toasts, so opening a session on a long
   log stays quiet.
+- **Colors.** The band and the pane color by meaning in Catppuccin pastels:
+  Mocha under a dark `/config` theme (`dark-ansi` too), Latte under a light
+  one. A daltonized theme, `auto`, or a theme the HUD cannot read keeps the
+  terminal theme's own colors, with active work in teal. Neutral text stays in
+  the theme's colors, and so does the Overview. Changing the theme repaints
+  the HUD at once.
 - **Watching.** Normally the HUD follows the epics whose events name this
   session. When nothing is pinned and the session has no such epic, it
   watches the newest running epic under the session's own roots instead, and

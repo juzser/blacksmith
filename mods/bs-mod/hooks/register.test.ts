@@ -1570,3 +1570,104 @@ describe('plan tier', () => {
     expect(tiers.sets).toBe(1)
   })
 })
+
+/** The `/config` theme row, as `$.config.list()` answers it; and a writer beneath bs-mod, so a `config.set` lands. */
+function themed(on: On, theme: string): void {
+  on('config.list', () => ({
+    value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: theme, provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
+  }))
+  on('config.set', ($, e) => ({ value: e.value }))
+}
+
+describe('palette', () => {
+  type Ui = Awaited<ReturnType<typeof mountBand>>
+  const prompt = new RegExp(`^${ASK_1.replace(/[()]/g, '\\$&')}$`)
+
+  /** The colors at the spots a theme repaints: a done and an active bar cell, the Current accent, a prompt, a done mark. */
+  async function spots(ui: Ui) {
+    const color = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
+    const cells = await ui.findAll({ type: 'Text', text: /^[█░]+$/ })
+    const out = { done: cells[0]?.props.color, active: cells[1]?.props.color, current: undefined as unknown, rule: undefined as unknown, prompt: undefined as unknown, mark: undefined as unknown }
+    await ui.press({ key: 'tab:current' })
+    out.current = (await color(/^ Current $/))?.backgroundColor
+    out.rule = (await color(/^─+$/))?.color
+    out.prompt = (await color(prompt))?.color
+    await ui.press({ key: 'tab:past' })
+    out.mark = (await color(/^✔$/))?.color
+    await ui.press({ key: 'tab:overview' })
+    return out
+  }
+
+  async function up($: Engine, on: On, theme: string | null): Promise<Ui> {
+    world(on, prompted())
+    if (theme !== null) themed(on, theme)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    return mountBand($)
+  }
+
+  const CASES = [
+    ['dark', { done: '#a6e3a1', active: '#94e2d5', current: '#89b4fa', rule: '#89b4fa', prompt: '#b4befe', mark: '#a6e3a1' }],
+    ['dark-ansi', { done: '#a6e3a1', active: '#94e2d5', current: '#89b4fa', rule: '#89b4fa', prompt: '#b4befe', mark: '#a6e3a1' }],
+    ['light', { done: '#40a02b', active: '#179299', current: '#1e66f5', rule: '#1e66f5', prompt: '#7287fd', mark: '#40a02b' }],
+    ['dark-daltonized', { done: 'success', active: '#14b8a6', current: 'permission', rule: 'permission', prompt: 'remember', mark: 'success' }],
+  ] as const
+
+  for (const [theme, want] of CASES) {
+    test(`under ${theme} the done, active, Current and prompt spots carry its palette`, async ($, on) => {
+      const ui = await up($, on, theme)
+      expect(await spots(ui)).toEqual(want)
+    })
+  }
+
+  test('a theme set from dark to light turns the Mocha colors Latte on the next draw', async ($, on) => {
+    const ui = await up($, on, 'dark')
+    expect((await spots(ui)).active).toBe('#94e2d5')
+
+    const set = await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+    expect(set).toEqual({ value: 'light' })
+    expect(await spots(ui)).toEqual(CASES[2][1])
+  })
+
+  test('a denied theme write leaves the palette as it was', async ($, on) => {
+    world(on, prompted())
+    on('config.list', () => ({
+      value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: 'dark', provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
+    }))
+    on('config.set', () => ({ deny: 'locked by policy' }))
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    const ui = await mountBand($)
+
+    expect(await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })).toEqual({ deny: 'locked by policy' })
+    expect((await spots(ui)).active).toBe('#94e2d5')
+  })
+
+  test('a theme that cannot be read leaves the theme keys and the band drawn', async ($, on) => {
+    world(on, prompted())
+    on('config.list', () => {
+      throw new Error('config unavailable')
+    })
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    const ui = await mountBand($)
+    expect(await rowKeys(ui)).toContain('head')
+    expect(await spots(ui)).toEqual(CASES[3][1])
+  })
+
+  for (const theme of ['dark', 'light', 'dark-daltonized', null]) {
+    test(`the Overview accent and labels stay the theme foreground under ${theme ?? 'no theme'}`, async ($, on) => {
+      const ui = await up($, on, theme)
+      const props = async (text: RegExp) => (await ui.find({ type: 'Text', text }))?.props
+      expect((await props(/^─+$/))?.color).toBe('text')
+      expect(await props(/^ Overview $/)).toEqual({ backgroundColor: 'text', color: 'inverseText', bold: true })
+      for (const label of ['Agents', 'Tasks', 'Budget']) expect(await props(new RegExp(`^${label}$`))).toEqual({ color: 'text', bold: true })
+    })
+  }
+})

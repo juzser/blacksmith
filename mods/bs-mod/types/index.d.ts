@@ -118,6 +118,8 @@ declare module 'claude-code' {
       planTiers: Record<string, PlanTier>
       /** the band's active tab; survives a reload, Overview by default */
       tab: BandTab
+      /** the `/config` theme, read at session start and on each theme write; null when unread, so the theme keys draw (fold.ts paletteOf) */
+      theme: string | null
     }
   }
 }

@@ -24,6 +24,7 @@ import {
   newestRunning,
   nextModel,
   overviewModel,
+  paletteOf,
   parseBsRoots,
   pastModel,
   pickEpic,
@@ -37,7 +38,7 @@ import {
   STATUS_RANK,
   summarize,
 } from './fold'
-import type { BsEvent, Cells, Phase, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
+import type { BsEvent, Cells, Palette, PaletteRole, Phase, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
 
 const PANE = 'bs-mod'
 const TICK_MS = 4000
@@ -60,8 +61,6 @@ const BAND_BAR = 10
 const BAND_GAUGE = 8
 const PANE_BAR = 24
 const MAX_DOTS = 8
-/** the active / in-progress status color: no theme key is teal */
-const ACTIVE_COLOR = '#14b8a6'
 /** the prompts Current and Next show, newest first; no `+N more` row for the rest */
 const BAND_PROMPTS = 2
 const BS_COMMAND = /\bbs\b|smith|cli\.js|BS_HOME|SMITH_HOME/
@@ -75,10 +74,13 @@ const watchedAtom = atom({ plugin: 'bs-mod', key: 'watched' } as const, null)
 const planTiersAtom = atom({ plugin: 'bs-mod', key: 'planTiers' } as const, {} as Record<string, PlanTier>)
 /** the band's active tab, in `$.state` so a reload of the band keeps it; Overview until a tab is picked */
 const tabAtom = atom({ plugin: 'bs-mod', key: 'tab' } as const, 'overview' as BandTab)
+/** the `/config` theme, which picks the palette (fold.ts paletteOf); null until read, so the theme keys draw */
+const themeAtom = atom({ plugin: 'bs-mod', key: 'theme' } as const, null as string | null)
 
 type Entry = { path: string; name: string; size: number; mtimeMs: number }
 /** a folded line, with the epic of the file it came from */
 type Line = { ev: BsEvent; ref: string; ts: number; isNewFile: boolean; fileEpic: string }
+/** `color` and `bg`: a palette role (fold.ts PaletteRole, `active` the in-progress teal) or a neutral theme key */
 type Look = { color?: string; bg?: string; bold?: boolean; dim?: boolean }
 /** a stretch of text drawn in one style; `shrink`: the run a band row cuts first when it is too wide */
 type Run = Look & { text: string; shrink?: boolean }
@@ -99,10 +101,15 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-function style(p: Look): TextProps {
+/** A palette role in the theme's palette; a neutral theme key stays itself. */
+function paint(pal: Palette, color: string): string {
+  return Object.hasOwn(pal, color) ? pal[color as PaletteRole] : color
+}
+
+function style(p: Look, pal: Palette): TextProps {
   const out: TextProps = {}
-  if (p.color) out.color = p.color
-  if (p.bg) out.backgroundColor = p.bg
+  if (p.color) out.color = paint(pal, p.color)
+  if (p.bg) out.backgroundColor = paint(pal, p.bg)
   if (p.bold) out.bold = true
   if (p.dim) out.dimColor = true
   return out
@@ -120,7 +127,7 @@ function partWidth(p: Part): number {
   return p.runs.reduce((n, r) => n + r.text.length, 0)
 }
 
-/** Each role keeps one theme color, wherever it is drawn. */
+/** Each role keeps one palette color, wherever it is drawn; verifier and scribe keep their theme keys. */
 const ROLE_COLOR: Record<string, string> = {
   coder: 'claude',
   tester: 'planMode',
@@ -164,7 +171,7 @@ function barRuns(c: Cells): Run[] {
   return [
     run('█'.repeat(c.done), { color: 'success' }),
     run('█'.repeat(c.review), { color: 'ide' }),
-    run('█'.repeat(c.active), { color: ACTIVE_COLOR }),
+    run('█'.repeat(c.active), { color: 'active' }),
     run('░'.repeat(c.todo), { color: 'inactive' }),
   ].filter(r => r.text)
 }
@@ -190,7 +197,7 @@ function budgetRuns(b: NonNullable<Summary['budget']>, width: number): Run[] {
 function tallyParts(c: Summary['counts']): Part[] {
   const out: Part[] = []
   if (c.review) out.push(part(3, run(`◐ ${c.review} review`, { color: 'ide' })))
-  if (c.active) out.push(part(3, run(`● ${c.active} active`, { color: ACTIVE_COLOR })))
+  if (c.active) out.push(part(3, run(`● ${c.active} active`, { color: 'active' })))
   if (c.todo) out.push(part(4, run(`○ ${c.todo} todo`, { dim: true })))
   return out
 }
@@ -233,7 +240,7 @@ function glyph(status: string): Look & { mark: string } {
     case 'escalated':
       return { mark: '⚑', color: 'warning' }
     case 'in-progress':
-      return { mark: '●', color: ACTIVE_COLOR }
+      return { mark: '●', color: 'active' }
     case 'reviewing':
     case 'merging':
       return { mark: '◐', color: 'ide' }
@@ -368,7 +375,7 @@ function dots(roles: readonly string[]): Run[] {
 function bandTallies(c: Cells): Part[] {
   const out: Part[] = []
   if (c.review) out.push(part(3, run('◐ ', { color: 'ide' }), num(c.review, { color: 'ide' }), run(' review', { color: 'ide' })))
-  if (c.active) out.push(part(3, run('● ', { color: ACTIVE_COLOR }), num(c.active, { color: ACTIVE_COLOR }), run(' active', { color: ACTIVE_COLOR })))
+  if (c.active) out.push(part(3, run('● ', { color: 'active' }), num(c.active, { color: 'active' }), run(' active', { color: 'active' })))
   if (c.todo) out.push(part(4, run('○ ', { color: 'inactive' }), num(c.todo, { color: 'inactive' }), run(' todo', { color: 'inactive' })))
   return out
 }
@@ -1051,8 +1058,28 @@ export const register: Register = on => {
     st.timer?.cancel()
     st.timer = $.clock.every(TICK_MS, () => void kick($, st))
     void kick($, st)
+    try {
+      const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
+      await update($, themeAtom, () => (typeof theme === 'string' ? theme : null))
+    } catch {
+      // no theme read: the theme keys draw until a theme is set
+    }
     return next(e)
   })
+
+  // A theme written from /config or a plugin repaints the band and the pane; a deny or a failed write keeps the palette.
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const set = await next(e)
+    if (set.deny === undefined && typeof set.value === 'string') {
+      const theme = set.value
+      try {
+        await update($, themeAtom, () => theme)
+      } catch {
+        // the palette stays as it was
+      }
+    }
+    return set
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
@@ -1116,7 +1143,8 @@ export const register: Register = on => {
     const stacked = drawable(below)
     const { Box, Button, Text } = $.ui.resolve(e)
     const width = e.props.bodyColumns
-    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r)}>{r.text}</Text>)
+    const pal = paletteOf(await read($, themeAtom))
+    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r, pal)}>{r.text}</Text>)
     const liveAgents = async () => {
       try {
         return activeSessionAgents(await $.agent.list()).length
@@ -1158,7 +1186,7 @@ export const register: Register = on => {
       waiting ? run(`⚑ ${waiting} waiting on you`, { color: 'warning', bold: true }) : null,
       s.blockers.total ? run(`✖ ${s.blockers.total} S1/S2 open`, { color: 'error', bold: true }) : null,
     ]) {
-      if (r) side.push({ w: cols(r.text), el: <Text {...style(r)}>{r.text}</Text> })
+      if (r) side.push({ w: cols(r.text), el: <Text {...style(r, pal)}>{r.text}</Text> })
     }
     side.push({ w: cols('Details') + BUTTON_CHROME_W, el: <Button key="details" label="Details" dimColor onPress={() => openPane($, epic.epicId)} /> })
     const tabsW = (gap: number) =>
@@ -1170,7 +1198,7 @@ export const register: Register = on => {
       if (t.id === active.id) return texts([badge(t)])[0]
       return (
         <Box key={`tabbox:${t.id}`}>
-          <Button key={`tab:${t.id}`} label={t.label} hotkey={t.hotkey} plain hover={{ color: t.accent, bold: true }} onPress={() => update($, tabAtom, () => t.id)} />
+          <Button key={`tab:${t.id}`} label={t.label} hotkey={t.hotkey} plain hover={{ color: paint(pal, t.accent), bold: true }} onPress={() => update($, tabAtom, () => t.id)} />
         </Box>
       )
     })
@@ -1198,6 +1226,7 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const view = await viewOf($)
     await read($, minuteAtom)
+    const pal = paletteOf(await read($, themeAtom))
     if (!view) {
       return (
         <Box flexDirection="column">
@@ -1211,7 +1240,7 @@ export const register: Register = on => {
     const rows: RenderElement[] = []
     const gap = () => rows.push(<Text> </Text>)
     const row = (...runs: Run[]) =>
-      rows.push(<Box flexDirection="row">{runs.filter(r => r.text).map(r => <Text {...style(r)}>{r.text}</Text>)}</Box>)
+      rows.push(<Box flexDirection="row">{runs.filter(r => r.text).map(r => <Text {...style(r, pal)}>{r.text}</Text>)}</Box>)
     const heading = (title: string, color: string, extra = '') => {
       gap()
       row(run('▍', { color }), run(title, { color, bold: true }), run(extra, { dim: true }))
@@ -1278,10 +1307,10 @@ export const register: Register = on => {
       rows.push(
         <Box flexDirection="row" columnGap={1}>
           <Text>{' '}</Text>
-          <Text {...style(g)}>{g.mark}</Text>
+          <Text {...style(g, pal)}>{g.mark}</Text>
           <Text bold={!isDone} dimColor={isDone}>{shortTask(id)}</Text>
           {title ? <Text wrap="truncate-end" dimColor={isDone}>{title}</Text> : null}
-          <Text {...style(isDone ? { dim: true } : g)}>{t.status}</Text>
+          <Text {...style(isDone ? { dim: true } : g, pal)}>{t.status}</Text>
         </Box>,
       )
     }
@@ -1293,7 +1322,7 @@ export const register: Register = on => {
         rows.push(
           <Box flexDirection="row" columnGap={1}>
             <Text dimColor>{`${fmtElapsed(now - a.ts)} ago`.padStart(10)}</Text>
-            <Text {...style({ color: toneColor(a.tone) })}>{a.text}</Text>
+            <Text {...style({ color: toneColor(a.tone) }, pal)}>{a.text}</Text>
           </Box>,
         )
       }
@@ -1301,7 +1330,7 @@ export const register: Register = on => {
 
     gap()
     rows.push(<Text dimColor>/bs-mod {'<epic-id>'} pins · auto follows this session · off hides the band</Text>)
-    if (st.lastError) rows.push(<Text color="error">{`last read failed: ${st.lastError}`}</Text>)
+    if (st.lastError) rows.push(<Text {...style({ color: 'error' }, pal)}>{`last read failed: ${st.lastError}`}</Text>)
     return <Box flexDirection="column">{rows}</Box>
   })
 }
