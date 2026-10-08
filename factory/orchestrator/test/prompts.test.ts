@@ -6,7 +6,7 @@ import { openDb, projectSession } from '../src/db/projector.js';
 import * as schema from '../src/db/schema.js';
 import { appendEvent, readEvents } from '../src/events.js';
 import type { EventContext } from '../src/findings.js';
-import { PromptError, recordUserPrompt } from '../src/prompts.js';
+import { isHarnessText, PromptError, recordUserPrompt } from '../src/prompts.js';
 
 describe('recordUserPrompt (D-142)', () => {
   let stateDir: string;
@@ -111,5 +111,27 @@ describe('recordUserPrompt (D-142)', () => {
     );
 
     expect(second.record.causal_parent).toBe(first.event_id);
+  });
+});
+
+describe('isHarnessText', () => {
+  it.each([
+    'system-reminder',
+    'local-command',
+    'command-message',
+    'bash-input',
+    'bash-stdout',
+    'bash-stderr',
+    'task-notification',
+    'user-memory-input',
+  ])('accepts a <%s> record', (tag) => {
+    expect(isHarnessText(`<${tag}>x</${tag}>`)).toBe(true);
+    expect(isHarnessText(`\n  <${tag}>x`)).toBe(true);
+  });
+
+  it('accepts blank text and rejects plain prose', () => {
+    expect(isHarnessText('   \n')).toBe(true);
+    expect(isHarnessText('run alpha-1')).toBe(false);
+    expect(isHarnessText('see <system-reminder> in the text')).toBe(false);
   });
 });

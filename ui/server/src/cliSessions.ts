@@ -51,6 +51,7 @@ import {
 import { compareLogOrder } from '../../../factory/orchestrator/dist/eventOrder.js';
 import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.js';
 import { normalizeProjectName } from '../../../factory/orchestrator/dist/projectName.js';
+import { isHarnessText } from '../../../factory/orchestrator/dist/prompts.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
@@ -347,16 +348,8 @@ function operatorText(raw: string): string | null {
     return clean(`${name[1] ?? ''} ${args?.[1] ?? ''}`) || null;
   }
   const trimmed = raw.trim();
-  // Harness-injected records (reminders, local and shell command echoes,
-  // task notifications, memory input) are not something the operator typed.
-  if (
-    trimmed === '' ||
-    /^<(system-reminder|local-command|command-message|bash-input|bash-stdout|bash-stderr|task-notification|user-memory-input)/.test(
-      trimmed,
-    )
-  ) {
-    return null;
-  }
+  // Harness-injected records are not something the operator typed.
+  if (isHarnessText(trimmed)) return null;
   return clean(trimmed) || null;
 }
 

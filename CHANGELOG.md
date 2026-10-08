@@ -37,6 +37,15 @@ than appearing in it.
 
 ### Added
 
+- **pr-mod, an optional pull-request view, ships as the marketplace's third
+  plugin.** `/plugin install pr-mod@blacksmith` adds a `/pr-mod` pane
+  listing the repo's open PRs with CI and merge state, with Merge (two
+  presses, only when CI is all green, the merge state is CLEAN and the PR is
+  not a draft), Update branch, Fix conflict and Fix CI (a prompt sent into
+  the session) and Open, plus a one-line band of counts above the prompt. It
+  reads and acts through `gh`, draws in the same Catppuccin palette as
+  bs-mod, and lives in `mods/pr-mod/`.
+
 - **bs-mod, an optional live HUD, ships as the marketplace's second
   plugin.** `/plugin install bs-mod@blacksmith` adds a band above the
   Claude Code prompt in every session: the session's epic, its wave,

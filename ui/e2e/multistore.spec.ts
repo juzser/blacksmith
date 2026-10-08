@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
+import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
@@ -23,6 +24,7 @@ const HOME_TITLE_1 = 'Add the widget renderer.';
 const HOME_TITLE_2 = 'Simplify the config loader.';
 const FOREIGN_TITLE_1 = 'Foreign widget renderer.';
 const FOREIGN_TITLE_2 = 'Foreign config loader.';
+const EXTRA_NOTES = 40;
 
 let tmp = '';
 let origin = '';
@@ -128,6 +130,24 @@ test.describe('a foreign store in the dashboard', () => {
     await mkdir(homeEvents, { recursive: true });
     await mkdir(foreignEvents, { recursive: true });
 
+    // Enough extra events, written first and store by store in turn, that the
+    // merged feed outgrows one 50-row page, the fixture stays on the newest page,
+    // and the older page still holds rows of both stores.
+    for (let n = 0; n < EXTRA_NOTES; n++) {
+      for (const dir of [homeEvents, foreignEvents]) {
+        await appendEvent(
+          {
+            session_id: 'sess-extra',
+            actor: 'user',
+            event_type: n === 0 ? 'session-start' : 'operator-note',
+            plan_version: 1,
+            causal_parent: n === 0 ? null : `sess-extra#${n - 1}`,
+            payload: n === 0 ? {} : { note: `extra ${n}` },
+          },
+          { stateDir: dir },
+        );
+      }
+    }
     for (const eventsDir of [homeEvents, foreignEvents]) {
       const opts = { stateDir: eventsDir };
       await buildFixture(opts);
@@ -176,13 +196,27 @@ test.describe('a foreign store in the dashboard', () => {
       },
       homeOpts,
     );
-    // The foreign store's own wording.
-    for (const file of (await readdir(foreignEvents)).filter((f) => f.endsWith('.jsonl'))) {
-      const full = path.join(foreignEvents, file);
-      const text = (await readFile(full, 'utf8'))
-        .replaceAll(HOME_TITLE_1, FOREIGN_TITLE_1)
-        .replaceAll(HOME_TITLE_2, FOREIGN_TITLE_2);
-      await writeFile(full, text);
+    // The foreign store's own wording, and each store's own project on every
+    // event, so the merged Activity feed spans two projects.
+    const stamp = (text: string, project: string) =>
+      text
+        .split('\n')
+        .map((line) => (line ? JSON.stringify({ ...JSON.parse(line), project }) : line))
+        .join('\n');
+    for (const [dir, project] of [
+      [homeEvents, 'project-a'],
+      [foreignEvents, 'project-b'],
+    ] as const) {
+      for (const file of (await readdir(dir)).filter((f) => f.endsWith('.jsonl'))) {
+        const full = path.join(dir, file);
+        let text = await readFile(full, 'utf8');
+        if (dir === foreignEvents) {
+          text = text
+            .replaceAll(HOME_TITLE_1, FOREIGN_TITLE_1)
+            .replaceAll(HOME_TITLE_2, FOREIGN_TITLE_2);
+        }
+        await writeFile(full, stamp(text, project));
+      }
     }
 
     const roadmap = path.join(home, 'roadmap.md');
@@ -426,6 +460,154 @@ test.describe('a foreign store in the dashboard', () => {
     await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}?store=${foreignId}`);
     await expect(page.getByRole('dialog', { name: 'Waive finding' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Waive' })).toHaveCount(0);
+  });
+
+  test.describe('Activity reads every store', () => {
+    const rows = (page: Page) =>
+      page.getByRole('feed', { name: 'Activity' }).locator('.bs-timeline-row__title');
+    // Both stores replay one fixture, so every event id repeats; a row's DOM id
+    // is `activity-row-<storeId>:<eventId>`, which is how the stores tell apart.
+    const rowsOf = (page: Page, storeId: string) =>
+      page.locator(`li[id^="activity-row-${storeId}:"]`);
+
+    test('C1: no filter fetches stores=all and shows both stores, without an other-store line', async ({
+      page,
+    }) => {
+      const reads: string[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.search);
+      });
+      await page.goto(`${origin}/activity?scope=all`);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      expect(reads.length).toBeGreaterThan(0);
+      for (const read of reads) expect(new URLSearchParams(read).get('stores')).toBe('all');
+      await expect(page.getByText(/in another store/i)).toHaveCount(0);
+      // No two rows may share a DOM id even though event ids repeat.
+      const ids = await page
+        .locator('li[id^="activity-row-"]')
+        .evaluateAll((els) => els.map((e) => e.id));
+      expect(ids.length).toBeGreaterThan(1);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    test('C4: Load older pages back across both stores with stores=all and the cursor', async ({
+      page,
+    }) => {
+      const reads: URLSearchParams[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.searchParams);
+      });
+      const domIds = () =>
+        page.locator('li[id^="activity-row-"]').evaluateAll((els) => els.map((e) => e.id));
+      await page.goto(`${origin}/activity?scope=all`);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      const loadOlder = page.getByRole('button', { name: 'Load older' });
+      await expect(loadOlder).toBeVisible();
+      const firstPage = await domIds();
+      await loadOlder.click();
+      await expect.poll(() => reads.some((q) => q.has('before'))).toBe(true);
+      await expect.poll(async () => (await domIds()).length).toBeGreaterThan(firstPage.length);
+
+      const older = reads.filter((q) => q.has('before'));
+      expect(older.length).toBeGreaterThan(0);
+      for (const q of older) {
+        expect(q.get('stores')).toBe('all');
+        expect(q.get('before')).toBeTruthy();
+      }
+      const after = await domIds();
+      const arrived = after.filter((id) => !firstPage.includes(id));
+      expect(arrived.some((id) => id.startsWith('activity-row-home:'))).toBe(true);
+      expect(arrived.some((id) => id.startsWith(`activity-row-${foreignId}:`))).toBe(true);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      expect(new Set(after).size).toBe(after.length);
+    });
+
+    test('C2: a foreign row opens its own store task, and an explicit filter keeps the old request', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/activity?scope=all`);
+      const link = rowsOf(page, foreignId)
+        .filter({ hasText: TASK_1 })
+        .locator('.bs-timeline-row__title--link')
+        .first();
+      await expect(link).toBeVisible();
+      await link.click();
+      await expect(page).toHaveURL(new RegExp(`/tasks/epic-1%2Ftask-1\\?store=${foreignId}$`));
+      await expect(title(page)).toHaveText(FOREIGN_TITLE_1);
+
+      const reads: string[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.search);
+      });
+      await page.goto(`${origin}/activity?task=${encodeURIComponent(TASK_1)}`);
+      await expect(rows(page).first()).toBeVisible();
+      expect(reads.length).toBeGreaterThan(0);
+      for (const read of reads) expect(new URLSearchParams(read).has('stores')).toBe(false);
+    });
+
+    test('C3: the multi-project feed names each project in its dividers and expanded rows', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/activity?scope=all`);
+      const feed = page.getByRole('feed', { name: 'Activity' });
+      const items = feed.locator('ol > li');
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      // The first block is labelled: a divider sits above the first row.
+      await expect(items.first()).toHaveClass(/bs-session-divider/);
+      await expect(items.first()).toContainText(/^project-[ab] · Session: /);
+      await expect(
+        feed.locator('.bs-session-divider', { hasText: 'project-b · Session:' }).first(),
+      ).toBeVisible();
+
+      // A foreign row names its project when expanded, and links carry its store.
+      const foreignRow = rowsOf(page, foreignId).filter({ hasText: TASK_1 }).first();
+      await foreignRow.getByRole('button', { name: 'Show details' }).click();
+      const detail = foreignRow.locator('.bs-timeline-row__detail');
+      await expect(detail.locator('dt', { hasText: 'Project' })).toBeVisible();
+      await expect(detail.locator('dt:has-text("Project") + dd')).toHaveText('project-b');
+      await expect(detail.getByRole('link')).toHaveAttribute(
+        'href',
+        new RegExp(`store=${foreignId}`),
+      );
+
+      const homeRow = rowsOf(page, 'home')
+        .filter({ has: page.locator('.bs-timeline-row__title--link') })
+        .first();
+      await homeRow.getByRole('button', { name: 'Show details' }).click();
+      const homeDetail = homeRow.locator('.bs-timeline-row__detail');
+      await expect(homeDetail.locator('dt:has-text("Project") + dd')).toHaveText('project-a');
+      await expect(homeDetail.getByRole('link')).not.toHaveAttribute('href', /store=/);
+
+      // The task link (a button that routes) is store-scoped for a foreign row only.
+      await homeRow.locator('.bs-timeline-row__title--link').click();
+      await expect(page).toHaveURL(/\/tasks\/[^?]+$/);
+      await page.goBack();
+      await rowsOf(page, foreignId)
+        .filter({ has: page.locator('.bs-timeline-row__title--link') })
+        .first()
+        .locator('.bs-timeline-row__title--link')
+        .click();
+      await expect(page).toHaveURL(new RegExp(`/tasks/[^?]+\\?store=${foreignId}$`));
+    });
+
+    for (const [name, viewport] of [
+      ['desktop-light', VIEWPORTS.desktop],
+      ['phone-light', { width: 375, height: 812 }],
+    ] as const) {
+      test(`screenshot two stores ${name}`, async ({ page }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/activity?scope=all`);
+        await expect(rowsOf(page, foreignId).first()).toBeVisible();
+        await settleForShot(page, rowsOf(page, 'home').first());
+        await shoot(page, `activity-two-stores-${name}`);
+      });
+    }
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which

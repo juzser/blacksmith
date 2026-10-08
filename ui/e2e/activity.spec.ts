@@ -394,6 +394,8 @@ test.describe('Activity', () => {
     });
     await page.goto('/activity');
     await expect(page.locator('.bs-session-divider')).toHaveText('Session: Session B');
+    // One project in the feed: the divider names no project.
+    await expect(page.locator('.bs-session-divider')).not.toContainText('·');
 
     await page.getByRole('button', { name: 'Expand all' }).click();
     const detail = page.locator('.bs-timeline-row__detail').nth(1);
@@ -927,7 +929,7 @@ test.describe('Activity follows Active/All (S9)', () => {
     const urls = requests(page);
     await page.goto('/activity');
     await expect(rowTitles(page).first()).toBeVisible();
-    expect(urls.some((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
+    expect(urls.some((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture')).toBe(
       true,
     );
     await expect(page.locator('.bs-session-divider')).toHaveCount(0);
@@ -949,7 +951,9 @@ test.describe('Activity follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
   });
 
-  test('live sessions, none on an epic, plus the other-store line', async ({ page }) => {
+  test('live sessions, none on an epic: no other-store line, every store is read', async ({
+    page,
+  }) => {
     await stubActiveScope(page, [], {
       liveSessions: 2,
       unlinkedSessions: 2,
@@ -958,20 +962,29 @@ test.describe('Activity follows Active/All (S9)', () => {
     const urls = requests(page);
     await page.goto('/activity');
     await expect(page.getByText('2 live sessions, none on an epic')).toBeVisible();
-    await expect(page.getByText('1 active project is in another store (project-b)')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'see Home' })).toBeVisible();
+    await expect(page.getByText(/in another store/)).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'see Home' })).toHaveCount(0);
     expect(urls).toHaveLength(0);
   });
 
-  test('measured but none in this store reads "No active session in this view"', async ({
+  test('measured but none on a session reads "No active session in this view"', async ({
     page,
   }) => {
-    await stubActiveScope(page, ['epic-a'], {
-      factorySessions: [{ storeId: 'store-b', sessionId: 'f1' }],
-    });
+    await stubActiveScope(page, ['epic-a'], { liveSessions: 1, factorySessions: [] });
     await page.goto('/activity');
     await expect(page.getByText('No active session in this view')).toBeVisible();
     await expect(rowTitles(page)).toHaveCount(0);
+  });
+
+  test('a session in another store is asked for qualified with its store id', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      factorySessions: [{ storeId: 'ab12cd34', sessionId: 'f1' }],
+    });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await expect.poll(() => urls.length).toBeGreaterThan(0);
+    await expect(page.getByText('No active session in this view')).toHaveCount(0);
+    for (const u of urls) expect(u.searchParams.getAll('sessions')).toEqual(['ab12cd34/f1']);
   });
 
   test('unmeasured: fetches All and says live sessions cannot be read', async ({ page }) => {
@@ -1010,9 +1023,9 @@ test.describe('Activity follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
     release();
     await expect(rowTitles(page).first()).toBeVisible();
-    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
-      true,
-    );
+    expect(
+      urls.every((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture'),
+    ).toBe(true);
   });
 
   test('an explicit ?session= wins: no sessions param, no toggle', async ({ page }) => {
@@ -1046,7 +1059,8 @@ test.describe('Activity follows Active/All (S9)', () => {
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await expect.poll(() => seen.some((u) => u.searchParams.has('before'))).toBe(true);
     await expect.poll(() => seen.some((u) => u.searchParams.has('after'))).toBe(true);
-    for (const u of seen) expect(u.searchParams.getAll('sessions')).toEqual(['sess-a', 'sess-c,x']);
+    for (const u of seen)
+      expect(u.searchParams.getAll('sessions')).toEqual(['home/sess-a', 'home/sess-c,x']);
   });
 
   test('a held All errors answer landing after the switch to Active does not replace it', async ({
@@ -1159,11 +1173,7 @@ test.describe('Activity follows Active/All (S9)', () => {
     [
       'none in this view desktop light',
       VIEWPORTS.desktop,
-      {
-        liveSessions: 1,
-        factorySessions: [{ storeId: 'store-b', sessionId: 'f1' }],
-        projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
-      },
+      { liveSessions: 1, factorySessions: [] },
       '/activity',
       'activity-none-here-desktop-light',
     ],

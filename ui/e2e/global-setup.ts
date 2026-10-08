@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO, normalizeFixtureClock } from './fixtureClock.js';
+import { arialSwitchOn } from './fontSwitch.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
@@ -80,6 +81,7 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
+  arialSwitchOn(); // a bad BS_E2E_FONT fails the run here, before any build
   const { buildFixture, EPIC_ID } = await import(
     path.join(REPO_ROOT, 'factory', 'orchestrator', 'test', 'db', 'fixtures.ts')
   );

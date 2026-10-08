@@ -2,7 +2,11 @@
 // `resolveActivePageScope` is the pure decision; `useActivePageScope` binds it
 // to the route and the shared active-scope read. See ds-spec §4.3 / §4.4 Scope.
 import { computed } from 'vue';
-import { activeHomeSessionIds, MAX_ACTIVE_SESSION_IDS } from '../lib/activeScope.js';
+import {
+  activeHomeSessionIds,
+  activeSessionIds,
+  MAX_ACTIVE_SESSION_IDS,
+} from '../lib/activeScope.js';
 import type { ActiveScopeResult } from '../lib/api.js';
 import { otherStoreProjects } from '../lib/sessionsSelection.js';
 import { useActiveScope } from './useActiveScope.js';
@@ -37,6 +41,8 @@ export function resolveActivePageScope(input: {
   explicit: boolean;
   active: ActiveScopeResult | null;
   settled: boolean;
+  /** Read every store (Activity): qualified ids from all of them, not the served store's alone. */
+  allStores?: boolean;
 }): ActivePageScope {
   const done = (mode: ActivePageMode, extra: Partial<ActivePageScope> = {}): ActivePageScope => ({
     mode,
@@ -50,7 +56,7 @@ export function resolveActivePageScope(input: {
   if (input.explicit) return done('explicit');
   if (input.scope === 'all') return done('all');
   if (input.active === null && !input.settled) return done('loading');
-  const ids = activeHomeSessionIds(input.active);
+  const ids = input.allStores ? activeSessionIds(input.active) : activeHomeSessionIds(input.active);
   if (ids === null || input.active === null) return done('unmeasured');
   if (ids.length > MAX_ACTIVE_SESSION_IDS) return done('too-many');
   if (ids.length > 0)
@@ -64,7 +70,7 @@ export function resolveActivePageScope(input: {
   return done('empty', { edge });
 }
 
-export function useActivePageScope(explicit: () => boolean) {
+export function useActivePageScope(explicit: () => boolean, options: { allStores?: boolean } = {}) {
   const { scope, scopeTo } = useActivityScope();
   const { scope: active, settled } = useActiveScope();
   const view = computed(() =>
@@ -73,6 +79,7 @@ export function useActivePageScope(explicit: () => boolean) {
       explicit: explicit(),
       active: active.value,
       settled: settled.value,
+      allStores: options.allStores === true,
     }),
   );
   // Under Active, the line about projects whose sessions live in another store.

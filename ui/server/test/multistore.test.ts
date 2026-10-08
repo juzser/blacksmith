@@ -7,8 +7,9 @@ import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } fr
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { appendEvent } from '../../../factory/orchestrator/src/events.js';
 import {
   buildFixture,
   EPIC_ID,
@@ -352,6 +353,324 @@ describe('multi-store dashboard reads', () => {
         expect(ok.status).toBe(200);
       });
     }
+  });
+
+  describe('Activity reads every store', () => {
+    type Row = {
+      eventId: string;
+      ts: string;
+      taskId: string | null;
+      project: string | null;
+      store: Store;
+    };
+    type Page = { entries: Row[]; nextBefore: string | null; newestId: string | null };
+    type Err = {
+      byClass: {
+        id: string;
+        errorGroup: string;
+        errorClass: string;
+        severity: string;
+        count: number;
+        store: Store;
+      }[];
+      byDay: { day: string; count: number }[];
+      classSummary: {
+        id: string;
+        count: number;
+        severityMix: Record<string, number>;
+        lastSeen: string;
+        projects: string[];
+        trend7d: number[];
+      }[];
+    };
+    const sessionOf = (r: Row): string => r.eventId.slice(0, r.eventId.lastIndexOf('#'));
+    const eventsA = (): string => path.join(projectA, 'state', 'events');
+    // appendEvent always stamps the wall clock and takes no `ts`, so the clock
+    // itself is pinned: every note gets the next millisecond, strictly after the
+    // last one (and never before the real clock), whatever the timers do.
+    let lastTs = 0;
+    const note = async (dir: string, sessionId: string, n: number): Promise<void> => {
+      lastTs = Math.max(Date.now(), lastTs + 1);
+      vi.setSystemTime(lastTs);
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'user',
+          event_type: n === 0 ? 'session-start' : 'operator-note',
+          plan_version: 1,
+          causal_parent: n === 0 ? null : `${sessionId}#${n - 1}`,
+          payload: n === 0 ? {} : { note: `n${n}` },
+        },
+        { stateDir: dir },
+      );
+    };
+    // Three more sessions across the two stores, appended turn by turn so their
+    // timestamps interleave with each other and with the fixture's.
+    async function interleave(): Promise<void> {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        for (let n = 0; n < 3; n++) {
+          await note(eventsA(), 'sess-home-2', n);
+          await note(eventsB, 'sess-b-2', n);
+          await note(eventsB, 'sess-b-3', n);
+          await note(eventsA(), 'sess-home-3', n);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+    const foreignStoreId = async (a: AppHandle): Promise<string> => {
+      const projects = await get<{ project: string; store: Store }[]>(a, '/api/projects');
+      return projects.find((p) => p.store.label === 'project-b')?.store.id as string;
+    };
+    const key = (r: Row): string => `${r.store.id}|${r.eventId}`;
+    const order = (x: Row, y: Row): number => {
+      const split = (id: string) => ({
+        s: id.slice(0, id.lastIndexOf('#')),
+        n: Number(id.slice(id.lastIndexOf('#') + 1)),
+      });
+      const a = split(x.eventId);
+      const b = split(y.eventId);
+      if (x.ts !== y.ts) return x.ts < y.ts ? -1 : 1;
+      if (a.s !== b.s) return a.s < b.s ? -1 : 1;
+      return a.n - b.n || x.store.id.localeCompare(y.store.id);
+    };
+    /** Every event of both stores, read one store at a time, newest first. */
+    async function everyRow(a: AppHandle, id: string): Promise<Row[]> {
+      const home = await get<Row[]>(a, '/api/timeline');
+      const foreign = await get<Row[]>(a, `/api/timeline?store=${id}`);
+      return [
+        ...home.map((r) => ({ ...r, store: { id: 'home', label: 'home' } })),
+        ...foreign.map((r) => ({ ...r, store: { id, label: 'project-b' } })),
+      ]
+        .sort(order)
+        .reverse();
+    }
+    const all = (q: string): string => `/api/timeline?stores=all&${q}`;
+
+    it('walks every page by before and returns each row of both stores once, newest first', async () => {
+      await interleave();
+      const a = app();
+      const id = await foreignStoreId(a);
+      const expected = await everyRow(a, id);
+      const seen: Row[] = [];
+      let before: string | null = null;
+      let pages = 0;
+      do {
+        const q: string = `limit=2${before ? `&before=${encodeURIComponent(before)}` : ''}`;
+        const page: Page = await get<Page>(a, all(q));
+        if (page.nextBefore !== null) expect(page.entries).toHaveLength(2);
+        expect(page.entries.length).toBeGreaterThan(0);
+        seen.push(...page.entries);
+        before = page.nextBefore;
+        pages += 1;
+      } while (before !== null && pages < 200);
+      expect(seen.map(key)).toEqual(expected.map(key));
+      expect(new Set(seen.map(key)).size).toBe(seen.length);
+      expect(new Set(seen.map((r) => r.store.id))).toEqual(new Set(['home', id]));
+      for (const r of seen.filter((x) => x.store.id === id)) expect(r.project).toBe('project-b');
+      for (const r of seen.filter((x) => x.store.id === 'home'))
+        expect(r.project).not.toBe('project-b');
+    });
+
+    it('after the newest id returns exactly the rows appended to each store since', async () => {
+      await interleave();
+      const a = app();
+      const first = await get<Page>(a, all('limit=5'));
+      expect(first.newestId).not.toBeNull();
+      await note(eventsA(), 'sess-home-2', 3);
+      await note(eventsB, 'sess-b-2', 3);
+      const poll = await get<Page>(
+        a,
+        all(`limit=50&after=${encodeURIComponent(first.newestId as string)}`),
+      );
+      expect(poll.entries.map((r) => `${r.store.label}:${r.eventId}`).sort()).toEqual([
+        'home:sess-home-2#3',
+        'project-b:sess-b-2#3',
+      ]);
+      const again = await get<Page>(
+        a,
+        all(`limit=50&after=${encodeURIComponent(poll.newestId as string)}`),
+      );
+      expect(again.entries).toEqual([]);
+    });
+
+    it('narrows to the listed sessions, qualified or bare, and refuses a qualified one alone', async () => {
+      await interleave();
+      const a = app();
+      const id = await foreignStoreId(a);
+      const q = `limit=100&sessions=${id}/sess-b-2&sessions=sess-home-3`;
+      const page = await get<Page>(a, all(q));
+      expect(new Set(page.entries.map((r) => `${r.store.id}/${sessionOf(r)}`))).toEqual(
+        new Set([`${id}/sess-b-2`, 'home/sess-home-3']),
+      );
+      expect(page.entries).toHaveLength(6);
+      const explicitHome = await get<Page>(a, all('limit=100&sessions=home/sess-home-2'));
+      expect(new Set(explicitHome.entries.map(sessionOf))).toEqual(new Set(['sess-home-2']));
+      expect((await a.app.request(`/api/timeline?limit=5&sessions=${id}/sess-b-2`)).status).toBe(
+        400,
+      );
+      expect((await a.app.request(all('limit=5&sessions=zz/sess-b-2'))).status).toBe(400);
+      expect((await a.app.request(all(`limit=5&sessions=${id}/a/b`))).status).toBe(400);
+    });
+
+    it('refuses stores=all with a filter that names one store, and bad values and cursors', async () => {
+      const a = app();
+      const id = await foreignStoreId(a);
+      const bad = [
+        all('limit=5&task=epic-1/task-1'),
+        all('limit=5&epic=epic-1'),
+        all('limit=5&session=sess-fixture'),
+        all('limit=5&session=sess-fixture&lineage=true'),
+        all('limit=5&causalChainFor=sess-fixture%231&session=sess-fixture'),
+        all(`limit=5&store=${id}`),
+        '/api/timeline?stores=x&limit=5',
+        '/api/timeline?stores=&limit=5',
+        all('limit=5&before=garbage'),
+        all('limit=5&before=v1.!!!'),
+        all(`limit=5&before=v1.${Buffer.from('[]').toString('base64url')}`),
+        all(`limit=5&before=v1.${Buffer.from('{"zz":"x#1"}').toString('base64url')}`),
+        all(`limit=5&before=v1.${Buffer.from('{"home":3}').toString('base64url')}`),
+        all('limit=5&after=garbage'),
+        '/api/errors?stores=all&epic=epic-1',
+        '/api/errors?stores=all&session=sess-fixture',
+        `/api/errors?stores=all&store=${id}`,
+        '/api/errors?stores=x',
+        '/api/errors?sessions=zz/sess-fixture',
+      ];
+      for (const route of bad) {
+        expect([route, (await a.app.request(route)).status]).toEqual([route, 400]);
+      }
+    });
+
+    it('reads one named store with store=<id>, and 404s an unknown one', async () => {
+      const a = app();
+      const id = await foreignStoreId(a);
+      const rows = await get<Row[]>(
+        a,
+        `/api/timeline?store=${id}&task=${encodeURIComponent(TASK_1)}`,
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        expect(r.taskId).toBe(TASK_1);
+        expect(r.store).toEqual({ id, label: 'project-b' });
+        expect(r.project).toBe('project-b');
+      }
+      const home = await get<Row[]>(
+        a,
+        `/api/timeline?store=home&task=${encodeURIComponent(TASK_1)}`,
+      );
+      expect(home).toEqual(await get(a, `/api/timeline?task=${encodeURIComponent(TASK_1)}`));
+      for (const route of ['/api/timeline?store=deadbeef', '/api/errors?store=deadbeef']) {
+        expect((await a.app.request(route)).status).toBe(404);
+      }
+    });
+
+    it('answers a request without stores=all exactly as before, rows untagged', async () => {
+      await interleave();
+      const a = app();
+      for (const route of ['/api/timeline', '/api/timeline?limit=3', '/api/errors']) {
+        const body = await get<unknown>(a, route);
+        expect(JSON.stringify(body)).not.toContain('"store"');
+      }
+      const page = await get<{ nextBefore: string | null }>(a, '/api/timeline?limit=3');
+      expect(page.nextBefore).toMatch(/#\d+$/);
+    });
+
+    it('merges errors across stores: every figure is the sum of the two stores read alone', async () => {
+      const err = (sessionId: string, n: number, error: string, severity: string) =>
+        appendEvent(
+          {
+            session_id: sessionId,
+            actor: 'coder',
+            event_type: 'error-logged',
+            plan_version: 1,
+            causal_parent: `${sessionId}#${n}`,
+            payload: { error, severity, task_ref: TASK_1, detail: 'x' },
+          },
+          { stateDir: sessionId === 'sess-b-2' ? eventsB : eventsA() },
+        );
+      await interleave();
+      await err('sess-b-2', 2, 'coordination.deadlock', 'S1-stop-the-line');
+      await err('sess-b-2', 3, 'coordination.deadlock', 'S2-major');
+      await err('sess-home-2', 2, 'coordination.deadlock', 'S2-major');
+      const a = app();
+      const id = await foreignStoreId(a);
+      const home = await get<Err>(a, '/api/errors');
+      const foreign = await get<Err>(a, `/api/errors?store=${id}`);
+      const merged = await get<Err>(a, '/api/errors?stores=all');
+      const total = (e: Err[], f: (x: Err) => { k: string; n: number }[]) => {
+        const m = new Map<string, number>();
+        for (const x of e) for (const { k, n } of f(x)) m.set(k, (m.get(k) ?? 0) + n);
+        return [...m.entries()].sort();
+      };
+      const classes = (x: Err) => x.byClass.map((c) => ({ k: `${c.id}`, n: c.count }));
+      expect(
+        total([merged], (x) =>
+          x.byClass.map((c) => ({ k: c.id.split(':').pop() as string, n: c.count })),
+        ),
+      ).toEqual(total([home, foreign], classes));
+      expect(new Set(merged.byClass.map((c) => c.id)).size).toBe(merged.byClass.length);
+      expect(merged.byClass.map((c) => c.store.id)).toContain(id);
+      expect(total([merged], (x) => x.byDay.map((d) => ({ k: d.day, n: d.count })))).toEqual(
+        total([home, foreign], (x) => x.byDay.map((d) => ({ k: d.day, n: d.count }))),
+      );
+      expect(total([merged], (x) => x.classSummary.map((c) => ({ k: c.id, n: c.count })))).toEqual(
+        total([home, foreign], (x) => x.classSummary.map((c) => ({ k: c.id, n: c.count }))),
+      );
+      const sev = (x: Err) =>
+        x.classSummary.flatMap((c) =>
+          Object.entries(c.severityMix).map(([s, n]) => ({ k: `${c.id}|${s}`, n })),
+        );
+      expect(total([merged], sev)).toEqual(total([home, foreign], sev));
+      const trend = (x: Err) =>
+        x.classSummary.flatMap((c) => c.trend7d.map((n, i) => ({ k: `${c.id}|${i}`, n })));
+      expect(total([merged], trend)).toEqual(total([home, foreign], trend));
+      const deadlock = merged.classSummary.find((c) => c.id === 'coordination.deadlock');
+      expect(deadlock?.projects).toContain('project-b');
+      const lastSeen = [...home.classSummary, ...foreign.classSummary]
+        .filter((c) => c.id === 'coordination.deadlock')
+        .map((c) => c.lastSeen)
+        .sort()
+        .pop();
+      expect(deadlock?.lastSeen).toBe(lastSeen);
+    });
+
+    it('never writes into the foreign store on either route, paged or not', async () => {
+      await interleave();
+      const before = snapshot(projectB);
+      const a = app();
+      const id = await foreignStoreId(a);
+      for (const route of [
+        all('limit=2'),
+        all('limit=2&sessions=home/sess-home-2'),
+        '/api/errors?stores=all',
+        `/api/timeline?store=${id}`,
+        `/api/errors?store=${id}`,
+      ]) {
+        await get(a, route);
+      }
+      expect(snapshot(projectB)).toEqual(before);
+    });
+
+    it('with only the home store, stores=all still answers with opaque cursors that walk the feed', async () => {
+      await rm(path.join(config, 'sessions'), { recursive: true, force: true });
+      await mkdir(path.join(config, 'sessions'), { recursive: true });
+      const a = app();
+      const expected = (await get<Row[]>(a, '/api/timeline')).map((r) => r.eventId).reverse();
+      const seen: string[] = [];
+      let before: string | null = null;
+      do {
+        const page: Page = await get<Page>(
+          a,
+          all(`limit=4${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+        );
+        seen.push(...page.entries.map((r) => r.eventId));
+        expect(page.entries.every((r) => r.store.id === 'home')).toBe(true);
+        before = page.nextBefore;
+      } while (before !== null);
+      expect(seen).toEqual(expected);
+    });
   });
 
   describe('a task of a foreign store', () => {

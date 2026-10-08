@@ -1,11 +1,12 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { appendFile, mkdtemp, open, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   appendEdge,
   appendEvent,
+  appendWithin,
   EventError,
   type EventRecord,
   eventTaskId,
@@ -1943,6 +1944,102 @@ describe('events.ts', () => {
   // The fix is a verb, not a rule inside the writer: a command whose whole job
   // is the root can be closed where `appendEvent` has to stay open.
   // ---------------------------------------------------------------------------
+  describe('appendWithin: read and append under one lock', () => {
+    const root = (sessionId: string) => ({
+      session_id: sessionId,
+      actor: 'operator',
+      event_type: 'session-start',
+      plan_version: 1,
+      causal_parent: null,
+      payload: {},
+    });
+    const logOf = (sessionId: string) => path.join(stateDir, `${sessionId}.jsonl`);
+    const prompt = (sessionId: string, text: string) => ({
+      session_id: sessionId,
+      actor: 'user',
+      event_type: 'user_prompt',
+      plan_version: 1,
+      causal_parent: 'home#0',
+      payload: { prompt: text },
+    });
+
+    it('refuses an input whose session_id is not the log it appends to', async () => {
+      await appendEvent(root('home'), { stateDir });
+      const before = await readFile(logOf('home'), 'utf8');
+      await expect(
+        appendWithin('home', () => [prompt('other', 'x')], { stateDir }),
+      ).rejects.toMatchObject({ code: 'events.malformed-session-id' });
+      expect(await readFile(logOf('home'), 'utf8')).toBe(before);
+    });
+
+    it('writes nothing when only a later input mismatches', async () => {
+      await appendEvent(root('home'), { stateDir });
+      const before = await readFile(logOf('home'), 'utf8');
+      await expect(
+        appendWithin('home', () => [prompt('home', 'ok'), prompt('other', 'bad')], { stateDir }),
+      ).rejects.toMatchObject({ code: 'events.malformed-session-id' });
+      expect(await readFile(logOf('home'), 'utf8')).toBe(before);
+    });
+
+    it('hands the callback the log as it stands and stores what it returns', async () => {
+      await appendEvent(root('sess-aw-1'), { stateDir });
+      const seen: number[] = [];
+      const stored = await appendWithin(
+        'sess-aw-1',
+        (existing) => {
+          seen.push(existing.length);
+          return [
+            {
+              session_id: 'sess-aw-1',
+              actor: 'user',
+              event_type: 'user_prompt',
+              plan_version: 1,
+              causal_parent: existing[existing.length - 1]?.event_id ?? null,
+              payload: { prompt: 'hello' },
+            },
+          ];
+        },
+        { stateDir },
+      );
+      expect(seen).toEqual([1]);
+      expect(stored.map((e) => e.event_id)).toEqual(['sess-aw-1#1']);
+      expect(stored[0]?.record.causal_parent).toBe('sess-aw-1#0');
+    });
+
+    it('appends nothing for an empty array', async () => {
+      await appendEvent(root('sess-aw-2'), { stateDir });
+      expect(await appendWithin('sess-aw-2', () => [], { stateDir })).toEqual([]);
+      expect(await readEvents('sess-aw-2', { stateDir })).toHaveLength(1);
+    });
+
+    it('lets two concurrent callers each see the other as the parent', async () => {
+      await appendEvent(root('sess-aw-3'), { stateDir });
+      const one = (label: string) =>
+        appendWithin(
+          'sess-aw-3',
+          (existing) => [
+            {
+              session_id: 'sess-aw-3',
+              actor: 'user',
+              event_type: 'user_prompt',
+              plan_version: 1,
+              causal_parent: existing[existing.length - 1]?.event_id ?? null,
+              payload: { prompt: label },
+            },
+          ],
+          { stateDir },
+        );
+      const [a, b] = await Promise.all([one('a'), one('b')]);
+      const parents = [a[0], b[0]]
+        .map((e) => ({ id: e?.event_id, parent: e?.record.causal_parent }))
+        .sort((x, y) => String(x.id).localeCompare(String(y.id)));
+      expect(parents).toEqual([
+        { id: 'sess-aw-3#1', parent: 'sess-aw-3#0' },
+        { id: 'sess-aw-3#2', parent: 'sess-aw-3#1' },
+      ]);
+    });
+  });
+
   describe('startSession: a session has one beginning', () => {
     it('opens a log that does not exist yet and hands back the id everything chains off', async () => {
       const { event_id, record } = await startSession('sess-open-1', { stateDir });

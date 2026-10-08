@@ -13,12 +13,21 @@
  * `state/ui-stores/`.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DbHandle, DbOpts } from '../../../factory/orchestrator/dist/db/projector.js';
 import { openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { DEFAULT_PROJECT } from '../../../factory/orchestrator/dist/db/queries.js';
+import {
+  gitTop,
+  hasEvents,
+  type StoreRoot,
+  storeRootAt,
+} from '../../../factory/orchestrator/dist/storeRoot.js';
 import type { ProjectionIssue, Refresher } from './app.js';
+
+// Callers (and tests) have always imported these from here.
+export { gitTop, type StoreRoot, storeRootAt };
 
 export interface StoreRef {
   id: string;
@@ -30,12 +39,6 @@ export interface StoreEntry extends StoreRef {
   refresher: Refresher;
   /** True only for the store the dashboard itself was started on. */
   home: boolean;
-}
-
-/** One discovered store: where its state home is and what to call it. */
-export interface StoreRoot {
-  root: string;
-  label: string;
 }
 
 const isDir = (p: string): boolean => {
@@ -53,66 +56,6 @@ const realOr = (p: string): string => {
     return p;
   }
 };
-
-/**
- * Where a `.git` file (a linked worktree) really leads: the main clone, but
- * only when that clone's `.git/worktrees/<name>` exists as a directory and is
- * the very place the pointer names. A pointer is text anyone can write, so it
- * is not trusted on its own; otherwise the worktree itself is the top.
- */
-function mainCloneOf(dotGitFile: string, dir: string): string {
-  try {
-    const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGitFile, 'utf8'))?.[1]?.trim();
-    if (!gitdir) return dir;
-    const target = path.resolve(dir, gitdir);
-    const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
-    const at = target.indexOf(marker);
-    if (at <= 0) return dir;
-    const top = target.slice(0, at);
-    const name = target.slice(at + marker.length);
-    if (name === '' || name.includes(path.sep)) return dir;
-    const entry = path.join(top, '.git', 'worktrees', name);
-    if (!isDir(path.join(top, '.git')) || !isDir(entry)) return dir;
-    return realpathSync(entry) === realpathSync(target) ? top : dir;
-  } catch {
-    // Unreadable or dangling pointer: treat the worktree itself as the top.
-    return dir;
-  }
-}
-
-/**
- * The git toplevel above `start`, or null. A `.git` directory marks a clone; a
- * `.git` file (a linked worktree) is followed to the main clone, because the
- * state home belongs to the project, not to one checkout of it.
- */
-export function gitTop(start: string): string | null {
-  let dir = path.resolve(start);
-  for (;;) {
-    const dotGit = path.join(dir, '.git');
-    if (isDir(dotGit)) return dir;
-    if (existsSync(dotGit)) return mainCloneOf(dotGit, dir);
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-/**
- * A real store marker: `state/events` is a directory that lives inside `root`,
- * not a file and not a link leading out of the tree.
- */
-function hasEvents(root: string): boolean {
-  const events = path.join(root, 'state', 'events');
-  return isDir(events) && realOr(events) === path.join(realOr(root), 'state', 'events');
-}
-
-/** `<top>/.blacksmith` first (a BS_HOME layout), else `<top>` itself (a clone). */
-export function storeRootAt(top: string): StoreRoot | null {
-  for (const root of [path.join(top, '.blacksmith'), top]) {
-    if (hasEvents(root)) return { root, label: path.basename(top) };
-  }
-  return null;
-}
 
 /** An explicit `--store <dir>`: the state home itself. */
 export function storeRootOf(dir: string): StoreRoot | null {

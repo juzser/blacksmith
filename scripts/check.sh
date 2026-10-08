@@ -540,6 +540,26 @@ else
 fi
 
 echo
+echo "-- pr-mod plugin (only if claude is on PATH) --"
+# Same as bs-mod above: its tests run only in the plugin runner, and a missing claude is a SKIP.
+if command -v claude >/dev/null 2>&1; then
+  if claude plugin validate mods/pr-mod; then
+    echo "OK   claude plugin validate mods/pr-mod"
+  else
+    echo "FAIL claude plugin validate mods/pr-mod"
+    FAIL=1
+  fi
+  if claude plugin test mods/pr-mod; then
+    echo "OK   claude plugin test mods/pr-mod"
+  else
+    echo "FAIL claude plugin test mods/pr-mod"
+    FAIL=1
+  fi
+else
+  echo "SKIP claude not found on PATH — mods/pr-mod not validated or tested (its tests run only in Claude Code's plugin runner)."
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "== PASS =="
   exit 0
