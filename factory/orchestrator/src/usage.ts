@@ -397,6 +397,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       "Put the operator's own words on the timeline verbatim, and print the event id a dispatch hangs off.",
   },
   {
+    command: 'prompt capture',
+    positionals: '',
+    flags: '',
+    summary:
+      'Read one UserPromptSubmit hook payload on stdin and record it where the cwd is managed. Print one line, or nothing; always exit 0.',
+  },
+  {
     command: 'feedback record',
     positionals: '',
     flags: `--task <task-id> [--body <text>|--body-file <file>] [--kind <must-fix|nice-to-have>] [--source <dashboard|github|cli>] [--external-id <id>] [--author <name>] ${EVENTS_DIR}`,

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -12785,6 +12786,49 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.ok).toBe(false);
       expect(parsed.violations[0].error).toBe('contract.uncited-claim');
       expect(parsed.violations[0].findingId).toBe('f1');
+    });
+
+    describe('prompt capture', () => {
+      const CLI_ID = '11111111-2222-4333-8444-555555555555';
+
+      let homes = 0;
+      function captureHome(): { env: Record<string, string>; eventsDir: string } {
+        const home = path.join(scratchDir, `prompt-capture-home-${homes++}`);
+        const eventsDir = path.join(home, 'state', 'events');
+        mkdirSync(eventsDir, { recursive: true });
+        return { env: { BS_HOME: home }, eventsDir };
+      }
+
+      it('records a hook payload from stdin and prints the one line', () => {
+        const { env, eventsDir } = captureHome();
+        const { stdout, status } = runCli(
+          ['prompt', 'capture'],
+          env,
+          JSON.stringify({ session_id: CLI_ID, prompt: 'Fix the flaky import.', cwd: scratchDir }),
+        );
+        expect(status).toBe(0);
+        expect(stdout.trim()).toBe(
+          `bs prompt capture: {"event_id":"prompts-${CLI_ID}#1","session_id":"prompts-${CLI_ID}"}`,
+        );
+        const lines = readFileSync(path.join(eventsDir, `prompts-${CLI_ID}.jsonl`), 'utf8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l));
+        expect(lines[1].payload).toEqual({ prompt: 'Fix the flaky import.', source: 'hook' });
+      });
+
+      it('prints nothing and exits 0 for malformed stdin and for a skipped prompt', () => {
+        const { env, eventsDir } = captureHome();
+        for (const input of [
+          'not json',
+          JSON.stringify({ session_id: CLI_ID, prompt: '<system-reminder>x</system-reminder>' }),
+        ]) {
+          const { stdout, status } = runCli(['prompt', 'capture'], env, input);
+          expect(status).toBe(0);
+          expect(stdout).toBe('');
+        }
+        expect(readdirSync(eventsDir)).toEqual([]);
+      });
     });
 
     describe('prompt record (D-142)', () => {
