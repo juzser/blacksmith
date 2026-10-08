@@ -38,9 +38,9 @@ Added 2026-09-16. Everything here was run, not recalled.
   now tell a clone to keep one or the other.
 - **Fork 4, still open, and shipped closed for now.** The plugin activates no
   enforcement: a plugin's component set has no permissions in it. Its
-  `hooks/hooks.json` now ships exactly one hook, a non-blocking prompt
-  recorder (`prompt-capture.sh`: `UserPromptSubmit`, plus `PostToolUse` on
-  `AskUserQuestion`), so the inventory reads `Hooks (2)` (the two events). The policy hook is
+  `hooks/hooks.json` now ships one non-blocking prompt recorder: one script
+  (`prompt-capture.sh`), registered for two events (`UserPromptSubmit`, plus
+  `PostToolUse` on `AskUserQuestion`). The policy hook is
   still not shipped, for the reason that follows. `.claude/hooks/guard.sh` resolves its policy
   binary against a checkout and degrades to `ask`, which in an install would
   mean a confirmation prompt in front of every command. The twelve deny rules
