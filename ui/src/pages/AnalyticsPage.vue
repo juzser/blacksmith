@@ -219,7 +219,7 @@ const recheckDisplay = computed(() =>
 const secondOpinion = computed(() => secondOpinionSummary(data.value?.providerAgreement ?? []));
 const secondOpinionPct = computed(() =>
   secondOpinion.value.agreementRate === null
-    ? 0
+    ? null
     : Math.round(secondOpinion.value.agreementRate * 100),
 );
 
@@ -442,11 +442,13 @@ const phoneRoleHeading = computed(() => {
           </template>
           <div class="bs-analytics-page__metric-value">
             <ProgressRing
+              v-if="secondOpinionPct !== null"
               :value="secondOpinionPct"
               :max="100"
               kind="ratio"
               :label="`${secondOpinionPct}% of second-opinion reviews agreed with the main reviewer`"
             />
+            <span v-else>Not enough data yet</span>
           </div>
           <p class="bs-analytics-page__metric-takeaway">{{ secondOpinionTakeaway(secondOpinion) }}</p>
         </Card>
@@ -465,11 +467,13 @@ const phoneRoleHeading = computed(() => {
             <span class="bs-analytics-page__phone-stat-label">Second-opinion agreed</span>
             <span class="bs-analytics-page__phone-stat-value">
               <ProgressRing
+                v-if="secondOpinionPct !== null"
                 :value="secondOpinionPct"
                 :max="100"
                 kind="ratio"
                 :label="`${secondOpinionPct}% agreed with the main reviewer`"
               />
+              <span v-else>Not enough data yet</span>
             </span>
           </div>
           <div class="bs-analytics-page__phone-stat">

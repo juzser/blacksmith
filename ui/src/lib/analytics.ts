@@ -242,8 +242,9 @@ export function secondOpinionSummary(
   };
 }
 
-/** "agreed with the main reviewer; 27 s average." */
+/** "agreed with the main reviewer; 27 s average." Unmeasured says so, never 0%. */
 export function secondOpinionTakeaway(summary: SecondOpinionSummary): string {
+  if (summary.agreementRate === null) return 'No second-opinion reviews in this period.';
   if (summary.meanLatencyMs === null) return 'agreed with the main reviewer.';
   return `agreed with the main reviewer; ${formatSeconds(summary.meanLatencyMs)} average.`;
 }

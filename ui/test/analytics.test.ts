@@ -373,7 +373,19 @@ describe('lib/analytics.ts — secondOpinionSummary / secondOpinionTakeaway', ()
   });
 
   it('takeaway drops the latency clause when nothing reported one', () => {
+    expect(secondOpinionTakeaway({ agreementRate: 0.5, meanLatencyMs: null })).toBe(
+      'agreed with the main reviewer.',
+    );
+  });
+
+  it('takeaway says nothing was measured instead of claiming no agreement', () => {
     expect(secondOpinionTakeaway({ agreementRate: null, meanLatencyMs: null })).toBe(
+      'No second-opinion reviews in this period.',
+    );
+    expect(secondOpinionTakeaway({ agreementRate: null, meanLatencyMs: 9000 })).toBe(
+      'No second-opinion reviews in this period.',
+    );
+    expect(secondOpinionTakeaway({ agreementRate: 0, meanLatencyMs: null })).toBe(
       'agreed with the main reviewer.',
     );
   });

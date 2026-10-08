@@ -41,3 +41,15 @@ describe('AnalyticsPage reads every store', () => {
     expect(page).not.toContain('another store');
   });
 });
+
+describe('AnalyticsPage second-opinion card with nothing measured', () => {
+  it('keeps null as null and swaps the ring for the not-enough-data text on both widths', () => {
+    expect(page).not.toMatch(/agreementRate === null\s*\?\s*0/);
+    expect(page).toContain('secondOpinion.value.agreementRate === null');
+    const rings = page.match(/<ProgressRing\s+v-if="secondOpinionPct !== null"/g) ?? [];
+    expect(rings).toHaveLength(2);
+    expect(page.match(/<span v-else>Not enough data yet<\/span>/g)?.length).toBeGreaterThanOrEqual(
+      4,
+    );
+  });
+});
