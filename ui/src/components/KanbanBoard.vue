@@ -31,7 +31,6 @@ import {
   groupByKanban,
   groupFollowups,
   isDoneStatus,
-  isInteractiveDescendant,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
 import {
@@ -40,7 +39,6 @@ import {
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
 } from '../lib/kanbanDisplayOptions.js';
-import { foreignStoreId } from '../lib/storeKey.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
 import KanbanFollowupGroup from './KanbanFollowupGroup.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
@@ -221,9 +219,9 @@ function onMobileTabKeydown(event: KeyboardEvent) {
 }
 
 // Pattern 9 — arrow-key card navigation + Space/Enter/Escape, no
-// drag-and-drop. Cards are plain focusable elements (KanbanTaskCard sets its
-// own tabindex); this only moves focus between them and opens/closes the
-// peek panel. Escape restores focus to the card that opened the panel.
+// drag-and-drop. A card's stop is its native open button (KanbanTaskCard); this
+// only moves focus between those and closes the peek panel. Escape restores
+// focus to the open button that opened the panel.
 const boardEl = ref<HTMLElement | null>(null);
 const peekTaskId = ref<string | null>(null);
 // The store a foreign card's task lives in; undefined for the served store.
@@ -244,7 +242,7 @@ function cardEls(): HTMLElement[] {
   // the rows of a closed group stay in the DOM but cannot take focus.
   return Array.from(
     boardEl.value.querySelectorAll<HTMLElement>(
-      '.bs-kanban-card, .bs-kanban-group__summary, .bs-kanban-group[open] .bs-kanban-group__row',
+      '.bs-kanban-card__open, .bs-kanban-group__summary, .bs-kanban-group[open] .bs-kanban-group__row-open',
     ),
   );
 }
@@ -279,26 +277,12 @@ async function closePeek() {
   card?.focus();
 }
 
-function onCardKeydown(event: KeyboardEvent, task: KanbanTask) {
-  // S2 review fix: a keydown that started on a focusable descendant (e.g.
-  // the footer's "Open PR" link) must keep its own native behaviour instead
-  // of being swallowed by the card's own Enter/Space/arrow handling.
-  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
-  const current = event.target as HTMLElement;
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault();
-    openPeek(task.taskId, foreignStoreId(task), current);
-    return;
-  }
-  moveFocus(event, current);
-}
-
 function moveFocus(event: KeyboardEvent, current: HTMLElement) {
   if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-  event.preventDefault();
   const cards = cardEls();
   const index = cards.indexOf(current);
   if (index === -1 || cards.length === 0) return;
+  event.preventDefault();
   // Up/Down and Left/Right both step through the same flat, DOM-order list
   // of cards: with cards laid out column-by-column this already reads as
   // "down the column" for Up/Down and "across columns" for Left/Right
@@ -307,15 +291,11 @@ function moveFocus(event: KeyboardEvent, current: HTMLElement) {
   const next = cards[(index + step + cards.length) % cards.length];
   next?.focus();
 }
-// A group summary takes arrows only: Enter/Space on it is the native toggle.
-function onGroupKeydown(event: KeyboardEvent) {
-  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
-  moveFocus(event, event.target as HTMLElement);
-}
-// A fix row is a role="link" stop like a card. onGroupKeydown skips it (a
-// role-bearing target counts as interactive), so the row hands arrows to the
-// board itself through its `navigate` event.
-function onRowNavigate(event: KeyboardEvent) {
+// Enter/Space are native on every stop (a card's open button, a fix row's open
+// button, a group summary's toggle), so a keydown here only ever means arrows.
+// moveFocus ignores a target that is not one of the stops (a copy-id button,
+// the "Open PR" link), which keep their own keys.
+function onNavKeydown(event: KeyboardEvent) {
   moveFocus(event, event.target as HTMLElement);
 }
 
@@ -429,8 +409,7 @@ defineExpose({ focusFirstCard });
               :reveal-store-id="peekStoreId"
               @toggle="toggleGroup(item.key)"
               @select="onCardSelect"
-              @keydown="onGroupKeydown"
-              @navigate="onRowNavigate"
+              @keydown="onNavKeydown"
             />
             <KanbanTaskCard
               v-else
@@ -439,7 +418,7 @@ defineExpose({ focusFirstCard });
               :summary-enabled="options.summary"
               :compact="isPhoneWidth"
               @select="onCardSelect"
-              @keydown="onCardKeydown($event, item.task)"
+              @keydown="onNavKeydown"
             />
           </li>
         </ul>

@@ -84,10 +84,9 @@ describe('KanbanTaskCard.vue — title-line copy icon (operator fix 2026-10-05)'
     expect(SRC).toMatch(/copyToClipboard\(props\.task\.taskId\)/);
   });
 
-  it('stops the click from propagating to the card, so it never opens the peek panel', () => {
-    expect(SRC).toMatch(
-      /function onCopyTaskId\(event: MouseEvent\) \{\s*event\.stopPropagation\(\);/,
-    );
+  it('keeps the copy button outside the open button, so its click never opens the card', () => {
+    expect(SRC).not.toMatch(/stopPropagation|@click\.stop/);
+    expect(SRC).not.toMatch(/role="link"|tabindex/);
   });
 
   it('gives the title medium font-weight via the design token', () => {

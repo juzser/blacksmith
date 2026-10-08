@@ -25,7 +25,6 @@ import {
   cardChips,
   dependencyChainText,
   hasWaitingDependency,
-  isInteractiveDescendant,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
@@ -71,50 +70,51 @@ const attemptLabelText = computed(() => attemptLabel(props.task));
 
 // Operator fix 2026-10-05: row 1's id text + copy button are gone (the full
 // id is unreadable there anyway); a link icon right after the title copies
-// it instead. stopPropagation keeps the click from also bubbling to the
-// card's own @click, which would open the peek panel.
+// it instead. It sits above the open button's overlay, not inside it, so its
+// click never reaches the open button and needs no click-stopping.
 const copyIdTooltip = computed(() => `${props.task.taskId} (click to copy)`);
 const { label: copyIdLabel, flash: flashIdCopied } = useCopyFeedback(copyIdTooltip.value, 'Copied');
-async function onCopyTaskId(event: MouseEvent) {
-  event.stopPropagation();
+async function onCopyTaskId() {
   const ok = await copyToClipboard(props.task.taskId);
   if (!ok) return;
   flashIdCopied();
 }
 
+// The open button is an empty overlay covering the whole card, so a click
+// anywhere opens it. Focusing it first keeps `closePeek`'s focus return
+// working in browsers that do not focus a button on click.
+const openEl = ref<HTMLElement | null>(null);
 function onSelect() {
+  openEl.value?.focus();
   emit('select', props.task.taskId, foreignStoreId(props.task));
 }
-
-// S2 review fix: ignore Enter/Space that started on a focusable descendant
-// (the footer's "Open PR" link today, any future focusable child tomorrow)
-// so it keeps its own native keyboard behaviour instead of the card
-// hijacking the keystroke to select/open itself.
-function onKeydown(event: KeyboardEvent) {
-  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
-  if (event.key === 'Enter') {
-    onSelect();
-  } else if (event.key === ' ') {
-    event.preventDefault();
-    onSelect();
-  }
+// The overlay cannot cover what needs hover (the time tooltip, chip and
+// dependency titles), so those sit above it. A click that lands on one of them
+// reaches the card and opens it like a click on the overlay. Buttons and links
+// keep their own click: this skips the overlay's own click (it opens itself, so
+// it must not fire twice), copy-id and "Open PR". Mouse only; keyboard users
+// use the open button.
+function onCardClick(event: MouseEvent) {
+  if ((event.target as Element).closest('button, a')) return;
+  onSelect();
 }
 </script>
 
 <template>
-  <div
-    class="bs-kanban-card"
-    role="link"
-    tabindex="0"
-    :aria-label="`${title}, opens task detail`"
-    @click="onSelect"
-    @keydown="onKeydown"
-  >
+  <div class="bs-kanban-card" @click="onCardClick">
+    <button
+      ref="openEl"
+      type="button"
+      class="bs-kanban-card__open"
+      :aria-label="`${title}, opens task detail`"
+      :title="fitted ? title : undefined"
+      @click="onSelect"
+    ></button>
     <div v-if="!compact && chip" class="bs-kanban-card__row bs-kanban-card__row--1">
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
     </div>
 
-    <p ref="titleEl" class="bs-kanban-card__title" :title="fitted ? title : undefined">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
+    <p ref="titleEl" class="bs-kanban-card__title">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
         :icon="Link"
         :label="copyIdLabel"
         size="sm"
@@ -160,7 +160,7 @@ function onKeydown(event: KeyboardEvent) {
         >{{ footerDependency }}</span
       >
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>
-      <a v-if="task.prUrl" :href="task.prUrl" target="_blank" rel="noopener" @click.stop>Open PR</a>
+      <a v-if="task.prUrl" :href="task.prUrl" target="_blank" rel="noopener">Open PR</a>
     </div>
   </div>
 </template>

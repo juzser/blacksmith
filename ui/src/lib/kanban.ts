@@ -546,35 +546,6 @@ export function isDoneStatus(status: string): boolean {
   return taskStatusKitTone(status) === 'done';
 }
 
-/** The bits of a keydown target isInteractiveDescendant() actually reads. */
-export interface KeydownTargetLike {
-  tagName?: string;
-  getAttribute?(name: string): string | null;
-}
-
-const INTERACTIVE_TAGS = new Set(['A', 'BUTTON', 'INPUT']);
-
-/**
- * S2 review fix — the Kanban card root carries its own Enter/Space
- * keydown handling (select the card, open the peek panel), but focusable
- * descendants like the footer's "Open PR" link must keep their own native
- * keyboard behaviour instead of being hijacked by the card's handler. True
- * for any descendant that is an `a`/`button`/`input` or carries a `role`
- * attribute — generalised rather than naming that one link, so a future
- * focusable descendant (e.g. a row-1 icon button) is covered too. The card
- * root itself also carries `role="link"`, so `target === currentTarget` is
- * checked first: without it the root would match its own guard and the
- * core select/navigate interaction would silently stop working.
- */
-export function isInteractiveDescendant(
-  target: KeydownTargetLike | null,
-  currentTarget: unknown,
-): boolean {
-  if (!target || target === currentTarget) return false;
-  if (target.tagName && INTERACTIVE_TAGS.has(target.tagName)) return true;
-  return typeof target.getAttribute === 'function' && target.getAttribute('role') != null;
-}
-
 /** The bits of a KanbanTask attemptLabel() actually reads. */
 export interface AttemptLabelTask {
   attemptCount: number;
