@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { arialSwitchOn } from './fontSwitch.js';
 
 // Absolute, not CWD-relative — page.screenshot()'s path option resolves
 // against process.cwd(), which differs between `pnpm test:e2e` (repo root)
@@ -45,7 +46,11 @@ export async function settleForShot(page: Page, marker: Locator, settleMs = 150)
 // themselves on a no-op run because of it (D-235). `animations: 'disabled'`
 // fast-forwards finite animations to their end state and cancels infinite
 // ones to their initial state: same pixels every run.
+//
+// Under BS_E2E_FONT=arial nothing is written: those pixels are not the
+// committed ones, and the switch must leave the work tree clean.
 export async function shoot(page: Page, name: string): Promise<void> {
+  if (arialSwitchOn()) return;
   await page.screenshot({
     path: path.join(SCREENSHOT_DIR, `${name}.png`),
     animations: 'disabled',
@@ -56,6 +61,7 @@ export async function shoot(page: Page, name: string): Promise<void> {
 // card that needs proving in full when the page around it is taller than
 // any fixed viewport (DS8 PR3 fix round 2, item 3: the Running now card).
 export async function shootElement(locator: Locator, name: string): Promise<void> {
+  if (arialSwitchOn()) return;
   await locator.screenshot({
     path: path.join(SCREENSHOT_DIR, `${name}.png`),
     animations: 'disabled',

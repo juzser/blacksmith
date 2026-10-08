@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './harness.js';
 
 /**
  * A destructive confirm has exactly one job: say what is about to happen
