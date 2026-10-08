@@ -101,6 +101,8 @@ export interface RunningSession {
    * id plus a dash, else that epic id, else null; never prompt text.
    */
   title?: string | null;
+  /** Which store the row came from; set by `?stores=all`, absent on the served store's own list. */
+  store?: StoreRef;
 }
 export interface EpicTokenSpend {
   epicId: string;
@@ -694,10 +696,15 @@ export function fetchPulse(session?: SessionScope, project?: string): Promise<Pu
  * picker inside the page's outage, and the page's error state inside the
  * frame's.
  */
-export function fetchSessions(session?: SessionScope, project?: string): Promise<RunningSession[]> {
+export function fetchSessions(
+  session?: SessionScope,
+  project?: string,
+  stores?: 'all',
+): Promise<RunningSession[]> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
+  applyStores(q, stores);
   const qs = q.toString();
   return getJson(`/api/sessions${qs ? `?${qs}` : ''}`);
 }
@@ -737,9 +744,11 @@ export interface SessionAgentsResult {
 export function fetchSessionAgents(
   sessionId: string,
   project?: string,
+  store?: string,
 ): Promise<SessionAgentsResult> {
   const q = new URLSearchParams();
   if (project) q.set('project', project);
+  applyStores(q, undefined, store);
   const qs = q.toString();
   return getJson(`/api/sessions/${encodeURIComponent(sessionId)}/agents${qs ? `?${qs}` : ''}`);
 }

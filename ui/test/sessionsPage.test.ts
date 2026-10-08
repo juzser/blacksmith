@@ -23,7 +23,7 @@ describe('SessionsPage.vue', () => {
   it('keeps the project context, unscoped from useSessionContext', () => {
     expect(PAGE).toMatch(/useProjectContext/);
     expect(PAGE).not.toMatch(/from '\.\.\/composables\/useSessionContext\.js'/);
-    expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value\)/);
+    expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value, 'all'\)/);
   });
 
   // The Active/All scope itself is tested as behaviour: sessionsInScope and
@@ -42,28 +42,36 @@ describe('SessionsPage.vue', () => {
   });
 
   it('loads one run of agents through fetchSessionAgents and renders one AgentBlock per role', () => {
-    expect(PAGE).toMatch(/fetchSessionAgents\(id, project\.value\)/);
+    expect(PAGE).toMatch(
+      /fetchSessionAgents\(sel\.sessionId, project\.value, foreignStoreId\(sel\)\)/,
+    );
     expect(PAGE).toMatch(/v-for="r in agents\.roles"/);
   });
 
   it('polls only while the selected run still has a live agent', () => {
     expect(PAGE).toMatch(/hasWorkingAgents\(agents\.value\?\.roles/);
-    expect(PAGE).toMatch(/if \(hasLiveAgents\(\)\) void loadAgents\(\);/);
+    expect(PAGE).toMatch(
+      /if \(hasLiveAgents\(\) \|\| emptyRosterOfActiveSession\(\)\) void loadAgents\(\);/,
+    );
   });
 
   it('resolves the deep link through the page-local selection helper, not sessionScope', () => {
     expect(PAGE).toMatch(/selectedSessionFromQuery/);
-    expect(PAGE).toMatch(/router\.replace\(\{ query: \{ \.\.\.route\.query, session: id \} \}\)/);
+    expect(PAGE).toMatch(/session: row\.sessionId/);
   });
 
   it('drops a stale loadAgents response instead of overwriting a later selection', () => {
     expect(PAGE).toMatch(/from '\.\.\/lib\/sessionsSelection\.js'/);
-    expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
+    expect(PAGE).toMatch(/if \(isStaleResponse\(key, selectedKey\.value\)\) return;/g);
   });
 
   it('marks the open run selected in the grouped and scoped lists', () => {
-    const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
+    const matches = PAGE.match(/:selected="selectedKey === storeKey\(s, s\.sessionId\)"/g);
     expect(matches?.length).toBe(2);
+  });
+
+  it('re-derives the selection when either ?session or ?store changes', () => {
+    expect(PAGE).toMatch(/\(\) => \[route\.query\.session, route\.query\.store\],/);
   });
 
   it('moves focus to the deep-linked row after scrolling it into view', () => {

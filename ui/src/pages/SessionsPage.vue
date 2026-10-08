@@ -6,15 +6,19 @@
 // import anywhere on this page — the dependency stays in package.json only
 // because nothing else in this round removes it from there.
 //
-// Deep link (`?session=<id>`): this page's own "which run is open" marker,
-// read and written only here. lib/sessionScope.ts also reads a `?session`
-// query key, but for a different job — narrowing every OTHER page's server
-// fetch (Activity, Work → Roadmap) to one run's lineage. The two share a
-// name, not a meaning, so this page does not call useSessionContext() at
-// all: lib/sessionsSelection.ts's selectedSessionFromQuery() only ever
-// selects an id this page's own history list already knows about.
+// Deep link (`?session=<id>`, plus `&store=<id>` for a session of another
+// store; none means the served store): this page's own "which run is open"
+// marker, read and written only here. Every store is read, and a session id
+// can repeat between stores, so the selection, the row refs and the stale
+// check all hold a storeKey, never a bare id.
+// lib/sessionScope.ts also reads a `?session` query key, but for a different
+// job — narrowing every OTHER page's server fetch (Activity, Work → Roadmap)
+// to one run's lineage. The two share a name, not a meaning, so this page
+// does not call useSessionContext() at all: lib/sessionsSelection.ts's
+// selectedSessionFromQuery() only ever selects an id this page's own history
+// list already knows about.
 import { Play, RefreshCw } from '@lucide/vue';
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import AgentBlock from '../components/kit/AgentBlock.vue';
@@ -22,6 +26,7 @@ import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
+import RelativeTime from '../components/kit/RelativeTime.vue';
 import SessionRow from '../components/kit/SessionRow.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import { useActiveScope } from '../composables/useActiveScope.js';
@@ -45,11 +50,12 @@ import {
   activeFirst,
   isSessionActive,
   isStaleResponse,
-  otherStoreProjects,
   selectedSessionFromQuery,
   sessionsByProject,
   sessionsInScope,
+  shouldPollEmptyRoster,
 } from '../lib/sessionsSelection.js';
+import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -70,7 +76,8 @@ const sessions = ref<RunningSession[]>([]);
 const sessionsLoaded = ref(false);
 const sessionsError = ref<string | null>(null);
 
-const selectedId = ref<string | null>(null);
+// The open run's storeKey (see the header).
+const selectedKey = ref<string | null>(null);
 const agents = ref<SessionAgentsResult | null>(null);
 const agentsLoadedFor = ref<string | null>(null);
 const agentsError = ref<string | null>(null);
@@ -93,7 +100,7 @@ const measured = () => live()?.measured === true;
 // Active shows only sessions a live CLI session drives (plus a quiet
 // selection, pinned); All also reveals the quiet ones, which render muted
 // after the active ones. Unmeasured, Active shows the full list.
-const visible = () => sessionsInScope(sessions.value, scope.value, selectedId.value, live());
+const visible = () => sessionsInScope(sessions.value, scope.value, selectedKey.value, live());
 // Quiet sessions Active leaves out: a pinned selection is shown, so not counted.
 const hiddenQuietCount = () => sessions.value.length - visible().length;
 
@@ -103,7 +110,6 @@ const noneOnAnEpic = () => {
   const l = live();
   return measured() && l !== null && l.factorySessions.length === 0 && l.unlinkedSessions > 0;
 };
-const otherStores = () => otherStoreProjects(live());
 
 // Unscoped (no project in context, SessionsPage never pre-selects one):
 // group the visible list by project, newest group first, active rows ahead of
@@ -114,11 +120,20 @@ const groups = () =>
 const flat = () => activeFirst(visible(), live());
 // Unmeasured, nothing can be called quiet: muting every row would be a claim.
 const isQuiet = (s: RunningSession) => measured() && !isSessionActive(live(), s);
+const selected = computed(
+  () => sessions.value.find((s) => storeKey(s, s.sessionId) === selectedKey.value) ?? null,
+);
 
 // Gates the poll: a selected run with nothing left working (live and inside
 // the stale window) has nothing left to learn by asking again every 5s.
 function hasLiveAgents(): boolean {
   return hasWorkingAgents(agents.value?.roles ?? [], new Date().toISOString());
+}
+
+// A loaded empty roster is never "working", so hasLiveAgents() alone would
+// freeze "No agents yet." even after a live session dispatches its first agent.
+function emptyRosterOfActiveSession(): boolean {
+  return shouldPollEmptyRoster(agents.value, live(), selected.value);
 }
 
 function errorMessage(e: unknown): string {
@@ -127,7 +142,7 @@ function errorMessage(e: unknown): string {
 
 async function loadSessions() {
   try {
-    sessions.value = await fetchSessions(undefined, project.value);
+    sessions.value = await fetchSessions(undefined, project.value, 'all');
     sessionsError.value = null;
   } catch (e) {
     sessionsError.value = errorMessage(e);
@@ -140,18 +155,19 @@ async function loadSessions() {
 // user has since clicked away from (isStaleResponse) must not overwrite
 // the run now selected.
 async function loadAgents() {
-  const id = selectedId.value;
-  if (!id) return;
+  const key = selectedKey.value;
+  const sel = selected.value;
+  if (!key || !sel) return;
   try {
-    const result = await fetchSessionAgents(id, project.value);
-    if (isStaleResponse(id, selectedId.value)) return;
+    const result = await fetchSessionAgents(sel.sessionId, project.value, foreignStoreId(sel));
+    if (isStaleResponse(key, selectedKey.value)) return;
     agents.value = result;
     agentsError.value = null;
   } catch (e) {
-    if (isStaleResponse(id, selectedId.value)) return;
+    if (isStaleResponse(key, selectedKey.value)) return;
     agentsError.value = errorMessage(e);
   } finally {
-    if (!isStaleResponse(id, selectedId.value)) agentsLoadedFor.value = id;
+    if (!isStaleResponse(key, selectedKey.value)) agentsLoadedFor.value = key;
   }
 }
 
@@ -190,12 +206,15 @@ function groupRowRef(groupKey: string, id: string): (el: Element | null) => void
   return setter;
 }
 
-function selectSession(id: string) {
-  if (selectedId.value === id) return;
-  selectedId.value = id;
+function selectSession(row: RunningSession) {
+  const key = storeKey(row, row.sessionId);
+  if (selectedKey.value === key) return;
+  selectedKey.value = key;
   agents.value = null;
   agentsLoadedFor.value = null;
-  router.replace({ query: { ...route.query, session: id } });
+  const { store: _drop, ...rest } = route.query;
+  const store = foreignStoreId(row);
+  router.replace({ query: { ...rest, session: row.sessionId, ...(store ? { store } : {}) } });
   void loadAgents();
 }
 
@@ -231,11 +250,11 @@ onMounted(async () => {
   if (gone) return;
   const deepLinked = selectedSessionFromQuery(route.query, sessions.value);
   if (deepLinked) {
-    selectedId.value = deepLinked;
+    selectedKey.value = deepLinked;
     // Deep link to a quiet session while the scope is Active: its row is
     // hidden there. Least surprising rule: widen the scope with router.replace
     // (no extra history entry) so the URL tells the truth about what is shown.
-    const hit = sessions.value.find((s) => s.sessionId === deepLinked);
+    const hit = selected.value;
     if (hit && isQuiet(hit) && scope.value === 'active') {
       await router.replace({ query: scopeQuery(route.query, 'all') as typeof route.query });
     }
@@ -249,15 +268,15 @@ onMounted(async () => {
   }
 });
 
-// Browser back/forward (or any outside query change) moves `?session=`;
-// re-derive the selection from it. selectSession's own replace already set
-// selectedId, so the equal case is a no-op and nothing loops.
+// Browser back/forward (or any outside query change) moves `?session=` and
+// `?store=`; re-derive the selection from them. selectSession's own replace
+// already set selectedKey, so the equal case is a no-op and nothing loops.
 watch(
-  () => route.query.session,
+  () => [route.query.session, route.query.store],
   () => {
-    const id = selectedSessionFromQuery(route.query, sessions.value);
-    if (id === selectedId.value) return;
-    selectedId.value = id;
+    const key = selectedSessionFromQuery(route.query, sessions.value);
+    if (key === selectedKey.value) return;
+    selectedKey.value = key;
     agents.value = null;
     agentsLoadedFor.value = null;
     void loadAgents();
@@ -267,12 +286,12 @@ watch(
 // Narrowing to Active hides a quiet selection's row, so the selection (and
 // its `?session=`) goes with it rather than leaving a detail with no row.
 watch(scope, (next) => {
-  const sel = sessions.value.find((s) => s.sessionId === selectedId.value);
+  const sel = selected.value;
   if (next === 'active' && sel && isQuiet(sel)) {
-    selectedId.value = null;
+    selectedKey.value = null;
     agents.value = null;
     agentsLoadedFor.value = null;
-    const { session: _drop, ...rest } = route.query;
+    const { session: _drop, store: _dropStore, ...rest } = route.query;
     void router.replace({ query: rest });
   }
 });
@@ -282,20 +301,20 @@ watch(scope, (next) => {
 // retired canvas both keep for a scope change.
 watch(project, () => {
   setBreadcrumb([{ label: breadcrumbLabel() }]);
-  selectedId.value = null;
+  selectedKey.value = null;
   agents.value = null;
   agentsLoadedFor.value = null;
   void loadSessions();
 });
 
 usePoll(() => {
-  if (hasLiveAgents()) void loadAgents();
+  if (hasLiveAgents() || emptyRosterOfActiveSession()) void loadAgents();
 }, POLL_MS);
 
 function refresh() {
   void loadSessions();
   void reloadActiveScope();
-  if (selectedId.value) void loadAgents();
+  if (selectedKey.value) void loadAgents();
 }
 </script>
 
@@ -336,36 +355,41 @@ function refresh() {
               v-if="group.project"
               :to="{ query: { ...route.query, project: group.project } }"
               class="bs-btn bs-btn--link bs-btn--sm"
+              :title="group.project"
             >
-              {{ group.project }}
+              <span class="bs-sessions__group-label">{{ group.project }}</span>
             </RouterLink>
             <template v-else>No project</template>
           </h2>
           <ul class="bs-sessions__list" role="list">
             <li
               v-for="s in group.sessions"
-              :key="s.sessionId"
-              :ref="(el) => groupRowRef(group.project, s.sessionId)(el as Element | null)"
+              :key="storeKey(s, s.sessionId)"
+              :ref="(el) => groupRowRef(group.project, storeKey(s, s.sessionId))(el as Element | null)"
             >
               <SessionRow
                 :session="s"
                 clickable
                 :quiet="isQuiet(s)"
-                :selected="selectedId === s.sessionId"
-                @click="selectSession(s.sessionId)"
+                :selected="selectedKey === storeKey(s, s.sessionId)"
+                @click="selectSession(s)"
               />
             </li>
           </ul>
         </section>
       </template>
       <ul v-else class="bs-sessions__list" role="list">
-        <li v-for="s in flat()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
+        <li
+          v-for="s in flat()"
+          :key="storeKey(s, s.sessionId)"
+          :ref="(el) => setRowRef(storeKey(s, s.sessionId), el as Element | null)"
+        >
           <SessionRow
             :session="s"
             clickable
             :quiet="isQuiet(s)"
-            :selected="selectedId === s.sessionId"
-            @click="selectSession(s.sessionId)"
+            :selected="selectedKey === storeKey(s, s.sessionId)"
+            @click="selectSession(s)"
           />
         </li>
       </ul>
@@ -383,20 +407,24 @@ function refresh() {
           {{ pluralize(hiddenQuietCount(), 'quiet session') }} ·
           <RouterLink :to="scopeTo('all')">Show all</RouterLink>
         </p>
-        <p v-if="otherStores().length > 0" class="bs-sessions__quiet">
-          {{ pluralize(otherStores().length, 'active project') }}
-          {{ otherStores().length === 1 ? 'is' : 'are' }} in another store
-          ({{ otherStores().join(', ') }}) ·
-          <RouterLink to="/overview">see Home</RouterLink>
-        </p>
       </template>
 
       <Banner v-if="agentsError" tone="danger" show-retry @retry="loadAgents">
         {{ agentsError }}
       </Banner>
 
-      <section v-if="selectedId" class="bs-sessions__detail" aria-label="Selected session's agents">
-        <Skeleton v-if="agentsLoadedFor !== selectedId" height="120" />
+      <section v-if="selectedKey" class="bs-sessions__detail" aria-label="Selected session's agents">
+        <!-- Absent when the list on screen (a project filter fetches a filtered one) lacks the selected session. -->
+        <p v-if="selected" class="bs-sessions__detail-head">
+          <span class="bs-sessions__detail-title">{{ selected.title ?? selected.sessionId }}</span>
+          <span>{{ selected.projects.length ? selected.projects.join(', ') : 'No project' }}</span>
+          <span>started <RelativeTime :iso="selected.startedAt" /></span>
+        </p>
+        <Skeleton v-if="agentsLoadedFor !== selectedKey" height="120" />
+        <!-- A live session that has dispatched nothing yet is normal, not an error. -->
+        <p v-else-if="agents && agents.roles.length === 0" class="bs-sessions__quiet">
+          No agents yet.
+        </p>
         <template v-else-if="agents">
           <AgentBlock
             v-for="r in agents.roles"

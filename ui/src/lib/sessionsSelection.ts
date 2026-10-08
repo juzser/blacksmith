@@ -1,7 +1,7 @@
 import { isActiveSession } from './activeScope.js';
 import type { ActivityScope } from './activityScope.js';
 import type { ActiveScopeResult } from './api.js';
-import { HOME_STORE_ID } from './storeKey.js';
+import { foreignStoreId, HOME_STORE_ID, type StoreRef, storeKey } from './storeKey.js';
 
 // SessionsPage's deep link (DS8 PR3 item 4): `?session=<id>` is this page's
 // own "which run is open" marker, read and written only here -- unlike
@@ -9,14 +9,21 @@ import { HOME_STORE_ID } from './storeKey.js';
 // page's server fetch (timeline, roadmap). The two share a query key, so
 // this helper only ever selects an id this page's own history list already
 // knows about, rather than trusting the string on faith the way a scope
-// reader would.
+// reader would. A session id repeats between stores, so `&store=<id>` names
+// the store (no `store` means the served one) and the answer is the row's
+// storeKey, the page's one key for a selection.
 export function selectedSessionFromQuery(
-  query: { session?: unknown },
-  sessions: readonly { sessionId: string }[],
+  query: { session?: unknown; store?: unknown },
+  sessions: readonly { sessionId: string; store?: StoreRef }[],
 ): string | null {
   const id = typeof query.session === 'string' ? query.session : null;
-  if (id && sessions.some((s) => s.sessionId === id)) return id;
-  return null;
+  if (!id || (query.store !== undefined && typeof query.store !== 'string')) return null;
+  const hit = sessions.find(
+    (s) =>
+      s.sessionId === id &&
+      foreignStoreId(s) === (query.store === HOME_STORE_ID ? undefined : query.store),
+  );
+  return hit ? storeKey(hit, id) : null;
 }
 
 /**
@@ -27,17 +34,20 @@ export function selectedSessionFromQuery(
  * rather than claim nothing is active. A selected id not in the list adds
  * nothing.
  */
-export function sessionsInScope<T extends { sessionId: string }>(
+export function sessionsInScope<T extends { sessionId: string; store?: StoreRef }>(
   sessions: readonly T[],
   scope: ActivityScope,
-  selectedId: string | null,
+  selectedKey: string | null,
   live: ActiveScopeResult | null,
 ): T[] {
   if (scope === 'all' || live?.measured !== true) return [...sessions];
-  return sessions.filter((s) => isSessionActive(live, s) || s.sessionId === selectedId);
+  return sessions.filter(
+    (s) => isSessionActive(live, s) || storeKey(s, s.sessionId) === selectedKey,
+  );
 }
 
 // SessionsPage.loadAgents() runs for both the poll path and the click path.
+// Both ids are storeKeys, so the same session id in two stores is two runs.
 // A fetch started for run A can still be in flight when the user clicks run
 // B; A's response must not overwrite B's agents once it finally lands. Both
 // callers check this before applying their result.
@@ -49,13 +59,32 @@ export function isStaleResponse(responseId: string, currentSelectedId: string | 
 // SessionsPage.vue. A session is active when a live CLI session is writing
 // into it (`/api/active-scope`'s factorySessions), not when an agent row says
 // `live` or `working`: those come from the factory's own 4h staleness window
-// and read zero while a CLI session is plainly at work. `/api/sessions` reads
-// the home store only, so its rows carry no `store` and match the home store.
+// and read zero while a CLI session is plainly at work. A row with no `store`
+// matches the home store.
 export function isSessionActive(
   live: ActiveScopeResult | null,
-  session: { sessionId: string },
+  session: { sessionId: string; store?: StoreRef },
 ): boolean {
-  return isActiveSession(live, {}, session.sessionId);
+  return isActiveSession(live, session, session.sessionId);
+}
+
+/**
+ * Whether a loaded, empty roster is worth asking for again: only while a live
+ * CLI session is writing into the selected session, since its first agent can
+ * appear at any moment. A quiet or ended session, or a deep link hidden from
+ * the list (`selected` null), cannot change by asking every few seconds.
+ */
+export function shouldPollEmptyRoster(
+  agents: { roles: unknown[] } | null,
+  live: ActiveScopeResult | null,
+  selected: { sessionId: string; store?: StoreRef } | null,
+): boolean {
+  return (
+    agents !== null &&
+    agents.roles.length === 0 &&
+    selected !== null &&
+    isSessionActive(live, selected)
+  );
 }
 
 /** Names of active projects living outside the home store, each once. */
@@ -106,7 +135,7 @@ export function sessionsByProject<T extends { lastEventAt: string; projects: rea
 }
 
 /** Newest first, then a stable split: active sessions ahead of quiet ones. */
-export function activeFirst<T extends { sessionId: string; lastEventAt: string }>(
+export function activeFirst<T extends { sessionId: string; lastEventAt: string; store?: StoreRef }>(
   sessions: readonly T[],
   live: ActiveScopeResult | null,
 ): T[] {

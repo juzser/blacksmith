@@ -311,8 +311,36 @@ async function prepare(page: Page, name: string): Promise<void> {
     );
 }
 
+// A session's row shows its time as plain text inside the row button, so the
+// tooltip times on the page are the selected session's head line ("started
+// <time>") and one per agent row in its roster. Select a row whose roster has
+// agents and wait for that roster to load, so the count below is not a race.
+const ROSTER_TIME = `.bs-sessions__detail-head ${TIME}`;
+const DETAIL = '.bs-sessions__detail';
+const AGENT_ROW = `${DETAIL} .bs-agentblock__row`;
+async function selectSession(page: Page): Promise<number> {
+  const rows = page.locator('.bs-sessionrow');
+  await expect(rows.first()).toBeVisible();
+  const total = await rows.count();
+  for (let i = 0; i < total; i++) {
+    await rows.nth(i).click();
+    await expect(page.locator(ROSTER_TIME)).toHaveCount(1);
+    // Settled means the roster rendered: agent rows, or the empty line. A mere
+    // missing skeleton can also be the instant before it first renders.
+    await expect(page.locator(`${AGENT_ROW}, ${DETAIL} .bs-sessions__quiet`).first()).toBeVisible();
+    await expect(page.locator(`${DETAIL} .bs-skeleton`)).toHaveCount(0);
+    const agents = await page.locator(AGENT_ROW).count();
+    if (agents > 0) return agents;
+  }
+  throw new Error('no listed session has agents in its roster');
+}
+
 // Opens what a page keeps closed until asked.
 async function reveal(page: Page, name: string): Promise<void> {
+  if (name === 'sessions') {
+    await selectSession(page);
+    return;
+  }
   if (name !== 'kanban-group') return;
   await page.locator('.bs-kanban-group summary').first().click();
   await expect(page.locator('.bs-kanban-group__row-meta .bs-reltime').first()).toBeVisible();
@@ -338,6 +366,14 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           exempt: EXEMPT,
         });
         expect(boxes.length).toBeGreaterThan(0);
+        // Sessions: the head line's time plus one per agent row are measured, so
+        // a time that drops out of the walk (or a row time that grows a tab
+        // stop) fails here.
+        if (name === 'sessions') {
+          const agentRows = await page.locator(AGENT_ROW).count();
+          expect(agentRows, 'sessions: agent rows').toBeGreaterThan(0);
+          expect(boxes.length, 'sessions: measured times').toBe(1 + agentRows);
+        }
         // A hit box wider than the text must not widen the page.
         expect(
           await page.evaluate(
@@ -387,7 +423,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
   for (const font of FONT_VARIANTS) {
     for (const [label, path, selector] of [
       ['card time', '/kanban', TIME],
-      ['session row time', '/sessions', TIME],
+      ['session roster time', '/sessions', ROSTER_TIME],
       ['live-card time', '/overview', '.bs-live-card__status .bs-reltime'],
       ['meta-line time', '/activity', '.bs-timeline-row__ts--meta'],
     ] as const) {
@@ -399,6 +435,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await page.goto(path);
         if (font.css) await page.addStyleTag({ content: font.css });
         await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        if (path === '/sessions') await selectSession(page);
         await expect(page.locator(`${selector}:visible`).first()).toBeVisible();
         const floor = await touchFloor(page);
         const widths = await page.evaluate(widthsFor, { selector, texts: SHORT_TEXTS });
@@ -428,6 +465,11 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
         const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
         expect(real.misses.length).toBeGreaterThan(0);
+        if (name === 'sessions') {
+          const agentRows = await page.locator(AGENT_ROW).count();
+          expect(agentRows, 'sessions: agent rows').toBeGreaterThan(0);
+          expect(real.misses.length, 'sessions: tapped times').toBe(1 + agentRows);
+        }
         expect(
           real.misses.map((m, i) => (m.length ? `time ${i}: ${m.join(', ')}` : '')).filter(Boolean),
           `${name}: a tap inside a time's box lands elsewhere`,
@@ -450,6 +492,33 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
       });
     }
   }
+
+  // A Sessions row is itself a button: nothing focusable may sit inside it, so
+  // its time is plain text (no tooltip trigger, no hit box, no tab stop).
+  test('sessions: no hit box and no other focusable element inside a row button', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-sessionrow').first()).toBeVisible();
+    const inside = await page.evaluate(
+      ({ neighbours }) => {
+        const rows = Array.from(document.querySelectorAll('.bs-sessionrow'));
+        const found: string[] = [];
+        for (const row of rows) {
+          for (const e of Array.from(
+            row.querySelectorAll(`.bs-reltime, .bs-tooltip-trigger, ${neighbours}`),
+          ))
+            found.push(`${e.tagName.toLowerCase()}.${String(e.className)}`);
+        }
+        return { rows: rows.length, found };
+      },
+      { neighbours: NEIGHBOURS },
+    );
+    expect(inside.rows).toBeGreaterThan(0);
+    expect(inside.found, 'something focusable inside a row button').toEqual([]);
+  });
 
   // A fix row's copy button sits right above its time. A tap on the lower half
   // of the copy button must stay on the copy button, not open the tooltip.

@@ -526,23 +526,18 @@ test.describe('Sessions', () => {
     await expect(titles(page)).toHaveCount(3);
   });
 
-  test('an active project in another store gets a line beside the list, linking to Home', async ({
-    page,
-  }) => {
+  test('an active project in another store gets no line: every store is read', async ({ page }) => {
     await serveScope(page);
     await stubActiveScope(page, ['sc-active'], {
       projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
     });
     await page.goto('/sessions');
     await expect(titles(page)).toHaveText(['Active in proj-a']);
-    await expect(
-      page.getByText('1 active project is in another store (project-b) ·'),
-    ).toBeVisible();
-    await page.getByRole('link', { name: 'see Home' }).click();
-    await expect(page).toHaveURL(/\/overview/);
+    await expect(page.getByText(/in another store/)).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'see Home' })).toHaveCount(0);
   });
 
-  for (const link of ['Show all', 'see Home']) {
+  for (const link of ['Show all']) {
     test(`phone: the "${link}" edge link is a 44px target`, async ({ page }) => {
       await serveScope(page);
       await stubActiveScope(page, [], {

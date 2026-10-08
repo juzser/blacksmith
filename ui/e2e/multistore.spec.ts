@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import { ARIAL_FONT_CSS, arialInit } from './fontSwitch.js';
 import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -175,6 +176,10 @@ test.describe('a foreign store in the dashboard', () => {
     // An image output on the home task-4, for the lightbox.
     const homeOpts = { stateDir: homeEvents };
     const homeLast = (await readEvents('sess-fixture', homeOpts)).at(-1);
+    // Stamped after the foreign store's last event: a same-ms tie flipped the Sessions group order.
+    const foreignTs: string = (await readEvents('sess-fixture', { stateDir: foreignEvents })).at(-1)
+      .record.ts;
+    while (new Date().toISOString() <= foreignTs) await new Promise((r) => setTimeout(r, 1));
     await appendEvent(
       {
         session_id: 'sess-fixture',
@@ -659,6 +664,472 @@ test.describe('a foreign store in the dashboard', () => {
         await shoot(page, `analytics-two-stores-${name}`);
       });
     }
+  });
+
+  test.describe('Sessions over two stores', () => {
+    // Both stores replay one fixture, so the session id repeats: the foreign
+    // copy sits under its store's label and opens its own roster.
+    const groupOf = (page: Page, project: string) =>
+      page.locator('section.bs-sessions__group').filter({
+        has: page.getByRole('heading', { level: 2, name: project }),
+      });
+    const roster = (page: Page) => page.getByLabel("Selected session's agents", { exact: true });
+
+    test('the page asks every store and opens a foreign roster with its store', async ({
+      page,
+    }) => {
+      const lists: URL[] = [];
+      const rosters: string[] = [];
+      page.on('request', (r) => {
+        const u = new URL(r.url());
+        if (u.pathname === '/api/sessions') lists.push(u);
+        if (/^\/api\/sessions\/[^/]+\/agents$/.test(u.pathname))
+          rosters.push(u.pathname + u.search);
+      });
+      await page.goto(`${origin}/sessions?scope=all`);
+      const row = groupOf(page, 'project-b').locator('.bs-sessionrow').first();
+      await expect(row).toBeVisible();
+      expect(lists.some((u) => u.searchParams.get('stores') === 'all')).toBe(true);
+      await expect(page.getByText(/in another store/i)).toHaveCount(0);
+      await row.click();
+      await expect(page).toHaveURL(new RegExp(`[?&]session=sess-fixture&store=${foreignId}`));
+      await expect(roster(page).locator('.bs-agentblock').first()).toBeVisible();
+      expect(rosters).toContain(`/api/sessions/sess-fixture/agents?store=${foreignId}`);
+    });
+
+    test('a session with no epic sits under its own store: foreign under its label, home under No project', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/sessions?scope=all`);
+      const extra = (group: ReturnType<Page['locator']>) =>
+        group.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' });
+      await expect(extra(groupOf(page, 'project-b'))).toHaveCount(1);
+      await expect(extra(groupOf(page, 'No project'))).toHaveCount(1);
+      await expect(extra(groupOf(page, 'project-a'))).toHaveCount(0);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop-light', VIEWPORTS.desktop],
+      ['phone-light', { width: 375, height: 812 }],
+    ] as const) {
+      test(`screenshot two stores ${name}`, async ({ page }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/sessions?scope=all`);
+        const row = groupOf(page, 'project-b').locator('.bs-sessionrow').first();
+        await expect(row).toBeVisible();
+        // Home's last event is the fixture's newest, so its group leads.
+        await expect(page.locator('.bs-sessions__group-title')).toHaveText([
+          'project-a',
+          'project-b',
+          'No project',
+        ]);
+        await settleForShot(page, row);
+        await shoot(page, `sessions-two-stores-${name}`);
+      });
+    }
+
+    // Gives the foreign `sess-extra` an agent that works for the session
+    // itself, so the session still has no epic. Idempotent: it appends the
+    // `dispatch_decision` only when none is there. Each test that reads the
+    // agent calls it, so none depends on another test's write (a failed test
+    // restarts the worker and `beforeAll` rebuilds the fixtures without it).
+    // The screenshot tests above never call it, so they shoot the no-agent state.
+    const ensureExtraAgent = async () => {
+      const { appendEvent, readEvents } = await import(
+        path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'events.ts')
+      );
+      const opts = { stateDir: path.join(tmp, 'project-b', '.blacksmith', 'state', 'events') };
+      const events = await readEvents('sess-extra', opts);
+      if (!events.some((e: { event_type: string }) => e.event_type === 'dispatch_decision')) {
+        await appendEvent(
+          {
+            session_id: 'sess-extra',
+            actor: 'orchestrator',
+            event_type: 'dispatch_decision',
+            plan_version: 1,
+            causal_parent: events.at(-1)?.event_id ?? null,
+            project: 'project-b',
+            payload: {
+              agent_role: 'researcher',
+              provider: 'claude',
+              model_tier: 'mid',
+              model: 'claude-sonnet-5',
+              reason: 'Look around before any epic.',
+            },
+          },
+          opts,
+        );
+      }
+      await waitFor(
+        async () => (await fetch(`${origin}/api/sessions/sess-extra/agents?store=${foreignId}`)).ok,
+        15000,
+        'the foreign agent',
+      );
+    };
+
+    test('the foreign project link keeps its session with no epic, and its roster opens', async ({
+      page,
+    }) => {
+      await ensureExtraAgent();
+      await page.goto(`${origin}/sessions?scope=all`);
+      const group = groupOf(page, 'project-b');
+      const extra = () => page.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' });
+      await expect(group.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' })).toHaveCount(
+        1,
+      );
+      await group.getByRole('link', { name: 'project-b', exact: true }).click();
+      await expect(page).toHaveURL(/[?&]project=project-b(&|$)/);
+      await expect(page.locator('section.bs-sessions__group')).toHaveCount(0);
+      await expect(extra()).toHaveCount(1);
+      await extra().click();
+      await expect(page).toHaveURL(new RegExp(`[?&]session=sess-extra&store=${foreignId}`));
+      await expect(roster(page).locator('.bs-agentblock')).toHaveCount(1);
+    });
+
+    test('Tab walks from one session row to the next, with no stop on a time inside a row', async ({
+      page,
+    }) => {
+      await ensureExtraAgent();
+      await page.goto(`${origin}/sessions?scope=all`);
+      const rows = groupOf(page, 'project-b').locator('button.bs-sessionrow');
+      await expect(rows).toHaveCount(2);
+      await rows.first().focus();
+      await page.keyboard.press('Tab');
+      expect(
+        await page.evaluate(() => {
+          const el = document.activeElement;
+          return {
+            isRow: el?.matches('button.bs-sessionrow') ?? false,
+            inRow: !!el?.closest('button.bs-sessionrow') && !el?.matches('button.bs-sessionrow'),
+          };
+        }),
+      ).toEqual({ isRow: true, inRow: false });
+      expect(
+        await page.locator('button.bs-sessionrow [tabindex], button.bs-sessionrow a').count(),
+      ).toBe(0);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop', VIEWPORTS.desktop],
+      ['phone', { width: 375, height: 812 }],
+    ] as const) {
+      test(`both group header branches read alike on ${name}: same type, one colour per quiet state, underline on keyboard focus`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        // One live factory session in the home store (project-a): that group is
+        // not quiet, the other two are, so both colour branches run.
+        await page.route('**/api/active-scope*', async (route) => {
+          const real = await (await route.fetch()).json();
+          await route.fulfill({
+            json: {
+              ...real,
+              measured: true,
+              factorySessions: [{ storeId: 'home', sessionId: 'sess-fixture' }],
+            },
+          });
+        });
+        await page.goto(`${origin}/sessions?scope=all`);
+        const titles = page.locator('.bs-sessions__group-title');
+        await expect(titles).toHaveCount(3);
+        const read = await page.evaluate(() => {
+          const probe = (v: string) => {
+            const el = document.createElement('span');
+            el.style.color = `var(${v})`;
+            document.body.append(el);
+            const c = getComputedStyle(el).color;
+            el.remove();
+            return c;
+          };
+          return {
+            text: probe('--bs-text'),
+            subtle: probe('--bs-text-subtle'),
+            groups: [...document.querySelectorAll('section.bs-sessions__group')].map((g) => {
+              const h = g.querySelector('.bs-sessions__group-title') as HTMLElement;
+              const target = (h.querySelector('a') ?? h) as HTMLElement;
+              const cs = getComputedStyle(target);
+              return {
+                name: h.textContent?.trim(),
+                quiet: g.classList.contains('bs-sessions__group--quiet'),
+                size: cs.fontSize,
+                weight: cs.fontWeight,
+                color: cs.color,
+                line: cs.textDecorationLine,
+              };
+            }),
+          };
+        });
+        expect(read.groups.filter((g) => g.quiet).length).toBe(2);
+        expect(read.groups.filter((g) => !g.quiet).length).toBe(1);
+        expect(new Set(read.groups.map((g) => g.size)).size).toBe(1);
+        expect(new Set(read.groups.map((g) => g.weight)).size).toBe(1);
+        for (const g of read.groups) {
+          expect([g.name, g.color]).toEqual([g.name, g.quiet ? read.subtle : read.text]);
+          expect([g.name, g.line]).toEqual([g.name, 'none']);
+        }
+        const link = groupOf(page, 'project-a').getByRole('link', {
+          name: 'project-a',
+          exact: true,
+        });
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        for (let i = 0; i < 40; i++) {
+          if (await link.evaluate((el) => el === document.activeElement)) break;
+          await page.keyboard.press('Tab');
+        }
+        await expect(link).toBeFocused();
+        expect(await link.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe(
+          'underline',
+        );
+      });
+    }
+
+    for (const width of [375, 390]) {
+      for (const font of ['default', 'arial'] as const) {
+        test(`on a ${width}px phone (${font} font) each group header link is a 44px target that touches no other target, and every header is as tall`, async ({
+          page,
+        }) => {
+          await page.setViewportSize({ width, height: 812 });
+          if (font === 'arial') await page.addInitScript(arialInit, ARIAL_FONT_CSS);
+          await page.goto(`${origin}/sessions?scope=all`);
+          await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
+          const found = await page.evaluate(() => {
+            const sel = 'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+            const all = [...document.querySelectorAll<HTMLElement>(sel)].filter(
+              (el) => el.getBoundingClientRect().width > 0,
+            );
+            return [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')].map(
+              (link) => {
+                const b = link.getBoundingClientRect();
+                const hits = all
+                  .filter((o) => o !== link && !link.contains(o) && !o.contains(link))
+                  .map((o) => {
+                    const r = o.getBoundingClientRect();
+                    return {
+                      who: (o.textContent ?? '').trim().slice(0, 20),
+                      w: Math.min(b.right, r.right) - Math.max(b.left, r.left),
+                      h: Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top),
+                    };
+                  })
+                  .filter((x) => x.w > 1 && x.h > 1);
+                return { name: link.textContent?.trim(), w: b.width, h: b.height, hits };
+              },
+            );
+          });
+          for (const f of found) {
+            expect(f.w).toBeGreaterThanOrEqual(44);
+            expect(f.h).toBeGreaterThanOrEqual(44);
+            expect([f.name, f.hits]).toEqual([f.name, []]);
+          }
+
+          const heights = await page
+            .locator('.bs-sessions__group-title')
+            .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+          expect(heights).toHaveLength(3);
+          expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1);
+        });
+      }
+    }
+
+    // A project name far longer than the page is wide: with and without spaces.
+    const LONG_NAMES = {
+      spaced: 'a-very long project name that keeps going well past any screen edge, twice over',
+      unbroken: `project-${'a'.repeat(52)}`,
+    };
+    for (const [width, height] of [
+      [375, 812],
+      [390, 812],
+      [1280, 800],
+    ] as const) {
+      for (const [variant, longName] of Object.entries(LONG_NAMES)) {
+        test(`a long project name (${variant}) wraps to two lines at ${width}px and never leaves the page`, async ({
+          page,
+        }) => {
+          await page.setViewportSize({ width, height });
+          await page.route('**/api/sessions?*', async (route) => {
+            const real = await (await route.fetch()).json();
+            await route.fulfill({
+              json: real.map((r: { projects: string[]; title: string | null }) => ({
+                ...r,
+                projects: r.projects.map((p) => (p === 'project-a' ? longName : p)),
+                title: r.projects.includes('project-a') ? `${longName}-title` : r.title,
+              })),
+            });
+          });
+          await page.goto(`${origin}/sessions?scope=all`);
+          const link = page.locator('.bs-sessions__group-title a').filter({ hasText: longName });
+          await expect(link).toHaveCount(1);
+          const m = await page.evaluate((name) => {
+            const scroll = document.querySelector('.app-scroll') as HTMLElement;
+            const link = [
+              ...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a'),
+            ].find((a) => a.textContent?.trim() === name) as HTMLElement;
+            const label = (link.querySelector('span') ?? link) as HTMLElement;
+            const page = document.querySelector('.app-page') as HTMLElement;
+            const pr = page.getBoundingClientRect();
+            const pad = parseFloat(getComputedStyle(page).paddingRight);
+            const lr = link.getBoundingClientRect();
+            const lh = parseFloat(getComputedStyle(label).lineHeight);
+            // The previous focusable target above this header.
+            const above = [...document.querySelectorAll<HTMLElement>('a, button')]
+              .filter(
+                (o) =>
+                  o !== link &&
+                  !link.contains(o) &&
+                  o.getBoundingClientRect().bottom <= lr.top + 60,
+              )
+              .map((o) => o.getBoundingClientRect().bottom)
+              .filter((b) => b > 0 && b <= lr.top + 60);
+            return {
+              scroll: { sw: scroll.scrollWidth, cw: scroll.clientWidth },
+              root: {
+                sw: document.documentElement.scrollWidth,
+                cw: document.documentElement.clientWidth,
+              },
+              overflow: lr.right - (pr.right - pad),
+              width: lr.width,
+              lines: Math.round(label.getBoundingClientRect().height / lh),
+              title: link.getAttribute('title'),
+              overlap: above.length ? Math.max(...above) - lr.top : 0,
+              top: lr.top,
+            };
+          }, longName);
+          expect(m.scroll.sw).toBeLessThanOrEqual(m.scroll.cw);
+          expect(m.root.sw).toBeLessThanOrEqual(m.root.cw);
+          expect(m.overflow).toBeLessThanOrEqual(0.5);
+          expect(m.lines).toBeLessThanOrEqual(2);
+          expect(m.title).toBe(longName);
+          expect(await link.getAttribute('aria-label')).toBeNull();
+          await expect(page.getByRole('link', { name: longName, exact: true })).toHaveCount(1);
+          if (width < 640) expect(m.overlap).toBeLessThanOrEqual(1);
+
+          // The same name in a session row's meta line, and the row title.
+          const row = await page.evaluate((name) => {
+            const meta = [
+              ...document.querySelectorAll<HTMLElement>('.bs-sessionrow__meta > span:first-child'),
+            ].find((s) => s.textContent?.trim() === name) as HTMLElement;
+            const card = meta.closest('.bs-sessionrow') as HTMLElement;
+            const title = card.querySelector('.bs-sessionrow__title') as HTMLElement;
+            const cr = card.getBoundingClientRect();
+            const inner = cr.right - parseFloat(getComputedStyle(card).paddingRight);
+            const lh = parseFloat(getComputedStyle(meta).lineHeight);
+            const tlh = parseFloat(getComputedStyle(title).lineHeight);
+            return {
+              overflow: meta.getBoundingClientRect().right - inner,
+              lines: Math.round(meta.getBoundingClientRect().height / lh),
+              title: meta.getAttribute('title'),
+              titleOverflow: title.getBoundingClientRect().right - inner,
+              titleScroll: title.scrollWidth - title.clientWidth,
+              titleLines: Math.round(title.getBoundingClientRect().height / tlh),
+            };
+          }, longName);
+          expect(row.overflow).toBeLessThanOrEqual(0.5);
+          expect(row.lines).toBeLessThanOrEqual(2);
+          expect(row.title).toBe(longName);
+          expect(row.titleOverflow).toBeLessThanOrEqual(0.5);
+          expect(row.titleScroll).toBeLessThanOrEqual(0);
+          expect(row.titleLines).toBeLessThanOrEqual(2);
+        });
+      }
+    }
+
+    for (const [name, viewport] of [
+      ['phone', { width: 375, height: 812 }],
+      ['desktop', { width: 1280, height: 800 }],
+    ] as const) {
+      test(`on ${name} a linked group header's text starts flush with the card edge, like No project`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/sessions?scope=all`);
+        await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
+        const lefts = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('section.bs-sessions__group')].map((g) => {
+            const h = g.querySelector('.bs-sessions__group-title') as HTMLElement;
+            const range = document.createRange();
+            range.selectNodeContents(h.querySelector('a') ?? h);
+            return {
+              name: h.textContent?.trim(),
+              text: range.getClientRects()[0]?.left ?? -1,
+              card: (g.querySelector('.bs-sessionrow') as HTMLElement).getBoundingClientRect().left,
+            };
+          }),
+        );
+        expect(lefts).toHaveLength(3);
+        for (const l of lefts) {
+          expect(Math.abs(l.text - l.card)).toBeLessThanOrEqual(0.5);
+        }
+      });
+    }
+
+    test('a selected session names where it is from: title, project, start time', async ({
+      page,
+    }) => {
+      await ensureExtraAgent();
+      const line = (p: Page) => roster(p).locator('.bs-sessions__detail-head');
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'project-b')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(line(page)).toContainText('sess-extra');
+      await expect(line(page)).toContainText('project-b');
+      await expect(line(page).locator('time')).toHaveCount(1);
+      await page.goto(`${origin}/sessions?scope=all&session=sess-extra&store=${foreignId}`);
+      await expect(line(page)).toContainText('project-b');
+      await expect(line(page).locator('time')).toHaveCount(1);
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'No project')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(line(page)).toContainText('No project');
+    });
+
+    test('selecting a session that has no agents yet shows a plain line, not an error', async ({
+      page,
+    }) => {
+      // The home store's `sess-extra` only ever got notes; the foreign one's
+      // agent (ensureExtraAgent) lives in another store under the same id.
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'No project')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(page).toHaveURL(/[?&]session=sess-extra(&|$)/);
+      await expect(roster(page).getByText('No agents yet.', { exact: true })).toBeVisible();
+      await expect(roster(page).locator('.bs-agentblock')).toHaveCount(0);
+      await expect(page.locator('.bs-banner')).toHaveCount(0);
+      await expect(page.getByText('0 agents')).toHaveCount(0);
+    });
+
+    test('a selected session that drops out of the list keeps its roster, without a head line', async ({
+      page,
+    }) => {
+      await ensureExtraAgent();
+      let drop = false;
+      await page.route('**/api/sessions?*', async (route) => {
+        const real = await (await route.fetch()).json();
+        await route.fulfill({
+          json: drop
+            ? real.filter((r: { sessionId: string }) => r.sessionId !== 'sess-extra')
+            : real,
+        });
+      });
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'project-b')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(roster(page).locator('.bs-sessions__detail-head')).toHaveCount(1);
+      drop = true;
+      await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(
+        groupOf(page, 'project-b').locator('.bs-sessionrow').filter({ hasText: 'sess-extra' }),
+      ).toHaveCount(0);
+      await expect(roster(page)).toBeVisible();
+      await expect(roster(page).locator('.bs-sessions__detail-head')).toHaveCount(0);
+    });
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which

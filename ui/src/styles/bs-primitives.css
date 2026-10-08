@@ -1256,6 +1256,13 @@ a:hover {
   font-size: var(--bs-text-sm);
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
+  /* Same rule as the project name below: two lines, then an ellipsis. */
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 .bs-sessionrow__meta {
   display: flex;
@@ -1264,6 +1271,19 @@ a:hover {
   gap: var(--bs-space-2);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
+}
+/* A long project name wraps to two lines, then ellipsizes (the Roadmap lane
+   rule), and breaks an unspaced name anywhere. It may shrink inside the
+   wrapping meta line instead of running past the card's padding. */
+.bs-sessionrow__project {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
 }
 .bs-sessionrow__laststep {
   overflow: hidden;
@@ -1382,35 +1402,92 @@ a:hover {
    own space-2 padding indented the text off the card's left edge below.
    Zeroing padding and letting height follow the text's own line-height
    (instead of the button's fixed 28px box) makes both branches render
-   identical type, flush with the card edge. */
+   identical type. .bs-btn also draws a 1px transparent border, which still
+   pushed the text 1px right and 1px down of the "No project" text, so the
+   border goes too: the text then starts exactly on the card edge.
+   A long project name wraps to two lines, then ellipsizes (the Roadmap lane
+   rule), and breaks an unspaced name anywhere, because .bs-btn is nowrap and
+   would otherwise run off the page. The link may shrink inside the header
+   (min-width: 0, max-width: 100%); the full name is in its title. */
 .bs-sessions__group-title .bs-btn--sm {
   height: auto;
   padding: 0;
+  border: 0;
   font-size: inherit;
   font-weight: inherit;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
-/* Fix round 2 item 2: the global ≤640px .bs-btn--sm rule (line ~281) floors
-   min-height at --bs-touch, which inflates only the linked variant's line
-   box -- the plain-text "No project" branch has no .bs-btn--sm and is
-   unaffected, so the two branches' headers sat at different heights above
-   their own list. Same pattern as .bs-timeline-row__title--link above:
-   cancel the inflated min-height and grow the hit box via padding-block
-   instead, offset by an equal negative margin-block so the row's own
-   layout height stays driven by the text line. padding-inline stays 0
-   (set above) so the link text stays flush with the card edge. */
+.bs-sessions__group-label {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+/* Dense-UI link (ds-spec §1.9): no underline at rest, one on hover (from
+   .bs-btn--link) and on keyboard focus. The label clips at its last line
+   (overflow: hidden above), and .bs-btn--link's 4px underline offset would
+   draw the underline below that line box, so here the font's own offset
+   keeps it inside. */
+.bs-sessions__group-title .bs-btn--link {
+  text-underline-offset: auto;
+}
+.bs-sessions__group-title .bs-btn--link:focus-visible {
+  text-decoration: underline;
+}
+/* Fix round 2 item 2, fix round 3, fix round 6: the global <=640px
+   .bs-btn--sm rule floors min-height at --bs-touch, which inflates only the
+   linked variant's line box (the plain-text "No project" branch is
+   unaffected). Cancel it and grow the hit box to --bs-touch ABOVE the text
+   only, nothing below, so it never reaches into the first row button under
+   it. The upward reach is tied to the page gap (--bs-m-gap, the flex gap
+   .app-page puts between groups): a negative margin-top of exactly that gap
+   lands the box's top on the previous target's bottom and no further. The h2
+   takes the remaining height (--bs-touch minus the gap) with its text at the
+   bottom, so a linked header and the plain-text one are the same height and
+   each keeps its own gap to its list. padding-inline stays 0 so the text
+   stays flush with the card edge. The box is a minimum height, so a
+   two-line name is covered whole. */
 @media (max-width: 640px) {
+  .bs-sessions__group-title {
+    display: flex;
+    align-items: flex-end;
+    min-height: calc(var(--bs-touch) - var(--bs-m-gap));
+  }
   .bs-sessions__group-title .bs-btn--sm {
-    min-height: 0;
+    box-sizing: border-box;
+    height: auto;
+    min-height: var(--bs-touch);
     display: inline-flex;
-    align-items: center;
-    padding-block: calc((var(--bs-touch) - 1lh) / 2);
-    margin-block: calc((var(--bs-touch) - 1lh) / -2);
+    align-items: flex-end;
+    line-height: inherit;
+    padding: 0;
+    margin-top: calc(var(--bs-m-gap) * -1);
   }
 }
 .bs-sessions__detail {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-3);
+}
+/* Names the selected run above its agents: title, project, start time. */
+.bs-sessions__detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bs-space-1) var(--bs-space-3);
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-sessions__detail-title {
+  color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
 }
 
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's

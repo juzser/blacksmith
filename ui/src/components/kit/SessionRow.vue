@@ -72,10 +72,10 @@ const lastStep = computed(() =>
     :aria-current="selected ? 'true' : undefined"
     @click="onClick"
   >
-    <div class="bs-sessionrow__title">{{ title }}</div>
+    <div class="bs-sessionrow__title" :title="title">{{ title }}</div>
     <div class="bs-sessionrow__meta">
-      <span>{{ projectsLabel }}</span>
-      <RelativeTime :iso="session.startedAt" :now="now" />
+      <span class="bs-sessionrow__project" :title="projectsLabel">{{ projectsLabel }}</span>
+      <RelativeTime :iso="session.startedAt" :now="now" plain />
       <span v-if="duration">{{ duration }}</span>
       <span v-if="agentCountLabel">{{ agentCountLabel }}</span>
       <span class="bs-sessionrow__laststep">{{ lastStep }}</span>

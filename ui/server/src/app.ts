@@ -51,6 +51,7 @@ import {
   projectedLineage,
   pulse,
   roadmapPage,
+  runningSessions,
   sessionAgents,
   taskDetail,
   taskRuns,
@@ -89,7 +90,7 @@ import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
 import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
-import type { StoreEntry } from './stores.js';
+import type { StoreEntry, StoreRef } from './stores.js';
 import { createStoreRegistry } from './stores.js';
 
 /**
@@ -1137,6 +1138,15 @@ export function createApp(opts: AppOpts): AppHandle {
     });
   });
 
+  // A foreign session that has not reached an epic yet would read as a home
+  // one ("No project"); it belongs to its store's project instead: listed under
+  // the store's label, kept by a filter on that label, and its roster opens
+  // there. A home one stays outside every project. Both session routes below
+  // ask this one rule.
+  const storeProjectOf = (store: StoreRef, session: { projects: string[] }) =>
+    store.id !== 'home' && session.projects.length === 0 ? store.label : undefined;
+  const NO_EPIC = { projects: [] };
+
   // The topbar session picker's feed -- the same thin-projection shape as
   // /api/projects below, and for the same reason. The shell asks for this on
   // every scopable page, and what it wants is a list of ids; routing it
@@ -1144,6 +1154,51 @@ export function createApp(opts: AppOpts): AppHandle {
   // review queue alongside, on every route change, to be thrown away.
   app.get('/api/sessions', (c) => {
     const project = c.req.query('project');
+    if (allStoresScope(c, (m) => new BadRequestError('scope.bad-request', m))) {
+      // Each store's own list (queries.ts runningSessions: newest event first,
+      // then session id), tagged, then merged on the same keys with the store
+      // id breaking a tie; the sort is stable, so one store keeps its own order.
+      const sessions = qualifiedSessions(c);
+      const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
+      const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
+      const list = (db: SmithDb, p: string | undefined) =>
+        overview(
+          db,
+          {
+            ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
+            ...(p ? { project: p } : {}),
+          },
+          clock,
+        ).runningSessions;
+      // The filtered query cannot see a session with no epic, so a filter on
+      // a foreign store's label reads that store once more, unfiltered, for
+      // those sessions alone.
+      const own = project
+        ? fanOut(
+            entries.filter((e) => storeProjectOf(e, NO_EPIC) === project),
+            undefined,
+            list,
+          ).map(({ store, data }) => ({
+            store,
+            data: data.filter((r) => storeProjectOf(store, r) === project),
+          }))
+        : [];
+      return c.json(
+        [...fanOut(entries, project, list), ...own]
+          .flatMap(({ store, data }) =>
+            data.map((r) => {
+              const label = storeProjectOf(store, r);
+              return { ...r, ...(label ? { projects: [label] } : {}), store };
+            }),
+          )
+          .sort(
+            (a, b) =>
+              b.lastEventAt.localeCompare(a.lastEventAt) ||
+              a.sessionId.localeCompare(b.sessionId) ||
+              a.store.id.localeCompare(b.store.id),
+          ),
+      );
+    }
     const result = overview(
       handle.db,
       {
@@ -1157,22 +1212,34 @@ export function createApp(opts: AppOpts): AppHandle {
 
   // DS8 PR1 plan F -- the session detail drawer's agent roster. A thin read
   // over sessionAgents(): grouped by role in first-dispatch order already,
-  // so the route is scoping plus a 404 for a session that has no agents
-  // (unknown, or not this project's), nothing more.
+  // so the route is scoping plus a 404 for a session this store does not know
+  // (or that is not this project's). A session the store does know but that
+  // has dispatched no agent yet is a normal live state: 200 with empty roles.
   app.get('/api/sessions/:sessionId/agents', (c) => {
     const sessionId = c.req.param('sessionId');
     const project = c.req.query('project');
+    // `?store=<id>` reads that store (a session id repeats between stores).
+    const only = storeOf(c);
+    const { db } = only.handle;
     if (project) {
-      const session = overview(handle.db, { sessionId, project }, clock).runningSessions[0];
+      const session =
+        overview(db, { sessionId, project }, clock).runningSessions[0] ??
+        (storeProjectOf(only, NO_EPIC) === project
+          ? overview(db, { sessionId }, clock).runningSessions.find(
+              (r) => storeProjectOf(only, r) === project,
+            )
+          : undefined);
       if (!session) {
         throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
       }
     }
-    const result = sessionAgents(handle.db, sessionId, clock);
-    if (result.roles.length === 0) {
+    const result = sessionAgents(db, sessionId, clock);
+    // Its row in the store's session list, the same one the page lists it
+    // from (running or ended), tells "no agents yet" from "no such session".
+    if (result.roles.length === 0 && runningSessions(db, { sessionId }, clock).length === 0) {
       throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
     }
-    return c.json(result);
+    return c.json(only.home ? result : relabelProject(result, only.label));
   });
 
   // Live Claude Code CLI sessions (name, working/waiting/idle, doing now,

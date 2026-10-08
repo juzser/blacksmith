@@ -28,6 +28,16 @@ describe('selectedSessionFromQuery', () => {
   it('returns null when the query repeats the key (vue-router hands an array)', () => {
     expect(selectedSessionFromQuery({ session: ['sess-a', 'sess-b'] }, sessions)).toBeNull();
   });
+
+  it('reads store=home as the served store, with or without a store tag on the row', () => {
+    const home = { id: 'home', label: 'project-a' };
+    expect(selectedSessionFromQuery({ session: 'sess-a', store: 'home' }, sessions)).toBe('sess-a');
+    expect(
+      selectedSessionFromQuery({ session: 'sess-a', store: 'home' }, [
+        { sessionId: 'sess-a', store: home },
+      ]),
+    ).toBe('home:sess-a');
+  });
 });
 
 describe('isStaleResponse', () => {
