@@ -94,6 +94,8 @@ type World = {
   below: 'engine' | 'line' | 'empty'
   /** what a Bash tool call prints */
   toolOut: string
+  /** runs when the band beneath pr-mod is drawn, as the cache changes */
+  onBand?: () => void
 }
 
 function world(on: On): World {
@@ -150,6 +152,7 @@ function world(on: On): World {
   on('tool.call', () => ({ result: { stdout: w.toolOut, stderr: '', interrupted: false }, text: w.toolOut }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
+    w.onBand?.()
     if (w.below === 'line') return h(Box, { key: 'other' }, h(Text, null, 'other plugin band')) as RenderElement
     if (w.below === 'empty') return h(Box, null) as RenderElement
     return ENGINE
@@ -289,10 +292,47 @@ describe('merge', () => {
     w.list = [raw(2)]
     await ui.press({ key: 'merge:1' })
     await clock.settle()
-    expect(merges(w)).toEqual([{ argv: ['gh', 'pr', 'merge', '1', '--squash'], cwd: CWD, timeoutMs: 120_000 }])
+    expect(merges(w)).toEqual([{ argv: ['gh', 'pr', 'merge', '1', '--squash', '--match-head-commit', 'oid1'], cwd: CWD, timeoutMs: 120_000 }])
     // mine left the list, but because this mod merged it: no second toast
     expect(w.toasts).toEqual(['Merged #1 (squash)'])
     expect(await rowKeys(ui)).toEqual(['header', 'pr:2'])
+  })
+
+  // The button is drawn from the cache, so a press reaches a changed PR only while the old drawing is
+  // still up. A new head commit leaves the button drawn, so the press can land after the cache changed:
+  // it is started as the band beneath is redrawn for the new cache.
+  test('a new head commit between the arming and the second press: no gh pr merge, disarmed, one plain toast', async ($, on) => {
+    const w = world(on)
+    w.list = [raw(5), raw(6)]
+    const clock = await up($, on, w)
+    await prmod($)
+    const ui = await mountPane($)
+    await mountBand($)
+    await ui.press({ key: 'merge:5' })
+    w.list = [raw(5, { headRefOid: 'oid5b' }), raw(6)]
+    let racing: Promise<unknown> = Promise.resolve()
+    w.onBand = () => {
+      w.onBand = undefined
+      racing = ui.press({ key: 'merge:5' })
+    }
+    await ui.press({ key: 'refresh' })
+    await racing
+    await clock.settle()
+    expect(merges(w)).toEqual([])
+    expect(w.toasts).toEqual(['#5 changed since you armed it; press Merge again'])
+    expect(await label(ui, 'merge:5')).toBe('Merge')
+  })
+
+  test('the merge pins the head commit it armed, squash first', async ($, on) => {
+    const w = world(on)
+    w.list = [raw(5)]
+    const clock = await up($, on, w)
+    await prmod($)
+    const ui = await mountPane($)
+    await ui.press({ key: 'merge:5' })
+    await ui.press({ key: 'merge:5' })
+    await clock.settle()
+    expect(merges(w).map(c => c.argv)).toEqual([['gh', 'pr', 'merge', '5', '--squash', '--match-head-commit', 'oid5']])
   })
 
   test('an armed Merge disarms after 8 s without merging', async ($, on) => {
@@ -327,7 +367,7 @@ describe('merge', () => {
     expect(await label(ui, 'merge:1')).toBe('Confirm merge #1 (merge)')
     await ui.press({ key: 'merge:1' })
     await clock.settle()
-    expect(merges(w)[0]?.argv).toEqual(['gh', 'pr', 'merge', '1', '--merge'])
+    expect(merges(w)[0]?.argv).toEqual(['gh', 'pr', 'merge', '1', '--merge', '--match-head-commit', 'oid1'])
     expect(w.toasts).toEqual(['Merged #1 (merge)'])
   })
 
@@ -341,7 +381,7 @@ describe('merge', () => {
     await ui.press({ key: 'merge:1' })
     await ui.press({ key: 'merge:1' })
     await clock.settle()
-    expect(merges(w)[0]?.argv).toEqual(['gh', 'pr', 'merge', '1', '--rebase'])
+    expect(merges(w)[0]?.argv).toEqual(['gh', 'pr', 'merge', '1', '--rebase', '--match-head-commit', 'oid1'])
   })
 
   test('no method allowed: no Merge button, and the row says why', async ($, on) => {
@@ -412,8 +452,8 @@ describe('fix prompts', () => {
     expect(sent?.origin).toMatchObject({ kind: 'plugin', name: 'pr-mod' })
     expect((sent?.origin as { asUser?: unknown } | undefined)?.asUser).toBeUndefined()
     expect(sent?.text).toContain('#4')
-    expect(sent?.text).toContain('Head branch: feat/b4')
-    expect(sent?.text).toContain('Base branch: main')
+    expect(sent?.text).toContain('Head branch: "feat/b4"')
+    expect(sent?.text).toContain('Base branch: "main"')
     expect(sent?.text.trimEnd().endsWith('Do not merge the PR.')).toBe(true)
     expect(w.toasts).toEqual(['Queued: fix conflict for #4'])
     expect(await label(ui, 'fixc:4')).toBe('fix sent')

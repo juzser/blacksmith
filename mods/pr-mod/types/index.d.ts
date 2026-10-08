@@ -44,7 +44,7 @@ export type PrCache = { cwd: string; prs: Pr[]; fetchedAt: number | null; error:
 export type RepoInfo = { cwd: string; nameWithOwner: string; method: MergeMethod | null }
 
 /** A Merge button pressed once: the second press within `until` merges. */
-export type Armed = { number: number; until: number }
+export type Armed = { number: number; until: number; oid: string }
 
 /** A fix prompt sent for a PR: held until its head moves or 15 minutes pass. */
 export type FixHold = { at: number; oid: string; kind: 'conflict' | 'ci' }

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderNode, TextProps, Timer, UiPressArgument } from 'claude-code'
 
-import type { FixHold, Pr, PrCache, RepoInfo } from '../types'
+import type { Armed, FixHold, Pr, PrCache, RepoInfo } from '../types'
 import {
   FIX_HOLD_MS,
   PR_LIST_ARGV,
@@ -11,6 +11,7 @@ import {
   ago,
   bandCounts,
   canMerge,
+  stillMergeable,
   ciPart,
   firstLine,
   fixCiPrompt,
@@ -47,7 +48,7 @@ const EMPTY_CACHE: PrCache = { cwd: '', prs: [], fetchedAt: null, error: null }
 const cacheAtom = atom({ plugin: 'pr-mod', key: 'cache' } as const, EMPTY_CACHE)
 const repoAtom = atom({ plugin: 'pr-mod', key: 'repo' } as const, null as RepoInfo | null)
 const mineAtom = atom({ plugin: 'pr-mod', key: 'mine' } as const, [] as string[])
-const armedAtom = atom({ plugin: 'pr-mod', key: 'armed' } as const, null as { number: number; until: number } | null)
+const armedAtom = atom({ plugin: 'pr-mod', key: 'armed' } as const, null as Armed | null)
 const fixAtom = atom({ plugin: 'pr-mod', key: 'fixSent' } as const, {} as Record<string, FixHold>)
 const busyAtom = atom({ plugin: 'pr-mod', key: 'busy' } as const, {} as Record<string, string>)
 /** the `/config` theme, which picks the palette (palette.ts paletteOf); null until read, so the theme keys draw */
@@ -264,18 +265,25 @@ async function pressMerge($: EngineInterface, st: St, n: number): Promise<void> 
   if (!repo || !method) return
   const now = await $.clock.now()
   const armed = await read($, armedAtom)
+  const pr = await prOf($, n)
   if (!armed || armed.number !== n || now >= armed.until) {
+    if (!pr || !canMerge(pr)) return
     const until = now + ARM_MS
-    await update($, armedAtom, () => ({ number: n, until }))
+    const oid = pr.headRefOid
+    await update($, armedAtom, () => ({ number: n, until, oid }))
     $.clock.after(ARM_MS, () => {
       void update($, armedAtom, a => (a && a.number === n && a.until === until ? null : a))
     })
     return
   }
   await update($, armedAtom, () => null)
+  if (!stillMergeable(pr, armed.oid)) {
+    $.ui.toast(`#${n} changed since you armed it; press Merge again`)
+    return
+  }
   await setBusy($, n, 'merge')
   try {
-    const out = await $.process.run(['gh', 'pr', 'merge', String(n), `--${method}`], { cwd: repo.cwd, timeoutMs: ACTION_TIMEOUT_MS })
+    const out = await $.process.run(['gh', 'pr', 'merge', String(n), `--${method}`, '--match-head-commit', armed.oid], { cwd: repo.cwd, timeoutMs: ACTION_TIMEOUT_MS })
     if (out.exitCode === 0) {
       st.mergedHere.push(n)
       $.ui.toast(`Merged #${n} (${method})`)

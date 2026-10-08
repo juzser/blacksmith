@@ -155,6 +155,11 @@ export function canMerge(pr: Pr): boolean {
   return mergeBlock(pr) === null
 }
 
+/** Whether the PR armed at `oid` may still be merged: present, mergeable, and still at that head commit. */
+export function stillMergeable(pr: Pr | undefined, oid: string): pr is Pr {
+  return pr !== undefined && canMerge(pr) && pr.headRefOid === oid
+}
+
 export function ciPart(pr: Pr): Part {
   const r = rollup(pr.checks)
   if (r.kind === 'green') return { text: '✔ green', tone: 'success' }
@@ -208,12 +213,18 @@ function quoted(text: string): string {
   return JSON.stringify(text.replace(/\s+/g, ' ').trim())
 }
 
+/** A URL from GitHub, only when it is one plain https token: anything else is left out of a prompt. */
+function safeUrl(url: string): string | null {
+  return /^https:\/\/\S+$/.test(url) && !/["'`]/.test(url) ? url : null
+}
+
 function prHeader(lead: string, pr: Pr): string[] {
+  const url = safeUrl(pr.url)
   return [
     `${lead} pull request #${pr.number} ${quoted(pr.title)}.`,
-    `URL: ${pr.url}`,
-    `Head branch: ${pr.headRefName}`,
-    `Base branch: ${pr.baseRefName}`,
+    ...(url ? [`URL: ${url}`] : []),
+    `Head branch: ${quoted(pr.headRefName)}`,
+    `Base branch: ${quoted(pr.baseRefName)}`,
   ]
 }
 
@@ -222,8 +233,8 @@ export function fixConflictPrompt(pr: Pr): string {
     ...prHeader('Fix the merge conflict on', pr),
     '',
     'Steps:',
-    `1. If ${pr.headRefName} is not checked out here, work in a separate git worktree rather than switching this checkout's branch.`,
-    `2. Fetch, then merge origin/${pr.baseRefName} into ${pr.headRefName}. Do not rebase and do not force-push.`,
+    `1. If the head branch is not checked out here, work in a separate git worktree rather than switching this checkout's branch.`,
+    `2. Fetch, then merge ${quoted(`origin/${pr.baseRefName}`)} into the head branch. Do not rebase and do not force-push.`,
     "3. Resolve each conflict keeping both sides' intent.",
     "4. Run the project's checks and commit.",
     '5. Push.',
@@ -239,8 +250,9 @@ function runId(url: string): string | null {
 
 export function fixCiPrompt(pr: Pr): string {
   const failing = rollup(pr.checks).failing.map(c => {
-    const id = runId(c.url)
-    return `- ${quoted(c.name)}${id ? ` (run ${id})` : ''}: ${c.url}`
+    const url = safeUrl(c.url)
+    const id = url ? runId(url) : null
+    return `- ${quoted(c.name)}${id ? ` (run ${id})` : ''}${url ? `: ${url}` : ''}`
   })
   return [
     ...prHeader('Fix the failing CI on', pr),
@@ -251,7 +263,7 @@ export function fixCiPrompt(pr: Pr): string {
     'Steps:',
     `1. Read the failure with \`gh pr checks ${pr.number}\` and \`gh run view <run-id> --log-failed\`.`,
     '2. Reproduce it locally.',
-    `3. Fix it in ${pr.headRefName}. If that branch is not checked out here, work in a separate git worktree rather than switching this checkout's branch.`,
+    `3. Fix it in the head branch. If that branch is not checked out here, work in a separate git worktree rather than switching this checkout's branch.`,
     "4. Run the project's checks, then push.",
     '5. Report the root cause.',
     '',
