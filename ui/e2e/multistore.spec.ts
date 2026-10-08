@@ -996,6 +996,35 @@ test.describe('a foreign store in the dashboard', () => {
       }
     }
 
+    for (const [name, viewport] of [
+      ['phone', { width: 375, height: 812 }],
+      ['desktop', { width: 1280, height: 800 }],
+    ] as const) {
+      test(`on ${name} a linked group header's text starts flush with the card edge, like No project`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/sessions?scope=all`);
+        await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
+        const lefts = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('section.bs-sessions__group')].map((g) => {
+            const h = g.querySelector('.bs-sessions__group-title') as HTMLElement;
+            const range = document.createRange();
+            range.selectNodeContents(h.querySelector('a') ?? h);
+            return {
+              name: h.textContent?.trim(),
+              text: range.getClientRects()[0]?.left ?? -1,
+              card: (g.querySelector('.bs-sessionrow') as HTMLElement).getBoundingClientRect().left,
+            };
+          }),
+        );
+        expect(lefts).toHaveLength(3);
+        for (const l of lefts) {
+          expect(Math.abs(l.text - l.card)).toBeLessThanOrEqual(0.5);
+        }
+      });
+    }
+
     test('a selected session names where it is from: title, project, start time', async ({
       page,
     }) => {

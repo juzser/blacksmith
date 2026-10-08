@@ -1382,7 +1382,9 @@ a:hover {
    own space-2 padding indented the text off the card's left edge below.
    Zeroing padding and letting height follow the text's own line-height
    (instead of the button's fixed 28px box) makes both branches render
-   identical type, flush with the card edge.
+   identical type. .bs-btn also draws a 1px transparent border, which still
+   pushed the text 1px right and 1px down of the "No project" text, so the
+   border goes too: the text then starts exactly on the card edge.
    Fix round 8: .bs-btn is nowrap, so a long project name ran off the page.
    The link may shrink inside the header (min-width: 0, max-width: 100%) and
    its label wraps to two lines, then ellipsizes (the Roadmap lane rule),
@@ -1390,6 +1392,7 @@ a:hover {
 .bs-sessions__group-title .bs-btn--sm {
   height: auto;
   padding: 0;
+  border: 0;
   font-size: inherit;
   font-weight: inherit;
   min-width: 0;
