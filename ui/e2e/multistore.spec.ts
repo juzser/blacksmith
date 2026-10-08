@@ -931,6 +931,15 @@ test.describe('a foreign store in the dashboard', () => {
         .click();
       await expect(line(page)).toContainText('No project');
     });
+
+    test('a selected session missing from the filtered list shows its roster without a head line', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/sessions?project=project-a&session=sess-extra&store=${foreignId}`);
+      await expect(roster(page)).toBeVisible();
+      await expect(groupOf(page, 'project-b')).toHaveCount(0);
+      await expect(roster(page).locator('.bs-sessions__detail-head')).toHaveCount(0);
+    });
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which

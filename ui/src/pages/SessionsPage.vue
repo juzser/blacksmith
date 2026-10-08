@@ -18,7 +18,7 @@
 // selectedSessionFromQuery() only ever selects an id this page's own history
 // list already knows about.
 import { Play, RefreshCw } from '@lucide/vue';
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import AgentBlock from '../components/kit/AgentBlock.vue';
@@ -119,8 +119,9 @@ const groups = () =>
 const flat = () => activeFirst(visible(), live());
 // Unmeasured, nothing can be called quiet: muting every row would be a claim.
 const isQuiet = (s: RunningSession) => measured() && !isSessionActive(live(), s);
-const selectedRow = () =>
-  sessions.value.find((s) => storeKey(s, s.sessionId) === selectedKey.value) ?? null;
+const selected = computed(
+  () => sessions.value.find((s) => storeKey(s, s.sessionId) === selectedKey.value) ?? null,
+);
 
 // Gates the poll: a selected run with nothing left working (live and inside
 // the stale window) has nothing left to learn by asking again every 5s.
@@ -148,7 +149,7 @@ async function loadSessions() {
 // the run now selected.
 async function loadAgents() {
   const key = selectedKey.value;
-  const sel = selectedRow();
+  const sel = selected.value;
   if (!key || !sel) return;
   try {
     const result = await fetchSessionAgents(sel.sessionId, project.value, foreignStoreId(sel));
@@ -246,7 +247,7 @@ onMounted(async () => {
     // Deep link to a quiet session while the scope is Active: its row is
     // hidden there. Least surprising rule: widen the scope with router.replace
     // (no extra history entry) so the URL tells the truth about what is shown.
-    const hit = selectedRow();
+    const hit = selected.value;
     if (hit && isQuiet(hit) && scope.value === 'active') {
       await router.replace({ query: scopeQuery(route.query, 'all') as typeof route.query });
     }
@@ -278,7 +279,7 @@ watch(
 // Narrowing to Active hides a quiet selection's row, so the selection (and
 // its `?session=`) goes with it rather than leaving a detail with no row.
 watch(scope, (next) => {
-  const sel = selectedRow();
+  const sel = selected.value;
   if (next === 'active' && sel && isQuiet(sel)) {
     selectedKey.value = null;
     agents.value = null;
@@ -405,10 +406,11 @@ function refresh() {
       </Banner>
 
       <section v-if="selectedKey" class="bs-sessions__detail" aria-label="Selected session's agents">
-        <p v-if="selectedRow()" class="bs-sessions__detail-head">
-          <span class="bs-sessions__detail-title">{{ selectedRow()?.title ?? selectedRow()?.sessionId }}</span>
-          <span>{{ selectedRow()?.projects.length ? selectedRow()?.projects.join(', ') : 'No project' }}</span>
-          <span>started <RelativeTime :iso="selectedRow()?.startedAt ?? ''" /></span>
+        <!-- Absent when the list on screen (a project filter fetches a filtered one) lacks the selected session. -->
+        <p v-if="selected" class="bs-sessions__detail-head">
+          <span class="bs-sessions__detail-title">{{ selected.title ?? selected.sessionId }}</span>
+          <span>{{ selected.projects.length ? selected.projects.join(', ') : 'No project' }}</span>
+          <span>started <RelativeTime :iso="selected.startedAt" /></span>
         </p>
         <Skeleton v-if="agentsLoadedFor !== selectedKey" height="120" />
         <template v-else-if="agents">
