@@ -56,6 +56,29 @@ a:hover {
 .bs-tooltip-trigger {
   display: inline-flex;
 }
+/* The relative time is a tap target (its tooltip trigger has its own tab
+   stop). On phone its hit box reaches --bs-touch both ways without taking any
+   layout space: an absolutely positioned ::after, centred on the bare text,
+   so the text, its row and its neighbours stay where they were. A tap on the
+   ::after lands on the trigger. The width is max(text, --bs-touch), so even
+   the shortest text ("for 1 h", about 31px in Arial) reaches the floor;
+   padding would have to be sized for the narrowest text and would cover a
+   neighbour for the widest. position: relative also paints the box above the
+   later siblings that a wrapped flex row can lay under it. */
+@media (max-width: 640px) {
+  .bs-reltime {
+    position: relative;
+  }
+  .bs-reltime::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--bs-touch));
+    height: var(--bs-touch);
+    transform: translate(-50%, -50%);
+  }
+}
 .bs-tooltip-bubble {
   position: fixed;
   z-index: 60;
@@ -513,6 +536,12 @@ a:hover {
     flex: none;
     white-space: nowrap;
   }
+  /* No taller hit box here: the row is 65px and already holds the title
+     button's 44px box above this line, so a second 44px box would sit on
+     the title's own text. The width still reaches the floor. */
+  .bs-timeline-row__ts--meta::after {
+    height: 100%;
+  }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
    on phone must match the mock's touch-sized row, not the desktop row. */
@@ -684,6 +713,20 @@ a:hover {
 }
 .bs-timeline-row--highlight {
   background: var(--bs-accent-subtle);
+}
+/* The Session link is a tap target: on phone its box reaches --bs-touch
+   without moving the detail list (padding cancelled by an equal negative
+   margin; the min-width only matters for a title shorter than the floor, and
+   nothing sits to its right). The extra height goes above the text, over the
+   plain-text Task/Project lines; below it is the next row's title button,
+   whose own box reaches up into this row. */
+@media (max-width: 640px) {
+  .bs-timeline-row__detail a {
+    display: inline-block;
+    min-width: var(--bs-touch);
+    padding-top: calc(var(--bs-touch) - 1lh);
+    margin-top: calc(1lh - var(--bs-touch));
+  }
 }
 /* rail variant (DS6 PR3 r3, ds-spec.md §1.5/§2.2): the rail dot replaces the
    3px stripe. Geometry from the shared --tl-* tokens (bs-tokens.css) so the
@@ -2862,6 +2905,15 @@ summary.bs-inbox__group-head {
   .bs-live-card .bs-card__body {
     padding: var(--bs-space-3);
   }
+  /* The status row's time keeps its text height: the head link's grown hit
+     box ends right above it and the title's starts right below, so a 44px
+     box here would sit on both. Its width still reaches the floor. A follow-up
+     fix row's time (.bs-kanban-group__row-meta) is the same: the row's copy
+     button sits right above it and the next row's open button right below. */
+  .bs-live-card__status .bs-reltime::after,
+  .bs-kanban-group__row-meta .bs-reltime::after {
+    height: 100%;
+  }
   .bs-live-card__head {
     flex-direction: column;
     /* Wider than the usual 4px: the status row's time is a focusable
@@ -3036,6 +3088,12 @@ summary.bs-inbox__group-head {
 .bs-kanban-group__row-meta .bs-tooltip-trigger {
   position: relative;
   z-index: 1;
+}
+/* A fix row's copy button ends about 8px into the time's text line below it.
+   Both sit at z-index 1 and the time comes later, so the time would take the
+   taps on the copy button's bottom edge; the copy button paints above it. */
+.bs-kanban-group__row-title .bs-kanban-card__title-copy {
+  z-index: 2;
 }
 .bs-kanban-card__row {
   display: flex;

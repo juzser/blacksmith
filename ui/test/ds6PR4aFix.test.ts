@@ -101,3 +101,11 @@ describe('item 7 — because-of wiring (shared helper, not a no-op)', () => {
     expect(HOME).toMatch(/'bs-timeline-row--highlight':\s*highlighted === entry\.eventId/);
   });
 });
+
+describe('highlighted timeline row keeps its background', () => {
+  it('paints the row Activity and Home mark with .bs-timeline-row--highlight', () => {
+    expect(ACTIVITY).toContain('bs-timeline-row--highlight');
+    expect(HOME).toContain('bs-timeline-row--highlight');
+    expect(rule('.bs-timeline-row--highlight')).toMatch(/background:\s*var\(--bs-accent-subtle\)/);
+  });
+});
