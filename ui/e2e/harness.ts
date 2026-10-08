@@ -12,7 +12,7 @@
 // stopped.
 import { test as base } from '@playwright/test';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
-import { ARIAL_FONT_CSS, arialSwitchOn } from './fontSwitch.js';
+import { ARIAL_FONT_CSS, arialInit, arialSwitchOn } from './fontSwitch.js';
 
 // `undefined`, not the `void` Playwright's own docs use for a value-less
 // fixture: biome's noConfusingVoidType rejects void in that position, and
@@ -26,23 +26,7 @@ export const test = base.extend<{ pinnedClock: undefined; arialFont: undefined }
   arialFont: [
     async ({ context }, use) => {
       if (arialSwitchOn()) {
-        await context.addInitScript((css) => {
-          const style = document.createElement('style');
-          style.textContent = css;
-          // An init script can run before <html> exists; wait for it, then
-          // add the style before anything paints.
-          const attach = () => {
-            if (!document.documentElement) return false;
-            document.documentElement.appendChild(style);
-            return true;
-          };
-          if (!attach()) {
-            const observer = new MutationObserver(() => {
-              if (attach()) observer.disconnect();
-            });
-            observer.observe(document, { childList: true });
-          }
-        }, ARIAL_FONT_CSS);
+        await context.addInitScript(arialInit, ARIAL_FONT_CSS);
       }
       await use(undefined);
     },

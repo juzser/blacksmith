@@ -9,6 +9,21 @@
 /** The one CSS rule the switch injects. `!important` so it beats the token. */
 export const ARIAL_FONT_CSS = ':root { --bs-font-sans: Arial, sans-serif !important; }';
 
+/** Init script body: adds the Arial rule as a <style>, waiting for <html> if it is not there yet. */
+export const arialInit = (css: string): void => {
+  const attach = () => {
+    if (!document.documentElement) return false;
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.documentElement.appendChild(style);
+    return true;
+  };
+  if (!attach()) {
+    const observer = new MutationObserver(() => attach() && observer.disconnect());
+    observer.observe(document, { childList: true });
+  }
+};
+
 /**
  * True when BS_E2E_FONT=arial, false when it is unset. Throws on any other
  * value, the empty string included: `BS_E2E_FONT=` is a typo, not "off".
