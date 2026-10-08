@@ -6,16 +6,19 @@ The whole install. One command in a shell:
 npm i -g @juzser/blacksmith
 ```
 
-Two inside a Claude Code session:
+Two inside a Claude Code session, and an optional third:
 
 ```
 /plugin marketplace add juzser/blacksmith
 /plugin install blacksmith@blacksmith
+/plugin install bs-mod@blacksmith
 ```
 
 Then `bs init` in the project you want it to work on, and you have `/bs`.
 Both halves are required and they are different things —
-[Which install](#which-install) says why.
+[Which install](#which-install) says why. The third line is optional:
+bs-mod is the live HUD, your epic's progress above the prompt, and
+Blacksmith runs the same without it.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -140,6 +143,7 @@ bs init
 # inside Claude Code
 /plugin marketplace add juzser/blacksmith
 /plugin install blacksmith@blacksmith
+/plugin install bs-mod@blacksmith      # optional: the live HUD
 ```
 
 `claude plugin details blacksmith` prints what the second half added:
@@ -147,6 +151,17 @@ bs init
 body read only when its verb runs. This repository is its own marketplace, and
 the plugin it lists is the same `.claude/` directory a clone uses — one source
 in the repository, nothing exported and nothing to keep in step.
+
+**bs-mod**, the third line, is optional. It is a band above the prompt in
+every session: with an epic in view, its agents, tasks done, budget, current
+wave and what waits on you, on Overview, Current, Next and Past tabs. `/bs-mod`
+opens a pane on the epic, `/bs-mod <epic-id>` pins one, and gate failures,
+merges, waivers and escalations arrive as toasts. It is a plugin module rather
+than skills and agents, so it needs a Claude Code build that loads plugin
+modules: it was written and tested on 2.1.292, and no older build has been
+checked. `claude plugin details bs-mod` shows it once installed, and
+[`mods/bs-mod/README.md`](mods/bs-mod/README.md) says where it looks for
+event logs.
 
 `init` creates `.blacksmith/` beside your code and nothing else:
 
@@ -367,7 +382,10 @@ job, **130** e2e tests across 11 specs.
 *Read the tail, not the exit code.* Every step degrades to a printed `SKIP`
 rather than a false `OK` when its tool is missing. `SKIP` lines for the
 TypeScript half mean `pnpm` was not found; `SKIP` lines for the policy half
-mean PyYAML was not found. Neither is a passing install.
+mean PyYAML was not found. Neither is a passing install. The one `SKIP` that
+is expected here is bs-mod's: its checks need the `claude` CLI, which
+[Step 6](#step-6--install-the-claude-code-cli) installs, so re-run the gate
+after that step to see them run.
 
 ### Step 5 — The stack interview
 
@@ -480,6 +498,34 @@ either way, so every `state/...` path in these docs stays true.
 Every `BS_*` variable in these docs was `SMITH_*` before the rename, and the
 old name still works as a fallback: `BS_<X>` wins when both are set.
 
+### Step 8 — The bs-mod HUD *(optional)*
+
+A clone has no use for the `blacksmith` plugin, because its `.claude/`
+already is that plugin. bs-mod is different: it lives in `mods/bs-mod/`, not
+in `.claude/`, so a checkout does not load it on its own. It comes last
+because it needs the `claude` CLI from Step 6, and, like Step 7, it is
+optional and has a variant that writes outside the clone. Pick one of two:
+
+```
+# inside Claude Code: the released copy, in every session on this machine
+/plugin marketplace add juzser/blacksmith
+/plugin install bs-mod@blacksmith
+```
+
+```bash
+# working on the mod itself: this checkout's copy, for one session only
+claude --plugin-dir "$PWD/mods/bs-mod"
+```
+
+The install writes into `~/.claude/` and applies to every session on the
+machine, so an agent running this file must ask before it. `--plugin-dir`
+installs nothing: it loads the checkout's copy into the one session it starts,
+which is how a change to the mod is seen before it is released.
+
+**Expect:** after the install, `claude plugin details bs-mod` lists it, and
+a new session shows the band above its prompt. With `--plugin-dir`, the
+band shows in that session.
+
 ---
 
 ## Part 3 — Optional extras
@@ -555,7 +601,8 @@ OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 For the package and the plugin, two commands answer it: `bs --help` lists
 every command and namespace, and `claude plugin details blacksmith` reports
 `Skills (1)` and `Agents (14)`. If both do, you are installed; the rest of
-this part is the clone's.
+this part is the clone's. If you took the optional HUD,
+`claude plugin details bs-mod` shows it.
 
 In a clone, one command answers "did this work":
 

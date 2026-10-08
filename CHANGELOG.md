@@ -37,6 +37,22 @@ than appearing in it.
 
 ### Added
 
+- **bs-mod, an optional live HUD, ships as the marketplace's second
+  plugin.** `/plugin install bs-mod@blacksmith` adds a band above the
+  Claude Code prompt in every session: the session's epic, its wave,
+  active agents, budget and what waits on you, in Overview / Current /
+  Next / Past tabs, with a `/bs-mod` pane, `/bs-mod <epic-id>` to pin an
+  epic, and toasts for admissions, gate failures, merges, waivers,
+  escalations and the epic closing. It reads `state/events/*.jsonl`
+  directly and changes nothing in the factory, so Blacksmith runs the
+  same without it. It is a Claude Code plugin module in `mods/bs-mod/`,
+  written and tested on Claude Code 2.1.292. Its manifest carries the
+  package version, and `pluginManifest.test.ts` now fails a release that
+  bumps one without the other, so an installed HUD updates with each
+  release. `scripts/check.sh` validates and tests it when `claude` is on
+  PATH and prints `SKIP` otherwise, CI included; the repo's vitest, Biome
+  and tsconfigs do not read the folder. INSTALL.md gains the optional
+  install line and an optional Step 8.
 - **`wave-admitted` says which tier its cap was sized for.** The `budget`
   block every admission writes now carries `tier` (`small` / `medium` /
   `huge`) beside `cap_tokens`: the plan's `effort` after `effort.yml`'s
