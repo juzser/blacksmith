@@ -931,6 +931,71 @@ test.describe('a foreign store in the dashboard', () => {
       }
     }
 
+    // A project name far longer than the page is wide: with and without spaces.
+    const LONG_NAMES = {
+      spaced: 'a-very long project name that keeps going well past any screen edge, twice over',
+      unbroken: `project-${'a'.repeat(52)}`,
+    };
+    for (const [width, height] of [
+      [375, 812],
+      [390, 812],
+      [1280, 800],
+    ] as const) {
+      for (const [variant, longName] of Object.entries(LONG_NAMES)) {
+        test(`a long project name (${variant}) wraps to two lines at ${width}px and never leaves the page`, async ({
+          page,
+        }) => {
+          await page.setViewportSize({ width, height });
+          await page.route('**/api/sessions?*', async (route) => {
+            const real = await (await route.fetch()).json();
+            await route.fulfill({
+              json: real.map((r: { projects: string[] }) => ({
+                ...r,
+                projects: r.projects.map((p) => (p === 'project-a' ? longName : p)),
+              })),
+            });
+          });
+          await page.goto(`${origin}/sessions?scope=all`);
+          const link = page.locator('.bs-sessions__group-title a').filter({ hasText: longName });
+          await expect(link).toHaveCount(1);
+          const m = await page.evaluate((name) => {
+            const scroll = document.querySelector('.app-scroll') as HTMLElement;
+            const link = [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')]
+              .find((a) => a.textContent?.trim() === name) as HTMLElement;
+            const label = (link.querySelector('span') ?? link) as HTMLElement;
+            const page = document.querySelector('.app-page') as HTMLElement;
+            const pr = page.getBoundingClientRect();
+            const pad = parseFloat(getComputedStyle(page).paddingRight);
+            const lr = link.getBoundingClientRect();
+            const lh = parseFloat(getComputedStyle(label).lineHeight);
+            // The previous focusable target above this header.
+            const above = [...document.querySelectorAll<HTMLElement>('a, button')]
+              .filter((o) => o !== link && !link.contains(o) && o.getBoundingClientRect().bottom <= lr.top + 60)
+              .map((o) => o.getBoundingClientRect().bottom)
+              .filter((b) => b > 0 && b <= lr.top + 60);
+            return {
+              scroll: [scroll.scrollWidth, scroll.clientWidth],
+              root: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+              overflow: lr.right - (pr.right - pad),
+              width: lr.width,
+              lines: Math.round(label.getBoundingClientRect().height / lh),
+              title: link.getAttribute('title'),
+              overlap: above.length ? Math.max(...above) - lr.top : 0,
+              top: lr.top,
+            };
+          }, longName);
+          expect(m.scroll[0]).toBeLessThanOrEqual(m.scroll[1]);
+          expect(m.root[0]).toBeLessThanOrEqual(m.root[1]);
+          expect(m.overflow).toBeLessThanOrEqual(0.5);
+          expect(m.lines).toBeLessThanOrEqual(2);
+          expect(m.title).toBe(longName);
+          expect(await link.getAttribute('aria-label')).toBeNull();
+          await expect(page.getByRole('link', { name: longName, exact: true })).toHaveCount(1);
+          if (width < 640) expect(m.overlap).toBeLessThanOrEqual(1);
+        });
+      }
+    }
+
     test('a selected session names where it is from: title, project, start time', async ({
       page,
     }) => {

@@ -348,8 +348,9 @@ function refresh() {
               v-if="group.project"
               :to="{ query: { ...route.query, project: group.project } }"
               class="bs-btn bs-btn--link bs-btn--sm"
+              :title="group.project"
             >
-              {{ group.project }}
+              <span class="bs-sessions__group-label">{{ group.project }}</span>
             </RouterLink>
             <template v-else>No project</template>
           </h2>
