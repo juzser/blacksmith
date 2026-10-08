@@ -24,6 +24,7 @@ const HOME_TITLE_1 = 'Add the widget renderer.';
 const HOME_TITLE_2 = 'Simplify the config loader.';
 const FOREIGN_TITLE_1 = 'Foreign widget renderer.';
 const FOREIGN_TITLE_2 = 'Foreign config loader.';
+const EXTRA_NOTES = 40;
 
 let tmp = '';
 let origin = '';
@@ -129,6 +130,24 @@ test.describe('a foreign store in the dashboard', () => {
     await mkdir(homeEvents, { recursive: true });
     await mkdir(foreignEvents, { recursive: true });
 
+    // Enough extra events, written first and store by store in turn, that the
+    // merged feed outgrows one 50-row page, the fixture stays on the newest page,
+    // and the older page still holds rows of both stores.
+    for (let n = 0; n < EXTRA_NOTES; n++) {
+      for (const dir of [homeEvents, foreignEvents]) {
+        await appendEvent(
+          {
+            session_id: 'sess-extra',
+            actor: 'user',
+            event_type: n === 0 ? 'session-start' : 'operator-note',
+            plan_version: 1,
+            causal_parent: n === 0 ? null : `sess-extra#${n - 1}`,
+            payload: n === 0 ? {} : { note: `extra ${n}` },
+          },
+          { stateDir: dir },
+        );
+      }
+    }
     for (const eventsDir of [homeEvents, foreignEvents]) {
       const opts = { stateDir: eventsDir };
       await buildFixture(opts);
@@ -471,6 +490,40 @@ test.describe('a foreign store in the dashboard', () => {
         .evaluateAll((els) => els.map((e) => e.id));
       expect(ids.length).toBeGreaterThan(1);
       expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    test('C4: Load older pages back across both stores with stores=all and the cursor', async ({
+      page,
+    }) => {
+      const reads: URLSearchParams[] = [];
+      page.on('request', (r) => {
+        const url = new URL(r.url());
+        if (url.pathname === '/api/timeline') reads.push(url.searchParams);
+      });
+      const domIds = () =>
+        page.locator('li[id^="activity-row-"]').evaluateAll((els) => els.map((e) => e.id));
+      await page.goto(`${origin}/activity?scope=all`);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      const loadOlder = page.getByRole('button', { name: 'Load older' });
+      await expect(loadOlder).toBeVisible();
+      const firstPage = await domIds();
+      await loadOlder.click();
+      await expect.poll(() => reads.some((q) => q.has('before'))).toBe(true);
+      await expect.poll(async () => (await domIds()).length).toBeGreaterThan(firstPage.length);
+
+      const older = reads.filter((q) => q.has('before'));
+      expect(older.length).toBeGreaterThan(0);
+      for (const q of older) {
+        expect(q.get('stores')).toBe('all');
+        expect(q.get('before')).toBeTruthy();
+      }
+      const after = await domIds();
+      const arrived = after.filter((id) => !firstPage.includes(id));
+      expect(arrived.some((id) => id.startsWith('activity-row-home:'))).toBe(true);
+      expect(arrived.some((id) => id.startsWith(`activity-row-${foreignId}:`))).toBe(true);
+      await expect(rowsOf(page, 'home').first()).toBeVisible();
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      expect(new Set(after).size).toBe(after.length);
     });
 
     test('C2: a foreign row opens its own store task, and an explicit filter keeps the old request', async ({
