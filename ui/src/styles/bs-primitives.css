@@ -631,14 +631,16 @@ a:hover {
    title collapsed to 0. The tag may shrink to at most half the head and
    ellipsises on one line (block, not inline-flex, so text-overflow applies;
    a rail tag carries no icon). The title keeps a 64px floor. The full outcome
-   is the tag's whole text content and the row's details (`dl` "Outcome"). */
+   is the tag's whole text content and the row's details (`dl` "Outcome").
+   The line is 18px: the kit tag box is 20px (ds-review.html `.tag`) minus the
+   1px border top and bottom, so the text sits centred in it. */
 @media (max-width: 640px) {
   .bs-timeline-row--rail .bs-timeline-row__head .bs-timeline-row__status {
     display: block;
     flex-shrink: 1;
     min-width: 0;
     max-width: 50%;
-    line-height: 14px;
+    line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
   }

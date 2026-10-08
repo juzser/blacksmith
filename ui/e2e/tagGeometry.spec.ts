@@ -156,7 +156,6 @@ test.describe('Phone timeline row: tag at the right end, fixed chevron column', 
           tagRight = Math.max(tagRight, await right(tags.nth(t)));
         }
         const headRight = await right(head);
-        console.log(`B2 ${c.name} row ${i}: tag right ${tagRight}, head right ${headRight}`);
         expect(Math.abs(tagRight - headRight)).toBeLessThanOrEqual(1);
       }
     });
@@ -175,17 +174,29 @@ test.describe('Phone timeline row: tag at the right end, fixed chevron column', 
       await expect(rows.nth(2).getByRole('button', { name: 'Show details' })).toHaveCount(0);
       const a = rows.nth(0).locator('.bs-timeline-row__head .bs-event-kind-tag');
       const b = rows.nth(2).locator('.bs-timeline-row__head .bs-event-kind-tag');
-      console.log(
-        `B3 ${c.name}: tag right with chevron ${await right(a)}, without ${await right(b)}`,
-      );
       expect(Math.abs((await right(a)) - (await right(b)))).toBeLessThanOrEqual(1);
-      const ta = rows.nth(0).locator('.bs-timeline-row__ts--meta');
-      const tb = rows.nth(2).locator('.bs-timeline-row__ts--meta');
-      console.log(
-        `B3 ${c.name}: ts right with chevron ${await right(ta)}, without ${await right(tb)}`,
-      );
     });
   }
+
+  test('375 task-history: the rail outcome tag text is vertically centred', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    const c = CONSUMERS.find((x) => x.name === 'task-history') as Consumer;
+    await c.open(page);
+    const tag = page.locator(c.rows).first().locator('.bs-timeline-row__status');
+    await expect(tag).toBeVisible();
+    const box = await tag.boundingBox();
+    const textCentre = await tag.evaluate((el) => {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      const b = r.getBoundingClientRect();
+      return b.top + b.height / 2;
+    });
+    const tagCentre = (box?.y ?? 0) + (box?.height ?? 0) / 2;
+    expect(
+      Math.abs(textCentre - tagCentre),
+      `text ${textCentre}, tag ${tagCentre}`,
+    ).toBeLessThanOrEqual(1);
+  });
 
   for (const c of CONSUMERS) {
     test(`screenshot timeline-row-tag-end-${c.name}-phone-light`, async ({ page }) => {
