@@ -383,7 +383,7 @@ Blue means one thing: "this is the action" or "this is you". Everything else is 
 | `ProgressRing` | `value`, `max?` (default 100), `tone?` (auto when omitted), `label` (required, plain sentence, e.g. "71% of token budget used") | 20px inline SVG ring (`r=8`, `pathLength=100`, 2.5px stroke): track `--bs-border`, fill in the tone colour; the % number sits to its right at 14px/400 `--bs-text`. Wrapper is `role="img"` + `aria-label`=`label`; hover/focus shows a `Tooltip` with the exact values ("127,402,118 of 180,000,000 tokens (71%)"). CSS class `.pring` |
 | `ProgressBarMini` | same props as `ProgressRing` | 56×6px rounded track (`--bs-border`) with a tone fill, number to the right at 12px/400. Same a11y contract. CSS class `.pmini`, number `.pnum` |
 | `BarChart` (prop addition) | gains an optional `stacked: boolean` + `series: [{key, tone}]` pair (pattern 10, §2.4c) — same inline-SVG/`role="img"`/sr-only-`<table>` accessible contract, same `takeaway` requirement, just a second render path for a per-role/per-tier stacked daily series instead of one bar per day |
-| `RelativeTime` | `iso`, `now?` (test seam), `duration?` (reads "for 12 min" / "for 2 h" / "just now" instead, for how long something has been in its current state; `LiveSessionCard` only) | renders "5 min ago" / "2 h ago" / "3 d ago" inside a `<time datetime>`; the absolute time ("30 Sep 2026, 14:07:12") in a `Tooltip` (describe mode, the element is focusable), not a `title` attribute — the single implementation for every relative-time surface named in the brief |
+| `RelativeTime` | `iso`, `now?` (test seam), `duration?` (reads "for 12 min" / "for 2 h" / "just now" instead, for how long something has been in its current state; `LiveSessionCard` only) | renders "5 min ago" / "2 h ago" / "3 d ago" inside a `<time datetime>`; the absolute time ("30 Sep 2026, 14:07:12") in a `Tooltip` (describe mode, the element is focusable), not a `title` attribute — the single implementation for every relative-time surface named in the brief. `plain` renders only the `<time datetime>` with the relative text, no `Tooltip`, no tab stop: used inside a control that is itself the target (a `SessionRow` button), where a second tab stop would nest |
 
 **Progress tones and placement.** Tone is computed when `tone` is omitted: for a budget
 (`max` is a budget) `< 90%` accent, `>= 90%` warning, `> 100%` danger (ring drawn full,
@@ -1317,7 +1317,7 @@ selected session that turns quiet while Active stays listed (muted, not counted 
 line) until another row is selected or the scope changes; narrowing All to Active with a
 quiet session open clears the selection and `?session=`. Browser back/forward restores the
 selection from `?session=`. Each row is humanized (derived title, humanized last-event,
-humanized task slug, audit Sessions-3). Selecting a row opens the per-role agent view: one `AgentBlock`
+humanized task slug, audit Sessions-3). Selecting a row opens the per-role agent view, which starts with one roster line naming the session: its title, then its project as the page labels it (a foreign session with no epic shows its store's label, a home one "No project"), then "started <RelativeTime>" (the normal one, so the absolute start stays a tap away). Under it, one `AgentBlock`
 per role (e.g. "Testers" block listing its 16 live agents from `/api/overview`'s
 `liveAgents` breakdown, each with task title, duration via `RelativeTime`, in/out tokens
 via `CompactNumber` or "not measured"). No canvas, no zoom controls, ever (audit

@@ -1346,28 +1346,48 @@ a:hover {
   font-size: inherit;
   font-weight: inherit;
 }
-/* Fix round 2 item 2: the global ≤640px .bs-btn--sm rule (line ~281) floors
-   min-height at --bs-touch, which inflates only the linked variant's line
-   box -- the plain-text "No project" branch has no .bs-btn--sm and is
-   unaffected, so the two branches' headers sat at different heights above
-   their own list. Same pattern as .bs-timeline-row__title--link above:
-   cancel the inflated min-height and grow the hit box via padding-block
-   instead, offset by an equal negative margin-block so the row's own
-   layout height stays driven by the text line. padding-inline stays 0
-   (set above) so the link text stays flush with the card edge. */
+/* Dense-UI link (ds-spec §1.9): no underline at rest, one on hover (from
+   .bs-btn--link) and on keyboard focus. */
+.bs-sessions__group-title .bs-btn--link:focus-visible {
+  text-decoration: underline;
+}
+/* Fix round 2 item 2, then fix round 3: the global ≤640px .bs-btn--sm rule
+   floors min-height at --bs-touch, which inflates only the linked variant's
+   line box (the plain-text "No project" branch is unaffected). Cancel it and
+   grow the hit box to --bs-touch ABOVE the text only: padding-top cancelled
+   by an equal negative margin-top, nothing below, so the box never reaches
+   into the first row button under it. The row's layout height stays driven
+   by the text line. padding-inline stays 0 so the text stays flush with the
+   card edge. */
 @media (max-width: 640px) {
   .bs-sessions__group-title .bs-btn--sm {
+    box-sizing: border-box;
+    height: var(--bs-touch);
     min-height: 0;
     display: inline-flex;
-    align-items: center;
-    padding-block: calc((var(--bs-touch) - 1lh) / 2);
-    margin-block: calc((var(--bs-touch) - 1lh) / -2);
+    align-items: flex-end;
+    line-height: inherit;
+    padding: 0;
+    margin-top: calc((var(--bs-touch) - 1lh) * -1);
   }
 }
 .bs-sessions__detail {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-3);
+}
+/* Names the selected run above its agents: title, project, start time. */
+.bs-sessions__detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bs-space-1) var(--bs-space-3);
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-sessions__detail-title {
+  color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
 }
 
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's

@@ -775,6 +775,148 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(page).toHaveURL(new RegExp(`[?&]session=sess-extra&store=${foreignId}`));
       await expect(roster(page).locator('.bs-agentblock')).toHaveCount(1);
     });
+
+    // The next tests read the `sess-extra` agent the test above added.
+    test('Tab walks from one session row to the next, with no stop on a time inside a row', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/sessions?scope=all`);
+      const rows = groupOf(page, 'project-b').locator('button.bs-sessionrow');
+      await expect(rows).toHaveCount(2);
+      await rows.first().focus();
+      await page.keyboard.press('Tab');
+      expect(
+        await page.evaluate(() => {
+          const el = document.activeElement;
+          return {
+            isRow: el?.matches('button.bs-sessionrow') ?? false,
+            inRow: !!el?.closest('button.bs-sessionrow') && !el?.matches('button.bs-sessionrow'),
+          };
+        }),
+      ).toEqual({ isRow: true, inRow: false });
+      expect(
+        await page.locator('button.bs-sessionrow [tabindex], button.bs-sessionrow a').count(),
+      ).toBe(0);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop', VIEWPORTS.desktop],
+      ['phone', { width: 375, height: 812 }],
+    ] as const) {
+      test(`both group header branches read alike on ${name}: same type, one colour per quiet state, underline on keyboard focus`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/sessions?scope=all`);
+        const titles = page.locator('.bs-sessions__group-title');
+        await expect(titles).toHaveCount(3);
+        const read = await page.evaluate(() => {
+          const probe = (v: string) => {
+            const el = document.createElement('span');
+            el.style.color = `var(${v})`;
+            document.body.append(el);
+            const c = getComputedStyle(el).color;
+            el.remove();
+            return c;
+          };
+          return {
+            text: probe('--bs-text'),
+            subtle: probe('--bs-text-subtle'),
+            groups: [...document.querySelectorAll('section.bs-sessions__group')].map((g) => {
+              const h = g.querySelector('.bs-sessions__group-title') as HTMLElement;
+              const target = (h.querySelector('a') ?? h) as HTMLElement;
+              const cs = getComputedStyle(target);
+              return {
+                name: h.textContent?.trim(),
+                quiet: g.classList.contains('bs-sessions__group--quiet'),
+                size: cs.fontSize,
+                weight: cs.fontWeight,
+                color: cs.color,
+                line: cs.textDecorationLine,
+              };
+            }),
+          };
+        });
+        expect(new Set(read.groups.map((g) => g.size)).size).toBe(1);
+        expect(new Set(read.groups.map((g) => g.weight)).size).toBe(1);
+        for (const g of read.groups) {
+          expect([g.name, g.color]).toEqual([g.name, g.quiet ? read.subtle : read.text]);
+          expect([g.name, g.line]).toEqual([g.name, 'none']);
+        }
+        const link = groupOf(page, 'project-a').getByRole('link', {
+          name: 'project-a',
+          exact: true,
+        });
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        for (let i = 0; i < 40; i++) {
+          if (await link.evaluate((el) => el === document.activeElement)) break;
+          await page.keyboard.press('Tab');
+        }
+        await expect(link).toBeFocused();
+        expect(await link.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe(
+          'underline',
+        );
+      });
+    }
+
+    test('on a phone each group header link is a 44px target that touches no other target', async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${origin}/sessions?scope=all`);
+      await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
+      const found = await page.evaluate(() => {
+        const sel = 'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+        const all = [...document.querySelectorAll<HTMLElement>(sel)].filter(
+          (el) => el.getBoundingClientRect().width > 0,
+        );
+        return [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')].map(
+          (link) => {
+            const b = link.getBoundingClientRect();
+            const hits = all
+              .filter((o) => o !== link && !link.contains(o) && !o.contains(link))
+              .map((o) => {
+                const r = o.getBoundingClientRect();
+                return {
+                  who: (o.textContent ?? '').trim().slice(0, 20),
+                  w: Math.min(b.right, r.right) - Math.max(b.left, r.left),
+                  h: Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top),
+                };
+              })
+              .filter((x) => x.w > 1 && x.h > 1);
+            return { name: link.textContent?.trim(), w: b.width, h: b.height, hits };
+          },
+        );
+      });
+      for (const f of found) {
+        expect(f.w).toBeGreaterThanOrEqual(44);
+        expect(f.h).toBeGreaterThanOrEqual(44);
+        expect([f.name, f.hits]).toEqual([f.name, []]);
+      }
+    });
+
+    test('a selected session names where it is from: title, project, start time', async ({
+      page,
+    }) => {
+      const line = (p: Page) => roster(p).locator('.bs-sessions__detail-head');
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'project-b')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(line(page)).toContainText('sess-extra');
+      await expect(line(page)).toContainText('project-b');
+      await expect(line(page).locator('time')).toHaveCount(1);
+      await page.goto(`${origin}/sessions?scope=all&session=sess-extra&store=${foreignId}`);
+      await expect(line(page)).toContainText('project-b');
+      await expect(line(page).locator('time')).toHaveCount(1);
+      await page.goto(`${origin}/sessions?scope=all`);
+      await groupOf(page, 'No project')
+        .locator('.bs-sessionrow')
+        .filter({ hasText: 'sess-extra' })
+        .click();
+      await expect(line(page)).toContainText('No project');
+    });
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which

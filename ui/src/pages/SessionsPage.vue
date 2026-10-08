@@ -26,6 +26,7 @@ import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
+import RelativeTime from '../components/kit/RelativeTime.vue';
 import SessionRow from '../components/kit/SessionRow.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import { useActiveScope } from '../composables/useActiveScope.js';
@@ -404,6 +405,11 @@ function refresh() {
       </Banner>
 
       <section v-if="selectedKey" class="bs-sessions__detail" aria-label="Selected session's agents">
+        <p v-if="selectedRow()" class="bs-sessions__detail-head">
+          <span class="bs-sessions__detail-title">{{ selectedRow()?.title ?? selectedRow()?.sessionId }}</span>
+          <span>{{ selectedRow()?.projects.length ? selectedRow()?.projects.join(', ') : 'No project' }}</span>
+          <span>started <RelativeTime :iso="selectedRow()?.startedAt ?? ''" /></span>
+        </p>
         <Skeleton v-if="agentsLoadedFor !== selectedKey" height="120" />
         <template v-else-if="agents">
           <AgentBlock
