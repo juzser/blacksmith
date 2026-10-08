@@ -1,7 +1,17 @@
 import type { Page } from '@playwright/test';
 import { stubActiveScope } from './activeScopeStub.js';
 import { expect, test } from './harness.js';
-import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import {
+  dropRoutes,
+  growToPageHeight,
+  setTheme,
+  settleForShot,
+  shoot,
+  VIEWPORTS,
+} from './helpers.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 // Several roles (not just the base fixture's single "Builder"), plus an
 // unmeasured run and a zero-token day — both screenshot baselines and the

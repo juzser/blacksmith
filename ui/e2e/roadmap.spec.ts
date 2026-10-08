@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { dropRoutes, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 import { stubActiveScope, stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 test.describe('Roadmap', () => {
   test('selecting a phase row updates the URL and marks it current', async ({ page }) => {

@@ -1,6 +1,9 @@
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot } from './helpers.js';
+import { dropRoutes, setTheme, settleForShot, shoot } from './helpers.js';
 import { stubActiveScope, stubWindowRoadmap } from './roadmapWindowFixture.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 // DS4 S4 — the phone Roadmap (<=640px). phase-6b (demo-hub: epic-9/10/11,
 // global-setup.ts) is the phase-mode fixture; epic-9 is the epic-mode
