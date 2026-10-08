@@ -1,6 +1,9 @@
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { dropRoutes, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 const DEMO_HUB_WAIVABLE_TASK = 'epic-9/task-3'; // multiProjectFixture.ts's confirmed S3 finding
 // epic-9/task-1: dispatched then completed (task-result-recorded, run_status

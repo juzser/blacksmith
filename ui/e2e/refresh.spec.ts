@@ -1,4 +1,8 @@
 import { expect, test } from './harness.js';
+import { dropRoutes } from './helpers.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 /**
  * design-spec.md §8, verbatim: "**Task detail, Lessons, Errors, Analytics**:
