@@ -16,6 +16,7 @@ const part = (id: string, over: Record<string, unknown>) => ({
     runningSessions: [],
     epicsInFlight: [],
     epicsActivelyRunning: [],
+    epicsIdle: [],
     closedEpics: [],
     tokensByEpic: [],
     alerts: { escalations: 0, pendingWaivers: 0 },
@@ -55,6 +56,69 @@ describe('mergeOverview order', () => {
     ]);
     expect((merged.milestoneProgress as { sequence: number }[]).map((m) => m.sequence)).toEqual([
       2, 1,
+    ]);
+  });
+
+  it('merges idle epics from every store, tagged, so a foreign idle epic is reported', () => {
+    const merged = mergeOverview([
+      part('home', { epicsIdle: [] }),
+      part('store-b', { epicsIdle: [{ epicId: 'epic-a', idleDays: 9 }] }),
+    ]);
+    expect(merged.epicsIdle).toEqual([
+      { epicId: 'epic-a', idleDays: 9, store: { id: 'store-b', label: 'store-b' } },
+    ]);
+  });
+
+  it('keeps each store its own idle order and orders the stores by id', () => {
+    const idle = (epicId: string, idleDays: number) => ({ epicId, idleDays });
+    const merged = mergeOverview([
+      part('store-b', { epicsIdle: [idle('epic-a', 9), idle('epic-z', 30)] }),
+      part('store-a', { epicsIdle: [idle('epic-a', 12), idle('epic-m', 8)] }),
+    ]);
+    const rows = merged.epicsIdle as { epicId: string; store: { id: string } }[];
+    expect(rows.map((e) => `${e.store.id}:${e.epicId}`)).toEqual([
+      'store-a:epic-a',
+      'store-a:epic-m',
+      'store-b:epic-a',
+      'store-b:epic-z',
+    ]);
+  });
+
+  it('drops an idle row for an epic another store still works on', () => {
+    const merged = mergeOverview([
+      part('store-a', { epicsIdle: [{ epicId: 'epic-a', idleDays: 9 }] }),
+      part('store-b', { epicsInFlight: ['epic-a'] }),
+    ]);
+    expect(merged.epicsIdle).toEqual([]);
+  });
+
+  it('keeps both idle rows when every store has the epic idle', () => {
+    const merged = mergeOverview([
+      part('store-a', {
+        epicsInFlight: ['epic-a'],
+        epicsIdle: [{ epicId: 'epic-a', idleDays: 9 }],
+      }),
+      part('store-b', {
+        epicsInFlight: ['epic-a'],
+        epicsIdle: [{ epicId: 'epic-a', idleDays: 12 }],
+      }),
+    ]);
+    const rows = merged.epicsIdle as { idleDays: number; store: { id: string } }[];
+    expect(rows.map((e) => `${e.store.id}:${e.idleDays}`)).toEqual(['store-a:9', 'store-b:12']);
+  });
+
+  it('leaves a single store idle list as it came', () => {
+    const merged = mergeOverview([
+      part('only', {
+        epicsIdle: [
+          { epicId: 'epic-z', idleDays: 8 },
+          { epicId: 'epic-a', idleDays: 30 },
+        ],
+      }),
+    ]);
+    expect((merged.epicsIdle as { epicId: string }[]).map((e) => e.epicId)).toEqual([
+      'epic-z',
+      'epic-a',
     ]);
   });
 });

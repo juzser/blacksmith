@@ -79,7 +79,10 @@ export function idleLabel(idleDays: number): string {
 /** Epic id -> its idle label, for the epics `epicsIdle` names; the Roadmap
  *  rows and pickers look an epic up here and show the label only on a hit. */
 export function idleLabelsById(idle: readonly IdleEpic[]): Record<string, string> {
-  return Object.fromEntries(idle.map((e) => [e.epicId, idleLabel(e.idleDays)]));
+  // A shared id keeps the smallest idleDays: the newest activity in any store is the honest age.
+  const days = new Map<string, number>();
+  for (const e of idle) days.set(e.epicId, Math.min(e.idleDays, days.get(e.epicId) ?? e.idleDays));
+  return Object.fromEntries([...days].map(([id, d]) => [id, idleLabel(d)]));
 }
 
 /** Options with an idle epic's label appended, as `epicOptions` does; any

@@ -154,6 +154,19 @@ describe('multi-store dashboard reads', () => {
     expect(o.epicsInFlightByStore.filter((e) => e.epicId === EPIC_ID)).toHaveLength(2);
   });
 
+  it('overview reports an in-flight epic as idle in every store, not only the served one', async () => {
+    // The fixture stamps the wall clock, so a query 10 days on finds epic-1 idle in both stores.
+    const a = app({ nowIso: new Date(Date.now() + 10 * 86_400_000).toISOString() });
+    const o = await get<{ epicsIdle: { epicId: string; idleDays: number; store: Store }[] }>(
+      a,
+      '/api/overview',
+    );
+    const idle = o.epicsIdle.filter((e) => e.epicId === EPIC_ID);
+    expect(idle).toHaveLength(2);
+    expect(idle.map((e) => e.store.label).sort()).toEqual(['home', 'project-b']);
+    expect(idle.every((e) => e.idleDays >= 9)).toBe(true);
+  });
+
   it('overview narrows to the foreign project when its label is the project filter', async () => {
     const a = app();
     const columns = await get<Col[]>(a, '/api/kanban?project=project-b');

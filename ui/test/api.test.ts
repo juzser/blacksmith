@@ -65,6 +65,13 @@ describe('lib/api.ts — selectableEpics (D-43/P9-27)', () => {
     ]);
   });
 
+  it('sorts an epic idle in another store after the running ones', () => {
+    const ov = overview(['epic-a', 'epic-run'], []);
+    const foreign = { epicId: 'epic-a', idleDays: 9, store: { id: 'store-b', label: 'project-b' } };
+    ov.epicsIdle = [foreign];
+    expect(selectableEpics(ov)).toEqual(['epic-run', 'epic-a']);
+  });
+
   it('keeps a closed epic selectable, after the ones still in flight', () => {
     const ov = overview(['epic-b', 'epic-a'], [closed('epic-done', '2026-08-07T00:00:00.000Z')]);
     expect(selectableEpics(ov)).toEqual(['epic-b', 'epic-a', 'epic-done']);
