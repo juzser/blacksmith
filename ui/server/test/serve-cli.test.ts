@@ -3,7 +3,7 @@
 // can never see a flag the CLI forgets to forward; this file exists for
 // exactly that gap.
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -191,13 +191,17 @@ describe('smith ui serve (built binary)', () => {
       expect.objectContaining({ name: 'served-fixture', status: 'working', inScopeBy: 'cwd' }),
     ]);
 
-    // No foreign store: each /api/projects row carries the store it came
-    // from, and this server may read only the --state-dir home. A session cwd
-    // that leads into a real clone shows up here as a second store id. Ids
-    // only, so a failure never prints a real project's name.
+    // No foreign store. /api/projects rows come from overview(), so a foreign
+    // store with no epics adds none: that check alone cannot see one. Discovery
+    // itself leaves a mark: the registry opens `<db dir>/ui-stores/<id>.db` for
+    // every foreign store it finds, epics or not, and never for the home store.
+    // So that directory must hold no db file. Ids only, so a failure never
+    // prints a real project's name.
     const projects = (await (await fetch(`http://127.0.0.1:${PORT}/api/projects`)).json()) as {
       store: { id: string };
     }[];
     expect([...new Set(projects.map((p) => p.store.id))]).toEqual(['home']);
+    const cached = await readdir(path.join(dbDir, 'ui-stores')).catch(() => [] as string[]);
+    expect(cached.filter((n) => n.endsWith('.db')).map((n) => n.slice(0, 8))).toEqual([]);
   }, 60_000); // spawns the built CLI and waits for a real HTTP server
 });
