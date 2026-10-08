@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { stubActiveScope } from './activeScopeStub.js';
 import { expect, test } from './harness.js';
 import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -60,7 +61,18 @@ async function withMultiRoleFixture(page: Page): Promise<void> {
   });
 }
 
+// S9: Cost & quality follows the Active/All scope. The e2e server cannot read
+// live CLI sessions (unmeasured), so the older tests run under a measured
+// answer naming every home-store session the fixture seeds.
+const homeSessions = (...ids: string[]) => ids.map((sessionId) => ({ storeId: 'home', sessionId }));
+
 test.describe('Analytics', () => {
+  test.beforeEach(async ({ page }) => {
+    await stubActiveScope(page, [], {
+      factorySessions: homeSessions('sess-fixture', 'sess-multiproject-fixture'),
+    });
+  });
+
   test('renders the period switch, charts, metric cards, and a11y basics', async ({ page }) => {
     await page.goto('/analytics');
     await expect(page.locator('h1')).toHaveText('Cost & quality');
@@ -177,4 +189,244 @@ test.describe('Analytics', () => {
       });
     }
   }
+});
+
+// S9 (ds-spec.md §4.4 Scope).
+test.describe('Cost & quality follows Active/All (S9)', () => {
+  const analyticsRequests = (page: Page) => {
+    const urls: URL[] = [];
+    page.on('request', (r) => {
+      const u = new URL(r.url());
+      if (u.pathname === '/api/analytics') urls.push(u);
+    });
+    return urls;
+  };
+
+  test("Active sends the scope's sessions; All sends none", async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const urls = analyticsRequests(page);
+    await page.goto('/analytics');
+    await expect(
+      page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+    ).toBeVisible();
+    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
+      true,
+    );
+    await page.getByRole('link', { name: 'All', exact: true }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect.poll(() => urls.some((u) => !u.searchParams.has('sessions'))).toBe(true);
+  });
+
+  // A response that was still in flight when the scope or period changed must
+  // not overwrite the newer answer. `hold` picks the request to park; it is
+  // answered "no usage" after `release()`, every other request with real usage.
+  async function holdAnalytics(page: Page, hold: (u: URL) => boolean) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started = false;
+    let settled = Promise.resolve();
+    await page.route('**/api/analytics*', async (route) => {
+      const isHeld = hold(new URL(route.request().url()));
+      const response = await route.fetch();
+      const body = await response.json();
+      body.tokensByDay = isHeld
+        ? []
+        : [
+            {
+              day: '2026-01-02',
+              tokensByRole: { coder: 100 },
+              tokensByModelTier: { mid: 100 },
+              unmeasuredRunCount: 0,
+            },
+          ];
+      if (isHeld) {
+        started = true;
+        settled = gate;
+        await gate;
+      }
+      await route.fulfill({ response, json: body });
+    });
+    return { release, started: () => started, settled: () => settled };
+  }
+
+  test('a held All answer landing after the switch to Active does not replace it', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const h = await holdAnalytics(page, (u) => !u.searchParams.has('sessions'));
+    await page.goto('/analytics?scope=all');
+    await expect.poll(h.started).toBe(true);
+    await page
+      .getByRole('navigation', { name: 'Activity scope' })
+      .getByRole('link', { name: 'Active', exact: true })
+      .click();
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+    await expect(page.locator('.bs-card__title').getByText('Tokens per day')).toBeVisible();
+    h.release();
+    await h.settled();
+    await page.waitForTimeout(300);
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+  });
+
+  test('a held answer for the old period does not replace the new period', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const h = await holdAnalytics(page, (u) => u.searchParams.get('period') === '30d');
+    await page.goto('/analytics');
+    await expect.poll(h.started).toBe(true);
+    await page.getByRole('button', { name: '7 days' }).click();
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+    await expect(page.locator('.bs-card__title').getByText('Tokens per day')).toBeVisible();
+    h.release();
+    await h.settled();
+    await page.waitForTimeout(300);
+    await expect(
+      page
+        .locator('.bs-card')
+        .filter({ hasText: 'Tokens per day' })
+        .getByText('Nothing has run in this period yet.'),
+    ).toHaveCount(0);
+  });
+
+  test('nothing live: only the edge line, no request, no charts or zero totals', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    const urls = analyticsRequests(page);
+    await page.goto('/analytics');
+    await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+    await expect(page.locator('.bs-card')).toHaveCount(0);
+    await expect(page.locator('.bs-analytics-page__phone-metrics')).toHaveCount(0);
+    expect(urls).toHaveLength(0);
+  });
+
+  test('none on an epic, and the other-store line names the store-b project', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 1,
+      unlinkedSessions: 1,
+      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+    });
+    await page.goto('/analytics');
+    await expect(page.getByText('1 live session, none on an epic')).toBeVisible();
+    await expect(page.getByText('1 active project is in another store (project-b)')).toBeVisible();
+  });
+
+  test('unmeasured: fetches All and says live sessions cannot be read', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false });
+    const urls = analyticsRequests(page);
+    await page.goto('/analytics');
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    await expect(
+      page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+    ).toBeVisible();
+    expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+  });
+
+  test('Active holds while the scope read is in flight: no analytics request yet', async ({
+    page,
+  }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await page.route('**/api/active-scope*', async (route) => {
+      await gate;
+      await route.fulfill({
+        json: {
+          measured: true,
+          readAt: '2026-10-07T12:00:00.000Z',
+          liveSessions: 1,
+          unlinkedSessions: 0,
+          projects: [],
+          epics: [],
+          factorySessions: homeSessions('sess-fixture'),
+        },
+      });
+    });
+    const urls = analyticsRequests(page);
+    await page.goto('/analytics');
+    await page.waitForTimeout(400);
+    expect(urls).toHaveLength(0);
+    release();
+    await expect.poll(() => urls.length).toBeGreaterThan(0);
+    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
+      true,
+    );
+  });
+
+  test('an explicit ?session= wins: no sessions param, no toggle', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-multiproject-fixture') });
+    const urls = analyticsRequests(page);
+    await page.goto('/analytics?session=sess-fixture');
+    await expect(
+      page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Activity scope' })).toHaveCount(0);
+    expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+  });
+
+  test('phone 375: the toggle clears 44px and the toolbar does not scroll sideways', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/analytics');
+    const toggle = page.getByRole('navigation', { name: 'Activity scope' });
+    await expect(toggle).toBeVisible();
+    const tab = toggle.getByRole('link', { name: 'All', exact: true });
+    expect((await tab.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('screenshot active desktop light', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await withMultiRoleFixture(page);
+    await page.goto('/analytics');
+    await settleForShot(
+      page,
+      page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+    );
+    await growToPageHeight(page);
+    await shoot(page, 'analytics-active-desktop-light');
+  });
+
+  test('screenshot active phone light', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await withMultiRoleFixture(page);
+    await page.goto('/analytics');
+    await settleForShot(page, page.locator('.bs-analytics-page__phone-metrics'));
+    await growToPageHeight(page);
+    await shoot(page, 'analytics-active-phone-light');
+  });
+
+  test('screenshot nothing active desktop light', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/analytics');
+    await settleForShot(page, page.getByText('Nothing is active right now.'));
+    await shoot(page, 'analytics-nothing-active-desktop-light');
+  });
 });

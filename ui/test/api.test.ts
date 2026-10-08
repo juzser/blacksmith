@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { type ClosedEpic, type OverviewResult, selectableEpics } from '../src/lib/api.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  type ClosedEpic,
+  fetchAnalytics,
+  fetchErrors,
+  fetchTimelinePage,
+  type OverviewResult,
+  selectableEpics,
+} from '../src/lib/api.js';
 
 // D-43/P9-27: closing an epic drops it out of `epicsInFlight` by design.
 // The picker on Kanban/Flow is how an operator reaches a board at all, so a
@@ -88,5 +95,35 @@ describe('lib/api.ts — selectableEpics (D-43/P9-27)', () => {
     };
     ov.closedEpics = undefined;
     expect(selectableEpics(ov as OverviewResult)).toEqual(['epic-a']);
+  });
+});
+
+describe('S9: the sessions list on the Activity and Cost & quality fetches', () => {
+  const urls: string[] = [];
+  const stub = () => {
+    urls.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (u: string) => {
+        urls.push(u);
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('writes one sessions= per id, keeps a comma in an id, and omits the param when undefined', async () => {
+    stub();
+    await fetchTimelinePage({ limit: 5, sessions: ['sess-a', 'sess-c,x'] });
+    await fetchErrors(undefined, undefined, ['sess-a', 'sess-b']);
+    await fetchAnalytics(undefined, undefined, '30d', ['sess-a']);
+    await fetchTimelinePage({ limit: 5 });
+    await fetchErrors();
+    await fetchAnalytics(undefined, undefined, '30d');
+    const q = (u: string) => new URL(u, 'http://x').searchParams;
+    expect(q(urls[0] as string).getAll('sessions')).toEqual(['sess-a', 'sess-c,x']);
+    expect(q(urls[1] as string).getAll('sessions')).toEqual(['sess-a', 'sess-b']);
+    expect(q(urls[2] as string).getAll('sessions')).toEqual(['sess-a']);
+    for (const u of urls.slice(3)) expect(u).not.toContain('sessions');
   });
 });

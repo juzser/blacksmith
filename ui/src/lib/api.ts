@@ -813,6 +813,8 @@ export interface TimelinePageParams extends TimelineParams {
   after?: string;
   limit?: number;
   kinds?: EventKind[];
+  /** Narrow to these factory sessions (one `sessions=` each); never with `session`. */
+  sessions?: string[];
 }
 
 /** Paged mode (newest-first): present whenever before/after/limit is set, so always here. */
@@ -828,6 +830,7 @@ export function fetchTimelinePage(params: TimelinePageParams = {}): Promise<Time
   if (params.before) q.set('before', params.before);
   if (params.after) q.set('after', params.after);
   if (params.limit !== undefined) q.set('limit', String(params.limit));
+  applySessions(q, params.sessions);
   const qs = q.toString();
   return getJson(`/api/timeline${qs ? `?${qs}` : ''}`);
 }
@@ -843,6 +846,11 @@ export function fetchKanban(
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/kanban${qs ? `?${qs}` : ''}`);
+}
+
+/** One `sessions=` per id (an id may hold a comma); undefined writes nothing. */
+function applySessions(q: URLSearchParams, sessions?: string[]): void {
+  for (const id of sessions ?? []) q.append('sessions', id);
 }
 
 /** `?store=` names a foreign store; absent reads the served store. */
@@ -897,10 +905,15 @@ export function fetchInbox(session?: SessionScope): Promise<InboxResult> {
   return getJson(`/api/inbox${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchErrors(session?: SessionScope, project?: string): Promise<ErrorsResult> {
+export function fetchErrors(
+  session?: SessionScope,
+  project?: string,
+  sessions?: string[],
+): Promise<ErrorsResult> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
+  applySessions(q, sessions);
   const qs = q.toString();
   return getJson(`/api/errors${qs ? `?${qs}` : ''}`);
 }
@@ -909,11 +922,13 @@ export function fetchAnalytics(
   session?: SessionScope,
   project?: string,
   period?: AnalyticsPeriod,
+  sessions?: string[],
 ): Promise<AnalyticsResult> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
   if (period) q.set('period', period);
+  applySessions(q, sessions);
   const qs = q.toString();
   return getJson(`/api/analytics${qs ? `?${qs}` : ''}`);
 }

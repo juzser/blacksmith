@@ -1183,6 +1183,27 @@ Data/API note — **needs new data** (all read-side; no new event type, no new w
 - Last-seen/project/trend fields on the merged error-class rows (audit Errors-5).
 Everything else is a client reshape of `/api/timeline` + `/api/errors`.
 
+**Scope.** The shared Active/All toggle (`?scope=`, Active by default and never written to
+the URL) sits at the right of the toolbar beside Expand all; on a phone it is the page
+header's action, above the kind tabs, with 44px targets. Active narrows the feed, its poll,
+Load older, the new-events pill and the error cards to the sessions a live CLI session is
+writing into (`factorySessions` of `GET /api/active-scope`, sent as repeated `sessions`
+query values, at most 200); All sends none. Each edge line is one muted line in Sessions'
+style, ending in a "Show all" link, and takes the page's own gap, as Sessions' lines do:
+with no live CLI session at all, "Nothing is active right now. · Show all"; with live
+sessions but none on an epic, "N live sessions, none on an epic · Show all"; with a
+measured answer but no active session in the served store, "No active session in this
+view · Show all". While one of these shows, no feed or error card is drawn and no request
+is made. When the live sessions cannot be read, Active shows everything as All does, with
+"Live sessions can't be read here" (the toggle stays). When more than 200 sessions are
+active in the served store, Active also shows everything, with "Too many active sessions
+to narrow; showing all" (the toggle stays, no `sessions` is sent). Beside the page,
+"N active projects are in another store (names) · see Home" for active projects it cannot
+list. Until the first answer arrives nothing is fetched and nothing is claimed. Under an
+explicit filter (`?session=`, `?task=`, `?epic=`) the filter wins: the toggle and these
+lines are not shown and no `sessions` is sent. This departs from Kanban, which keeps its
+toggle under `?session=`: here the filter already names the scope.
+
 ### 4.4 Cost & quality (Analytics, cut to ~4 metrics, plus a token-trend section)
 
 This page shows token cost, never dollar cost: `cost_usd` is parsed off a run's raw
@@ -1231,6 +1252,24 @@ projection already stores (verified today's response has none of the three: conf
 live shape is `throughput`/`costByModelTierAndProvider`/`sameMistakeRateByDay`/
 `recheckOutcomes`/`providerAgreement` only, no `period` param accepted). No new event
 type or writer.
+
+**Scope.** The shared Active/All toggle sits beside Refresh (the toolbar wraps on a phone,
+targets stay 44px). Active narrows every chart, table and metric to the sessions a live CLI
+session is writing into, as Activity does (§4.3 Scope); All sends no `sessions`. Each edge
+line is one muted line in Sessions' style, ending in a "Show all" link, and takes the
+page's own gap, as Sessions' lines do: with no live CLI session at all, "Nothing is active
+right now. · Show all"; with live sessions but none on an epic, "N live sessions, none on
+an epic · Show all"; with a measured answer but no active session in the served store, "No
+active session in this view · Show all". While one of these shows, no chart, table or
+metric is drawn and no request is made. When the live sessions cannot be read, Active
+shows everything as All does, with "Live sessions can't be read here" (the toggle stays).
+When more than 200 sessions are active in the served store, Active also shows everything,
+with "Too many active sessions to narrow; showing all" (the toggle stays, no `sessions` is
+sent). Beside the page, "N active projects are in another store (names) · see Home" for
+active projects it cannot list. Until the first answer arrives nothing is fetched and
+nothing is claimed. Under an explicit filter (`?session=`) the filter wins: the toggle and
+these lines are not shown and no `sessions` is sent. This departs from Kanban, which keeps
+its toggle under `?session=`: here the filter already names the scope.
 
 ### 4.5 Lessons
 

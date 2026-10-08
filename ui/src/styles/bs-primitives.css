@@ -4476,7 +4476,13 @@ h2.rm-section__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--bs-space-3);
+}
+.bs-analytics-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
 }
 .bs-analytics-page__charts {
   display: grid;
