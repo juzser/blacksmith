@@ -394,6 +394,8 @@ test.describe('Activity', () => {
     });
     await page.goto('/activity');
     await expect(page.locator('.bs-session-divider')).toHaveText('Session: Session B');
+    // One project in the feed: the divider names no project.
+    await expect(page.locator('.bs-session-divider')).not.toContainText('·');
 
     await page.getByRole('button', { name: 'Expand all' }).click();
     const detail = page.locator('.bs-timeline-row__detail').nth(1);

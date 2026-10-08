@@ -177,13 +177,27 @@ test.describe('a foreign store in the dashboard', () => {
       },
       homeOpts,
     );
-    // The foreign store's own wording.
-    for (const file of (await readdir(foreignEvents)).filter((f) => f.endsWith('.jsonl'))) {
-      const full = path.join(foreignEvents, file);
-      const text = (await readFile(full, 'utf8'))
-        .replaceAll(HOME_TITLE_1, FOREIGN_TITLE_1)
-        .replaceAll(HOME_TITLE_2, FOREIGN_TITLE_2);
-      await writeFile(full, text);
+    // The foreign store's own wording, and each store's own project on every
+    // event, so the merged Activity feed spans two projects.
+    const stamp = (text: string, project: string) =>
+      text
+        .split('\n')
+        .map((line) => (line ? JSON.stringify({ ...JSON.parse(line), project }) : line))
+        .join('\n');
+    for (const [dir, project] of [
+      [homeEvents, 'project-a'],
+      [foreignEvents, 'project-b'],
+    ] as const) {
+      for (const file of (await readdir(dir)).filter((f) => f.endsWith('.jsonl'))) {
+        const full = path.join(dir, file);
+        let text = await readFile(full, 'utf8');
+        if (dir === foreignEvents) {
+          text = text
+            .replaceAll(HOME_TITLE_1, FOREIGN_TITLE_1)
+            .replaceAll(HOME_TITLE_2, FOREIGN_TITLE_2);
+        }
+        await writeFile(full, stamp(text, project));
+      }
     }
 
     const roadmap = path.join(home, 'roadmap.md');
@@ -481,6 +495,51 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(rows(page).first()).toBeVisible();
       expect(reads.length).toBeGreaterThan(0);
       for (const read of reads) expect(new URLSearchParams(read).has('stores')).toBe(false);
+    });
+
+    test('C3: the multi-project feed names each project in its dividers and expanded rows', async ({
+      page,
+    }) => {
+      await page.goto(`${origin}/activity?scope=all`);
+      const feed = page.getByRole('feed', { name: 'Activity' });
+      const items = feed.locator('ol > li');
+      await expect(rowsOf(page, foreignId).first()).toBeVisible();
+      // The first block is labelled: a divider sits above the first row.
+      await expect(items.first()).toHaveClass(/bs-session-divider/);
+      await expect(items.first()).toContainText(/^project-[ab] · Session: /);
+      await expect(
+        feed.locator('.bs-session-divider', { hasText: 'project-b · Session:' }).first(),
+      ).toBeVisible();
+
+      // A foreign row names its project when expanded, and links carry its store.
+      const foreignRow = rowsOf(page, foreignId).filter({ hasText: TASK_1 }).first();
+      await foreignRow.getByRole('button', { name: 'Show details' }).click();
+      const detail = foreignRow.locator('.bs-timeline-row__detail');
+      await expect(detail.locator('dt', { hasText: 'Project' })).toBeVisible();
+      await expect(detail.locator('dt:has-text("Project") + dd')).toHaveText('project-b');
+      await expect(detail.getByRole('link')).toHaveAttribute(
+        'href',
+        new RegExp(`store=${foreignId}`),
+      );
+
+      const homeRow = rowsOf(page, 'home')
+        .filter({ has: page.locator('.bs-timeline-row__title--link') })
+        .first();
+      await homeRow.getByRole('button', { name: 'Show details' }).click();
+      const homeDetail = homeRow.locator('.bs-timeline-row__detail');
+      await expect(homeDetail.locator('dt:has-text("Project") + dd')).toHaveText('project-a');
+      await expect(homeDetail.getByRole('link')).not.toHaveAttribute('href', /store=/);
+
+      // The task link (a button that routes) is store-scoped for a foreign row only.
+      await homeRow.locator('.bs-timeline-row__title--link').click();
+      await expect(page).toHaveURL(/\/tasks\/[^?]+$/);
+      await page.goBack();
+      await rowsOf(page, foreignId)
+        .filter({ has: page.locator('.bs-timeline-row__title--link') })
+        .first()
+        .locator('.bs-timeline-row__title--link')
+        .click();
+      await expect(page).toHaveURL(new RegExp(`/tasks/[^?]+\\?store=${foreignId}$`));
     });
 
     for (const [name, viewport] of [
