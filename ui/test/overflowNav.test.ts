@@ -40,4 +40,12 @@ describe('navigationClosesOverflow', () => {
     await router.push('/work/kanban');
     expect(closes).toEqual([false, false]);
   });
+
+  it('does not close when a navigation to a different path is aborted', async () => {
+    const { router, closes } = makeRouter();
+    router.beforeEach((to) => (to.path === '/work/roadmap' ? false : true));
+    await router.push('/work/kanban');
+    await router.push('/work/roadmap');
+    expect(closes).toEqual([false, false]);
+  });
 });

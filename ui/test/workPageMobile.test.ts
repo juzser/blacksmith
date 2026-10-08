@@ -66,4 +66,9 @@ describe('MobileTopBar closes its overflow on navigation', () => {
       /router\.afterEach\([\s\S]*navigationClosesOverflow\([\s\S]*closeOverflow\(\)/,
     );
   });
+
+  it('has no route watcher that closes the overflow beside the hook', () => {
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/watch\(\s*\(\)\s*=>\s*route\.(full)?[pP]ath\b/);
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/watch\(\s*route\b/);
+  });
 });
