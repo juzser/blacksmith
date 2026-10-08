@@ -83,15 +83,27 @@ async function onCopyTaskId() {
 // The open button is an empty overlay covering the whole card, so a click
 // anywhere opens it. Focusing it first keeps `closePeek`'s focus return
 // working in browsers that do not focus a button on click.
-function onSelect(event: MouseEvent) {
-  (event.currentTarget as HTMLElement).focus();
+const openEl = ref<HTMLElement | null>(null);
+function onSelect() {
+  openEl.value?.focus();
   emit('select', props.task.taskId, foreignStoreId(props.task));
+}
+// The overlay cannot cover what needs hover (the time tooltip, chip and
+// dependency titles), so those sit above it. A click that lands on one of them
+// reaches the card and opens it like a click on the overlay. Buttons and links
+// keep their own click: this skips the overlay's own click (it opens itself, so
+// it must not fire twice), copy-id and "Open PR". Mouse only; keyboard users
+// use the open button.
+function onCardClick(event: MouseEvent) {
+  if ((event.target as Element).closest('button, a')) return;
+  onSelect();
 }
 </script>
 
 <template>
-  <div class="bs-kanban-card">
+  <div class="bs-kanban-card" @click="onCardClick">
     <button
+      ref="openEl"
       type="button"
       class="bs-kanban-card__open"
       :aria-label="`${title}, opens task detail`"

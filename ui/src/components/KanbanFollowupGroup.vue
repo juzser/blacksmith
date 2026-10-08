@@ -107,8 +107,18 @@ async function onCopyTaskId(taskId: string) {
 // first keeps the board's focus return working in browsers that do not focus
 // a button on click.
 function onRowSelect(event: MouseEvent, task: KanbanTask) {
-  (event.currentTarget as HTMLElement).focus();
+  const row = (event.currentTarget as HTMLElement).closest('.bs-kanban-group__row');
+  row?.querySelector<HTMLElement>('.bs-kanban-group__row-open')?.focus();
   emit('select', task.taskId, foreignStoreId(task));
+}
+// The overlay cannot cover what needs hover (the time tooltip and the chip), so
+// those sit above it. A click on one of them reaches the row and opens it like a
+// click on the overlay. Buttons and links keep their own click: this skips the
+// overlay's own click (it opens itself, so it must not fire twice) and copy-id.
+// Mouse only; keyboard users use the open button.
+function onRowClick(event: MouseEvent, task: KanbanTask) {
+  if ((event.target as Element).closest('button, a')) return;
+  onRowSelect(event, task);
 }
 </script>
 
@@ -133,7 +143,7 @@ function onRowSelect(event: MouseEvent, task: KanbanTask) {
     </summary>
     <ul role="list" class="bs-kanban-group__rows">
       <li v-for="task in rows" :key="storeKey(task, task.taskId)">
-        <div class="bs-kanban-group__row">
+        <div class="bs-kanban-group__row" @click="onRowClick($event, task)">
           <button
             type="button"
             class="bs-kanban-group__row-open"

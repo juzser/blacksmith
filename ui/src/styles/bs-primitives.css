@@ -3026,7 +3026,12 @@ summary.bs-inbox__group-head {
   outline-offset: 2px;
 }
 .bs-kanban-card__title-copy,
-.bs-kanban-card__footer a {
+.bs-kanban-card__footer a,
+.bs-kanban-card .bs-agent-chip,
+.bs-kanban-card__row--5 .bs-tooltip-trigger,
+.bs-kanban-card__footer-dep,
+.bs-kanban-group__row-meta .bs-agent-chip,
+.bs-kanban-group__row-meta .bs-tooltip-trigger {
   position: relative;
   z-index: 1;
 }

@@ -1673,9 +1673,115 @@ test.describe('Kanban: no interactive control inside another', () => {
     await card.getByRole('link', { name: 'Open PR' }).click();
     await (await popup).close();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    // A click on the footer text, away from every control, still opens the card.
-    await card.click({ position: { x: 4, y: 4 } });
+    // A click on the card's own text, away from every control, still opens the card.
+    // (force: the open button is the hit element there, which is the point.)
+    await card.locator('.bs-kanban-card__title').click({ position: { x: 4, y: 4 }, force: true });
     await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  // The open button is an overlay over the whole card; the card's hoverable
+  // elements are raised above it, so their tooltips and native titles work and
+  // a click on them still opens the peek (as it did before the overlay).
+  function hoverBoard() {
+    const card: KanbanTask = {
+      ...task('epic-1/task-1', 'in-progress'),
+      agentRole: 'coder',
+      agentModelTier: 'mid',
+      agentActivity: 'working',
+      dependencies: [
+        {
+          taskId: 'epic-1/task-0',
+          title: 'Earlier task',
+          status: 'in-progress',
+          edgeType: 'blocks',
+        },
+      ],
+    };
+    const [liveFix, ...otherFixes] = followupBoard()[0]?.tasks.slice(0, 3) ?? [];
+    const live: KanbanTask = {
+      ...(liveFix as KanbanTask),
+      agentRole: 'coder',
+      agentModelTier: 'mid',
+      agentActivity: 'working',
+    };
+    return [
+      { taskStatus: 'todo', tasks: [live, ...otherFixes] },
+      { taskStatus: 'in-progress', tasks: [card] },
+    ];
+  }
+
+  async function openHoverBoard(page: import('@playwright/test').Page) {
+    await mockBoard(page, hoverBoard());
+    await page.goto('/work/kanban');
+    await page.locator('.bs-kanban-group summary').click();
+    await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
+  }
+
+  // A raw mouse move, as a user's pointer: unlike locator.hover() it does not
+  // wait for the target to become the hit element.
+  async function hoverCentre(
+    page: import('@playwright/test').Page,
+    target: import('@playwright/test').Locator,
+  ) {
+    const box = await target.boundingBox();
+    if (!box) throw new Error('target has no box');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  }
+
+  test('desktop: the time tooltip shows on hover over a card and a fix row', async ({ page }) => {
+    await openHoverBoard(page);
+    const cardTime = page.locator('.bs-kanban-card__row--5 .bs-tooltip-trigger').first();
+    await hoverCentre(page, cardTime);
+    await expect(page.locator('.bs-tooltip-bubble')).toBeVisible();
+    await page.mouse.move(0, 0);
+    await expect(page.locator('.bs-tooltip-bubble')).toHaveCount(0);
+    const rowTime = page.locator('.bs-kanban-group__row-meta .bs-tooltip-trigger').first();
+    await hoverCentre(page, rowTime);
+    await expect(page.locator('.bs-tooltip-bubble')).toBeVisible();
+  });
+
+  test('desktop: chips and the waiting line are not covered by the open button', async ({
+    page,
+  }) => {
+    await openHoverBoard(page);
+    const targets = [
+      page.locator('.bs-kanban-card .bs-agent-chip').first(),
+      page.locator('.bs-kanban-card__footer-dep').first(),
+      page.locator('.bs-kanban-group__row-meta .bs-agent-chip').first(),
+      page.locator('.bs-kanban-card__row--5 .bs-tooltip-trigger').first(),
+      page.locator('.bs-kanban-group__row-meta .bs-tooltip-trigger').first(),
+    ];
+    for (const [i, target] of targets.entries()) {
+      await expect(target).toBeVisible();
+      const hit = await target.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!top && el.contains(top);
+      });
+      expect(hit, `target ${i} is the hit element`).toBe(true);
+    }
+  });
+
+  test('desktop: a click on a time, chip or waiting line opens the peek once', async ({ page }) => {
+    await openHoverBoard(page);
+    const dialogs = page.getByRole('dialog');
+    const targets = [
+      page.locator('.bs-kanban-card__row--5 .bs-tooltip-trigger').first(),
+      page.locator('.bs-kanban-card .bs-agent-chip').first(),
+      page.locator('.bs-kanban-card__footer-dep').first(),
+    ];
+    for (const [i, target] of targets.entries()) {
+      await target.click();
+      await expect(dialogs, `click on target ${i}`).toHaveCount(1);
+      await page.keyboard.press('Escape');
+      await expect(dialogs).toHaveCount(0);
+    }
+  });
+
+  test('desktop: a click on a fix row time opens the peek once', async ({ page }) => {
+    await openHoverBoard(page);
+    await page.locator('.bs-kanban-group__row-meta .bs-tooltip-trigger').first().click();
+    await expect(page.getByRole('dialog')).toHaveCount(1);
   });
 
   test('375: the card body goes to the task page', async ({ page }) => {
