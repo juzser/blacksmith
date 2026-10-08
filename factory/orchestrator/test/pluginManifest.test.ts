@@ -21,6 +21,11 @@ import { runProcess } from './helpers/process.js';
 // release, a plugin quietly starting to load the clone-shaped policy hook.
 // None of those fail loudly at install time; they fail in an operator's
 // session, which is too late. They fail here instead.
+//
+// The marketplace lists a second plugin, bs-mod, the live HUD. It is a plugin
+// module, not skills and agents, so it lives in `mods/bs-mod/` rather than
+// `.claude/`: a module's entry point is `hooks/hooks.json`, the one file the
+// blacksmith payload must not ship.
 // ---------------------------------------------------------------------------
 
 const MARKETPLACE_REL = '.claude-plugin/marketplace.json';
@@ -48,20 +53,69 @@ describe('plugin manifest', () => {
 });
 
 describe('marketplace', () => {
-  it('lists the plugin at a source that is itself a plugin', () => {
+  type Entry = { name: string; source: string };
+  const entries = (): Entry[] => readJson(MARKETPLACE_REL).plugins as Entry[];
+  const entryNamed = (name: string): Entry | undefined => entries().find((e) => e.name === name);
+
+  it('lists the blacksmith plugin at a source that is itself a plugin', () => {
     // A relative `source` is resolved against the marketplace's own repo, so
     // this is the one claim that makes `/plugin install` work at all: the
     // directory named has to hold `.claude-plugin/plugin.json`.
-    const market = readJson(MARKETPLACE_REL);
-    const plugins = market.plugins as { name: string; source: string }[];
-    expect(plugins).toHaveLength(1);
-    const [entry] = plugins as [{ name: string; source: string }];
-    expect(entry.name).toBe('blacksmith');
+    const entry = entryNamed('blacksmith');
+    expect(entry).toBeDefined();
+    if (!entry) return;
     expect(entry.source.startsWith('./')).toBe(true);
 
     const root = path.join(REPO_ROOT, entry.source);
     expect(existsSync(path.join(root, '.claude-plugin/plugin.json'))).toBe(true);
     expect(path.relative(REPO_ROOT, root)).toBe(PLUGIN_ROOT_REL);
+  });
+
+  it('lists every plugin at a source whose manifest carries the same name', () => {
+    // `/plugin install <name>@blacksmith` finds the entry by name, then loads
+    // whatever manifest its source holds. An entry and a manifest that
+    // disagree install one plugin under another's name.
+    const listed = entries();
+    expect(new Set(listed.map((e) => e.name)).size).toBe(listed.length);
+    for (const entry of listed) {
+      expect(entry.source.startsWith('./'), `${entry.name}: source is not relative`).toBe(true);
+      const manifest = path.join(entry.source, '.claude-plugin/plugin.json');
+      expect(existsSync(path.join(REPO_ROOT, manifest)), `${manifest} is absent`).toBe(true);
+      expect(readJson(manifest).name, `${manifest} names another plugin`).toBe(entry.name);
+    }
+  });
+
+  it('releases every plugin it lists at the package version', () => {
+    // An installed plugin stays on its cached copy until its manifest's
+    // `version` string changes, so a plugin a release forgot to bump never
+    // updates on anyone's machine. Holding every listed plugin to the
+    // package's version makes the release commit that bumps package.json fail
+    // here until each manifest moves with it: nothing to remember.
+    const pkg = readJson('package.json');
+    for (const entry of entries()) {
+      const manifest = path.join(entry.source, '.claude-plugin/plugin.json');
+      expect(readJson(manifest).version, manifest).toBe(pkg.version);
+    }
+  });
+
+  it('lists bs-mod at a source whose hooks.json names modules that exist', () => {
+    // bs-mod is a plugin module: the engine loads only what `hooks/hooks.json`
+    // names, so a renamed entry file installs a plugin that draws nothing.
+    const entry = entryNamed('bs-mod');
+    expect(entry).toBeDefined();
+    if (!entry) return;
+    expect(entry.source).toBe('./mods/bs-mod');
+
+    const hooksDir = path.join(REPO_ROOT, entry.source, 'hooks');
+    const hooks = JSON.parse(readFileSync(path.join(hooksDir, 'hooks.json'), 'utf8')) as {
+      modules?: unknown;
+    };
+    expect(Array.isArray(hooks.modules)).toBe(true);
+    const modules = hooks.modules as string[];
+    expect(modules.length).toBeGreaterThan(0);
+    for (const mod of modules) {
+      expect(existsSync(path.join(hooksDir, mod)), `${mod} is named but absent`).toBe(true);
+    }
   });
 });
 

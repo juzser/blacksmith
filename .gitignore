@@ -31,3 +31,9 @@ blob-report/
 
 # Per-clone audit store (smith audit), never committed
 .blacksmith/
+
+# bs-mod's engine API types and base tsconfig: Claude Code writes them when it
+# loads the mod, for the Claude Code build doing the loading. A committed copy
+# would pin one build's API. mods/bs-mod/types/ is the mod's own state
+# contract and stays tracked.
+/mods/bs-mod/.claude-plugin/types/
