@@ -661,6 +661,53 @@ test.describe('a foreign store in the dashboard', () => {
     }
   });
 
+  test.describe('Sessions over two stores', () => {
+    // Both stores replay one fixture, so the session id repeats: the foreign
+    // copy sits under its store's label and opens its own roster.
+    const groupOf = (page: Page, project: string) =>
+      page.locator('section.bs-sessions__group').filter({
+        has: page.getByRole('heading', { level: 2, name: project }),
+      });
+    const roster = (page: Page) => page.getByLabel("Selected session's agents", { exact: true });
+
+    test('the page asks every store and opens a foreign roster with its store', async ({
+      page,
+    }) => {
+      const lists: URL[] = [];
+      const rosters: string[] = [];
+      page.on('request', (r) => {
+        const u = new URL(r.url());
+        if (u.pathname === '/api/sessions') lists.push(u);
+        if (/^\/api\/sessions\/[^/]+\/agents$/.test(u.pathname))
+          rosters.push(u.pathname + u.search);
+      });
+      await page.goto(`${origin}/sessions?scope=all`);
+      const row = groupOf(page, 'project-b').locator('.bs-sessionrow').first();
+      await expect(row).toBeVisible();
+      expect(lists.some((u) => u.searchParams.get('stores') === 'all')).toBe(true);
+      await expect(page.getByText(/in another store/i)).toHaveCount(0);
+      await row.click();
+      await expect(page).toHaveURL(new RegExp(`[?&]session=sess-fixture&store=${foreignId}`));
+      await expect(roster(page).locator('.bs-agentblock').first()).toBeVisible();
+      expect(rosters).toContain(`/api/sessions/sess-fixture/agents?store=${foreignId}`);
+    });
+
+    for (const [name, viewport] of [
+      ['desktop-light', VIEWPORTS.desktop],
+      ['phone-light', { width: 375, height: 812 }],
+    ] as const) {
+      test(`screenshot two stores ${name}`, async ({ page }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize(viewport);
+        await page.goto(`${origin}/sessions?scope=all`);
+        const row = groupOf(page, 'project-b').locator('.bs-sessionrow').first();
+        await expect(row).toBeVisible();
+        await settleForShot(page, row);
+        await shoot(page, `sessions-two-stores-${name}`);
+      });
+    }
+  });
+
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which
   // the server has no flag to shorten, so this runs the real window: the store
   // leaves the Kanban board at once and its task page keeps loading.

@@ -1307,8 +1307,10 @@ Show all" (hidden at 0); with no live CLI session at all, "Nothing is active rig
 Show all"; with live sessions but none on an epic, "N live sessions, none on an epic · Show
 all" (while either of these two lines shows, the quiet count is not shown, so the line
 carries the page's one Show all); when the live sessions cannot be read, Active lists everything unmuted, as All does,
-with "Live sessions can't be read here" (the toggle stays); and, beside the list, "N active
-projects are in another store (names) · see Home" for active projects the page cannot list.
+with "Live sessions can't be read here" (the toggle stays). There is no "in another store"
+line here: every store is read (`stores=all`), a foreign session sits under its store's label,
+and opening it asks its roster from that store (`?session=<id>&store=<storeId>`; a home
+session writes only `?session=`, and a link without `store` means the home store).
 Until the first answer arrives the page shows its loading skeleton, never an empty claim.
 All adds the quiet sessions, muted by title colour only, after the active ones. A
 selected session that turns quiet while Active stays listed (muted, not counted in the quiet
