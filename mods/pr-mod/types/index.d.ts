@@ -61,6 +61,8 @@ declare module 'claude-code' {
       fixSent: Record<string, FixHold>
       /** per PR number: what runs on it now (merging, updating) */
       busy: Record<string, string>
+      /** the `/config` theme, read at session start and on each theme write; null when unread, so the theme keys draw (hooks/palette.ts) */
+      theme: string | null
     }
   }
 }

@@ -27,6 +27,8 @@ import {
   toastsBetween,
 } from './prs'
 import type { Tone } from './prs'
+import { paletteOf } from './palette'
+import type { Palette, PaletteRole } from './palette'
 
 const PANE = 'pr-mod'
 const POLL_MS = 60_000
@@ -35,8 +37,6 @@ const RECHECK_MAX = 3
 const ARM_MS = 8_000
 const LIST_TIMEOUT_MS = 30_000
 const ACTION_TIMEOUT_MS = 120_000
-/** The one raw colour: no theme key reads as "pending". */
-const PENDING = '#14b8a6'
 /** A Button with chrome draws its label plus two columns each side. */
 const BUTTON_CHROME_W = 4
 const GAP = 1
@@ -50,6 +50,8 @@ const mineAtom = atom({ plugin: 'pr-mod', key: 'mine' } as const, [] as string[]
 const armedAtom = atom({ plugin: 'pr-mod', key: 'armed' } as const, null as { number: number; until: number } | null)
 const fixAtom = atom({ plugin: 'pr-mod', key: 'fixSent' } as const, {} as Record<string, FixHold>)
 const busyAtom = atom({ plugin: 'pr-mod', key: 'busy' } as const, {} as Record<string, string>)
+/** the `/config` theme, which picks the palette (palette.ts paletteOf); null until read, so the theme keys draw */
+const themeAtom = atom({ plugin: 'pr-mod', key: 'theme' } as const, null as string | null)
 
 type St = {
   running: Promise<void> | null
@@ -64,7 +66,8 @@ type FixKind = 'conflict' | 'ci'
 
 // ---------------------------------------------------------------- drawing helpers
 
-type Look = { color?: string; bold?: boolean; dim?: boolean }
+/** `color`: a palette role (palette.ts PaletteRole) */
+type Look = { color?: PaletteRole; bold?: boolean; dim?: boolean }
 type Run = Look & { text: string; shrink?: boolean }
 
 function run(text: string, look: Look = {}): Run {
@@ -124,9 +127,9 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function style(look: Look): TextProps {
+function style(look: Look, pal: Palette): TextProps {
   const out: TextProps = {}
-  if (look.color) out.color = look.color
+  if (look.color) out.color = pal[look.color]
   if (look.bold) out.bold = true
   if (look.dim) out.dimColor = true
   return out
@@ -136,7 +139,7 @@ function toneLook(tone: Tone): Look {
   if (tone === 'success') return { color: 'success' }
   if (tone === 'error') return { color: 'error' }
   if (tone === 'warning') return { color: 'warning' }
-  if (tone === 'pending') return { color: PENDING }
+  if (tone === 'pending') return { color: 'warning' }
   return { dim: true }
 }
 
@@ -376,8 +379,29 @@ export const register: Register = on => {
     st.timer?.cancel()
     st.timer = $.clock.every(POLL_MS, () => void poll($, st))
     void kick($, st)
-    return next(e)
+    const started = await next(e)
+    try {
+      const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
+      await update($, themeAtom, () => (typeof theme === 'string' ? theme : null))
+    } catch {
+      // no theme read: the theme keys draw until a theme is set
+    }
+    return started
   })
+
+  // A theme written from /config or a plugin repaints the band and the pane; a deny or a failed write keeps the palette.
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const set = await next(e)
+    if (set.deny === undefined && typeof set.value === 'string') {
+      const theme = set.value
+      try {
+        await update($, themeAtom, () => theme)
+      } catch {
+        // the palette stays as it was
+      }
+    }
+    return set
+  }).catch(($, e, next) => next(e))
 
   // gh pr create names a PR this session made; a push or any gh pr command may have changed the list
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -414,7 +438,8 @@ export const register: Register = on => {
     const busy = await read($, busyAtom)
     const now = await $.clock.now()
     const width = e.props.bodyColumns
-    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r)}>{r.text}</Text>)
+    const pal = paletteOf(await read($, themeAtom))
+    const texts = (runs: Run[]) => runs.map(r => <Text {...style(r, pal)}>{r.text}</Text>)
 
     if (!repo) {
       const line = cache.error ? `pr-mod: no GitHub repo here (${cache.error})` : 'pr-mod: reading open PRs…'
@@ -433,10 +458,10 @@ export const register: Register = on => {
     const rows: RenderElement[] = []
     const refreshW = cols('Refresh') + BUTTON_CHROME_W
     const head = [
-      run(repo.nameWithOwner, { bold: true }),
+      run(repo.nameWithOwner, { dim: true }),
       run(' · ', { dim: true }),
-      run(String(cache.prs.length), { bold: true }),
-      run(' open'),
+      run(String(cache.prs.length), { bold: true, color: 'claude' }),
+      run(' open', { dim: true }),
       run(' · ', { dim: true }),
       run(cache.fetchedAt === null ? 'not fetched yet' : `fetched ${ago(now - cache.fetchedAt)}`, { dim: true }),
     ]
@@ -507,20 +532,21 @@ export const register: Register = on => {
     if (e.props.hasSurvey || !repo || cache.prs.length === 0) return next(e)
     const below = await next(e)
     const { Box, Text } = $.ui.resolve(e)
+    const pal = paletteOf(await read($, themeAtom))
     const c = bandCounts(cache.prs)
-    const runs: Run[] = [run('PR', { bold: true, color: 'claude' }), run(' '), run(String(c.open), { bold: true }), run(' open')]
+    const runs: Run[] = [run('PR', { bold: true, color: 'claude' }), run(' '), run(String(c.open), { bold: true, color: 'claude' }), run(' open', { dim: true })]
     const add = (count: number, text: string, look: Look) => {
       if (count > 0) runs.push(run(' · ', { dim: true }), run(text, look))
     }
     add(c.green, `✔ ${c.green} green`, { color: 'success' })
     add(c.red, `✖ ${c.red} CI red`, { color: 'error' })
     add(c.conflict, `⚠ ${c.conflict} conflict`, { color: 'warning' })
-    add(c.pending, `◌ ${c.pending} pending`, { color: PENDING })
+    add(c.pending, `◌ ${c.pending} pending`, { color: 'warning' })
     if (cache.error) runs.push(run(' · stale', { dim: true }))
     const rows: RenderElement[] = [
       <Box key="pr-mod" flexDirection="row">
         {clip(runs, e.props.bodyColumns).map(r => (
-          <Text {...style(r)}>{r.text}</Text>
+          <Text {...style(r, pal)}>{r.text}</Text>
         ))}
       </Box>,
     ]

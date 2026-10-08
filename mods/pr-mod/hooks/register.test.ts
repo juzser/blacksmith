@@ -507,7 +507,7 @@ describe('band', () => {
     expect((await ui.find({ type: 'Text', text: /^✔ 2 green$/ }))?.props.color).toBe('success')
     expect((await ui.find({ type: 'Text', text: /^✖ 1 CI red$/ }))?.props.color).toBe('error')
     expect((await ui.find({ type: 'Text', text: /^⚠ 1 conflict$/ }))?.props.color).toBe('warning')
-    expect((await ui.find({ type: 'Text', text: /^◌ 1 pending$/ }))?.props.color).toBe('#14b8a6')
+    expect((await ui.find({ type: 'Text', text: /^◌ 1 pending$/ }))?.props.color).toBe('warning')
   })
 
   test('one green PR reads PR 1 open · ✔ 1 green', async ($, on) => {
@@ -699,5 +699,91 @@ describe('polling', () => {
     expect(seen).toEqual([1, 2, 3, 4, 4])
     await prmod($)
     expect(await rowText(await mountPane($), 'pr:1')).toContain('… computing')
+  })
+})
+
+// ---------------------------------------------------------------- palette
+
+/** The `/config` theme row, as `$.config.list()` answers it; the same shape bs-mod reads. */
+function themed(on: On, theme: string): void {
+  on('config.list', () => ({
+    value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: theme, provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
+  }))
+  on('config.set', ($, e) => ({ value: e.value }))
+}
+
+const PENDING_PR = { mergeStateStatus: 'UNSTABLE', statusCheckRollup: [cr('gate', '', 'IN_PROGRESS')] }
+
+// the same hex values as bs-mod's palette: green success, red failure, yellow pending, pastel accent
+const LOOKS = [
+  ['dark', { green: '#a6e3a1', red: '#f38ba8', pending: '#f9e2af', accent: '#fab387' }],
+  ['dark-ansi', { green: '#a6e3a1', red: '#f38ba8', pending: '#f9e2af', accent: '#fab387' }],
+  ['light', { green: '#40a02b', red: '#d20f39', pending: '#df8e1d', accent: '#fe640b' }],
+  ['dark-daltonized', { green: 'success', red: 'error', pending: 'warning', accent: 'claude' }],
+  ['auto', { green: 'success', red: 'error', pending: 'warning', accent: 'claude' }],
+] as const
+
+describe('palette', () => {
+  for (const [theme, want] of LOOKS) {
+    test(`under ${theme} the band draws green, red and pending in the palette`, async ($, on) => {
+      const w = world(on)
+      themed(on, theme)
+      w.list = [raw(1), raw(2, RED), raw(3, PENDING_PR)]
+      await up($, on, w)
+      const ui = await mountBand($)
+      expect((await ui.find({ type: 'Text', text: /^✔ 1 green$/ }))?.props.color).toBe(want.green)
+      expect((await ui.find({ type: 'Text', text: /^✖ 1 CI red$/ }))?.props.color).toBe(want.red)
+      expect((await ui.find({ type: 'Text', text: /^◌ 1 pending$/ }))?.props.color).toBe(want.pending)
+      expect((await ui.find({ type: 'Text', text: /^PR$/ }))?.props.color).toBe(want.accent)
+    })
+
+    test(`under ${theme} a pane row draws green, red and pending in the palette`, async ($, on) => {
+      const w = world(on)
+      themed(on, theme)
+      w.list = [raw(1), raw(2, RED), raw(3, PENDING_PR)]
+      await up($, on, w)
+      await prmod($)
+      const ui = await mountPane($)
+      expect((await ui.find({ type: 'Text', text: /^✔ green$/ }))?.props.color).toBe(want.green)
+      expect((await ui.find({ type: 'Text', text: /^✖ CI red/ }))?.props.color).toBe(want.red)
+      expect((await ui.find({ type: 'Text', text: /^◌ pending$/ }))?.props.color).toBe(want.pending)
+    })
+  }
+
+  test('no theme read: the theme keys draw', async ($, on) => {
+    const w = world(on)
+    on('config.list', () => {
+      throw new Error('config unavailable')
+    })
+    w.list = [raw(1)]
+    await up($, on, w)
+    expect((await (await mountBand($)).find({ type: 'Text', text: /^✔ 1 green$/ }))?.props.color).toBe('success')
+  })
+
+  test('a theme set from dark to light turns the Mocha colors Latte on the next draw', async ($, on) => {
+    const w = world(on)
+    themed(on, 'dark')
+    w.list = [raw(1)]
+    await up($, on, w)
+    const ui = await mountBand($)
+    expect((await ui.find({ type: 'Text', text: /^✔ 1 green$/ }))?.props.color).toBe('#a6e3a1')
+    await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+    expect((await ui.find({ type: 'Text', text: /^✔ 1 green$/ }))?.props.color).toBe('#40a02b')
+  })
+
+  test('labels and secondary text are dim, marks and numbers are not', async ($, on) => {
+    const w = world(on)
+    themed(on, 'dark')
+    w.list = [raw(1)]
+    await up($, on, w)
+    await prmod($)
+    const band = await mountBand($)
+    expect((await band.find({ type: 'Text', text: /^ open$/ }))?.props.dimColor).toBe(true)
+    expect((await band.find({ type: 'Text', text: /^✔ 1 green$/ }))?.props.dimColor).toBeUndefined()
+    const pane = await mountPane($)
+    expect((await pane.find({ type: 'Text', text: /^acme\/widgets$/ }))?.props.dimColor).toBe(true)
+    expect((await pane.find({ type: 'Text', text: /^ open$/ }))?.props.dimColor).toBe(true)
+    expect((await pane.find({ type: 'Text', text: /^fetched / }))?.props.dimColor).toBe(true)
+    expect((await pane.find({ type: 'Text', text: /^✔ green$/ }))?.props.dimColor).toBeUndefined()
   })
 })
