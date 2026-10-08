@@ -516,6 +516,30 @@ else
 fi
 
 echo
+echo "-- bs-mod plugin (only if claude is on PATH) --"
+# mods/bs-mod is a Claude Code plugin module: its tests import Claude Code's
+# own test kit and run only in its plugin runner, so vitest, biome and the
+# tsconfigs never see them. Unlike gitleaks and pnpm above, a missing claude
+# stays a SKIP under CI: CI has no claude to install, and the marketplace
+# wiring is still guarded there by pluginManifest.test.ts.
+if command -v claude >/dev/null 2>&1; then
+  if claude plugin validate mods/bs-mod; then
+    echo "OK   claude plugin validate mods/bs-mod"
+  else
+    echo "FAIL claude plugin validate mods/bs-mod"
+    FAIL=1
+  fi
+  if claude plugin test mods/bs-mod; then
+    echo "OK   claude plugin test mods/bs-mod"
+  else
+    echo "FAIL claude plugin test mods/bs-mod"
+    FAIL=1
+  fi
+else
+  echo "SKIP claude not found on PATH — mods/bs-mod not validated or tested (its tests run only in Claude Code's plugin runner)."
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "== PASS =="
   exit 0
