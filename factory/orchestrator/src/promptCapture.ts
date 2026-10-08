@@ -145,6 +145,8 @@ export function resolveLine(cwd: string, ctx: CaptureContext): string | null {
 const CLI_ID = /^[0-9a-f-]{8,64}$/i;
 const COMMAND_NAME = /^[A-Za-z0-9_.:-]+$/;
 const MAIN_THREAD = new Set(['user', 'operator', 'orchestrator']);
+/** Wave logs belong to their wave-runner node (architecture §18 rule 4). */
+const WAVE_RUNNER = 'wave-runner';
 const FALLBACK_WINDOW_MS = 72 * 3600 * 1000;
 const DEDUPE_MS = 10_000;
 const SCAN_LIMIT = 20;
@@ -190,7 +192,7 @@ async function findMainLog(
     try {
       if (!readFileSync(log.file, 'utf8').includes(cli)) continue;
       const events = await readEvents(log.id, { stateDir: eventsDir });
-      if (events[0]?.record.actor === 'wave-runner') continue;
+      if (events[0]?.record.actor === WAVE_RUNNER) continue;
       if (events.some((e) => e.record.event_type === 'epic-closed')) continue;
       const hit = newestMain(events, cli);
       if (hit !== undefined && (best === null || hit.record.ts > best.ts)) {
