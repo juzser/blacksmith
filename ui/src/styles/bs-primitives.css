@@ -3001,9 +3001,11 @@ summary.bs-inbox__group-head {
 /* The card's one open control: an empty native button laid over the whole card
    (inset -1px = the border box), so a click anywhere opens it and its focus
    ring surrounds the card as it did when the card itself was the focus stop.
-   The title text, the copy icon and the "Open PR" link are not inside it; the
-   last two are raised above it so they keep their own clicks. A fix row works
-   the same, over the row's own box. */
+   Nothing is inside it. The controls below are raised above it: the copy icon
+   and the "Open PR" link keep their own clicks, and the agent chip, the time
+   and the "Waits for" line keep their hover text (a click on those three still
+   opens the card through the card's own click handler). A fix row works the
+   same, over the row's own box, with its chip and time raised. */
 .bs-kanban-card__open,
 .bs-kanban-group__row-open {
   position: absolute;
