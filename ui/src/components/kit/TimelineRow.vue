@@ -10,6 +10,7 @@ import { ChevronDown, ChevronRight, CircleCheck, CircleX } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { formatTime } from '../../lib/format.js';
 import { isPastStaleWindow } from '../../lib/liveness.js';
+import { foreignStoreId, storeKey } from '../../lib/storeKey.js';
 // DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
 // replaces HH:MM everywhere this row renders (Activity, task History, Home
 // compact); RelativeTime itself carries the absolute time in its tooltip.
@@ -56,13 +57,18 @@ const props = withDefaults(
      * "a humanized label ... outcome Tag"), same slot the general row table
      * gives a gate's Passed/Failed status tag. */
     tag?: { tone: KitTone; label: string } | null;
+    /** Activity in a multi-project feed only: adds a Project pair to the
+     * expanded detail. Off elsewhere, so Home and task History do not move. */
+    showProject?: boolean;
   }>(),
   { linkable: true },
 );
 const emit = defineEmits<{
-  toggle: [eventId: string];
-  selectTask: [taskId: string];
-  becauseOf: [promptId: string];
+  // The id the row reports is storeKey(entry, eventId): a bare event id for a
+  // row with no store, so every caller outside a multi-store read is unchanged.
+  toggle: [rowKey: string];
+  selectTask: [taskId: string, store: string | undefined];
+  becauseOf: [promptKey: string];
 }>();
 
 const kind = computed(() => kindFor(props.entry));
@@ -130,15 +136,20 @@ const hasDetails = computed(
 // (sessionsSelection.ts) when the entry carries one; a plain string route
 // when it does not, so a stray entry with no sessionId still lands on the
 // list rather than on `/sessions?session=`.
+const rowKey = computed(() => storeKey(props.entry, props.entry.eventId));
+const store = computed(() => foreignStoreId(props.entry));
 const sessionLink = computed(() =>
   props.entry.sessionId
-    ? { path: '/sessions', query: { session: props.entry.sessionId } }
+    ? {
+        path: '/sessions',
+        query: { session: props.entry.sessionId, ...(store.value ? { store: store.value } : {}) },
+      }
     : '/sessions',
 );
 
 function onBecauseOf() {
   const promptId = props.entry.nearestPromptId;
-  if (promptId) emit('becauseOf', promptId);
+  if (promptId) emit('becauseOf', storeKey(props.entry, promptId));
 }
 </script>
 
@@ -147,7 +158,7 @@ function onBecauseOf() {
     class="bs-timeline-row"
     :class="{ 'bs-timeline-row--rail': variant === 'rail', 'bs-timeline-row--compact': variant === 'compact' }"
     :data-kind="kind"
-    :id="`activity-row-${entry.eventId}`"
+    :id="`activity-row-${rowKey}`"
   >
     <div class="bs-timeline-row__body">
       <div class="bs-timeline-row__head">
@@ -159,7 +170,7 @@ function onBecauseOf() {
           v-if="entry.taskId && linkable"
           type="button"
           class="bs-timeline-row__title bs-timeline-row__title--link"
-          @click="emit('selectTask', entry.taskId)"
+          @click="emit('selectTask', entry.taskId, store)"
         >
           <span class="bs-timeline-row__title-label">{{ title }}</span>
         </button>
@@ -187,7 +198,7 @@ function onBecauseOf() {
       <dl
         v-if="hasDetails"
         v-show="expanded"
-        :id="`activity-row-detail-${entry.eventId}`"
+        :id="`activity-row-detail-${rowKey}`"
         class="bs-timeline-row__detail"
       >
         <dt>Kind</dt>
@@ -206,6 +217,10 @@ function onBecauseOf() {
           <dd>{{ tag.label }}</dd>
         </template>
         <template v-if="variant !== 'rail'">
+          <template v-if="showProject && entry.project">
+            <dt>Project</dt>
+            <dd>{{ entry.project }}</dd>
+          </template>
           <template v-if="entry.taskId">
             <dt>Task</dt>
             <dd>{{ entry.taskId }}</dd>
@@ -231,8 +246,8 @@ function onBecauseOf() {
       label="Show details"
       size="sm"
       :aria-expanded="expanded"
-      :aria-controls="`activity-row-detail-${entry.eventId}`"
-      @click="emit('toggle', entry.eventId)"
+      :aria-controls="`activity-row-detail-${rowKey}`"
+      @click="emit('toggle', rowKey)"
     />
     <!-- Fix round item 4 (mock `.ev` grid: always 3 columns): a row with no
          details still reserves the chevron's track, or its time column

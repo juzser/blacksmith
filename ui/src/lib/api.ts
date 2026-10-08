@@ -803,6 +803,8 @@ export interface TimelinePage {
     run?: DispatchRun;
     /** Present only on `Gate` rows; null when the counts cannot be derived. */
     gateCounts?: { passed: number; failed: number } | null;
+    /** Present on rows of a `stores=all` or foreign-`store` read. */
+    store?: StoreRef;
   })[];
   nextBefore: string | null;
   newestId: string | null;
@@ -815,6 +817,10 @@ export interface TimelinePageParams extends TimelineParams {
   kinds?: EventKind[];
   /** Narrow to these factory sessions (one `sessions=` each); never with `session`. */
   sessions?: string[];
+  /** `all` reads every store (Activity with no explicit filter); never with `store` or a task/epic/session filter. */
+  stores?: 'all';
+  /** Reads this one store instead of the served one. */
+  store?: string;
 }
 
 /** Paged mode (newest-first): present whenever before/after/limit is set, so always here. */
@@ -831,6 +837,7 @@ export function fetchTimelinePage(params: TimelinePageParams = {}): Promise<Time
   if (params.after) q.set('after', params.after);
   if (params.limit !== undefined) q.set('limit', String(params.limit));
   applySessions(q, params.sessions);
+  applyStores(q, params.stores, params.store);
   const qs = q.toString();
   return getJson(`/api/timeline${qs ? `?${qs}` : ''}`);
 }
@@ -851,6 +858,12 @@ export function fetchKanban(
 /** One `sessions=` per id (an id may hold a comma); undefined writes nothing. */
 function applySessions(q: URLSearchParams, sessions?: string[]): void {
   for (const id of sessions ?? []) q.append('sessions', id);
+}
+
+/** `stores=all` fans out; `store=<id>` names one store. Neither: the served store. */
+function applyStores(q: URLSearchParams, stores?: 'all', store?: string): void {
+  if (stores) q.set('stores', stores);
+  if (store) q.set('store', store);
 }
 
 /** `?store=` names a foreign store; absent reads the served store. */
@@ -909,11 +922,14 @@ export function fetchErrors(
   session?: SessionScope,
   project?: string,
   sessions?: string[],
+  stores?: 'all',
+  store?: string,
 ): Promise<ErrorsResult> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
   applySessions(q, sessions);
+  applyStores(q, stores, store);
   const qs = q.toString();
   return getJson(`/api/errors${qs ? `?${qs}` : ''}`);
 }

@@ -46,6 +46,7 @@ import { pluralize } from '../lib/format.js';
 import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../lib/liveFeed.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
+import { storeKey } from '../lib/storeKey.js';
 import { severityKitTone } from '../lib/taxonomy.js';
 import {
   type ActivityEntry,
@@ -54,8 +55,9 @@ import {
   type EventKind,
   groupByDay,
   groupByRoleMinute,
+  isMultiProjectFeed,
   sessionDividerBefore,
-  sessionDividerLabel,
+  sessionDividerText,
 } from '../lib/timelineDisplay.js';
 
 const route = useRoute();
@@ -147,12 +149,22 @@ const epicFilter = computed(() =>
 
 // S9: Active/All scope (ds-spec §4.3 Scope). An explicit filter -- a session,
 // task or epic in the URL -- names its own scope and wins over the toggle.
-const { view, active, otherStores, scopeTo } = useActivePageScope(
+const { view, active, scopeTo } = useActivePageScope(
   () =>
     sessionScope.value !== undefined ||
     taskFilter.value !== undefined ||
     epicFilter.value !== undefined,
+  { allStores: true },
 );
+
+// Which stores a request reads. No explicit filter: every store. An explicit
+// filter names ids that repeat between projects, so it keeps the old request,
+// plus the one store a link out of a foreign row names (`?store=`).
+const storeFilter = computed(() =>
+  typeof route.query.store === 'string' ? route.query.store : undefined,
+);
+const storeParams = () =>
+  view.value.mode === 'explicit' ? { store: storeFilter.value } : { stores: 'all' as const };
 
 // DS6 PR4c: the class-summary cards and their two charts only need data
 // while the Errors kind is selected, fetched separately from the main feed
@@ -174,7 +186,14 @@ async function loadErrorsData() {
   }
   errorsLoading.value = true;
   try {
-    const result = await fetchErrors(sessionScope.value, project.value, view.value.sessions);
+    const { stores, store } = storeParams();
+    const result = await fetchErrors(
+      sessionScope.value,
+      project.value,
+      view.value.sessions,
+      stores,
+      store,
+    );
     if (seq === errorsSeq) errorsData.value = result;
   } finally {
     if (seq === errorsSeq) errorsLoading.value = false;
@@ -182,7 +201,7 @@ async function loadErrorsData() {
 }
 
 watch(
-  [kindFilter, project, sessionKey, () => view.value.key],
+  [kindFilter, project, sessionKey, storeFilter, () => view.value.key],
   () => {
     if (kindFilter.value === 'error') loadErrorsData();
   },
@@ -291,6 +310,7 @@ async function load() {
       kinds,
       limit: 50,
       sessions: view.value.sessions,
+      ...storeParams(),
     });
     if (feedGen.isStale(gen)) return;
     page.value = fetched;
@@ -308,7 +328,10 @@ async function load() {
 }
 
 onMounted(load);
-watch([project, sessionKey, kindFilter, taskFilter, epicFilter, () => view.value.key], load);
+watch(
+  [project, sessionKey, kindFilter, taskFilter, epicFilter, storeFilter, () => view.value.key],
+  load,
+);
 
 // DS6 PR4b round 3 item 1: once the feed is loaded, the same `usePoll`
 // trigger (15s fallback, stream advance, global Refresh) fetches only rows
@@ -333,6 +356,7 @@ async function poll() {
       kinds,
       limit: 50,
       sessions: view.value.sessions,
+      ...storeParams(),
       after: cursor ?? undefined,
     });
     if (!page.value || feedGen.isStale(gen)) return;
@@ -393,6 +417,7 @@ async function loadOlder() {
         : undefined,
       limit: 50,
       sessions: view.value.sessions,
+      ...storeParams(),
       before: page.value.nextBefore,
     });
     if (feedGen.isStale(gen)) return;
@@ -410,11 +435,17 @@ async function loadOlder() {
 }
 
 const entries = computed<ActivityEntry[]>(() => page.value?.entries ?? []);
-const promptTsById = computed(() => new Map(entries.value.map((e) => [e.eventId, e.ts])));
+// Event ids repeat between stores, so every lookup and DOM id on this page is
+// keyed by storeKey (a bare id for a row with no store).
+const keyOf = (e: ActivityEntry): string => storeKey(e, e.eventId);
+const promptTsById = computed(() => new Map(entries.value.map((e) => [keyOf(e), e.ts])));
 const causedCountByPromptId = computed(() => {
   const counts = new Map<string, number>();
   for (const e of entries.value) {
-    if (e.nearestPromptId) counts.set(e.nearestPromptId, (counts.get(e.nearestPromptId) ?? 0) + 1);
+    if (e.nearestPromptId) {
+      const k = storeKey(e, e.nearestPromptId);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
   }
   return counts;
 });
@@ -424,37 +455,53 @@ const dayGroups = computed(() => groupByDay(entries.value, new Date().toISOStrin
 // DS6 PR4b item 3: a "Session: <title>" divider between adjacent rows whose
 // session differs, keyed off the whole feed's order (not per day-group), so a
 // session that spans a day boundary still only breaks once per real change.
-const indexById = computed(() => new Map(entries.value.map((e, i) => [e.eventId, i])));
+const indexById = computed(() => new Map(entries.value.map((e, i) => [keyOf(e), i])));
+const multiProject = computed(() => isMultiProjectFeed(entries.value));
+// In a multi-project feed the first single row also gets a divider, so the
+// first block is labelled. A feed that opens with a "N dispatches" group has
+// no divider on the group; its first single row after it gets this one.
+const firstRowKey = computed(() => {
+  if (!multiProject.value) return null;
+  for (const group of dayGroups.value) {
+    const first = groupByRoleMinute(group.items).find((i) => i.kind === 'entry');
+    if (first?.entry) return keyOf(first.entry);
+  }
+  return null;
+});
 function dividerBefore(entry: ActivityEntry): boolean {
-  const idx = indexById.value.get(entry.eventId);
-  return idx !== undefined && sessionDividerBefore(entries.value, idx);
+  const idx = indexById.value.get(keyOf(entry));
+  if (idx === undefined) return false;
+  return keyOf(entry) === firstRowKey.value || sessionDividerBefore(entries.value, idx);
 }
 
 function ctxFor(entry: ActivityEntry) {
   const promptTs = entry.nearestPromptId
-    ? (promptTsById.value.get(entry.nearestPromptId) ?? null)
+    ? (promptTsById.value.get(storeKey(entry, entry.nearestPromptId)) ?? null)
     : undefined;
-  const causedCount = causedCountByPromptId.value.get(entry.eventId);
+  const causedCount = causedCountByPromptId.value.get(keyOf(entry));
   return { promptTs, causedCount };
 }
 
-function toggleRow(eventId: string) {
-  expanded.value = toggleExpanded(expanded.value, eventId);
+function toggleRow(rowKey: string) {
+  expanded.value = toggleExpanded(expanded.value, rowKey);
   saveExpanded(sessionStorage, STORAGE_KEY, expanded.value);
 }
 
 function expandAll() {
-  expanded.value = new Set(entries.value.map((e) => e.eventId));
+  expanded.value = new Set(entries.value.map(keyOf));
   saveExpanded(sessionStorage, STORAGE_KEY, expanded.value);
 }
 
-function goToTask(taskId: string) {
-  router.push(`/tasks/${encodeURIComponent(taskId)}`);
+function goToTask(taskId: string, store?: string) {
+  router.push({
+    path: `/tasks/${encodeURIComponent(taskId)}`,
+    ...(store ? { query: { store } } : {}),
+  });
 }
 
-function becauseOf(promptId: string) {
-  highlighted.value = promptId;
-  scrollToTimelineRow(promptId);
+function becauseOf(promptKey: string) {
+  highlighted.value = promptKey;
+  scrollToTimelineRow(promptKey);
 }
 </script>
 
@@ -525,12 +572,6 @@ function becauseOf(promptId: string) {
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
     </template>
-    <p v-if="otherStores.length > 0" class="bs-sessions__quiet">
-      {{ pluralize(otherStores.length, 'active project') }}
-      {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
-      ({{ otherStores.join(', ') }}) ·
-      <RouterLink to="/overview">see Home</RouterLink>
-    </p>
 
     <div v-if="kindFilter === 'error' && view.fetchable" class="bs-activity-errors">
       <div class="bs-activity-errors__charts">
@@ -607,19 +648,20 @@ function becauseOf(promptId: string) {
           <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
           <div class="timeline-feed">
             <ol style="list-style: none; margin: 0; padding: 0">
-              <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
+              <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : keyOf(item.entry!)">
                 <li v-if="item.kind === 'group'" class="bs-timeline-row">
                   {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
                 </li>
                 <template v-else>
                   <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
-                    Session: {{ sessionDividerLabel(item.entry!) }}
+                    {{ sessionDividerText(item.entry!, multiProject) }}
                   </li>
                   <TimelineRow
                     :entry="item.entry!"
-                    :expanded="expanded.has(item.entry!.eventId)"
+                    :expanded="expanded.has(keyOf(item.entry!))"
                     :ctx="ctxFor(item.entry!)"
-                    :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
+                    :show-project="multiProject"
+                    :class="{ 'bs-timeline-row--highlight': highlighted === keyOf(item.entry!) }"
                     @toggle="toggleRow"
                     @select-task="goToTask"
                     @because-of="becauseOf"

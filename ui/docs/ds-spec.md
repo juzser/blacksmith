@@ -1188,20 +1188,28 @@ the URL) sits at the right of the toolbar beside Expand all; on a phone it is th
 header's action, above the kind tabs, with 44px targets. Active narrows the feed, its poll,
 Load older, the new-events pill and the error cards to the sessions a live CLI session is
 writing into (`factorySessions` of `GET /api/active-scope`, sent as repeated `sessions`
-query values, at most 200); All sends none. Each edge line is one muted line in Sessions'
+query values, at most 200, each qualified `<storeId>/<sessionId>` because Activity reads
+every store); All sends none. With no explicit filter Activity reads every store
+(`stores=all` on `/api/timeline` and `/api/errors`): rows carry their store, the feed is one
+merged list in log order, and a row's links to its task and session carry `?store=` when
+the row is foreign. No store label is drawn, but when the loaded feed spans more than one project the
+project is named: in each session divider (`<project> · Session: <title>`), in a divider
+above the feed's first row, and in a `Project` line of the expanded row (operator decision
+of 2026-10-08; it beats the mock). Each edge line is one muted line in Sessions'
 style, ending in a "Show all" link, and takes the page's own gap, as Sessions' lines do:
 with no live CLI session at all, "Nothing is active right now. · Show all"; with live
 sessions but none on an epic, "N live sessions, none on an epic · Show all"; with a
-measured answer but no active session in the served store, "No active session in this
-view · Show all". While one of these shows, no feed or error card is drawn and no request
+measured answer but no active session in any store, "No active session in this view ·
+Show all". While one of these shows, no feed or error card is drawn and no request
 is made. When the live sessions cannot be read, Active shows everything as All does, with
 "Live sessions can't be read here" (the toggle stays). When more than 200 sessions are
-active in the served store, Active also shows everything, with "Too many active sessions
-to narrow; showing all" (the toggle stays, no `sessions` is sent). Beside the page,
-"N active projects are in another store (names) · see Home" for active projects it cannot
-list. Until the first answer arrives nothing is fetched and nothing is claimed. Under an
+active, counted across all stores, Active also shows everything, with "Too many active
+sessions to narrow; showing all" (the toggle stays, no `sessions` is sent). There is no
+"in another store" line here: every store is read. Until the first answer arrives nothing is fetched and nothing is claimed. Under an
 explicit filter (`?session=`, `?task=`, `?epic=`) the filter wins: the toggle and these
-lines are not shown and no `sessions` is sent. This departs from Kanban, which keeps its
+lines are not shown and no `sessions` is sent; the request stays on one store (`store=<id>`
+when the URL carries one, as a foreign row's link does), because task, epic and session ids
+repeat between stores. This departs from Kanban, which keeps its
 toggle under `?session=`: here the filter already names the scope.
 
 ### 4.4 Cost & quality (Analytics, cut to ~4 metrics, plus a token-trend section)

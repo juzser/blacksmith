@@ -7,6 +7,7 @@ import { formatCompactNumber, formatElapsed, formatTime, taskLabel } from './for
 import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
+import type { StoreRef } from './storeKey.js';
 
 /** The shape `/api/timeline`'s paged mode (`fetchTimelinePage`, api.ts) adds
  * on top of a plain `TimelineEntry`: a server-computed `kind`, the nearest
@@ -19,6 +20,8 @@ export interface ActivityEntry extends TimelineEntry {
   nearestPromptId?: string | null;
   run?: DispatchRun;
   gateCounts?: { passed: number; failed: number } | null;
+  /** Set on a row of a read that spans stores; event ids repeat between stores. */
+  store?: StoreRef;
 }
 
 /** Extra context `metaFor` needs but cannot derive from one row alone: the
@@ -1121,12 +1124,17 @@ function minuteKey(ts: string): string {
  * `sessionTitle`; the compact Home variant never calls this, so it never
  * renders dividers (brief item 3).
  */
-export function sessionDividerBefore(entries: readonly TimelineEntry[], index: number): boolean {
+export function sessionDividerBefore(
+  entries: readonly (TimelineEntry & { store?: StoreRef })[],
+  index: number,
+): boolean {
   if (index <= 0 || index >= entries.length) return false;
   const current = entries[index];
   const previous = entries[index - 1];
   return (
-    current !== undefined && previous !== undefined && current.sessionId !== previous.sessionId
+    current !== undefined &&
+    previous !== undefined &&
+    (current.sessionId !== previous.sessionId || current.store?.id !== previous.store?.id)
   );
 }
 
@@ -1139,6 +1147,32 @@ export function sessionDividerBefore(entries: readonly TimelineEntry[], index: n
  */
 export function sessionDividerLabel(entry: TimelineEntry): string {
   return entry.sessionTitle || entry.sessionId;
+}
+
+/**
+ * True when the loaded feed holds more than one distinct non-null `project`.
+ * A store id is not a project (one store can hold several), so only the
+ * entry's own `project` counts.
+ */
+export function isMultiProjectFeed(entries: readonly TimelineEntry[]): boolean {
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (e.project) {
+      seen.add(e.project);
+      if (seen.size > 1) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The divider's full text. A multi-project feed names the entry's project
+ * ("project-b · Session: epic-1"); an entry with no project, or any
+ * one-project feed, reads "Session: <title>" as before.
+ */
+export function sessionDividerText(entry: TimelineEntry, multiProject: boolean): string {
+  const text = `Session: ${sessionDividerLabel(entry)}`;
+  return multiProject && entry.project ? `${entry.project} · ${text}` : text;
 }
 
 export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {

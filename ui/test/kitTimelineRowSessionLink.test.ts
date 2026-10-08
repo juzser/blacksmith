@@ -20,7 +20,7 @@ describe('kit/TimelineRow.vue Session detail link (deep link fix)', () => {
 
   it('falls back to the plain /sessions path when sessionId is empty', () => {
     expect(TIMELINE_ROW).toMatch(
-      /const sessionLink = computed\(\(\) =>\s*props\.entry\.sessionId\s*\?\s*\{ path: '\/sessions', query: \{ session: props\.entry\.sessionId \} \}\s*:\s*'\/sessions',?\s*\);/,
+      /const sessionLink = computed\(\(\) =>\s*props\.entry\.sessionId\s*\?\s*\{\s*path: '\/sessions',\s*query: \{ session: props\.entry\.sessionId,[\s\S]*?\}\s*:\s*'\/sessions',?\s*\);/,
     );
   });
 });
