@@ -112,8 +112,6 @@ declare module 'claude-code' {
       isHidden: boolean
       /** the clock's minute, written each tick it changes, so elapsed times redraw */
       minute: number
-      /** the newest running epic of the session's own roots, watched while nothing is pinned and no epic of its own can be shown; null otherwise */
-      watched: string | null
       /** per shown epic with no admission tier: its plan's effort (fold.ts tierOf's fallback), cached so the plan file is read once per plan version */
       planTiers: Record<string, PlanTier>
       /** the band's active tab; survives a reload, Overview by default */

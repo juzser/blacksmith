@@ -38,7 +38,7 @@ shows it once installed.
 - **Toasts** report a wave admitted, a gate failure, a merge, a waiver
   pending, an escalation, an error above minor severity, a spec change
   proposed, and the epic closing. They come from this session's epics and a
-  pinned one, never from a watched one. The log a session starts on, and any
+  pinned one. The log a session starts on, and any
   event older than two minutes, never toasts, so opening a session on a long
   log stays quiet.
 - **Colors.** The band and the pane color by meaning in Catppuccin pastels:
@@ -49,10 +49,7 @@ shows it once installed.
   dividers take a soft white under Mocha and Latte, and the theme's `inactive`
   grey otherwise. Changing the theme repaints
   the HUD at once.
-- **Watching.** Normally the HUD follows the epics whose events name this
-  session. When nothing is pinned and the session has no such epic, it
-  watches the newest running epic under the session's own roots instead, and
-  sends no toasts for it.
+- **Closed epics.** A closed epic leaves the band unless it is pinned.
 
 ## The command
 
@@ -77,9 +74,6 @@ It looks in these directories:
   `BS_HOME`/`SMITH_HOME`, or that runs a clone's
   `factory/orchestrator/dist/cli.js`, teaches the mod that root's
   `state/events`. It keeps up to 20 learned roots.
-
-The first three entries are the session's own roots. A learned root is shared by
-every session, so the HUD searches only its own roots for an epic to watch.
 
 ## Developing it
 

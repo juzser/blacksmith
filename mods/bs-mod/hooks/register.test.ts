@@ -827,9 +827,8 @@ describe('band always', () => {
     })
   }
 
-  for (const how of ['its own', 'watched', 'pinned'] as const) {
+  for (const how of ['its own', 'pinned'] as const) {
     test(`the dim line never says no running epic while an epic is in view (${how})`, async ($, on) => {
-      // other-1 last ran three days ago: web-ux-4 is the newest running epic
       const w = how === 'its own' ? world(on, seed()) : world(on, seed(), 'sid-none')
       w.mtimes.set(`${ROOT}/${OTHER_S}.jsonl`, T0 - 3 * 1440 * MIN)
       await up($, on)
@@ -938,7 +937,8 @@ describe('pane', () => {
     mock.env(on, { HOME: '/home/u' })
     await boot($, clock)
 
-    await bs($, '')
+    // a closed epic is not the session's own any more, so it is pinned to be drawn
+    await bs($, 'web-ux-4')
     const pane = await $.ui.mount({
       plugin: 'bs-mod',
       surface: 'terminal',
@@ -1283,59 +1283,45 @@ describe('pinning', () => {
   })
 })
 
-describe('watching', () => {
+describe('own epics only', () => {
   const OTHER_F = `${ROOT}/${OTHER_S}.jsonl`
-  const DAY = 1440 * MIN
-  const WATCHING = 'bs-mod pane opened on web-ux-4 (watching the newest running epic).'
-
-  /** The seed as a session that never ran bs sees it: web-ux-4 was written now, other-1 three days ago. */
-  function watcher(on: On, files = seed(), cwd = CWD): World {
-    const w = world(on, files, 'sid-none', cwd)
-    w.mtimes.set(OTHER_F, T0 - 3 * DAY)
-    return w
-  }
+  const NO_EPIC = 'No bs epic in this session yet; /bs-mod <epic-id> pins one.'
+  const CLOSE = line(EPIC_S, SID, 'epic-closed', 'web-ux-4/integration', T0 - 2 * MIN, { epic_id: 'web-ux-4', closed_by: 'operator', machine_verdict: 'met', summary: 's' })
 
   function band($: Engine) {
     return $.ui.mount({ plugin: 'bs-mod', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   }
 
-  function pane($: Engine) {
-    return $.ui.mount({ plugin: 'bs-mod', surface: 'terminal', component: 'Pane', requestId: 'bs-mod', props: PANE, viewport: { columns: 120, rows: 40 } })
-  }
-
-  test('a session with no epic of its own watches the newest running epic of its own roots', async ($, on) => {
-    const w = watcher(on)
+  async function up($: Engine, on: On, cwd = CWD): Promise<void> {
     const clock = mock.clock(on, { now: T0 })
     mock.store(on)
     mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
+    await boot($, clock, cwd)
+  }
+
+  /** seed() with the session's epic closed */
+  function closedSeed(): Map<string, string> {
+    const files = seed()
+    files.set(EPIC_F, (files.get(EPIC_F) ?? '') + CLOSE)
+    return files
+  }
+
+  test('a session with no epic of its own shows the idle band, though another session runs an epic in its cwd', async ($, on) => {
+    const w = world(on, seed(), 'sid-none')
+    await up($, on)
 
     const ui = await band($)
-    expect(await rowText(ui, 'head')).toMatch(/^watching web-ux-4 · wave 4/)
-    expect(await shown(ui)).toContain('1/3 done')
-    // only the marker and the name are dim; the chip gives way to the plain name
-    expect((await ui.find({ type: 'Text', text: /^watching$/ }))?.props).toEqual({ dimColor: true })
-    expect((await ui.find({ type: 'Text', text: /^web-ux-4$/ }))?.props).toEqual({ dimColor: true })
-    expect(await ui.find({ type: 'Text', text: /^ web-ux-4 $/ })).toBeUndefined()
-    expect((await ui.find({ type: 'Text', text: /^wave 4$/ }))?.props).toEqual({ color: 'permission', bold: true })
-    // the old band's `Now coder task-16 (12m)` is a Current row, the watched epic still marked dim
-    await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, 'head')).toMatch(/^wave 4  .* · watching web-ux-4$/)
-    expect((await ui.find({ type: 'Text', text: /^watching web-ux-4$/ }))?.props).toEqual({ dimColor: true })
-    expect(await rowText(ui, `task:${T16}`)).toMatch(/task-16.*coder.*12m/)
-    expect((await ui.find({ type: 'Text', text: /^coder$/ }))?.props.color).toBe('claude')
-
-    expect((await bs($, '')).text).toBe(WATCHING)
-    expect(w.opened).toEqual(['bs-mod'])
-    const p = await pane($)
-    expect(await shown(p)).toContain('Remote error and phone header')
-    expect((await p.find({ type: 'Text', text: /^watching · newest running epic$/ }))?.props).toEqual({ dimColor: true })
-    // the status line is the same as for an epic of its own
-    expect(w.statuses[w.statuses.length - 1]).toBe('web-ux-4 · w4 · 1/3')
+    expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
+    expect(await rowText(ui, 'idle')).toBe(IDLE_LINE)
+    expect(await shown(ui)).not.toContain('web-ux-4')
+    expect(await shown(ui)).not.toContain('watching')
+    expect((await bs($, '')).text).toBe(NO_EPIC)
+    expect(w.opened).toEqual([])
+    expect(w.statuses[w.statuses.length - 1]).toBeUndefined()
   })
 
-  test('a log only under a learned root is never watched, though a pin still finds it', async ($, on) => {
-    watcher(on, seed(), '/w/elsewhere')
+  test('a log only under a learned root is never shown, though a pin still finds it', async ($, on) => {
+    world(on, seed(), 'sid-none', '/w/elsewhere')
     const clock = mock.clock(on, { now: T0 })
     mock.store(on, { roots: [ROOT] })
     mock.env(on, { HOME: '/home/u' })
@@ -1344,162 +1330,58 @@ describe('watching', () => {
     const ui = await band($)
     expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
     expect(await rowText(ui, 'idle')).toBe(IDLE_LINE)
-    expect((await bs($, '')).text).toBe('No bs epic in this session yet; /bs-mod <epic-id> pins one.')
+    expect((await bs($, '')).text).toBe(NO_EPIC)
     expect((await bs($, 'web-ux-4')).text).toBe('Pinned web-ux-4; /bs-mod auto follows this session again.')
   })
 
-  test('a closed epic is not watched: the next newest running one is', async ($, on) => {
-    const files = seed()
-    files.set(EPIC_F, (files.get(EPIC_F) ?? '') +
-      line(EPIC_S, 'sid-o', 'epic-closed', 'web-ux-4/integration', T0 - 2 * MIN, { epic_id: 'web-ux-4', closed_by: 'operator', machine_verdict: 'met', summary: 's' }))
-    watcher(on, files)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
+  test('a session whose only epic is closed shows the idle band', async ($, on) => {
+    const w = world(on, closedSeed())
+    await up($, on)
 
     const ui = await band($)
-    expect(await rowText(ui, 'head')).toMatch(/^watching other-1 · wave 1/)
+    expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
     expect(await shown(ui)).not.toContain('web-ux-4')
+    expect((await bs($, '')).text).toBe(NO_EPIC)
+    expect(w.opened).toEqual([])
   })
 
-  test('an epic idle past the cutoff is not watched', async ($, on) => {
-    const w = watcher(on)
-    for (const p of [EPIC_F, WAVE_F]) w.mtimes.set(p, T0 - 7 * DAY - 1)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    expect(await rowText(await band($), 'head')).toMatch(/^watching other-1 · wave 1/)
-  })
-
-  test('of two running epics the one written last is watched', async ($, on) => {
-    const w = watcher(on)
-    w.mtimes.set(OTHER_F, T0 - MIN)
-    for (const p of [EPIC_F, WAVE_F]) w.mtimes.set(p, T0 - 5 * MIN)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    expect(await rowText(await band($), 'head')).toMatch(/^watching other-1 · wave 1/)
-  })
-
-  test('a fresh event of the watched epic folds but toasts nothing', async ($, on) => {
-    const w = watcher(on)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    append(w, WAVE_F, line(WAVE_S, 'sid-w', 'gate-outcome', T17, T0 + 1000, { outcome: 'blocked', reason: 'unit' }))
-    await clock.advance(4000)
-    expect(w.toasts).toEqual([])
-    await bs($, '')
-    expect(await shown(await pane($))).toContain('✖ gate fail task-17 (unit)')
-  })
-
-  test('once the session writes to an epic of its own, the band shows it unmarked and lets the watched one go', async ($, on) => {
-    const w = watcher(on)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
+  test('a closed epic still shows while it is pinned; /bs-mod auto lets it go', async ($, on) => {
+    world(on, closedSeed())
+    await up($, on)
 
     const ui = await band($)
-    expect(await rowText(ui, 'head')).toMatch(/^watching web-ux-4 · wave 4/)
-    append(w, OTHER_F, line(OTHER_S, 'sid-none', 'session-start', null, T0 + 1000))
-    await clock.advance(4000)
-    expect(await rowText(ui, 'head')).toMatch(/^ other-1 \s*· wave 1/)
-    expect(await shown(ui)).not.toContain('watching')
-    expect((await bs($, '')).text).toBe('bs-mod pane opened on other-1.')
-
-    // web-ux-4 is no longer read, so its fresh failure neither folds nor toasts
-    w.tails.length = 0
-    append(w, WAVE_F, line(WAVE_S, 'sid-w', 'gate-outcome', T17, T0 + 5000, { outcome: 'blocked', reason: 'unit' }))
-    await clock.advance(4000)
-    expect(w.tails).not.toContain(WAVE_F)
-    expect(w.toasts).toEqual([])
-  })
-
-  test('a pinned epic beats the watched one; /bs-mod auto watches again', async ($, on) => {
-    const w = watcher(on)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    const ui = await band($)
-    expect((await bs($, 'other-1')).text).toBe('Pinned other-1; /bs-mod auto follows this session again.')
-    expect(await rowText(ui, 'head')).toMatch(/^ other-1 \s*· wave 1/)
-    expect(await shown(ui)).not.toContain('watching')
-    w.tails.length = 0
-    await clock.advance(4000)
-    expect(w.tails).not.toContain(WAVE_F)
-
+    expect((await bs($, 'web-ux-4')).text).toBe('Pinned web-ux-4; /bs-mod auto follows this session again.')
+    expect(await rowText(ui, 'head')).toMatch(/web-ux-4/)
+    expect(await rowKeys(ui)).not.toContain('idle')
+    expect((await bs($, '')).text).toBe('bs-mod pane opened on web-ux-4.')
     await bs($, 'auto')
-    expect(await rowText(ui, 'head')).toMatch(/^watching web-ux-4 · wave 4/)
+    expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
   })
 
-  // Shaped like 2026-10-07's logs: web-mods-1 was written last, but before its plan its log names the
-  // epic only through pre-plan dispatches to `web-mods-1/integration`: no task, no admission, nothing to draw.
-  const MODS_S = 'web-mods-1-2026-10-07'
-  const MODS_F = `${ROOT}/${MODS_S}.jsonl`
-  function preplan(cli: string): string {
-    return [
-      line(MODS_S, cli, 'session-start', null, T0 - 30 * MIN),
-      line(MODS_S, cli, 'user_prompt', null, T0 - 29 * MIN, { prompt: 'Do B now, in the terminal and the response view' }),
-      line(MODS_S, cli, 'dispatch_decision', 'web-mods-1/integration', T0 - 25 * MIN, { agent_role: 'researcher', model: 'claude-sonnet-5-5' }),
-      line(MODS_S, cli, 'task-result-recorded', 'web-mods-1/integration', T0 - 10 * MIN, { agent_role: 'researcher', run_status: 'done' }),
-    ].join('')
-  }
-
-  test('an epic with no task nor admission yet is not watched: the next newest running one is', async ($, on) => {
-    const files = seed()
-    files.set(MODS_F, preplan('sid-mods'))
-    const w = watcher(on, files)
-    for (const p of [EPIC_F, WAVE_F]) w.mtimes.set(p, T0 - 5 * MIN)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    expect(await rowText(await band($), 'head')).toMatch(/^watching web-ux-4 · wave 4/)
-    expect((await bs($, '')).text).toBe(WATCHING)
-  })
-
-  test('/bs-mod right after boot in the session of an epic with nothing to draw yet opens the newest running one', async ($, on) => {
-    const files = seed()
-    files.set(MODS_F, preplan('sid-mods'))
-    const w = world(on, files, 'sid-mods')
-    w.mtimes.set(OTHER_F, T0 - 3 * DAY)
-    for (const p of [EPIC_F, WAVE_F]) w.mtimes.set(p, T0 - 5 * MIN)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
-
-    expect((await bs($, '')).text).toBe(WATCHING)
-    expect(await rowText(await band($), 'head')).toMatch(/^watching web-ux-4 · wave 4/)
-  })
-
-  test('the epic set aside is watched once its plan adds a task', async ($, on) => {
-    const files = seed()
-    files.set(MODS_F, preplan('sid-mods'))
-    const w = watcher(on, files)
-    for (const p of [EPIC_F, WAVE_F]) w.mtimes.set(p, T0 - 5 * MIN)
-    const clock = mock.clock(on, { now: T0 })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/u' })
-    await boot($, clock)
+  test('a closed epic gives way to an older open epic of the same session', async ($, on) => {
+    const files = closedSeed()
+    files.set(OTHER_F, (files.get(OTHER_F) ?? '').replace(/sid-other/g, SID))
+    const w = world(on, files)
+    w.mtimes.set(OTHER_F, T0 - 3 * 1440 * MIN)
+    await up($, on)
 
     const ui = await band($)
-    expect(await rowText(ui, 'head')).toMatch(/^watching web-ux-4 · wave 4/)
-    append(w, MODS_F, line(MODS_S, 'sid-mods', 'task-added', 'web-mods-1/task-1-band', T0 + 1000, { title: 'Band' }))
-    w.mtimes.set(MODS_F, T0 + 1000)
+    expect(await rowText(ui, 'head')).toMatch(/other-1\s+· wave 1/)
+    expect(await shown(ui)).not.toContain('web-ux-4')
+    expect((await bs($, '')).text).toBe('bs-mod pane opened on other-1.')
+  })
+
+  test('the epic-closed toast still fires for an own epic', async ($, on) => {
+    const w = world(on, seed())
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+
+    append(w, EPIC_F, line(EPIC_S, SID, 'epic-closed', 'web-ux-4/integration', T0 + 1000, { epic_id: 'web-ux-4', closed_by: 'operator', machine_verdict: 'met', summary: 's' }))
     await clock.advance(4000)
-    expect(await rowText(ui, 'head')).toMatch(/^watching web-mods-1/)
+    expect(w.toasts.join('\n')).toContain('✔ epic web-ux-4 closed')
+    expect(await rowKeys(await band($))).toEqual(IDLE_KEYS)
   })
 })
 
