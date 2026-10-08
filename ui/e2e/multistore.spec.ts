@@ -980,8 +980,11 @@ test.describe('a foreign store in the dashboard', () => {
               .map((o) => o.getBoundingClientRect().bottom)
               .filter((b) => b > 0 && b <= lr.top + 60);
             return {
-              scroll: [scroll.scrollWidth, scroll.clientWidth],
-              root: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+              scroll: { sw: scroll.scrollWidth, cw: scroll.clientWidth },
+              root: {
+                sw: document.documentElement.scrollWidth,
+                cw: document.documentElement.clientWidth,
+              },
               overflow: lr.right - (pr.right - pad),
               width: lr.width,
               lines: Math.round(label.getBoundingClientRect().height / lh),
@@ -990,8 +993,8 @@ test.describe('a foreign store in the dashboard', () => {
               top: lr.top,
             };
           }, longName);
-          expect(m.scroll[0]).toBeLessThanOrEqual(m.scroll[1]);
-          expect(m.root[0]).toBeLessThanOrEqual(m.root[1]);
+          expect(m.scroll.sw).toBeLessThanOrEqual(m.scroll.cw);
+          expect(m.root.sw).toBeLessThanOrEqual(m.root.cw);
           expect(m.overflow).toBeLessThanOrEqual(0.5);
           expect(m.lines).toBeLessThanOrEqual(2);
           expect(m.title).toBe(longName);
