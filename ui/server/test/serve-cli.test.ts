@@ -201,7 +201,14 @@ describe('smith ui serve (built binary)', () => {
       store: { id: string };
     }[];
     expect([...new Set(projects.map((p) => p.store.id))]).toEqual(['home']);
-    const cached = await readdir(path.join(dbDir, 'ui-stores')).catch(() => [] as string[]);
+    // Only a missing directory means "no foreign store"; any other error (ENOTDIR,
+    // EACCES) must fail the test rather than read as an empty list.
+    const cached = await readdir(path.join(dbDir, 'ui-stores')).catch(
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return [] as string[];
+        throw err;
+      },
+    );
     expect(cached.filter((n) => n.endsWith('.db')).map((n) => n.slice(0, 8))).toEqual([]);
   }, 60_000); // spawns the built CLI and waits for a real HTTP server
 });
