@@ -68,9 +68,9 @@ const { sessionScope, sessionKey } = useSessionContext();
 const { isPhoneWidth } = useViewport();
 // S9: Active/All scope (ds-spec §4.4 Scope). A ?session= in the URL names its
 // own scope and wins over the toggle.
-const { view, active, otherStores, scopeTo } = useActivePageScope(
-  () => sessionScope.value !== undefined,
-);
+const { view, active, scopeTo } = useActivePageScope(() => sessionScope.value !== undefined, {
+  allStores: true,
+});
 
 const PERIOD_OPTIONS = [
   { value: '7d', label: '7 days' },
@@ -109,6 +109,8 @@ async function load() {
       project.value,
       period.value,
       view.value.sessions,
+      // Every store, unless a ?session= names ids that repeat between stores.
+      view.value.mode === 'explicit' ? undefined : 'all',
     );
     if (seq === loadSeq) data.value = result;
   } catch (e) {
@@ -287,12 +289,6 @@ const phoneRoleHeading = computed(() => {
         <RouterLink :to="scopeTo('all')">Show all</RouterLink>
       </p>
     </template>
-    <p v-if="otherStores.length > 0" class="bs-sessions__quiet">
-      {{ pluralize(otherStores.length, 'active project') }}
-      {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
-      ({{ otherStores.join(', ') }}) ·
-      <RouterLink to="/overview">see Home</RouterLink>
-    </p>
 
     <Banner v-if="error && view.mode !== 'empty'" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 

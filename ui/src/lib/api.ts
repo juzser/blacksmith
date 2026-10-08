@@ -939,12 +939,14 @@ export function fetchAnalytics(
   project?: string,
   period?: AnalyticsPeriod,
   sessions?: string[],
+  stores?: 'all',
 ): Promise<AnalyticsResult> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
   if (period) q.set('period', period);
   applySessions(q, sessions);
+  applyStores(q, stores);
   const qs = q.toString();
   return getJson(`/api/analytics${qs ? `?${qs}` : ''}`);
 }

@@ -219,9 +219,10 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     await expect(
       page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
     ).toBeVisible();
-    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
-      true,
-    );
+    expect(
+      urls.every((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture'),
+    ).toBe(true);
+    expect(urls.every((u) => u.searchParams.get('stores') === 'all')).toBe(true);
     await page.getByRole('link', { name: 'All', exact: true }).click();
     await expect(page).toHaveURL(/scope=all/);
     await expect.poll(() => urls.some((u) => !u.searchParams.has('sessions'))).toBe(true);
@@ -326,7 +327,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
   });
 
-  test('none on an epic, and the other-store line names the store-b project', async ({ page }) => {
+  test('none on an epic, and no other-store line is drawn', async ({ page }) => {
     await stubActiveScope(page, [], {
       liveSessions: 1,
       unlinkedSessions: 1,
@@ -334,7 +335,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     });
     await page.goto('/analytics');
     await expect(page.getByText('1 live session, none on an epic')).toBeVisible();
-    await expect(page.getByText('1 active project is in another store (project-b)')).toBeVisible();
+    await expect(page.getByText('in another store')).toHaveCount(0);
   });
 
   test('unmeasured: fetches All and says live sessions cannot be read', async ({ page }) => {
@@ -375,9 +376,9 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     expect(urls).toHaveLength(0);
     release();
     await expect.poll(() => urls.length).toBeGreaterThan(0);
-    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
-      true,
-    );
+    expect(
+      urls.every((u) => u.searchParams.getAll('sessions').join() === 'home/sess-fixture'),
+    ).toBe(true);
   });
 
   test('an explicit ?session= wins: no sessions param, no toggle', async ({ page }) => {
@@ -389,6 +390,7 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     ).toBeVisible();
     await expect(page.getByRole('navigation', { name: 'Activity scope' })).toHaveCount(0);
     expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+    expect(urls.every((u) => !u.searchParams.has('stores'))).toBe(true);
   });
 
   test('phone 375: the toggle clears 44px and the toolbar does not scroll sideways', async ({
