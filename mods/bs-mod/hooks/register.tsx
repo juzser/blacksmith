@@ -1,8 +1,7 @@
 // bs-mod: a band above the prompt, a pane and toasts for the Blacksmith epic
 // this CLI session drives. It reads the event logs itself, a few lines at a
-// time: the files of every epic one of whose events names this session, and,
-// with nothing pinned and none of those to show, of the newest running epic
-// under the session's own roots, watched without toasts.
+// time: the files of every epic one of whose events names this session, and of
+// the pinned epic. A closed epic of its own leaves the band unless it is pinned.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderNode, TextProps } from 'claude-code'
 
@@ -15,13 +14,11 @@ import {
   emptyHud,
   EPIC_ERE,
   epicOfFile,
-  epicIdOf,
   epicsFromGrep,
   fmtElapsed,
   fmtTok,
   foldEvent,
   latestPlanName,
-  newestRunning,
   nextModel,
   overviewModel,
   paletteOf,
@@ -46,14 +43,6 @@ const TOAST_MS = 6000
 /** an event older than this is history, never a toast */
 const FRESH_MS = 120_000
 const GREP_CHUNK = 200
-/** the line that closes an epic, as Blacksmith writes it */
-const CLOSED_NEEDLE = '"event_type":"epic-closed"'
-/**
- * The lines that give an epic something pickView draws: fold.ts mints a task row only on these, and a
- * `wave-admitted` counts in `admitted`. An epic whose logs hold none (a pre-plan epic: research and
- * prompts under `<epic>/integration`) has nothing to draw.
- */
-const DRAWN_ERE = '"event_type":"(task-added|wave-admitted|gate-outcome|wave-merged|task-superseded)"'
 const ROOTS_CAP = 20
 const SEP = ' · '
 /** band bar cells: progress, budget */
@@ -70,7 +59,6 @@ const hudAtom = atom({ plugin: 'bs-mod', key: 'hud' } as const, emptyHud())
 const pinnedAtom = atom({ plugin: 'bs-mod', key: 'pinned' } as const, null)
 const hiddenAtom = atom({ plugin: 'bs-mod', key: 'isHidden' } as const, false)
 const minuteAtom = atom({ plugin: 'bs-mod', key: 'minute' } as const, 0)
-const watchedAtom = atom({ plugin: 'bs-mod', key: 'watched' } as const, null)
 const planTiersAtom = atom({ plugin: 'bs-mod', key: 'planTiers' } as const, {} as Record<string, PlanTier>)
 /** the band's active tab, in `$.state` so a reload of the band keeps it; Overview until a tab is picked */
 const tabAtom = atom({ plugin: 'bs-mod', key: 'tab' } as const, 'overview' as BandTab)
@@ -466,10 +454,9 @@ function listRows(tasks: readonly TaskRow[], prompts: readonly PromptRow[], budg
   return rows.slice(0, Math.max(0, budget))
 }
 
-/** The head row of Next and Past: the header in the tab's accent, a watched epic marked dim. */
-function headRow(key: string, header: string, accent: string, watched: string | null): BandRow {
-  const mark = watched ? [run(SEP, { color: 'subtle' }), run(`watching ${watched}`, { dim: true })] : []
-  return { key, runs: [run(header, { color: accent, bold: true }), ...mark] }
+/** The head row of Next and Past: the header in the tab's accent. */
+function headRow(key: string, header: string, accent: string): BandRow {
+  return { key, runs: [run(header, { color: accent, bold: true })] }
 }
 
 /** A section divider of Current and Next, `── Tasks ───…`, as wide as the band like the rule. */
@@ -561,7 +548,7 @@ function sectionRows(tasks: readonly TaskRow[], prompts: readonly PromptRow[], b
   return rows.slice(0, Math.max(0, budget))
 }
 
-type BandInput = { epic: EpicView; now: number; rows: number; width: number; watched: boolean; effort: Tier | null; sessionAgents: number }
+type BandInput = { epic: EpicView; now: number; rows: number; width: number; effort: Tier | null; sessionAgents: number }
 
 /** The Overview's `Agents N in this session`: the idle band draws the same part. */
 function sessionAgentsPart(n: number, accent: string): Part {
@@ -612,8 +599,7 @@ function drawable(node: RenderNode | null | undefined): boolean {
 function overviewRows(b: BandInput): BandRow[] {
   const m = overviewModel(b.epic, b.now, b.effort)
   const accent = OVERVIEW_TAB.accent
-  const name = b.watched ? [run('watching', { dim: true }), run(' '), run(m.epicId, { dim: true })] : [chip(m.epicId)]
-  const head = [part(0, ...name), part(0, run(m.phase.label, { color: PHASE_COLOR[m.phase.kind], bold: true }))]
+  const head = [part(0, chip(m.epicId)), part(0, run(m.phase.label, { color: PHASE_COLOR[m.phase.kind], bold: true }))]
   if (m.tier.tier) head.push(part(1, run(`tier ${m.tier.tier}`, { color: TIER_COLOR[m.tier.tier], bold: true })))
   const agents = [
     sessionAgentsPart(b.sessionAgents, accent),
@@ -634,8 +620,8 @@ function overviewRows(b: BandInput): BandRow[] {
 }
 
 /**
- * Current: one head row (the phase, the wave bar and done/total, the live agents on the wave, the spend, a watched
- * epic), then a Tasks and a Prompts section. A narrow band drops the spend first, then the agents, then the watch.
+ * Current: one head row (the phase, the wave bar and done/total, the live agents on the wave, the spend),
+ * then a Tasks and a Prompts section. A narrow band drops the spend first, then the agents.
  */
 function currentRows(b: BandInput): BandRow[] {
   const m = currentModel(b.epic, b.now, { prompts: BAND_PROMPTS })
@@ -648,7 +634,6 @@ function currentRows(b: BandInput): BandRow[] {
     const tone = budgetColor(m.tokens.pct)
     head.push(part(3, run(`${fmtTok(m.tokens.projected)}/${fmtTok(m.tokens.cap)}`, { color: tone }), run(' '), run(`${m.tokens.pct}%`, { color: tone, bold: true })))
   }
-  if (b.watched) head.push(part(1, run(`watching ${b.epic.epicId}`, { dim: true })))
   const empty = m.tasks.rows.length === 0 && m.prompts.rows.length === 0
   const lists = empty
     ? [{ key: 'empty', runs: [run('nothing running', { color: 'inactive' })] }]
@@ -658,7 +643,7 @@ function currentRows(b: BandInput): BandRow[] {
 
 function nextRows(b: BandInput): BandRow[] {
   const m = nextModel(b.epic, b.now, { prompts: BAND_PROMPTS })
-  const head = headRow('head', m.header, 'planMode', b.watched ? b.epic.epicId : null)
+  const head = headRow('head', m.header, 'planMode')
   if (m.tasks.rows.length === 0) return [head, { key: 'empty', runs: [run('nothing planned', { color: 'inactive' })] }]
   return [head, ...sectionRows(m.tasks.rows, m.prompts.rows, b.rows - 1, b.width, b.now)]
 }
@@ -676,7 +661,7 @@ function pastRows(b: BandInput): BandRow[] {
       rows.push(moreRow('more:groups', left, left === 1 ? 'more wave' : 'more waves'))
       break
     }
-    rows.push(i === 0 ? headRow('head', g.label, 'success', b.watched ? b.epic.epicId : null) : { key: `group:${g.label}`, runs: [run(g.label, { color: 'success', bold: true })] })
+    rows.push(i === 0 ? headRow('head', g.label, 'success') : { key: `group:${g.label}`, runs: [run(g.label, { color: 'success', bold: true })] })
     rows.push(...listRows(g.tasks.rows, g.prompts.rows, room - 1, b.now, `:${g.label}`))
   }
   return rows
@@ -711,16 +696,6 @@ type State = {
   probed: Map<string, number>
   /** epics one of whose events names this CLI session */
   mine: Set<string>
-  /** the newest running epic of the session's own roots, followed while nothing is pinned and no epic of its own can be shown */
-  watched: string | null
-  /** per log file of an epic the watch picked: the size grep last searched for `epic-closed` */
-  closedScan: Map<string, number>
-  /** log files holding an `epic-closed` line */
-  closedFiles: Set<string>
-  /** per log file of an epic the watch picked: the size grep last searched for a DRAWN_ERE line */
-  drawnScan: Map<string, number>
-  /** log files holding a DRAWN_ERE line */
-  drawnFiles: Set<string>
   maxTs: number
   isBooted: boolean
   running: Promise<void> | null
@@ -741,11 +716,6 @@ function newState(): State {
     fileEpic: new Map(),
     probed: new Map(),
     mine: new Set(),
-    watched: null,
-    closedScan: new Map(),
-    closedFiles: new Set(),
-    drawnScan: new Map(),
-    drawnFiles: new Set(),
     maxTs: 0,
     isBooted: false,
     running: null,
@@ -834,55 +804,6 @@ async function discover($: EngineInterface, st: State, sid: string, entries: Ent
   }
 }
 
-/**
- * The epic to watch among the logs of the session's own roots: newestRunning's pick,
- * once grep found no `epic-closed` line in that epic's logs and found a DRAWN_ERE line
- * there. Only the pick's logs are grepped, each once per size, so a tick re-reads no
- * whole log: a closed pick is remembered, a pick with nothing to draw yet (a pre-plan
- * epic) is set aside for this tick, and the next newest is tried. When grep fails on a
- * pick's logs and found no such line, the pick stands: an unread epic is not an empty one.
- */
-async function pickWatched($: EngineInterface, st: State, own: Entry[], now: number): Promise<string | null> {
-  const stamps = own.map(en => ({ epic: epicOf(st, en), mtimeMs: en.mtimeMs, isNamed: st.fileEpic.has(en.path) }))
-  const seen = new Set<string>()
-  const looked = new Set<string>()
-  const empty = new Set<string>()
-  for (;;) {
-    const closed = new Set([...st.closedFiles].map(path => epicOf(st, { path, name: basename(path) })))
-    const pick = newestRunning(stamps, new Set([...closed, ...empty]), now)
-    if (!pick) return null
-    const logs = own.filter(en => epicOf(st, en) === pick)
-    const fresh = logs.filter(en => !seen.has(en.path) && st.closedScan.get(en.path) !== en.size)
-    if (fresh.length > 0) {
-      for (let i = 0; i < fresh.length; i += GREP_CHUNK) {
-        const chunk = fresh.slice(i, i + GREP_CHUNK)
-        const res = await $.process.run(['grep', '-l', '-F', '--', CLOSED_NEEDLE, ...chunk.map(c => c.path)])
-        for (const c of chunk) seen.add(c.path)
-        // a hit is a fact even when another file of the chunk failed (exit 2)
-        if (res.exitCode === 0) for (const path of res.stdout.split('\n')) if (path) st.closedFiles.add(path)
-        if (res.exitCode === 0 || res.exitCode === 1) for (const c of chunk) st.closedScan.set(c.path, c.size)
-      }
-      continue
-    }
-    if (logs.some(en => st.drawnFiles.has(en.path))) return pick
-    const unread = logs.filter(en => !looked.has(en.path) && st.drawnScan.get(en.path) !== en.size)
-    if (unread.length === 0) {
-      empty.add(pick)
-      continue
-    }
-    let failed = false
-    for (let i = 0; i < unread.length; i += GREP_CHUNK) {
-      const chunk = unread.slice(i, i + GREP_CHUNK)
-      const res = await $.process.run(['grep', '-l', '-E', '--', DRAWN_ERE, ...chunk.map(c => c.path)])
-      for (const c of chunk) looked.add(c.path)
-      if (res.exitCode === 0) for (const path of res.stdout.split('\n')) if (path) st.drawnFiles.add(path)
-      if (res.exitCode === 0 || res.exitCode === 1) for (const c of chunk) st.drawnScan.set(c.path, c.size)
-      else failed = true
-    }
-    if (failed && !logs.some(en => st.drawnFiles.has(en.path))) return pick
-  }
-}
-
 function dirOf(path: string): string {
   return path.slice(0, path.lastIndexOf('/'))
 }
@@ -953,16 +874,7 @@ async function tick($: EngineInterface, st: State): Promise<void> {
   st.lastEpics = entries.map(en => epicOf(st, en))
   if (sid) await discover($, st, sid, entries)
 
-  // Nothing pinned and no epic of its own to show: watch the newest running epic,
-  // from the session's own roots only (a learned root is every session's). A session
-  // with epics of its own lets the first fold tell whether one of them can be shown.
-  const isWatching = !pinned && (st.isBooted || st.mine.size === 0) && !pickEpic(st.hud, null)
-  const ownDirs = new Set(own)
-  let watched = isWatching ? await pickWatched($, st, entries.filter(en => ownDirs.has(dirOf(en.path))), now) : null
-  // the watched epic's events fold like any other, but toasts are for this session's work
-  const quiet = watched && !st.mine.has(watched) ? watched : null
-
-  const followed = new Set([...st.mine, ...(pinned ? [pinned] : []), ...(watched ? [watched] : [])])
+  const followed = new Set([...st.mine, ...(pinned ? [pinned] : [])])
   const tracked = entries.filter(en => followed.has(epicOf(st, en)))
   // The first read is the history the session booted on: fold it, toast none of it.
   let isQuiet = !st.isBooted
@@ -984,18 +896,11 @@ async function tick($: EngineInterface, st: State): Promise<void> {
     const notices = foldEvent(st.hud, r.ev, r.ref, sid, r.fileEpic)
     if (r.ts > st.maxTs) st.maxTs = r.ts
     if (isQuiet || now - r.ts > FRESH_MS) continue
-    if (quiet && (r.fileEpic === quiet || epicIdOf(r.ev, r.fileEpic) === quiet)) continue
     for (const n of notices) $.ui.toast(n.text, { timeoutMs: TOAST_MS })
   }
   if (batch.length > 0 || isQuiet) {
     const copy = JSON.parse(JSON.stringify(st.hud)) as Hud
     await update($, hudAtom, () => copy)
-  }
-  // an epic of its own this fold made showable replaces the watched one
-  if (watched && pickEpic(st.hud, null)) watched = null
-  if (watched !== st.watched) {
-    st.watched = watched
-    await update($, watchedAtom, () => watched)
   }
 
   const minute = Math.floor(now / 60_000)
@@ -1004,7 +909,7 @@ async function tick($: EngineInterface, st: State): Promise<void> {
     await update($, minuteAtom, () => minute)
   }
 
-  const view = pickView(st.hud, pinned, st.watched)
+  const view = pickView(st.hud, pinned)
   if (view) await readPlanTier($, st, view.epic, entries)
   const status = view ? statusOf(summarize(view.epic, now)) : undefined
   if (status !== st.lastStatus) {
@@ -1039,7 +944,7 @@ async function refresh($: EngineInterface, st: State): Promise<void> {
 
 /** What the band, pane and command draw, as pickView decides it from `$.state`. */
 async function viewOf($: EngineInterface): Promise<ReturnType<typeof pickView>> {
-  return pickView(await read($, hudAtom), await read($, pinnedAtom), await read($, watchedAtom))
+  return pickView(await read($, hudAtom), await read($, pinnedAtom))
 }
 
 async function openPane($: EngineInterface, epicId: string): Promise<void> {
@@ -1124,14 +1029,12 @@ export const register: Register = on => {
       await openPane($, arg)
       return { text: `Pinned ${arg}; /bs-mod auto follows this session again.` }
     }
-    // a tick that starts now: the boot tick does not watch yet, so awaiting it alone left the
-    // session of an epic with nothing to draw answering "No bs epic" for a TICK_MS
+    // a tick that starts now: one already running may predate the session's last event
     await refresh($, st)
     const view = await viewOf($)
     if (!view) return { text: 'No bs epic in this session yet; /bs-mod <epic-id> pins one.' }
     await openPane($, view.epic.epicId)
-    const how = view.kind === 'watched' ? ' (watching the newest running epic)' : ''
-    return { text: `bs-mod pane opened on ${view.epic.epicId}${how}.` }
+    return { text: `bs-mod pane opened on ${view.epic.epicId}.` }
   })
 
   // The band always draws, the idle band with no epic in view; it passes only to a survey and when hidden.
@@ -1217,8 +1120,7 @@ export const register: Register = on => {
     if (fit.body > 0) {
       const sessionAgents = active.id === 'overview' ? await liveAgents() : 0
       const effort = (await read($, planTiersAtom))?.[epic.epicId]?.tier ?? null
-      const watched = view.kind === 'watched'
-      body = tabRows(active.id, { epic, now, rows: fit.body, width, watched, effort, sessionAgents })
+      body = tabRows(active.id, { epic, now, rows: fit.body, width, effort, sessionAgents })
     }
     return band(active.accent, tabRow, body)
   })
@@ -1248,8 +1150,7 @@ export const register: Register = on => {
     }
     const joined = (parts: Part[]) => parts.flatMap((p, i) => (i > 0 ? [run(SEP, { dim: true }), ...p.runs] : p.runs))
 
-    const watching = view.kind === 'watched' ? [run(SEP, { dim: true }), run('watching · newest running epic', { dim: true })] : []
-    row(chip(s.epicId), run(' '), run(`wave ${s.wave}`, { color: 'permission', bold: true }), run(SEP, { dim: true }), stateRun(s), ...watching)
+    row(chip(s.epicId), run(' '), run(`wave ${s.wave}`, { color: 'permission', bold: true }), run(SEP, { dim: true }), stateRun(s))
     const c = s.counts
     row(...barRuns(segments(c, PANE_BAR)), run(' '), run(`${c.done}/${c.total} done`, { color: 'success', bold: true }), ...tallyParts(c).flatMap(t => [run(SEP, { dim: true }), ...t.runs]))
     if (s.budget) {

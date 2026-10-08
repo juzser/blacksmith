@@ -969,62 +969,25 @@ export function planVersionOf(epic: EpicView): number {
   return max
 }
 
-/** The pinned epic, else the most recently active epic this CLI session wrote to. */
+/** The pinned epic (closed or not), else the most recently active open epic this CLI session wrote to. */
 export function pickEpic(hud: Hud, pinned: string | null): EpicView | null {
   if (pinned) return hud.epics[pinned] ?? null
-  const mine = Object.values(hud.epics).filter(e => e.isMine && (Object.keys(e.tasks).length > 0 || e.admitted > 0))
+  const mine = Object.values(hud.epics).filter(e => e.isMine && !e.isClosed && (Object.keys(e.tasks).length > 0 || e.admitted > 0))
   mine.sort((a, b) => b.lastTs - a.lastTs)
   return mine[0] ?? null
 }
 
+/** Which of the two an epic on screen is: pinned, or this session's own. */
+export type ViewKind = 'pinned' | 'own'
 
-/** Which of the three an epic on screen is: pinned, this session's own, or watched. */
-export type ViewKind = 'pinned' | 'own' | 'watched'
-
-/** The one place the drawing asks what to show: the pin, else this session's own epic, else the watched one. */
-export function pickView(hud: Hud, pinned: string | null, watched: string | null): { epic: EpicView; kind: ViewKind } | null {
+/** The one place the drawing asks what to show: the pin, else this session's own open epic. */
+export function pickView(hud: Hud, pinned: string | null): { epic: EpicView; kind: ViewKind } | null {
   if (pinned) {
     const epic = hud.epics[pinned]
     return epic ? { epic, kind: 'pinned' } : null
   }
   const own = pickEpic(hud, null)
-  if (own) return { epic: own, kind: 'own' }
-  const epic = watched ? hud.epics[watched] : undefined
-  // the bar an own epic must clear: an epic with no task nor admission has nothing to draw
-  return epic && (Object.keys(epic.tasks).length > 0 || epic.admitted > 0) ? { epic, kind: 'watched' } : null
-}
-
-/**
- * An epic none of whose logs was written for longer than this has left "Running now" (exactly 7 days has not):
- * mirrors Blacksmith factory/orchestrator/src/db/queries.ts EPIC_IDLE_MS, the cutoff ui/server/src/activeScope.ts applies.
- */
-export const EPIC_IDLE_MS = 7 * 24 * 60 * 60 * 1000
-
-/** A log file as the watch sees it: its epic, when it was last written, and whether its content names that epic. */
-export type LogStamp = { epic: string; mtimeMs: number; isNamed: boolean }
-
-/**
- * The epic to watch: the one whose newest log file was written last, among the epics
- * some log's content names (a maint or lessons log only its file name gives is no epic),
- * none closed and none idle past EPIC_IDLE_MS. A tie goes to the lower id.
- */
-export function newestRunning(logs: readonly LogStamp[], closed: ReadonlySet<string>, now: number): string | null {
-  const newest = new Map<string, number>()
-  const named = new Set<string>()
-  for (const l of logs) {
-    newest.set(l.epic, Math.max(newest.get(l.epic) ?? 0, l.mtimeMs))
-    if (l.isNamed) named.add(l.epic)
-  }
-  let best: string | null = null
-  let bestMs = -1
-  for (const [epic, ms] of [...newest].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    if (!named.has(epic) || closed.has(epic) || now - ms > EPIC_IDLE_MS) continue
-    if (ms > bestMs) {
-      best = epic
-      bestMs = ms
-    }
-  }
-  return best
+  return own ? { epic: own, kind: 'own' } : null
 }
 
 // ── Tab models: what each tab of the band lists, as plain data the drawing cuts to fit ─────────

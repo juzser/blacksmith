@@ -7,7 +7,6 @@ import {
   currentModel,
   distinctPrompts,
   emptyHud,
-  EPIC_IDLE_MS,
   epicIdOf,
   epicOfFile,
   epicsFromGrep,
@@ -16,7 +15,6 @@ import {
   foldEvent,
   LATTE,
   MOCHA,
-  newestRunning,
   nextModel,
   overviewModel,
   paletteOf,
@@ -1057,40 +1055,9 @@ test('pickEpic takes the pin, else the busiest epic of this session', async () =
   expect(pickEpic(emptyHud(), null)).toBeNull()
 })
 
-describe('watching', () => {
-  const MIN = 60_000
-  const DAY = 24 * 60 * MIN
-  const log = (epic: string, mtimeMs: number, isNamed = true) => ({ epic, mtimeMs, isNamed })
+describe('pickEpic and pickView', () => {
   const UX3 = 'web-ux-3'
-
-  test('the idle cutoff is the dashboard\'s seven days', async () => {
-    expect(EPIC_IDLE_MS).toBe(7 * DAY)
-  })
-
-  test('newestRunning takes the epic whose newest log is newest', async () => {
-    const logs = [log('a', T0 - 5 * MIN), log('b', T0 - 2 * MIN), log('a', T0 - 1 * MIN)]
-    expect(newestRunning(logs, new Set(), T0)).toBe('a')
-    expect(newestRunning([log('a', T0 - 9 * MIN), log('b', T0 - 2 * MIN)], new Set(), T0)).toBe('b')
-    expect(newestRunning([], new Set(), T0)).toBeNull()
-  })
-
-  test('newestRunning skips an epic idle past the cutoff; exactly the cutoff still runs', async () => {
-    expect(newestRunning([log('a', T0 - EPIC_IDLE_MS - 1)], new Set(), T0)).toBeNull()
-    expect(newestRunning([log('a', T0 - EPIC_IDLE_MS)], new Set(), T0)).toBe('a')
-    // an older file of a fresh epic does not make it idle
-    expect(newestRunning([log('a', T0 - 30 * DAY), log('a', T0 - DAY)], new Set(), T0)).toBe('a')
-  })
-
-  test('newestRunning skips a closed epic for the next newest', async () => {
-    expect(newestRunning([log('a', T0 - MIN), log('b', T0 - 5 * MIN)], new Set(['a']), T0)).toBe('b')
-    expect(newestRunning([log('a', T0 - MIN)], new Set(['a']), T0)).toBeNull()
-  })
-
-  test('newestRunning skips an epic only a file name gives (a maint or lessons log)', async () => {
-    expect(newestRunning([log('maint', T0 - MIN, false), log('a', T0 - 5 * MIN)], new Set(), T0)).toBe('a')
-    // a wave file naming no epic still dates the epic its other files name
-    expect(newestRunning([log('a', T0 - 9 * MIN), log('a', T0 - MIN, false), log('b', T0 - 5 * MIN)], new Set(), T0)).toBe('a')
-  })
+  const closed = (id: string, session: string) => ev('epic-closed', `${id}/integration`, { epic_id: id, closed_by: 'operator', machine_verdict: 'met', summary: 's' }, { session_id: session, cli_session_id: SID })
 
   /** web-ux-4 is this session's when `isOwn`; web-ux-3 is another session's; maint is this session's with no task */
   function hudOf(isOwn: boolean) {
@@ -1105,24 +1072,42 @@ describe('watching', () => {
   }
   const view = (v: ReturnType<typeof pickView>) => (v ? `${v.kind} ${v.epic.epicId}` : null)
 
-  test('pickView: the pin beats this session\'s own epic, which beats the watched one', async () => {
+  test('pickView: the pin beats this session\'s own epic; another session\'s epic is never shown', async () => {
     const own = hudOf(true)
-    expect(view(pickView(own, UX3, UX3))).toBe(`pinned ${UX3}`)
-    expect(view(pickView(own, UX3, null))).toBe(`pinned ${UX3}`)
-    expect(view(pickView(own, null, UX3))).toBe(`own ${EPIC}`)
+    expect(view(pickView(own, UX3))).toBe(`pinned ${UX3}`)
+    expect(view(pickView(own, null))).toBe(`own ${EPIC}`)
     const none = hudOf(false)
-    expect(view(pickView(none, null, UX3))).toBe(`watched ${UX3}`)
-    expect(view(pickView(none, null, null))).toBeNull()
+    expect(view(pickView(none, null))).toBeNull()
     // a pin whose epic has no log shows nothing, as pickEpic does
-    expect(view(pickView(none, 'nope', UX3))).toBeNull()
+    expect(view(pickView(none, 'nope'))).toBeNull()
   })
 
-  test('pickView: an own epic with no task or admission does not beat the watched one', async () => {
+  test('an own epic with no task or admission is not shown', async () => {
     const hud = hudOf(false)
     expect(hud.epics.maint?.isMine).toBe(true)
-    expect(view(pickView(hud, null, UX3))).toBe(`watched ${UX3}`)
-    // nor is a watched epic with nothing to draw drawn
-    expect(view(pickView(hud, null, 'maint'))).toBeNull()
+    expect(view(pickView(hud, null))).toBeNull()
+  })
+
+  test('pickEpic skips a closed own epic for the newest open one', async () => {
+    const hud = emptyHud()
+    ;[
+      ev('task-added', 'web-ux-3/task-1', { epic_id: UX3, origin: 'user' }, { session_id: 'web-ux-3-2026-09-30', cli_session_id: SID }),
+      added(T16),
+      ev('user_prompt', null, { prompt: 'x' }, { session_id: 'web-ux-4-2026-10-04', cli_session_id: SID }),
+      closed(EPIC, 'web-ux-4-2026-10-04'),
+    ].forEach((e, i) => foldEvent(hud, e, `f#${i}`, SID))
+    expect(hud.epics[EPIC]?.isClosed).toBe(true)
+    expect(pickEpic(hud, null)?.epicId).toBe(UX3)
+  })
+
+  test('pickEpic shows nothing when the only own epic is closed, but a pin still shows it', async () => {
+    const hud = emptyHud()
+    ;[added(T16), closed(EPIC, 'web-ux-4-2026-10-04')].forEach((e, i) => foldEvent(hud, e, `f#${i}`, SID))
+    expect(hud.epics[EPIC]?.isMine).toBe(true)
+    expect(pickEpic(hud, null)).toBeNull()
+    expect(pickEpic(hud, EPIC)?.epicId).toBe(EPIC)
+    expect(view(pickView(hud, null))).toBeNull()
+    expect(view(pickView(hud, EPIC))).toBe(`pinned ${EPIC}`)
   })
 })
 
