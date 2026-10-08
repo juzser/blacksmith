@@ -31,8 +31,9 @@ shows it once installed.
       marks.
     - **Past** shows what is done, grouped by the wave that merged it.
   - The letters `o`, `c`, `n` and `p` switch tabs while the band has focus.
-  - With no epic, the band is idle. It shows this session's agent count and a
-    hint to pin an epic.
+  - With no epic, the band is idle. It shows this session's agent count, a
+    Tasks row (the session task list, or the background work still running),
+    the session's two newest prompts, and a hint to pin an epic.
   - The band stacks over other plugins' bands rather than hiding them.
 - **The pane** gives the full view of one epic.
 - **Toasts** report a wave admitted, a gate failure, a merge, a waiver

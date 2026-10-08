@@ -1714,7 +1714,7 @@ describe('prompts and task progress outside an epic', () => {
         const ui = await mountBand($)
         expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
         expect(w.toasts).toEqual([])
-        const out = (await $.command.run({ command: 'bs-mod', args: '' })) as { text?: string } | undefined
+        const out = (await $.command.run({ command: 'bs-mod', args: '' } as never)) as { text?: string } | undefined
         expect(JSON.stringify(out ?? {})).not.toMatch(/error/i)
       })
     }
@@ -1722,20 +1722,21 @@ describe('prompts and task progress outside an epic', () => {
 
   test('homePrompts survives the hud copy: the idle band of a clone whose epics all went idle still shows them', async ($, on) => {
     const files = seed()
-    files.set(`${ROOT}/${HOME_ID}.jsonl`, homeLog(PROMPTS))
-    const w = world(on, files)
-    for (const p of files.keys()) if (!p.includes(HOME_ID)) w.mtimes.set(p, T0 - 7 * 1440 * MIN - 1)
+    const home = 'prompts-sid-none'
+    files.set(`${ROOT}/${home}.jsonl`, homeLog(PROMPTS, home))
+    const w = world(on, files, 'sid-none')
+    for (const p of files.keys()) if (!p.includes(home)) w.mtimes.set(p, T0 - 7 * 1440 * MIN - 1)
     await up($, on)
 
     const ui = await mountBand($)
-    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${HOME_ID}#2`, `prompt:${HOME_ID}#1`, 'idle'])
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${home}#2`, `prompt:${home}#1`, 'idle'])
   })
 
   test('a parent_prompt_id on an epic\'s session-start pulls its home log into the fold', async ($, on) => {
     const files = prompted()
     const other = 'prompts-sid-other'
-    files.set(`${ROOT}/${other}.jsonl`, homeLog([[2, 'Plan the web-ux-4 epic']], other))
-    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'session-start', null, T0 - 45 * MIN, { parent_prompt_id: `${other}#0` }))
+    files.set(`${ROOT}/${other}.jsonl`, homeLog([[3, 'Plan the web-ux-4 epic']], other))
+    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'session-start', null, T0 - MIN, { parent_prompt_id: `${other}#0` }))
     world(on, files)
     await up($, on)
 
