@@ -84,6 +84,29 @@ describe('mergeOverview order', () => {
     ]);
   });
 
+  it('drops an idle row for an epic another store still works on', () => {
+    const merged = mergeOverview([
+      part('store-a', { epicsIdle: [{ epicId: 'epic-a', idleDays: 9 }] }),
+      part('store-b', { epicsInFlight: ['epic-a'] }),
+    ]);
+    expect(merged.epicsIdle).toEqual([]);
+  });
+
+  it('keeps both idle rows when every store has the epic idle', () => {
+    const merged = mergeOverview([
+      part('store-a', {
+        epicsInFlight: ['epic-a'],
+        epicsIdle: [{ epicId: 'epic-a', idleDays: 9 }],
+      }),
+      part('store-b', {
+        epicsInFlight: ['epic-a'],
+        epicsIdle: [{ epicId: 'epic-a', idleDays: 12 }],
+      }),
+    ]);
+    const rows = merged.epicsIdle as { idleDays: number; store: { id: string } }[];
+    expect(rows.map((e) => `${e.store.id}:${e.idleDays}`)).toEqual(['store-a:9', 'store-b:12']);
+  });
+
   it('leaves a single store idle list as it came', () => {
     const merged = mergeOverview([
       part('only', {

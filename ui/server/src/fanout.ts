@@ -107,6 +107,16 @@ export function mergeOverview(
   ];
   const withStore = (key: 'epicsInFlight' | 'epicsActivelyRunning') =>
     parts.flatMap((p) => p.data[key].map((epicId) => ({ epicId, store: p.store })));
+  // An epic is idle only if no store still works on it: in flight in a store and not idle there.
+  const worked = new Set(
+    parts.flatMap((p) => {
+      const idle = new Set(p.data.epicsIdle.map((e) => e.epicId));
+      return p.data.epicsInFlight.filter((id) => !idle.has(id));
+    }),
+  );
+  const idleRows = many
+    ? rows('epicsIdle').filter((e) => !worked.has(e.epicId))
+    : rows('epicsIdle');
   const projects = parts.flatMap((p) => tag(p.data.projects ?? [], p.store));
   const sorted = <T>(list: T[], cmp: (a: T, b: T) => number): T[] =>
     many ? [...list].sort(cmp) : list;
@@ -130,7 +140,7 @@ export function mergeOverview(
     epicsActivelyRunning: strings('epicsActivelyRunning'),
     epicsInFlightByStore: withStore('epicsInFlight'),
     // Each store's own order stands (the sort is stable); the store id orders the stores.
-    epicsIdle: sorted(rows('epicsIdle'), byStore),
+    epicsIdle: sorted(idleRows, byStore),
     closedEpics: sorted(
       rows('closedEpics'),
       (a, b) => newest(a.closedAt, b.closedAt) || byStore(a, b),

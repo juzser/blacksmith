@@ -127,6 +127,15 @@ describe('idle labels on lists that are not the picker', () => {
     expect(labels['epic-b']).toBeUndefined();
   });
 
+  it('labels a shared id with the smallest idleDays, whichever row comes first', () => {
+    const rows = [
+      { epicId: 'epic-a', idleDays: 9 },
+      { epicId: 'epic-a', idleDays: 30 },
+    ];
+    expect(idleLabelsById(rows)).toEqual({ 'epic-a': 'idle 9d' });
+    expect(idleLabelsById([...rows].reverse())).toEqual({ 'epic-a': 'idle 9d' });
+  });
+
   it('appends the label to an idle epic option and keeps every other option as it was', () => {
     const labels = idleLabelsById([{ epicId: 'epic-a', idleDays: 18 }]);
     const options = [
