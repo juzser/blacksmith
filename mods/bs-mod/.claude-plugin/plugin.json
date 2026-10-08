@@ -1,0 +1,14 @@
+{
+  "name": "bs-mod",
+  "version": "0.4.0",
+  "description": "Blacksmith HUD: the bs epic, wave, agents, budget and what waits on you, live above the prompt.",
+  "author": {
+    "name": "juzser",
+    "url": "https://github.com/juzser"
+  },
+  "homepage": "https://github.com/juzser/blacksmith/tree/main/mods/bs-mod",
+  "repository": "https://github.com/juzser/blacksmith",
+  "license": "MIT",
+  "keywords": ["hud", "statusline", "agents", "orchestration"],
+  "types": "./types/index.d.ts"
+}

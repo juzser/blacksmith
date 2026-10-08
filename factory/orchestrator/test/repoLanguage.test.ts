@@ -59,6 +59,7 @@ const PROSE_EXTENSIONS = [
   '.sh',
   '.sql',
   '.ts',
+  '.tsx',
   '.vue',
   '.yaml',
   '.yml',
