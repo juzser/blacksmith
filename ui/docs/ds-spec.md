@@ -1203,9 +1203,9 @@ measured answer but no active session in any store, "No active session in this v
 Show all". While one of these shows, no feed or error card is drawn and no request
 is made. When the live sessions cannot be read, Active shows everything as All does, with
 "Live sessions can't be read here" (the toggle stays). When more than 200 sessions are
-active in the served store, Active also shows everything, with "Too many active sessions
-to narrow; showing all" (the toggle stays, no `sessions` is sent). There is no "in another
-store" line here: every store is read. Until the first answer arrives nothing is fetched and nothing is claimed. Under an
+active, counted across all stores, Active also shows everything, with "Too many active
+sessions to narrow; showing all" (the toggle stays, no `sessions` is sent). There is no
+"in another store" line here: every store is read. Until the first answer arrives nothing is fetched and nothing is claimed. Under an
 explicit filter (`?session=`, `?task=`, `?epic=`) the filter wins: the toggle and these
 lines are not shown and no `sessions` is sent; the request stays on one store (`store=<id>`
 when the URL carries one, as a foreign row's link does), because task, epic and session ids
