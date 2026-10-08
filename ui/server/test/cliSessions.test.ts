@@ -1963,7 +1963,9 @@ describe('cliSessions reader', () => {
           first: number[],
           second: number[],
         ) {
-          while (!root.last().endsWith('#8')) await root.add('note', {});
+          const index = (): number => Number(root.last().split('#').at(-1));
+          expect(index()).toBeLessThanOrEqual(8);
+          while (index() < 8) await root.add('note', {});
           await admit(root, ...first);
           await admit(root, ...second);
           expect(root.last().endsWith('#10')).toBe(true);

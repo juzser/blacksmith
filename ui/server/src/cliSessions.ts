@@ -1371,10 +1371,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           workingAgents.some((a) => a.taskId !== null && taskIdsMatch(a.taskId, t));
         let nextTask: { taskId: string; taskTitle: string } | null = null;
         // Next is work still to do that nobody is on: a task in the todo or
-        // in-progress bucket (the set `remaining` counts), not closed, no live
-        // agent. One in review is not left. The newest open wave's first such
-        // task is next; otherwise (every wave merged, or none qualifies) the
-        // first one in plan order: the order the log first added the tasks in.
+        // in-progress bucket, not closed, no live agent. One in review is not
+        // left. The newest open wave's first such task is next, whatever the
+        // wave admitted (a follow-up the plan does not list counts too);
+        // otherwise (every wave merged, or none qualifies) the first plan task
+        // `remaining` counts, in the order the log first added the tasks in.
         // A task with no label means unknown, never a later one.
         const undone = (t: string): boolean => {
           const r = row(t);
