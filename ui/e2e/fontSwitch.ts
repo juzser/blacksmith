@@ -9,10 +9,13 @@
 /** The one CSS rule the switch injects. `!important` so it beats the token. */
 export const ARIAL_FONT_CSS = ':root { --bs-font-sans: Arial, sans-serif !important; }';
 
-/** True when BS_E2E_FONT=arial; throws on any other non-empty value. */
+/**
+ * True when BS_E2E_FONT=arial, false when it is unset. Throws on any other
+ * value, the empty string included: `BS_E2E_FONT=` is a typo, not "off".
+ */
 export function arialSwitchOn(env: NodeJS.ProcessEnv = process.env): boolean {
   const value = env.BS_E2E_FONT;
-  if (value === undefined || value === '') return false;
+  if (value === undefined) return false;
   if (value === 'arial') return true;
   throw new Error(`BS_E2E_FONT must be unset or "arial", got "${value}"`);
 }
