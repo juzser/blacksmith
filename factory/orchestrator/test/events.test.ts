@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   appendEdge,
   appendEvent,
+  appendWithin,
   EventError,
   type EventRecord,
   eventTaskId,
@@ -1943,6 +1944,68 @@ describe('events.ts', () => {
   // The fix is a verb, not a rule inside the writer: a command whose whole job
   // is the root can be closed where `appendEvent` has to stay open.
   // ---------------------------------------------------------------------------
+  describe('appendWithin: read and append under one lock', () => {
+    const root = (sessionId: string) => ({
+      session_id: sessionId,
+      actor: 'operator',
+      event_type: 'session-start',
+      plan_version: 1,
+      causal_parent: null,
+      payload: {},
+    });
+    const logOf = (sessionId: string) => path.join(stateDir, `${sessionId}.jsonl`);
+
+    it('hands the callback the log as it stands and stores what it returns', async () => {
+      await appendEvent(root('sess-aw-1'), { stateDir });
+      const seen: number[] = [];
+      const stored = await appendWithin(logOf('sess-aw-1'), (existing) => {
+        seen.push(existing.length);
+        return [
+          {
+            session_id: 'sess-aw-1',
+            actor: 'user',
+            event_type: 'user_prompt',
+            plan_version: 1,
+            causal_parent: existing[existing.length - 1]?.event_id ?? null,
+            payload: { prompt: 'hello' },
+          },
+        ];
+      });
+      expect(seen).toEqual([1]);
+      expect(stored.map((e) => e.event_id)).toEqual(['sess-aw-1#1']);
+      expect(stored[0]?.record.causal_parent).toBe('sess-aw-1#0');
+    });
+
+    it('appends nothing for an empty array', async () => {
+      await appendEvent(root('sess-aw-2'), { stateDir });
+      expect(await appendWithin(logOf('sess-aw-2'), () => [])).toEqual([]);
+      expect(await readEvents('sess-aw-2', { stateDir })).toHaveLength(1);
+    });
+
+    it('lets two concurrent callers each see the other as the parent', async () => {
+      await appendEvent(root('sess-aw-3'), { stateDir });
+      const one = (label: string) =>
+        appendWithin(logOf('sess-aw-3'), (existing) => [
+          {
+            session_id: 'sess-aw-3',
+            actor: 'user',
+            event_type: 'user_prompt',
+            plan_version: 1,
+            causal_parent: existing[existing.length - 1]?.event_id ?? null,
+            payload: { prompt: label },
+          },
+        ]);
+      const [a, b] = await Promise.all([one('a'), one('b')]);
+      const parents = [a[0], b[0]]
+        .map((e) => ({ id: e?.event_id, parent: e?.record.causal_parent }))
+        .sort((x, y) => String(x.id).localeCompare(String(y.id)));
+      expect(parents).toEqual([
+        { id: 'sess-aw-3#1', parent: 'sess-aw-3#0' },
+        { id: 'sess-aw-3#2', parent: 'sess-aw-3#1' },
+      ]);
+    });
+  });
+
   describe('startSession: a session has one beginning', () => {
     it('opens a log that does not exist yet and hands back the id everything chains off', async () => {
       const { event_id, record } = await startSession('sess-open-1', { stateDir });

@@ -3057,6 +3057,7 @@ async function main(): Promise<number> {
         ...eventOptsFromFlags(flags),
         ...(flags.actor === undefined ? {} : { actor: flags.actor }),
         ...(flags.continues === undefined ? {} : { continues: flags.continues }),
+        ...(flags.prompt === undefined ? {} : { promptId: flags.prompt }),
       }),
     );
     return 0;
