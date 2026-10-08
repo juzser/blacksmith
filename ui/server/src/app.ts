@@ -89,7 +89,7 @@ import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
 import { fanOut, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
-import type { StoreEntry } from './stores.js';
+import type { StoreEntry, StoreRef } from './stores.js';
 import { createStoreRegistry } from './stores.js';
 
 /**
@@ -1137,6 +1137,15 @@ export function createApp(opts: AppOpts): AppHandle {
     });
   });
 
+  // A foreign session that has not reached an epic yet would read as a home
+  // one ("No project"); it belongs to its store's project instead: listed under
+  // the store's label, kept by a filter on that label, and its roster opens
+  // there. A home one stays outside every project. Both session routes below
+  // ask this one rule.
+  const storeProjectOf = (store: StoreRef, session: { projects: string[] }) =>
+    store.id !== 'home' && session.projects.length === 0 ? store.label : undefined;
+  const NO_EPIC = { projects: [] };
+
   // The topbar session picker's feed -- the same thin-projection shape as
   // /api/projects below, and for the same reason. The shell asks for this on
   // every scopable page, and what it wants is a list of ids; routing it
@@ -1151,7 +1160,7 @@ export function createApp(opts: AppOpts): AppHandle {
       const sessions = qualifiedSessions(c);
       const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
       const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
-      const parts = fanOut(entries, project, (db, p) =>
+      const list = (db: SmithDb, p: string | undefined) =>
         overview(
           db,
           {
@@ -1159,20 +1168,27 @@ export function createApp(opts: AppOpts): AppHandle {
             ...(p ? { project: p } : {}),
           },
           clock,
-        ),
-      );
+        ).runningSessions;
+      // The filtered query cannot see a session with no epic, so a filter on
+      // a foreign store's label reads that store once more, unfiltered, for
+      // those sessions alone.
+      const own = project
+        ? fanOut(
+            entries.filter((e) => storeProjectOf(e, NO_EPIC) === project),
+            undefined,
+            list,
+          ).map(({ store, data }) => ({
+            store,
+            data: data.filter((r) => storeProjectOf(store, r) === project),
+          }))
+        : [];
       return c.json(
-        parts
+        [...fanOut(entries, project, list), ...own]
           .flatMap(({ store, data }) =>
-            data.runningSessions.map((r) => ({
-              ...r,
-              // A foreign session that has not reached an epic yet would read
-              // as a home one ("No project"); name its project after the store.
-              ...(store.id !== 'home' && r.projects.length === 0
-                ? { projects: [store.label] }
-                : {}),
-              store,
-            })),
+            data.map((r) => {
+              const label = storeProjectOf(store, r);
+              return { ...r, ...(label ? { projects: [label] } : {}), store };
+            }),
           )
           .sort(
             (a, b) =>
@@ -1204,7 +1220,13 @@ export function createApp(opts: AppOpts): AppHandle {
     const only = storeOf(c);
     const { db } = only.handle;
     if (project) {
-      const session = overview(db, { sessionId, project }, clock).runningSessions[0];
+      const session =
+        overview(db, { sessionId, project }, clock).runningSessions[0] ??
+        (storeProjectOf(only, NO_EPIC) === project
+          ? overview(db, { sessionId }, clock).runningSessions.find(
+              (r) => storeProjectOf(only, r) === project,
+            )
+          : undefined);
       if (!session) {
         throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
       }

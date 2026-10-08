@@ -717,6 +717,54 @@ test.describe('a foreign store in the dashboard', () => {
         await shoot(page, `sessions-two-stores-${name}`);
       });
     }
+
+    // After the screenshots: it gives the foreign `sess-extra` an agent that
+    // works for the session itself, so the session still has no epic.
+    test('the foreign project link keeps its session with no epic, and its roster opens', async ({
+      page,
+    }) => {
+      const { appendEvent, readEvents } = await import(
+        path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'events.ts')
+      );
+      const opts = { stateDir: path.join(tmp, 'project-b', '.blacksmith', 'state', 'events') };
+      const last = (await readEvents('sess-extra', opts)).at(-1);
+      await appendEvent(
+        {
+          session_id: 'sess-extra',
+          actor: 'orchestrator',
+          event_type: 'dispatch_decision',
+          plan_version: 1,
+          causal_parent: last?.event_id ?? null,
+          project: 'project-b',
+          payload: {
+            agent_role: 'researcher',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            reason: 'Look around before any epic.',
+          },
+        },
+        opts,
+      );
+      await waitFor(
+        async () => (await fetch(`${origin}/api/sessions/sess-extra/agents?store=${foreignId}`)).ok,
+        15000,
+        'the foreign agent',
+      );
+      await page.goto(`${origin}/sessions?scope=all`);
+      const group = groupOf(page, 'project-b');
+      const extra = () => page.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' });
+      await expect(group.locator('.bs-sessionrow').filter({ hasText: 'sess-extra' })).toHaveCount(
+        1,
+      );
+      await group.getByRole('link', { name: 'project-b', exact: true }).click();
+      await expect(page).toHaveURL(/[?&]project=project-b(&|$)/);
+      await expect(page.locator('section.bs-sessions__group')).toHaveCount(0);
+      await expect(extra()).toHaveCount(1);
+      await extra().click();
+      await expect(page).toHaveURL(new RegExp(`[?&]session=sess-extra&store=${foreignId}`));
+      await expect(roster(page).locator('.bs-agentblock')).toHaveCount(1);
+    });
   });
 
   // Last: it ends the foreign CLI session. The grace period is 5 minutes, which
