@@ -76,6 +76,40 @@ export function hasWorkingAgents(
   return roles.some((r) => r.agents.some((a) => agentStatus(a, nowIso).state === 'working'));
 }
 
+// Event types whose titleFor() title is built from the payload. The row has
+// only the type, so these read as the short complete label instead of a title
+// with its detail blanked ("Finding raised: ", "Lesson : ").
+const PAYLOAD_FREE_LABEL: Record<string, string> = {
+  'schema-check-result': 'Schema check',
+  'deps-check-result': 'Dependency check',
+  'testgate-result': 'Test gate',
+  'gate-outcome': 'Gate outcome',
+  'finding-raised': 'Finding raised',
+  'finding-transitioned': 'Finding transitioned',
+  'error-logged': 'Error logged',
+  'task-added': 'Task added',
+  'task-result-recorded': 'Task result',
+  'judge-verdict': 'Judge verdict',
+  'cross-finding-reconciled': 'Cross-finding reconciled',
+  'judge-reported': 'Judge reported',
+  'epic-closed': 'Epic closed',
+  'lesson-candidate-raised': 'Lesson candidate raised',
+  'lesson-edited': 'Lesson edited',
+  'lesson-status-changed': 'Lesson status changed',
+  'recheck-proposed': 'Recheck proposed',
+  'maintenance-proposed': 'Maintenance proposed',
+  'growth-review-due': 'Growth review due',
+  'error-report-proposed': 'Error report proposed',
+  'plan-version-created': 'Plan version created',
+  'plan-version-superseded': 'Plan version superseded',
+  'task-split': 'Task split',
+  'task-superseded': 'Task superseded',
+  'edge-recorded': 'Edge recorded',
+  'wave-admitted': 'Wave admitted',
+  'wave-merged': 'Task merged',
+  'spec-change-proposed': 'Spec change proposed',
+};
+
 /**
  * "What it is doing" / "last step", for SessionRow and AgentBlock: both only
  * ever carry a bare `lastEventType`, never the full event payload, so this
@@ -99,6 +133,8 @@ export function lastStepLabel(
     const who = `Dispatched ${roleLabel(dispatch.role)}`;
     return dispatch.task ? `${who} · ${dispatch.task}` : who;
   }
+  const fixed = PAYLOAD_FREE_LABEL[lastEventType];
+  if (fixed !== undefined) return fixed;
   return titleFor({
     eventId: '',
     ts: '',

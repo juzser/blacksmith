@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.js';
 import {
@@ -184,5 +187,33 @@ describe('hasWorkingAgents (Sessions poll gate)', () => {
 
   it('ignores rows that are not live', () => {
     expect(hasWorkingAgents(roles(agent({ status: 'done' })), now)).toBe(false);
+  });
+});
+
+// Every event type titleFor() has a case for, read out of its source so a case
+// added later is covered without anyone remembering this list.
+const DISPLAY = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib', 'timelineDisplay.ts'),
+  'utf8',
+);
+const titleForSource = DISPLAY.slice(
+  DISPLAY.indexOf('export function titleFor('),
+  DISPLAY.indexOf('function humanizeEventType('),
+);
+const TITLED_TYPES = [...titleForSource.matchAll(/^ {4}case '([^']+)':/gm)].map(
+  (m) => m[1] as string,
+);
+
+describe('lastStepLabel over every titled event type', () => {
+  it('reads the case labels out of titleFor', () => {
+    expect(TITLED_TYPES.length).toBeGreaterThan(30);
+    expect(TITLED_TYPES).toContain('finding-raised');
+  });
+
+  it.each(TITLED_TYPES)('%s reads as a complete label without its payload', (type) => {
+    const label = lastStepLabel(type);
+    expect(label).not.toMatch(/:\s*$/);
+    expect(label).not.toMatch(/undefined|\(\)|\(\/\)| {2}| :|\?|no .* recorded/);
+    expect(label).toBe(label.trim());
   });
 });
