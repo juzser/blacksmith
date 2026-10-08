@@ -1734,12 +1734,20 @@ a:hover {
     border-bottom-color: var(--bs-text);
   }
   /* ds-review.html `.mtabs`: the phone tab row runs edge to edge and scrolls
-     within itself. Every page that hosts tabs (Task detail, Lessons, Activity)
-     is an `.app-page`, whose side padding is --bs-m-gutter on phone, so the
-     bleed is that same token. */
-  .app-page .bs-tabs__list {
+     within itself. Every page that hosts tabs (Task detail, Lessons, Activity,
+     Cost & quality's period tabs) is an `.app-page`, whose side padding is
+     --bs-m-gutter on phone, so the bleed is that same token. */
+  .app-page .bs-tabs__list,
+  .app-page .bs-periodswitch--tabs {
     margin-inline: calc(-1 * var(--bs-m-gutter));
     padding-inline: var(--bs-m-gutter);
+  }
+  /* Cost & quality's toolbar is a wrapping flex row, so the period tabs were
+     sized to their content. A full-width basis (bleed included) gives them the
+     whole line and wraps the toolbar actions beneath. */
+  .bs-analytics-page__toolbar > .bs-periodswitch--tabs {
+    flex: 0 0 calc(100% + 2 * var(--bs-m-gutter));
+    min-width: 0;
   }
 }
 

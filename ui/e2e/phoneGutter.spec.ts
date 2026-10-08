@@ -1,3 +1,4 @@
+import { stubActiveScope } from './activeScopeStub.js';
 import { expect, test } from './harness.js';
 import { VIEWPORTS } from './helpers.js';
 
@@ -70,4 +71,22 @@ test.describe('Page gutter matches the mock (ds-review.html .ph-body)', () => {
       expect(css.gap, `desktop gap ${css.gap}px`).toBe(24);
     });
   }
+
+  // ds-review.html `.mtabs`: Cost & quality's period tabs run edge to edge, so
+  // the row's bottom border spans the viewport, not just the three tabs.
+  test('phone cost & quality: period tab row runs edge to edge', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      factorySessions: [{ storeId: 'home', sessionId: 'sess-fixture' }],
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/analytics?scope=all');
+    const row = page.locator('.bs-periodswitch--tabs');
+    await expect(row).toBeVisible();
+    const box = await row.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, width: r.width };
+    });
+    expect.soft(box.left, `row left ${box.left}px`).toBeCloseTo(0, 0);
+    expect.soft(box.width, `row width ${box.width}px`).toBeCloseTo(VIEWPORTS.mobile.width, 0);
+  });
 });
