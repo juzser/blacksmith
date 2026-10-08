@@ -61,7 +61,16 @@ describe('Kanban drops Refresh on phone (existing rule, unchanged by S1)', () =>
 });
 
 describe('MobileTopBar closes its overflow on navigation', () => {
-  it('watches the route and calls closeOverflow', () => {
-    expect(MOBILE_TOPBAR_SRC).toMatch(/watch\(\(\) => route\.fullPath, closeOverflow\)/);
+  it('closes on navigation through the router hook, not on the first navigation', () => {
+    expect(MOBILE_TOPBAR_SRC).toMatch(
+      /router\.afterEach\([\s\S]*navigationClosesOverflow\([\s\S]*closeOverflow\(\)/,
+    );
+  });
+
+  it('learns about navigation only through the router.afterEach hook', () => {
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/watch\(\s*\(\)\s*=>\s*route\.(full)?[pP]ath\b/);
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/watch\(\s*route\b/);
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/\buseRoute\(/);
+    expect(MOBILE_TOPBAR_SRC).not.toMatch(/\bcurrentRoute\b/);
   });
 });

@@ -11,9 +11,10 @@
 // path. Page-view options and "Open desktop view" are deferred, see
 // ui/docs/DESIGN.md Known deviations.
 import { Ellipsis, Moon, Pause, Play, Settings, Sun } from '@lucide/vue';
-import { computed, nextTick, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { formatLiveStatus } from '../../lib/format.js';
+import { navigationClosesOverflow } from '../../lib/overflowNav.js';
 import Icon from './Icon.vue';
 import IconButton from './IconButton.vue';
 import MobileProjectSwitcher from './MobileProjectSwitcher.vue';
@@ -130,9 +131,13 @@ watch(overflowOpen, (open) => {
 // Any navigation closes the overflow — in particular Work's "View" radio
 // group teleported in via #bs-mtopbar-overflow-extra, whose own change
 // handler routes rather than emitting a dedicated close event (Work's view
-// switch, uiux spec §3 focus return).
-const route = useRoute();
-watch(() => route.fullPath, closeOverflow);
+// switch, uiux spec §3 focus return). The router's own first navigation does
+// not count: on a cold start it can land after the user has opened the menu.
+const router = useRouter();
+const stopNavWatch = router.afterEach((to, from, failure) => {
+  if (navigationClosesOverflow(to, from, failure)) closeOverflow();
+});
+onBeforeUnmount(stopNavWatch);
 
 // Same text LiveIndicator.vue composes inline (statusLabel + a conditional
 // RelativeTime), as a plain string here because this is an aria-label, not a
