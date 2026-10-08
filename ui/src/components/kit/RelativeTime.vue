@@ -31,7 +31,7 @@ const absolute = computed(() => formatAbsolute(props.iso));
 </script>
 
 <template>
-  <Tooltip class="bs-reltime" mode="describe" :text="absolute" placement="top">
+  <Tooltip mode="describe" :text="absolute" class="bs-reltime" placement="top">
     <time :datetime="iso">{{ relative }}</time>
   </Tooltip>
 </template>

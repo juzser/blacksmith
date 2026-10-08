@@ -531,6 +531,9 @@ a:hover {
        the title's own text. */
     padding-block: 0;
     margin-block: 0;
+    /* Wide enough already, and its box must start where the title starts. */
+    padding-inline: 0;
+    margin-inline: 0;
   }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
@@ -2891,6 +2894,13 @@ summary.bs-inbox__group-head {
   /* The mock's `.phone .ls-card`: 12px, one step under the desktop card. */
   .bs-live-card .bs-card__body {
     padding: var(--bs-space-3);
+  }
+  /* The status row's time keeps its text height: the head link's grown hit
+     box ends right above it and the title's starts right below, so a 44px
+     box here would sit on both. Its width still reaches the floor. */
+  .bs-live-card__status .bs-reltime {
+    padding-block: 0;
+    margin-block: 0;
   }
   .bs-live-card__head {
     flex-direction: column;

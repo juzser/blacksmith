@@ -64,7 +64,7 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       h: r.height,
       holder: holder?.getBoundingClientRect().height ?? 0,
       overlaps,
-      inRow: el.closest('.bs-timeline-row') !== null,
+      inRow: el.closest('.bs-timeline-row, .bs-live-card') !== null,
     });
   }
   return out;
@@ -126,8 +126,8 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const boxes = await page.evaluate(measure, { selector: TIME, neighbours: NEIGHBOURS });
         expect(boxes.length).toBeGreaterThan(0);
         for (const b of boxes) {
-          // A timeline row holds the title button's 44px box right above its
-          // time (bs-primitives.css, .bs-timeline-row__ts--meta), so its time
+          // A timeline row (or live card) holds a neighbour's 44px box right above its
+          // time (bs-primitives.css, .bs-timeline-row__ts--meta, .bs-live-card__status), so its time
           // keeps its text box: only its width is a floor.
           // That title box already covers 8px of the time's own text on main.
           if (b.inRow) {
