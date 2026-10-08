@@ -94,7 +94,7 @@ export async function growToPageHeight(page: Page): Promise<void> {
 // A route handler that proxies with route.fetch() may still be mid-fetch when a
 // test ends; the page then closes under it and the handler throws "Response has
 // been disposed", which the runner charges to the test. Unrouting with
-// ignoreErrors waits for those handlers and swallows what they throw.
+// ignoreErrors does not wait for those handlers and swallows what they throw.
 export async function dropRoutes(page: Page): Promise<void> {
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 }
