@@ -42,6 +42,10 @@ const SFC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'AnalyticsPage.vue'),
   'utf8',
 );
+const PRIMITIVES = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
 const PERIOD_SWITCH = readFileSync(
   join(
     dirname(fileURLToPath(import.meta.url)),
@@ -853,5 +857,21 @@ describe('number and unit never split across a line', () => {
     expect(secondOpinionTakeaway({ agreementRate: 0.5, meanLatencyMs: 8000 })).toContain(
       '8\u00a0s average',
     );
+  });
+});
+
+describe('AnalyticsPage.vue — phone not-measured values (mock .mstat .v.nd)', () => {
+  const MOD = 'bs-analytics-page__phone-stat-value--nd';
+  it('marks every phone stat value that can read "Not enough data yet"', () => {
+    const all = SFC.match(/<span\s+class="bs-analytics-page__phone-stat-value"/g) ?? [];
+    expect(all).toHaveLength(4);
+    const marked = SFC.match(new RegExp(`phone-stat-value[^>]*${MOD}`, 'g')) ?? [];
+    expect(marked).toHaveLength(4);
+  });
+  it('styles the modifier with the mock size, weight and colour from tokens', () => {
+    const rule = PRIMITIVES.match(new RegExp(`\\.${MOD} \\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule).toContain('font-size: var(--bs-text-sm)');
+    expect(rule).toContain('font-weight: var(--bs-font-weight-normal)');
+    expect(rule).toContain('color: var(--bs-text-subtle)');
   });
 });

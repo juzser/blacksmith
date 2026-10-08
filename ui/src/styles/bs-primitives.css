@@ -4599,6 +4599,12 @@ h2.rm-section__head {
   font-size: var(--bs-text-md);
   font-weight: 600;
 }
+/* The mock's .mstat .v.nd: a value that was not measured reads quieter than a figure. */
+.bs-analytics-page__phone-stat-value--nd {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtle);
+}
 .bs-analytics-page__phone-roles-section {
   display: flex;
   flex-direction: column;

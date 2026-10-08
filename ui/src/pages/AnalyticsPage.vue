@@ -458,14 +458,20 @@ const phoneRoleHeading = computed(() => {
         <div class="bs-analytics-page__phone-metrics">
           <div class="bs-analytics-page__phone-stat">
             <span class="bs-analytics-page__phone-stat-label">Tokens per task</span>
-            <span class="bs-analytics-page__phone-stat-value">
+            <span
+              class="bs-analytics-page__phone-stat-value"
+              :class="{ 'bs-analytics-page__phone-stat-value--nd': avgCostPerTask === null }"
+            >
               <CompactNumber v-if="avgCostPerTask !== null" :value="avgCostPerTask" unit="tok" />
               <span v-else>Not enough data yet</span>
             </span>
           </div>
           <div class="bs-analytics-page__phone-stat">
             <span class="bs-analytics-page__phone-stat-label">Second-opinion agreed</span>
-            <span class="bs-analytics-page__phone-stat-value">
+            <span
+              class="bs-analytics-page__phone-stat-value"
+              :class="{ 'bs-analytics-page__phone-stat-value--nd': secondOpinionPct === null }"
+            >
               <ProgressRing
                 v-if="secondOpinionPct !== null"
                 :value="secondOpinionPct"
@@ -478,11 +484,19 @@ const phoneRoleHeading = computed(() => {
           </div>
           <div class="bs-analytics-page__phone-stat">
             <span class="bs-analytics-page__phone-stat-label">Repeated mistakes</span>
-            <span class="bs-analytics-page__phone-stat-value">{{ rateDisplay(sameMistakeDisplay) }}</span>
+            <span
+              class="bs-analytics-page__phone-stat-value"
+              :class="{ 'bs-analytics-page__phone-stat-value--nd': sameMistakeDisplay === null }"
+              >{{ rateDisplay(sameMistakeDisplay) }}</span
+            >
           </div>
           <div class="bs-analytics-page__phone-stat">
             <span class="bs-analytics-page__phone-stat-label">Fixes that held</span>
-            <span class="bs-analytics-page__phone-stat-value">{{ rateDisplay(recheckDisplay) }}</span>
+            <span
+              class="bs-analytics-page__phone-stat-value"
+              :class="{ 'bs-analytics-page__phone-stat-value--nd': recheckDisplay === null }"
+              >{{ rateDisplay(recheckDisplay) }}</span
+            >
           </div>
         </div>
 

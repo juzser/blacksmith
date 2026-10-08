@@ -1245,6 +1245,8 @@ one-line takeaway underneath:
    icon button whose tooltip defines the metric; from the existing `agree %`/`ms` values, msconverted to seconds
    ("27 s average"). With no second-opinion review in the period the ring gives way to
    "Not enough data yet" and the takeaway reads "No second-opinion reviews in this period." (never 0%).
+   On a phone, any stat value that reads "Not enough data yet" is set at 13px, regular weight,
+   `--bs-text-subtle` (the mock's `.mstat .v.nd`), so it cannot be mistaken for a measured figure.
 
 "Cost per task by provider" is hidden outright when fewer than 2 providers have data (per
 operator decision, plan-ui-friendly.md's decisions list) — confirmed from
