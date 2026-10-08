@@ -24,7 +24,6 @@ import {
   paletteOf,
   parseBsRoots,
   pastModel,
-  pickEpic,
   pickView,
   planDirOf,
   planEffort,
