@@ -958,16 +958,30 @@ export async function startSession(
  * `existing` cannot go stale before the write. An empty array appends nothing.
  * Returns the stored events with their ids as `appendEventLocked` reports them.
  * `build` runs under the lock: keep it synchronous and cheap.
+ *
+ * Every returned input must carry `sessionId` as its own `session_id`, since a
+ * stored id names the log that holds it; any other is refused before a single
+ * input is written. Past that check, each input is appended in turn, so if
+ * input N fails validation the inputs before it are already written: the call
+ * is not atomic across inputs.
  */
 export async function appendWithin(
-  filePath: string,
+  sessionId: string,
   build: (existing: StoredEvent[]) => EventInput[],
   opts: EventOpts = {},
 ): Promise<StoredEvent[]> {
+  const filePath = logPath(sessionId, opts);
   return enqueue(filePath, () =>
     withLogLock(filePath, async () => {
-      const sessionId = path.basename(filePath, '.jsonl');
       const inputs = build(await readEventsAtPath(filePath, sessionId));
+      const stray = inputs.find((input) => input.session_id !== sessionId);
+      if (stray !== undefined) {
+        throw new EventError(
+          'events.malformed-session-id',
+          `Input names session "${stray.session_id}" but is being appended to the log of "${sessionId}". A stored event id names the log that holds it, so an input for another session cannot go here.`,
+          { session_id: stray.session_id, log_session_id: sessionId },
+        );
+      }
       const stored: StoredEvent[] = [];
       for (const input of inputs) stored.push(await appendEventLocked(input, opts, filePath));
       return stored;

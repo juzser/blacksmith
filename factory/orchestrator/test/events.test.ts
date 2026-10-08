@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { appendFile, mkdtemp, open, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1954,23 +1954,53 @@ describe('events.ts', () => {
       payload: {},
     });
     const logOf = (sessionId: string) => path.join(stateDir, `${sessionId}.jsonl`);
+    const prompt = (sessionId: string, text: string) => ({
+      session_id: sessionId,
+      actor: 'user',
+      event_type: 'user_prompt',
+      plan_version: 1,
+      causal_parent: 'home#0',
+      payload: { prompt: text },
+    });
+
+    it('refuses an input whose session_id is not the log it appends to', async () => {
+      await appendEvent(root('home'), { stateDir });
+      const before = await readFile(logOf('home'), 'utf8');
+      await expect(
+        appendWithin('home', () => [prompt('other', 'x')], { stateDir }),
+      ).rejects.toMatchObject({ code: 'events.malformed-session-id' });
+      expect(await readFile(logOf('home'), 'utf8')).toBe(before);
+    });
+
+    it('writes nothing when only a later input mismatches', async () => {
+      await appendEvent(root('home'), { stateDir });
+      const before = await readFile(logOf('home'), 'utf8');
+      await expect(
+        appendWithin('home', () => [prompt('home', 'ok'), prompt('other', 'bad')], { stateDir }),
+      ).rejects.toMatchObject({ code: 'events.malformed-session-id' });
+      expect(await readFile(logOf('home'), 'utf8')).toBe(before);
+    });
 
     it('hands the callback the log as it stands and stores what it returns', async () => {
       await appendEvent(root('sess-aw-1'), { stateDir });
       const seen: number[] = [];
-      const stored = await appendWithin(logOf('sess-aw-1'), (existing) => {
-        seen.push(existing.length);
-        return [
-          {
-            session_id: 'sess-aw-1',
-            actor: 'user',
-            event_type: 'user_prompt',
-            plan_version: 1,
-            causal_parent: existing[existing.length - 1]?.event_id ?? null,
-            payload: { prompt: 'hello' },
-          },
-        ];
-      });
+      const stored = await appendWithin(
+        'sess-aw-1',
+        (existing) => {
+          seen.push(existing.length);
+          return [
+            {
+              session_id: 'sess-aw-1',
+              actor: 'user',
+              event_type: 'user_prompt',
+              plan_version: 1,
+              causal_parent: existing[existing.length - 1]?.event_id ?? null,
+              payload: { prompt: 'hello' },
+            },
+          ];
+        },
+        { stateDir },
+      );
       expect(seen).toEqual([1]);
       expect(stored.map((e) => e.event_id)).toEqual(['sess-aw-1#1']);
       expect(stored[0]?.record.causal_parent).toBe('sess-aw-1#0');
@@ -1978,23 +2008,27 @@ describe('events.ts', () => {
 
     it('appends nothing for an empty array', async () => {
       await appendEvent(root('sess-aw-2'), { stateDir });
-      expect(await appendWithin(logOf('sess-aw-2'), () => [])).toEqual([]);
+      expect(await appendWithin('sess-aw-2', () => [], { stateDir })).toEqual([]);
       expect(await readEvents('sess-aw-2', { stateDir })).toHaveLength(1);
     });
 
     it('lets two concurrent callers each see the other as the parent', async () => {
       await appendEvent(root('sess-aw-3'), { stateDir });
       const one = (label: string) =>
-        appendWithin(logOf('sess-aw-3'), (existing) => [
-          {
-            session_id: 'sess-aw-3',
-            actor: 'user',
-            event_type: 'user_prompt',
-            plan_version: 1,
-            causal_parent: existing[existing.length - 1]?.event_id ?? null,
-            payload: { prompt: label },
-          },
-        ]);
+        appendWithin(
+          'sess-aw-3',
+          (existing) => [
+            {
+              session_id: 'sess-aw-3',
+              actor: 'user',
+              event_type: 'user_prompt',
+              plan_version: 1,
+              causal_parent: existing[existing.length - 1]?.event_id ?? null,
+              payload: { prompt: label },
+            },
+          ],
+          { stateDir },
+        );
       const [a, b] = await Promise.all([one('a'), one('b')]);
       const parents = [a[0], b[0]]
         .map((e) => ({ id: e?.event_id, parent: e?.record.causal_parent }))
