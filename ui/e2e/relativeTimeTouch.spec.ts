@@ -22,6 +22,7 @@ interface Box {
   w: number;
   h: number;
   holder: number;
+  top: number;
   overlaps: string[];
   inRow: boolean;
 }
@@ -77,6 +78,7 @@ function measure(args: { selector: string; neighbours: string; exempt: string })
       w: r.width,
       h: r.height,
       holder: holder?.getBoundingClientRect().height ?? 0,
+      top: own.top,
       overlaps,
       inRow: el.matches(args.exempt),
     });
@@ -107,17 +109,6 @@ async function touchFloor(page: Page): Promise<number> {
   );
   return touch - 0.5;
 }
-
-// Heights of the holder of every trigger, read on main before the fix. They
-// must not move: the hit box is an absolutely positioned ::after.
-const HOLDER_HEIGHTS: Record<string, number[]> = {
-  kanban: [102],
-  'kanban-group': [272, 60, 61, 61],
-  errors: [20, 64],
-  activity: [...Array(49).fill(65), 64],
-  overview: [65, 65, 65, 65, ...Array(8).fill(40)],
-  sessions: [98, 98],
-};
 
 // The shortest text each formatter tier can produce (lib/format.ts): "just now",
 // the one-digit form of every "… ago" unit, and the one-digit "for …" forms.
@@ -375,9 +366,18 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           [...new Set(boxes.filter((b) => !b.inRow).flatMap((b) => b.overlaps))],
           `${name}: covers another target`,
         ).toEqual([]);
-        // Row heights follow the font (a wrapped line), so they are pinned for
-        // the default font only.
-        if (!font.css) expect(boxes.map((b) => round(b.holder))).toEqual(HOLDER_HEIGHTS[name]);
+        // The hit box is an absolutely positioned ::after, so it takes no layout
+        // space: with its rules dropped, each trigger's holder height and own top
+        // are the same. Both are measured on the same page and font, so this
+        // holds on any font, wherever a row happens to wrap.
+        await page.evaluate(dropHitBoxRules);
+        const before = await page.evaluate(measure, {
+          selector: TIME,
+          neighbours: NEIGHBOURS,
+          exempt: EXEMPT,
+        });
+        expect(boxes.map((b) => round(b.holder))).toEqual(before.map((b) => round(b.holder)));
+        expect(boxes.map((b) => round(b.top))).toEqual(before.map((b) => round(b.top)));
       });
     }
   }
