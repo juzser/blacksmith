@@ -1149,6 +1149,32 @@ export function sessionDividerLabel(entry: TimelineEntry): string {
   return entry.sessionTitle || entry.sessionId;
 }
 
+/**
+ * True when the loaded feed holds more than one distinct non-null `project`.
+ * A store id is not a project (one store can hold several), so only the
+ * entry's own `project` counts.
+ */
+export function isMultiProjectFeed(entries: readonly TimelineEntry[]): boolean {
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (e.project) {
+      seen.add(e.project);
+      if (seen.size > 1) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The divider's full text. A multi-project feed names the entry's project
+ * ("project-b · Session: epic-1"); an entry with no project, or any
+ * one-project feed, reads "Session: <title>" as before.
+ */
+export function sessionDividerText(entry: TimelineEntry, multiProject: boolean): string {
+  const text = `Session: ${sessionDividerLabel(entry)}`;
+  return multiProject && entry.project ? `${entry.project} · ${text}` : text;
+}
+
 export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {
   const items: RoleMinuteItem[] = [];
   let run: ActivityEntry[] = [];

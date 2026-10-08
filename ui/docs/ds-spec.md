@@ -1192,7 +1192,10 @@ query values, at most 200, each qualified `<storeId>/<sessionId>` because Activi
 every store); All sends none. With no explicit filter Activity reads every store
 (`stores=all` on `/api/timeline` and `/api/errors`): rows carry their store, the feed is one
 merged list in log order, and a row's links to its task and session carry `?store=` when
-the row is foreign. No store label is drawn. Each edge line is one muted line in Sessions'
+the row is foreign. No store label is drawn, but when the loaded feed spans more than one project the
+project is named: in each session divider (`<project> · Session: <title>`), in a divider
+above the feed's first row, and in a `Project` line of the expanded row (operator decision
+of 2026-10-08; it beats the mock). Each edge line is one muted line in Sessions'
 style, ending in a "Show all" link, and takes the page's own gap, as Sessions' lines do:
 with no live CLI session at all, "Nothing is active right now. · Show all"; with live
 sessions but none on an epic, "N live sessions, none on an epic · Show all"; with a

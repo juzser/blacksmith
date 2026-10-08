@@ -57,6 +57,9 @@ const props = withDefaults(
      * "a humanized label ... outcome Tag"), same slot the general row table
      * gives a gate's Passed/Failed status tag. */
     tag?: { tone: KitTone; label: string } | null;
+    /** Activity in a multi-project feed only: adds a Project pair to the
+     * expanded detail. Off elsewhere, so Home and task History do not move. */
+    showProject?: boolean;
   }>(),
   { linkable: true },
 );
@@ -214,6 +217,10 @@ function onBecauseOf() {
           <dd>{{ tag.label }}</dd>
         </template>
         <template v-if="variant !== 'rail'">
+          <template v-if="showProject && entry.project">
+            <dt>Project</dt>
+            <dd>{{ entry.project }}</dd>
+          </template>
           <template v-if="entry.taskId">
             <dt>Task</dt>
             <dd>{{ entry.taskId }}</dd>

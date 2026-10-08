@@ -55,8 +55,9 @@ import {
   type EventKind,
   groupByDay,
   groupByRoleMinute,
+  isMultiProjectFeed,
   sessionDividerBefore,
-  sessionDividerLabel,
+  sessionDividerText,
 } from '../lib/timelineDisplay.js';
 
 const route = useRoute();
@@ -455,9 +456,22 @@ const dayGroups = computed(() => groupByDay(entries.value, new Date().toISOStrin
 // session differs, keyed off the whole feed's order (not per day-group), so a
 // session that spans a day boundary still only breaks once per real change.
 const indexById = computed(() => new Map(entries.value.map((e, i) => [keyOf(e), i])));
+const multiProject = computed(() => isMultiProjectFeed(entries.value));
+// In a multi-project feed the first single row also gets a divider, so the
+// first block is labelled. A feed that opens with a "N dispatches" group has
+// no divider on the group; its first single row after it gets this one.
+const firstRowKey = computed(() => {
+  if (!multiProject.value) return null;
+  for (const group of dayGroups.value) {
+    const first = groupByRoleMinute(group.items).find((i) => i.kind === 'entry');
+    if (first?.entry) return keyOf(first.entry);
+  }
+  return null;
+});
 function dividerBefore(entry: ActivityEntry): boolean {
   const idx = indexById.value.get(keyOf(entry));
-  return idx !== undefined && sessionDividerBefore(entries.value, idx);
+  if (idx === undefined) return false;
+  return keyOf(entry) === firstRowKey.value || sessionDividerBefore(entries.value, idx);
 }
 
 function ctxFor(entry: ActivityEntry) {
@@ -640,12 +654,13 @@ function becauseOf(promptKey: string) {
                 </li>
                 <template v-else>
                   <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
-                    Session: {{ sessionDividerLabel(item.entry!) }}
+                    {{ sessionDividerText(item.entry!, multiProject) }}
                   </li>
                   <TimelineRow
                     :entry="item.entry!"
                     :expanded="expanded.has(keyOf(item.entry!))"
                     :ctx="ctxFor(item.entry!)"
+                    :show-project="multiProject"
                     :class="{ 'bs-timeline-row--highlight': highlighted === keyOf(item.entry!) }"
                     @toggle="toggleRow"
                     @select-task="goToTask"

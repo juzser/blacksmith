@@ -12,6 +12,7 @@ import {
   groupByDay,
   groupByRoleMinute,
   groupDispatches,
+  isMultiProjectFeed,
   KIND_OPTIONS,
   kindFor,
   matchesKind,
@@ -19,6 +20,7 @@ import {
   nodesOfItem,
   sessionDividerBefore,
   sessionDividerLabel,
+  sessionDividerText,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -1841,5 +1843,41 @@ describe('lib/timelineDisplay.ts empty gate checks still recorded a verdict', ()
     expect(title('deps-check-result', { detail: 'no .bin' })).toBe(
       'Dependency check (no verdict recorded): no .bin',
     );
+  });
+});
+
+// Operator decision 2026-10-08: with more than one project in the feed, the
+// divider names the project. A store is not a project, so only `project` counts.
+describe('lib/timelineDisplay.ts isMultiProjectFeed()', () => {
+  it('is false for an empty feed, one project, or nulls beside one project', () => {
+    expect(isMultiProjectFeed([])).toBe(false);
+    expect(
+      isMultiProjectFeed([entry({ project: 'project-a' }), entry({ project: 'project-a' })]),
+    ).toBe(false);
+    expect(isMultiProjectFeed([entry({ project: 'project-a' }), entry({ project: null })])).toBe(
+      false,
+    );
+  });
+
+  it('is true once two distinct non-null projects appear', () => {
+    expect(
+      isMultiProjectFeed([entry({ project: 'project-a' }), entry({ project: 'project-b' })]),
+    ).toBe(true);
+  });
+});
+
+describe('lib/timelineDisplay.ts sessionDividerText()', () => {
+  const e = entry({ sessionId: 'sess-a', sessionTitle: 'epic-1', project: 'project-b' });
+
+  it('reads "Session: <title>" in a one-project feed', () => {
+    expect(sessionDividerText(e, false)).toBe('Session: epic-1');
+  });
+
+  it('prefixes the project in a multi-project feed', () => {
+    expect(sessionDividerText(e, true)).toBe('project-b · Session: epic-1');
+  });
+
+  it('stays "Session: <title>" when the entry has no project', () => {
+    expect(sessionDividerText({ ...e, project: null }, true)).toBe('Session: epic-1');
   });
 });

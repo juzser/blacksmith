@@ -126,3 +126,22 @@ describe('ActivityPage reads every store', () => {
     expect(page).not.toMatch(/otherStores/);
   });
 });
+
+describe('project naming in a multi-project feed', () => {
+  const row = read('components', 'kit', 'TimelineRow.vue');
+  const page = read('pages', 'ActivityPage.vue');
+
+  it('shows a Project pair before Task only when the opt-in prop is set and a project exists', () => {
+    expect(row).toContain('showProject?: boolean');
+    expect(row).toMatch(
+      /v-if="showProject && entry\.project"[\s\S]*<dt>Project<\/dt>[\s\S]*<dt>Task<\/dt>/,
+    );
+  });
+
+  it('computes multi-project once, labels dividers with it and opens the feed with a divider', () => {
+    expect(page).toContain('isMultiProjectFeed(entries.value)');
+    expect(page).toContain('sessionDividerText(item.entry!, multiProject)');
+    expect(page).toContain(':show-project="multiProject"');
+    expect(page).toContain('firstRowKey');
+  });
+});
