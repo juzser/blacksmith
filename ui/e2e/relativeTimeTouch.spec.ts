@@ -312,17 +312,35 @@ async function prepare(page: Page, name: string): Promise<void> {
 }
 
 // A session's row shows its time as plain text inside the row button, so the
-// only tooltip time on the page is the one in the selected session's roster
-// line ("started <time>"). Select a row to put that line on screen.
+// tooltip times on the page are the selected session's head line ("started
+// <time>") and one per agent row in its roster. Select a row whose roster has
+// agents and wait for that roster to load, so the count below is not a race.
 const ROSTER_TIME = `.bs-sessions__detail-head ${TIME}`;
-async function selectSession(page: Page): Promise<void> {
-  await page.locator('.bs-sessionrow').first().click();
-  await expect(page.locator(ROSTER_TIME)).toHaveCount(1);
+const DETAIL = '.bs-sessions__detail';
+const AGENT_ROW = `${DETAIL} .bs-agentblock__row`;
+async function selectSession(page: Page): Promise<number> {
+  const rows = page.locator('.bs-sessionrow');
+  await expect(rows.first()).toBeVisible();
+  const total = await rows.count();
+  for (let i = 0; i < total; i++) {
+    await rows.nth(i).click();
+    await expect(page.locator(ROSTER_TIME)).toHaveCount(1);
+    // Settled means the roster rendered: agent rows, or the empty line. A mere
+    // missing skeleton can also be the instant before it first renders.
+    await expect(page.locator(`${AGENT_ROW}, ${DETAIL} .bs-sessions__quiet`).first()).toBeVisible();
+    await expect(page.locator(`${DETAIL} .bs-skeleton`)).toHaveCount(0);
+    const agents = await page.locator(AGENT_ROW).count();
+    if (agents > 0) return agents;
+  }
+  throw new Error('no listed session has agents in its roster');
 }
 
 // Opens what a page keeps closed until asked.
 async function reveal(page: Page, name: string): Promise<void> {
-  if (name === 'sessions') return selectSession(page);
+  if (name === 'sessions') {
+    await selectSession(page);
+    return;
+  }
   if (name !== 'kanban-group') return;
   await page.locator('.bs-kanban-group summary').first().click();
   await expect(page.locator('.bs-kanban-group__row-meta .bs-reltime').first()).toBeVisible();
@@ -348,9 +366,14 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           exempt: EXEMPT,
         });
         expect(boxes.length).toBeGreaterThan(0);
-        // Sessions: the roster line's time is the one measured, so a time that
-        // drops out of the walk (or a row time that grows a tab stop) fails here.
-        if (name === 'sessions') expect(boxes.length, 'sessions: measured times').toBe(1);
+        // Sessions: the head line's time plus one per agent row are measured, so
+        // a time that drops out of the walk (or a row time that grows a tab
+        // stop) fails here.
+        if (name === 'sessions') {
+          const agentRows = await page.locator(AGENT_ROW).count();
+          expect(agentRows, 'sessions: agent rows').toBeGreaterThan(0);
+          expect(boxes.length, 'sessions: measured times').toBe(1 + agentRows);
+        }
         // A hit box wider than the text must not widen the page.
         expect(
           await page.evaluate(
@@ -442,7 +465,11 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
         const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
         expect(real.misses.length).toBeGreaterThan(0);
-        if (name === 'sessions') expect(real.misses.length, 'sessions: tapped times').toBe(1);
+        if (name === 'sessions') {
+          const agentRows = await page.locator(AGENT_ROW).count();
+          expect(agentRows, 'sessions: agent rows').toBeGreaterThan(0);
+          expect(real.misses.length, 'sessions: tapped times').toBe(1 + agentRows);
+        }
         expect(
           real.misses.map((m, i) => (m.length ? `time ${i}: ${m.join(', ')}` : '')).filter(Boolean),
           `${name}: a tap inside a time's box lands elsewhere`,
