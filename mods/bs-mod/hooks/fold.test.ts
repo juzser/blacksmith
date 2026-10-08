@@ -3,6 +3,14 @@ import type { AgentInfo, AgentStatus } from 'claude-code'
 import {
   activeSessionAgents,
   bar,
+  bgEnd,
+  bgStart,
+  notificationEnd,
+  foldTaskTool,
+  progressOf,
+  promptHomes,
+  type BgState,
+  type TaskItem,
   capped,
   currentModel,
   distinctPrompts,
@@ -1226,9 +1234,17 @@ describe('prompts in the fold', () => {
     expect(saved.includes('x'.repeat(241))).toBe(false)
   })
 
-  test('a prompt no work descends from is never kept', async () => {
-    const { hud } = foldLog([prompt('just chatting'), added(T16)])
-    expect(JSON.stringify(hud).includes('just chatting')).toBe(false)
+  test('a prompt no work descends from is kept too, the epic log\'s own', async () => {
+    const { epic } = foldLog([prompt('just chatting'), added(T16)])
+    expect(epic.prompts![`${ES}#0`]!.text).toBe('just chatting')
+  })
+
+  test('an epic keeps its newest 20 prompts', async () => {
+    const { epic } = foldLog([...Array.from({ length: 23 }, (_, i) => prompt(`ask ${i}`)), added(T16)])
+    const kept = Object.values(epic.prompts!).map(p => p.text)
+    expect(kept.length).toBe(20)
+    expect(kept.includes('ask 0')).toBe(false)
+    expect(kept.includes('ask 22')).toBe(true)
   })
 
   test('a hud persisted before prompts were kept folds on', async () => {
@@ -1748,5 +1764,187 @@ describe('palette', () => {
     for (const theme of ['dark-daltonized', 'light-daltonized', 'auto', 'solarized', '', null, undefined]) {
       expect(paletteOf(theme)).toEqual(keys)
     }
+  })
+})
+
+describe('prompts in Current, linked or not', () => {
+  const ES = 'web-ux-4-2026-10-04'
+  const HOME = 'prompts-c1c1c1c1-0000-4000-8000-000000000001'
+  function foldLog(events: BsEvent[], sid = SID) {
+    const hud = emptyHud()
+    const lines = new Map<string, number>()
+    for (const e of events) {
+      const s = e.session_id ?? ''
+      const n = lines.get(s) ?? 0
+      lines.set(s, n + 1)
+      foldEvent(hud, e, `${s}#${n}`, sid)
+    }
+    return { hud, epic: hud.epics[EPIC]! }
+  }
+  const prompt = (text: string, session = ES) =>
+    ev('user_prompt', null, { prompt: text }, { session_id: session, actor: 'user', cli_session_id: SID })
+  const cite = (e: BsEvent, parent: string | null) => ({ ...e, causal_parent: parent })
+  const now = (events: BsEvent[]) => Date.parse(events.at(-1)!.ts!) + 60_000
+
+  test('an unlinked user_prompt of the epic log appears in Current', async () => {
+    const events = [prompt('sketch the beta-app login'), added(T16)]
+    const { epic } = foldLog(events)
+    const rows = currentModel(epic, now(events)).prompts.rows
+    expect(rows.map(r => ({ ref: r.ref, text: r.text }))).toEqual([{ ref: `${ES}#0`, text: 'sketch the beta-app login' }])
+    expect(rows[0]!.task).toBeUndefined()
+  })
+
+  test('the newest 2 by ts win, the rest counted', async () => {
+    const events = [prompt('first'), prompt('second'), prompt('third'), added(T16)]
+    const { epic } = foldLog(events)
+    const c = currentModel(epic, now(events), { prompts: 2 })
+    expect(c.prompts.rows.map(r => r.text)).toEqual(['third', 'second'])
+    expect(c.prompts.more).toBe(1)
+  })
+
+  test('a linked prompt carries its task, and +N when it led to several', async () => {
+    const events = [prompt('first'), prompt('second'), cite(added(T16), `${ES}#0`), cite(added(T17), `${ES}#0`), cite(added(T18), `${ES}#1`)]
+    const { epic } = foldLog(events)
+    const rows = currentModel(epic, now(events)).prompts.rows
+    const by = (text: string) => rows.find(r => r.text === text)!
+    expect(by('first').task).toBe('task-16')
+    expect(by('first').more).toBe(1)
+    expect(by('second').task).toBe('task-18')
+    expect(by('second').more).toBeUndefined()
+  })
+
+  test('a prompts-<id> file is no epic', async () => {
+    expect(epicOfFile(`${HOME}.jsonl`)).toBeNull()
+    const e = prompt('hello', HOME)
+    expect(epicIdOf(e)).toBeNull()
+    expect(epicIdOf(e, epicOfFile(`${HOME}.jsonl`))).toBeNull()
+    const { hud } = foldLog([e])
+    expect(hud.epics).toEqual({})
+  })
+
+  test('a parent_prompt_id on a root pulls the home-log prompt into the epic', async () => {
+    const other = 'prompts-d2d2d2d2-0000-4000-8000-000000000002'
+    const events = [
+      prompt('open the acme epic', other), // other#0
+      ev('session-start', null, { parent_prompt_id: `${other}#0` }, { session_id: ES, actor: 'operator', cli_session_id: SID }),
+      added(T16),
+    ]
+    const { hud, epic } = foldLog(events)
+    expect(epic.prompts![`${other}#0`]!.text).toBe('open the acme epic')
+    expect(currentModel(epic, now(events)).prompts.rows.map(r => r.text)).toEqual(['open the acme epic'])
+    expect(promptHomes(hud)).toEqual([other])
+  })
+
+  test('a dispatch_decision carrying parent_prompt_id reaches the prompt too, and makes it that task\'s', async () => {
+    const events = [
+      prompt('rerun the acme gate', HOME), // HOME#0
+      added(T16),
+      ev('dispatch_decision', T16, { agent_role: 'coder', parent_prompt_id: `${HOME}#0` }, { session_id: ES, actor: 'orchestrator' }),
+    ]
+    const { epic } = foldLog(events)
+    expect(epic.prompts![`${HOME}#0`]!.text).toBe('rerun the acme gate')
+  })
+
+  test('homePrompts keeps the own home log\'s newest 2 user_prompts, and no other session\'s', async () => {
+    const mine = `prompts-${SID}`
+    const events = [
+      prompt('one', mine),
+      prompt('two', mine),
+      prompt('three', mine),
+      prompt('not mine', HOME),
+    ]
+    const { hud } = foldLog(events)
+    expect(hud.homePrompts!.map(r => r.text)).toEqual(['three', 'two'])
+    expect(hud.homePrompts![0]!.ref).toBe(`${mine}#2`)
+    expect(hud.epics).toEqual({})
+  })
+})
+
+describe('the session task list (§2.9)', () => {
+  const task = (id: string, subject: string, status = 'pending', activeForm: string | null = null): TaskItem => ({ id, subject, activeForm, status })
+
+  test('TaskCreate adds a pending task with its activeForm', async () => {
+    const out = foldTaskTool([], 'TaskCreate', { subject: 'Run tests', description: 'd', activeForm: 'Running tests' }, { task: { id: '1', subject: 'Run tests' } })
+    expect(out).toEqual([task('1', 'Run tests', 'pending', 'Running tests')])
+    // no activeForm in the input: none kept
+    expect(foldTaskTool(out, 'TaskCreate', { subject: 'Ship', description: 'd' }, { task: { id: '2', subject: 'Ship' } })[1]).toEqual(task('2', 'Ship'))
+  })
+
+  test('TaskUpdate applies the input fields on success; deleted removes the task', async () => {
+    const list = [task('1', 'Run tests'), task('2', 'Ship')]
+    const doing = foldTaskTool(list, 'TaskUpdate', { taskId: '1', status: 'in_progress', activeForm: 'Running tests' }, { success: true, taskId: '1', updatedFields: ['status'] })
+    expect(doing[0]).toEqual(task('1', 'Run tests', 'in_progress', 'Running tests'))
+    const renamed = foldTaskTool(doing, 'TaskUpdate', { taskId: '2', subject: 'Ship it' }, { success: true, taskId: '2', updatedFields: ['subject'] })
+    expect(renamed[1]).toEqual(task('2', 'Ship it'))
+    const gone = foldTaskTool(renamed, 'TaskUpdate', { taskId: '1', status: 'deleted' }, { success: true, taskId: '1', updatedFields: ['status'] })
+    expect(gone.map(t => t.id)).toEqual(['2'])
+  })
+
+  test('a failed TaskUpdate changes nothing', async () => {
+    const list = [task('1', 'Run tests')]
+    expect(foldTaskTool(list, 'TaskUpdate', { taskId: '1', status: 'completed' }, { success: false, taskId: '1', updatedFields: [], error: 'x' })).toEqual(list)
+    expect(foldTaskTool(list, 'TaskUpdate', { taskId: '1', status: 'completed' }, undefined)).toEqual(list)
+  })
+
+  test('TaskList replaces the list but keeps the activeForms it knows', async () => {
+    const list = [task('1', 'Run tests', 'in_progress', 'Running tests'), task('3', 'Gone')]
+    const out = foldTaskTool(list, 'TaskList', {}, { tasks: [{ id: '1', subject: 'Run tests', status: 'completed', blockedBy: [] }, { id: '4', subject: 'New', status: 'pending', blockedBy: [] }] })
+    expect(out).toEqual([task('1', 'Run tests', 'completed', 'Running tests'), task('4', 'New')])
+  })
+
+  test('TodoWrite replaces the list with newTodos', async () => {
+    const out = foldTaskTool([task('9', 'old')], 'TodoWrite', {}, {
+      oldTodos: [],
+      newTodos: [
+        { content: 'Write code', status: 'completed', activeForm: 'Writing code' },
+        { content: 'Test it', status: 'in_progress', activeForm: 'Testing it' },
+      ],
+    })
+    expect(out.map(t => [t.subject, t.status, t.activeForm])).toEqual([
+      ['Write code', 'completed', 'Writing code'],
+      ['Test it', 'in_progress', 'Testing it'],
+    ])
+  })
+
+  test('an unknown tool or an odd result leaves the list as it was', async () => {
+    const list = [task('1', 'a')]
+    expect(foldTaskTool(list, 'Read', {}, {})).toBe(list)
+    expect(foldTaskTool(list, 'TaskList', {}, 'oops')).toEqual(list)
+    expect(foldTaskTool(list, 'TaskCreate', {}, null)).toEqual(list)
+  })
+
+  const none: BgState = { started: {}, ended: [] }
+  const agentOf = (id: string, status: AgentStatus): AgentInfo => ({ id, description: id, type: 'general-purpose', status })
+
+  test('a task list shows done over total and the first task in progress', async () => {
+    const list = [task('1', 'a', 'completed'), task('2', 'b', 'in_progress', 'Doing b'), task('3', 'c', 'in_progress'), task('4', 'd'), task('5', 'e', 'completed')]
+    expect(progressOf(list, none, [])).toEqual({ kind: 'list', done: 2, total: 5, doing: 'Doing b' })
+    // no activeForm: the subject
+    expect(progressOf([task('1', 'a', 'in_progress')], none, [])).toEqual({ kind: 'list', done: 0, total: 1, doing: 'a' })
+    expect(progressOf([task('1', 'a', 'completed')], none, [])).toEqual({ kind: 'list', done: 1, total: 1, doing: null })
+  })
+
+  test('with no list, background work counts: running by kind, done from the ended ids', async () => {
+    let bg = bgStart(none, 'bsh1', 'shell')
+    bg = bgStart(bg, 'bmon', 'monitor')
+    bg = bgStart(bg, 'bold', 'shell')
+    bg = bgEnd(bg, 'bold')
+    bg = bgEnd(bg, 'bold') // deduped
+    bg = bgEnd(bg, 'a-gone')
+    const p = progressOf([], bg, [agentOf('a-run', 'running'), agentOf('a-done', 'completed'), agentOf('a-gone', 'running')])
+    // a-gone ended by notification, though the list still holds it; a-done is not active
+    expect(p).toEqual({ kind: 'bg', running: 3, done: 2, agents: 1, shells: 1, monitors: 1 })
+    expect(progressOf([], none, [])).toBeNull()
+  })
+
+  test('a notification ends the work its task-id names, unless its status is running', async () => {
+    const text = (id: string, status: string) =>
+      `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_01</tool-use-id>\n<status>${status}</status>\n<summary>x</summary>\n</task-notification>`
+    expect(notificationEnd(text('bq9z', 'completed'))).toBe('bq9z')
+    expect(notificationEnd(text('a12', 'killed'))).toBe('a12')
+    expect(notificationEnd(text('bq9z', 'stopped'))).toBe('bq9z')
+    expect(notificationEnd(text('bq9z', 'running'))).toBeNull()
+    expect(notificationEnd('<status>completed</status> and no id')).toBeNull()
+    expect(notificationEnd('just a prompt')).toBeNull()
   })
 })
