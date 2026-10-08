@@ -48,6 +48,7 @@ import {
   projectedLineage,
   statusBucketForTaskStatus,
 } from '../../../factory/orchestrator/dist/db/queries.js';
+import { compareLogOrder } from '../../../factory/orchestrator/dist/eventOrder.js';
 import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.js';
 import { normalizeProjectName } from '../../../factory/orchestrator/dist/projectName.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
@@ -1255,10 +1256,14 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           const ownMarks = own.map(() => '?').join(',');
           const stamped = handle.sqlite
             .prepare(
-              `select project as p from events_raw where project is not null and session_id in (${ownMarks}) order by ts desc, event_id desc limit 1`,
+              `select ts, event_id, project as p from events_raw where project is not null and json_extract(payload, '$.epic_id') = ? and session_id in (${ownMarks})`,
             )
-            .get(...own) as { p: string | null } | undefined;
-          project = stamped?.p ? normalizeProjectName(stamped.p) : null;
+            .all(epicId, ...own) as { ts: string; event_id: string; p: string }[];
+          const newestStamp = stamped
+            .map((r) => ({ ts: r.ts, eventId: r.event_id, p: r.p }))
+            .sort(compareLogOrder)
+            .at(-1);
+          project = newestStamp?.p ? normalizeProjectName(newestStamp.p) : null;
         }
 
         // Really working now: live, dispatched inside the same window the rest
@@ -1309,8 +1314,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         // and a re-run `<epic>-w<N>r-<date>`, so the newest such session that
         // started with (or after) the newest open wave's admission gives N,
         // re-runs included. An admission ordinal would drift: every re-run is
-        // another admission. No such session (a wave run inline): 1 when the
-        // epic has a single admission, else unknown (null).
+        // another admission. No such session (a wave run inline): count the
+        // epic's admissions in log order. An admission whose task set equals
+        // an earlier one's (a re-run) keeps that number; any other takes the
+        // next. The card shows the newest open wave's number, or the newest
+        // admission's once every wave has merged.
         const newestOpen = openWaves[0];
         const namePattern = new RegExp(
           `^${epicId.replace(/[.*+?^${'$'}{}()|[\]\\]/g, '\\$&')}-w(\\d+)r?-`,
@@ -1332,19 +1340,63 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               r.id === newestOpen.sessionId,
           )
           .sort((a, b) => b.ts.localeCompare(a.ts) || b.id.localeCompare(a.id))[0];
-        // Without a named session the position is a guess, certain only when
-        // the epic has a single admission.
-        const wave = named?.n ?? (epicWaves.length === 1 ? 1 : null);
+        const numbered: { eventId: string; taskIds: string[]; n: number }[] = [];
+        for (const w of [...epicWaves].sort((a, b) =>
+          compareLogOrder(
+            { ts: a.admittedAt, eventId: a.admittedEventId },
+            { ts: b.admittedAt, eventId: b.admittedEventId },
+          ),
+        )) {
+          const same = numbered.find(
+            (x) =>
+              x.taskIds.length === w.taskIds.length &&
+              x.taskIds.every((t) => w.taskIds.some((u) => taskIdsMatch(t, u))) &&
+              w.taskIds.every((u) => x.taskIds.some((t) => taskIdsMatch(t, u))),
+          );
+          numbered.push({
+            eventId: w.admittedEventId,
+            taskIds: w.taskIds,
+            n: same?.n ?? Math.max(0, ...numbered.map((x) => x.n)) + 1,
+          });
+        }
+        const shown = newestOpen
+          ? numbered.find((x) => x.eventId === newestOpen.admittedEventId)
+          : numbered.at(-1);
+        const wave = named?.n ?? shown?.n ?? null;
 
         const busy = (t: string): boolean =>
           workingAgents.some((a) => a.taskId !== null && taskIdsMatch(a.taskId, t));
         let nextTask: { taskId: string; taskTitle: string } | null = null;
-        for (const t of newestOpen?.taskIds ?? []) {
-          if (isClosed(t) || busy(t)) continue;
-          // The first remaining task is next; unnamed means unknown, never a later one.
+        // The newest open wave's first unstarted, unclosed task is next.
+        // Otherwise (every wave merged, or its tasks all in progress) the first
+        // unfinished plan task in plan order: the order the log first added
+        // the tasks in. A task with no label means unknown, never a later one.
+        const pick = (t: string): void => {
           const label = row(t)?.label;
           if (label) nextTask = { taskId: row(t)?.taskId ?? t, taskTitle: label };
-          break;
+        };
+        const inWave = (newestOpen?.taskIds ?? []).find((t) => !isClosed(t) && !busy(t));
+        if (inWave !== undefined) pick(inWave);
+        else {
+          const added = (
+            handle.sqlite
+              .prepare(
+                "select event_id, ts, task_id from events_raw where event_type = 'task-added' and task_id is not null and json_extract(payload, '$.epic_id') = ?",
+              )
+              .all(epicId) as { event_id: string; ts: string; task_id: string }[]
+          )
+            .map((r) => ({ ts: r.ts, eventId: r.event_id, taskId: r.task_id }))
+            .sort(compareLogOrder);
+          const position = (t: { taskId: string }): number => {
+            const i = added.findIndex((a) => taskIdsMatch(a.taskId, t.taskId));
+            return i < 0 ? added.length : i;
+          };
+          const first = planTasks
+            .map((t) => ({ t, at: position(t) }))
+            .sort((a, b) => a.at - b.at)
+            .map((x) => x.t.taskId)
+            .find((t) => !isClosed(t) && !busy(t));
+          if (first !== undefined) pick(first);
         }
         focusParts = {
           wave,
@@ -1352,10 +1404,14 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             a.taskId === null ? null : (row(a.taskId)?.label ?? null),
           ),
           nextTask,
-          remaining: planTasks.some((t) => {
-            const b = statusBucketForTaskStatus(t.taskStatus);
-            return b === 'todo' || b === 'inProgress';
-          }),
+          // No plan task yet (a planner still drafting): nothing is known.
+          remaining:
+            planTasks.length === 0
+              ? null
+              : planTasks.some((t) => {
+                  const b = statusBucketForTaskStatus(t.taskStatus);
+                  return b === 'todo' || b === 'inProgress';
+                }),
         };
       }
 
