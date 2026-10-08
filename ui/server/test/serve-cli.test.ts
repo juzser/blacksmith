@@ -3,7 +3,7 @@
 // can never see a flag the CLI forgets to forward; this file exists for
 // exactly that gap.
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -68,7 +68,7 @@ describe('smith ui serve (built binary)', () => {
     await rm(dbDir, { recursive: true, force: true });
   });
 
-  async function serve(extraArgs: string[]): Promise<void> {
+  async function serve(extraArgs: string[], env: NodeJS.ProcessEnv = {}): Promise<void> {
     server = spawn(
       process.execPath,
       [
@@ -86,7 +86,7 @@ describe('smith ui serve (built binary)', () => {
         path.join(dbDir, 'no-claude'),
         ...extraArgs,
       ],
-      { stdio: 'pipe', env: process.env },
+      { stdio: 'pipe', env: { ...process.env, ...env } },
     );
     server.stdout?.on('data', () => {});
     server.stderr?.on('data', (chunk) => {
@@ -149,16 +149,27 @@ describe('smith ui serve (built binary)', () => {
    * the flag being dropped between the CLI and the server. A session file in
    * a temp config dir, answered by the spawned binary, proves it travels. The
    * pid is this runner's own, so it is alive for the whole test.
+   *
+   * The session's cwd is a temp work root, not REPO_ROOT. A live session's
+   * cwd is where the server looks for other stores, and in a linked worktree
+   * REPO_ROOT's `.git` file leads to the main clone: its real state/events was
+   * found as a foreign store and folded on the first /api/* request, so this
+   * test read the developer's own store and its time grew with that store
+   * until it passed 60 s. The temp dir's own `.git` stops the walk there and
+   * it holds no state/events. BS_HOME makes it the CLI's work root, which
+   * `ui serve` passes as a known root, so the cwd is still in scope by cwd.
    */
   it('forwards --claude-config-dir, so /api/cli-sessions reads that directory', async () => {
     const configDir = path.join(dbDir, 'claude');
+    const workRoot = path.join(dbDir, 'work');
+    await mkdir(path.join(workRoot, '.git'), { recursive: true });
     await mkdir(path.join(configDir, 'sessions'), { recursive: true });
     await writeFile(
       path.join(configDir, 'sessions', `${process.pid}.json`),
       JSON.stringify({
         pid: process.pid,
         sessionId: '77777777-7777-4777-8777-777777777777',
-        cwd: REPO_ROOT,
+        cwd: workRoot,
         kind: 'interactive',
         status: 'busy',
         name: 'served-fixture',
@@ -167,7 +178,7 @@ describe('smith ui serve (built binary)', () => {
         statusUpdatedAt: 1_790_000_100_000,
       }),
     );
-    await serve(['--claude-config-dir', configDir]);
+    await serve(['--claude-config-dir', configDir], { BS_HOME: workRoot });
 
     const body = (await (await fetch(`http://127.0.0.1:${PORT}/api/cli-sessions`)).json()) as {
       state: string;
@@ -179,5 +190,25 @@ describe('smith ui serve (built binary)', () => {
     expect(body.sessions).toEqual([
       expect.objectContaining({ name: 'served-fixture', status: 'working', inScopeBy: 'cwd' }),
     ]);
+
+    // No foreign store. /api/projects rows come from overview(), so a foreign
+    // store with no epics adds none: that check alone cannot see one. Discovery
+    // itself leaves a mark: the registry opens `<db dir>/ui-stores/<id>.db` for
+    // every foreign store it finds, epics or not, and never for the home store.
+    // So that directory must hold no db file. Ids only, so a failure never
+    // prints a real project's name.
+    const projects = (await (await fetch(`http://127.0.0.1:${PORT}/api/projects`)).json()) as {
+      store: { id: string };
+    }[];
+    expect([...new Set(projects.map((p) => p.store.id))]).toEqual(['home']);
+    // Only a missing directory means "no foreign store"; any other error (ENOTDIR,
+    // EACCES) must fail the test rather than read as an empty list.
+    const cached = await readdir(path.join(dbDir, 'ui-stores')).catch(
+      (err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return [] as string[];
+        throw err;
+      },
+    );
+    expect(cached.filter((n) => n.endsWith('.db')).map((n) => n.slice(0, 8))).toEqual([]);
   }, 60_000); // spawns the built CLI and waits for a real HTTP server
 });
