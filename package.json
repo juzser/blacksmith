@@ -85,7 +85,7 @@
     "@biomejs/biome": "2.5.15",
     "@floating-ui/dom": "1.8.0",
     "@hono/node-server": "2.1.1",
-    "@lucide/vue": "1.49.0",
+    "@lucide/vue": "1.50.0",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
