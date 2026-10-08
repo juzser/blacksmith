@@ -353,23 +353,26 @@ a:hover {
   padding: 0 var(--bs-space-2);
 }
 .bs-tag--sm {
-  height: 16px;
-  /* 4px (--bs-space-1) read as no padding at all on Home's "Escalation"/
-     "Waiver" tags (operator 2026-10-02); --bs-space-2 (8px) clears a 6px
-     floor without touching the fixed 16px height above. */
+  /* ds-review.html `.tag` (12px text, 16px line, 2px 8px padding) is the
+     mock's one tag box, 20px tall -- so sm now matches md's height. The two
+     classes stay (no call-site churn); `size` still picks the padding. The
+     operator's 2026-10-02 fix was about padding: 4px (--bs-space-1) read as
+     no padding at all on Home's "Escalation"/"Waiver" tags, and
+     --bs-space-2 (8px) clears a 6px floor. */
+  height: 20px;
   padding: 0 var(--bs-space-2);
 }
 
 /* EventKindTag (DS6 §4.3, ds-review.html `.ktag`): a text-only kind label,
-   same box metrics as .bs-tag--subtle.bs-tag--sm, colour set inline from the
-   kind's own --bs-event-* tokens. */
+   same 20px box as .bs-tag--subtle.bs-tag--sm (the mock's `.tag.ktag`),
+   colour set inline from the kind's own --bs-event-* tokens. */
 .bs-event-kind-tag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: fit-content;
   flex-shrink: 0;
-  height: 16px;
+  height: 20px;
   padding: 0 var(--bs-space-2);
   border-radius: var(--bs-radius-sm);
   font-size: var(--bs-text-xs);
@@ -547,6 +550,15 @@ a:hover {
   width: 22px;
   height: 22px;
 }
+/* The phone chevron is a --bs-touch IconButton (mock `.mrow.tlrow`'s fixed
+   third column), so the placeholder holds the same width or a row without
+   details ends its tags 22px further right than its neighbours. Height stays
+   22px: it must not grow the row past the mock's `.mrow` min-height. */
+@media (max-width: 640px) {
+  .bs-timeline-row__chevron-placeholder {
+    width: var(--bs-touch);
+  }
+}
 .bs-timeline-row__meta {
   display: flex;
   align-items: center;
@@ -619,14 +631,16 @@ a:hover {
    title collapsed to 0. The tag may shrink to at most half the head and
    ellipsises on one line (block, not inline-flex, so text-overflow applies;
    a rail tag carries no icon). The title keeps a 64px floor. The full outcome
-   is the tag's whole text content and the row's details (`dl` "Outcome"). */
+   is the tag's whole text content and the row's details (`dl` "Outcome").
+   The line is 18px: the kit tag box is 20px (ds-review.html `.tag`) minus the
+   1px border top and bottom, so the text sits centred in it. */
 @media (max-width: 640px) {
   .bs-timeline-row--rail .bs-timeline-row__head .bs-timeline-row__status {
     display: block;
     flex-shrink: 1;
     min-width: 0;
     max-width: 50%;
-    line-height: 14px;
+    line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -3198,6 +3212,10 @@ summary.bs-inbox__group-head {
      already wins — no !important needed. */
   font-variant-numeric: tabular-nums;
   border-radius: var(--bs-radius-full);
+  /* Not the mock's 20px `.tag`: the column count is its `.pill`
+     (ds-review.html:429, used at :1203) -- 11px text, no vertical padding --
+     so it keeps the compact 16px box instead of growing with .bs-tag--sm. */
+  height: 16px;
   /* Tag's tone="neutral" variant="subtle" sets background inline (Tag.vue)
      to --bs-tone-neutral-subtle, which aliases --bs-surface-sunken — the
      exact token .bs-kanban-col itself is painted with, so the fill was
