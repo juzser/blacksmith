@@ -19,10 +19,16 @@ shows it once installed.
   row and a separator, then a row of tabs.
   - With an epic in view, the band has four tabs.
     - **Overview** shows active agents, tasks done, budget, the current wave
-      or phase, and the epic's tier.
-    - **Current** shows the work in flight: its wave and the prompts you gave
-      for it, with progress, agents, budget and tokens spent.
-    - **Next** shows what comes next, with its wave and prompts.
+      or phase, and the epic's tier. Its tab and labels are white.
+    - **Current** shows the work in flight. One head row carries the wave
+      or phase, a progress bar with tasks done, the live agents and the
+      spend against the cap. Below it, a **Tasks** section lists the wave's
+      tasks in aligned columns (status, id, title, role, time), and a
+      **Prompts** section shows the two newest prompts you gave for it.
+    - **Next** shows what comes next, with the same Tasks and Prompts
+      sections.
+    - Active work is marked in teal, in the bar, the tallies and the task
+      marks.
     - **Past** shows what is done, grouped by the wave that merged it.
   - The letters `o`, `c`, `n` and `p` switch tabs while the band has focus.
   - With no epic, the band is idle. It shows this session's agent count and a
