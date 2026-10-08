@@ -38,18 +38,16 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       if (o === el || o.contains(el) || el.contains(o)) continue;
       const b = o.getBoundingClientRect();
       if (b.width === 0 || b.height === 0) continue;
-      // A box that holds this whole one (a card's stretched link) is its
-      // container, not a neighbour.
       // The top and tab bars sit over whatever scrolls under them.
       if (o.closest('header, nav')) continue;
-      // A box that holds this whole one (a card's stretched link) is its
-      // container, not a neighbour.
       // Fixed or sticky chrome (the tab bar) overlaps whatever scrolls under it.
       let fixed = false;
       for (let a: Element | null = o; a; a = a.parentElement) {
         if (['fixed', 'sticky'].includes(getComputedStyle(a).position)) fixed = true;
       }
       if (fixed) continue;
+      // A box that holds this whole one (a card's stretched link) is its
+      // container, not a neighbour.
       if (b.left <= r.left && b.right >= r.right && b.top <= r.top && b.bottom >= r.bottom)
         continue;
       const w = Math.min(r.right, b.right) - Math.max(r.left, b.left);
@@ -64,13 +62,13 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       h: r.height,
       holder: holder?.getBoundingClientRect().height ?? 0,
       overlaps,
-      inRow: el.closest('.bs-timeline-row, .bs-live-card') !== null,
+      // Only these two keep their text height (bs-primitives.css).
+      inRow: el.matches('.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime'),
     });
   }
   return out;
 }
 
-// The relative-time and Session-link rules of the fix, undone.
 // Deletes the hit-box rules under test from the live stylesheets, so the same
 // page can be measured as if they were never there.
 const dropHitBoxRules = () => {
