@@ -411,6 +411,8 @@ function promptRuns(p: PromptRow, now: number, ago = true): Run[] {
     run(ago ? `${age} ago` : age, { dim: true }),
     run(ago ? ' ' : '  '),
     shrink(run(oneLine(p.text), { color: 'remember' })),
+    // Current's and Next's rows name the task the prompt led to; Past groups them by wave already
+    ...(!ago && p.task ? [run(` → ${p.task}${p.more ? ` +${p.more}` : ''}`, { dim: true })] : []),
   ]
 }
 

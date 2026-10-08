@@ -165,10 +165,16 @@ type World = {
   agents: AgentInfo[]
   /** what lies beneath bs-mod in AbovePrompt: core's own drawing, another plugin's one-line band, or an empty Box */
   below: 'engine' | 'line' | 'empty'
+  /** each `bs-prompt-hook` call's argv, in call order */
+  hookCalls: string[][]
+  /** what `bs-prompt-hook --resolve` answers: a stdout and exit code, or null for no such bin (the call is denied) */
+  hook: { stdout: string; exitCode: number } | null
+  /** a tool's result, as the engine answers `$.tool.call`; the default is an empty Bash result */
+  tools: Record<string, unknown>
 }
 
 function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World {
-  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], agents: [], below: 'engine' }
+  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], agents: [], below: 'engine', hookCalls: [], hook: null, tools: {} }
   const ran = (exitCode: number, stdout: string) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
   on('session.id', () => ({ value: sid }))
@@ -212,6 +218,10 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
       if (text === undefined) return ran(1, '')
       return ran(0, text.split('\n').slice(Number((rest[1] ?? '+1').replace('+', '')) - 1).join('\n'))
     }
+    if (cmd === 'bs-prompt-hook') {
+      w.hookCalls.push(e.argv.slice(1))
+      return w.hook ? ran(w.hook.exitCode, w.hook.stdout) : { deny: 'no such command: bs-prompt-hook' }
+    }
     return { deny: `unexpected process: ${e.argv.join(' ')}` }
   })
   on('ui.toast', ($, e) => {
@@ -234,7 +244,7 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     w.onStart?.()
     return { cwd: e.cwd }
   })
-  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: '' }))
+  on('tool.call', ($, e) => ({ result: (w.tools[e.tool] ?? { stdout: '', stderr: '', interrupted: false }) as never, text: '' }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     if (w.below === 'line') return h(Box, { key: 'other' }, h(Text, null, 'other plugin band')) as RenderElement
@@ -297,7 +307,7 @@ describe('band', () => {
 
     const ui = await mountBand($)
     await ui.press({ key: 'tab:current' })
-    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T16}`, `task:${T17}`, 'section:prompts', `prompt:${promptRef(0)}`])
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T16}`, `task:${T17}`, 'section:prompts', `prompt:${promptRef(5)}`, `prompt:${promptRef(0)}`])
     // the wave's 1/3 done, its coder and wave-runner, the epic's projected spend: no Wave or Tokens row below
     expect(await rowText(ui, 'head')).toMatch(/^wave 4  [█░]{10} 1\/3 · ●● 2 · 9\.1M\/16M 57%$/)
     expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
@@ -305,11 +315,11 @@ describe('band', () => {
     expect(await rowText(ui, `task:${T16}`)).toBe(`● task-16  Phone toolbar hits${' '.repeat(11)}  coder  12m`)
     expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  Remote error and phone header')
     expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
-    // ASK_1, reached through the admission's and the tasks' causal_parent
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m  ${ASK_1}`)
-    const text = await shown(ui)
-    expect(text).not.toContain('task-18')
-    expect(text).not.toContain(ASK_2)
+    // ASK_1, reached through the admission's and the tasks' causal_parent, names the first task it led to and the two more
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m  ${ASK_1} → task-15 +2`)
+    // ASK_2 asked for task-18 only: Current shows every prompt of the epic, linked to the wave or not
+    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2} → task-18`)
+    expect(await shown(ui)).not.toContain('Task 18 row')
   })
 
   test('Next draws its head, then a Tasks and a Prompts section of the open tasks no wave took', async ($, on) => {
@@ -326,7 +336,7 @@ describe('band', () => {
     expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
     expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
     expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
-    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2}`)
+    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2} → task-18`)
     const text = await shown(ui)
     expect(text).not.toContain('task-16')
     expect(text).not.toContain('task-17')
@@ -378,7 +388,7 @@ describe('band', () => {
     // the role and the time keep their columns; the title gives way
     expect(await rowText(ui, `task:${T16}`)).toBe('● task-16  …  coder  12m')
     expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  …')
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe('❝ 1h10m  Group by tag (…')
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe('❝ 1h10m  G… → task-15 +2')
     // with no role column the title runs to the edge
     await ui.press({ key: 'tab:next' })
     expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
@@ -633,7 +643,7 @@ describe('band', () => {
       }
     }
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toMatch(/…$/)
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toMatch(/… → task-15 \+2$/)
   })
 
   test('draws the idle band when this session wrote no bs event and no epic ran in the last seven days', async ($, on) => {

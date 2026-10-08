@@ -1519,7 +1519,7 @@ describe('tab models', () => {
     expect(ids(tight.tasks.rows)).toEqual([T16])
     expect(tight.tasks.more).toBe(3)
     expect(refs(tight.prompts.rows)).toEqual(['f#17'])
-    expect(tight.prompts.more).toBe(1)
+    expect(tight.prompts.more).toBe(3)
   })
 
   test('current before any admission: the planning header, no wave', async () => {
