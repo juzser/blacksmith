@@ -838,6 +838,39 @@ export async function appendEvent(input: EventInput, opts: EventOpts = {}): Prom
   );
 }
 
+/**
+ * Refuse a `--prompt` id that names no event, or an event that is not a
+ * `user_prompt`. Read outside the other log's queue, safe for the reason
+ * `validateCausalParent` gives: logs only grow.
+ */
+async function requireUserPrompt(promptId: string, opts: EventOpts): Promise<void> {
+  const target = parseEventId(promptId);
+  const targetPath = logPath(target.sessionId, opts);
+  if (!existsSync(targetPath)) {
+    throw new EventError(
+      'events.unknown-causal-session',
+      `prompt "${promptId}" names session "${target.sessionId}", which has no event log (expected ${targetPath}).`,
+      { prompt_id: promptId, session_id: target.sessionId, path: targetPath },
+    );
+  }
+  const events = await readEventsAtPath(targetPath, target.sessionId);
+  const found = events.find((e) => e.event_id === promptId);
+  if (found === undefined) {
+    throw new EventError(
+      'events.unknown-causal-parent',
+      `prompt "${promptId}" does not reference an existing event in session "${target.sessionId}" (it holds ${events.length}).`,
+      { prompt_id: promptId, session_id: target.sessionId },
+    );
+  }
+  if (found.record.event_type !== 'user_prompt') {
+    throw new EventError(
+      'events.not-a-user-prompt',
+      `"${promptId}" is a "${found.record.event_type}" event, not a "user_prompt". --prompt links a session to the operator prompt that asked for it.`,
+      { prompt_id: promptId, event_type: found.record.event_type },
+    );
+  }
+}
+
 export interface StartSessionOptions extends EventOpts {
   /**
    * Who is opening the session. Defaults to `operator`, which is who opens one
@@ -850,6 +883,12 @@ export interface StartSessionOptions extends EventOpts {
    * not restated here -- this only fills the field.
    */
   continues?: string;
+  /**
+   * A `user_prompt` event (any session's log) that asked for this session.
+   * Recorded as `payload.parent_prompt_id`; `causal_parent` and lineage are
+   * untouched, so a prompt in a home log never merges lineage.
+   */
+  promptId?: string;
 }
 
 /**
@@ -890,8 +929,9 @@ export async function startSession(
     event_type: ROOT_EVENT_TYPE,
     plan_version: 1,
     causal_parent: opts.continues ?? null,
-    payload: {},
+    payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
   };
+  if (opts.promptId !== undefined) await requireUserPrompt(opts.promptId, opts);
 
   return enqueue(filePath, () =>
     withLogLock(filePath, async () => {
@@ -908,6 +948,43 @@ export async function startSession(
         );
       }
       return appendEventLocked(input, opts, filePath);
+    }),
+  );
+}
+
+/**
+ * Read a log and append to it under ONE lock: `build` sees the events the log
+ * holds at that moment and returns what to append, so a parent chosen from
+ * `existing` cannot go stale before the write. An empty array appends nothing.
+ * Returns the stored events with their ids as `appendEventLocked` reports them.
+ * `build` runs under the lock: keep it synchronous and cheap.
+ *
+ * Every returned input must carry `sessionId` as its own `session_id`, since a
+ * stored id names the log that holds it; any other is refused before a single
+ * input is written. Past that check, each input is appended in turn, so if
+ * input N fails validation the inputs before it are already written: the call
+ * is not atomic across inputs.
+ */
+export async function appendWithin(
+  sessionId: string,
+  build: (existing: StoredEvent[]) => EventInput[],
+  opts: EventOpts = {},
+): Promise<StoredEvent[]> {
+  const filePath = logPath(sessionId, opts);
+  return enqueue(filePath, () =>
+    withLogLock(filePath, async () => {
+      const inputs = build(await readEventsAtPath(filePath, sessionId));
+      const stray = inputs.find((input) => input.session_id !== sessionId);
+      if (stray !== undefined) {
+        throw new EventError(
+          'events.malformed-session-id',
+          `Input names session "${stray.session_id}" but is being appended to the log of "${sessionId}". A stored event id names the log that holds it, so an input for another session cannot go here.`,
+          { session_id: stray.session_id, log_session_id: sessionId },
+        );
+      }
+      const stored: StoredEvent[] = [];
+      for (const input of inputs) stored.push(await appendEventLocked(input, opts, filePath));
+      return stored;
     }),
   );
 }

@@ -1674,6 +1674,117 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  describe('session start --prompt: the root names the prompt that asked for it', () => {
+    const stamp = Date.now();
+    const promptIn = (eventsDir: string, session: string): string => {
+      expect(runCli(['session', 'start', session, '--state-dir', eventsDir]).status).toBe(0);
+      const recorded = runCli(
+        [
+          'prompt',
+          'record',
+          '-',
+          '--session',
+          session,
+          '--causal-parent',
+          `${session}#0`,
+          '--state-dir',
+          eventsDir,
+        ],
+        undefined,
+        'run alpha-1',
+      );
+      expect(recorded.status).toBe(0);
+      return JSON.parse(recorded.stdout).event_id as string;
+    };
+
+    it('writes payload.parent_prompt_id and leaves causal_parent alone', () => {
+      const eventsDir = path.join(scratchDir, 'sp-events-1');
+      const promptId = promptIn(eventsDir, `sp-home-${stamp}`);
+      const started = runCli([
+        'session',
+        'start',
+        `sp-epic-${stamp}`,
+        '--prompt',
+        promptId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(started.status).toBe(0);
+      const { record } = JSON.parse(started.stdout);
+      expect(record.payload.parent_prompt_id).toBe(promptId);
+      expect(record.causal_parent).toBeNull();
+    });
+
+    it('composes with --continues', () => {
+      const eventsDir = path.join(scratchDir, 'sp-events-2');
+      const promptId = promptIn(eventsDir, `sp-home2-${stamp}`);
+      expect(
+        runCli(['session', 'start', `sp-first-${stamp}`, '--state-dir', eventsDir]).status,
+      ).toBe(0);
+      const started = runCli([
+        'session',
+        'start',
+        `sp-next-${stamp}`,
+        '--continues',
+        `sp-first-${stamp}#0`,
+        '--prompt',
+        promptId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(started.status).toBe(0);
+      const { record } = JSON.parse(started.stdout);
+      expect(record.causal_parent).toBe(`sp-first-${stamp}#0`);
+      expect(record.payload.parent_prompt_id).toBe(promptId);
+    });
+
+    it('refuses an id that does not exist', () => {
+      const eventsDir = path.join(scratchDir, 'sp-events-3');
+      const promptId = promptIn(eventsDir, `sp-home3-${stamp}`);
+      const missing = promptId.replace(/#\d+$/, '#99');
+      const refused = runCli([
+        'session',
+        'start',
+        `sp-bad-${stamp}`,
+        '--prompt',
+        missing,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(refused.status).toBe(1);
+      expect(JSON.parse(refused.stdout).error.code).toBe('events.unknown-causal-parent');
+      const nowhere = runCli([
+        'session',
+        'start',
+        `sp-bad2-${stamp}`,
+        '--prompt',
+        'sp-nowhere#0',
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(nowhere.status).toBe(1);
+      expect(JSON.parse(nowhere.stdout).error.code).toBe('events.unknown-causal-session');
+      expect(existsSync(path.join(eventsDir, `sp-bad-${stamp}.jsonl`))).toBe(false);
+    });
+
+    it('refuses an id whose event is not a user_prompt', () => {
+      const eventsDir = path.join(scratchDir, 'sp-events-4');
+      const promptId = promptIn(eventsDir, `sp-home4-${stamp}`);
+      const root = promptId.replace(/#\d+$/, '#0');
+      const refused = runCli([
+        'session',
+        'start',
+        `sp-bad3-${stamp}`,
+        '--prompt',
+        root,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(refused.status).toBe(1);
+      expect(JSON.parse(refused.stdout).error.code).toBe('events.not-a-user-prompt');
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // D-263. `session start --continues` made an epic able to outlast the window
   // that opened it, and the operator console then recommended splitting one

@@ -357,9 +357,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'session start',
     positionals: '<session-id>',
-    flags: '[--continues <event-id>] [--actor <name>] [--state-dir <dir>]',
+    flags: '[--continues <event-id>] [--prompt <event-id>] [--actor <name>] [--state-dir <dir>]',
     summary:
-      'Open a session log with the one root event it is allowed. Exit 1 if the session is already open.',
+      'Open a session log with the one root event it is allowed; --prompt links the user_prompt that asked for it. Exit 1 if the session is already open.',
   },
   {
     command: 'event append',
