@@ -36,7 +36,8 @@
     "bs": "factory/orchestrator/dist/cli.js",
     "bs-run": "factory/orchestrator/dist/run-cli.js",
     "smith": "factory/orchestrator/dist/cli.js",
-    "smith-run": "factory/orchestrator/dist/run-cli.js"
+    "smith-run": "factory/orchestrator/dist/run-cli.js",
+    "bs-prompt-hook": "factory/orchestrator/dist/promptHook.js"
   },
   "files": [
     "factory/orchestrator/dist",

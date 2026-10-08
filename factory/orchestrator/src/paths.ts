@@ -33,7 +33,7 @@ export function isFactoryCheckout(dir: string): boolean {
  * `package.json#files` could not ship it if it tried. A linked worktree spells
  * it as a file rather than a directory, which `existsSync` reads either way.
  */
-const IS_CLONE = existsSync(path.join(REPO_ROOT, '.git'));
+export const IS_CLONE = existsSync(path.join(REPO_ROOT, '.git'));
 
 /**
  * Where the work root goes when the CLI is not standing in a clone.

@@ -119,6 +119,10 @@ const OVERLAID = new Map([
 /** Constants that are under neither root, each with the reason. */
 const UNROOTED = new Map([
   [
+    'IS_CLONE',
+    'Not a path: whether REPO_ROOT holds a `.git`. Exported so the prompt-capture bin passes the answer `resolveWorkRoot` gets.',
+  ],
+  [
     'PROJECTS_DIR',
     "Where a project `smith new` creates goes, which is outside this tree by construction (D-42) -- beside the clone when there is one, and the operator's own directory when the CLI is an installed package.",
   ],
@@ -149,12 +153,16 @@ describe('the published package', () => {
     // file, and the two pairs must point at the same target apiece.
     expect(manifest.bin.bs).toBe(manifest.bin.smith);
     expect(manifest.bin['bs-run']).toBe(manifest.bin['smith-run']);
-    for (const name of ['bs', 'bs-run', 'smith', 'smith-run']) {
+    for (const name of ['bs', 'bs-run', 'smith', 'smith-run', 'bs-prompt-hook']) {
       expect(manifest.bin[name], `package.json#bin is missing "${name}"`).toBeDefined();
       expect(isShipped(manifest.bin[name] as string), `${name} -> ${manifest.bin[name]}`).toBe(
         true,
       );
     }
+  });
+
+  it('declares the lean prompt-capture hook bin, shipped', () => {
+    expect(manifest.bin['bs-prompt-hook']).toBe('factory/orchestrator/dist/promptHook.js');
   });
 
   it('ships every root paths.ts reads, and ships none it writes', () => {

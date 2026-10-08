@@ -178,6 +178,7 @@ import {
   loadGuardrailPolicy,
 } from './policy.js';
 import { factoryProjects } from './projects.js';
+import { captureContext, capturePrompt } from './promptCapture.js';
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
@@ -2701,6 +2702,24 @@ async function main(): Promise<number> {
     // that makes the interleaved timeline (architecture §7) real rather than
     // inferred from timestamps.
     printJson({ event_id: stored.event_id, record: stored.record });
+    return 0;
+  }
+
+  // The hook-driven sibling of `prompt record`: reads one UserPromptSubmit
+  // payload on stdin and files it where promptCapture.ts decides. The plugin
+  // reaches the same function through the lean `bs-prompt-hook` bin; this verb
+  // is the surface the CLI tests drive. It never fails a prompt, so every
+  // outcome is exit 0.
+  if (namespace === 'prompt' && action === 'capture') {
+    try {
+      const line = await capturePrompt(
+        readFileSync(0, 'utf8'),
+        captureContext(process.cwd(), process.env),
+      );
+      if (line !== null) console.log(line);
+    } catch {
+      // A capture that fails loses one record; the prompt itself goes through.
+    }
     return 0;
   }
 
