@@ -1385,10 +1385,10 @@ a:hover {
    identical type. .bs-btn also draws a 1px transparent border, which still
    pushed the text 1px right and 1px down of the "No project" text, so the
    border goes too: the text then starts exactly on the card edge.
-   Fix round 8: .bs-btn is nowrap, so a long project name ran off the page.
-   The link may shrink inside the header (min-width: 0, max-width: 100%) and
-   its label wraps to two lines, then ellipsizes (the Roadmap lane rule),
-   breaking an unspaced name anywhere. The full name is in the link's title. */
+   A long project name wraps to two lines, then ellipsizes (the Roadmap lane
+   rule), and breaks an unspaced name anywhere, because .bs-btn is nowrap and
+   would otherwise run off the page. The link may shrink inside the header
+   (min-width: 0, max-width: 100%); the full name is in its title. */
 .bs-sessions__group-title .bs-btn--sm {
   height: auto;
   padding: 0;
@@ -1426,8 +1426,8 @@ a:hover {
    takes the remaining height (--bs-touch minus the gap) with its text at the
    bottom, so a linked header and the plain-text one are the same height and
    each keeps its own gap to its list. padding-inline stays 0 so the text
-   stays flush with the card edge. The box is a minimum, not a fixed height,
-   so a two-line name (fix round 8) is covered whole. */
+   stays flush with the card edge. The box is a minimum height, so a
+   two-line name is covered whole. */
 @media (max-width: 640px) {
   .bs-sessions__group-title {
     display: flex;
