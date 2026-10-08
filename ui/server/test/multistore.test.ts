@@ -926,6 +926,67 @@ describe('multi-store dashboard reads', () => {
       expect(home.roles).toHaveLength(1);
     });
 
+    it('the roster of a foreign session whose epic is in another project stays closed under the store label', async () => {
+      // One session, one epic stamped for `project-c`, one agent on it.
+      const start = await appendEvent(
+        {
+          session_id: 'sess-b-epic',
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir: eventsB },
+      );
+      const added = await appendEvent(
+        {
+          session_id: 'sess-b-epic',
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: 'epic-c/task-1',
+          project: 'project-c',
+          plan_version: 1,
+          causal_parent: start.event_id,
+          payload: {
+            epic_id: 'epic-c',
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Look elsewhere.',
+            claims: ['src/c.ts'],
+            budget_tokens: 1000,
+          },
+        },
+        { stateDir: eventsB },
+      );
+      await appendEvent(
+        {
+          session_id: 'sess-b-epic',
+          actor: 'orchestrator',
+          event_type: 'dispatch_decision',
+          task_id: 'epic-c/task-1',
+          plan_version: 1,
+          causal_parent: added.event_id,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            reason: 'Build it.',
+          },
+        },
+        { stateDir: eventsB },
+      );
+      const a = app();
+      const id = await foreignId(a);
+      const open = `/api/sessions/sess-b-epic/agents?store=${id}&project=project-c`;
+      expect([open, (await a.app.request(open)).status]).toEqual([open, 200]);
+      const closed = `/api/sessions/sess-b-epic/agents?store=${id}&project=project-b`;
+      expect([closed, (await a.app.request(closed)).status]).toEqual([closed, 404]);
+    });
+
     it('merges in the order one store uses: newest event first, then session id, then store id', async () => {
       await extra(eventsB, 'sess-b-only');
       await extra(eventsHome(), 'sess-home-only');
