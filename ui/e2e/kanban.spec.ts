@@ -868,8 +868,10 @@ test.describe('Kanban', () => {
           // The full-title tooltip rides the card's open button (the overlay
           // that sits above the title text).
           titleAttr:
-            p.closest('.bs-kanban-card')?.querySelector('.bs-kanban-card__open')?.getAttribute('title') ??
-            null,
+            p
+              .closest('.bs-kanban-card')
+              ?.querySelector('.bs-kanban-card__open')
+              ?.getAttribute('title') ?? null,
         };
       });
       expect(text.lines).toBeLessThanOrEqual(2);
@@ -1479,7 +1481,10 @@ test.describe('Kanban', () => {
     await expect(rows.nth(1)).toBeFocused();
     await page.keyboard.press('ArrowUp');
     await expect(rows.first()).toBeFocused();
-    const copy = group.locator('.bs-kanban-group__row').first().getByRole('button', { name: 'Copy task id' });
+    const copy = group
+      .locator('.bs-kanban-group__row')
+      .first()
+      .getByRole('button', { name: 'Copy task id' });
     await copy.focus();
     await page.keyboard.press('ArrowDown');
     await expect(copy).toBeFocused();
@@ -1677,7 +1682,10 @@ test.describe('Kanban: no interactive control inside another', () => {
     await page.setViewportSize(NARROW_VIEWPORT);
     await mockBoard(page, nestedBoard());
     await page.goto('/work/kanban');
-    await page.locator('.bs-kanban-card').first().click({ position: { x: 4, y: 4 } });
+    await page
+      .locator('.bs-kanban-card')
+      .first()
+      .click({ position: { x: 4, y: 4 } });
     await expect(page).toHaveURL(/\/tasks\/.*task-1$/);
   });
 
