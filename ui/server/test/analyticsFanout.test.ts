@@ -23,6 +23,15 @@ describe('mergeAnalytics', () => {
     expect(mergeAnalytics([{ store: { id: 'home', label: 'a' }, data }])).toBe(data);
   });
 
+  it('answers an empty merge with the period keys only when a period was asked', () => {
+    const withPeriod = mergeAnalytics([], { period: true });
+    expect(withPeriod.tokensByDay).toEqual([]);
+    expect(withPeriod.tokensByRoleAndModelTier).toEqual([]);
+    const without = mergeAnalytics([]);
+    expect(without).not.toHaveProperty('tokensByDay');
+    expect(without).not.toHaveProperty('tokensByRoleAndModelTier');
+  });
+
   it('sums cost buckets by tier and provider and recomputes the mean over measured tasks', () => {
     const r = mergeAnalytics([
       part('home', {

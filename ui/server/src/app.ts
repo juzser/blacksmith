@@ -1352,6 +1352,7 @@ export function createApp(opts: AppOpts): AppHandle {
               { ...clock, ...(period ? { period } : {}) },
             ),
           ),
+          { period: period !== undefined },
         ),
       );
     }

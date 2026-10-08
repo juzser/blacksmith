@@ -80,9 +80,14 @@ const mergeProvider = (rows: ProviderAgreementStat[][]): ProviderAgreementStat[]
   }));
 };
 
-/** One store's result passes through untouched; several are summed key by key. */
+/**
+ * One store's result passes through untouched; several are summed key by key.
+ * `period` says the request asked for one, so the period keys appear (empty)
+ * even when no store contributed any.
+ */
 export function mergeAnalytics(
   parts: { store: StoreRef; data: AnalyticsResult }[],
+  opts: { period?: boolean } = {},
 ): AnalyticsResult {
   if (parts.length === 1) return (parts[0] as (typeof parts)[number]).data;
   const all = parts.map((p) => p.data);
@@ -123,8 +128,9 @@ export function mergeAnalytics(
     (into, r) => ({ taskStatus: r.taskStatus, count: (into?.count ?? 0) + r.count }),
   );
 
-  const withDays = all.some((d) => d.tokensByDay !== undefined);
-  const withRoles = all.some((d) => d.tokensByRoleAndModelTier !== undefined);
+  const withDays = opts.period === true || all.some((d) => d.tokensByDay !== undefined);
+  const withRoles =
+    opts.period === true || all.some((d) => d.tokensByRoleAndModelTier !== undefined);
   const days = byKey<DailyTokenBucket>(
     all.map((d) => d.tokensByDay ?? []),
     (r) => r.day,
