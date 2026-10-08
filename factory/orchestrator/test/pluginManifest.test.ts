@@ -98,6 +98,23 @@ describe('marketplace', () => {
     }
   });
 
+  it('lists every plugin whose manifest names a types contract at a file that exists', () => {
+    // A plugin module's `types` is the contract `claude plugin validate`
+    // holds its `$.state` keys to. Pointed at a file the repo does not ship,
+    // the plugin validates here, where an engine-generated folder may sit
+    // beside it, and fails on an operator's fresh install.
+    const typed = entries().filter((e) => {
+      const manifest = path.join(e.source, '.claude-plugin/plugin.json');
+      return typeof readJson(manifest).types === 'string';
+    });
+    expect(typed.map((e) => e.name)).toContain('bs-mod');
+    for (const entry of typed) {
+      const manifest = path.join(entry.source, '.claude-plugin/plugin.json');
+      const types = path.join(entry.source, readJson(manifest).types as string);
+      expect(existsSync(path.join(REPO_ROOT, types)), `${types} is named but absent`).toBe(true);
+    }
+  });
+
   it('lists bs-mod at a source whose hooks.json names modules that exist', () => {
     // bs-mod is a plugin module: the engine loads only what `hooks/hooks.json`
     // names, so a renamed entry file installs a plugin that draws nothing.

@@ -382,8 +382,8 @@ job, **130** e2e tests across 11 specs.
 *Read the tail, not the exit code.* Every step degrades to a printed `SKIP`
 rather than a false `OK` when its tool is missing. `SKIP` lines for the
 TypeScript half mean `pnpm` was not found; `SKIP` lines for the policy half
-mean PyYAML was not found. Neither is a passing install. The one `SKIP` that
-is expected here is bs-mod's: its checks need the `claude` CLI, which
+mean PyYAML was not found. Neither is a passing install. bs-mod's `SKIP` is
+expected here whatever else you have: its checks need the `claude` CLI, which
 [Step 6](#step-6--install-the-claude-code-cli) installs, so re-run the gate
 after that step to see them run.
 

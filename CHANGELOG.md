@@ -50,9 +50,11 @@ than appearing in it.
   package version, and `pluginManifest.test.ts` now fails a release that
   bumps one without the other, so an installed HUD updates with each
   release. `scripts/check.sh` validates and tests it when `claude` is on
-  PATH and prints `SKIP` otherwise, CI included; the repo's vitest, Biome
-  and tsconfigs do not read the folder. INSTALL.md gains the optional
-  install line and an optional Step 8.
+  PATH and prints `SKIP` otherwise, CI included. The repo's vitest does
+  not run its tests and Biome and the tsconfigs leave it out, but the
+  repo-wide guards still read it: the one-language test now scans `.tsx`
+  too, and the manifest test checks that its `types` contract exists.
+  INSTALL.md gains the optional install line and an optional Step 8.
 - **`wave-admitted` says which tier its cap was sized for.** The `budget`
   block every admission writes now carries `tier` (`small` / `medium` /
   `huge`) beside `cap_tokens`: the plan's `effort` after `effort.yml`'s

@@ -91,8 +91,10 @@ type check.
 `scripts/check.sh` runs the first two checks whenever `claude` is on PATH.
 CI has no `claude`, so there they print `SKIP`. The marketplace wiring is
 checked in CI anyway, by `factory/orchestrator/test/pluginManifest.test.ts`.
-The repo's vitest, Biome and tsconfigs do not read this folder: its tests
-import Claude Code's own test kit, which only its runner provides.
+The repo's vitest does not run this folder's tests, and Biome and the
+tsconfigs leave it out: its tests import Claude Code's own test kit, which
+only its runner provides. The repo-wide guards still read it, so its prose
+stays in English like the rest of the repo.
 
 `types/index.d.ts` is the mod's own contract for the state it keeps. It is
 committed, unlike `.claude-plugin/types/`.
