@@ -9,7 +9,8 @@
 // already has loaded.
 import { Coins, Info, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import Banner from '../components/kit/Banner.vue';
 import BarChart from '../components/kit/BarChart.vue';
 import Button from '../components/kit/Button.vue';
@@ -23,6 +24,7 @@ import ProgressBarMini from '../components/kit/ProgressBarMini.vue';
 import ProgressRing from '../components/kit/ProgressRing.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import Table from '../components/kit/Table.vue';
+import { useActivePageScope } from '../composables/useActivePageScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
@@ -54,6 +56,7 @@ import {
 } from '../lib/analytics.js';
 import { type AnalyticsPeriod, type AnalyticsResult, fetchAnalytics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { pluralize } from '../lib/format.js';
 import { roleLabel, tierLabel } from '../lib/roleLabels.js';
 
 const router = useRouter();
@@ -63,6 +66,11 @@ setBreadcrumb([{ label: 'Cost & quality' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
 const { isPhoneWidth } = useViewport();
+// S9: Active/All scope (ds-spec §4.4 Scope). A ?session= in the URL names its
+// own scope and wins over the toggle.
+const { view, active, otherStores, scopeTo } = useActivePageScope(
+  () => sessionScope.value !== undefined,
+);
 
 const PERIOD_OPTIONS = [
   { value: '7d', label: '7 days' },
@@ -82,9 +90,21 @@ const loading = ref(true);
 
 async function load() {
   error.value = null;
+  if (!view.value.fetchable) {
+    // Holding for the scope read, or Active with nothing in this store: no
+    // request, and no figures from an earlier scope left on screen.
+    data.value = null;
+    loading.value = view.value.mode === 'loading';
+    return;
+  }
   loading.value = data.value === null;
   try {
-    data.value = await fetchAnalytics(sessionScope.value, project.value, period.value);
+    data.value = await fetchAnalytics(
+      sessionScope.value,
+      project.value,
+      period.value,
+      view.value.sessions,
+    );
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -92,7 +112,7 @@ async function load() {
   }
 }
 onMounted(load);
-watch([project, sessionKey], load);
+watch([project, sessionKey, () => view.value.key], load);
 
 function setPeriod(value: string) {
   period.value = value as AnalyticsPeriod;
@@ -235,12 +255,40 @@ const phoneRoleHeading = computed(() => {
         :variant="isPhoneWidth ? 'tabs' : 'buttons'"
         @update:model-value="setPeriod"
       />
-      <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load">Refresh</Button>
+      <div class="bs-analytics-page__toolbar-actions">
+        <ActivityScopeToggle v-if="view.showToggle" />
+        <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load">Refresh</Button>
+      </div>
     </div>
 
-    <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
+    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet bs-scope-line">
+      Live sessions can't be read here
+    </p>
+    <template v-if="view.mode === 'empty'">
+      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet bs-scope-line">
+        Nothing is active right now. ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet bs-scope-line">
+        {{ pluralize(active?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+      <p v-else class="bs-sessions__quiet bs-scope-line">
+        No active session in this view ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+    </template>
+    <p v-if="otherStores.length > 0" class="bs-sessions__quiet bs-scope-line">
+      {{ pluralize(otherStores.length, 'active project') }}
+      {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
+      ({{ otherStores.join(', ') }}) ·
+      <RouterLink to="/overview">see Home</RouterLink>
+    </p>
 
-    <template v-if="loading">
+    <Banner v-if="error && view.mode !== 'empty'" tone="danger" show-retry @retry="load">{{ error }}</Banner>
+
+    <template v-if="view.mode === 'empty'"></template>
+    <template v-else-if="loading">
       <Skeleton v-for="i in 3" :key="i" height="220" />
     </template>
 

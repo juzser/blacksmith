@@ -10,17 +10,20 @@
 // earlier commit (48f2647) — there was nothing left to remove here.
 import { ArrowUp, History } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
+import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import Banner from '../components/kit/Banner.vue';
 import BarChart from '../components/kit/BarChart.vue';
 import Button from '../components/kit/Button.vue';
 import Card from '../components/kit/Card.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import LineChart from '../components/kit/LineChart.vue';
+import PageHeader from '../components/kit/PageHeader.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Sparkline from '../components/kit/Sparkline.vue';
 import Tag from '../components/kit/Tag.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
+import { useActivePageScope } from '../composables/useActivePageScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
@@ -39,6 +42,7 @@ import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { errorClassCardView, humanizeClass } from '../lib/errorClassCards.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { FeedGeneration } from '../lib/feedGeneration.js';
+import { pluralize } from '../lib/format.js';
 import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../lib/liveFeed.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
@@ -141,6 +145,15 @@ const epicFilter = computed(() =>
   typeof route.query.epic === 'string' ? route.query.epic : undefined,
 );
 
+// S9: Active/All scope (ds-spec §4.3 Scope). An explicit filter -- a session,
+// task or epic in the URL -- names its own scope and wins over the toggle.
+const { view, active, otherStores, scopeTo } = useActivePageScope(
+  () =>
+    sessionScope.value !== undefined ||
+    taskFilter.value !== undefined ||
+    epicFilter.value !== undefined,
+);
+
 // DS6 PR4c: the class-summary cards and their two charts only need data
 // while the Errors kind is selected, fetched separately from the main feed
 // since `fetchErrors` returns a different shape (class/day/group buckets,
@@ -149,16 +162,20 @@ const errorsData = ref<ErrorsResult | null>(null);
 const errorsLoading = ref(false);
 
 async function loadErrorsData() {
+  if (!view.value.fetchable) {
+    errorsData.value = null;
+    return;
+  }
   errorsLoading.value = true;
   try {
-    errorsData.value = await fetchErrors(sessionScope.value, project.value);
+    errorsData.value = await fetchErrors(sessionScope.value, project.value, view.value.sessions);
   } finally {
     errorsLoading.value = false;
   }
 }
 
 watch(
-  [kindFilter, project, sessionKey],
+  [kindFilter, project, sessionKey, () => view.value.key],
   () => {
     if (kindFilter.value === 'error') loadErrorsData();
   },
@@ -246,6 +263,15 @@ watch(
 
 async function load() {
   const gen = feedGen.bump();
+  if (!view.value.fetchable) {
+    // Holding for the scope read, or Active with nothing in this store: no
+    // request, and nothing from an earlier scope left on screen.
+    page.value = null;
+    pendingNewCount.value = 0;
+    error.value = null;
+    loading.value = view.value.mode === 'loading';
+    return;
+  }
   try {
     const kinds = kindFilter.value
       ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
@@ -257,6 +283,7 @@ async function load() {
       epic: epicFilter.value,
       kinds,
       limit: 50,
+      sessions: view.value.sessions,
     });
     if (feedGen.isStale(gen)) return;
     page.value = fetched;
@@ -274,7 +301,7 @@ async function load() {
 }
 
 onMounted(load);
-watch([project, sessionKey, kindFilter, taskFilter, epicFilter], load);
+watch([project, sessionKey, kindFilter, taskFilter, epicFilter, () => view.value.key], load);
 
 // DS6 PR4b round 3 item 1: once the feed is loaded, the same `usePoll`
 // trigger (15s fallback, stream advance, global Refresh) fetches only rows
@@ -282,7 +309,7 @@ watch([project, sessionKey, kindFilter, taskFilter, epicFilter], load);
 // the whole page, so an incremental poll cannot re-sort rows already paged
 // back. `load()` still owns the initial fetch and filter changes.
 async function poll() {
-  if (!page.value) return;
+  if (!page.value || !view.value.fetchable) return;
   if (!feedGen.startPoll()) return;
   const gen = feedGen.snapshot();
   const cursor = page.value.newestId;
@@ -298,6 +325,7 @@ async function poll() {
       epic: epicFilter.value,
       kinds,
       limit: 50,
+      sessions: view.value.sessions,
       after: cursor ?? undefined,
     });
     if (!page.value || feedGen.isStale(gen)) return;
@@ -357,6 +385,7 @@ async function loadOlder() {
         ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
         : undefined,
       limit: 50,
+      sessions: view.value.sessions,
       before: page.value.nextBefore,
     });
     if (feedGen.isStale(gen)) return;
@@ -425,6 +454,9 @@ function becauseOf(promptId: string) {
 <template>
   <div class="app-page" role="feed" aria-label="Activity" :aria-busy="loading || polling">
     <span class="sr-only" aria-live="polite">{{ liveAnnouncement }}</span>
+    <PageHeader v-if="isPhoneWidth && view.showToggle" title="Activity">
+      <template #actions><ActivityScopeToggle /></template>
+    </PageHeader>
     <div
       v-if="isPhoneWidth"
       role="tablist"
@@ -459,13 +491,38 @@ function becauseOf(promptId: string) {
           {{ EVENT_KIND_LABEL[kind] }}
         </Button>
       </div>
-      <div style="display: flex; gap: var(--bs-space-1)">
+      <div style="display: flex; gap: var(--bs-space-1); align-items: center">
+        <ActivityScopeToggle v-if="view.showToggle" />
         <Button class="activity-toolbar__expand-all" variant="ghost" size="sm" @click="expandAll">Expand all</Button>
         <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
       </div>
     </div>
 
-    <div v-if="kindFilter === 'error'" class="bs-activity-errors">
+    <p v-if="view.mode === 'unmeasured'" class="bs-sessions__quiet bs-scope-line">
+      Live sessions can't be read here
+    </p>
+    <template v-if="view.mode === 'empty'">
+      <p v-if="view.edge === 'nothing-live'" class="bs-sessions__quiet bs-scope-line">
+        Nothing is active right now. ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+      <p v-else-if="view.edge === 'none-on-epic'" class="bs-sessions__quiet bs-scope-line">
+        {{ pluralize(active?.unlinkedSessions ?? 0, 'live session') }}, none on an epic ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+      <p v-else class="bs-sessions__quiet bs-scope-line">
+        No active session in this view ·
+        <RouterLink :to="scopeTo('all')">Show all</RouterLink>
+      </p>
+    </template>
+    <p v-if="otherStores.length > 0" class="bs-sessions__quiet bs-scope-line">
+      {{ pluralize(otherStores.length, 'active project') }}
+      {{ otherStores.length === 1 ? 'is' : 'are' }} in another store
+      ({{ otherStores.join(', ') }}) ·
+      <RouterLink to="/overview">see Home</RouterLink>
+    </p>
+
+    <div v-if="kindFilter === 'error' && view.fetchable" class="bs-activity-errors">
       <div class="bs-activity-errors__charts">
         <Card title="Errors over time">
           <LineChart
@@ -513,6 +570,7 @@ function becauseOf(promptId: string) {
       </div>
     </div>
 
+    <template v-if="view.mode !== 'empty'">
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
     <EmptyState
@@ -564,6 +622,7 @@ function becauseOf(promptId: string) {
         <div v-if="page?.nextBefore" ref="sentinelEl" class="activity-sentinel" aria-hidden="true"></div>
         <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
       </div>
+    </template>
     </template>
   </div>
 </template>

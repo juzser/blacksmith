@@ -58,3 +58,21 @@ export function isActiveSession(
 export function isActiveProjectName(scope: ActiveScopeResult | null, project: string): boolean {
   return scope?.measured === true && scope.projects.some((p) => p.project === project);
 }
+
+/** The server refuses more `sessions` values than this (400), so the client never sends more. */
+export const MAX_ACTIVE_SESSION_IDS = 200;
+
+// The home-store factory session ids Activity and Cost & quality narrow to.
+// null = no usable answer: scope unknown, unmeasured, or past the server cap
+// (the caller then fetches everything rather than a truncated slice). An empty
+// list is a real answer -- measured, nothing active here. Foreign-store ids are
+// dropped: those pages read the served store only.
+export function activeHomeSessionIds(scope: ActiveScopeResult | null): string[] | null {
+  if (scope?.measured !== true) return null;
+  const ids = [
+    ...new Set(
+      scope.factorySessions.filter((s) => s.storeId === HOME_STORE_ID).map((s) => s.sessionId),
+    ),
+  ].sort();
+  return ids.length > MAX_ACTIVE_SESSION_IDS ? null : ids;
+}

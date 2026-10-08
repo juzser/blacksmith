@@ -725,6 +725,39 @@ export function createApp(opts: AppOpts): AppHandle {
     return { sessionId, sessionIds: projectedLineage(handle.db, sessionId) };
   }
 
+  /**
+   * S9: `?sessions=a&sessions=b` narrows Activity and Cost & quality to the
+   * factory sessions the dashboard's active scope names. Repeated, never
+   * comma-joined: a session id may contain a comma. Absent changes nothing.
+   *
+   * Refused (400): together with `session` or `lineage`, an empty or
+   * non-segment value (the shape `requireSessionIdShape` in events.ts keeps
+   * for a log file name, copied rather than exported so this route needs no
+   * orchestrator rebuild), or more than 200 values. A request that carries
+   * `sessions` never yields an empty list, which `scopedToSessions` refuses.
+   */
+  const MAX_SESSIONS = 200;
+  function sessionsScope(c: Context): Pick<Scope, 'sessionIds'> {
+    const values = c.req.queries('sessions');
+    if (values === undefined) return {};
+    const bad = (message: string) =>
+      new BadRequestError('scope.bad-request', message, { sessions: values.length });
+    if (c.req.query('session') !== undefined || c.req.query('lineage') !== undefined) {
+      throw bad('Query parameter "sessions" cannot be combined with "session" or "lineage".');
+    }
+    if (values.length > MAX_SESSIONS) {
+      throw bad(`Query parameter "sessions" takes at most ${MAX_SESSIONS} values.`);
+    }
+    for (const id of values) {
+      if (id.length === 0 || id === '.' || id === '..' || id.includes('/')) {
+        throw bad(
+          'Every "sessions" value must be a single non-empty path segment: no "/", and not "." or "..".',
+        );
+      }
+    }
+    return { sessionIds: [...new Set(values)] };
+  }
+
   const app = new Hono();
 
   app.onError((err, c) => {
@@ -895,9 +928,18 @@ export function createApp(opts: AppOpts): AppHandle {
       );
     }
 
+    const sessions = sessionsScope(c);
+    if (causalChainFor && sessions.sessionIds) {
+      throw new BadRequestError(
+        'scope.bad-request',
+        'The causal chain for "causalChainFor" needs one "session", not "sessions".',
+      );
+    }
+
     const paged = limit !== undefined || beforeParam !== undefined || afterParam !== undefined;
     const entries = timeline(handle.db, {
       ...sessionScope(c),
+      ...sessions,
       ...(taskId ? { taskId } : {}),
       ...(epicId ? { epicId } : {}),
       ...(project ? { project } : {}),
@@ -916,6 +958,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const nextBefore = oldest
       ? timeline(handle.db, {
           ...sessionScope(c),
+          ...sessions,
           ...(taskId ? { taskId } : {}),
           ...(epicId ? { epicId } : {}),
           ...(project ? { project } : {}),
@@ -1122,7 +1165,11 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');
     return c.json(
-      errorsPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+      errorsPage(
+        handle.db,
+        { ...sessionScope(c), ...sessionsScope(c), ...(project ? { project } : {}) },
+        clock,
+      ),
     );
   });
 
@@ -1140,7 +1187,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const period = periodParam as AnalyticsPeriod | undefined;
     const result: AnalyticsResult = analytics(
       handle.db,
-      { ...sessionScope(c), ...(project ? { project } : {}) },
+      { ...sessionScope(c), ...sessionsScope(c), ...(project ? { project } : {}) },
       { ...clock, ...(period ? { period } : {}) },
     );
     return c.json(result);

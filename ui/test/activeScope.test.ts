@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
 import {
+  activeHomeSessionIds,
   isActiveEpic,
   isActiveProject,
   isActiveProjectName,
@@ -50,6 +51,42 @@ describe('active-scope predicates', () => {
     expect(isActiveProjectName(elsewhere, 'project-b')).toBe(false);
     expect(isActiveProjectName({ ...elsewhere, measured: false }, 'project-a')).toBe(false);
     expect(isActiveProjectName(null, 'project-a')).toBe(false);
+  });
+});
+
+describe('activeHomeSessionIds', () => {
+  const withSessions = (ids: [string, string][]): ActiveScopeResult => ({
+    ...scope,
+    factorySessions: ids.map(([storeId, sessionId]) => ({ storeId, sessionId })),
+  });
+
+  it('is null while unknown: no scope, or an unmeasured one', () => {
+    expect(activeHomeSessionIds(null)).toBeNull();
+    expect(activeHomeSessionIds({ ...scope, measured: false })).toBeNull();
+  });
+
+  it('is an empty list when measured with no home-store factory session', () => {
+    expect(activeHomeSessionIds(withSessions([]))).toEqual([]);
+    expect(activeHomeSessionIds(withSessions([['st-b', 'f1']]))).toEqual([]);
+  });
+
+  it('keeps home ids only, de-duplicated and sorted', () => {
+    expect(
+      activeHomeSessionIds(
+        withSessions([
+          ['home', 'sess-b'],
+          ['st-b', 'f1'],
+          ['home', 'sess-a'],
+          ['home', 'sess-b'],
+        ]),
+      ),
+    ).toEqual(['sess-a', 'sess-b']);
+  });
+
+  it('is null above the 200-id cap, never a truncated list', () => {
+    const many = Array.from({ length: 201 }, (_, i): [string, string] => ['home', `s${i}`]);
+    expect(activeHomeSessionIds(withSessions(many))).toBeNull();
+    expect(activeHomeSessionIds(withSessions(many.slice(0, 200)))).toHaveLength(200);
   });
 });
 

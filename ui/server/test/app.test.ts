@@ -2350,3 +2350,231 @@ describe('GET /api/cli-sessions', () => {
     }
   });
 });
+
+// S9: Activity and Cost & quality narrow to an explicit list of factory
+// sessions (`?sessions=a&sessions=b`, repeated, never comma-joined).
+describe('ui/server app.ts: ?sessions narrows timeline, errors and analytics (S9)', () => {
+  const A = 'sess-a';
+  const B = 'sess-b';
+  const C = 'sess-c,with-comma';
+  const TOKENS = { [A]: 1000, [B]: 20000, [C]: 300000 };
+  let stateDir: string;
+  let dbDir: string;
+  let dbPath: string;
+  let roadmapPath: string;
+
+  /** Rounds interleave the sessions, so every page of a narrowed feed crosses a foreign row. */
+  async function seed(): Promise<void> {
+    const tip: Record<string, string> = {};
+    for (const s of [A, B, C]) {
+      const root = await appendEvent(
+        {
+          session_id: s,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+      tip[s] = root.event_id;
+    }
+    const add = async (s: string, event: Parameters<typeof appendEvent>[0]) => {
+      const written = await appendEvent(
+        { ...event, session_id: s, causal_parent: tip[s] ?? null },
+        { stateDir },
+      );
+      tip[s] = written.event_id;
+    };
+    for (let round = 1; round <= 3; round++) {
+      for (const s of [A, B, C]) {
+        const taskId = `epic-${s.slice(-1)}/task-${round}`;
+        await add(s, {
+          session_id: s,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: null,
+          payload: {
+            epic_id: `epic-${s.slice(-1)}`,
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: `Round ${round} in ${s}.`,
+            claims: [`src/${round}.ts`],
+            budget_tokens: 1000,
+          },
+        });
+        await add(s, {
+          session_id: s,
+          actor: 'coder',
+          event_type: 'task-result-recorded',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: null,
+          payload: {
+            task_id: taskId,
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: {
+              input_tokens: TOKENS[s as keyof typeof TOKENS],
+              output_tokens: 0,
+              total_tokens: TOKENS[s as keyof typeof TOKENS],
+            },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          },
+        });
+      }
+    }
+    for (const s of [A, B, C]) {
+      await add(s, {
+        session_id: s,
+        actor: 'coder',
+        event_type: 'error-logged',
+        task_id: `epic-${s.slice(-1)}/task-1`,
+        plan_version: 1,
+        causal_parent: null,
+        payload: {
+          error: s === A ? 'coordination.deadlock' : 'execution.flaky-test',
+          severity: 'S1-stop-the-line',
+          task_ref: `epic-${s.slice(-1)}/task-1`,
+          detail: `failure in ${s}`,
+        },
+      });
+    }
+    await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+  }
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-s9-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-s9-db-'));
+    roadmapPath = path.join(dbDir, 'roadmap.md');
+    await writeFile(
+      roadmapPath,
+      '## Phase A\n- id: phase-a\n- status: in-progress\n- epics: []\n',
+      'utf8',
+    );
+    dbPath = path.join(dbDir, 'smith.db');
+    await seed();
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  async function get<T>(route: string): Promise<{ status: number; body: T }> {
+    const handle = createApp({ dbPath, stateDir, roadmapPath });
+    try {
+      const res = await handle.app.request(route);
+      return { status: res.status, body: await json<T>(res) };
+    } finally {
+      closeApp(handle);
+    }
+  }
+
+  const q = (...ids: string[]) => ids.map((id) => `sessions=${encodeURIComponent(id)}`).join('&');
+
+  type Page = { entries: Array<{ eventId: string; sessionId: string }>; nextBefore: string | null };
+
+  async function walk(query: string): Promise<Page['entries'][]> {
+    const pages: Page['entries'][] = [];
+    let before: string | null = null;
+    for (let i = 0; i < 100; i++) {
+      const res: { body: Page } = await get<Page>(
+        `/api/timeline?${query}&limit=2${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+      );
+      pages.push(res.body.entries);
+      before = res.body.nextBefore;
+      if (before === null) return pages;
+    }
+    throw new Error('timeline walk did not end');
+  }
+
+  it('pages a narrowed timeline to the end: no empty page, A and B in full, no C', async () => {
+    const pages = await walk(q(A, B));
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.every((p) => p.length > 0)).toBe(true);
+    const seen = pages.flat();
+    const everyAB = (await get<Array<{ eventId: string }>>(`/api/timeline?${q(A, B)}`)).body;
+    expect(new Set(seen.map((e) => e.eventId))).toEqual(new Set(everyAB.map((e) => e.eventId)));
+    expect(seen.some((e) => e.sessionId === C)).toBe(false);
+    expect(new Set(seen.map((e) => e.sessionId))).toEqual(new Set([A, B]));
+    const all = (await get<Array<{ sessionId: string }>>('/api/timeline')).body;
+    expect(all.some((e) => e.sessionId === C)).toBe(true);
+    // Two sessions of the same shape: exactly their share of the whole.
+    expect(seen.length).toBe(all.filter((e) => e.sessionId !== C).length);
+  });
+
+  it('reads a session id with a comma intact (repeated param, never comma-joined)', async () => {
+    const { body } = await get<Array<{ sessionId: string }>>(`/api/timeline?${q(C)}`);
+    expect(body.length).toBeGreaterThan(0);
+    expect(new Set(body.map((e) => e.sessionId))).toEqual(new Set([C]));
+  });
+
+  it('analytics adds A and B up exactly, and differs from the unscoped answer', async () => {
+    type Cost = { costByModelTierAndProvider: Array<{ taskCount: number; totalTokens: number }> };
+    const sum = (r: Cost) => ({
+      tokens: r.costByModelTierAndProvider.reduce((n, b) => n + b.totalTokens, 0),
+      tasks: r.costByModelTierAndProvider.reduce((n, b) => n + b.taskCount, 0),
+    });
+    const one = async (s: string) => sum((await get<Cost>(`/api/analytics?${q(s)}`)).body);
+    const both = sum((await get<Cost>(`/api/analytics?${q(A, B)}`)).body);
+    const a = await one(A);
+    const b = await one(B);
+    const everything = sum((await get<Cost>('/api/analytics')).body);
+    expect(a.tokens).toBe(3 * TOKENS[A]);
+    expect(both).toEqual({ tokens: a.tokens + b.tokens, tasks: a.tasks + b.tasks });
+    expect(both.tokens).not.toBe(everything.tokens);
+    expect(everything.tokens).toBe(a.tokens + b.tokens + 3 * TOKENS[C]);
+  });
+
+  it('errors holds only the named session', async () => {
+    type Errs = { byClass: Array<{ errorGroup: string; errorClass: string; count: number }> };
+    const only = (await get<Errs>(`/api/errors?${q(A)}`)).body;
+    expect(only.byClass.map((r) => `${r.errorGroup}.${r.errorClass}`)).toEqual([
+      'coordination.deadlock',
+    ]);
+    expect(only.byClass[0]?.count).toBe(1);
+    const all = (await get<Errs>('/api/errors')).body;
+    expect(all.byClass.reduce((n, r) => n + r.count, 0)).toBe(3);
+  });
+
+  const refused: Array<[string, string]> = [
+    ['an empty value', '?sessions='],
+    ['a value with a slash', '?sessions=a%2Fb'],
+    ['..', '?sessions=..'],
+    ['.', '?sessions=.'],
+    ['one empty value among good ones', `?${q(A)}&sessions=`],
+    ['sessions with session', `?${q(A)}&session=${A}`],
+    ['sessions with lineage', `?${q(A)}&lineage=true`],
+    ['201 values', `?${Array.from({ length: 201 }, (_, i) => `sessions=s${i}`).join('&')}`],
+  ];
+  for (const route of ['/api/timeline', '/api/errors', '/api/analytics']) {
+    for (const [name, query] of refused) {
+      it(`${route} refuses ${name} with 400 scope.bad-request`, async () => {
+        const res = await get<{ error: { code: string } }>(`${route}${query}`);
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('scope.bad-request');
+      });
+    }
+  }
+
+  it('accepts exactly 200 values', async () => {
+    const ids = Array.from({ length: 200 }, (_, i) => `s${i}`);
+    expect((await get<unknown>(`/api/errors?${q(...ids)}`)).status).toBe(200);
+  });
+
+  it('refuses sessions with causalChainFor, which needs one session', async () => {
+    const res = await get<{ error: { code: string } }>(
+      `/api/timeline?${q(A)}&causalChainFor=whatever`,
+    );
+    expect(res.status).toBe(400);
+  });
+});

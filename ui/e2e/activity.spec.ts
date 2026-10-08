@@ -1,3 +1,4 @@
+import { stubActiveScope } from './activeScopeStub.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
@@ -37,7 +38,18 @@ function synthEntry(
 // (operator decisions). DS6 PR4c adds the Errors kind's own class cards and
 // chart takeaways back, above the feed, as their own section below.
 
+// S9: Activity follows the Active/All scope. The e2e server cannot read live
+// CLI sessions (unmeasured), so the older tests below run under a measured
+// answer that names every home-store session the fixture seeds: Active then
+// narrows to exactly what All showed, and no unmeasured note shifts a layout.
+const SEEDED_SESSIONS = ['sess-fixture', 'sess-multiproject-fixture'];
+const homeSessions = (...ids: string[]) => ids.map((sessionId) => ({ storeId: 'home', sessionId }));
+
 test.describe('Activity', () => {
+  test.beforeEach(async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions(...SEEDED_SESSIONS) });
+  });
+
   test('renders the seeded event log and a11y basics', async ({ page }) => {
     await page.goto('/activity');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
@@ -319,6 +331,8 @@ test.describe('Activity', () => {
   test('a session divider separates adjacent rows from different sessions, and its details link opens that session on Sessions', async ({
     page,
   }) => {
+    // Sessions only keeps the deep link in Active when it names an active session.
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-a', 'sess-b') });
     const entries = [
       synthEntry('div-a', 0, { sessionId: 'sess-a', sessionTitle: 'Session A' }),
       synthEntry('div-b', 1, { sessionId: 'sess-b', sessionTitle: 'Session B' }),
@@ -891,4 +905,229 @@ test.describe('Activity', () => {
       });
     }
   }
+});
+
+// S9 (ds-spec.md §4.3 Scope): the feed, its poll, "Load older" and the error
+// cards follow Active/All; an explicit filter wins over the toggle.
+test.describe('Activity follows Active/All (S9)', () => {
+  const requests = (page: import('@playwright/test').Page) => {
+    const urls: URL[] = [];
+    page.on('request', (r) => {
+      const u = new URL(r.url());
+      if (u.pathname === '/api/timeline' || u.pathname === '/api/errors') urls.push(u);
+    });
+    return urls;
+  };
+  const rowTitles = (page: import('@playwright/test').Page) =>
+    page.locator('.bs-timeline-row__title');
+
+  test('Active lists only the one session the scope names; All lists more', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await expect(rowTitles(page).first()).toBeVisible();
+    expect(urls.some((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
+      true,
+    );
+    await expect(page.locator('.bs-session-divider')).toHaveCount(0);
+    const activeCount = await rowTitles(page).count();
+    await page.getByRole('link', { name: 'All', exact: true }).click();
+    await expect(page).toHaveURL(/scope=all/);
+    await expect.poll(() => rowTitles(page).count()).toBeGreaterThan(activeCount);
+    expect(urls.at(-1)?.searchParams.has('sessions')).toBe(false);
+  });
+
+  test('nothing live: only the edge line, no request, no feed', async ({ page }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Show all' })).toBeVisible();
+    await expect(rowTitles(page)).toHaveCount(0);
+    await expect(page.locator('.activity-feed')).toHaveCount(0);
+    expect(urls).toHaveLength(0);
+  });
+
+  test('live sessions, none on an epic, plus the other-store line', async ({ page }) => {
+    await stubActiveScope(page, [], {
+      liveSessions: 2,
+      unlinkedSessions: 2,
+      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+    });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await expect(page.getByText('2 live sessions, none on an epic')).toBeVisible();
+    await expect(page.getByText('1 active project is in another store (project-b)')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'see Home' })).toBeVisible();
+    expect(urls).toHaveLength(0);
+  });
+
+  test('measured but none in this store reads "No active session in this view"', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, ['epic-a'], {
+      factorySessions: [{ storeId: 'store-b', sessionId: 'f1' }],
+    });
+    await page.goto('/activity');
+    await expect(page.getByText('No active session in this view')).toBeVisible();
+    await expect(rowTitles(page)).toHaveCount(0);
+  });
+
+  test('unmeasured: fetches All and says live sessions cannot be read', async ({ page }) => {
+    await stubActiveScope(page, [], { measured: false });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await expect(rowTitles(page).first()).toBeVisible();
+    await expect(page.getByText("Live sessions can't be read here")).toBeVisible();
+    expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+  });
+
+  test('Active holds while the scope read is in flight: no feed request until it settles', async ({
+    page,
+  }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await page.route('**/api/active-scope*', async (route) => {
+      await gate;
+      await route.fulfill({
+        json: {
+          measured: true,
+          readAt: '2026-10-07T12:00:00.000Z',
+          liveSessions: 1,
+          unlinkedSessions: 0,
+          projects: [],
+          epics: [],
+          factorySessions: homeSessions('sess-fixture'),
+        },
+      });
+    });
+    const urls = requests(page);
+    await page.goto('/activity');
+    await page.waitForTimeout(400);
+    expect(urls).toHaveLength(0);
+    release();
+    await expect(rowTitles(page).first()).toBeVisible();
+    expect(urls.every((u) => u.searchParams.getAll('sessions').join() === 'sess-fixture')).toBe(
+      true,
+    );
+  });
+
+  test('an explicit ?session= wins: no sessions param, no toggle', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-multiproject-fixture') });
+    const urls = requests(page);
+    await page.goto('/activity?session=sess-fixture');
+    await expect(rowTitles(page).first()).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Activity scope' })).toHaveCount(0);
+    expect(urls.every((u) => !u.searchParams.has('sessions'))).toBe(true);
+  });
+
+  test('Load older and the poll carry the same sessions', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-a', 'sess-c,x') });
+    const seen: URL[] = [];
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      seen.push(url);
+      const entry = synthEntry(url.searchParams.has('before') ? 'older-1' : 'first-1', 1);
+      route.fulfill({
+        json: {
+          entries: [entry],
+          nextBefore: url.searchParams.has('before') ? null : 'cursor-1',
+          newestId: entry.eventId,
+        },
+      });
+    });
+    await page.goto('/activity');
+    await expect(rowTitles(page).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    // The short list leaves the sentinel in view, so "Load older" fires on its own.
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await expect.poll(() => seen.some((u) => u.searchParams.has('before'))).toBe(true);
+    await expect.poll(() => seen.some((u) => u.searchParams.has('after'))).toBe(true);
+    for (const u of seen) expect(u.searchParams.getAll('sessions')).toEqual(['sess-a', 'sess-c,x']);
+  });
+
+  test('phone 375: the toggle clears 44px, sits above the kind tabs, and nothing scrolls sideways', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity');
+    const toggle = page.getByRole('navigation', { name: 'Activity scope' });
+    await expect(toggle).toBeVisible();
+    const tab = toggle.getByRole('link', { name: 'All', exact: true });
+    expect((await tab.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect((await tab.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
+    const toggleY = (await toggle.boundingBox())?.y ?? 0;
+    const tabsY = (await page.getByRole('tablist', { name: 'Filter' }).boundingBox())?.y ?? 0;
+    expect(toggleY).toBeLessThan(tabsY);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('the Error kind follows the scope too: no cards while nothing is active', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { liveSessions: 0 });
+    const urls = requests(page);
+    await page.goto('/activity?kind=errors');
+    await expect(page.getByText('Nothing is active right now.')).toBeVisible();
+    await expect(page.locator('.bs-activity-errors')).toHaveCount(0);
+    expect(urls).toHaveLength(0);
+  });
+
+  for (const [name, viewport, scopeOver, path, shot] of [
+    [
+      'desktop light',
+      VIEWPORTS.desktop,
+      { factorySessions: homeSessions('sess-fixture') },
+      '/activity',
+      'activity-active-desktop-light',
+    ],
+    [
+      'phone light',
+      { width: 375, height: 812 },
+      { factorySessions: homeSessions('sess-fixture') },
+      '/activity',
+      'activity-active-phone-light',
+    ],
+    [
+      'nothing active phone light',
+      { width: 375, height: 812 },
+      { liveSessions: 0 },
+      '/activity',
+      'activity-nothing-active-phone-light',
+    ],
+    [
+      'unmeasured desktop light',
+      VIEWPORTS.desktop,
+      { measured: false },
+      '/activity',
+      'activity-unmeasured-desktop-light',
+    ],
+  ] as const) {
+    test(`screenshot ${name}`, async ({ page }) => {
+      await stubActiveScope(page, [], scopeOver);
+      await setTheme(page, 'light');
+      await page.setViewportSize(viewport);
+      await page.goto(path);
+      const marker =
+        scopeOver.liveSessions === 0
+          ? page.locator('.bs-scope-line')
+          : page.getByRole('feed', { name: 'Activity' }).locator('.bs-timeline-row__title').first();
+      await settleForShot(page, marker);
+      await shoot(page, shot);
+    });
+  }
+
+  test('screenshot active desktop dark', async ({ page }) => {
+    await stubActiveScope(page, [], { factorySessions: homeSessions('sess-fixture') });
+    await setTheme(page, 'dark');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    await settleForShot(page, rowTitles(page).first());
+    await shoot(page, 'activity-active-desktop-dark');
+  });
 });

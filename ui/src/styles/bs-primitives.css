@@ -4476,7 +4476,13 @@ h2.rm-section__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--bs-space-3);
+}
+.bs-analytics-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
 }
 .bs-analytics-page__charts {
   display: grid;
@@ -4643,4 +4649,11 @@ h2.rm-section__head {
   .bs-activity-errors__charts {
     grid-template-columns: 1fr;
   }
+}
+
+/* S9: the Active-scope note and edge lines on Activity and Cost & quality.
+   .bs-sessions__quiet carries no margin of its own, so they take the same
+   gap Kanban's note does (.bs-kanban-page__note). */
+.bs-scope-line {
+  margin: var(--bs-space-4) 0;
 }
