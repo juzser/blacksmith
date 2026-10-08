@@ -199,6 +199,71 @@ test.describe('Analytics', () => {
       });
     }
   }
+
+  // The second-opinion rate is null with no verdicts and a real 0 when every
+  // verdict disagreed. The page must show "Not enough data yet" and no ring for
+  // the first, and a 0% ring for the second, on both widths.
+  const providerRow = (verdicts: number, agreementRate: number | null) => ({
+    provider: 'codex',
+    runs: verdicts,
+    verdicts,
+    agreementRate,
+    latencySamples: 0,
+    meanLatencyMs: null,
+    schemaFailureRate: 0,
+    transportFailureRate: 0,
+    failuresByCode: {},
+  });
+  async function stubProviderAgreement(page: Page, rows: unknown[]): Promise<void> {
+    await page.route('**/api/analytics*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.providerAgreement = rows;
+      await route.fulfill({ response, json: body });
+    });
+  }
+
+  for (const [name, viewport] of [
+    ['desktop', { width: 1280, height: 900 }],
+    ['phone', { width: 375, height: 812 }],
+  ] as const) {
+    const scope = (page: Page) =>
+      name === 'desktop'
+        ? page.locator('.bs-card').filter({ hasText: 'Second-opinion reviewers' })
+        : page
+            .locator('.bs-analytics-page__phone-stat')
+            .filter({ hasText: 'Second-opinion agreed' });
+
+    test(`${name}: no second-opinion review shows not-enough-data and no ring`, async ({
+      page,
+    }) => {
+      await stubProviderAgreement(page, []);
+      await page.setViewportSize(viewport);
+      await page.goto('/analytics');
+      const box = scope(page);
+      await expect(box).toContainText('Not enough data yet');
+      await expect(box.getByRole('img')).toHaveCount(0);
+      await expect(box).not.toContainText('0%');
+      if (name === 'desktop') {
+        await expect(box).toContainText('No second-opinion reviews in this period.');
+      }
+    });
+
+    test(`${name}: second-opinion reviews that all disagreed show a 0% ring`, async ({ page }) => {
+      await stubProviderAgreement(page, [providerRow(4, 0)]);
+      await page.setViewportSize(viewport);
+      await page.goto('/analytics');
+      const box = scope(page);
+      await expect(
+        box.getByRole('img', { name: /^0% .*agreed with the main reviewer$/ }),
+      ).toBeVisible();
+      await expect(box).not.toContainText('Not enough data yet');
+      if (name === 'desktop') {
+        await expect(box).toContainText('agreed with the main reviewer.');
+        await expect(box).not.toContainText('No second-opinion reviews in this period.');
+      }
+    });
+  }
 });
 
 // S9 (ds-spec.md §4.4 Scope).
