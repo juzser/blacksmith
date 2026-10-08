@@ -6,19 +6,20 @@ The whole install. One command in a shell:
 npm i -g @juzser/blacksmith
 ```
 
-Two inside a Claude Code session, and an optional third:
+Two inside a Claude Code session, and two optional more:
 
 ```
 /plugin marketplace add juzser/blacksmith
 /plugin install blacksmith@blacksmith
 /plugin install bs-mod@blacksmith
+/plugin install pr-mod@blacksmith
 ```
 
 Then `bs init` in the project you want it to work on, and you have `/bs`.
 Both halves are required and they are different things —
-[Which install](#which-install) says why. The third line is optional:
-bs-mod is the live HUD, your epic's progress above the prompt, and
-Blacksmith runs the same without it.
+[Which install](#which-install) says why. The last two lines are optional:
+bs-mod is the live HUD, your epic's progress above the prompt, and pr-mod
+lists the repo's open pull requests. Blacksmith runs the same without them.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -144,6 +145,7 @@ bs init
 /plugin marketplace add juzser/blacksmith
 /plugin install blacksmith@blacksmith
 /plugin install bs-mod@blacksmith      # optional: the live HUD
+/plugin install pr-mod@blacksmith      # optional: the open pull requests
 ```
 
 `claude plugin details blacksmith` prints what the second half added:
@@ -162,6 +164,12 @@ modules: it was written and tested on 2.1.292, and no older build has been
 checked. `claude plugin details bs-mod` shows it once installed, and
 [`mods/bs-mod/README.md`](mods/bs-mod/README.md) says where it looks for
 event logs.
+
+**pr-mod**, the fourth line, is optional too. `/pr-mod` opens a pane of the
+repo's open pull requests with their CI and merge state, and a one-line band
+of counts shows above the prompt. It needs the `gh` CLI signed in, and the same
+kind of Claude Code build as bs-mod.
+[`mods/pr-mod/README.md`](mods/pr-mod/README.md) has the details.
 
 `init` creates `.blacksmith/` beside your code and nothing else:
 
@@ -382,7 +390,7 @@ job, **130** e2e tests across 11 specs.
 *Read the tail, not the exit code.* Every step degrades to a printed `SKIP`
 rather than a false `OK` when its tool is missing. `SKIP` lines for the
 TypeScript half mean `pnpm` was not found; `SKIP` lines for the policy half
-mean PyYAML was not found. Neither is a passing install. bs-mod's `SKIP` is
+mean PyYAML was not found. Neither is a passing install. The `SKIP` for bs-mod and pr-mod is
 expected here whatever else you have: its checks need the `claude` CLI, which
 [Step 6](#step-6--install-the-claude-code-cli) installs, so re-run the gate
 after that step to see them run.
@@ -526,6 +534,12 @@ which is how a change to the mod is seen before it is released.
 a new session shows the band above its prompt. With `--plugin-dir`, the
 band shows in that session.
 
+pr-mod, the open-pull-request view, is installed the same way and is optional
+too: `/plugin install pr-mod@blacksmith`, or `claude --plugin-dir
+"$PWD/mods/pr-mod"` for one session. The same rule applies: an agent running
+this file asks before the install. **Expect:** `claude plugin details pr-mod`
+lists it, and `/pr-mod` opens its pane in a repo with a GitHub remote.
+
 ---
 
 ## Part 3 — Optional extras
@@ -601,8 +615,8 @@ OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 For the package and the plugin, two commands answer it: `bs --help` lists
 every command and namespace, and `claude plugin details blacksmith` reports
 `Skills (1)` and `Agents (14)`. If both do, you are installed; the rest of
-this part is the clone's. If you took the optional HUD,
-`claude plugin details bs-mod` shows it.
+this part is the clone's. If you took an optional plugin,
+`claude plugin details bs-mod` or `claude plugin details pr-mod` shows it.
 
 In a clone, one command answers "did this work":
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "blacksmith",
-  "description": "The Blacksmith factory as Claude Code plugins: the /bs operator console and the role contracts it dispatches, plus bs-mod, an optional live HUD.",
+  "description": "The Blacksmith factory as Claude Code plugins: the /bs operator console and the role contracts it dispatches, plus two optional plugin modules: bs-mod, a live HUD, and pr-mod, the repo's open pull requests.",
   "owner": {
     "name": "juzser",
     "url": "https://github.com/juzser"
@@ -26,6 +26,16 @@
       "category": "monitoring",
       "source": "./mods/bs-mod",
       "homepage": "https://github.com/juzser/blacksmith/tree/main/mods/bs-mod"
+    },
+    {
+      "name": "pr-mod",
+      "description": "Optional pull-request view: a pane lists the repo's open PRs with CI and merge state, and merges, updates a branch or sends a fix prompt; a band line above the prompt counts them. A plugin module; needs a Claude Code build with plugin modules and the gh CLI.",
+      "author": {
+        "name": "juzser"
+      },
+      "category": "workflow",
+      "source": "./mods/pr-mod",
+      "homepage": "https://github.com/juzser/blacksmith/tree/main/mods/pr-mod"
     }
   ]
 }
