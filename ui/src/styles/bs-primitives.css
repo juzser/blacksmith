@@ -1394,15 +1394,24 @@ a:hover {
 .bs-sessions__group-title .bs-btn--link:focus-visible {
   text-decoration: underline;
 }
-/* Fix round 2 item 2, then fix round 3: the global ≤640px .bs-btn--sm rule
-   floors min-height at --bs-touch, which inflates only the linked variant's
-   line box (the plain-text "No project" branch is unaffected). Cancel it and
-   grow the hit box to --bs-touch ABOVE the text only: padding-top cancelled
-   by an equal negative margin-top, nothing below, so the box never reaches
-   into the first row button under it. The row's layout height stays driven
-   by the text line. padding-inline stays 0 so the text stays flush with the
-   card edge. */
+/* Fix round 2 item 2, fix round 3, fix round 6: the global <=640px
+   .bs-btn--sm rule floors min-height at --bs-touch, which inflates only the
+   linked variant's line box (the plain-text "No project" branch is
+   unaffected). Cancel it and grow the hit box to --bs-touch ABOVE the text
+   only, nothing below, so it never reaches into the first row button under
+   it. The upward reach is tied to the page gap (--bs-m-gap, the flex gap
+   .app-page puts between groups): a negative margin-top of exactly that gap
+   lands the box's top on the previous target's bottom and no further. The h2
+   takes the remaining height (--bs-touch minus the gap) with its text at the
+   bottom, so a linked header and the plain-text one are the same height and
+   each keeps its own gap to its list. padding-inline stays 0 so the text
+   stays flush with the card edge. */
 @media (max-width: 640px) {
+  .bs-sessions__group-title {
+    display: flex;
+    align-items: flex-end;
+    min-height: calc(var(--bs-touch) - var(--bs-m-gap));
+  }
   .bs-sessions__group-title .bs-btn--sm {
     box-sizing: border-box;
     height: var(--bs-touch);
@@ -1411,7 +1420,7 @@ a:hover {
     align-items: flex-end;
     line-height: inherit;
     padding: 0;
-    margin-top: calc((var(--bs-touch) - 1lh) * -1);
+    margin-top: calc(var(--bs-m-gap) * -1);
   }
 }
 .bs-sessions__detail {

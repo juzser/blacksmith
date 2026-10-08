@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import { ARIAL_FONT_CSS } from './fontSwitch.js';
 import { expect, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -101,6 +102,20 @@ const errorBodiesRead = (page: Page, part: string) =>
   );
 
 const title = (page: Page) => page.getByRole('heading', { level: 1 });
+// Init script that forces Arial (the way BS_E2E_FONT=arial does) for one test.
+const arialInit = (css: string) => {
+  const attach = () => {
+    if (!document.documentElement) return false;
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.documentElement.appendChild(style);
+    return true;
+  };
+  if (!attach()) {
+    const observer = new MutationObserver(() => attach() && observer.disconnect());
+    observer.observe(document, { childList: true });
+  }
+};
 
 test.describe('a foreign store in the dashboard', () => {
   test.beforeAll(async () => {
@@ -873,41 +888,52 @@ test.describe('a foreign store in the dashboard', () => {
       });
     }
 
-    test('on a phone each group header link is a 44px target that touches no other target', async ({
-      page,
-    }) => {
-      await page.setViewportSize({ width: 375, height: 812 });
-      await page.goto(`${origin}/sessions?scope=all`);
-      await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
-      const found = await page.evaluate(() => {
-        const sel = 'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
-        const all = [...document.querySelectorAll<HTMLElement>(sel)].filter(
-          (el) => el.getBoundingClientRect().width > 0,
-        );
-        return [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')].map(
-          (link) => {
-            const b = link.getBoundingClientRect();
-            const hits = all
-              .filter((o) => o !== link && !link.contains(o) && !o.contains(link))
-              .map((o) => {
-                const r = o.getBoundingClientRect();
-                return {
-                  who: (o.textContent ?? '').trim().slice(0, 20),
-                  w: Math.min(b.right, r.right) - Math.max(b.left, r.left),
-                  h: Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top),
-                };
-              })
-              .filter((x) => x.w > 1 && x.h > 1);
-            return { name: link.textContent?.trim(), w: b.width, h: b.height, hits };
-          },
-        );
-      });
-      for (const f of found) {
-        expect(f.w).toBeGreaterThanOrEqual(44);
-        expect(f.h).toBeGreaterThanOrEqual(44);
-        expect([f.name, f.hits]).toEqual([f.name, []]);
+    for (const width of [375, 390]) {
+      for (const font of ['default', 'arial'] as const) {
+        test(`on a ${width}px phone (${font} font) each group header link is a 44px target that touches no other target, and every header is as tall`, async ({
+          page,
+        }) => {
+          await page.setViewportSize({ width, height: 812 });
+          if (font === 'arial') await page.addInitScript(arialInit, ARIAL_FONT_CSS);
+          await page.goto(`${origin}/sessions?scope=all`);
+          await expect(page.locator('.bs-sessions__group-title a')).toHaveCount(2);
+          const found = await page.evaluate(() => {
+            const sel = 'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+            const all = [...document.querySelectorAll<HTMLElement>(sel)].filter(
+              (el) => el.getBoundingClientRect().width > 0,
+            );
+            return [...document.querySelectorAll<HTMLElement>('.bs-sessions__group-title a')].map(
+              (link) => {
+                const b = link.getBoundingClientRect();
+                const hits = all
+                  .filter((o) => o !== link && !link.contains(o) && !o.contains(link))
+                  .map((o) => {
+                    const r = o.getBoundingClientRect();
+                    return {
+                      who: (o.textContent ?? '').trim().slice(0, 20),
+                      w: Math.min(b.right, r.right) - Math.max(b.left, r.left),
+                      h: Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top),
+                    };
+                  })
+                  .filter((x) => x.w > 1 && x.h > 1);
+                return { name: link.textContent?.trim(), w: b.width, h: b.height, hits };
+              },
+            );
+          });
+          for (const f of found) {
+            expect(f.w).toBeGreaterThanOrEqual(44);
+            expect(f.h).toBeGreaterThanOrEqual(44);
+            expect([f.name, f.hits]).toEqual([f.name, []]);
+          }
+
+          const heights = await page
+            .locator('.bs-sessions__group-title')
+            .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+          expect(heights).toHaveLength(3);
+          expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1);
+        });
       }
-    });
+    }
 
     test('a selected session names where it is from: title, project, start time', async ({
       page,
