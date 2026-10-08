@@ -636,6 +636,101 @@ describe('multi-store dashboard reads', () => {
       expect(deadlock?.lastSeen).toBe(lastSeen);
     });
 
+    describe('cost and quality across stores', () => {
+      type Cost = {
+        modelTier: string;
+        provider: string;
+        taskCount: number;
+        totalTokens: number;
+        avgTokensPerTask: number;
+      };
+      type Ana = {
+        throughput: { day: string; completed: number }[];
+        costByModelTierAndProvider: Cost[];
+        recheckOutcomes: { taskStatus: string; count: number }[];
+        tokensByDay?: { day: string; tokensByRole: Record<string, number> }[];
+      };
+      const extraResult = async () => {
+        // One more measured run in the foreign store only, so the two stores differ.
+        await note(eventsB, 'sess-b-2', 0);
+        await appendEvent(
+          {
+            session_id: 'sess-b-2',
+            actor: 'coder',
+            event_type: 'task-result-recorded',
+            task_id: TASK_1,
+            plan_version: 1,
+            causal_parent: 'sess-b-2#0',
+            payload: {
+              task_id: TASK_1,
+              run_status: 'done',
+              structured_output: {},
+              artifacts: [],
+              token_usage: { input_tokens: 300, output_tokens: 100, total_tokens: 400 },
+              agent: 'coder',
+              provider: 'claude',
+              model_tier: 'mid',
+            },
+          },
+          { stateDir: eventsB },
+        );
+      };
+      const mid = (x: Ana) =>
+        x.costByModelTierAndProvider.find(
+          (c) => c.modelTier === 'mid' && c.provider === 'claude',
+        ) as Cost;
+
+      it('sums the two stores and recomputes the mean from the sums', async () => {
+        await extraResult();
+        const a = app();
+        const q = '?period=30d';
+        const home = await get<Ana>(a, `/api/analytics${q}`);
+        const merged = await get<Ana>(a, `/api/analytics${q}&stores=all`);
+        expect(mid(merged).taskCount).toBe(mid(home).taskCount + 2);
+        expect(mid(merged).totalTokens).toBe(mid(home).totalTokens + 2000 + 400);
+        expect(mid(merged).avgTokensPerTask).toBe(mid(merged).totalTokens / mid(merged).taskCount);
+        const days = merged.tokensByDay as NonNullable<Ana['tokensByDay']>;
+        const sum = (rows: typeof days) =>
+          rows.reduce((n, d) => n + (d.tokensByRole.coder ?? 0), 0);
+        expect(sum(days)).toBe(sum(home.tokensByDay as typeof days) + 2400);
+        const done = (x: Ana) => x.throughput.reduce((n, d) => n + d.completed, 0);
+        expect(done(merged)).toBe(done(home) * 2);
+      });
+
+      it('narrows to the stores named by qualified sessions', async () => {
+        await extraResult();
+        const a = app();
+        const id = await foreignStoreId(a);
+        const only = await get<Ana>(a, `/api/analytics?stores=all&sessions=${id}/sess-b-2`);
+        expect(mid(only).taskCount).toBe(1);
+        expect(mid(only).totalTokens).toBe(400);
+      });
+
+      it('refuses what Activity refuses with a 400', async () => {
+        const a = app();
+        const id = await foreignStoreId(a);
+        for (const route of [
+          '/api/analytics?stores=all&session=sess-fixture',
+          '/api/analytics?stores=all&epic=epic-1',
+          '/api/analytics?stores=all&task=epic-1/task-1',
+          `/api/analytics?stores=all&store=${id}`,
+          '/api/analytics?stores=x',
+          '/api/analytics?stores=all&sessions=zz/sess-fixture',
+        ]) {
+          expect([route, (await a.app.request(route)).status]).toEqual([route, 400]);
+        }
+      });
+
+      it('answers without stores=all as before, and a foreign project filter reads only that store', async () => {
+        await extraResult();
+        const a = app();
+        const plain = await get<Ana>(a, '/api/analytics');
+        expect(mid(plain).taskCount).toBe(1);
+        const b = await get<Ana>(a, '/api/analytics?stores=all&project=project-b');
+        expect(mid(b).taskCount).toBe(2);
+      });
+    });
+
     it('never writes into the foreign store on either route, paged or not', async () => {
       await interleave();
       const before = snapshot(projectB);
