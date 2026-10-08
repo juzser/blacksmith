@@ -311,8 +311,18 @@ async function prepare(page: Page, name: string): Promise<void> {
     );
 }
 
+// A session's row shows its time as plain text inside the row button, so the
+// only tooltip time on the page is the one in the selected session's roster
+// line ("started <time>"). Select a row to put that line on screen.
+const ROSTER_TIME = `.bs-sessions__detail-head ${TIME}`;
+async function selectSession(page: Page): Promise<void> {
+  await page.locator('.bs-sessionrow').first().click();
+  await expect(page.locator(ROSTER_TIME)).toHaveCount(1);
+}
+
 // Opens what a page keeps closed until asked.
 async function reveal(page: Page, name: string): Promise<void> {
+  if (name === 'sessions') return selectSession(page);
   if (name !== 'kanban-group') return;
   await page.locator('.bs-kanban-group summary').first().click();
   await expect(page.locator('.bs-kanban-group__row-meta .bs-reltime').first()).toBeVisible();
@@ -338,6 +348,9 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           exempt: EXEMPT,
         });
         expect(boxes.length).toBeGreaterThan(0);
+        // Sessions: the roster line's time is the one measured, so a time that
+        // drops out of the walk (or a row time that grows a tab stop) fails here.
+        if (name === 'sessions') expect(boxes.length, 'sessions: measured times').toBe(1);
         // A hit box wider than the text must not widen the page.
         expect(
           await page.evaluate(
@@ -387,7 +400,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
   for (const font of FONT_VARIANTS) {
     for (const [label, path, selector] of [
       ['card time', '/kanban', TIME],
-      ['session row time', '/sessions', TIME],
+      ['session roster time', '/sessions', ROSTER_TIME],
       ['live-card time', '/overview', '.bs-live-card__status .bs-reltime'],
       ['meta-line time', '/activity', '.bs-timeline-row__ts--meta'],
     ] as const) {
@@ -399,6 +412,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await page.goto(path);
         if (font.css) await page.addStyleTag({ content: font.css });
         await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        if (path === '/sessions') await selectSession(page);
         await expect(page.locator(`${selector}:visible`).first()).toBeVisible();
         const floor = await touchFloor(page);
         const widths = await page.evaluate(widthsFor, { selector, texts: SHORT_TEXTS });
@@ -428,6 +442,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
         const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
         expect(real.misses.length).toBeGreaterThan(0);
+        if (name === 'sessions') expect(real.misses.length, 'sessions: tapped times').toBe(1);
         expect(
           real.misses.map((m, i) => (m.length ? `time ${i}: ${m.join(', ')}` : '')).filter(Boolean),
           `${name}: a tap inside a time's box lands elsewhere`,
@@ -450,6 +465,33 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
       });
     }
   }
+
+  // A Sessions row is itself a button: nothing focusable may sit inside it, so
+  // its time is plain text (no tooltip trigger, no hit box, no tab stop).
+  test('sessions: no hit box and no other focusable element inside a row button', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-sessionrow').first()).toBeVisible();
+    const inside = await page.evaluate(
+      ({ neighbours }) => {
+        const rows = Array.from(document.querySelectorAll('.bs-sessionrow'));
+        const found: string[] = [];
+        for (const row of rows) {
+          for (const e of Array.from(
+            row.querySelectorAll(`.bs-reltime, .bs-tooltip-trigger, ${neighbours}`),
+          ))
+            found.push(`${e.tagName.toLowerCase()}.${String(e.className)}`);
+        }
+        return { rows: rows.length, found };
+      },
+      { neighbours: NEIGHBOURS },
+    );
+    expect(inside.rows).toBeGreaterThan(0);
+    expect(inside.found, 'something focusable inside a row button').toEqual([]);
+  });
 
   // A fix row's copy button sits right above its time. A tap on the lower half
   // of the copy button must stay on the copy button, not open the tooltip.
