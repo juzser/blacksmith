@@ -161,14 +161,22 @@ type World = {
   mtimes: Map<string, number>
   /** the path of each `tail` call, in call order */
   tails: string[]
+  /** paths whose `tail` exits non-zero though the file is listed */
+  unreadable: Set<string>
   /** what `$.agent.list()` answers: the session's subagents */
   agents: AgentInfo[]
   /** what lies beneath bs-mod in AbovePrompt: core's own drawing, another plugin's one-line band, or an empty Box */
   below: 'engine' | 'line' | 'empty'
+  /** each `bs-prompt-hook` call's argv, in call order */
+  hookCalls: string[][]
+  /** what `bs-prompt-hook --resolve` answers: a stdout and exit code, or null for no such bin (the call is denied) */
+  hook: { stdout: string; exitCode: number } | null
+  /** a tool's result, as the engine answers `$.tool.call`; the default is an empty Bash result */
+  tools: Record<string, unknown>
 }
 
 function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World {
-  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], agents: [], below: 'engine' }
+  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], hook: null, tools: {} }
   const ran = (exitCode: number, stdout: string) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
   on('session.id', () => ({ value: sid }))
@@ -209,8 +217,12 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     if (cmd === 'tail' && rest[0] === '-n') {
       w.tails.push(rest[2] ?? '')
       const text = files.get(rest[2] ?? '')
-      if (text === undefined) return ran(1, '')
+      if (text === undefined || w.unreadable.has(rest[2] ?? '')) return ran(1, '')
       return ran(0, text.split('\n').slice(Number((rest[1] ?? '+1').replace('+', '')) - 1).join('\n'))
+    }
+    if (cmd === 'bs-prompt-hook') {
+      w.hookCalls.push(e.argv.slice(1))
+      return w.hook ? ran(w.hook.exitCode, w.hook.stdout) : { deny: 'no such command: bs-prompt-hook' }
     }
     return { deny: `unexpected process: ${e.argv.join(' ')}` }
   })
@@ -234,7 +246,7 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     w.onStart?.()
     return { cwd: e.cwd }
   })
-  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: '' }))
+  on('tool.call', ($, e) => ({ result: (w.tools[e.tool] ?? { stdout: '', stderr: '', interrupted: false }) as never, text: '' }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     if (w.below === 'line') return h(Box, { key: 'other' }, h(Text, null, 'other plugin band')) as RenderElement
@@ -297,7 +309,7 @@ describe('band', () => {
 
     const ui = await mountBand($)
     await ui.press({ key: 'tab:current' })
-    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T16}`, `task:${T17}`, 'section:prompts', `prompt:${promptRef(0)}`])
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'head', 'section:tasks', `task:${T16}`, `task:${T17}`, 'section:prompts', `prompt:${promptRef(5)}`, `prompt:${promptRef(0)}`])
     // the wave's 1/3 done, its coder and wave-runner, the epic's projected spend: no Wave or Tokens row below
     expect(await rowText(ui, 'head')).toMatch(/^wave 4  [█░]{10} 1\/3 · ●● 2 · 9\.1M\/16M 57%$/)
     expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
@@ -305,11 +317,11 @@ describe('band', () => {
     expect(await rowText(ui, `task:${T16}`)).toBe(`● task-16  Phone toolbar hits${' '.repeat(11)}  coder  12m`)
     expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  Remote error and phone header')
     expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
-    // ASK_1, reached through the admission's and the tasks' causal_parent
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m  ${ASK_1}`)
-    const text = await shown(ui)
-    expect(text).not.toContain('task-18')
-    expect(text).not.toContain(ASK_2)
+    // ASK_1, reached through the admission's and the tasks' causal_parent, names the first task it led to and the two more
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe(`❝ 1h10m  ${ASK_1} → task-15 +2`)
+    // ASK_2 asked for task-18 only: Current shows every prompt of the epic, linked to the wave or not
+    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2} → task-18`)
+    expect(await shown(ui)).not.toContain('Task 18 row')
   })
 
   test('Next draws its head, then a Tasks and a Prompts section of the open tasks no wave took', async ($, on) => {
@@ -326,7 +338,7 @@ describe('band', () => {
     expect(await rowText(ui, 'section:tasks')).toBe(`── Tasks ${'─'.repeat(115 - 9)}`)
     expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
     expect(await rowText(ui, 'section:prompts')).toBe(`── Prompts ${'─'.repeat(115 - 11)}`)
-    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2}`)
+    expect(await rowText(ui, `prompt:${promptRef(5)}`)).toBe(`❝ 8m  ${ASK_2} → task-18`)
     const text = await shown(ui)
     expect(text).not.toContain('task-16')
     expect(text).not.toContain('task-17')
@@ -378,7 +390,7 @@ describe('band', () => {
     // the role and the time keep their columns; the title gives way
     expect(await rowText(ui, `task:${T16}`)).toBe('● task-16  …  coder  12m')
     expect(await rowText(ui, `task:${T17}`)).toBe('○ task-17  …')
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe('❝ 1h10m  Group by tag (…')
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toBe('❝ 1h10m  G… → task-15 +2')
     // with no role column the title runs to the edge
     await ui.press({ key: 'tab:next' })
     expect(await rowText(ui, `task:${T18}`)).toBe('○ task-18  Phone tab bar')
@@ -633,7 +645,7 @@ describe('band', () => {
       }
     }
     await ui.press({ key: 'tab:current' })
-    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toMatch(/…$/)
+    expect(await rowText(ui, `prompt:${promptRef(0)}`)).toMatch(/… → task-15 \+2$/)
   })
 
   test('draws the idle band when this session wrote no bs event and no epic ran in the last seven days', async ($, on) => {
@@ -1586,4 +1598,283 @@ describe('palette', () => {
       for (const name of ['Tasks', 'Prompts']) expect(await props(new RegExp(`^${name}$`))).toEqual({ color: soft, bold: true })
     })
   }
+})
+
+describe('prompts and task progress outside an epic', () => {
+  const HOME_ID = `prompts-${SID}`
+  const ELSE = '/w/elsewhere'
+  const CLONE_EVENTS = '/w/clone/state/events'
+  const M4 = JSON.stringify({ events_dir: CLONE_EVENTS, project: 'acme', rule: 'M4' })
+
+  /** The home log of the session, one user_prompt per entry, oldest first, `ago` minutes before T0. */
+  function homeLog(prompts: [number, string][], id = HOME_ID): string {
+    return prompts.map(([ago, text]) => line(id, SID, 'user_prompt', null, T0 - ago * MIN, { prompt: text })).join('')
+  }
+
+  const PROMPTS: [number, string][] = [
+    [30, 'Rename the beta-app settings page'],
+    [20, 'Why does the acme build warn?'],
+    [5, 'Add a dark theme toggle'],
+  ]
+
+  async function up($: Engine, on: On, cwd = CWD): Promise<void> {
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock, cwd)
+  }
+
+  /** A ToDoWrite answer holding `todos`. */
+  const todos = (...rows: [string, string, string][]) => ({
+    oldTodos: [],
+    newTodos: rows.map(([content, status, activeForm]) => ({ content, status, activeForm })),
+  })
+
+  async function write($: Engine, w: World, newTodos: unknown, extra: Record<string, unknown> = {}): Promise<void> {
+    w.tools.TodoWrite = newTodos
+    await $.tool.call({ tool: 'TodoWrite', todos: [], ...extra } as never)
+  }
+
+  test('the idle band shows the 2 newest own prompts from the home log, in the session\'s own events dir', async ($, on) => {
+    const files = new Map<string, string>([[`${ELSE}/state/events/${HOME_ID}.jsonl`, homeLog(PROMPTS)]])
+    world(on, files, SID, ELSE)
+    await up($, on, ELSE)
+
+    const ui = await mountBand($)
+    const keys = await rowKeys(ui)
+    expect(keys).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${HOME_ID}#2`, `prompt:${HOME_ID}#1`, 'idle'])
+    expect(await rowText(ui, `prompt:${HOME_ID}#2`)).toBe('❝ 5m ago Add a dark theme toggle')
+    expect(await rowText(ui, `prompt:${HOME_ID}#1`)).toBe('❝ 20m ago Why does the acme build warn?')
+  })
+
+  test('the tick follows prompts-<sid>.jsonl as it grows', async ($, on) => {
+    const path = `${ELSE}/state/events/${HOME_ID}.jsonl`
+    const files = new Map<string, string>([[path, homeLog(PROMPTS.slice(0, 1))]])
+    world(on, files, SID, ELSE)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock, ELSE)
+
+    const ui = await mountBand($)
+    expect(await rowKeys(ui)).toContain(`prompt:${HOME_ID}#0`)
+    files.set(path, homeLog(PROMPTS))
+    await clock.advance(4000)
+    expect(await rowText(ui, `prompt:${HOME_ID}#2`)).toContain('Add a dark theme toggle')
+  })
+
+  test('no prompt row for another session\'s home log', async ($, on) => {
+    const other = 'prompts-sid-other'
+    world(on, new Map([[`${ELSE}/state/events/${other}.jsonl`, homeLog(PROMPTS, other)]]), SID, ELSE)
+    await up($, on, ELSE)
+
+    expect(await rowKeys(await mountBand($))).toEqual(IDLE_KEYS)
+  })
+
+  describe('the capture root (M4)', () => {
+    const cloneWorld = (on: On) => {
+      const w = world(on, new Map([[`${CLONE_EVENTS}/${HOME_ID}.jsonl`, homeLog(PROMPTS)]]), SID, ELSE)
+      w.hook = { stdout: `${M4}\n`, exitCode: 0 }
+      return w
+    }
+
+    test('a root --resolve prints, that no own root names, supplies the idle band\'s prompts', async ($, on) => {
+      const w = cloneWorld(on)
+      await up($, on, ELSE)
+
+      const ui = await mountBand($)
+      expect(w.hookCalls[0]).toEqual(['--resolve', ELSE])
+      expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${HOME_ID}#2`, `prompt:${HOME_ID}#1`, 'idle'])
+      expect(await rowText(ui, `prompt:${HOME_ID}#2`)).toContain('Add a dark theme toggle')
+    })
+
+    test('--resolve runs once per session and cwd, not once per tick', async ($, on) => {
+      const w = cloneWorld(on)
+      const clock = mock.clock(on, { now: T0 })
+      mock.store(on)
+      mock.env(on, { HOME: '/home/u' })
+      await boot($, clock, ELSE)
+      await clock.advance(4000)
+      await clock.advance(4000)
+      await clock.advance(4000)
+      expect(w.hookCalls).toEqual([['--resolve', ELSE]])
+    })
+
+    const BROKEN = {
+      'a missing bin': null,
+      'empty output': { stdout: '', exitCode: 0 },
+      'a non-zero exit': { stdout: `${M4}\n`, exitCode: 1 },
+      'bad JSON': { stdout: 'not json\n', exitCode: 0 },
+      'JSON with no events_dir': { stdout: '{"project":"acme"}\n', exitCode: 0 },
+    } as const
+    for (const [name, hook] of Object.entries(BROKEN)) {
+      test(`${name} adds no root and shows no error`, async ($, on) => {
+        const w = cloneWorld(on)
+        w.hook = hook
+        await up($, on, ELSE)
+
+        const ui = await mountBand($)
+        expect(await rowKeys(ui)).toEqual(IDLE_KEYS)
+        expect(w.toasts).toEqual([])
+        const out = (await $.command.run({ command: 'bs-mod', args: '' } as never)) as { text?: string } | undefined
+        expect(JSON.stringify(out ?? {})).not.toMatch(/error/i)
+      })
+    }
+  })
+
+  test('homePrompts survives the hud copy: the idle band of a clone whose epics all went idle still shows them', async ($, on) => {
+    const files = seed()
+    const home = 'prompts-sid-none'
+    files.set(`${ROOT}/${home}.jsonl`, homeLog(PROMPTS, home))
+    const w = world(on, files, 'sid-none')
+    for (const p of files.keys()) if (!p.includes(home)) w.mtimes.set(p, T0 - 7 * 1440 * MIN - 1)
+    await up($, on)
+
+    const ui = await mountBand($)
+    expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${home}#2`, `prompt:${home}#1`, 'idle'])
+  })
+
+  test('a parent_prompt_id on an epic\'s session-start pulls its home log into the fold', async ($, on) => {
+    const files = prompted()
+    const other = 'prompts-sid-other'
+    files.set(`${ROOT}/${other}.jsonl`, homeLog([[3, 'Plan the web-ux-4 epic']], other))
+    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'session-start', null, T0 - MIN, { parent_prompt_id: `${other}#0` }))
+    world(on, files)
+    await up($, on)
+
+    const ui = await mountBand($)
+    await ui.press({ key: 'tab:current' })
+    const text = JSON.stringify(await ui.drawn())
+    expect(text).toContain('Plan the web-ux-4 epic')
+  })
+
+  test('a named home log that cannot be read is not retried within every tick', async ($, on) => {
+    const files = prompted()
+    const other = 'prompts-sid-other'
+    const otherF = `${ROOT}/${other}.jsonl`
+    files.set(otherF, homeLog([[3, 'Plan the web-ux-4 epic']], other))
+    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'session-start', null, T0 - MIN, { parent_prompt_id: `${other}#0` }))
+    const w = world(on, files)
+    w.unreadable.add(otherF)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    // the first tick tracks it only after the fold names it: one read in the retry
+    expect(w.tails.filter(p => p === otherF).length).toBe(1)
+    await clock.advance(4000)
+    // the second tick tracks it from the start and reads it once: no retry for a file that was already tracked
+    expect(w.tails.filter(p => p === otherF).length).toBe(2)
+  })
+
+  describe('the task list (§2.9)', () => {
+    test('shows Tasks 2/5 done with the first in-progress task\'s activeForm', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      await write($, w, todos(['a', 'completed', 'Doing a'], ['b', 'completed', 'Doing b'], ['c', 'in_progress', 'Running tests'], ['d', 'pending', 'Doing d'], ['e', 'pending', 'Doing e']))
+
+      const ui = await mountBand($)
+      expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', 'progress', 'idle'])
+      expect(await rowText(ui, 'progress')).toBe('Tasks   2/5 done · ▸ Running tests')
+      expect(await rowText(ui, 'agents')).toBe('Agents  0 in this session')
+    })
+
+    test('with every task done it shows Tasks 5/5 done and no ▸', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      await write($, w, todos(...(['a', 'b', 'c', 'd', 'e'].map(c => [c, 'completed', c]) as [string, string, string][])))
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   5/5 done')
+    })
+
+    test('TaskCreate then TaskUpdate build the list through the tool hooks', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      for (const [id, subject] of [['1', 'Write tests'], ['2', 'Write code']]) {
+        w.tools.TaskCreate = { task: { id, subject } }
+        await $.tool.call({ tool: 'TaskCreate', subject, description: subject, activeForm: `Doing ${subject}` } as never)
+      }
+      w.tools.TaskUpdate = { success: true, taskId: '1', updatedFields: ['status'] }
+      await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' } as never)
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   0/2 done · ▸ Doing Write tests')
+    })
+
+    test('a subagent\'s TaskCreate (agentId set) is ignored', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      w.tools.TaskCreate = { task: { id: '1', subject: 'Sub work' } }
+      await $.tool.call({ tool: 'TaskCreate', subject: 'Sub work', description: 'x', agentId: 'a1' } as never)
+
+      expect(await rowKeys(await mountBand($))).toEqual(IDLE_KEYS)
+    })
+
+    test('the list survives a reload of the band', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      await write($, w, todos(['a', 'completed', 'A'], ['b', 'in_progress', 'Doing b']))
+
+      const first = await mountBand($)
+      expect(await rowText(first, 'progress')).toContain('1/2 done')
+      await first.unmount()
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   1/2 done · ▸ Doing b')
+    })
+  })
+
+  describe('background work, with no task list', () => {
+    const bg = (w: World, id: string) => {
+      w.tools.Bash = { stdout: '', stderr: '', interrupted: false, backgroundTaskId: id }
+    }
+
+    test('a background Bash result and a running agent read Tasks 2 running', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      w.agents = [agent('a1', 'running')]
+      await up($, on, ELSE)
+      bg(w, 'bsh1')
+      await $.tool.call({ tool: 'Bash', command: 'npm run dev', run_in_background: true } as never)
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   2 running · 0 done · 1 agent, 1 shell')
+    })
+
+    test('a Monitor call adds a running monitor', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      w.tools.Monitor = { taskId: 'bmon1', timeoutMs: 1000 }
+      await $.tool.call({ tool: 'Monitor', command: 'tail -f x', description: 'x' } as never)
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   1 running · 0 done · 1 monitor')
+    })
+
+    test('a TaskStop naming a shell ends it, once however often it is told', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      w.agents = [agent('a1', 'running')]
+      await up($, on, ELSE)
+      bg(w, 'bsh1')
+      await $.tool.call({ tool: 'Bash', command: 'npm run dev', run_in_background: true } as never)
+      await $.tool.call({ tool: 'TaskStop', shell_id: 'bsh1' } as never)
+      await $.tool.call({ tool: 'TaskStop', task_id: 'bsh1' } as never)
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   1 running · 1 done · 1 agent')
+    })
+
+    test('a subagent\'s background Bash result is ignored', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      await up($, on, ELSE)
+      bg(w, 'bsh9')
+      await $.tool.call({ tool: 'Bash', command: 'sleep 9', run_in_background: true, agentId: 'a1' } as never)
+
+      expect(await rowKeys(await mountBand($))).toEqual(IDLE_KEYS)
+    })
+
+    test('a plugin-origin prompt carrying notification text changes nothing', async ($, on) => {
+      const w = world(on, new Map(), SID, ELSE)
+      on('prompt.submit', (_$, e) => ({ text: e.text }))
+      await up($, on, ELSE)
+      bg(w, 'bsh1')
+      await $.tool.call({ tool: 'Bash', command: 'npm run dev', run_in_background: true } as never)
+      await $.prompt.submit({ text: '<task-notification>\n<task-id>bsh1</task-id>\n<status>completed</status>\n</task-notification>' } as never)
+
+      expect(await rowText(await mountBand($), 'progress')).toBe('Tasks   1 running · 0 done · 1 shell')
+    })
+  })
 })

@@ -96,7 +96,22 @@ export type EpicView = {
   isMine: boolean
 }
 
-export type Hud = { epics: Record<string, EpicView> }
+/** A prompt of this CLI session's home log, as the band keeps it: `ref` is its `<session id>#<line index>`. */
+export type HomePrompt = PromptView & { ref: string }
+
+export type Hud = {
+  epics: Record<string, EpicView>
+  /** the newest 2 `user_prompt`s of this CLI session's own home log (`prompts-<cli id>`), newest first; absent before one was folded */
+  homePrompts?: HomePrompt[]
+  /** the home logs (`prompts-<id>`) some epic's session-start or dispatch_decision named through `parent_prompt_id`, so register can read them */
+  homes?: string[]
+}
+
+/** One task of the session's own task list (TaskCreate / TaskUpdate / TaskList / TodoWrite), as the band keeps it. */
+export type TaskItem = { id: string; subject: string; activeForm: string | null; status: string }
+
+/** The background work the main loop started (a shell or a monitor, by id) and the ids a notification or TaskStop ended, each once. */
+export type BgState = { started: Record<string, 'shell' | 'monitor'>; ended: string[] }
 
 /** An epic's latest plan `effort` where Blacksmith latestPlan looks by default, read once at `version` (fold.ts planVersionOf); `tier` null when no plan there names one. */
 export type PlanTier = { version: number; tier: 'small' | 'medium' | 'huge' | null }
@@ -118,6 +133,10 @@ declare module 'claude-code' {
       tab: BandTab
       /** the `/config` theme, read at session start and on each theme write; null when unread, so the theme keys draw (fold.ts paletteOf) */
       theme: string | null
+      /** the session's own task list, folded from the main loop's task tool calls; empty when it has none */
+      taskList: TaskItem[]
+      /** the background work started and ended: the idle band's progress when there is no task list */
+      bg: BgState
     }
   }
 }

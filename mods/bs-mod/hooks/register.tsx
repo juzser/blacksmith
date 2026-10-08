@@ -5,10 +5,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderNode, TextProps } from 'claude-code'
 
-import type { BandTab, EpicView, Hud, PlanTier } from '../types'
+import type { BandTab, BgState, EpicView, Hud, PlanTier, TaskItem } from '../types'
 import {
   activeSessionAgents,
   bar,
+  bgEnd,
+  bgStart,
   capped,
   currentModel,
   emptyHud,
@@ -18,8 +20,10 @@ import {
   fmtElapsed,
   fmtTok,
   foldEvent,
+  foldTaskTool,
   latestPlanName,
   nextModel,
+  notificationEnd,
   overviewModel,
   paletteOf,
   parseBsRoots,
@@ -28,13 +32,14 @@ import {
   planDirOf,
   planEffort,
   planVersionOf,
+  progressOf,
   segments,
   shortTask,
   splitLines,
   STATUS_RANK,
   summarize,
 } from './fold'
-import type { BsEvent, Cells, Palette, PaletteRole, Phase, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
+import type { BsEvent, Cells, Palette, PaletteRole, Phase, Progress, PromptRow, Spend, Summary, TaskRow, Tier } from './fold'
 
 const PANE = 'bs-mod'
 const TICK_MS = 4000
@@ -60,13 +65,17 @@ const hiddenAtom = atom({ plugin: 'bs-mod', key: 'isHidden' } as const, false)
 const minuteAtom = atom({ plugin: 'bs-mod', key: 'minute' } as const, 0)
 const planTiersAtom = atom({ plugin: 'bs-mod', key: 'planTiers' } as const, {} as Record<string, PlanTier>)
 /** the band's active tab, in `$.state` so a reload of the band keeps it; Overview until a tab is picked */
+/** The main loop's task list (TaskCreate, TaskUpdate, TaskList, TodoWrite), for the idle band's Tasks row. */
+const taskListAtom = atom({ plugin: 'bs-mod', key: 'taskList' } as const, [] as TaskItem[])
+/** The background shells and monitors the main loop started, and the ids of work that ended. */
+const bgAtom = atom({ plugin: 'bs-mod', key: 'bg' } as const, { started: {}, ended: [] } as BgState)
 const tabAtom = atom({ plugin: 'bs-mod', key: 'tab' } as const, 'overview' as BandTab)
 /** the `/config` theme, which picks the palette (fold.ts paletteOf); null until read, so the theme keys draw */
 const themeAtom = atom({ plugin: 'bs-mod', key: 'theme' } as const, null as string | null)
 
 type Entry = { path: string; name: string; size: number; mtimeMs: number }
 /** a folded line, with the epic of the file it came from */
-type Line = { ev: BsEvent; ref: string; ts: number; isNewFile: boolean; fileEpic: string }
+type Line = { ev: BsEvent; ref: string; ts: number; isNewFile: boolean; fileEpic: string | null }
 /** `color` and `bg`: a palette role (fold.ts PaletteRole, `active` the in-progress teal) or a neutral theme key */
 type Look = { color?: string; bg?: string; bold?: boolean; dim?: boolean }
 /** a stretch of text drawn in one style; `shrink`: the run a band row cuts first when it is too wide */
@@ -411,6 +420,8 @@ function promptRuns(p: PromptRow, now: number, ago = true): Run[] {
     run(ago ? `${age} ago` : age, { dim: true }),
     run(ago ? ' ' : '  '),
     shrink(run(oneLine(p.text), { color: 'remember' })),
+    // Current's and Next's rows name the task the prompt led to; Past groups them by wave already
+    ...(!ago && p.task ? [run(` → ${p.task}${p.more ? ` +${p.more}` : ''}`, { dim: true })] : []),
   ]
 }
 
@@ -575,10 +586,31 @@ function bandFit(rows: number): { blank: boolean; rule: boolean; body: number } 
 const IDLE_LINE = `no running epic${SEP}/bs-mod <epic-id> pins one`
 
 /** The idle band's body, with no epic in view: the session's live agents, styled as the Overview's, then a dim line. */
-function idleRows(sessionAgents: number, width: number): BandRow[] {
+function idleRows(sessionAgents: number, progress: Progress | null, prompts: readonly PromptRow[], now: number, width: number): BandRow[] {
+  const rows: BandRow[] = [{ key: 'agents', runs: joinParts([sessionAgentsPart(sessionAgents, OVERVIEW_TAB.accent)], width) }]
+  if (progress) rows.push({ key: 'progress', runs: joinParts(progressParts(progress, OVERVIEW_TAB.accent), width) })
+  for (const p of prompts) rows.push({ key: `prompt:${p.ref}`, runs: promptRuns(p, now) })
+  rows.push({ key: 'idle', runs: [run(IDLE_LINE, { dim: true })] })
+  return rows
+}
+
+/** The Tasks row: `2/5 done · ▸ Running tests` for a task list, `2 running · 9 done · 1 agent, 1 shell` for background work. */
+function progressParts(p: Progress, accent: string): Part[] {
+  if (p.kind === 'list') {
+    return [
+      part(0, ...label('Tasks', accent), num(p.done), run(`/${p.total} done`)),
+      ...(p.doing ? [part(1, run('▸ ', { color: accent }), shrink(run(oneLine(p.doing))))] : []),
+    ]
+  }
+  const kinds = [
+    ...(p.agents ? [plural(p.agents, 'agent')] : []),
+    ...(p.shells ? [plural(p.shells, 'shell')] : []),
+    ...(p.monitors ? [plural(p.monitors, 'monitor')] : []),
+  ].join(', ')
   return [
-    { key: 'agents', runs: joinParts([sessionAgentsPart(sessionAgents, OVERVIEW_TAB.accent)], width) },
-    { key: 'idle', runs: [run(IDLE_LINE, { dim: true })] },
+    part(0, ...label('Tasks', accent), num(p.running), run(' running')),
+    part(0, num(p.done), run(' done')),
+    ...(kinds ? [part(1, run(kinds))] : []),
   ]
 }
 
@@ -703,6 +735,8 @@ type State = {
   /** the epic of each log file the last tick listed */
   lastEpics: string[]
   lastRoots: string[]
+  /** per session and cwd: the events dir `bs-prompt-hook --resolve` named, or null for none (asked once) */
+  resolved: Map<string, string | null>
   lastError: string
   timer: { cancel(): void } | null
 }
@@ -722,6 +756,7 @@ function newState(): State {
     lastMinute: -1,
     lastEpics: [],
     lastRoots: [],
+    resolved: new Map(),
     lastError: '',
     timer: null,
   }
@@ -749,9 +784,30 @@ async function ownRoots($: EngineInterface): Promise<string[]> {
   return [...out]
 }
 
-/** The session's own event dirs, then the ones Bash commands taught the mod (shared by every session). */
-async function rootsOf($: EngineInterface, own: string[]): Promise<string[]> {
+/**
+ * The events dir the prompt hook's own resolver names for this session's cwd (a checkout whose store is elsewhere), asked
+ * once per session and cwd. A missing bin, no output, a non-zero exit or bad JSON is no root, and no error.
+ */
+async function resolvedRoot($: EngineInterface, st: State, sid: string): Promise<string | null> {
+  const cwd = await $.session.cwd()
+  const key = `${sid}|${cwd}`
+  if (st.resolved.has(key)) return st.resolved.get(key) ?? null
+  let dir: string | null = null
+  try {
+    const res = await $.process.run(['bs-prompt-hook', '--resolve', cwd])
+    const out = res.exitCode === 0 ? (JSON.parse(res.stdout.trim().split('\n')[0] ?? '') as { events_dir?: unknown } | null) : null
+    if (typeof out?.events_dir === 'string' && out.events_dir.startsWith('/')) dir = out.events_dir.replace(/\/$/, '')
+  } catch {
+    // no bin, or an answer that is no JSON: no root from it
+  }
+  st.resolved.set(key, dir)
+  return dir
+}
+
+/** The session's own event dirs, the one the resolver named, then the ones Bash commands taught the mod (shared by every session). */
+async function rootsOf($: EngineInterface, own: string[], resolved: string | null): Promise<string[]> {
   const out = new Set(own)
+  if (resolved) out.add(resolved)
   for (const root of learned(await $.store.get('roots'))) out.add(root)
   return [...out]
 }
@@ -772,8 +828,8 @@ async function listLogs($: EngineInterface, roots: string[]): Promise<Entry[]> {
   return out
 }
 
-/** A log file's epic: the one its content names, else the one its name gives. */
-function epicOf(st: State, en: { path: string; name: string }): string {
+/** A log file's epic: the one its content names, else the one its name gives; null for a prompt home log. */
+function epicOf(st: State, en: { path: string; name: string }): string | null {
   return st.fileEpic.get(en.path) ?? epicOfFile(en.name)
 }
 
@@ -782,7 +838,7 @@ function epicOf(st: State, en: { path: string; name: string }): string {
  * a name alone cannot tell `web-audit-1-close-<date>` from an epic of its own.
  */
 async function resolveEpics($: EngineInterface, st: State, entries: Entry[]): Promise<void> {
-  const fresh = entries.filter(en => !st.fileEpic.has(en.path) && st.probed.get(en.path) !== en.size)
+  const fresh = entries.filter(en => !en.name.startsWith('prompts-') && !st.fileEpic.has(en.path) && st.probed.get(en.path) !== en.size)
   for (let i = 0; i < fresh.length; i += GREP_CHUNK) {
     const chunk = fresh.slice(i, i + GREP_CHUNK)
     const res = await $.process.run(['grep', '-m1', '-oE', '-H', '--', EPIC_ERE, ...chunk.map(c => c.path)])
@@ -794,11 +850,16 @@ async function resolveEpics($: EngineInterface, st: State, entries: Entry[]): Pr
 
 /** Greps the logs not yet ours for this session's id; a hit makes its epic ours. */
 async function discover($: EngineInterface, st: State, sid: string, entries: Entry[]): Promise<void> {
-  const fresh = entries.filter(en => !st.mine.has(epicOf(st, en)) && st.scanned.get(en.path) !== en.size)
+  const fresh = entries.filter(en => !en.name.startsWith('prompts-') && !st.mine.has(epicOf(st, en) ?? '') && st.scanned.get(en.path) !== en.size)
   for (let i = 0; i < fresh.length; i += GREP_CHUNK) {
     const chunk = fresh.slice(i, i + GREP_CHUNK)
     const res = await $.process.run(['grep', '-l', '-F', '--', sid, ...chunk.map(c => c.path)])
-    if (res.exitCode === 0) for (const path of res.stdout.split('\n')) if (path) st.mine.add(epicOf(st, { path, name: basename(path) }))
+    if (res.exitCode === 0) {
+      for (const path of res.stdout.split('\n')) {
+        const epic = path ? epicOf(st, { path, name: basename(path) }) : null
+        if (epic) st.mine.add(epic)
+      }
+    }
     if (res.exitCode === 0 || res.exitCode === 1) for (const c of chunk) st.scanned.set(c.path, c.size)
   }
 }
@@ -861,20 +922,25 @@ async function readChanged($: EngineInterface, st: State, tracked: Entry[]): Pro
   return out
 }
 
-async function tick($: EngineInterface, st: State): Promise<void> {
+async function tick($: EngineInterface, st: State, isRetry = false): Promise<void> {
   const sid = await $.session.id()
   const now = await $.clock.now()
   const pinned = await read($, pinnedAtom)
   const own = await ownRoots($)
-  const roots = await rootsOf($, own)
+  const roots = await rootsOf($, own, sid ? await resolvedRoot($, st, sid) : null)
   const entries = await listLogs($, roots)
   st.lastRoots = roots
   await resolveEpics($, st, entries)
-  st.lastEpics = entries.map(en => epicOf(st, en))
+  st.lastEpics = entries.flatMap(en => epicOf(st, en) ?? [])
   if (sid) await discover($, st, sid, entries)
 
   const followed = new Set([...st.mine, ...(pinned ? [pinned] : [])])
-  const tracked = entries.filter(en => followed.has(epicOf(st, en)))
+  /** the epics' files, and the home logs: this session's own, and every one an epic's event named by parent_prompt_id */
+  const trackedOf = () => {
+    const homes = new Set([`prompts-${sid}`, ...(st.hud.homes ?? [])].map(h => `${h}.jsonl`))
+    return entries.filter(en => (homes.has(en.name) ? Boolean(sid) : followed.has(epicOf(st, en) ?? '')))
+  }
+  const tracked = trackedOf()
   // The first read is the history the session booted on: fold it, toast none of it.
   let isQuiet = !st.isBooted
   if (tracked.some(en => (st.cursors.get(en.path)?.size ?? -1) > en.size)) {
@@ -916,6 +982,9 @@ async function tick($: EngineInterface, st: State): Promise<void> {
     $.ui.status(status)
   }
   st.isBooted = true
+  // a home log an epic's event just named is read now, not a tick later; one that was tracked and failed to read is not retried
+  const before = new Set(tracked.map(en => en.path))
+  if (!isRetry && trackedOf().some(en => !before.has(en.path) && !st.cursors.has(en.path))) await tick($, st, true)
 }
 
 /** Starts a tick unless one runs; resolves when the running one ends. */
@@ -988,6 +1057,9 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
+    // a shell the main loop sent to the background: the idle band's Tasks row counts it until it ends
+    const shell = (ran.result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
+    if (!e.agentId && typeof shell === 'string' && shell) await update($, bgAtom, bg => bgStart(bg, shell, 'shell'))
     if (!BS_COMMAND.test(e.command)) return ran
     try {
       const found = parseBsRoots(e.command, await $.session.cwd(), (await $.env.get('HOME')) ?? '')
@@ -1001,6 +1073,36 @@ export const register: Register = on => {
     }
     void kick($, st)
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // The main loop's task list, for the idle band; a subagent's tools (agentId set) are its own list.
+  for (const tool of ['TaskCreate', 'TaskUpdate', 'TaskList', 'TodoWrite'] as const) {
+    on('tool.call', { tool: tool as 'TaskCreate' }, async ($, e, next) => {
+      const ran = await next(e)
+      if (!e.agentId) await update($, taskListAtom, list => foldTaskTool(list, tool, e, ran.result))
+      return ran
+    }).catch(($, e, next) => next(e))
+  }
+
+  on('tool.call', { tool: 'Monitor' }, async ($, e, next) => {
+    const ran = await next(e)
+    const id = (ran.result as { taskId?: unknown } | undefined)?.taskId
+    if (!e.agentId && typeof id === 'string' && id) await update($, bgAtom, bg => bgStart(bg, id, 'monitor'))
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const ran = await next(e)
+    const id = e.task_id ?? e.shell_id
+    if (!e.agentId && id) await update($, bgAtom, bg => bgEnd(bg, id))
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  // A background task's notification arrives as a prompt: any status but running ends the work it names.
+  on('prompt.submit', async ($, e, next) => {
+    const id = e.origin.kind === 'task-notification' ? notificationEnd(e.text) : null
+    if (id) await update($, bgAtom, bg => bgEnd(bg, id))
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'bs-mod' }, async ($, e) => {
@@ -1048,14 +1150,15 @@ export const register: Register = on => {
     const width = e.props.bodyColumns
     const pal = paletteOf(await read($, themeAtom))
     const texts = (runs: Run[]) => runs.map(r => <Text {...style(r, pal)}>{r.text}</Text>)
-    const liveAgents = async () => {
+    const agentList = async () => {
       try {
-        return activeSessionAgents(await $.agent.list()).length
+        return await $.agent.list()
       } catch {
         // no agent list: the session's count reads 0 until it answers
-        return 0
+        return []
       }
     }
+    const liveAgents = async () => activeSessionAgents(await agentList()).length
     // maxRows is read-only: a hook cannot hand the plugins beneath fewer rows, and a column taller than maxRows
     // scrolls with the band at its top. So the band takes its rows first, one less when stacked: a one-row tree
     // beneath fits, a taller one scrolls under the band, which stays whole.
@@ -1073,7 +1176,11 @@ export const register: Register = on => {
 
     if (!view) {
       const tabRow = <Box key="tabs" flexDirection="row">{texts([badge(OVERVIEW_TAB)])}</Box>
-      return band(OVERVIEW_TAB.accent, tabRow, fit.body > 0 ? idleRows(await liveAgents(), width) : [])
+      if (fit.body <= 0) return band(OVERVIEW_TAB.accent, tabRow, [])
+      const agents = await agentList()
+      const progress = progressOf((await read($, taskListAtom)) ?? [], (await read($, bgAtom)) ?? { started: {}, ended: [] }, agents)
+      const homePrompts = (await read($, hudAtom))?.homePrompts ?? []
+      return band(OVERVIEW_TAB.accent, tabRow, idleRows(activeSessionAgents(agents).length, progress, homePrompts, await $.clock.now(), width))
     }
     const epic = view.epic
     const now = await $.clock.now()
