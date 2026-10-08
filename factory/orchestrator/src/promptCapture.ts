@@ -184,13 +184,15 @@ async function findMainLog(
     .filter(
       (l): l is { id: string; file: string; mtime: number } => l !== null && l.mtime >= floorMs,
     )
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, SCAN_LIMIT);
+    .sort((a, b) => b.mtime - a.mtime);
 
   let best: { id: string; ts: string } | null = null;
+  let stamped = 0;
   for (const log of logs) {
+    if (stamped >= SCAN_LIMIT) break;
     try {
       if (!readFileSync(log.file, 'utf8').includes(cli)) continue;
+      stamped++;
       const events = await readEvents(log.id, { stateDir: eventsDir });
       if (events[0]?.record.actor === WAVE_RUNNER) continue;
       if (events.some((e) => e.record.event_type === 'epic-closed')) continue;
@@ -239,55 +241,68 @@ export async function capturePrompt(raw: string, ctx: CaptureContext): Promise<s
     }
   }
   const home = `prompts-${cli}`;
-  const target = (await findMainLog(eventsDir, cli, floorMs)) ?? home;
+  const found = await findMainLog(eventsDir, cli, floorMs);
   const promptId = typeof input.prompt_id === 'string' ? input.prompt_id : undefined;
 
-  const stored = await appendWithin(
-    target,
-    (existing) => {
-      const nowMs = Date.now();
-      const duplicate = existing.some(
-        (e) =>
-          e.record.event_type === 'user_prompt' &&
-          ((promptId !== undefined && e.record.payload.prompt_id === promptId) ||
-            (e.record.cli_session_id === cli &&
-              e.record.payload.prompt === prompt &&
-              nowMs - Date.parse(e.record.ts) <= DEDUPE_MS)),
-      );
-      if (duplicate) return [];
+  const write = (target: string) =>
+    appendWithin(
+      target,
+      (existing) => {
+        const nowMs = Date.now();
+        const duplicate = existing.some(
+          (e) =>
+            e.record.event_type === 'user_prompt' &&
+            ((promptId !== undefined && e.record.payload.prompt_id === promptId) ||
+              (e.record.cli_session_id === cli &&
+                e.record.payload.prompt === prompt &&
+                nowMs - Date.parse(e.record.ts) <= DEDUPE_MS)),
+        );
+        if (duplicate) return [];
 
-      const out: EventInput[] = [];
-      if (existing.length === 0) {
+        const out: EventInput[] = [];
+        if (existing.length === 0) {
+          out.push({
+            session_id: target,
+            actor: 'system',
+            event_type: ROOT_EVENT_TYPE,
+            plan_version: 1,
+            causal_parent: null,
+            payload: { kind: 'prompt-log' },
+            ...(declared === undefined ? {} : { project: declared }),
+          });
+        }
+        const parent = newestMain(existing, cli) ?? existing[0];
+        const project =
+          parent?.record.project ?? declared ?? (out[0]?.project as string | undefined);
         out.push({
           session_id: target,
-          actor: 'system',
-          event_type: ROOT_EVENT_TYPE,
-          plan_version: 1,
-          causal_parent: null,
-          payload: { kind: 'prompt-log' },
-          ...(declared === undefined ? {} : { project: declared }),
+          actor: 'user',
+          event_type: 'user_prompt',
+          plan_version: parent?.record.plan_version ?? 1,
+          causal_parent: parent?.event_id ?? `${target}#0`,
+          payload: {
+            prompt,
+            source: 'hook',
+            ...(promptId === undefined ? {} : { prompt_id: promptId }),
+            ...(command === undefined ? {} : { command }),
+          },
+          ...(project === undefined ? {} : { project }),
         });
-      }
-      const parent = newestMain(existing, cli) ?? existing[0];
-      const project = parent?.record.project ?? declared ?? (out[0]?.project as string | undefined);
-      out.push({
-        session_id: target,
-        actor: 'user',
-        event_type: 'user_prompt',
-        plan_version: parent?.record.plan_version ?? 1,
-        causal_parent: parent?.event_id ?? `${target}#0`,
-        payload: {
-          prompt,
-          source: 'hook',
-          ...(promptId === undefined ? {} : { prompt_id: promptId }),
-          ...(command === undefined ? {} : { command }),
-        },
-        ...(project === undefined ? {} : { project }),
-      });
-      return out;
-    },
-    { stateDir: eventsDir, cliSessionId: cli },
-  );
+        return out;
+      },
+      { stateDir: eventsDir, cliSessionId: cli },
+    );
+
+  let target = found ?? home;
+  let stored: StoredEvent[];
+  try {
+    stored = await write(target);
+  } catch (err) {
+    if (target === home) throw err;
+    // The epic log the scan picked can no longer take the prompt: keep it in the home log.
+    target = home;
+    stored = await write(target);
+  }
   const written = stored[stored.length - 1];
   if (written === undefined) return null;
   return `bs prompt capture: ${JSON.stringify({ event_id: written.event_id, session_id: target })}`;

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -484,6 +485,55 @@ describe('capturePrompt', () => {
       await capturePrompt(hookInput({ transcript_path: transcript }), ctxFor(env, cwd));
       expect(readLog(dir, 'acme-1-main')).toHaveLength(1);
       expect(existsSync(path.join(dir, `prompts-${CLI}.jsonl`))).toBe(true);
+    });
+
+    it('finds this CLI id past 20 newer logs that lack it', async () => {
+      const { env, dir, cwd } = homeStore();
+      const root = await seed(dir, 'acme-1-main', 'operator', 'session-start', null);
+      const old = new Date(Date.now() - 3_600_000);
+      utimesSync(path.join(dir, 'acme-1-main.jsonl'), old, old);
+      for (let i = 0; i < 21; i++) {
+        await seed(dir, `beta-app-${i}-main`, 'operator', 'session-start', null, {
+          cli: OTHER_CLI,
+        });
+      }
+      await capturePrompt(hookInput(), ctxFor(env, cwd));
+      const log = readLog(dir, 'acme-1-main');
+      expect(log).toHaveLength(2);
+      expect(log[1].causal_parent).toBe(root.event_id);
+      expect(existsSync(path.join(dir, `prompts-${CLI}.jsonl`))).toBe(false);
+    });
+
+    it('falls back to the home log when the epic log cannot be appended', async () => {
+      const { env, dir, cwd } = homeStore();
+      await seed(dir, 'acme-1-main', 'operator', 'session-start', null, { project: 'acme' });
+      const epic = path.join(dir, 'acme-1-main.jsonl');
+      chmodSync(epic, 0o444);
+      try {
+        const out = await capturePrompt(hookInput(), ctxFor(env, cwd));
+        expect(out).toContain(`prompts-${CLI}#1`);
+      } finally {
+        chmodSync(epic, 0o644);
+      }
+      expect(readLog(dir, 'acme-1-main')).toHaveLength(1);
+      const home = readLog(dir, `prompts-${CLI}`);
+      expect(home).toHaveLength(2);
+      expect(home[0].event_type).toBe('session-start');
+      expect(home[1]).toMatchObject({ event_type: 'user_prompt', session_id: `prompts-${CLI}` });
+    });
+
+    it('a failing home log still throws, with no second retry', async () => {
+      const { env, dir, cwd } = homeStore();
+      await capturePrompt(hookInput({ prompt: 'first' }), ctxFor(env, cwd));
+      const home = path.join(dir, `prompts-${CLI}.jsonl`);
+      chmodSync(home, 0o444);
+      try {
+        await expect(
+          capturePrompt(hookInput({ prompt: 'second' }), ctxFor(env, cwd)),
+        ).rejects.toThrow();
+      } finally {
+        chmodSync(home, 0o644);
+      }
     });
 
     it('two concurrent captures each see the other as parent, inside the lock', async () => {
