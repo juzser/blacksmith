@@ -140,6 +140,18 @@ diffed by `pnpm test:e2e` on every gate run. The data in them is synthetic;
 the pixels are not a mockup. Every page is captured desktop and mobile
 (390px), light and dark.
 
+### Running the e2e suite under CI's font
+
+Locally the dashboard's font stack resolves to the system font, while the
+Linux CI runner resolves it to an Arial-metric font, so geometry that depends
+on line metrics can pass on a Mac and fail on CI. After any change to sizes,
+line heights, hit boxes or clamps, run the suite with
+`BS_E2E_FONT=arial pnpm test:e2e`: every page renders with
+`--bs-font-sans: Arial, sans-serif` from its first paint. The switch writes no
+screenshots, so the tree stays clean. Any other value fails the run at
+startup. New specs must import `test` from `ui/e2e/harness.js`, which a unit
+test enforces.
+
 If a local gate run leaves those PNGs dirty in `git status`, that is the
 specs rewriting their own artifacts — `scripts/check.sh` says so explicitly.
 Commit them only if the branch meant to change the UI.

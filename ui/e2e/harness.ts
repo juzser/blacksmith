@@ -12,11 +12,42 @@
 // stopped.
 import { test as base } from '@playwright/test';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import { ARIAL_FONT_CSS, arialSwitchOn } from './fontSwitch.js';
 
 // `undefined`, not the `void` Playwright's own docs use for a value-less
 // fixture: biome's noConfusingVoidType rejects void in that position, and
 // nothing reads this fixture's value either way.
-export const test = base.extend<{ pinnedClock: undefined }>({
+//
+// `arialFont` is the BS_E2E_FONT=arial switch (./fontSwitch.ts). It adds the
+// style to the *context*, so it reaches every page the context opens (popups
+// included) and is re-run on each navigation and reload, before the page's
+// own scripts. The product build is untouched.
+export const test = base.extend<{ pinnedClock: undefined; arialFont: undefined }>({
+  arialFont: [
+    async ({ context }, use) => {
+      if (arialSwitchOn()) {
+        await context.addInitScript((css) => {
+          const style = document.createElement('style');
+          style.textContent = css;
+          // An init script can run before <html> exists; wait for it, then
+          // add the style before anything paints.
+          const attach = () => {
+            if (!document.documentElement) return false;
+            document.documentElement.appendChild(style);
+            return true;
+          };
+          if (!attach()) {
+            const observer = new MutationObserver(() => {
+              if (attach()) observer.disconnect();
+            });
+            observer.observe(document, { childList: true });
+          }
+        }, ARIAL_FONT_CSS);
+      }
+      await use(undefined);
+    },
+    { auto: true },
+  ],
   pinnedClock: [
     async ({ page }, use) => {
       await page.clock.setFixedTime(new Date(FIXTURE_NOW_ISO));
