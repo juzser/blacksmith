@@ -865,7 +865,11 @@ test.describe('Kanban', () => {
           top: Math.min(...last.map((r) => r.top)),
           bottom: Math.max(...last.map((r) => r.bottom)),
           text: p.textContent ?? '',
-          titleAttr: p.getAttribute('title'),
+          // The full-title tooltip rides the card's open button (the overlay
+          // that sits above the title text).
+          titleAttr:
+            p.closest('.bs-kanban-card')?.querySelector('.bs-kanban-card__open')?.getAttribute('title') ??
+            null,
         };
       });
       expect(text.lines).toBeLessThanOrEqual(2);
@@ -1088,8 +1092,8 @@ test.describe('Kanban', () => {
     ]);
     await page.goto('/work/kanban');
 
-    const firstCard = page.locator('.bs-kanban-card').nth(0);
-    const secondCard = page.locator('.bs-kanban-card').nth(1);
+    const firstCard = page.locator('.bs-kanban-card__open').nth(0);
+    const secondCard = page.locator('.bs-kanban-card__open').nth(1);
     await firstCard.focus();
     await expect(firstCard).toBeFocused();
 
@@ -1459,7 +1463,7 @@ test.describe('Kanban', () => {
     await group.locator('summary').click();
     await group.locator('summary').focus();
     await page.keyboard.press('ArrowDown');
-    await expect(group.locator('.bs-kanban-group__row').first()).toBeFocused();
+    await expect(group.locator('.bs-kanban-group__row-open').first()).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toBeVisible();
   });
@@ -1469,13 +1473,13 @@ test.describe('Kanban', () => {
     await page.goto('/work/kanban');
     const group = page.locator('.bs-kanban-group');
     await group.locator('summary').click();
-    const rows = group.locator('.bs-kanban-group__row');
+    const rows = group.locator('.bs-kanban-group__row-open');
     await rows.first().focus();
     await page.keyboard.press('ArrowDown');
     await expect(rows.nth(1)).toBeFocused();
     await page.keyboard.press('ArrowUp');
     await expect(rows.first()).toBeFocused();
-    const copy = rows.first().getByRole('button');
+    const copy = group.locator('.bs-kanban-group__row').first().getByRole('button', { name: 'Copy task id' });
     await copy.focus();
     await page.keyboard.press('ArrowDown');
     await expect(copy).toBeFocused();
@@ -1516,7 +1520,8 @@ test.describe('Kanban', () => {
     // The summary is one stop: arrows step into the open rows, Tab goes row then its copy button.
     await page.keyboard.press('ArrowDown');
     const row = group.locator('.bs-kanban-group__row').first();
-    await expect(row).toBeFocused();
+    const rowOpen = row.locator('.bs-kanban-group__row-open');
+    await expect(rowOpen).toBeFocused();
     await page.keyboard.press('Tab');
     const copy = row.getByRole('button', { name: 'Copy task id' });
     await expect(copy).toBeFocused();
@@ -1527,8 +1532,8 @@ test.describe('Kanban', () => {
     // Space on the copy button behaves the same.
     await page.keyboard.press('Space');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    // Enter on the row itself opens the task (the quick-look panel on desktop).
-    await row.focus();
+    // Enter on the row's open button opens the task (the quick-look panel on desktop).
+    await rowOpen.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toBeVisible();
   });
@@ -1541,7 +1546,7 @@ test.describe('Kanban', () => {
     await summary.focus();
     await page.keyboard.press('ArrowDown');
     // Next stop is the lone follow-up card, not a hidden row of the closed group.
-    await expect(todo.locator('.bs-kanban-card')).toBeFocused();
+    await expect(todo.locator('.bs-kanban-card__open')).toBeFocused();
     await page.keyboard.press('ArrowUp');
     await expect(summary).toBeFocused();
   });
@@ -1603,4 +1608,119 @@ test.describe('Kanban', () => {
       await shoot(page, `work-kanban-mobile-tab2-${theme}`);
     });
   }
+});
+
+// WCAG 4.1.2 / axe `nested-interactive`: no focusable control may sit inside
+// another one. A card is a stretched native button with its copy-id button
+// and "Open PR" link as siblings, so nothing on the board nests.
+test.describe('Kanban: no interactive control inside another', () => {
+  const FOCUSABLE =
+    'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"]), [role=link], [role=button]';
+
+  function nestedBoard() {
+    const withPr = {
+      ...task('epic-1/task-1', 'todo'),
+      prUrl: 'https://example.com/pr/1',
+      updatedAt: '2026-02-01T00:00:00.000Z',
+    };
+    return [
+      { taskStatus: 'todo', tasks: [withPr, ...(followupBoard()[0]?.tasks.slice(0, 3) ?? [])] },
+      { taskStatus: 'in-progress', tasks: [task('epic-1/task-2', 'in-progress')] },
+    ];
+  }
+
+  for (const [vpName, viewport] of [
+    ['desktop', VIEWPORTS.desktop],
+    ['375', NARROW_VIEWPORT],
+  ] as const) {
+    test(`${vpName}: no focusable element has a focusable ancestor`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await mockBoard(page, nestedBoard());
+      await page.goto('/work/kanban');
+      await page.locator('.bs-kanban-group summary').click();
+      await expect(page.locator('.bs-kanban-group')).toHaveAttribute('open', '');
+      const pairs = await page.evaluate((selector) => {
+        const name = (el: Element) => `${el.tagName.toLowerCase()}.${el.className || '-'}`;
+        const out: string[] = [];
+        for (const el of document.querySelectorAll(selector)) {
+          const outer = el.parentElement?.closest(selector);
+          if (outer) out.push(`${name(outer)} > ${name(el)}`);
+        }
+        return out;
+      }, FOCUSABLE);
+      expect(pairs).toEqual([]);
+    });
+  }
+
+  test('desktop: the card body opens the peek, copy-id and Open PR open nothing', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await mockBoard(page, nestedBoard());
+    await page.goto('/work/kanban');
+    const card = page.locator('.bs-kanban-card').first();
+    await card.locator('.bs-kanban-card__title-copy button').click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('epic-1/task-1');
+    await page.route('https://example.com/**', (route) => route.fulfill({ body: 'pr' }));
+    const popup = page.waitForEvent('popup');
+    await card.getByRole('link', { name: 'Open PR' }).click();
+    await (await popup).close();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // A click on the footer text, away from every control, still opens the card.
+    await card.click({ position: { x: 4, y: 4 } });
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('375: the card body goes to the task page', async ({ page }) => {
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await mockBoard(page, nestedBoard());
+    await page.goto('/work/kanban');
+    await page.locator('.bs-kanban-card').first().click({ position: { x: 4, y: 4 } });
+    await expect(page).toHaveURL(/\/tasks\/.*task-1$/);
+  });
+
+  test('Tab reaches the open button, the copy button, then Open PR; Escape returns to the open button', async ({
+    page,
+  }) => {
+    await mockBoard(page, nestedBoard());
+    await page.goto('/work/kanban');
+    const card = page.locator('.bs-kanban-card').first();
+    const open = card.getByRole('button', { name: 'epic-1/task-1, opens task detail' });
+    await open.focus();
+    await page.keyboard.press('Tab');
+    await expect(card.locator('.bs-kanban-card__title-copy button')).toBeFocused();
+    // The card's relative-time tooltip trigger is its own, pre-existing tab stop between them.
+    await page.keyboard.press('Tab');
+    await expect(card.locator('.bs-tooltip-trigger', { hasText: 'just now' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(card.getByRole('link', { name: 'Open PR' })).toBeFocused();
+    await open.focus();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(open).toBeFocused();
+  });
+
+  test('arrow keys move between cards and fix rows (open buttons)', async ({ page }) => {
+    await mockBoard(page, nestedBoard());
+    await page.goto('/work/kanban');
+    const group = page.locator('.bs-kanban-group');
+    await group.locator('summary').click();
+    const card = page.locator('.bs-kanban-card').first().locator('.bs-kanban-card__open');
+    await card.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(group.locator('summary')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    const rowOpen = group.locator('.bs-kanban-group__row-open');
+    await expect(rowOpen.first()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(rowOpen.nth(1)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(rowOpen.nth(1)).toBeFocused();
+  });
 });

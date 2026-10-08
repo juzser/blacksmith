@@ -18,7 +18,7 @@ import { useFittedTitle } from '../composables/useFittedTitle.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
-import { agentChip, isInteractiveDescendant, titleCase } from '../lib/kanban.js';
+import { agentChip, titleCase } from '../lib/kanban.js';
 import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
 import AgentChip from './AgentChip.vue';
@@ -44,11 +44,9 @@ const props = defineProps<{
   revealTaskId?: string | null;
   revealStoreId?: string;
 }>();
-// `navigate` carries an arrow key on a fix row: the board moves focus on.
 const emit = defineEmits<{
   toggle: [];
-  select: [taskId: string];
-  navigate: [event: KeyboardEvent];
+  select: [taskId: string, storeId?: string];
 }>();
 
 const count = computed(() => props.members.length);
@@ -99,23 +97,18 @@ const copiedTaskId = ref<string | null>(null);
 function copyLabel(taskId: string): string {
   return copiedTaskId.value === taskId ? copiedLabel.value : 'Copy task id';
 }
-async function onCopyTaskId(event: MouseEvent, taskId: string) {
-  event.stopPropagation();
+async function onCopyTaskId(taskId: string) {
   if (!(await copyToClipboard(taskId))) return;
   copiedTaskId.value = taskId;
   flash();
 }
 
-function onRowKeydown(event: KeyboardEvent, task: KanbanTask) {
-  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
-  if (event.key === 'Enter') {
-    emit('select', task.taskId, foreignStoreId(task));
-  } else if (event.key === ' ') {
-    event.preventDefault();
-    emit('select', task.taskId, foreignStoreId(task));
-  } else if (event.key.startsWith('Arrow')) {
-    emit('navigate', event);
-  }
+// The row's open button is an empty overlay covering the whole row. Focusing it
+// first keeps the board's focus return working in browsers that do not focus
+// a button on click.
+function onRowSelect(event: MouseEvent, task: KanbanTask) {
+  (event.currentTarget as HTMLElement).focus();
+  emit('select', task.taskId, foreignStoreId(task));
 }
 </script>
 
@@ -140,22 +133,22 @@ function onRowKeydown(event: KeyboardEvent, task: KanbanTask) {
     </summary>
     <ul role="list" class="bs-kanban-group__rows">
       <li v-for="task in rows" :key="storeKey(task, task.taskId)">
-        <div
-          class="bs-kanban-group__row"
-          role="link"
-          tabindex="0"
-          :aria-label="`${rowTitle(task)}, opens task detail`"
-          @click="emit('select', task.taskId, foreignStoreId(task))"
-          @keydown="onRowKeydown($event, task)"
-        >
-          <p class="bs-kanban-group__row-title" :title="compact ? undefined : rowTitle(task)">
+        <div class="bs-kanban-group__row">
+          <button
+            type="button"
+            class="bs-kanban-group__row-open"
+            :aria-label="`${rowTitle(task)}, opens task detail`"
+            :title="compact ? undefined : rowTitle(task)"
+            @click="onRowSelect($event, task)"
+          ></button>
+          <p class="bs-kanban-group__row-title">
             <span class="bs-kanban-group__row-text">{{ rowTitle(task) }}</span>
             <IconButton
               :icon="Link"
               :label="copyLabel(task.taskId)"
               size="sm"
               class="bs-kanban-card__title-copy"
-              @click="onCopyTaskId($event, task.taskId)"
+              @click="onCopyTaskId(task.taskId)"
             />
           </p>
           <span class="bs-kanban-group__row-meta">

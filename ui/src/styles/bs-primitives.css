@@ -2984,6 +2984,7 @@ summary.bs-inbox__group-head {
 
 .bs-kanban-card,
 .bs-kanban-group {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-2);
@@ -2997,9 +2998,37 @@ summary.bs-inbox__group-head {
   /* The closed <details> content slot is hidden but would still take a gap. */
   gap: 0;
 }
-.bs-kanban-card:focus-visible {
+/* The card's one open control: an empty native button laid over the whole card
+   (inset -1px = the border box), so a click anywhere opens it and its focus
+   ring surrounds the card as it did when the card itself was the focus stop.
+   The title text, the copy icon and the "Open PR" link are not inside it; the
+   last two are raised above it so they keep their own clicks. A fix row works
+   the same, over the row's own box. */
+.bs-kanban-card__open,
+.bs-kanban-group__row-open {
+  position: absolute;
+  inset: -1px;
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: var(--bs-radius-md);
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.bs-kanban-group__row-open {
+  inset: 0;
+  border-radius: 0;
+}
+.bs-kanban-card__open:focus-visible,
+.bs-kanban-group__row-open:focus-visible {
   outline: 2px solid var(--bs-focus-ring);
   outline-offset: 2px;
+}
+.bs-kanban-card__title-copy,
+.bs-kanban-card__footer a {
+  position: relative;
+  z-index: 1;
 }
 .bs-kanban-card__row {
   display: flex;
@@ -3277,8 +3306,7 @@ summary.bs-inbox__group-head {
 .bs-kanban-group__summary::-webkit-details-marker {
   display: none;
 }
-.bs-kanban-group__summary:focus-visible,
-.bs-kanban-group__row:focus-visible {
+.bs-kanban-group__summary:focus-visible {
   outline: 2px solid var(--bs-focus-ring);
   outline-offset: 2px;
 }
@@ -3324,6 +3352,7 @@ summary.bs-inbox__group-head {
   flex-direction: column;
 }
 .bs-kanban-group__row {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-1);
