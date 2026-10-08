@@ -1431,7 +1431,13 @@ a:hover {
   white-space: normal;
 }
 /* Dense-UI link (ds-spec §1.9): no underline at rest, one on hover (from
-   .bs-btn--link) and on keyboard focus. */
+   .bs-btn--link) and on keyboard focus. The label clips at its last line
+   (overflow: hidden above), and .bs-btn--link's 4px underline offset would
+   draw the underline below that line box, so here the font's own offset
+   keeps it inside. */
+.bs-sessions__group-title .bs-btn--link {
+  text-underline-offset: auto;
+}
 .bs-sessions__group-title .bs-btn--link:focus-visible {
   text-decoration: underline;
 }
