@@ -219,9 +219,15 @@ What the plugin deliberately does **not** activate is this repo's enforcement:
 the twelve `permissions.deny` rules in `.claude/settings.json` and the policy
 hook in `.claude/hooks/`. A plugin's component set — skills, agents,
 commands, hooks, MCP and LSP servers — has no permissions in it, and it loads
-hooks only from a `hooks/hooks.json` this plugin does not ship — so
-`claude plugin details blacksmith` reports `Hooks (0)`, which is the intended
-result, not an omission. Both resolve paths against a checkout, and a hook that
+hooks only from a `hooks/hooks.json`, and this plugin ships exactly one
+non-blocking recorder — so `claude plugin details blacksmith` reports
+`Hooks (2)` (two events: `UserPromptSubmit` and `PostToolUse`), which is the intended result, not an omission. The recorder
+(`prompt-capture.sh`) writes each prompt and each option answer to the event
+log, never blocks, and exits silently when it finds no binary. It looks for
+`factory/orchestrator/dist/promptHook.js` in your project (or its main clone),
+then for `bs-prompt-hook` on `PATH`: put it there with a global install of the
+package, or `pnpm link --global` from a clone. The guard and the deny rules
+are not shipped. Both resolve paths against a checkout, and a hook that
 cannot find its policy binary degrades to `ask`: installed as-is it would put a
 confirmation prompt in front of every command you run. A clone keeps them,
 because in a clone the paths are real.

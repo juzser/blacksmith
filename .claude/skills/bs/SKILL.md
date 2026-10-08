@@ -54,17 +54,22 @@ off as `--causal-parent`. Run it once: it refuses a session that already
 has a log, and names the last event in it so you have the anchor either way
 (`docs/guide/operator-guide/queue-and-gate.md` §5). To continue an epic in a
 new session,
-`bs session start <new-id> --continues <old-session>#<index>` (§5b). Once
+`bs session start <new-id> --continues <old-session>#<index>` (§5b); add
+`--prompt <event-id>` to link the operator prompt that asked for it. Once
 you have, pass `--lineage` alongside `--session` on every `bs stats` read:
 without it each page answers about the window you are standing in, not about
 the epic.
 
-**Record the operator's turn before you act on it**: `bs prompt record -
---session <id> --causal-parent <event-id>` (heredoc the words in, or pass a
-file). It prints the event id — hang the dispatch it caused off that id as
-`--causal-parent`, and the timeline draws "this work happened because a
-person asked for it" instead of leaving a reader to infer it from clocks.
-Store what they wrote, not a summary of it.
+The plugin's hook records the operator's turn. When your context carries a
+line headed "bs prompt capture:" and a JSON object for this turn, that is the record: do not record
+it again. Parse `event_id` and `session_id` by key. Same session →
+`--causal-parent`. A `prompts-…` session → `bs session start … --prompt
+<event_id>`, or `parent_prompt_id` on the `dispatch_decision`. No line → run
+`bs prompt record - --session <id> --causal-parent <event-id>` as before
+(heredoc the words in, or pass a file). Hang the dispatch the prompt caused
+off that id, and the timeline draws "this work happened because a person
+asked for it" instead of leaving a reader to infer it from clocks. Store what
+they wrote, not a summary of it.
 
 **Compact your own context at 60%** (`budgets.yml` `context_window`,
 agent-constraints.md "context window"). You are the longest-lived session in

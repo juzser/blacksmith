@@ -516,6 +516,21 @@ else
 fi
 
 echo
+echo "-- blacksmith plugin (only if claude is on PATH) --"
+# .claude is the plugin root, and since it ships hooks/hooks.json a malformed
+# manifest or hook file would only surface in an operator's session.
+if command -v claude >/dev/null 2>&1; then
+  if claude plugin validate .claude; then
+    echo "OK   claude plugin validate .claude"
+  else
+    echo "FAIL claude plugin validate .claude"
+    FAIL=1
+  fi
+else
+  echo "SKIP claude not found on PATH — .claude not validated as a plugin."
+fi
+
+echo
 echo "-- bs-mod plugin (only if claude is on PATH) --"
 # mods/bs-mod is a Claude Code plugin module: its tests import Claude Code's
 # own test kit and run only in its plugin runner, so vitest, biome and the

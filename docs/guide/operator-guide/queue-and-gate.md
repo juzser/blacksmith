@@ -338,7 +338,12 @@ bs gate run epic-1/task-1 \
   is the only event type allowed a `null` causal_parent, and the only one
   allowed to name a parent in a *different* session (see §5a and §5b).
 
-**Putting your own words in the log.** `bs prompt record <file|-> --session
+**Putting your own words in the log.** With the plugin installed this is
+automatic: its `UserPromptSubmit` hook records each prompt you type, and its
+`PostToolUse` hook on `AskUserQuestion` records each option answer you pick,
+both as `user_prompt` events (`bs prompt capture`), and prints the stored
+`event_id` into the model's context. `prompt record` is the manual path, for a
+machine where the hook is not installed. `bs prompt record <file|-> --session
 <id> --causal-parent <event-id>` appends a `user_prompt` holding what you
 typed, verbatim, and prints its event id:
 
