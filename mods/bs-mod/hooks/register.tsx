@@ -1058,13 +1058,14 @@ export const register: Register = on => {
     st.timer?.cancel()
     st.timer = $.clock.every(TICK_MS, () => void kick($, st))
     void kick($, st)
+    const started = await next(e)
     try {
       const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
       await update($, themeAtom, () => (typeof theme === 'string' ? theme : null))
     } catch {
       // no theme read: the theme keys draw until a theme is set
     }
-    return next(e)
+    return started
   })
 
   // A theme written from /config or a plugin repaints the band and the pane; a deny or a failed write keeps the palette.

@@ -19,7 +19,7 @@ shows it once installed.
   row and a separator, then a row of tabs.
   - With an epic in view, the band has four tabs.
     - **Overview** shows active agents, tasks done, budget, the current wave
-      or phase, and the epic's tier. Its tab and labels are soft white.
+      or phase, and the epic's tier. Its tab and labels are soft white under Mocha and Latte, and the theme's grey otherwise.
     - **Current** shows the work in flight. One head row carries the wave
       or phase, a progress bar with tasks done, the live agents and the
       spend against the cap. Below it, a **Tasks** section lists the wave's
@@ -44,8 +44,10 @@ shows it once installed.
 - **Colors.** The band and the pane color by meaning in Catppuccin pastels:
   Mocha under a dark `/config` theme (`dark-ansi` too), Latte under a light
   one. A daltonized theme, `auto`, or a theme the HUD cannot read keeps the
-  terminal theme's own colors, with active work in teal. Neutral text stays in
-  the theme's colors, and so does the Overview. Changing the theme repaints
+  terminal theme's own colors, with active work in teal. Neutral body text stays in
+  the theme's colors. The Overview tab, its labels and the Tasks and Prompts
+  dividers take a soft white under Mocha and Latte, and the theme's `inactive`
+  grey otherwise. Changing the theme repaints
   the HUD at once.
 - **Watching.** Normally the HUD follows the epics whose events name this
   session. When nothing is pinned and the session has no such epic, it

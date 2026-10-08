@@ -153,6 +153,8 @@ type World = {
   statuses: (string | undefined)[]
   opened: string[]
   commands: string[]
+  /** called when a session.start reaches the engine, beneath every plugin */
+  onStart?: () => void
   /** the paths of each `grep -m1 -oE` call, in call order */
   resolves: string[][]
   /** a file's mtime when not T0 */
@@ -228,7 +230,10 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     w.commands.push(e.name)
     return { value: { command: e.name } }
   })
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', ($, e) => {
+    w.onStart?.()
+    return { cwd: e.cwd }
+  })
   on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: '' }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
@@ -1659,6 +1664,32 @@ describe('palette', () => {
     const ui = await mountBand($)
     expect(await rowKeys(ui)).toContain('head')
     expect(await spots(ui)).toEqual(CASES[3][1])
+  })
+
+  test('a theme write that fails leaves the palette as it was', async ($, on) => {
+    on('state.set', { plugin: 'bs-mod', key: 'theme' }, ($, e, next) => {
+      return e.value === 'light' ? { deny: 'state unavailable' } : next(e)
+    })
+    const ui = await up($, on, 'dark')
+    const set = await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+    expect(set).toEqual({ value: 'light' })
+    expect((await spots(ui)).active).toBe('#94e2d5')
+  })
+
+  test('session.start goes down the chain before the theme is read', async ($, on) => {
+    const order: string[] = []
+    on('state.set', { plugin: 'bs-mod', key: 'theme' }, ($, e, next) => {
+      order.push('theme')
+      return next(e)
+    })
+    const w = world(on, prompted())
+    w.onStart = () => order.push('engine')
+    themed(on, 'dark')
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    expect(order).toEqual(['engine', 'theme'])
   })
 
   // the soft label color per palette: Mocha subtext0, Latte subtext0, the theme key
