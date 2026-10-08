@@ -1,7 +1,10 @@
 import { activeScopeBody, stubActiveScope } from './activeScopeStub.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, type Page, test } from './harness.js';
-import { setTheme, settleForShot, shoot, shootElement, VIEWPORTS } from './helpers.js';
+import { dropRoutes, setTheme, settleForShot, shoot, shootElement, VIEWPORTS } from './helpers.js';
+
+// Route proxies that call route.fetch() must not outlive their test.
+test.afterEach(async ({ page }) => dropRoutes(page));
 
 // Home (ds-spec.md §4.1): Overview and Projects merged into one page. The
 // numbers and sentences are unit-tested in ui/test/homeView.test.ts and the
