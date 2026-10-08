@@ -33,7 +33,6 @@ import {
   planEffort,
   planVersionOf,
   progressOf,
-  promptHomes,
   segments,
   shortTask,
   splitLines,
@@ -938,7 +937,7 @@ async function tick($: EngineInterface, st: State, isRetry = false): Promise<voi
   const followed = new Set([...st.mine, ...(pinned ? [pinned] : [])])
   /** the epics' files, and the home logs: this session's own, and every one an epic's event named by parent_prompt_id */
   const trackedOf = () => {
-    const homes = new Set([`prompts-${sid}`, ...promptHomes(st.hud)].map(h => `${h}.jsonl`))
+    const homes = new Set([`prompts-${sid}`, ...(st.hud.homes ?? [])].map(h => `${h}.jsonl`))
     return entries.filter(en => (homes.has(en.name) ? Boolean(sid) : followed.has(epicOf(st, en) ?? '')))
   }
   const tracked = trackedOf()
@@ -983,8 +982,9 @@ async function tick($: EngineInterface, st: State, isRetry = false): Promise<voi
     $.ui.status(status)
   }
   st.isBooted = true
-  // a home log an epic's event just named is read now, not a tick later
-  if (!isRetry && trackedOf().some(en => !st.cursors.has(en.path))) await tick($, st, true)
+  // a home log an epic's event just named is read now, not a tick later; one that was tracked and failed to read is not retried
+  const before = new Set(tracked.map(en => en.path))
+  if (!isRetry && trackedOf().some(en => !before.has(en.path) && !st.cursors.has(en.path))) await tick($, st, true)
 }
 
 /** Starts a tick unless one runs; resolves when the running one ends. */

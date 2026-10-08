@@ -161,6 +161,8 @@ type World = {
   mtimes: Map<string, number>
   /** the path of each `tail` call, in call order */
   tails: string[]
+  /** paths whose `tail` exits non-zero though the file is listed */
+  unreadable: Set<string>
   /** what `$.agent.list()` answers: the session's subagents */
   agents: AgentInfo[]
   /** what lies beneath bs-mod in AbovePrompt: core's own drawing, another plugin's one-line band, or an empty Box */
@@ -174,7 +176,7 @@ type World = {
 }
 
 function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World {
-  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], agents: [], below: 'engine', hookCalls: [], hook: null, tools: {} }
+  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], hook: null, tools: {} }
   const ran = (exitCode: number, stdout: string) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
   on('session.id', () => ({ value: sid }))
@@ -215,7 +217,7 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
     if (cmd === 'tail' && rest[0] === '-n') {
       w.tails.push(rest[2] ?? '')
       const text = files.get(rest[2] ?? '')
-      if (text === undefined) return ran(1, '')
+      if (text === undefined || w.unreadable.has(rest[2] ?? '')) return ran(1, '')
       return ran(0, text.split('\n').slice(Number((rest[1] ?? '+1').replace('+', '')) - 1).join('\n'))
     }
     if (cmd === 'bs-prompt-hook') {
@@ -1744,6 +1746,25 @@ describe('prompts and task progress outside an epic', () => {
     await ui.press({ key: 'tab:current' })
     const text = JSON.stringify(await ui.drawn())
     expect(text).toContain('Plan the web-ux-4 epic')
+  })
+
+  test('a named home log that cannot be read is not retried within every tick', async ($, on) => {
+    const files = prompted()
+    const other = 'prompts-sid-other'
+    const otherF = `${ROOT}/${other}.jsonl`
+    files.set(otherF, homeLog([[3, 'Plan the web-ux-4 epic']], other))
+    files.set(WAVE_F, (files.get(WAVE_F) ?? '') + line(WAVE_S, 'sid-w', 'session-start', null, T0 - MIN, { parent_prompt_id: `${other}#0` }))
+    const w = world(on, files)
+    w.unreadable.add(otherF)
+    const clock = mock.clock(on, { now: T0 })
+    mock.store(on)
+    mock.env(on, { HOME: '/home/u' })
+    await boot($, clock)
+    // the first tick tracks it only after the fold names it: one read in the retry
+    expect(w.tails.filter(p => p === otherF).length).toBe(1)
+    await clock.advance(4000)
+    // the second tick tracks it from the start and reads it once: no retry for a file that was already tracked
+    expect(w.tails.filter(p => p === otherF).length).toBe(2)
   })
 
   describe('the task list (§2.9)', () => {

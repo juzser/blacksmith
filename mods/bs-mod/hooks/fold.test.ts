@@ -8,7 +8,6 @@ import {
   notificationEnd,
   foldTaskTool,
   progressOf,
-  promptHomes,
   type BgState,
   type TaskItem,
   capped,
@@ -1134,8 +1133,8 @@ test('formatters', async () => {
 
 describe('prompt walk', () => {
   // refs as the fold mints them and as causal_parent spells them: `<session id>#<0-based line index>`
-  const links = (rows: [string, string, string | null][]) => {
-    const m = new Map<string, Link>(rows.map(([ref, type, parent]) => [ref, { type, parent }]))
+  const links = (rows: [string, string, string | null, string?][]) => {
+    const m = new Map<string, Link>(rows.map(([ref, type, parent, cite]) => [ref, { type, parent, cite }]))
     return (ref: string) => m.get(ref)
   }
 
@@ -1175,6 +1174,24 @@ describe('prompt walk', () => {
     expect(PROMPT_HOPS).toBe(50)
     expect(walkToPrompt(`l#${PROMPT_HOPS}`, long)).toEqual({ prompt: 'l#0', hops: PROMPT_HOPS, end: 'prompt' })
     expect(walkToPrompt(`l#${PROMPT_HOPS + 1}`, long)).toEqual({ prompt: null, hops: PROMPT_HOPS, end: 'cap' })
+  })
+
+  test('a parent_prompt_id cite of a known user_prompt is the walk\'s final hop; an unknown one is not', async () => {
+    const at = links([
+      ['h#0', 'user_prompt', null],
+      ['e#0', 'session-start', null, 'h#0'],
+      ['e#1', 'task-added', 'e#0'],
+      ['e#2', 'task-added', 'e#0', 'h#9'],
+      ['e#3', 'session-start', 'e#0', 'e#0'],
+      ['e#4', 'task-added', 'e#2'],
+    ])
+    expect(walkToPrompt('e#1', at)).toEqual({ prompt: 'h#0', hops: 2, end: 'prompt' })
+    // the start node's own cite
+    expect(walkToPrompt('e#0', at)).toEqual({ prompt: 'h#0', hops: 1, end: 'prompt' })
+    // a cite linkOf does not know, or that is no user_prompt, falls back to causal_parent
+    expect(walkToPrompt('e#2', at)).toEqual({ prompt: 'h#0', hops: 2, end: 'prompt' })
+    expect(walkToPrompt('e#3', at)).toEqual({ prompt: 'h#0', hops: 2, end: 'prompt' })
+    expect(walkToPrompt('e#4', at)).toEqual({ prompt: 'h#0', hops: 3, end: 'prompt' })
   })
 
   test('distinctPrompts keeps each prompt once, in first-seen order, and drops the misses', async () => {
@@ -1832,7 +1849,7 @@ describe('prompts in Current, linked or not', () => {
     const { hud, epic } = foldLog(events)
     expect(epic.prompts![`${other}#0`]!.text).toBe('open the acme epic')
     expect(currentModel(epic, now(events)).prompts.rows.map(r => r.text)).toEqual(['open the acme epic'])
-    expect(promptHomes(hud)).toEqual([other])
+    expect(hud.homes).toEqual([other])
   })
 
   test('a dispatch_decision carrying parent_prompt_id reaches the prompt too, and makes it that task\'s', async () => {
@@ -1843,6 +1860,17 @@ describe('prompts in Current, linked or not', () => {
     ]
     const { epic } = foldLog(events)
     expect(epic.prompts![`${HOME}#0`]!.text).toBe('rerun the acme gate')
+  })
+
+  test('a task-added chained to a session-start that cites a home prompt carries that prompt\'s task', async () => {
+    const events = [
+      prompt('start the acme epic', HOME), // HOME#0
+      ev('session-start', null, { parent_prompt_id: `${HOME}#0` }, { session_id: ES, actor: 'operator', cli_session_id: SID }), // ES#0
+      cite(added(T16), `${ES}#0`),
+    ]
+    const { epic } = foldLog(events)
+    const rows = currentModel(epic, now(events)).prompts.rows
+    expect(rows.map(r => ({ text: r.text, task: r.task }))).toEqual([{ text: 'start the acme epic', task: 'task-16' }])
   })
 
   test('homePrompts keeps the own home log\'s newest 2 user_prompts, and no other session\'s', async () => {
@@ -1935,6 +1963,13 @@ describe('the session task list (§2.9)', () => {
     // a-gone ended by notification, though the list still holds it; a-done is not active
     expect(p).toEqual({ kind: 'bg', running: 3, done: 2, agents: 1, shells: 1, monitors: 1 })
     expect(progressOf([], none, [])).toBeNull()
+  })
+
+  test('an ended id leaves started, and the ended list still counts it once', async () => {
+    let bg = bgStart(none, 'bsh1', 'shell')
+    bg = bgEnd(bgEnd(bg, 'bsh1'), 'bsh1')
+    expect(bg.started).toEqual({})
+    expect(progressOf([], bg, [])).toEqual({ kind: 'bg', running: 0, done: 1, agents: 0, shells: 0, monitors: 0 })
   })
 
   test('a notification ends the work its task-id names, unless its status is running', async () => {

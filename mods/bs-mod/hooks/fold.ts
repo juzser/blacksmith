@@ -346,8 +346,8 @@ function taskRefs(epic: EpicView, ev: BsEvent): string[] {
 /** The most parent edges a walk follows before it gives up. */
 export const PROMPT_HOPS = 50
 
-/** What the walk needs of one event: its type and its `causal_parent` (null when it has none). */
-export type Link = { type: string; parent: string | null }
+/** What the walk needs of one event: its type, its `causal_parent` (null when it has none) and the prompt its payload's `parent_prompt_id` cites. */
+export type Link = { type: string; parent: string | null; cite?: string }
 
 /**
  * A walk's result: the nearest `user_prompt` ancestor's ref, or null; `hops` = parent edges followed to a known
@@ -355,12 +355,13 @@ export type Link = { type: string; parent: string | null }
  */
 export type Walk = { prompt: string | null; hops: number; end: 'prompt' | 'missing' | 'root' | 'cycle' | 'cap' }
 
-/** Walks `causal_parent` up from the event `start` to its nearest `user_prompt` ancestor: at most `cap` hops, stopping on a cycle or a parent `linkOf` does not know. */
+/** Walks `causal_parent` up from the event `start` to its nearest `user_prompt` ancestor: at most `cap` hops, stopping on a cycle or a parent `linkOf` does not know. A node whose `parent_prompt_id` cites a known `user_prompt` ends the walk there, as a final hop. */
 export function walkToPrompt(start: string, linkOf: (ref: string) => Link | undefined, cap = PROMPT_HOPS): Walk {
   let cur = linkOf(start)
   if (!cur) return { prompt: null, hops: 0, end: 'missing' }
   const seen = new Set([start])
   for (let hops = 0; ; ) {
+    if (cur.cite && hops < cap && linkOf(cur.cite)?.type === 'user_prompt') return { prompt: cur.cite, hops: hops + 1, end: 'prompt' }
     const parent = cur.parent
     if (!parent) return { prompt: null, hops, end: 'root' }
     if (seen.has(parent)) return { prompt: null, hops, end: 'cycle' }
@@ -427,11 +428,6 @@ function homeRef(v: unknown): string | null {
   return typeof v === 'string' && v.startsWith(HOME_LOG) && /#\d+$/.test(v) ? v : null
 }
 
-/** The home logs some epic named through `parent_prompt_id`: register reads each into the fold. */
-export function promptHomes(hud: Hud): string[] {
-  return hud.homes ?? []
-}
-
 /**
  * Keeps an epic-log prompt on the epic and drops the oldest past EPIC_PROMPTS. A prompt some admission, task or kept
  * wave points at stays: Past and Next read it by ref.
@@ -453,7 +449,7 @@ export function foldEvent(hud: Hud, ev: BsEvent, ref: string, sid: string, fileE
   const ts = ev.ts ? Date.parse(ev.ts) || 0 : 0
   // every event's link, an epic's or not: a work event's chain can cross into another session's or epic's log
   const ix = indexOf(hud)
-  ix.links.set(ref, { type: ev.event_type, parent: str(ev.causal_parent) })
+  ix.links.set(ref, { type: ev.event_type, parent: str(ev.causal_parent), cite: str(p.parent_prompt_id) ?? undefined })
   if (ev.event_type === 'user_prompt') ix.prompts.set(ref, { ts, text: promptLine(typeof p.prompt === 'string' ? p.prompt : '') })
   const epicId = epicIdOf(ev, fileEpic)
   if (!epicId) {
@@ -1448,7 +1444,8 @@ export function bgStart(bg: BgState, id: string, kind: 'shell' | 'monitor'): BgS
 
 /** Marks background work `id` as ended, once however many times it is told. */
 export function bgEnd(bg: BgState, id: string): BgState {
-  return bg.ended.includes(id) ? bg : { ...bg, ended: [...bg.ended, id] }
+  const { [id]: _, ...started } = bg.started
+  return { started, ended: bg.ended.includes(id) ? bg.ended : [...bg.ended, id] }
 }
 
 /** The task id a `task-notification` prompt reports ended: any status but `running` ends it; null when it names no id. */
