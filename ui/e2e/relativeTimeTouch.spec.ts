@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { VIEWPORTS } from './helpers.js';
 
@@ -29,9 +30,21 @@ interface Box {
 // row holding it, and the other targets whose box it intersects by over 1px.
 function measure(args: { selector: string; neighbours: string }): Box[] {
   const out: Box[] = [];
+  // The hit box: the bare box, or the ::after centred on it when that grows it.
+  const hit = (e: Element) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e, '::after');
+    if (cs.content === 'none' || cs.position !== 'absolute') return r;
+    const w = Number.parseFloat(cs.width);
+    const h = Number.parseFloat(cs.height);
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    return new DOMRect(cx - w / 2, cy - h / 2, w, h);
+  };
   for (const el of Array.from(document.querySelectorAll(args.selector))) {
-    const r = el.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
+    const own = el.getBoundingClientRect();
+    if (own.width === 0 || own.height === 0) continue;
+    const r = hit(el);
     const holder = el.closest('li, article, tr') ?? el.parentElement;
     const overlaps: string[] = [];
     for (const o of Array.from(document.querySelectorAll(args.neighbours))) {
@@ -62,7 +75,6 @@ function measure(args: { selector: string; neighbours: string }): Box[] {
       h: r.height,
       holder: holder?.getBoundingClientRect().height ?? 0,
       overlaps,
-      // Only these two keep their text height (bs-primitives.css).
       inRow: el.matches('.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime'),
     });
   }
@@ -76,7 +88,7 @@ const dropHitBoxRules = () => {
     for (let i = rules.length - 1; i >= 0; i--) {
       const r = rules[i] as CSSStyleRule & CSSGroupingRule;
       if (r.cssRules && !r.selectorText) drop(r.cssRules);
-      else if (r.selectorText === '.bs-reltime' || r.selectorText === '.bs-timeline-row__detail a')
+      else if (/^\.bs-reltime(::after)?$|^\.bs-timeline-row__detail a$/.test(r.selectorText))
         r.parentRule
           ? (r.parentRule as CSSGroupingRule).deleteRule(i)
           : r.parentStyleSheet?.deleteRule(i);
@@ -94,13 +106,140 @@ async function touchFloor(page: Page): Promise<number> {
 }
 
 // Heights of the holder of every trigger, read on main before the fix. They
-// must not move: the hit box is padding cancelled by an equal negative margin.
+// must not move: the hit box is an absolutely positioned ::after.
 const HOLDER_HEIGHTS: Record<string, number[]> = {
   kanban: [102],
   activity: [...Array(49).fill(65), 64],
   overview: [65, 65, 65, 65, ...Array(8).fill(40)],
   sessions: [98, 98],
 };
+
+// The shortest text each formatter tier can produce (lib/format.ts): "just now",
+// the one-digit form of every "… ago" unit, and the one-digit "for …" forms.
+const SHORT_TEXTS = [
+  'just now',
+  '5 s ago',
+  '1 min ago',
+  '1 h ago',
+  '1 d ago',
+  '1 w ago',
+  '1 mo ago',
+  '1 y ago',
+  'for 1 min',
+  'for 1 h',
+  'for 1 d',
+  'for 1 w',
+  'for 1 mo',
+  'for 1 y',
+];
+
+// Runs in the page: the width of the first matching trigger with each text set.
+function widthsFor(args: { selector: string; texts: string[] }): Record<string, number> {
+  const el = document.querySelector(args.selector);
+  const time = el?.querySelector('time');
+  if (!el || !time) throw new Error(`no time for ${args.selector}`);
+  const out: Record<string, number> = {};
+  // The hit box: the bare box, or the ::after centred on it when that grows it.
+  const hit = (e: Element) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e, '::after');
+    if (cs.content === 'none' || cs.position !== 'absolute') return r;
+    const w = Number.parseFloat(cs.width);
+    const h = Number.parseFloat(cs.height);
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    return new DOMRect(cx - w / 2, cy - h / 2, w, h);
+  };
+  for (const t of args.texts) {
+    time.textContent = t;
+    out[t] = hit(el).width;
+  }
+  return out;
+}
+
+// Runs in the page: scrolls each time to the middle of the viewport and asks
+// which element a tap 2px inside each edge of its hit box would land on.
+// `sizes` measures the points of boxes given by `sizes` (the box before the
+// rules were dropped) around the element's centre instead of its own box.
+function tapMisses(args: {
+  selector: string;
+  exempt: string;
+  sizes?: { w: number; h: number }[];
+}): { sizes: { w: number; h: number }[]; exempt: boolean[]; misses: string[][] } {
+  const sizes: { w: number; h: number }[] = [];
+  const exempt: boolean[] = [];
+  const misses: string[][] = [];
+  const hit = (e: Element) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e, '::after');
+    if (cs.content === 'none' || cs.position !== 'absolute') return r;
+    const w = Number.parseFloat(cs.width);
+    const h = Number.parseFloat(cs.height);
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    return new DOMRect(cx - w / 2, cy - h / 2, w, h);
+  };
+  const els = Array.from(document.querySelectorAll(args.selector)).filter((e) => {
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  els.forEach((el, i) => {
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = hit(el);
+    const w = args.sizes?.[i]?.w ?? r.width;
+    const h = args.sizes?.[i]?.h ?? r.height;
+    sizes.push({ w: r.width, h: r.height });
+    exempt.push(el.matches(args.exempt));
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const points: [string, number, number][] = [
+      ['left', cx - w / 2 + 2, cy],
+      ['right', cx + w / 2 - 2, cy],
+    ];
+    if (!el.matches(args.exempt))
+      points.push(['top', cx, cy - h / 2 + 2], ['bottom', cx, cy + h / 2 - 2]);
+    const missed: string[] = [];
+    for (const [side, x, y] of points) {
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !el.contains(hit)) {
+        const name = hit
+          ? `${hit.tagName.toLowerCase()}.${String(hit.className).slice(0, 40)}`
+          : 'nothing';
+        missed.push(`${side} -> ${name}`);
+      }
+    }
+    misses.push(missed);
+  });
+  return { sizes, exempt, misses };
+}
+
+// The e2e server's CLI registry is empty, so the live card is served from a stub.
+async function serveLiveCards(page: Page): Promise<void> {
+  const startedAt = new Date(Date.parse(FIXTURE_NOW_ISO) - 12 * 60_000).toISOString();
+  await page.route('**/api/cli-sessions*', (route) =>
+    route.fulfill({
+      json: {
+        state: 'ok',
+        configSource: 'default',
+        readAt: FIXTURE_NOW_ISO,
+        formatWarning: null,
+        hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+        sessions: [
+          {
+            cliSessionId: 'cli-x',
+            name: null,
+            cwdLabel: 'workspace-c',
+            status: 'working',
+            statusSince: startedAt,
+            focus: null,
+          },
+        ],
+      },
+    }),
+  );
+}
+
+const EXEMPT = '.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime';
 
 const PAGES = [
   ['kanban', '/kanban'],
@@ -123,11 +262,17 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const floor = await touchFloor(page);
         const boxes = await page.evaluate(measure, { selector: TIME, neighbours: NEIGHBOURS });
         expect(boxes.length).toBeGreaterThan(0);
+        // A hit box wider than the text must not widen the page.
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        ).toBeLessThanOrEqual(0);
         for (const b of boxes) {
-          // A timeline row (or live card) holds a neighbour's 44px box right above its
-          // time (bs-primitives.css, .bs-timeline-row__ts--meta, .bs-live-card__status), so its time
-          // keeps its text box: only its width is a floor.
-          // That title box already covers 8px of the time's own text on main.
+          // Only the meta-line time of a timeline row and the live card's status time
+          // keep their text height (bs-primitives.css): a neighbour's 44px box sits
+          // right against them (the row's title button, the card's head link), so a
+          // second 44px box would lie on it. Their width is still a floor.
           if (b.inRow) {
             expect(b.w, `${name}: a row's time is narrower than --bs-touch`).toBeGreaterThanOrEqual(
               floor,
@@ -147,6 +292,73 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         // Row heights follow the font (a wrapped line), so they are pinned for
         // the default font only.
         if (!font.css) expect(boxes.map((b) => round(b.holder))).toEqual(HOLDER_HEIGHTS[name]);
+      });
+    }
+  }
+
+  // The width floor comes from a fixed 4px on each side, so it holds only if the
+  // narrowest text the formatters can produce is already wide enough.
+  for (const font of FONT_VARIANTS) {
+    for (const [label, path, selector] of [
+      ['card time', '/kanban', TIME],
+      ['session row time', '/sessions', TIME],
+      ['live-card time', '/overview', '.bs-live-card__status .bs-reltime'],
+      ['meta-line time', '/activity', '.bs-timeline-row__ts--meta'],
+    ] as const) {
+      test(`${label}: the shortest time texts still reach --bs-touch wide${font.label}`, async ({
+        page,
+      }) => {
+        if (path === '/overview') await serveLiveCards(page);
+        await page.setViewportSize(VIEWPORTS.mobile);
+        await page.goto(path);
+        if (font.css) await page.addStyleTag({ content: font.css });
+        await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        await expect(page.locator(`${selector}:visible`).first()).toBeVisible();
+        const floor = await touchFloor(page);
+        const widths = await page.evaluate(widthsFor, { selector, texts: SHORT_TEXTS });
+        console.log(`WIDTHS ${label}${font.label}: ${JSON.stringify(widths)}`);
+        const short = Object.entries(widths)
+          .filter(([, w]) => w < floor)
+          .map(([text, w]) => `"${text}" ${w.toFixed(1)}`);
+        expect(short, `${label}: narrower than --bs-touch`).toEqual([]);
+      });
+    }
+  }
+
+  // A tap inside the grown box must land on the time: no ancestor clips it and
+  // no later sibling covers it.
+  for (const font of FONT_VARIANTS) {
+    for (const [name, path] of PAGES) {
+      test(`${name}: a tap inside every relative time's hit box lands on it${font.label}`, async ({
+        page,
+      }) => {
+        if (path === '/overview') await serveLiveCards(page);
+        await page.setViewportSize(VIEWPORTS.mobile);
+        await page.goto(path);
+        if (font.css) await page.addStyleTag({ content: font.css });
+        await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+        await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
+        const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
+        expect(real.misses.length).toBeGreaterThan(0);
+        expect(
+          real.misses.map((m, i) => (m.length ? `time ${i}: ${m.join(', ')}` : '')).filter(Boolean),
+          `${name}: a tap inside a time's box lands elsewhere`,
+        ).toEqual([]);
+        // Control: without the hit-box rules the same points miss, so the check
+        // above cannot pass by accident. Times with a grown box only: the two
+        // exempt ones have no vertical box to lose.
+        const grown = real.sizes.filter((_, i) => !real.exempt[i]);
+        if (grown.length === 0) return;
+        await page.evaluate(dropHitBoxRules);
+        const bare = await page.evaluate(tapMisses, {
+          selector: `${TIME}:not(${EXEMPT})`,
+          exempt: EXEMPT,
+          sizes: grown,
+        });
+        const missing = bare.misses.filter((m) => m.length > 0).length;
+        expect(missing, `${name}: the control misses for only ${missing} times`).toBeGreaterThan(
+          bare.misses.length / 2,
+        );
       });
     }
   }
