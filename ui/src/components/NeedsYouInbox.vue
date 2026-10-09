@@ -5,11 +5,20 @@
 // driven by props. Grouping, filtering and per-kind wording live in
 // lib/inbox.ts, where the DOM-free unit suite can hold them to the spec.
 //
-// Not built (flagged in the DS2 report): the unread dot and the
-// 600/500 read-state title weight (pattern 12 needs a read-state store no
-// DS2 criterion names), and the "Stop points" kind, which has no projected
-// row yet (§4.1: ship three kinds, file the fourth).
-import { Inbox } from '@lucide/vue';
+// On phone each row follows ds-review.html's .mrow: title and tag, then a
+// faint time line (plain: no tooltip, so no tab stop inside the row link and
+// no hit box over the title); only the first row carries the Decide button,
+// every other row is one whole-row link and the description stays
+// desktop-only.
+//
+// Read state (pattern 12): a row is unread until the viewer activates one of
+// its links or its Decide button; lib/inboxSeen.ts keeps that per viewer in
+// localStorage. Unread is a 600 title (plus an accent dot on desktop), read
+// is 500.
+//
+// The "Stop points" kind has no projected row yet (§4.1: ship three kinds,
+// file the fourth).
+import { ChevronDown, Inbox } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useViewport } from '../composables/useViewport.js';
@@ -22,7 +31,10 @@ import {
   INBOX_KIND,
   type InboxFilter,
   inboxActionTarget,
+  inboxCopy,
+  inboxMetaPrefix,
 } from '../lib/inbox.js';
+import { inboxSeenId, isSeen, loadSeen, markSeen } from '../lib/inboxSeen.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
 import EmptyState from './kit/EmptyState.vue';
@@ -52,11 +64,38 @@ const groups = computed(() => {
   return groupInbox(isPhoneWidth.value ? rows : filterInbox(rows, filter.value), props.project);
 });
 const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).length);
+// Phone heading count (mock .ph-h .cnt): the rows listed, never 0.
+const total = computed(() =>
+  props.failed
+    ? 0
+    : groupInbox(props.rows ?? [], props.project).reduce((n, g) => n + g.rows.length, 0),
+);
+
+// window.localStorage can throw on access itself (private browsing), so the
+// lookup stays inside the module's try/catch.
+const storage = {
+  getItem: (k: string) => window.localStorage.getItem(k),
+  setItem: (k: string, v: string) => window.localStorage.setItem(k, v),
+};
+const seen = ref(loadSeen(storage));
+const markRead = (id: string) => {
+  seen.value = markSeen(storage, id);
+};
+// A middle-click opens the link in a new tab and fires auxclick, never click.
+const markReadAux = (e: MouseEvent, id: string) => {
+  if (e.button === 1) markRead(id);
+};
 </script>
 
 <template>
   <section class="bs-inbox" aria-labelledby="inbox-heading">
-    <h2 id="inbox-heading" class="bs-section-title">Needs you</h2>
+    <h2
+      id="inbox-heading"
+      class="bs-section-title"
+      :class="{ 'bs-inbox__heading--count': isPhoneWidth && total > 0 }"
+    >
+      Needs you <span v-if="isPhoneWidth && total > 0" class="bs-inbox__count">{{ total }}</span>
+    </h2>
 
     <Banner v-if="failed" show-retry @retry="emit('retry')">Could not load what needs you.</Banner>
 
@@ -95,45 +134,85 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
         class="bs-inbox__group"
         :open="isPhoneWidth && gi === 0 ? true : undefined"
       >
-        <component :is="isPhoneWidth ? 'summary' : 'h3'" class="bs-inbox__group-head">
-          {{ g.label }} · {{ g.rows.length }}
-        </component>
+        <h3 v-if="!isPhoneWidth" class="bs-inbox__group-head">{{ g.label }} · {{ g.rows.length }}</h3>
+        <summary v-else class="bs-inbox__group-head">
+          {{ g.label }} <span class="bs-inbox__gcount">· {{ g.rows.length }}</span>
+          <ChevronDown class="bs-inbox__chev" :size="16" aria-hidden="true" />
+        </summary>
         <ul class="bs-inbox__list">
           <li
             v-for="(r, ri) in g.rows"
             :key="r.id"
             class="bs-inbox__row"
-            :class="{ 'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0 }"
+            :class="{
+              'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,
+              'bs-inbox__row--link': isPhoneWidth && (gi > 0 || ri > 0),
+              'bs-inbox__row--unread': !isSeen(seen, r),
+            }"
             :data-kind="r.kind"
           >
-            <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
-            <div class="bs-inbox__text">
-              <p class="bs-inbox__title">{{ r.title }}</p>
-              <Tooltip v-if="r.description" mode="describe" :text="r.description">
-                <span class="bs-inbox__desc">{{ r.description }}</span>
-              </Tooltip>
-            </div>
-            <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
-            <!-- §3.1: the single most urgent row (first group, first row) on
-                 phone gets one full-width --bs-touch-sized "Decide" action
-                 instead of the inline per-kind label; every other row keeps
-                 the small link. -->
+            <!-- Phone (ds-review.html .mrow): title and tag, then a faint line
+                 with the time (and the task name for an escalation); no
+                 description. Every row but the Decide one is the link itself. -->
             <RouterLink
-              v-if="isPhoneWidth && gi === 0 && ri === 0"
-              class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
-              :aria-label="`Decide: ${r.title}`"
+              v-if="isPhoneWidth && (gi > 0 || ri > 0)"
+              class="bs-inbox__rowlink"
               :to="inboxActionTarget(r)"
+              @click="markRead(inboxSeenId(r))"
+              @auxclick="markReadAux($event, inboxSeenId(r))"
             >
-              Decide
+              <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
+              <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+              <span class="bs-inbox__pmeta"
+                ><template v-if="inboxMetaPrefix(r)">{{ inboxMetaPrefix(r) }} · </template
+                ><RelativeTime :iso="r.createdAt" plain
+              /></span>
             </RouterLink>
-            <RouterLink
-              v-else
-              class="bs-btn bs-btn--sm bs-btn--secondary"
-              :aria-label="`${INBOX_KIND[r.kind].action}: ${r.title}`"
-              :to="inboxActionTarget(r)"
-            >
-              {{ INBOX_KIND[r.kind].action }}
-            </RouterLink>
+            <template v-else-if="isPhoneWidth">
+              <span class="bs-inbox__prow">
+                <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
+                <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+                <span class="bs-inbox__pmeta"
+                  ><template v-if="inboxMetaPrefix(r)">{{ inboxMetaPrefix(r) }} · </template
+                  ><RelativeTime :iso="r.createdAt" plain
+                /></span>
+              </span>
+              <!-- §3.1: the single most urgent row (first group, first row)
+                   gets one full-width --bs-touch-sized "Decide" action; it
+                   is the only button in the box. -->
+              <RouterLink
+                class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
+                :aria-label="`Decide: ${inboxCopy(r).title}`"
+                :to="inboxActionTarget(r)"
+                @click="markRead(inboxSeenId(r))"
+                @auxclick="markReadAux($event, inboxSeenId(r))"
+              >
+                Decide
+              </RouterLink>
+            </template>
+            <template v-else>
+              <span
+                class="bs-inbox__udot"
+                v-bind="isSeen(seen, r) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
+              ></span>
+              <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+              <div class="bs-inbox__text">
+                <p class="bs-inbox__title">{{ inboxCopy(r).title }}</p>
+                <Tooltip mode="describe" :text="inboxCopy(r).description">
+                  <span class="bs-inbox__desc">{{ inboxCopy(r).description }}</span>
+                </Tooltip>
+              </div>
+              <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
+              <RouterLink
+                class="bs-btn bs-btn--sm bs-btn--secondary"
+                :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
+                :to="inboxActionTarget(r)"
+                @click="markRead(inboxSeenId(r))"
+                @auxclick="markReadAux($event, inboxSeenId(r))"
+              >
+                {{ INBOX_KIND[r.kind].action }}
+              </RouterLink>
+            </template>
           </li>
         </ul>
       </component>

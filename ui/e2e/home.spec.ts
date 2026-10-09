@@ -16,30 +16,42 @@ const minutesAgo = (minutes: number): string =>
 
 // One row of each kind, across two projects plus the project-less group, so
 // the grouping, the per-kind tag and the per-kind action are all on screen.
+const FACTS = {
+  taskTitle: null,
+  role: null,
+  reason: null,
+  findingCount: 0,
+  findingSummaries: [],
+  statement: null,
+};
 const INBOX_ROWS = [
   {
+    ...FACTS,
     id: 'esc-1',
     kind: 'escalation',
-    title: 'Checkout flow',
-    description: 'Tester found a failing refund path; the task stays blocked until you choose.',
+    taskTitle: 'Checkout flow',
+    role: 'tester',
     project: 'black-smith',
     taskId: 'epic-1/task-3-checkout',
     createdAt: minutesAgo(5),
   },
   {
+    ...FACTS,
     id: 'waiver-1',
     kind: 'waiver',
-    title: 'Show fee',
-    description: null,
+    taskTitle: 'Show fee',
+    findingCount: 2,
+    findingSummaries: ['Fee shown before tax.', 'Rounding drifts.'],
     project: 'demo-hub',
     taskId: 'epic-9/task-2-show-fee',
+    store: { id: 'ab12cd34', label: 'demo-hub' },
     createdAt: minutesAgo(30),
   },
   {
+    ...FACTS,
     id: 'lesson-1',
     kind: 'lesson_candidate',
-    title: 'Run the full suite before a gate check',
-    description: null,
+    statement: 'Run the full suite before a gate check.',
     project: null,
     taskId: null,
     createdAt: minutesAgo(90),
@@ -323,15 +335,32 @@ test.describe('Home: Needs you inbox', () => {
       'demo-hub · 1',
       'All projects · 1',
     ]);
+    // The mock's wording: what to decide, then the task and why.
+    await expect(inbox.getByText('Decide on an escalated task')).toBeVisible();
     await expect(
-      inbox.getByText('Tester found a failing refund path', { exact: false }),
+      inbox.getByText('Tester stopped on Checkout flow; the task stays blocked until you choose'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Approve waiver for 2 minor findings')).toBeVisible();
+    await expect(
+      inbox.getByText('Show fee · review found 2 issues; merge is waiting on you'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Review a new lesson candidate')).toBeVisible();
+    await expect(
+      inbox.getByText(
+        'Run the full suite before a gate check; approving applies it to future runs',
+      ),
     ).toBeVisible();
     await expect(inbox.getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       '/tasks/epic-1%2Ftask-3-checkout',
     );
-    const reviews = inbox.getByRole('link', { name: 'Review' });
+    const reviews = inbox.getByRole('link', { name: /^Review/ });
     await expect(reviews).toHaveCount(2);
+    // A foreign store's row opens its task in that store.
+    await expect(reviews.first()).toHaveAttribute(
+      'href',
+      '/tasks/epic-9%2Ftask-2-show-fee?store=ab12cd34',
+    );
     await expect(reviews.last()).toHaveAttribute('href', '/lessons');
 
     // The filter chips narrow the list and say which one is pressed.
@@ -361,19 +390,293 @@ test.describe('Home: Needs you inbox', () => {
     await expect(inbox.locator('details.bs-inbox__group').first()).toHaveAttribute('open', '');
     await expect(inbox.locator('details.bs-inbox__group').nth(1)).not.toHaveAttribute('open', '');
 
-    // §3.1: the single most urgent row (the escalation, first group/row)
-    // gets one full-width 44px "Decide" action; every other row keeps its
-    // small per-kind link ("Open"/"Review"), not a primary button.
+    // §3.1 + ds-review.html: the single most urgent row (the escalation,
+    // first group/row) gets one full-width 44px "Decide" action; every other
+    // row is one whole-row link. Nothing shows a description.
     await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
-    const decide = inbox.getByRole('link', { name: 'Decide: Checkout flow' });
+    const decide = inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' });
     await expect(decide).toHaveClass(/bs-btn--primary/);
     await expect(decide).toHaveClass(/bs-btn--touch/);
     await expect(decide).toHaveClass(/bs-btn--block/);
-    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveCount(0);
+    expect((await decide.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(inbox.locator('.bs-inbox__desc')).toHaveCount(0);
+    await expect(inbox.getByText(/the task stays blocked|merge is waiting/)).toHaveCount(0);
 
-    // A folded group opens from its summary.
+    // The escalation's time line starts with its short task name.
+    const escRow = inbox.locator('.bs-inbox__row[data-kind="escalation"]');
+    await expect(escRow.locator('.bs-inbox__pmeta')).toHaveText(/^Checkout flow · .*ago$/);
+
+    // A folded group opens from its summary; its row is one link.
     await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
-    await expect(inbox.getByText('Show fee')).toBeVisible();
+    const waiverLink = inbox.getByRole('link', { name: /Approve waiver for 2 minor findings/ });
+    await expect(waiverLink).toBeVisible();
+    await expect(waiverLink).toHaveAttribute('href', /\/tasks\/epic-9%2Ftask-2-show-fee/);
+    await inbox.locator('summary', { hasText: 'All projects · 1' }).click();
+    await expect(inbox.getByRole('link', { name: /Review a new lesson candidate/ })).toBeVisible();
+
+    // Every visible row: a 44px+ target, a title of at most two lines, a time
+    // line, and no button or link nested in a link row.
+    for (const row of await inbox.locator('.bs-inbox__row').all()) {
+      const box = await row.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      const title = row.locator('.bs-inbox__ptitle');
+      const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect((await title.boundingBox())?.height ?? 99).toBeLessThanOrEqual(2 * lineHeight + 1);
+      await expect(row.locator('.bs-inbox__pmeta')).toContainText(/ago|now/);
+    }
+    await expect(inbox.locator('a.bs-inbox__rowlink a, a.bs-inbox__rowlink button')).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
+  test('320px: row titles wrap to at most two lines and nothing scrolls sideways', async ({
+    page,
+  }) => {
+    // The waiver title is the longest phone copy; a two-digit count is the
+    // worst case for the wrap rule.
+    await serveInbox(
+      page,
+      INBOX_ROWS.map((r) => (r.kind === 'waiver' ? { ...r, findingCount: 12 } : r)),
+    );
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('.bs-inbox__ptitle').first()).toBeVisible();
+    // Open every folded group so each title is laid out.
+    for (const g of await inbox.locator('details.bs-inbox__group').all()) {
+      await g.evaluate((el) => ((el as HTMLDetailsElement).open = true));
+    }
+    const lineHeight = await inbox
+      .locator('.bs-inbox__ptitle')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    expect(lineHeight).toBeGreaterThan(0);
+    const waiverTitle = 'Approve waiver for 12 minor findings';
+    const titles = inbox.locator('.bs-inbox__ptitle');
+    await expect(titles).toHaveCount(3);
+    await expect(titles.filter({ hasText: waiverTitle })).toHaveCount(1);
+    for (const t of await titles.all()) {
+      const h = (await t.boundingBox())?.height ?? 99;
+      expect(h).toBeLessThanOrEqual(2 * lineHeight + 1);
+      if ((await t.textContent()) === waiverTitle) {
+        // Wraps (taller than one line) and stops at two.
+        expect(h).toBeGreaterThan(lineHeight + 1);
+      }
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
+  test('375px: each group is a card with a 44px chevron summary and a total in the heading', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('#inbox-heading')).toHaveText(/^\s*Needs you\s*3\s*$/);
+    await expect(page.getByRole('heading', { name: 'Needs you 3', exact: true })).toBeVisible();
+    // Mock .ph-h: the words stay left, the count sits on the cards' right edge.
+    const firstCard = (await inbox.locator('details.bs-inbox__group').first().boundingBox()) as {
+      x: number;
+      width: number;
+    };
+    const count = (await inbox.locator('.bs-inbox__count').boundingBox()) as {
+      x: number;
+      width: number;
+    };
+    expect(Math.abs(count.x + count.width - (firstCard.x + firstCard.width))).toBeLessThanOrEqual(
+      1,
+    );
+    const textLeft = await inbox.locator('#inbox-heading').evaluate((el) => {
+      const range = document.createRange();
+      range.setStart(el.firstChild as Node, 0);
+      range.setEnd(el.firstChild as Node, 1);
+      return range.getBoundingClientRect().left;
+    });
+    expect(Math.abs(textLeft - firstCard.x)).toBeLessThanOrEqual(1);
+
+    const group = inbox.locator('details.bs-inbox__group').nth(1);
+    const summary = group.locator('summary');
+    expect((await summary.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(await summary.evaluate((el) => getComputedStyle(el).listStyleType)).toBe('none');
+    await expect(group.locator('.bs-inbox__list')).toBeAttached();
+    const chev = summary.locator('.bs-inbox__chev');
+    const turn = () => chev.evaluate((el) => getComputedStyle(el).transform);
+    const closed = await turn();
+    await summary.click();
+    await expect.poll(turn).not.toBe(closed);
+  });
+
+  test('375px: no count while loading, on error or when empty', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.route('**/api/inbox*', () => {}); // never answers: stays loading
+    await page.goto('/overview');
+    await expect(page.locator('.bs-inbox__loading')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    await page.unroute('**/api/inbox*');
+
+    await page.route('**/api/inbox*', (route) => route.abort('failed'));
+    await page.reload();
+    await expect(page.getByText('Could not load what needs you.')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    await page.unroute('**/api/inbox*');
+
+    await serveInbox(page, []);
+    await page.reload();
+    await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+  });
+
+  test('desktop: no count in the heading', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    await expect(page.locator('#inbox-heading')).toHaveText('Needs you');
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    expect(
+      await page.locator('#inbox-heading').evaluate((el) => getComputedStyle(el).display),
+    ).toBe('block');
+  });
+
+  test('desktop: rows start unread; opening one reads it, the others stay unread', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const rows = inbox.locator('.bs-inbox__row');
+    const weight = (i: number) =>
+      rows
+        .nth(i)
+        .locator('.bs-inbox__title')
+        .evaluate((el) => getComputedStyle(el).fontWeight);
+    await expect(rows).toHaveCount(3);
+    for (let i = 0; i < 3; i++) {
+      expect(await weight(i)).toBe('600');
+      await expect(rows.nth(i).getByRole('img', { name: 'Unread' })).toBeVisible();
+    }
+    await rows
+      .nth(1)
+      .getByRole('link', { name: /^Review/ })
+      .click();
+    await page.goto('/overview');
+    await expect(rows).toHaveCount(3);
+    expect(await weight(1)).toBe('500');
+    await expect(rows.nth(1).getByRole('img', { name: 'Unread' })).toHaveCount(0);
+    await expect(rows.nth(1).locator('.bs-inbox__udot')).toHaveAttribute('aria-hidden', 'true');
+    expect(await weight(0)).toBe('600');
+    expect(await weight(2)).toBe('600');
+    await expect(rows.nth(0).getByRole('img', { name: 'Unread' })).toBeVisible();
+  });
+
+  test('375px: a row opened and returned to by history still reads as read, without a reload', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const title = (kind: string) =>
+      inbox.locator(`.bs-inbox__row[data-kind="${kind}"] .bs-inbox__ptitle`);
+    const weight = (kind: string) => title(kind).evaluate((el) => getComputedStyle(el).fontWeight);
+    expect(await weight('escalation')).toBe('600');
+    await expect(inbox.locator('.bs-inbox__udot')).toHaveCount(0);
+    await inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' }).click();
+    await expect(page).not.toHaveURL(/\/overview$/);
+    // Back by the history stack: the SPA stays mounted, nothing reloads.
+    await page.evaluate(() => {
+      (window as unknown as { __kept: boolean }).__kept = true;
+    });
+    await page.goBack();
+    await expect(inbox).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __kept?: boolean }).__kept)).toBe(
+      true,
+    );
+    expect(await weight('escalation')).toBe('500');
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    expect(await weight('waiver')).toBe('600');
+    // The state outlives a reload too.
+    await page.reload();
+    expect(await weight('escalation')).toBe('500');
+  });
+
+  test('375px: a middle-click reads the row too', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const weight = (kind: string) =>
+      inbox
+        .locator(`.bs-inbox__row[data-kind="${kind}"] .bs-inbox__ptitle`)
+        .evaluate((el) => getComputedStyle(el).fontWeight);
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    expect(await weight('waiver')).toBe('600');
+    await inbox
+      .getByRole('link', { name: /Approve waiver for 2 minor findings/ })
+      .click({ button: 'middle' });
+    expect(await weight('waiver')).toBe('500');
+  });
+
+  test('a row seen before reads as unread again once a newer decision reuses its id', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const row = inbox.locator('.bs-inbox__row[data-kind="escalation"]');
+    await row.getByRole('link', { name: /^Open/ }).click();
+    await page.goto('/overview');
+    await expect(row.getByRole('img', { name: 'Unread' })).toHaveCount(0);
+    // The same task escalates again: same row id, a later createdAt.
+    await page.unroute('**/api/inbox*');
+    await serveInbox(
+      page,
+      INBOX_ROWS.map((r) => (r.kind === 'escalation' ? { ...r, createdAt: minutesAgo(1) } : r)),
+    );
+    await page.goto('/overview');
+    await expect(row.getByRole('img', { name: 'Unread' })).toBeVisible();
+  });
+
+  test('a localStorage that throws leaves every row unread and the page quiet', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    // Only the inbox's key throws: a localStorage that throws on every access
+    // takes the whole app's startup down, which is not this box's concern.
+    await page.addInitScript(() => {
+      const proto = Storage.prototype;
+      const realGet = proto.getItem;
+      const realSet = proto.setItem;
+      const guard = (key: string) => {
+        if (key.startsWith('bs.inbox.')) throw new Error('denied');
+      };
+      proto.getItem = function (this: Storage, key: string) {
+        guard(key);
+        return realGet.call(this, key);
+      };
+      proto.setItem = function (this: Storage, key: string, value: string) {
+        guard(key);
+        realSet.call(this, key, value);
+      };
+    });
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const rows = page.locator('section.bs-inbox .bs-inbox__row');
+    await expect(rows).toHaveCount(3);
+    await expect(page.getByRole('img', { name: 'Unread' })).toHaveCount(3);
+    await rows.nth(0).getByRole('link', { name: 'Open' }).click();
+    expect(errors).toEqual([]);
   });
 
   for (const [vpName, viewport] of [

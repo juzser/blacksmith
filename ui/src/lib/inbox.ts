@@ -2,6 +2,9 @@
 // grouping, filtering and per-kind wording, kept out of the .vue file so the
 // DOM-free vitest config can hold it to the spec's rules.
 import type { InboxKind, InboxRow } from './api.js';
+import { shortTaskName } from './format.js';
+import { roleLabel } from './roleLabels.js';
+import { foreignStoreId } from './storeKey.js';
 
 /** The last group's header: rows with no project (lesson candidates today). */
 export const ALL_PROJECTS_GROUP = 'All projects';
@@ -67,6 +70,58 @@ export const INBOX_KIND: Record<InboxKind, { tag: string; tone: TagTone; action:
   lesson_candidate: { tag: 'Lesson', tone: 'review', action: 'Review' },
 };
 
+/** A reason longer than this is a log line, not something to read in a row. */
+const REASON_MAX = 80;
+
+const firstSentence = (text: string): string => {
+  const first = text.trim().split(/[.!?](?:\s|$)/)[0] ?? '';
+  return first.trim();
+};
+
+/**
+ * The row's two lines, composed from the server's facts (ds-review.html's
+ * Needs-you rows): what to decide, then the task and why. A missing piece
+ * drops its clause, never leaving a placeholder.
+ */
+export function inboxCopy(row: InboxRow): { title: string; description: string } {
+  const name = row.taskId === null ? '' : shortTaskName(row.taskId, row.taskTitle);
+  if (row.kind === 'waiver') {
+    const n = row.findingCount;
+    const found = n > 1 ? `review found ${n} issues` : firstSentence(row.findingSummaries[0] ?? '');
+    const lead = [name, found].filter(Boolean).join(' · ');
+    return {
+      title: `Approve waiver for ${n} minor finding${n === 1 ? '' : 's'}`,
+      description: lead ? `${lead}; merge is waiting on you` : 'Merge is waiting on you',
+    };
+  }
+  if (row.kind === 'escalation') {
+    const stopped = row.role
+      ? `${roleLabel(row.role)} stopped${name ? ` on ${name}` : ''}`
+      : `${name || 'A task'} stopped`;
+    const why = firstSentence(row.reason ?? '');
+    return {
+      title: 'Decide on an escalated task',
+      description: `${stopped}${why && why.length <= REASON_MAX ? ` (${why})` : ''}; the task stays blocked until you choose`,
+    };
+  }
+  const rule = (row.statement ?? '').trim().replace(/\.+$/, '');
+  return {
+    title: 'Review a new lesson candidate',
+    description: rule
+      ? `${rule}; approving applies it to future runs`
+      : 'Approving applies it to future runs',
+  };
+}
+
+/**
+ * The phone meta line's lead: the short task name of an escalation (never the
+ * task's objective), null for every other row, which shows its time alone.
+ */
+export function inboxMetaPrefix(row: InboxRow): string | null {
+  if (row.kind !== 'escalation' || row.taskId === null) return null;
+  return shortTaskName(row.taskId, row.taskTitle);
+}
+
 /**
  * Where a row's action goes: the existing page for that kind. Waivers and
  * escalations are decided on the task's own page; lesson candidates on
@@ -74,7 +129,8 @@ export const INBOX_KIND: Record<InboxKind, { tag: string; tone: TagTone; action:
  */
 export function inboxActionTarget(row: InboxRow): string {
   if (row.taskId !== null && row.kind !== 'lesson_candidate') {
-    return `/tasks/${encodeURIComponent(row.taskId)}`;
+    const store = foreignStoreId(row);
+    return `/tasks/${encodeURIComponent(row.taskId)}${store ? `?store=${store}` : ''}`;
   }
   return '/lessons';
 }

@@ -87,7 +87,14 @@ import {
 import { mergeAnalytics } from './analyticsFanout.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
-import { fanOut, mergeKanban, mergeOverview, mergeRoadmap, relabelProject } from './fanout.js';
+import {
+  fanOut,
+  mergeInbox,
+  mergeKanban,
+  mergeOverview,
+  mergeRoadmap,
+  relabelProject,
+} from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
 import type { StoreEntry, StoreRef } from './stores.js';
@@ -1355,7 +1362,17 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));
 
-  app.get('/api/inbox', (c) => c.json({ rows: inboxRows(handle.db, sessionScope(c)) }));
+  app.get('/api/inbox', (c) => {
+    const project = c.req.query('project');
+    const scope = sessionScope(c);
+    return c.json({
+      rows: mergeInbox(
+        fanOut(readable(c), project, (db, p) =>
+          inboxRows(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }),
+        ),
+      ),
+    });
+  });
 
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');

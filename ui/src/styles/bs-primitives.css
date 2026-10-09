@@ -2781,8 +2781,8 @@ a:hover {
 }
 
 /* NeedsYouInbox (ds-spec.md §2.2): group header "name · count" 12px/500
-   subtle; row = tag, two-line text column, meta (hidden below 480px),
-   action. On phone the groups are <details> with a 44px summary (§3.1). */
+   subtle; row = tag, two-line text column, meta, action. On phone the
+   groups are <details> with a 44px summary (§3.1). */
 .bs-inbox {
   display: flex;
   flex-direction: column;
@@ -2815,11 +2815,90 @@ a:hover {
   margin: 0;
 }
 /* list-item, not flex: flex drops the disclosure marker, and a closed group
-   must still read as openable. One line, so line-height gives the 44px. */
+   must still read as openable. One line, so line-height gives the 44px.
+   RoadmapProjectSection reuses this summary, so it keeps this rule as is. */
 summary.bs-inbox__group-head {
   display: list-item;
   line-height: var(--bs-touch);
   cursor: pointer;
+}
+/* Phone (ds-review.html .mgroup): inside Home's Needs-you box only, the
+   <details> is the card, the summary a 44px sunken bar with the count and a
+   chevron that turns when open, the rows sit inside with no chrome of their
+   own. Desktop keeps its plain h3 + list. */
+.bs-inbox details.bs-inbox__group {
+  display: block;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  overflow: hidden;
+}
+/* .bs-inbox already gaps its children by --bs-space-3; the mock wants 8px. */
+.bs-inbox details.bs-inbox__group + details.bs-inbox__group {
+  margin-top: calc(var(--bs-space-2) - var(--bs-space-3));
+}
+.bs-inbox summary.bs-inbox__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-height: var(--bs-touch);
+  padding: 0 var(--bs-m-card-pad);
+  background: var(--bs-surface-sunken);
+  font-size: 13px;
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
+  line-height: inherit;
+  list-style: none;
+  cursor: pointer;
+}
+.bs-inbox summary.bs-inbox__group-head::-webkit-details-marker {
+  display: none;
+}
+.bs-inbox details.bs-inbox__group[open] > summary.bs-inbox__group-head {
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-inbox__gcount {
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.bs-inbox__chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--bs-text-subtle);
+  transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-inbox details.bs-inbox__group[open] > summary > .bs-inbox__chev {
+  transform: rotate(180deg);
+}
+/* Phone heading (mock .ph-h): the words left, the total on the right edge. */
+.bs-inbox__heading--count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+/* Phone heading total (mock .ph-h .cnt). */
+.bs-inbox__count {
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+/* Read state (pattern 12): the dot is desktop-only markup; both title kinds
+   go 600 while the row is unread. */
+.bs-inbox__udot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--bs-radius-full);
+  flex: none;
+  background: transparent;
+}
+.bs-inbox__row--unread .bs-inbox__udot {
+  background: var(--bs-accent);
+}
+.bs-inbox__row--unread .bs-inbox__title,
+.bs-inbox__row--unread .bs-inbox__ptitle {
+  font-weight: var(--bs-font-weight-semibold);
 }
 .bs-inbox__list {
   list-style: none;
@@ -2828,6 +2907,11 @@ summary.bs-inbox__group-head {
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
   background: var(--bs-surface);
+}
+.bs-inbox details.bs-inbox__group > .bs-inbox__list {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .bs-inbox__row {
   display: flex;
@@ -2876,10 +2960,58 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
 }
-@media (max-width: 479px) {
-  .bs-inbox__meta {
-    display: none;
-  }
+/* Phone rows (ds-review.html .mrow/.mt/.mm): a title that wraps to two lines
+   then ellipsizes, the tag at the right, a faint one-line time line below.
+   Only the phone markup uses these classes, so desktop is untouched. */
+.bs-inbox__prow,
+.bs-inbox__rowlink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--bs-space-2);
+  align-items: center;
+  min-width: 0;
+}
+.bs-inbox__prow {
+  flex: 1 1 100%;
+}
+.bs-inbox__rowlink {
+  flex: 1;
+  min-height: var(--bs-touch);
+  padding: 10px var(--bs-m-card-pad);
+  color: var(--bs-text);
+  text-decoration: none;
+  border-radius: var(--bs-radius-md);
+}
+.bs-inbox__rowlink:hover {
+  background: var(--bs-surface-selected);
+}
+.bs-inbox__rowlink:focus-visible {
+  outline: 2px solid var(--bs-focus-ring);
+  outline-offset: -2px;
+}
+.bs-inbox__row--link {
+  padding: 0;
+}
+.bs-inbox__ptitle {
+  min-width: 0;
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.bs-inbox__pmeta {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* HomePage (ds-spec.md §4.1): stacked sections, project cards in a wrap
@@ -3846,7 +3978,7 @@ summary.bs-inbox__group-head {
    component. list-item, not flex: flex drops the browser's native
    disclosure marker (it only renders for the default list-item display),
    leaving a closed row with no visible sign it opens -- the same pitfall
-   summary.bs-inbox__group-head's own comment already names. line-height
+   the summary.bs-inbox__group-head rule above avoids. line-height
    gives the --bs-touch tap target instead of min-height + flex centering. */
 .bs-task-detail__tech-details summary {
   cursor: pointer;
