@@ -263,6 +263,96 @@ test.describe('Analytics', () => {
         await expect(box).not.toContainText('No second-opinion reviews in this period.');
       }
     });
+
+    if (name === 'desktop') {
+      // ds-spec.md 2.1: every ProgressRing number outside a phone stat tile stays 14px.
+      test('desktop: the second-opinion card ring percent stays 14px', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        const size = await scope(page)
+          .locator('.bs-pnum')
+          .evaluate((el) => getComputedStyle(el).fontSize);
+        expect(size).toBe('14px');
+      });
+    }
+
+    if (name === 'phone') {
+      // ds-review.html .mstat .v: a measured value is 18px, a not-measured one 13px.
+      const valueSize = (page: Page) =>
+        scope(page)
+          .locator('.bs-analytics-page__phone-stat-value')
+          .evaluate((el) => getComputedStyle(el).fontSize);
+
+      test('phone: a measured stat value is 18px', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        expect(await valueSize(page)).toBe('18px');
+      });
+
+      // ds-review.html .pnum sets no size, so the ring percent inherits .mstat .v.
+      test('phone: the ring percent in a stat tile follows the 18px value', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        const pnum = await scope(page)
+          .locator('.bs-pnum')
+          .evaluate((el) => {
+            const cs = getComputedStyle(el);
+            return { size: cs.fontSize, weight: cs.fontWeight, line: cs.lineHeight };
+          });
+        const value = await scope(page)
+          .locator('.bs-analytics-page__phone-stat-value')
+          .evaluate((el) => getComputedStyle(el).lineHeight);
+        expect(pnum.size).toBe('18px');
+        expect(pnum.weight).toBe('400');
+        expect(pnum.line).toBe(value);
+      });
+
+      // ds-review.html .mstat .v: a 28.8px value line and tabular figures. The ring
+      // must not stretch its value box past that line, or its row grows 4px.
+      test('phone: the ring tile keeps the value line height and every value is tabular', async ({
+        page,
+      }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        const tiles = await page.locator('.bs-analytics-page__phone-stat').evaluateAll((els) =>
+          els.map((el) => {
+            const value = el.querySelector('.bs-analytics-page__phone-stat-value');
+            return {
+              top: Math.round(el.getBoundingClientRect().top),
+              tile: el.getBoundingClientRect().height,
+              value: value?.getBoundingClientRect().height ?? 0,
+              nums: value ? getComputedStyle(value).fontVariantNumeric : '',
+            };
+          }),
+        );
+        expect(tiles.length).toBeGreaterThan(2);
+        const ring = await scope(page)
+          .locator('.bs-analytics-page__phone-stat-value')
+          .evaluate((el) => el.getBoundingClientRect().height);
+        // Tokens per task sits first and carries no ring.
+        expect(ring).toBe(tiles[0]?.value);
+        const rowTop = tiles[0]?.top;
+        const row = tiles.filter((t) => t.top === rowTop);
+        expect(new Set(row.map((t) => t.tile)).size).toBe(1);
+        for (const t of tiles) expect(t.nums).toContain('tabular-nums');
+      });
+
+      test('phone: a not-measured stat value stays 13px', async ({ page }) => {
+        await stubProviderAgreement(page, []);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page)).toContainText('Not enough data yet');
+        expect(await valueSize(page)).toBe('13px');
+      });
+    }
   }
 });
 
