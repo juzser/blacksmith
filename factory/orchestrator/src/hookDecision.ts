@@ -48,7 +48,10 @@ function decideAgentDispatch(
 ): HookDecisionOutput | null {
   const type = typeof input?.subagent_type === 'string' ? input.subagent_type : '';
   // Same mapping as judge-stop: `bs-reviewer`, `blacksmith:bs-reviewer` and the
-  // bare pre-prefix names all reach the role; a foreign namespace is stripped too.
+  // bare pre-prefix names all reach the role. Another plugin's namespace
+  // (`other:reviewer`) is not a Blacksmith agent, so it is skipped, not stripped.
+  const colon = type.indexOf(':');
+  if (colon !== -1 && type.slice(0, colon) !== 'blacksmith') return null;
   const role = roleOfAgentType(type);
   if (role === null || !JUDGE_ROLE_NAMES.has(role)) return null;
   const prompt = typeof input?.prompt === 'string' ? input.prompt : '';

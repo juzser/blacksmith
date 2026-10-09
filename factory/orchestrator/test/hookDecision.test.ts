@@ -376,8 +376,7 @@ describe('Agent dispatches (judge artifact line)', () => {
     );
 
   // `bs-<role>` is the agent name; the bare names stay denied for a box whose
-  // installed plugin predates the prefix. A foreign namespace is stripped the
-  // same way judge-stop strips it (roleOfAgentType), so the two agree.
+  // installed plugin predates the prefix.
   it.each([
     'reviewer',
     'blacksmith:reviewer',
@@ -387,8 +386,6 @@ describe('Agent dispatches (judge artifact line)', () => {
     'blacksmith:bs-reviewer',
     'bs-spec-reviewer',
     'bs-security-reviewer',
-    'other:bs-reviewer',
-    'other:reviewer',
   ])('denies %s with no declared-artifact line', (type) => {
     const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
     expect(reason).toContain('Declared artifact: <absolute path>');
@@ -437,6 +434,8 @@ describe('Agent dispatches (judge artifact line)', () => {
     ['blacksmith:grader', `Declared artifact: ${abs}`],
     ['bs-reviewer', `Declared artifact: ${abs}`],
     ['blacksmith:bs-reviewer', `Declared artifact: ${abs}`],
+    ['other:reviewer', 'no line needed'],
+    ['other:bs-reviewer', 'no line needed'],
     ['bs-coder', 'no line needed'],
     ['blacksmith:bs-uiux', 'no line needed'],
     ['bs-', 'no line needed'],
