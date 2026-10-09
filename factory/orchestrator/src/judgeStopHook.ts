@@ -2,7 +2,7 @@
 /**
  * `.claude/hooks/judge-stop.sh` — the SubagentStop decision for a judge-class
  * agent (reviewer, verifier, grader, spec-reviewer, security-reviewer,
- * auditor; `JUDGE_ROLES` in dispatchLint.ts is the authoritative set).
+ * auditor; `JUDGE_ROLES` in judgeRoles.ts is the authoritative set).
  *
  * A judge can end its turn without ever writing the artifact its dispatch
  * declared, and today that gap is found only downstream, when `smith judge
@@ -11,10 +11,11 @@
  * while the declared path does not exist, allow it once it does. A harness
  * `maxTurns` cap is out of scope; this hook cannot override it.
  *
- * The declared-artifact line and its parser come from `dispatchLint.ts`,
- * never redefined — `dispatch lint` already refuses, before dispatch, any
- * judge prompt whose line is missing, relative, or mismatched, so this hook
- * only asks "does the file exist yet", never "is the line well-formed".
+ * The declared-artifact line and its parser come from
+ * `declaredArtifactLine.ts`, never redefined — in this clone the PreToolUse
+ * guard refuses, before dispatch, any judge dispatch whose prompt lacks an
+ * absolute line (and `dispatch lint` checks it against the ledger), so this
+ * hook only asks "does the file exist yet", never "is the line well-formed".
  *
  * Fail open on anything this hook cannot read: a non-judge `agent_type`, a
  * prompt with no declared-artifact line, a relative path, unparseable stdin,
@@ -43,7 +44,8 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
 import { roleOfAgentType } from './agentNames.js';
-import { JUDGE_ROLES, parseDeclaredArtifactLine } from './dispatchLint.js';
+import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
+import { JUDGE_ROLES } from './judgeRoles.js';
 
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
 
@@ -106,7 +108,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         'judge-stop: no "Declared artifact: <path>" line in this prompt; allowing ' +
-        "the stop. dispatch lint refuses this before dispatch, and judge report's " +
+        "the stop. The PreToolUse guard refuses this before dispatch in this clone, and judge report's " +
         'judges.artifact-missing catches it downstream.',
     };
   }
@@ -116,7 +118,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         `judge-stop: declared artifact "${declared}" is not an absolute path; ` +
-        'allowing the stop. dispatch lint refuses this before dispatch, and judge ' +
+        'allowing the stop. The PreToolUse guard refuses this before dispatch in this clone, and judge ' +
         "report's judges.artifact-missing catches it downstream.",
     };
   }

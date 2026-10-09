@@ -820,7 +820,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'judge dispatch',
     positionals: '',
-    flags: `--task <task-id> --role <role> --artifact <file> --model <id> [--round <n>] [--provider <name>] [--model-tier <tier>] [--kind <spec|visual>] ${EVENTS_DIR}`,
+    flags: `--task <task-id> --role <role> --artifact <absolute-path> --model <id> [--round <n>] [--provider <name>] [--model-tier <tier>] [--kind <spec|visual>] ${EVENTS_DIR}`,
     summary:
       'Declare the file a judge owes, so a turn that never came back is visible. --kind only applies to uiux, which opens a spec turn and a visual turn per task.',
   },

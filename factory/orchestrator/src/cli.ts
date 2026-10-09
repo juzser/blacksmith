@@ -65,6 +65,7 @@ import {
 } from './crossFinding.js';
 import type { TickOptions } from './daemon.js';
 import type { DbOpts } from './db/projector.js';
+import { formatDeclaredArtifactLine } from './declaredArtifactLine.js';
 import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { lintDispatchPrompt } from './dispatchLint.js';
@@ -4859,7 +4860,10 @@ async function main(): Promise<number> {
       eventContextFromFlags(flags),
       eventOptsFromFlags(flags),
     );
-    printJson(stored);
+    printJson({
+      ...stored,
+      expected_line: formatDeclaredArtifactLine(requireFlag(flags, 'artifact')),
+    });
     return 0;
   }
 

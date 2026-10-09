@@ -264,6 +264,40 @@ describe('lintDispatchPrompt — declared artifact', () => {
     expect(report.exitCode).toBe(1);
   });
 
+  it('is "relative", not "ok", when a relative line equals a relative ledger path', async () => {
+    // An old log can hold a relative declared_artifact; recordJudgeDispatch no
+    // longer writes one, so the event goes straight to the log.
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-1/task-1',
+        plan_version: 1,
+        causal_parent: `${sessionId}#0`,
+        payload: {
+          agent_role: 'reviewer',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+          round: 1,
+          declared_artifact: 'task-1.reviewer.json',
+        },
+      },
+      eventOpts(),
+    );
+    const report = await lintDispatchPrompt({
+      prompt: 'Turn budget: 15\nDeclared artifact: task-1.reviewer.json\n',
+      role: 'reviewer',
+      taskId: 'epic-1/task-1',
+      sessionId,
+      agentsDir,
+      eventOpts: eventOpts(),
+    });
+    expect(report.artifact.status).toBe('relative');
+    expect(report.exitCode).toBe(1);
+  });
+
   it('is "mismatch" and exits 1 when the declared path is absolute but wrong', async () => {
     await dispatchJudge();
     const report = await lintDispatchPrompt({

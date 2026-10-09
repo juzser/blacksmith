@@ -30,8 +30,8 @@
 #
 # What it execs is a dedicated entry point rather than the `smith` CLI, and
 # that is a performance decision with a correctness edge to it. This hook runs
-# in front of every Bash/Write/Edit/MultiEdit/NotebookEdit call an agent
-# makes, so its startup cost is paid more often than any other code here.
+# in front of every Bash/Write/Edit/MultiEdit/NotebookEdit/Agent/Task call an
+# agent makes, so its startup cost is paid more often than any other code here.
 # `dist/cli.js` is a router with 64 top-level imports, drizzle-orm among them
 # via the database layer, and loading that graph measured ~1.3s in front of
 # ~39ms of actual policy work. `dist/policyHook.js` imports only what deciding
