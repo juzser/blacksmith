@@ -20,7 +20,8 @@ const TONE_BY_STATUS: Record<EpicStatus, BarTone> = {
  * A phase's status from its own task counts. Mirrors the orchestrator's
  * `epicStatusFromCounts` (db/queries.ts) rule for an epic: all live tasks
  * done is `done`; otherwise any review or in-progress is `review` when
- * nothing is in progress or todo, else `in_progress`; otherwise `todo`.
+ * nothing is in progress or todo, else `in_progress`; otherwise some done
+ * with the rest to do is `in_progress`, and nothing done is `todo`.
  */
 export function phaseStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
   const live = tasksTotal - counts.superseded;
@@ -28,7 +29,7 @@ export function phaseStatusFromCounts(counts: StatusCounts, tasksTotal: number):
   if (counts.review > 0 || counts.inProgress > 0) {
     return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
   }
-  return 'todo';
+  return counts.done > 0 ? 'in_progress' : 'todo';
 }
 
 /**

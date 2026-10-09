@@ -510,9 +510,11 @@ export interface StatusCounts {
 /**
  * DS4 S5b — an epic's own status, derived from `statusCounts`: every task
  * done is `done`; any open task puts it at least at `in_progress`, rising to
- * `review` only when every open task is itself in the review bucket; no open
- * task and nothing done yet is `todo` (also the answer for an epic with no
- * tasks at all — see roadmapPage()'s caller doc).
+ * `review` only when every open task is itself in the review bucket; some
+ * tasks done with the rest still to do is `in_progress` even with nothing
+ * open (between waves); no open task and nothing done yet is `todo` (also
+ * the answer for an epic with no tasks at all — see roadmapPage()'s caller
+ * doc).
  */
 export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';
 

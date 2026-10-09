@@ -405,6 +405,12 @@ describe('bar tone follows status, not dates', () => {
     expect(phaseStatusFromCounts(counts({ done: 2 }), 2)).toBe('done');
   });
 
+  it('phaseStatusFromCounts reads some done with the rest to do as in progress, like the server fold', () => {
+    expect(phaseStatusFromCounts(counts({ done: 1, todo: 1 }), 2)).toBe('in_progress');
+    expect(phaseStatusFromCounts(counts({ done: 1, todo: 1, superseded: 1 }), 3)).toBe('in_progress');
+    expect(phaseStatusFromCounts(counts({ todo: 2 }), 2)).toBe('todo');
+  });
+
   it('a not-scheduled row still has no bar', () => {
     const lane = buildSwimlane([milestone({})], NOW);
     expect(lane.rows[0]?.bar).toBeNull();
