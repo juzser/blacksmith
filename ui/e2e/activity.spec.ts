@@ -599,6 +599,267 @@ test.describe('Activity', () => {
     expect(box?.height ?? 0).toBeLessThanOrEqual(lineHeight + 2);
   });
 
+  // ds-review.html (#p-activity phone note): on a phone "because of" moves
+  // into the expanded detail; the meta line stays one line ending in the time.
+  // The link was left in the meta line, where it shrank to one word per line.
+  for (const width of [375, 390]) {
+    test(`${width}px: the prompt link leaves the meta line and is a one-line tap target in the detail`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto('/activity?session=sess-fixture');
+      const row = page
+        .locator('.bs-timeline-row')
+        .filter({ has: page.locator('.bs-timeline-row__because-of') })
+        .first();
+      await expect(row).toBeVisible();
+
+      // Meta line: no link, one line, nothing past the row's right edge.
+      const metaLink = row.locator('.bs-timeline-row__meta .bs-timeline-row__because-of');
+      await expect(metaLink).toBeHidden();
+      const meta = await row.locator('.bs-timeline-row__meta').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const rowRect = (el.closest('li') as HTMLElement).getBoundingClientRect();
+        return {
+          height: r.height,
+          lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+          right: r.right,
+          rowRight: rowRect.right,
+        };
+      });
+      expect(meta.height).toBeLessThanOrEqual(meta.lineHeight + 2);
+      expect(meta.right).toBeLessThanOrEqual(meta.rowRight);
+
+      // The collapsed meta line does not mention the prompt at all.
+      await expect(row.locator('.bs-timeline-row__meta')).not.toContainText(/prompt/i, {
+        useInnerText: true,
+      });
+
+      // Detail: the link keeps its words on one line and clears --bs-touch.
+      await row.getByRole('button', { name: 'Show details' }).click();
+      // The expanded row names the prompt once: the "Because of" pair.
+      expect((await row.innerText()).match(/your prompt at/g)).toHaveLength(1);
+      await expect(row.locator('.bs-timeline-row__detail')).toContainText('Because of');
+      const link = row.locator('.bs-timeline-row__detail .bs-timeline-row__because-of');
+      await expect(link).toBeVisible();
+      const m = await link.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return {
+          height: b.height,
+          lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+          right: b.right,
+        };
+      });
+      expect(m.height).toBeGreaterThanOrEqual(43.5);
+      const text = await link.evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getClientRects().length;
+      });
+      expect(text).toBe(1);
+      expect(m.right).toBeLessThanOrEqual(width);
+    });
+  }
+
+  // ds-review.html `.emeta`: "round 2 · ... · because of <a>your prompt at
+  // 10:05</a>". The reference appears once, "because of" is plain text after
+  // a " · " separator, and only the time phrase is the link.
+  test('1280px: the dispatch meta line names the causing prompt once, as the mock spells it', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    const meta = row.locator('.bs-timeline-row__meta');
+    await expect(meta).toContainText(/ · because of your prompt at \d\d:\d\d/, {
+      useInnerText: true,
+    });
+    const link = meta.locator('.bs-timeline-row__because-of');
+    await expect(link).toHaveText(/^your prompt at \d\d:\d\d$/);
+    expect((await meta.innerText()).match(/because of/g)).toHaveLength(1);
+
+    await row.getByRole('button', { name: 'Show details' }).click();
+    // Expanded: still once in the whole row; the detail does not repeat it.
+    expect((await row.innerText()).match(/your prompt at/g)).toHaveLength(1);
+    await expect(row.locator('.bs-timeline-row__detail')).not.toContainText(/prompt/i, {
+      useInnerText: true,
+    });
+  });
+
+  // ds-review.html `.emeta a` + ds-spec.md ~:344/350: the meta-line link reads
+  // as meta text at rest (no underline, the line's colour and size), and its
+  // focus ring is 2px offset by 2px.
+  test('1280px: the meta-line prompt link matches the meta text at rest and rings on focus', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    const link = row.locator('.bs-timeline-row__meta .bs-timeline-row__because-of');
+    const styles = await link.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const meta = getComputedStyle(el.closest('.bs-timeline-row__meta') as Element);
+      return {
+        color: cs.color,
+        metaColor: meta.color,
+        deco: cs.textDecorationLine,
+        size: cs.fontSize,
+        metaSize: meta.fontSize,
+      };
+    });
+    expect(styles.color).toBe(styles.metaColor);
+    expect(styles.deco).toBe('none');
+    expect(styles.size).toBe(styles.metaSize);
+
+    await link.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(link).toBeFocused();
+    expect(await link.evaluate((el) => getComputedStyle(el).outlineOffset)).toBe('2px');
+  });
+
+  // ds-review.html `.edet a` inherits the global `a`: link colour at rest, no
+  // underline at rest. Only the meta-line copy is subtle (`.emeta a`).
+  test('375px: the detail prompt link is link-coloured at rest', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const link = row.locator('.bs-timeline-row__detail .bs-timeline-row__because-of');
+    await expect(link).toBeVisible();
+    const s = await link.evaluate((el) => {
+      const probe = document.createElement('a');
+      probe.style.color = 'var(--bs-link-text)';
+      document.body.append(probe);
+      const expected = getComputedStyle(probe).color;
+      probe.remove();
+      const cs = getComputedStyle(el);
+      return { color: cs.color, expected, deco: cs.textDecorationLine };
+    });
+    expect(s.color).toBe(s.expected);
+    expect(s.deco).toBe('none');
+  });
+
+  // A prompt-linked, non-compact row whose meta is long enough to
+  // overflow: the meta text and the link must behave as before the link
+  // existed (phone ellipsis on the clipping span; desktop inline flow).
+  async function serveLongCausedDispatch(page: import('@playwright/test').Page) {
+    const prompt = {
+      ...synthEntry('plink-prompt', 30),
+      kind: 'prompt',
+      nearestPromptId: null as string | null,
+    };
+    const dispatch = {
+      ...synthEntry('plink-dispatch', 1, { payload: { agent_role: 'coder', round: 12 } }),
+      eventType: 'dispatch_decision',
+      kind: 'Dispatched',
+      nearestPromptId: 'plink-prompt',
+      run: {
+        tokensIn: 1_234_567,
+        tokensOut: 2_345_678,
+        durationMs: 5_025_000,
+        runStatus: 'done',
+        dispatchedAt: new Date(Date.now() - 60_000).toISOString(),
+        round: 12,
+      },
+    };
+    const entries = [dispatch, prompt];
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries, nextBefore: null, newestId: dispatch.eventId } });
+    });
+  }
+
+  test('375px: a long meta on a prompt-linked row still ends in an ellipsis', async ({ page }) => {
+    await serveLongCausedDispatch(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity');
+    // A dispatch's real meta is short; narrow the line so it overflows.
+    await page.addStyleTag({ content: '.bs-timeline-row__meta { max-width: 150px; }' });
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const m = await row.locator('.bs-timeline-row__meta').evaluate((meta) => {
+      const el = meta.firstElementChild as HTMLElement;
+      const cs = getComputedStyle(el);
+      return {
+        ellipsis: cs.textOverflow,
+        display: cs.display,
+        overflowing: el.scrollWidth > el.clientWidth,
+      };
+    });
+    expect(m.ellipsis).toBe('ellipsis');
+    expect(m.display).not.toMatch(/flex/);
+    expect(m.overflowing).toBe(true);
+  });
+
+  test('1280px: the prompt link flows inline after a wrapped meta', async ({ page }) => {
+    await serveLongCausedDispatch(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity');
+    await page.addStyleTag({ content: '.bs-timeline-row__meta { max-width: 300px; }' });
+    const link = page.locator('.bs-timeline-row__meta .bs-timeline-row__because-of').first();
+    await expect(link).toBeVisible();
+    const m = await link.evaluate((el) => {
+      const text = el
+        .closest('.bs-timeline-row__meta')
+        ?.querySelector('.bs-timeline-row__meta-text');
+      if (!text) throw new Error('no meta text');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rects = Array.from(range.getClientRects());
+      const first = el.getClientRects()[0];
+      return {
+        textTop: Math.min(...rects.map((r) => r.top)),
+        textLastTop: Math.max(...rects.map((r) => r.top)),
+        linkFirstTop: first?.top ?? Number.NaN,
+      };
+    });
+    // The text wraps, and the link's first line box is the text's last line.
+    expect(m.textLastTop).toBeGreaterThan(m.textTop + 4);
+    expect(Math.abs(m.linkFirstTop - m.textLastTop)).toBeLessThanOrEqual(4);
+  });
+
+  test('1280px: the phone-only "Because of" pair stays hidden when the row is expanded', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const cause = row.locator('.bs-timeline-row__cause');
+    await expect(cause).toHaveCount(2);
+    for (const el of await cause.all()) await expect(el).toBeHidden();
+  });
+
+  // ds-review.html #ap-1: on phone "Because of" is the detail's last pair.
+  test('375px: the detail lists "Because of" last', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const last = row.locator('.bs-timeline-row__detail dt').last();
+    await expect(last).toHaveText('Because of');
+  });
+
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
   // is one line, ellipsised -- the app used to wrap a long title to 2-3
   // lines in bold. The full title stays reachable: it is still the

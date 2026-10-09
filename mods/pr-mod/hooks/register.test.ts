@@ -96,6 +96,8 @@ type World = {
   toolOut: string
   /** runs when the band beneath pr-mod is drawn, as the cache changes */
   onBand?: () => void
+  /** runs as a toast is raised, which a poll does before its cache takes the answer */
+  onToast?: () => void
 }
 
 function world(on: On): World {
@@ -132,6 +134,7 @@ function world(on: On): World {
   })
   on('ui.toast', ($, e) => {
     w.toasts.push(e.text)
+    w.onToast?.()
     return { value: undefined }
   })
   on('ui.open', ($, e) => {
@@ -351,6 +354,55 @@ describe('merge', () => {
     await ui.press({ key: 'merge:1' })
     expect(merges(w)).toEqual([])
     expect(await label(ui, 'merge:1')).toBe('Confirm merge #1 (squash)')
+  })
+
+  // A refused confirm consumes the arm; the re-arm that follows keeps a full 8 s of its own.
+  test('a re-arm after a refused confirm keeps its own full 8 s', async ($, on) => {
+    const w = world(on)
+    w.list = [raw(5)]
+    const clock = await up($, on, w)
+    await prmod($)
+    const ui = await mountPane($)
+    await ui.press({ key: 'merge:5' })
+    await clock.advance(5_000)
+    w.list = [raw(5, { headRefOid: 'oid5b' })]
+    await ui.press({ key: 'refresh' })
+    await ui.press({ key: 'merge:5' })
+    expect(w.toasts).toEqual(['#5 changed since you armed it; press Merge again'])
+    expect(await label(ui, 'merge:5')).toBe('Merge')
+    await ui.press({ key: 'merge:5' })
+    expect(await label(ui, 'merge:5')).toBe('Confirm merge #5 (squash)')
+    await clock.advance(3_000)
+    expect(await label(ui, 'merge:5')).toBe('Confirm merge #5 (squash)')
+    await clock.advance(5_000)
+    expect(await label(ui, 'merge:5')).toBe('Merge')
+    expect(merges(w)).toEqual([])
+  })
+
+  // The button is drawn from the cache; a press can land after the cache turned unmergeable.
+  test('a PR that turned unmergeable between the drawing and the press does not arm', async ($, on) => {
+    const w = world(on)
+    w.list = [raw(5), raw(6)]
+    const clock = await up($, on, w)
+    await prmod($)
+    const ui = await mountPane($)
+    w.list = [raw(5, DIRTY), raw(6)]
+    let racing: Promise<unknown> = Promise.resolve()
+    w.onToast = () => {
+      w.onToast = undefined
+      racing = ui.press({ key: 'merge:5' })
+    }
+    await ui.press({ key: 'refresh' })
+    await racing
+    await clock.settle()
+    expect(merges(w)).toEqual([])
+    // had the press armed, this one would confirm and merge
+    w.list = [raw(5), raw(6)]
+    await ui.press({ key: 'refresh' })
+    await ui.press({ key: 'merge:5' })
+    expect(merges(w)).toEqual([])
+    expect(await label(ui, 'merge:5')).toBe('Confirm merge #5 (squash)')
+    expect(w.toasts).toEqual(['#5 has a conflict with main: title 5'])
   })
 
   test('squash not allowed: the merge commit method, read once per session', async ($, on) => {
