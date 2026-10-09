@@ -10,9 +10,9 @@ import type {
   OverviewResult,
   RecentDispatch,
 } from './api.js';
-import { formatCompactNumber, pluralize, taskLabel } from './format.js';
-import { dispatchDecisionLine } from './roleLabels.js';
-import { HOME_STORE_ID, type StoreRef } from './storeKey.js';
+import { formatCompactNumber, pluralize, shortTaskName } from './format.js';
+import { roleLabel } from './roleLabels.js';
+import { foreignStoreId, HOME_STORE_ID, type StoreRef } from './storeKey.js';
 
 export interface TokenTotals {
   spent: number;
@@ -311,8 +311,18 @@ export function trackJustFinished(
   );
 }
 
-/** A decision line; when no reason was recorded, the task and round stand in. */
+/**
+ * One plain line per dispatch: "Builder started on Settings integrations",
+ * with " · round N" from the second attempt. The provider, the tier and the
+ * orchestrator's free-text reason stay on the Activity page.
+ */
 export function decisionLine(d: RecentDispatch): string {
-  const fallback = d.taskId ? `on ${taskLabel(d.taskId)}, round ${d.round}` : `round ${d.round}`;
-  return dispatchDecisionLine({ ...d, reason: d.reason ?? fallback });
+  const started = `${roleLabel(d.agentRole)} started`;
+  const line = d.taskId ? `${started} on ${shortTaskName(d.taskId)}` : started;
+  return d.round >= 2 ? `${line} · round ${d.round}` : line;
+}
+
+/** True when the rows on screen come from more than one store. */
+export function decisionsSpanStores(rows: readonly RecentDispatch[]): boolean {
+  return new Set(rows.map((r) => foreignStoreId(r) ?? '')).size > 1;
 }

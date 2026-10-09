@@ -1809,3 +1809,99 @@ test.describe('Home: Running now follows Active/All (S8)', () => {
     await shootElement(running(page), 'home-running-now-scope-unmeasured-phone-light');
   });
 });
+
+// "What the factory decided recently": one plain line per decision, the role
+// and the short task name, never the provider, the tier or the free-text reason.
+test.describe('Home: What the factory decided recently', () => {
+  const LONG_REASON = `${'internal note round 4 finding F-12 commit 0a1b2c3 '.repeat(8)}`;
+  const dispatch = (n: number, extra: Record<string, unknown> = {}) => ({
+    eventId: `d-${n}`,
+    ts: minutesAgo(n),
+    agentRole: 'coder',
+    provider: 'claude',
+    modelTier: 'mid',
+    taskId: 'epic-a/task-3-settings-integrations',
+    reason: LONG_REASON,
+    round: 1,
+    ...extra,
+  });
+  const serve = (page: Page, rows: unknown[]) =>
+    page.route('**/api/overview*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recentDispatches = rows;
+      await route.fulfill({ response, json: body });
+    });
+  const card = (page: Page) => page.locator('section[aria-labelledby="decisions-heading"]');
+
+  for (const [label, viewport] of [
+    ['1280px', VIEWPORTS.desktop],
+    ['375px', PHONE],
+  ] as const) {
+    test(`${label}: a row is one ellipsized plain line with the full text in title`, async ({
+      page,
+    }) => {
+      await serve(page, [dispatch(5), dispatch(9, { taskId: null }), dispatch(12, { round: 2 })]);
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      const rows = card(page).locator('.bs-home__decision');
+      await expect(rows).toHaveCount(3);
+      await expect(rows.nth(0)).toHaveText('Builder started on Settings integrations');
+      await expect(rows.nth(1)).toHaveText('Builder started');
+      await expect(rows.nth(2)).toHaveText('Builder started on Settings integrations · round 2');
+      await expect(rows.nth(0)).toHaveAttribute(
+        'title',
+        'Builder started on Settings integrations',
+      );
+      await expect(card(page)).not.toContainText(/internal note|Claude|standard model/);
+      const first = await rows.nth(0).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          height: el.getBoundingClientRect().height,
+          lineHeight: Number.parseFloat(cs.lineHeight),
+          overflow: cs.textOverflow,
+          nowrap: cs.whiteSpace,
+        };
+      });
+      expect(first.overflow).toBe('ellipsis');
+      expect(first.nowrap).toBe('nowrap');
+      if (viewport.width <= 640) expect(first.height).toBeGreaterThanOrEqual(44);
+      else expect(first.height).toBeLessThan(first.lineHeight * 2);
+    });
+  }
+
+  test('a minted follow-up id reads Follow-up fix, with no hex', async ({ page }) => {
+    await serve(page, [dispatch(5, { taskId: 'followup-48bb6826' })]);
+    await page.goto('/overview');
+    await expect(card(page).locator('.bs-home__decision')).toHaveText(
+      'Builder started on Follow-up fix',
+    );
+    await expect(card(page)).not.toContainText('48bb6826');
+  });
+
+  test('over two stores a foreign row names its project and opens the task in its store', async ({
+    page,
+  }) => {
+    await serve(page, [
+      dispatch(5),
+      dispatch(8, { eventId: 'f-1', store: { id: 'ab12cd34', label: 'project-b' } }),
+    ]);
+    await page.goto('/overview');
+    const rows = card(page).locator('li');
+    await expect(rows.nth(1)).toContainText('project-b');
+    await expect(rows.nth(1).locator('.bs-home__decision')).toHaveAttribute(
+      'href',
+      '/tasks/epic-a%2Ftask-3-settings-integrations?store=ab12cd34',
+    );
+    await expect(rows.nth(0).locator('.bs-home__decision')).toHaveAttribute(
+      'href',
+      '/tasks/epic-a%2Ftask-3-settings-integrations',
+    );
+  });
+
+  test('over one store no row names a project', async ({ page }) => {
+    await serve(page, [dispatch(5), dispatch(8, { eventId: 'f-2' })]);
+    await page.goto('/overview');
+    await expect(card(page).locator('.bs-home__decision-project')).toHaveCount(0);
+  });
+});

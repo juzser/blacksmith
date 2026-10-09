@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  dispatchDecisionLine,
-  providerLabel,
-  roleLabel,
-  tierLabel,
-} from '../src/lib/roleLabels.js';
+import { roleLabel, tierLabel } from '../src/lib/roleLabels.js';
 
 // factory/policies/taxonomy.yml `agent` (version 11, ~line 25-27) is the
 // closed vocabulary every dispatched role is drawn from. Hard-coded here
@@ -61,11 +56,9 @@ describe('lib/roleLabels.ts roleLabel()', () => {
   });
 });
 
-// ds-spec.md §4.1 point 3 ("What the factory decided recently"): "Checker
-// (DeepSeek, standard model): double-checking another model's review" style
-// — friendly provider + model_tier names (taxonomy.yml `provider`/
-// `model_tier`, version 11 ~line 37-38) on top of the role table above.
-describe('lib/roleLabels.ts tierLabel()/providerLabel()', () => {
+// Friendly model_tier names (taxonomy.yml `model_tier`) for the Cost & quality
+// charts, on top of the role table above.
+describe('lib/roleLabels.ts tierLabel()', () => {
   it('has an explicit, friendly label for every taxonomy.yml model tier', () => {
     expect(tierLabel('frontier')).toBe('flagship model');
     expect(tierLabel('mid')).toBe('standard model');
@@ -74,28 +67,5 @@ describe('lib/roleLabels.ts tierLabel()/providerLabel()', () => {
 
   it('falls back to the raw tier string rather than rendering blank', () => {
     expect(tierLabel('unknown-tier')).toBe('unknown-tier');
-  });
-
-  it('has an explicit, friendly label for every taxonomy.yml provider', () => {
-    expect(providerLabel('claude')).toBe('Claude');
-    expect(providerLabel('codex')).toBe('Codex');
-    expect(providerLabel('deepseek')).toBe('DeepSeek');
-  });
-
-  it('falls back to the raw provider string rather than rendering blank', () => {
-    expect(providerLabel('some-new-provider')).toBe('some-new-provider');
-  });
-});
-
-describe('lib/roleLabels.ts dispatchDecisionLine()', () => {
-  it('renders the operator-suggested "role (provider, tier): reason" style', () => {
-    expect(
-      dispatchDecisionLine({
-        agentRole: 'verifier',
-        provider: 'deepseek',
-        modelTier: 'mid',
-        reason: "double-checking another model's review",
-      }),
-    ).toBe("Finding checker (DeepSeek, standard model): double-checking another model's review");
   });
 });

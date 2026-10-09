@@ -3104,6 +3104,26 @@ summary.bs-inbox__group-head {
   flex: 1;
   min-width: 0;
   color: var(--bs-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-home__decision-project {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On phone a decision row is 44px tall: its link is a tap target, and so is
+   the time beside it, whose hit box needs the room even with no task link. */
+@media (max-width: 640px) {
+  .bs-home__decision {
+    line-height: var(--bs-touch);
+  }
+  .bs-home__line:has(> .bs-home__decision) {
+    align-items: center;
+  }
 }
 
 /* "Live sessions" (ds-spec.md §4.1 item 1a, ds-review.html `.ls-*`): one card

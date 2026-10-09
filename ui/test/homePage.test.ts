@@ -84,8 +84,9 @@ describe('HomePage.vue', () => {
     expect(TEMPLATE).not.toContain('/flow');
   });
 
-  it('words each decision through decisionLine (roleLabels)', () => {
+  it('words each decision through decisionLine and shows the full line in title', () => {
     expect(TEMPLATE).toMatch(/\{\{ decisionLine\(d\) \}\}/);
+    expect(TEMPLATE).toMatch(/:title="decisionLine\(d\)"/);
   });
 
   it('flags budget outliers with a Details link', () => {

@@ -52,12 +52,13 @@ import {
   cardShowsRing,
   cardTokensText,
   decisionLine,
+  decisionsSpanStores,
   outlierSentence,
   runningNowCards,
   trackJustFinished,
 } from '../lib/homeView.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
-import { storeKey } from '../lib/storeKey.js';
+import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 
 const POLL_MS = 5000;
 /** How many decisions the section lists; the rest live on Activity. */
@@ -169,6 +170,7 @@ const running = computed(() =>
 );
 const cards = computed(() => running.value.shown);
 const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECISIONS_SHOWN) ?? []);
+const decisionsNameProject = computed(() => decisionsSpanStores(decisions.value));
 const budget = computed(() =>
   overview.value
     ? budgetView(
@@ -431,10 +433,19 @@ function becauseOf(promptId: string) {
         />
         <ul v-else class="bs-home__list">
           <li v-for="d in decisions" :key="storeKey(d, d.eventId)" class="bs-home__line">
-            <RouterLink v-if="d.taskId" :to="`/tasks/${encodeURIComponent(d.taskId)}`" class="bs-home__decision">
+            <RouterLink
+              v-if="d.taskId"
+              :to="{
+                path: `/tasks/${encodeURIComponent(d.taskId)}`,
+                query: foreignStoreId(d) ? { store: foreignStoreId(d) } : {},
+              }"
+              class="bs-home__decision"
+              :title="decisionLine(d)"
+            >
               {{ decisionLine(d) }}
             </RouterLink>
-            <span v-else class="bs-home__decision">{{ decisionLine(d) }}</span>
+            <span v-else class="bs-home__decision" :title="decisionLine(d)">{{ decisionLine(d) }}</span>
+            <span v-if="decisionsNameProject && d.store" class="bs-home__decision-project">{{ d.store.label }}</span>
             <RelativeTime :iso="d.ts" />
           </li>
         </ul>
