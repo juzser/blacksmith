@@ -1833,6 +1833,9 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   // The error that parked a task is a `coordination.*` one above a note-only
   // severity (projector.ts); its detail is free text the logger wrote.
   const reasonByTask = new Map<string, string>();
+  // When that error was logged: the decision's own date. `tasks.updatedAt`
+  // moves on every later touch of the task, which would re-date it.
+  const parkedAtByTask = new Map<string, string>();
   if (escalatedTaskIds.length > 0) {
     const parked = inLogOrder(
       db.select().from(errors).where(eq(errors.errorGroup, 'coordination')).all(),
@@ -1840,7 +1843,10 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
     for (const e of parked) {
       for (const ref of (e.taskRef ?? '').split(',')) {
         const id = escalatedTaskIds.find((tid) => taskIdsMatch(tid, ref.trim()));
-        if (id) reasonByTask.set(id, e.detail as string);
+        if (id) {
+          reasonByTask.set(id, e.detail as string);
+          parkedAtByTask.set(id, e.ts);
+        }
       }
     }
   }
@@ -1855,7 +1861,7 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       reason: reasonByTask.get(t.taskId) ?? null,
       project: projectOf(t.project),
       taskId: t.taskId,
-      createdAt: t.updatedAt,
+      createdAt: parkedAtByTask.get(t.taskId) ?? t.updatedAt,
     });
   }
 

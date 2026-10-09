@@ -2905,6 +2905,23 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     expect(inboxRows(handle.db)[0]?.reason).toBeNull();
   });
 
+  it('createdAt is when the parking error was logged, so a later touch of the task does not re-date the decision', () => {
+    const parked = handle.db
+      .select()
+      .from(errors)
+      .where(eq(errors.errorGroup, 'coordination'))
+      .all()
+      .filter((e) => e.detail)
+      .at(-1);
+    expect(parked).toBeDefined();
+    handle.db
+      .update(tasks)
+      .set({ updatedAt: '2099-01-01T00:00:00.000Z' })
+      .where(eq(tasks.taskId, TASK_3))
+      .run();
+    expect(inboxRows(handle.db)[0]?.createdAt).toBe(parked?.ts);
+  });
+
   it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
     const rows = inboxRows(handle.db);
     expect(rows[0]?.project).toBe(DEFAULT_PROJECT);

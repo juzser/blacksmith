@@ -1,6 +1,12 @@
 // lib/inboxSeen.ts: the per-viewer set of Needs-you rows already opened.
 import { describe, expect, it } from 'vitest';
-import { INBOX_SEEN_CAP, INBOX_SEEN_KEY, loadSeen, markSeen } from '../src/lib/inboxSeen.js';
+import {
+  INBOX_SEEN_CAP,
+  INBOX_SEEN_KEY,
+  inboxSeenId,
+  loadSeen,
+  markSeen,
+} from '../src/lib/inboxSeen.js';
 
 const memory = (initial?: string) => {
   const data = new Map<string, string>();
@@ -54,5 +60,24 @@ describe('inboxSeen', () => {
     expect(seen.size).toBe(INBOX_SEEN_CAP);
     expect(seen.has('k0')).toBe(false);
     expect(seen.has(`k${INBOX_SEEN_CAP + 5}`)).toBe(true);
+  });
+
+  it('names one decision: a newer createdAt on the same row id is a different key', () => {
+    const first = { id: 'escalation:t1', createdAt: '2026-10-01T00:00:00.000Z' };
+    expect(inboxSeenId({ ...first })).toBe(inboxSeenId({ ...first }));
+    expect(inboxSeenId({ ...first, createdAt: '2026-10-02T00:00:00.000Z' })).not.toBe(
+      inboxSeenId(first),
+    );
+    expect(inboxSeenId({ id: 'waiver:t1', createdAt: first.createdAt })).not.toBe(
+      inboxSeenId(first),
+    );
+  });
+
+  it('a row seen before keeps reading as read until a newer decision arrives', () => {
+    const store = memory();
+    const old = { id: 'waiver:t1', createdAt: '2026-10-01T00:00:00.000Z' };
+    const seen = markSeen(store, inboxSeenId(old));
+    expect(seen.has(inboxSeenId(old))).toBe(true);
+    expect(seen.has(inboxSeenId({ ...old, createdAt: '2026-10-03T00:00:00.000Z' }))).toBe(false);
   });
 });

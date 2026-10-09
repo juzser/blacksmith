@@ -11,6 +11,16 @@ export interface InboxSeenStorage {
 export const INBOX_SEEN_KEY = 'bs.inbox.seen.v1';
 export const INBOX_SEEN_CAP = 200;
 
+/**
+ * The seen key of one decision. The row id names the task, not the decision
+ * (a second escalation of it, or a newer finding in its waiver batch, reuses
+ * the id), so the date the decision was raised rides along: a new decision
+ * reads as unread again, the same one stays read across polls.
+ */
+export function inboxSeenId(row: { id: string; createdAt: string }): string {
+  return `${row.id}@${row.createdAt}`;
+}
+
 function readKeys(storage: InboxSeenStorage): string[] {
   try {
     const parsed: unknown = JSON.parse(storage.getItem(INBOX_SEEN_KEY) ?? '[]');
