@@ -512,7 +512,7 @@ describe('the documented bs commands are the shipped bs commands', () => {
     for (const rel of [
       'AGENTS.md',
       'INSTALL.md',
-      '.claude/agents/spec-reviewer.md',
+      '.claude/agents/bs-spec-reviewer.md',
       'factory/specs/roadmap.md',
       // AGENTS.md's "Read on demand" table routes agents into these three. A
       // rename that misses them reaches an agent exactly as D-259 did.

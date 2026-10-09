@@ -1,5 +1,5 @@
 ---
-name: coder
+name: bs-coder
 description: Implements one task spec TDD-first inside an assigned worktree. Use to execute a single, claims-scoped coding task after research/uiux prerequisites are attached — never for open-ended or repo-wide work.
 model: sonnet
 effort: medium

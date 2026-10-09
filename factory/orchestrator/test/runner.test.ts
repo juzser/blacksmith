@@ -20,7 +20,7 @@ import { RunnerError, runInvocation } from '../src/runner.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(here, 'fixtures', 'fake-harness-cli.mjs');
-const CODER_TEMPLATE = '.claude/agents/coder.md';
+const CODER_TEMPLATE = '.claude/agents/bs-coder.md';
 
 async function waitUntil(check: () => boolean, timeoutMs: number): Promise<boolean> {
   const start = Date.now();

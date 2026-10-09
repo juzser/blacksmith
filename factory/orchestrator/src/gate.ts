@@ -740,7 +740,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * load-bearing only if something loads it.
  *
  * The verdict lives at `.structured_output` of the result envelope the grader
- * writes (.claude/agents/grader.md, "Output contract"); the envelope itself is
+ * writes (.claude/agents/bs-grader.md, "Output contract"); the envelope itself is
  * a Result and is not re-checked here. Three ways to not pass: the file is not
  * shaped like a grader result (`grader-invalid`), the run came back `dead`
  * because the task spec had no checkable acceptance criteria (`grader-fail`,

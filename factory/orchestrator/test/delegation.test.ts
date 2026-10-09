@@ -68,10 +68,10 @@ afterEach(() => {
 /** Writes a role template whose frontmatter grants exactly `tools`. */
 function template(role: string, tools: string): void {
   writeFileSync(
-    path.join(agentsDir, `${role}.md`),
+    path.join(agentsDir, `bs-${role}.md`),
     [
       '---',
-      `name: ${role}`,
+      `name: bs-${role}`,
       'description: t',
       'model: sonnet',
       `tools: ${tools}`,
@@ -174,7 +174,7 @@ describe('checkDelegationGrants', () => {
   });
 
   it('reads a scoped grant as a grant', () => {
-    template('wave-runner', 'Read, Agent(coder, tester)');
+    template('wave-runner', 'Read, Agent(bs-coder, bs-tester)');
     const report = grants(
       policyOf([{ role: 'wave-runner', mayDispatch: ['coder', 'tester'], mustOpenSession: true }]),
     );
@@ -182,12 +182,21 @@ describe('checkDelegationGrants', () => {
   });
 
   it('rejects a scoped grant whose scope disagrees with delegation.yml', () => {
-    template('wave-runner', 'Read, Agent(coder)');
+    template('wave-runner', 'Read, Agent(bs-coder)');
     const report = grants(
       policyOf([{ role: 'wave-runner', mayDispatch: ['coder', 'tester'], mustOpenSession: true }]),
     );
     expect(report.ok).toBe(false);
-    expect(details(report)).toMatch(/scopes `Agent` to \(coder\) while delegation\.yml grants/);
+    expect(details(report)).toMatch(/scopes `Agent` to \(bs-coder\) while delegation\.yml grants/);
+  });
+
+  it('flags a bare Agent(coder) scope: it names an agent that no longer exists', () => {
+    template('wave-runner', 'Read, Agent(coder)');
+    const report = grants(
+      policyOf([{ role: 'wave-runner', mayDispatch: ['coder'], mustOpenSession: true }]),
+    );
+    expect(report.ok).toBe(false);
+    expect(details(report)).toMatch(/to name `coder`, which is no agent; use `bs-coder`/);
   });
 
   it('does not read a tool that merely starts with Agent as a grant', () => {
@@ -258,7 +267,7 @@ describe('checkDelegationGrants', () => {
     template('coder', 'Read, Agent');
     const report = grants(policyOf([]));
     expect(report.ok).toBe(false);
-    expect(details(report)).toMatch(/coder\.md lists `Agent`/);
+    expect(details(report)).toMatch(/bs-coder\.md lists `Agent`/);
   });
 
   it('answers not-applicable when nobody holds Agent at all', () => {

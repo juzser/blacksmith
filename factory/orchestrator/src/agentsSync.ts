@@ -16,6 +16,7 @@
  */
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { roleOfTemplateFile, templateFileFor } from './agentNames.js';
 import { SmithError } from './errors.js';
 import { GitCommandError, runGit, runGitRaw } from './git.js';
 import { AGENTS_DIR } from './paths.js';
@@ -66,8 +67,8 @@ const MAX_TURNS_LINE = /^maxTurns:[ \t]*(\S*)[ \t]*$/m;
 
 function listRoles(agentsDir: string): string[] {
   return readdirSync(agentsDir)
-    .filter((name) => name.endsWith('.md'))
-    .map((name) => name.slice(0, -'.md'.length))
+    .map((name) => roleOfTemplateFile(name))
+    .filter((role): role is string => role !== null)
     .sort();
 }
 
@@ -116,7 +117,7 @@ function withMaxTurns(text: string, site: MaxTurnsSite, value: number): string {
  * caller like dispatchLint.ts, not a hard failure.
  */
 export function readTemplateMaxTurns(agentsDir: string, role: string): number | undefined {
-  const file = path.join(agentsDir, `${role}.md`);
+  const file = path.join(agentsDir, templateFileFor(role));
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
@@ -200,7 +201,7 @@ export function syncAgentMaxTurns(
   const requested = [...byRole.values()].sort((a, b) => a.role.localeCompare(b.role));
 
   const edits = requested.map(({ role, env: name, to }): PlannedEdit => {
-    const file = path.join(agentsDir, `${role}.md`);
+    const file = path.join(agentsDir, templateFileFor(role));
     const text = readFileSync(file, 'utf8');
     const site = findMaxTurns(text, file);
     return {
@@ -237,7 +238,7 @@ export function resetAgentMaxTurns(
   }
 
   const edits = roles.map((role): PlannedEdit => {
-    const file = path.join(agentsDir, `${role}.md`);
+    const file = path.join(agentsDir, templateFileFor(role));
     const rel = path.relative(topLevel, realpathSync(file)).split(path.sep).join('/');
     let committed: string;
     try {

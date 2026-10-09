@@ -2,6 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { roleOfTemplateFile } from '../src/agentNames.js';
 import { AGENTS_DIR } from '../src/paths.js';
 import {
   beginFence,
@@ -95,7 +96,7 @@ describe('shipped templates vs .claude/fragments (MD-5)', () => {
     for (const { file, regions } of report.templates) {
       for (const region of regions) {
         const list = carriers.get(region.name) ?? [];
-        list.push(path.basename(file, '.md'));
+        list.push(roleOfTemplateFile(file) ?? file);
         carriers.set(region.name, list);
       }
     }
@@ -226,7 +227,7 @@ describe('syncTemplates on a copy of the shipped tree', () => {
 
   it('reports a drifted region without writing, then repairs it when asked, then is idempotent', () => {
     const { agentsDir, fragmentsDir } = copyTree();
-    const graderPath = path.join(agentsDir, 'grader.md');
+    const graderPath = path.join(agentsDir, 'bs-grader.md');
     const original = readFileSync(graderPath, 'utf8');
     const drifted = original.replace(
       'you cannot read your\nown meter',
@@ -236,13 +237,13 @@ describe('syncTemplates on a copy of the shipped tree', () => {
     writeFileSync(graderPath, drifted, 'utf8');
 
     const dry = syncTemplates({ agentsDir, fragmentsDir });
-    expect(dry.drifted).toEqual([{ file: 'grader.md', name: 'token-usage' }]);
+    expect(dry.drifted).toEqual([{ file: 'bs-grader.md', name: 'token-usage' }]);
     expect(dry.written).toEqual([]);
     expect(readFileSync(graderPath, 'utf8')).toBe(drifted);
 
     const wet = syncTemplates({ agentsDir, fragmentsDir, write: true });
-    expect(wet.drifted).toEqual([{ file: 'grader.md', name: 'token-usage' }]);
-    expect(wet.written).toEqual(['grader.md']);
+    expect(wet.drifted).toEqual([{ file: 'bs-grader.md', name: 'token-usage' }]);
+    expect(wet.written).toEqual(['bs-grader.md']);
     expect(readFileSync(graderPath, 'utf8')).toBe(original);
 
     const again = syncTemplates({ agentsDir, fragmentsDir, write: true });

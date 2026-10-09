@@ -115,7 +115,7 @@ const DEFAULT_QUORUM_POLICY: QuorumPolicy = { minProviders: 2 };
 /**
  * Bridge a raw JudgeResult into the binary confirm/refute quorum needs.
  * `kind: review` has no explicit verdict field (its contract is a findings
- * array, .claude/agents/reviewer.md) — presence of any finding IS the
+ * array, .claude/agents/bs-reviewer.md) — presence of any finding IS the
  * claim being judged ("this task has a real blocking issue"), so a
  * non-empty array reads as `confirm`. `kind: verify`/`plan-critique` carry
  * an explicit judge-verdict.schema.json object instead.

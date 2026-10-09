@@ -1,5 +1,5 @@
 ---
-name: reviewer
+name: bs-reviewer
 description: Fresh-context, read-only diff review after the test gate — never the coder's own session. Use once a task's tests are green, before merge queue admission.
 model: sonnet
 effort: medium

@@ -42,6 +42,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
+import { roleOfAgentType } from './agentNames.js';
 import { JUDGE_ROLES, parseDeclaredArtifactLine } from './dispatchLint.js';
 
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
@@ -80,8 +81,10 @@ export function decideJudgeStop(
   input: SubagentStopHookInput,
   promptText: string | null,
 ): JudgeStopDecision {
-  const agentType = input.agent_type;
-  if (agentType === undefined || !JUDGE_ROLE_SET.has(agentType)) {
+  // `bs-reviewer`, `blacksmith:bs-reviewer` and (transition) the bare old names
+  // all map to the role; a name that maps to nothing is not a judge.
+  const role = input.agent_type === undefined ? null : roleOfAgentType(input.agent_type);
+  if (role === null || !JUDGE_ROLE_SET.has(role)) {
     // Not one of the six judge roles -- a coder's turn carries no declared
     // artifact at all, so there is nothing for this hook to check.
     return { decision: 'allow' };

@@ -1,5 +1,5 @@
 ---
-name: uiux
+name: bs-uiux
 description: Writes a UI spec grounded in the project's design system before any UI-affecting task is coded, and runs the post-test visual pass against the tester's screenshots. Use pre-code on any epic with a UI-affecting acceptance criterion, and after tests when a UI task has both a spec and screenshots.
 model: sonnet
 effort: medium
@@ -88,7 +88,7 @@ without re-deriving component choices. Per screen or component:
   apply here, and which the project's own design system has no component
   for yet (a deviation needing planner sign-off, not a silent invention);
   desktop and mobile viewport behavior, matching the tester's screenshot
-  contract (tester.md).
+  contract (bs-tester.md).
 - **a11y notes** — WCAG AA is an `S2-major` review gate downstream
   (severity.yml), and so now is a spec'd layout broken or clipped at a
   required viewport, a touch target under the project's declared minimum
@@ -119,7 +119,7 @@ substitute a universal numeric default of your own for one the project
 doesn't declare.
 
 List every screenshot you looked at before the verdict. The tester's
-contract is desktop + mobile, light + dark, max 4 per feature (tester.md) —
+contract is desktop + mobile, light + dark, max 4 per feature (bs-tester.md) —
 an incomplete set (a missing theme or viewport) is itself a finding
 ("dark/mobile screenshots missing, pass incomplete"), never a silent pass on
 whatever happened to be there.
@@ -148,7 +148,7 @@ even when the glyph it sits on looks fine — the hit area a project's
 design system or framework grants an element routinely extends past the
 glyph, and only a measurement catches a shortfall. Do not judge target
 size from the screenshot: read the tester's measured touch-target report
-instead (tester.md) and fold any element below the project's declared
+instead (bs-tester.md) and fold any element below the project's declared
 minimum (WCAG 2.2's 24x24 CSS px target size, AA, only as the fallback
 when the project declares none) into the accessibility dimension as
 `S2-major`, the same severity a contrast or layout failure gets.

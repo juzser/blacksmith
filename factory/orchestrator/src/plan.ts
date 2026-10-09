@@ -627,7 +627,7 @@ export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidatio
     for (const field of unreadTaskBudgetFields(budget)) {
       errors.push({
         path: `/tasks/${t.task_id}/budget/${field}`,
-        message: `Budget field "${field}" has no mechanical reader: nothing in the factory can enforce it per task, so declaring it here states a limit the task will never be held to. The turn ceiling is the role template's maxTurns (.claude/agents/<role>.md), enforced by the harness per role; the dispatch prompt restates that number (agent-interviews.md M-4, corrected 2026-09-11).`,
+        message: `Budget field "${field}" has no mechanical reader: nothing in the factory can enforce it per task, so declaring it here states a limit the task will never be held to. The turn ceiling is the role template's maxTurns (.claude/agents/bs-<role>.md), enforced by the harness per role; the dispatch prompt restates that number (agent-interviews.md M-4, corrected 2026-09-11).`,
       });
     }
     // D-7: the ref is what result.schema.json defers structured_output's shape

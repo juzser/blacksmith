@@ -26,6 +26,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { agentNameFor, roleOfTemplateFile, templateFileFor } from './agentNames.js';
 import {
   DISPATCH_EVENT_TYPE,
   ERROR_EVENT_TYPE,
@@ -154,12 +155,12 @@ export interface DelegationGrantsOptions {
  */
 const AGENT_TOOL = /\bAgent\b/;
 
-/** The roles a scoped grant names, e.g. `Agent(coder, tester)`. */
+/** The agents a scoped grant names, e.g. `Agent(bs-coder, bs-tester)`. */
 const AGENT_SCOPE = /\bAgent\s*\(([^)]*)\)/;
 
 /** The raw `tools:` line of a role template's frontmatter. Null when there is no template. */
 function templateTools(dir: string, role: string): string | null {
-  const file = path.join(dir, `${role}.md`);
+  const file = path.join(dir, templateFileFor(role));
   if (!existsSync(file)) return null;
   return toolsOf(readFileSync(file, 'utf8'));
 }
@@ -233,11 +234,11 @@ export function checkDelegationGrants(
     const tools = templateTools(dir, grant.role);
     if (tools === null) {
       problems.push(
-        `\`${grant.role}\` holds a grant but ships no template at ${path.join(path.basename(dir), `${grant.role}.md`)}, so the grant reaches no agent (D-191).`,
+        `\`${grant.role}\` holds a grant but ships no template at ${path.join(path.basename(dir), templateFileFor(grant.role))}, so the grant reaches no agent (D-191).`,
       );
     } else if (!holdsAgent(tools)) {
       problems.push(
-        `${grant.role}.md does not list \`Agent\` in \`tools\`, so the grant reaches no agent (D-191).`,
+        `${templateFileFor(grant.role)} does not list \`Agent\` in \`tools\`, so the grant reaches no agent (D-191).`,
       );
     } else {
       // A scoped grant is enforced by the harness at dispatch time and this
@@ -245,11 +246,17 @@ export function checkDelegationGrants(
       // of both: the file an operator reads is not the file that binds.
       const scope = agentScope(tools);
       if (scope !== null) {
-        const declared = [...grant.mayDispatch].sort().join(', ');
+        for (const name of scope) {
+          if (name.startsWith('bs-')) continue;
+          problems.push(
+            `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no agent; use \`${agentNameFor(name)}\`. The harness enforces the agent names, and the bare role no longer exists as one.`,
+          );
+        }
+        const declared = [...grant.mayDispatch].map(agentNameFor).sort().join(', ');
         const scoped = [...scope].sort().join(', ');
         if (declared !== scoped) {
           problems.push(
-            `${grant.role}.md scopes \`Agent\` to (${scoped}) while delegation.yml grants (${declared}). The template is what the harness enforces and the policy is what the audits read, so a disagreement is a rule nobody applies.`,
+            `${templateFileFor(grant.role)} scopes \`Agent\` to (${scoped}) while delegation.yml grants (${declared}). The template is what the harness enforces and the policy is what the audits read, so a disagreement is a rule nobody applies.`,
           );
         }
       }
@@ -269,11 +276,13 @@ export function checkDelegationGrants(
   // The converse of D-191, and the one that actually widens the topology: a
   // template may hand itself `Agent` without any grant naming it, and nothing
   // else in the repo reads the frontmatter closely enough to notice.
-  const templates = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.md')) : [];
+  const templates = existsSync(dir)
+    ? readdirSync(dir).filter((f) => roleOfTemplateFile(f) !== null)
+    : [];
   const granted = new Set(policy.grants.map((g) => g.role));
   let ungrantedHolders = 0;
   for (const file of templates) {
-    const role = path.basename(file, '.md');
+    const role = roleOfTemplateFile(file) as string;
     if (granted.has(role)) continue;
     if (!holdsAgent(toolsOf(readFileSync(path.join(dir, file), 'utf8')))) continue;
     ungrantedHolders += 1;

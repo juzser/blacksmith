@@ -14,7 +14,7 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const RUN_CLI_PATH = path.join(REPO_ROOT, 'factory', 'orchestrator', 'dist', 'run-cli.js');
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(here, 'fixtures', 'fake-harness-cli.mjs');
-const CODER_TEMPLATE = '.claude/agents/coder.md';
+const CODER_TEMPLATE = '.claude/agents/bs-coder.md';
 
 function runSmithRun(
   args: string[],

@@ -10,7 +10,7 @@ import { REPO_ROOT } from '../src/paths.js';
 // so it needs a pointer into the section rather than a second copy.
 
 const SKILL_MD_PATH = path.join(REPO_ROOT, '.claude/skills/bs/SKILL.md');
-const SCRIBE_MD_PATH = path.join(REPO_ROOT, '.claude/agents/scribe.md');
+const SCRIBE_MD_PATH = path.join(REPO_ROOT, '.claude/agents/bs-scribe.md');
 
 const SECTION_HEADING = '## Talking to the operator';
 

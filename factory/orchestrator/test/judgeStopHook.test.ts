@@ -85,6 +85,23 @@ afterEach(() => {
 });
 
 describe('decideJudgeStop (pure decision)', () => {
+  it.each(['bs-reviewer', 'blacksmith:bs-reviewer', 'reviewer', 'blacksmith:reviewer'])(
+    'blocks %s when the declared artifact is missing',
+    (agentType) => {
+      const artifactPath = path.join(root, 'missing.reviewer.json');
+      const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;
+      const decision = decideJudgeStop(stdinFixture({ agent_type: agentType }), prompt);
+      expect(decision.decision).toBe('block');
+    },
+  );
+
+  it('allows bs-coder, which is no judge', () => {
+    const prompt = `Role: coder.\nDeclared artifact: ${path.join(root, 'nope.json')}\n`;
+    expect(decideJudgeStop(stdinFixture({ agent_type: 'bs-coder' }), prompt).decision).toBe(
+      'allow',
+    );
+  });
+
   it('blocks a judge whose declared artifact does not exist yet', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;

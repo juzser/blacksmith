@@ -588,10 +588,10 @@ describe('writeRootCheck', () => {
     await mkdir(path.join(repoDir, 'state', 'lessons'), { recursive: true });
     await writeFile(path.join(repoDir, 'state', 'lessons', 'epic-1.candidates.json'), '[]\n');
     await mkdir(path.join(repoDir, '.claude', 'agents'), { recursive: true });
-    await writeFile(path.join(repoDir, '.claude', 'agents', 'coder.md'), 'rewritten\n');
+    await writeFile(path.join(repoDir, '.claude', 'agents', 'bs-coder.md'), 'rewritten\n');
 
     const result = writeRootCheck(repoDir, ['state/lessons/**']);
-    expect(result.outOfClaim).toEqual(['.claude/agents/coder.md']);
+    expect(result.outOfClaim).toEqual(['.claude/agents/bs-coder.md']);
     expect(result.violation?.error).toBe('contract.write-root-violation');
   });
 });

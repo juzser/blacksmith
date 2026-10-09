@@ -14,7 +14,7 @@ import { AGENTS_DIR } from '../src/paths.js';
 function template(role: string, maxTurns: number): string {
   return [
     '---',
-    `name: ${role}`,
+    `name: bs-${role}`,
     `description: The ${role} role. maxTurns: is mentioned here too.`,
     'model: sonnet',
     'effort: medium',
@@ -36,16 +36,16 @@ beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'smith-agents-sync-'));
   agentsDir = path.join(root, '.claude', 'agents');
   mkdirSync(agentsDir, { recursive: true });
-  writeFileSync(path.join(agentsDir, 'coder.md'), template('coder', 40));
-  writeFileSync(path.join(agentsDir, 'spec-reviewer.md'), template('spec-reviewer', 15));
-  writeFileSync(path.join(agentsDir, 'wave-runner.md'), template('wave-runner', 60));
+  writeFileSync(path.join(agentsDir, 'bs-coder.md'), template('coder', 40));
+  writeFileSync(path.join(agentsDir, 'bs-spec-reviewer.md'), template('spec-reviewer', 15));
+  writeFileSync(path.join(agentsDir, 'bs-wave-runner.md'), template('wave-runner', 60));
 });
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const read = (role: string) => readFileSync(path.join(agentsDir, `${role}.md`), 'utf8');
+const read = (role: string) => readFileSync(path.join(agentsDir, `bs-${role}.md`), 'utf8');
 
 describe('maxTurnsEnvName', () => {
   it('upper-cases the role and turns - into _', () => {
@@ -67,6 +67,12 @@ describe('syncAgentMaxTurns', () => {
     expect(after).toBe(before.replace('maxTurns: 40\n', 'maxTurns: 55\n'));
     // Other roles untouched.
     expect(read('spec-reviewer')).toBe(template('spec-reviewer', 15));
+  });
+
+  it('BS_MAXTURNS_CODER rewrites bs-coder.md, never BS_MAXTURNS_BS_CODER', () => {
+    const report = syncAgentMaxTurns({ agentsDir, env: { BS_MAXTURNS_CODER: '61' } });
+    expect(report.changes[0]).toMatchObject({ role: 'coder', env: 'BS_MAXTURNS_CODER', to: 61 });
+    expect(readFileSync(path.join(agentsDir, 'bs-coder.md'), 'utf8')).toContain('maxTurns: 61\n');
   });
 
   it('maps hyphenated roles through the env name', () => {
@@ -133,7 +139,7 @@ describe('syncAgentMaxTurns', () => {
   });
 
   it('refuses a template with no frontmatter maxTurns line', () => {
-    writeFileSync(path.join(agentsDir, 'coder.md'), '---\nname: coder\n---\n\nmaxTurns: 3\n');
+    writeFileSync(path.join(agentsDir, 'bs-coder.md'), '---\nname: bs-coder\n---\n\nmaxTurns: 3\n');
     expect(() => syncAgentMaxTurns({ agentsDir, env: { SMITH_MAXTURNS_CODER: '5' } })).toThrow(
       /maxTurns/,
     );
@@ -206,7 +212,7 @@ describe('resetAgentMaxTurns', () => {
 
   it('touches only the maxTurns line, keeping other local edits', () => {
     const edited = template('coder', 70).replace('# Body', '# Body, edited locally');
-    writeFileSync(path.join(agentsDir, 'coder.md'), edited);
+    writeFileSync(path.join(agentsDir, 'bs-coder.md'), edited);
     resetAgentMaxTurns({ agentsDir });
     expect(read('coder')).toBe(edited.replace('maxTurns: 70\n', 'maxTurns: 40\n'));
   });
@@ -229,7 +235,7 @@ describe('the shipped templates', () => {
     const report = syncAgentMaxTurns({ agentsDir: AGENTS_DIR, env: {}, dryRun: true });
     expect(report.roles.length).toBeGreaterThan(0);
     for (const role of report.roles) {
-      const text = readFileSync(path.join(AGENTS_DIR, `${role}.md`), 'utf8');
+      const text = readFileSync(path.join(AGENTS_DIR, `bs-${role}.md`), 'utf8');
       expect(text.split('---')[1]).toMatch(/\nmaxTurns: \d+\n/);
     }
   });
@@ -240,12 +246,12 @@ describe('the shipped templates', () => {
     // the real shipped template into a scratch agentsDir, actually write
     // (not dry-run) a new maxTurns value, and assert the diff is exactly
     // that one line -- the hooks block, and everything else, unchanged.
-    const before = readFileSync(path.join(AGENTS_DIR, 'reviewer.md'), 'utf8');
+    const before = readFileSync(path.join(AGENTS_DIR, 'bs-reviewer.md'), 'utf8');
     const scratchDir = mkdtempSync(path.join(tmpdir(), 'smith-agents-sync-hooks-'));
     try {
       const scratchAgentsDir = path.join(scratchDir, '.claude', 'agents');
       mkdirSync(scratchAgentsDir, { recursive: true });
-      writeFileSync(path.join(scratchAgentsDir, 'reviewer.md'), before);
+      writeFileSync(path.join(scratchAgentsDir, 'bs-reviewer.md'), before);
       const beforeMaxTurns = /\nmaxTurns: (\d+)\n/.exec(before)?.[1];
       expect(beforeMaxTurns).toBeDefined();
       const newValue = String(Number(beforeMaxTurns) + 1);
@@ -265,7 +271,7 @@ describe('the shipped templates', () => {
         },
       ]);
 
-      const after = readFileSync(path.join(scratchAgentsDir, 'reviewer.md'), 'utf8');
+      const after = readFileSync(path.join(scratchAgentsDir, 'bs-reviewer.md'), 'utf8');
       expect(after).toBe(
         before.replace(`maxTurns: ${beforeMaxTurns}\n`, `maxTurns: ${newValue}\n`),
       );

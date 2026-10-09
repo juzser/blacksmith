@@ -1,5 +1,5 @@
 ---
-name: planner
+name: bs-planner
 description: Turns an approved epic goal into an immutable plan of task specs. Use to draft or re-plan an epic, decompose a backlog, or render a planner verdict against acceptance criteria — never to write code.
 model: opus
 effort: xhigh

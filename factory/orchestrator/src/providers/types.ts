@@ -1,7 +1,7 @@
 // Provider-agnostic judge contract (architecture §6): "any model that can
 // honor the I/O contract can serve" — a JudgeRequest is a plain diff+spec+
 // prior-findings prompt already assembled by the caller from
-// .claude/agents/{reviewer,verifier}.md's own contract, plus a schema
+// .claude/agents/bs-{reviewer,verifier}.md's own contract, plus a schema
 // name the extracted response is validated against. Transports never see
 // more than `prompt` — the trust boundary (architecture §6 "External
 // providers judge; they never gain write access... their findings are

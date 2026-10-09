@@ -11,6 +11,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { roleOfTemplateFile, templateFileFor } from '../src/agentNames.js';
 import { syncAgentMaxTurns } from '../src/agentsSync.js';
 import { BUDGET_ENV_VARS, type BudgetPolicy, parseBudgetPolicy } from '../src/budgets.js';
 import { AGENTS_DIR, BUDGETS_POLICY_PATH, REPO_ROOT } from '../src/paths.js';
@@ -125,7 +126,7 @@ describe('.env.example per-tier budget knobs', () => {
 describe('.env.example maxTurns knobs', () => {
   const templates = readdirSync(AGENTS_DIR)
     .filter((f) => f.endsWith('.md'))
-    .map((f) => f.slice(0, -'.md'.length))
+    .flatMap((f) => roleOfTemplateFile(f) ?? [])
     .sort();
 
   it('has exactly one BS_MAXTURNS_* line per role template, and none for a non-role', () => {
@@ -138,7 +139,7 @@ describe('.env.example maxTurns knobs', () => {
 
   it("carries each role at its template's committed maxTurns", () => {
     for (const role of templates) {
-      const text = readFileSync(path.join(AGENTS_DIR, `${role}.md`), 'utf8');
+      const text = readFileSync(path.join(AGENTS_DIR, templateFileFor(role)), 'utf8');
       const committed = /^maxTurns: (\d+)$/m.exec(text.split(/^---$/m)[1] ?? '')?.[1];
       const line = maxTurnsLines.find(
         (a) => a.name === `${MAXTURNS}${role.toUpperCase().replaceAll('-', '_')}`,
