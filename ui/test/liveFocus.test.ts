@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  afterRead,
   liveMarks,
   markFor,
   matchNow,
@@ -224,5 +225,22 @@ describe('orderLive', () => {
   it('returns the input untouched without marks', () => {
     const col = [task('epic-a/p'), task('epic-a/x')];
     expect(orderLive(col, null)).toBe(col);
+  });
+});
+
+describe('afterRead', () => {
+  const s = [card([epic()])];
+
+  it('takes a good read and clears the miss count', () => {
+    expect(afterRead(null, 1, s)).toEqual({ sessions: s, misses: 0 });
+  });
+
+  it('keeps the last good sessions for one failed read, then clears them', () => {
+    const first = afterRead(s, 0, 'failed');
+    expect(first).toEqual({ sessions: s, misses: 1 });
+    expect(afterRead(first.sessions, first.misses, 'failed')).toEqual({
+      sessions: null,
+      misses: 2,
+    });
   });
 });

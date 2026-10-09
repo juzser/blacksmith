@@ -118,3 +118,17 @@ export function orderLive<T extends MarkTask>(tasks: T[], marks: LiveMarks | nul
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .map((x) => x.t);
 }
+
+/**
+ * What a poll leaves behind: a good read replaces the sessions; a failed one
+ * keeps the last good sessions for one cycle, then drops them to unknown
+ * (null) rather than leave stale marks on the board.
+ */
+export function afterRead(
+  prev: LiveCard[] | null,
+  misses: number,
+  read: LiveCard[] | 'failed',
+): { sessions: LiveCard[] | null; misses: number } {
+  if (read !== 'failed') return { sessions: read, misses: 0 };
+  return { sessions: misses === 0 ? prev : null, misses: misses + 1 };
+}
