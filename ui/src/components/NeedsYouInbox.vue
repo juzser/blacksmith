@@ -6,9 +6,10 @@
 // lib/inbox.ts, where the DOM-free unit suite can hold them to the spec.
 //
 // On phone each row follows ds-review.html's .mrow: title and tag, then a
-// faint time line (plain: no tooltip, so no tab stop inside the row link and no
-// hit box over the title); only the first row carries a (Decide) button, every other
-// row is one whole-row link and the description stays desktop-only.
+// faint time line (plain: no tooltip, so no tab stop inside the row link and
+// no hit box over the title); only the first row carries the Decide button,
+// every other row is one whole-row link and the description stays
+// desktop-only.
 //
 // Not built (flagged in the DS2 report): the unread dot and the
 // 600/500 read-state title weight (pattern 12 needs a read-state store no
@@ -122,7 +123,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             <RouterLink
               v-if="isPhoneWidth && (gi > 0 || ri > 0)"
               class="bs-inbox__rowlink"
-                            :to="inboxActionTarget(r)"
+              :to="inboxActionTarget(r)"
             >
               <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>

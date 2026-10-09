@@ -2781,7 +2781,8 @@ a:hover {
 }
 
 /* NeedsYouInbox (ds-spec.md §2.2): group header "name · count" 12px/500
-   subtle; row = tag, two-line text column, meta, action. On phone the groups are <details> with a 44px summary (§3.1). */
+   subtle; row = tag, two-line text column, meta, action. On phone the
+   groups are <details> with a 44px summary (§3.1). */
 .bs-inbox {
   display: flex;
   flex-direction: column;
