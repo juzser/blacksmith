@@ -22,10 +22,12 @@ import Skeleton from '../components/kit/Skeleton.vue';
 import { useActiveScope } from '../composables/useActiveScope.js';
 import { useActivityScope } from '../composables/useActivityScope.js';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { useLiveFocus } from '../composables/useLiveFocus.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
+import { isActiveEpic } from '../lib/activeScope.js';
 import {
   type ActiveScopeResult,
   fetchKanban,
@@ -43,7 +45,8 @@ import {
   retainedEpic,
 } from '../lib/epicPicker.js';
 import { pluralize } from '../lib/format.js';
-import { visibleTaskCount } from '../lib/kanban.js';
+import { epicKeyForTask, visibleTaskCount } from '../lib/kanban.js';
+import { liveMarks, waitingLines } from '../lib/liveFocus.js';
 import type { StoreRef } from '../lib/storeKey.js';
 
 const router = useRouter();
@@ -55,6 +58,7 @@ const { sessionScope, sessionKey } = useSessionContext();
 const { isPhoneWidth } = useViewport();
 const { scope: mode, scopeTo } = useActivityScope();
 const { scope: activeScope, settled: activeScopeSettled } = useActiveScope();
+const { sessions: liveSessions } = useLiveFocus();
 
 // A failed read counts as unmeasured, never as "nothing is active"; null only
 // while the first answer is still in flight (same rule as SessionsPage).
@@ -113,15 +117,20 @@ const offered = computed(() =>
 );
 // "All epics" stays whenever Active has nothing to offer, so the select always
 // names what the board shows instead of going blank.
+// Under Active the first option is every live epic at once, the default.
 const pickerOptions = computed(() =>
-  epicOptions(offered.value, idleEpics.value, !activeView() || offered.value.length === 0),
+  epicOptions(
+    offered.value,
+    idleEpics.value,
+    true,
+    activeView() && offered.value.length > 0 ? 'All live epics' : 'All epics',
+  ),
 );
 
-// Active has no "All epics" choice while it offers something, so a selection it
-// does not offer (including the default) moves to the `?epic=` pin when that is
-// offered, else to the first epic. With nothing offered the picker lists only
-// "All epics", so that is the selection: the select never holds a value it has
-// no option for.
+// Under Active "All live epics" (the empty selection) is a valid choice unless
+// the URL still pins an offered epic; any selection it does not offer moves to
+// that pin when it is offered, else back to "All live epics". With nothing offered the picker lists
+// only "All epics", so the select never holds a value it has no option for.
 function resolveSelection() {
   if (!activeView()) return;
   if (offered.value.length === 0) {
@@ -132,7 +141,8 @@ function resolveSelection() {
   }
   if (offered.value.includes(selectedEpic.value)) return;
   const pin = pinnedEpic();
-  selectedEpic.value = offered.value.includes(pin) ? pin : (offered.value[0] ?? '');
+  if (selectedEpic.value === ALL_EPICS && !offered.value.includes(pin)) return;
+  selectedEpic.value = offered.value.includes(pin) ? pin : ALL_EPICS;
 }
 
 async function loadBoard() {
@@ -212,12 +222,38 @@ const scopePending = computed(() => mode.value === 'active' && live() === null);
 const unmeasuredNote = computed(() => mode.value === 'active' && live()?.measured === false);
 
 const milestoneFilter = ref<string | null>(null);
+// "All live epics" fetches every epic, so the board keeps only the cards of
+// epics a live session drives (same store + epic rule as the picker).
+const liveEpicsOnly = computed(
+  () => activeView() && selectedEpic.value === ALL_EPICS && offered.value.length > 0,
+);
 const displayedColumns = computed(() => {
-  if (!milestoneFilter.value) return columns.value ?? [];
+  const keepLive = liveEpicsOnly.value;
+  const keepMilestone = milestoneFilter.value;
+  if (!keepMilestone && !keepLive) return columns.value ?? [];
   return (columns.value ?? []).map((c) => ({
     ...c,
-    tasks: c.tasks.filter((t) => t.milestoneId === milestoneFilter.value),
+    tasks: c.tasks.filter(
+      (t) =>
+        (!keepMilestone || t.milestoneId === keepMilestone) &&
+        (!keepLive || isActiveEpic(live(), t, epicKeyForTask(t.taskId) ?? '')),
+    ),
   }));
+});
+
+// Marks need a measured Active view and a settled board; unmeasured and
+// loading show none, never a false "nothing".
+const marks = computed(() =>
+  activeView() && !loading.value && liveSessions.value ? liveMarks(liveSessions.value) : null,
+);
+const waiting = computed(() => waitingLines(marks.value, boardTasks.value));
+// With more than one live epic on the board the epics are the columns.
+const defaultGroupBy = computed(() => {
+  if (!liveEpicsOnly.value) return null;
+  const epicIds = new Set(
+    boardTasks.value.map((t) => `${t.store?.id ?? ''}:${epicKeyForTask(t.taskId)}`),
+  );
+  return epicIds.size > 1 ? 'epic' : null;
 });
 
 // Not a plain sum over the payload: the server groups by raw task_status and
@@ -233,6 +269,14 @@ const taskCount = computed(() => visibleTaskCount(displayedColumns.value));
 // the server, so the board's input is simply every task across them.
 const boardTasks = computed(() => displayedColumns.value.flatMap((c) => c.tasks));
 
+// Picking an epic is written to `?epic=` (and "All live epics" clears it), so a
+// reload or a shared link lands on the same board.
+function pickEpic(epicId: string) {
+  selectedEpic.value = epicId;
+  const rest = Object.fromEntries(Object.entries(route.query).filter(([k]) => k !== 'epic'));
+  router.replace({ query: epicId ? { ...rest, epic: epicId } : rest });
+}
+
 function goToTask(taskId: string, storeId?: string) {
   router.push({
     path: `/tasks/${encodeURIComponent(taskId)}`,
@@ -246,7 +290,7 @@ function goToTask(taskId: string, storeId?: string) {
     <div class="bs-kanban-page__toolbar">
       <label v-if="!edgeEmpty" class="bs-kanban-page__toolbar-field">
         <span class="bs-kanban-page__count">Epic</span>
-        <Select v-model="selectedEpic" :options="pickerOptions" :disabled="scopePending" aria-label="Epic" />
+        <Select :model-value="selectedEpic" :options="pickerOptions" :disabled="scopePending" aria-label="Epic" @update:model-value="pickEpic" />
       </label>
       <ActivityScopeToggle />
       <span v-if="!edgeEmpty && !scopePending" class="bs-kanban-page__count">{{ taskCount }} tasks</span>
@@ -298,6 +342,9 @@ function goToTask(taskId: string, storeId?: string) {
       body="Try a different epic, or clear the milestone filter."
     />
 
-    <KanbanBoard v-else-if="columns !== null" :tasks="boardTasks" @select="goToTask" />
+    <template v-else-if="columns !== null">
+      <p v-for="line in waiting" :key="line" class="bs-sessions__quiet">{{ line }}: Waiting on you</p>
+      <KanbanBoard :tasks="boardTasks" :live="marks" :default-group-by="defaultGroupBy" @select="goToTask" />
+    </template>
   </div>
 </template>

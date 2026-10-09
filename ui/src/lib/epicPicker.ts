@@ -101,10 +101,11 @@ export function epicOptions(
   epics: readonly string[],
   idle: readonly IdleEpic[] = [],
   withAll = true,
+  allLabel = 'All epics',
 ): EpicOption[] {
   const idleDays = new Map(idle.map((e) => [e.epicId, e.idleDays]));
   const seen = new Set<string>([ALL_EPICS]);
-  const options: EpicOption[] = withAll ? [{ value: ALL_EPICS, label: 'All epics' }] : [];
+  const options: EpicOption[] = withAll ? [{ value: ALL_EPICS, label: allLabel }] : [];
   for (const epic of epics) {
     if (seen.has(epic)) continue;
     seen.add(epic);
