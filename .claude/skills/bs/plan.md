@@ -57,6 +57,11 @@ there means "not looked at", not "looked at and clean".
    6. From round 2 on, only the previous round's findings plus any task
       that changed since then.
 
+   The prompt also carries, inline on its own line,
+   `Declared artifact: /abs/path/to/state/results/<epic-id>.spec-review.json`
+   — the absolute form of the path `spec-reviewer.md` names. The PreToolUse
+   guard refuses a judge dispatch without it.
+
    When `size.small` reads true on the draft (`bs wave schedule` or
    `bs plan ingest`'s `parallelism.size`, run against the draft plan
    file), recommend effort tier `small` -- single-pass spec review -- to

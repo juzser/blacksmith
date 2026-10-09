@@ -279,7 +279,8 @@ one thing this playbook never asks you to.
      that judge's result; it does not become a finding against the coder.
    - Each of those is also bracketed by `bs judge dispatch` /
      `bs judge report` ("Declare each judge's artifact before you dispatch
-     it" above). `bs judge outstanding --task <task-id>` exits 1 while any
+     it" above); paste `judge dispatch`'s `expected_line` inline in the
+     judge's prompt, or the `Agent` call is refused. `bs judge outstanding --task <task-id>` exits 1 while any
      judge still owes its file — re-poke it and report before running the
      gate, because the gate now refuses to score with a non-empty outstanding
      set (`reason: judges-outstanding`) rather than reading a silent judge as

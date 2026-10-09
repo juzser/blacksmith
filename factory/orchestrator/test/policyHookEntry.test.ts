@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { bareSpecifiersFrom } from './helpers/moduleGraph.js';
 import { runProcess } from './helpers/process.js';
 
-// `.claude/hooks/guard.sh` runs on every Bash/Write/Edit/MultiEdit/NotebookEdit
+// `.claude/hooks/guard.sh` runs on every Bash/Write/Edit/MultiEdit/NotebookEdit/Agent/Task
 // call an agent session makes, so whatever it execs is the single hottest path
 // in this factory — it runs more often than any other code here, by orders of
 // magnitude. It used to exec `dist/cli.js policy hook`, and cli.ts was then a
@@ -84,6 +84,22 @@ describe('dist/policyHook.js — the guard hook entry point', () => {
       input: JSON.stringify({
         tool_name: 'Write',
         tool_input: { file_path: path.join(REPO_ROOT, 'AGENTS.md') },
+        cwd: REPO_ROOT,
+      }),
+    },
+    {
+      name: 'an Agent judge dispatch with no declared-artifact line — deny envelope',
+      input: JSON.stringify({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'blacksmith:reviewer', prompt: 'review it' },
+        cwd: REPO_ROOT,
+      }),
+    },
+    {
+      name: 'an Agent judge dispatch carrying the line — silence',
+      input: JSON.stringify({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'reviewer', prompt: 'Declared artifact: /abs/x.json\n' },
         cwd: REPO_ROOT,
       }),
     },
