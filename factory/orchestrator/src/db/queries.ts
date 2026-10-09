@@ -2784,8 +2784,11 @@ function epicOfEntry(entry: TimelineEntry): string | null {
  * under `epicId` when its session holds an entry of that epic, or when its id
  * is named by a `parent_prompt_id` of such an entry or of any epic-less entry
  * (the root `session-start`, which carries only `parent_prompt_id`) in one of
- * those sessions. The `prompts-<uuid>` home log has no entries of its own.
- * Every other epic-less entry is dropped.
+ * those sessions. A prompt carrying its own epic does not make its session an
+ * epic session; it only decides itself. A session holding entries of two
+ * epics shares its epic-less prompts, and the `parent_prompt_id` naming of its
+ * epic-less entries, with both. The `prompts-<uuid>` home log has no entries
+ * of its own. Every other epic-less entry is dropped.
  */
 function promptInEpic(
   entries: readonly TimelineEntry[],
@@ -2793,7 +2796,7 @@ function promptInEpic(
 ): (e: TimelineEntry) => boolean {
   const sessions = new Set<string>();
   for (const e of entries) {
-    if (epicOfEntry(e) === epicId) sessions.add(e.sessionId);
+    if (e.eventType !== 'user_prompt' && epicOfEntry(e) === epicId) sessions.add(e.sessionId);
   }
   const named = new Set<string>();
   for (const e of entries) {

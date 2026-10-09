@@ -197,7 +197,8 @@ describe('timeline() epic filter links a prompt through the epic session start',
       line('link-main', 0, 'session-start', { parent_prompt_id: `${HOME}#1` }) +
         line('link-main', 1, 'task-added', { epic_id: 'epic-x' }, { task_id: 'epic-x/task-1' }) +
         // A prompt that names its own epic wins over the session's epic.
-        line('link-main', 2, 'user_prompt', { prompt: 'own epic', epic_id: 'epic-y' }),
+        line('link-main', 2, 'user_prompt', { prompt: 'own epic', epic_id: 'epic-y' }) +
+        line('link-main', 3, 'user_prompt', { prompt: 'no epic of its own' }),
       'utf8',
     );
     await appendFile(
@@ -253,6 +254,13 @@ describe('timeline() epic filter links a prompt through the epic session start',
   it('lets a prompt that names its own epic decide, not its session', () => {
     expect(ids({ epicId: 'epic-y' })).toContain('link-main#2');
     expect(ids({ epicId: 'epic-x' })).not.toContain('link-main#2');
+  });
+
+  it('does not let a prompt with its own epic make its session an epic session', () => {
+    const got = ids({ epicId: 'epic-y' });
+    expect(got).not.toContain(`${HOME}#1`);
+    expect(got).not.toContain('link-main#3');
+    expect(ids({ epicId: 'epic-x' })).toContain('link-main#3');
   });
 
   it('reads the linking entries before the kinds filter', () => {
