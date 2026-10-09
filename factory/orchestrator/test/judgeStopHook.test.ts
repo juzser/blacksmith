@@ -199,7 +199,10 @@ describe('extractDispatchPromptText', () => {
   it('skips meta user strings and tool_result entries before the dispatch prompt', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const lines = [
-      userLine('<system-reminder>\nYour final report is delivered through SubagentHandback\n', true),
+      userLine(
+        '<system-reminder>\nYour final report is delivered through SubagentHandback\n',
+        true,
+      ),
       JSON.stringify({
         type: 'user',
         message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] },
@@ -212,7 +215,10 @@ describe('extractDispatchPromptText', () => {
 
   it('returns null when every user entry is meta (fail open)', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
-    const lines = [userLine('reminder one', true), userLine('The coordinator sent a message', true)];
+    const lines = [
+      userLine('reminder one', true),
+      userLine('The coordinator sent a message', true),
+    ];
     writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
     expect(extractDispatchPromptText(transcriptPath)).toBeNull();
   });
