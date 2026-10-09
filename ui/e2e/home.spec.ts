@@ -1,14 +1,7 @@
-import { activeScopeBody, stubActiveScope } from "./activeScopeStub.js";
-import { FIXTURE_NOW_ISO } from "./fixtureClock.js";
-import { expect, type Page, test } from "./harness.js";
-import {
-  dropRoutes,
-  setTheme,
-  settleForShot,
-  shoot,
-  shootElement,
-  VIEWPORTS,
-} from "./helpers.js";
+import { activeScopeBody, stubActiveScope } from './activeScopeStub.js';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import { expect, type Page, test } from './harness.js';
+import { dropRoutes, setTheme, settleForShot, shoot, shootElement, VIEWPORTS } from './helpers.js';
 
 // Route proxies that call route.fetch() must not outlive their test.
 test.afterEach(async ({ page }) => dropRoutes(page));
@@ -34,31 +27,31 @@ const FACTS = {
 const INBOX_ROWS = [
   {
     ...FACTS,
-    id: "esc-1",
-    kind: "escalation",
-    taskTitle: "Checkout flow",
-    role: "tester",
-    project: "black-smith",
-    taskId: "epic-1/task-3-checkout",
+    id: 'esc-1',
+    kind: 'escalation',
+    taskTitle: 'Checkout flow',
+    role: 'tester',
+    project: 'black-smith',
+    taskId: 'epic-1/task-3-checkout',
     createdAt: minutesAgo(5),
   },
   {
     ...FACTS,
-    id: "waiver-1",
-    kind: "waiver",
-    taskTitle: "Show fee",
+    id: 'waiver-1',
+    kind: 'waiver',
+    taskTitle: 'Show fee',
     findingCount: 2,
-    findingSummaries: ["Fee shown before tax.", "Rounding drifts."],
-    project: "demo-hub",
-    taskId: "epic-9/task-2-show-fee",
-    store: { id: "ab12cd34", label: "demo-hub" },
+    findingSummaries: ['Fee shown before tax.', 'Rounding drifts.'],
+    project: 'demo-hub',
+    taskId: 'epic-9/task-2-show-fee',
+    store: { id: 'ab12cd34', label: 'demo-hub' },
     createdAt: minutesAgo(30),
   },
   {
     ...FACTS,
-    id: "lesson-1",
-    kind: "lesson_candidate",
-    statement: "Run the full suite before a gate check.",
+    id: 'lesson-1',
+    kind: 'lesson_candidate',
+    statement: 'Run the full suite before a gate check.',
     project: null,
     taskId: null,
     createdAt: minutesAgo(90),
@@ -66,9 +59,7 @@ const INBOX_ROWS = [
 ];
 
 async function serveInbox(page: Page, rows: unknown[]): Promise<void> {
-  await page.route("**/api/inbox*", (route) =>
-    route.fulfill({ json: { rows } }),
-  );
+  await page.route('**/api/inbox*', (route) => route.fulfill({ json: { rows } }));
 }
 
 const PHONE = { width: 375, height: 812 };
@@ -79,7 +70,7 @@ const PHONE = { width: 375, height: 812 };
 // cards, and so the baselines, are what they were before the scope); a test
 // about the scope stubs its own, which wins as the later route.
 const activeProject = (project: string, agentsWorking = 1) => ({
-  storeId: "home",
+  storeId: 'home',
   project,
   liveSessions: 1,
   agentsWorking,
@@ -87,92 +78,75 @@ const activeProject = (project: string, agentsWorking = 1) => ({
 test.beforeEach(async ({ page }) => {
   await stubActiveScope(page, [], {
     liveSessions: 2,
-    projects: [activeProject("blacksmith", 2), activeProject("demo-hub")],
+    projects: [activeProject('blacksmith', 2), activeProject('demo-hub')],
   });
 });
 
-test.describe("Home", () => {
-  test("/ lands on Home, with a11y basics", async ({ page }) => {
-    await page.goto("/");
+test.describe('Home', () => {
+  test('/ lands on Home, with a11y basics', async ({ page }) => {
+    await page.goto('/');
     await expect(page).toHaveURL(/\/overview$/);
-    await expect(page.locator("h1")).toHaveText("Home");
-    await expect(page.locator("a.skip-link")).toHaveText("Skip to content");
-    await expect(
-      page.getByRole("navigation", { name: "Primary" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("navigation", { name: "Breadcrumb" }),
-    ).toBeVisible();
+    await expect(page.locator('h1')).toHaveText('Home');
+    await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible();
   });
 
-  test("the retired /projects link keeps its project scope on Home", async ({
-    page,
-  }) => {
-    await page.goto("/projects?project=demo-hub");
+  test('the retired /projects link keeps its project scope on Home', async ({ page }) => {
+    await page.goto('/projects?project=demo-hub');
     await expect(page).toHaveURL(/\/p\/demo-hub\/overview$/);
-    await expect(
-      page.getByRole("navigation", { name: "Breadcrumb" }),
-    ).toContainText("demo-hub · Home");
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(
+      'demo-hub · Home',
+    );
   });
 
-  test("lays out the sections in order, what needs you first", async ({
-    page,
-  }) => {
-    await page.goto("/overview");
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText([
-      "Needs you",
-      "Live sessions",
-      "Recent activity",
-      "Running now",
-      "What the factory decided recently",
-      "Budget",
+  test('lays out the sections in order, what needs you first', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText([
+      'Needs you',
+      'Live sessions',
+      'Recent activity',
+      'Running now',
+      'What the factory decided recently',
+      'Budget',
     ]);
   });
 
-  test("Running now has one card per project with work in flight, linked to Work", async ({
+  test('Running now has one card per project with work in flight, linked to Work', async ({
     page,
   }) => {
-    await page.goto("/overview");
-    const view = page.getByRole("link", { name: "View blacksmith in Work" });
-    await expect(view).toHaveAttribute(
-      "href",
-      "/work/kanban?project=blacksmith",
-    );
-    await expect(page.getByText("2 epics in flight")).toBeVisible();
-    await expect(page.getByText("epic in flights")).toHaveCount(0);
+    await page.goto('/overview');
+    const view = page.getByRole('link', { name: 'View blacksmith in Work' });
+    await expect(view).toHaveAttribute('href', '/work/kanban?project=blacksmith');
+    await expect(page.getByText('2 epics in flight')).toBeVisible();
+    await expect(page.getByText('epic in flights')).toHaveCount(0);
     // envkit is declared but has nothing running: no card for it.
-    await expect(
-      page.getByRole("link", { name: "View envkit in Work" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View envkit in Work' })).toHaveCount(0);
   });
 
-  test("a project declared before its first task is still selectable from the topbar", async ({
+  test('a project declared before its first task is still selectable from the topbar', async ({
     page,
   }) => {
     // The fixture roadmap's third phase declares `envkit` and nothing else.
-    await page.goto("/overview");
+    await page.goto('/overview');
     await expect(
-      page
-        .getByLabel("Project", { exact: true })
-        .locator("option", { hasText: "envkit" }),
+      page.getByLabel('Project', { exact: true }).locator('option', { hasText: 'envkit' }),
     ).toHaveCount(1);
   });
 
-  test("an epic seen in flight and then closed shows under Just finished", async ({
-    page,
-  }) => {
+  test('an epic seen in flight and then closed shows under Just finished', async ({ page }) => {
     let served = 0;
-    await page.route("**/api/overview*", async (route) => {
+    await page.route('**/api/overview*', async (route) => {
       served += 1;
       const response = await route.fetch();
       const body = await response.json();
       if (served === 1) {
-        body.epicsInFlight = [...body.epicsInFlight, "epic-just-done"];
+        body.epicsInFlight = [...body.epicsInFlight, 'epic-just-done'];
       } else {
         body.closedEpics = [
           {
-            epicId: "epic-just-done",
-            closedBy: "operator",
+            epicId: 'epic-just-done',
+            closedBy: 'operator',
             machineVerdict: null,
             machineReason: null,
             overrideRationale: null,
@@ -184,102 +158,86 @@ test.describe("Home", () => {
       }
       await route.fulfill({ response, json: body });
     });
-    await page.goto("/overview");
-    await expect(page.getByText("Just finished")).toHaveCount(0);
+    await page.goto('/overview');
+    await expect(page.getByText('Just finished')).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Pause updates" }).click();
-    await page.getByRole("button", { name: "Refresh now" }).click();
-    await expect(page.getByText("Just finished")).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "epic-just-done" }),
-    ).toHaveAttribute("href", "/work/kanban?epic=epic-just-done");
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await expect(page.getByText('Just finished')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'epic-just-done' })).toHaveAttribute(
+      'href',
+      '/work/kanban?epic=epic-just-done',
+    );
   });
 
-  test("a failed overview fetch never renders as an idle factory", async ({
-    page,
-  }) => {
-    await page.route("**/api/overview*", (route) => route.abort("failed"));
-    await page.goto("/overview");
-    await expect(page.getByText("Could not load Home.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  test('a failed overview fetch never renders as an idle factory', async ({ page }) => {
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 
-    await expect(page.getByText("Nothing is running right now.")).toHaveCount(
-      0,
-    );
-    await expect(page.getByText("No decisions yet.")).toHaveCount(0);
+    await expect(page.getByText('Nothing is running right now.')).toHaveCount(0);
+    await expect(page.getByText('No decisions yet.')).toHaveCount(0);
   });
 
   // D-226: the error clears on success, not on attempt, so a refresh still in
   // flight against a dead server never makes the page look healthy.
-  test("a failing refresh never takes the error banner off the screen", async ({
-    page,
-  }) => {
+  test('a failing refresh never takes the error banner off the screen', async ({ page }) => {
     let served = 0;
-    await page.route("**/api/overview*", async (route) => {
+    await page.route('**/api/overview*', async (route) => {
       served += 1;
       if (served === 1) {
-        await route.abort("failed");
+        await route.abort('failed');
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 12_000));
-      await route.abort("failed").catch(() => {});
+      await route.abort('failed').catch(() => {});
     });
-    await page.goto("/overview");
-    await expect(page.getByText("Could not load Home.")).toBeVisible();
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
 
-    const refetch = page.waitForRequest("**/api/overview*");
-    await page.getByRole("button", { name: "Pause updates" }).click();
-    await page.getByRole("button", { name: "Refresh now" }).click();
+    const refetch = page.waitForRequest('**/api/overview*');
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetch;
 
-    await expect(page.getByText("Could not load Home.")).toBeVisible();
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
   });
 
-  test("a failed inbox fetch never claims nothing needs you", async ({
-    page,
-  }) => {
-    await page.route("**/api/inbox*", (route) => route.abort("failed"));
-    await page.goto("/overview");
-    await expect(
-      page.getByText("Could not load what needs you."),
-    ).toBeVisible();
-    await expect(page.getByText("Nothing needs you right now.")).toHaveCount(0);
+  test('a failed inbox fetch never claims nothing needs you', async ({ page }) => {
+    await page.route('**/api/inbox*', (route) => route.abort('failed'));
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load what needs you.')).toBeVisible();
+    await expect(page.getByText('Nothing needs you right now.')).toHaveCount(0);
   });
 
-  test("the sidebar brand mark is the project logo, decoded and not a broken image", async ({
+  test('the sidebar brand mark is the project logo, decoded and not a broken image', async ({
     page,
   }) => {
-    await page.goto("/overview");
-    const mark = page.locator(".bs-side__mark img");
+    await page.goto('/overview');
+    const mark = page.locator('.bs-side__mark img');
     await expect(mark).toBeVisible();
-    await expect(mark).toHaveAttribute("alt", "Blacksmith");
+    await expect(mark).toHaveAttribute('alt', 'Blacksmith');
     // toBeVisible() passes on a broken <img> too; naturalWidth proves it decoded.
-    const naturalWidth = await mark.evaluate(
-      (el) => (el as HTMLImageElement).naturalWidth,
-    );
+    const naturalWidth = await mark.evaluate((el) => (el as HTMLImageElement).naturalWidth);
     expect(naturalWidth).toBeGreaterThan(0);
   });
 
-  test("theme toggle switches to dark and persists the class on <html>", async ({
-    page,
-  }) => {
-    await page.goto("/overview");
-    await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await page.getByRole("button", { name: "Switch to dark theme" }).click();
-    await expect(page.locator("html")).toHaveClass(/dark/);
+  test('theme toggle switches to dark and persists the class on <html>', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
   });
 
-  for (const theme of ["light", "dark"] as const) {
+  for (const theme of ['light', 'dark'] as const) {
     for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto("/overview");
-        await expect(page.locator("h1")).toHaveText("Home");
-        await settleForShot(
-          page,
-          page.getByRole("link", { name: "View blacksmith in Work" }),
-        );
+        await page.goto('/overview');
+        await expect(page.locator('h1')).toHaveText('Home');
+        await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
         await shoot(page, `home-${vpName}-${theme}`);
       });
     }
@@ -291,13 +249,10 @@ test.describe("Home", () => {
   // An element screenshot proves it in full regardless of page height.
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     test(`screenshot running-now card ${vpName}/light`, async ({ page }) => {
-      await setTheme(page, "light");
+      await setTheme(page, 'light');
       await page.setViewportSize(viewport);
-      await page.goto("/overview");
-      const card = page
-        .locator(".bs-card")
-        .filter({ hasText: "blacksmith" })
-        .first();
+      await page.goto('/overview');
+      const card = page.locator('.bs-card').filter({ hasText: 'blacksmith' }).first();
       await settleForShot(page, card);
       await shootElement(card, `home-running-now-${vpName}-light`);
     });
@@ -306,13 +261,13 @@ test.describe("Home", () => {
   // Blast radius: MobileTopBar renders on every page, so its vertical
   // overflow menu (DS4 S1 round 4) needs its own proof on Home too, not
   // just Work (work.spec.ts).
-  for (const theme of ["light", "dark"] as const) {
+  for (const theme of ['light', 'dark'] as const) {
     test(`screenshot mobile overflow/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.mobile);
-      await page.goto("/overview");
-      await page.getByRole("button", { name: "More actions" }).click();
-      const menu = page.getByRole("menu", { name: "More actions" });
+      await page.goto('/overview');
+      await page.getByRole('button', { name: 'More actions' }).click();
+      const menu = page.getByRole('menu', { name: 'More actions' });
       await settleForShot(page, menu);
       await shoot(page, `home-mobile-overflow-${theme}`);
     });
@@ -322,19 +277,19 @@ test.describe("Home", () => {
   // the Separator before the (empty) extra slot must not render — a visible
   // separator with nothing stacked under it is a dangling rule (DS4 S1
   // round 5, S3 finding 1).
-  test("phone: no separator follows the last menuitem when the overflow has no page extra", async ({
+  test('phone: no separator follows the last menuitem when the overflow has no page extra', async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
-    await page.goto("/overview");
-    await page.getByRole("button", { name: "More actions" }).click();
-    const menu = page.getByRole("menu", { name: "More actions" });
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
     await expect(menu).toBeVisible();
 
-    const menuitemsLocator = menu.getByRole("menuitem");
+    const menuitemsLocator = menu.getByRole('menuitem');
     await expect.poll(() => menuitemsLocator.count()).toBeGreaterThan(0);
 
-    const separators = await menu.getByRole("separator").all();
+    const separators = await menu.getByRole('separator').all();
     for (const separator of separators) {
       await expect(separator).not.toBeVisible();
     }
@@ -343,209 +298,164 @@ test.describe("Home", () => {
   // Home has no page-specific teleported extra, so this is the three
   // built-in items only (Pause, Switch theme, Settings) — the walk still
   // needs to wrap with just those three (DS4 S1 round 6).
-  test("phone: ArrowDown walks the three built-in menu items and wraps", async ({
-    page,
-  }) => {
+  test('phone: ArrowDown walks the three built-in menu items and wraps', async ({ page }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
-    await page.goto("/overview");
-    await page.getByRole("button", { name: "More actions" }).click();
-    const menu = page.getByRole("menu", { name: "More actions" });
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
     await expect(menu).toBeVisible();
 
-    const items = menu.getByRole("menuitem");
+    const items = menu.getByRole('menuitem');
     await expect(items).toHaveCount(3);
     await expect(items.nth(0)).toBeFocused();
 
-    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press('ArrowDown');
     await expect(items.nth(1)).toBeFocused();
-    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press('ArrowDown');
     await expect(items.nth(2)).toBeFocused();
-    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press('ArrowDown');
     await expect(items.nth(0)).toBeFocused();
 
-    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press('ArrowUp');
     await expect(items.nth(2)).toBeFocused();
   });
 });
 
-test.describe("Home: Needs you inbox", () => {
-  test("desktop: groups by project, project-less rows last, one action per row", async ({
+test.describe('Home: Needs you inbox', () => {
+  test('desktop: groups by project, project-less rows last, one action per row', async ({
     page,
   }) => {
     await serveInbox(page, INBOX_ROWS);
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const inbox = page.locator("section.bs-inbox");
-    await expect(inbox.locator(".bs-inbox__group-head")).toHaveText([
-      "black-smith · 1",
-      "demo-hub · 1",
-      "All projects · 1",
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('.bs-inbox__group-head')).toHaveText([
+      'black-smith · 1',
+      'demo-hub · 1',
+      'All projects · 1',
     ]);
     // The mock's wording: what to decide, then the task and why.
-    await expect(inbox.getByText("Decide on an escalated task")).toBeVisible();
+    await expect(inbox.getByText('Decide on an escalated task')).toBeVisible();
+    await expect(
+      inbox.getByText('Tester stopped on Checkout flow; the task stays blocked until you choose'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Approve waiver for 2 minor findings')).toBeVisible();
+    await expect(
+      inbox.getByText('Show fee · review found 2 issues; merge is waiting on you'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Review a new lesson candidate')).toBeVisible();
     await expect(
       inbox.getByText(
-        "Tester stopped on Checkout flow; the task stays blocked until you choose",
+        'Run the full suite before a gate check; approving applies it to future runs',
       ),
     ).toBeVisible();
-    await expect(
-      inbox.getByText("Approve waiver for 2 minor findings"),
-    ).toBeVisible();
-    await expect(
-      inbox.getByText(
-        "Show fee · review found 2 issues; merge is waiting on you",
-      ),
-    ).toBeVisible();
-    await expect(
-      inbox.getByText("Review a new lesson candidate"),
-    ).toBeVisible();
-    await expect(
-      inbox.getByText(
-        "Run the full suite before a gate check; approving applies it to future runs",
-      ),
-    ).toBeVisible();
-    await expect(inbox.getByRole("link", { name: "Open" })).toHaveAttribute(
-      "href",
-      "/tasks/epic-1%2Ftask-3-checkout",
+    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveAttribute(
+      'href',
+      '/tasks/epic-1%2Ftask-3-checkout',
     );
-    const reviews = inbox.getByRole("link", { name: /^Review/ });
+    const reviews = inbox.getByRole('link', { name: /^Review/ });
     await expect(reviews).toHaveCount(2);
     // A foreign store's row opens its task in that store.
     await expect(reviews.first()).toHaveAttribute(
-      "href",
-      "/tasks/epic-9%2Ftask-2-show-fee?store=ab12cd34",
+      'href',
+      '/tasks/epic-9%2Ftask-2-show-fee?store=ab12cd34',
     );
-    await expect(reviews.last()).toHaveAttribute("href", "/lessons");
+    await expect(reviews.last()).toHaveAttribute('href', '/lessons');
 
     // The filter chips narrow the list and say which one is pressed.
-    const waivers = inbox.getByRole("button", { name: "Waivers" });
+    const waivers = inbox.getByRole('button', { name: 'Waivers' });
     await waivers.click();
-    await expect(waivers).toHaveAttribute("aria-pressed", "true");
-    await expect(inbox.locator(".bs-inbox__group-head")).toHaveText([
-      "demo-hub · 1",
-    ]);
+    await expect(waivers).toHaveAttribute('aria-pressed', 'true');
+    await expect(inbox.locator('.bs-inbox__group-head')).toHaveText(['demo-hub · 1']);
   });
 
-  test("desktop: a scoped Home shows only that project", async ({ page }) => {
+  test('desktop: a scoped Home shows only that project', async ({ page }) => {
     await serveInbox(page, INBOX_ROWS);
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto("/p/demo-hub/overview");
-    await expect(page.locator(".bs-inbox__group-head")).toHaveText([
-      "demo-hub · 1",
-    ]);
+    await page.goto('/p/demo-hub/overview');
+    await expect(page.locator('.bs-inbox__group-head')).toHaveText(['demo-hub · 1']);
   });
 
-  test("375px: no filter chips, groups fold with the first open, one primary action", async ({
+  test('375px: no filter chips, groups fold with the first open, one primary action', async ({
     page,
   }) => {
     await serveInbox(page, INBOX_ROWS);
     await page.setViewportSize(PHONE);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const inbox = page.locator("section.bs-inbox");
-    await expect(inbox.locator("details.bs-inbox__group")).toHaveCount(3);
-    await expect(
-      inbox.getByRole("group", { name: "Filter what needs you" }),
-    ).toHaveCount(0);
-    await expect(
-      inbox.locator("details.bs-inbox__group").first(),
-    ).toHaveAttribute("open", "");
-    await expect(
-      inbox.locator("details.bs-inbox__group").nth(1),
-    ).not.toHaveAttribute("open", "");
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('details.bs-inbox__group')).toHaveCount(3);
+    await expect(inbox.getByRole('group', { name: 'Filter what needs you' })).toHaveCount(0);
+    await expect(inbox.locator('details.bs-inbox__group').first()).toHaveAttribute('open', '');
+    await expect(inbox.locator('details.bs-inbox__group').nth(1)).not.toHaveAttribute('open', '');
 
     // §3.1 + ds-review.html: the single most urgent row (the escalation,
     // first group/row) gets one full-width 44px "Decide" action; every other
     // row is one whole-row link. Nothing shows a description.
-    await expect(inbox.locator(".bs-btn--primary")).toHaveCount(1);
-    const decide = inbox.getByRole("link", {
-      name: "Decide: Decide on an escalated task",
-    });
+    await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
+    const decide = inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' });
     await expect(decide).toHaveClass(/bs-btn--primary/);
     await expect(decide).toHaveClass(/bs-btn--touch/);
     await expect(decide).toHaveClass(/bs-btn--block/);
-    expect((await decide.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(
-      44,
-    );
-    await expect(inbox.locator(".bs-inbox__desc")).toHaveCount(0);
-    await expect(
-      inbox.getByText(/the task stays blocked|merge is waiting/),
-    ).toHaveCount(0);
+    expect((await decide.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(inbox.locator('.bs-inbox__desc')).toHaveCount(0);
+    await expect(inbox.getByText(/the task stays blocked|merge is waiting/)).toHaveCount(0);
 
     // The escalation's time line starts with its short task name.
     const escRow = inbox.locator('.bs-inbox__row[data-kind="escalation"]');
-    await expect(escRow.locator(".bs-inbox__pmeta")).toHaveText(
-      /^Checkout flow · .*ago$/,
-    );
+    await expect(escRow.locator('.bs-inbox__pmeta')).toHaveText(/^Checkout flow · .*ago$/);
 
     // A folded group opens from its summary; its row is one link.
-    await inbox.locator("summary", { hasText: "demo-hub · 1" }).click();
-    const waiverLink = inbox.getByRole("link", {
-      name: /Approve waiver for 2 minor findings/,
-    });
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    const waiverLink = inbox.getByRole('link', { name: /Approve waiver for 2 minor findings/ });
     await expect(waiverLink).toBeVisible();
-    await expect(waiverLink).toHaveAttribute(
-      "href",
-      /\/tasks\/epic-9%2Ftask-2-show-fee/,
-    );
-    await inbox.locator("summary", { hasText: "All projects · 1" }).click();
-    await expect(
-      inbox.getByRole("link", { name: /Review a new lesson candidate/ }),
-    ).toBeVisible();
+    await expect(waiverLink).toHaveAttribute('href', /\/tasks\/epic-9%2Ftask-2-show-fee/);
+    await inbox.locator('summary', { hasText: 'All projects · 1' }).click();
+    await expect(inbox.getByRole('link', { name: /Review a new lesson candidate/ })).toBeVisible();
 
     // Every visible row: a 44px+ target, a title of at most two lines, a time
     // line, and no button or link nested in a link row.
-    for (const row of await inbox.locator(".bs-inbox__row").all()) {
+    for (const row of await inbox.locator('.bs-inbox__row').all()) {
       const box = await row.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-      const title = row.locator(".bs-inbox__ptitle");
-      const lineHeight = await title.evaluate((el) =>
-        parseFloat(getComputedStyle(el).lineHeight),
-      );
-      expect((await title.boundingBox())?.height ?? 99).toBeLessThanOrEqual(
-        2 * lineHeight + 1,
-      );
-      await expect(row.locator(".bs-inbox__pmeta")).toContainText(/ago|now/);
+      const title = row.locator('.bs-inbox__ptitle');
+      const lineHeight = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect((await title.boundingBox())?.height ?? 99).toBeLessThanOrEqual(2 * lineHeight + 1);
+      await expect(row.locator('.bs-inbox__pmeta')).toContainText(/ago|now/);
     }
-    await expect(
-      inbox.locator("a.bs-inbox__rowlink a, a.bs-inbox__rowlink button"),
-    ).toHaveCount(0);
+    await expect(inbox.locator('a.bs-inbox__rowlink a, a.bs-inbox__rowlink button')).toHaveCount(0);
     expect(
       await page.evaluate(
-        () =>
-          document.documentElement.scrollWidth <=
-          document.documentElement.clientWidth,
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
   });
 
-  test("320px: row titles wrap to at most two lines and nothing scrolls sideways", async ({
+  test('320px: row titles wrap to at most two lines and nothing scrolls sideways', async ({
     page,
   }) => {
     // The waiver title is the longest phone copy; a two-digit count is the
     // worst case for the wrap rule.
     await serveInbox(
       page,
-      INBOX_ROWS.map((r) =>
-        r.kind === "waiver" ? { ...r, findingCount: 12 } : r,
-      ),
+      INBOX_ROWS.map((r) => (r.kind === 'waiver' ? { ...r, findingCount: 12 } : r)),
     );
     await page.setViewportSize({ width: 320, height: 700 });
-    await page.goto("/overview");
-    const inbox = page.locator("section.bs-inbox");
-    await expect(inbox.locator(".bs-inbox__ptitle").first()).toBeVisible();
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('.bs-inbox__ptitle').first()).toBeVisible();
     // Open every folded group so each title is laid out.
-    for (const g of await inbox.locator("details.bs-inbox__group").all()) {
+    for (const g of await inbox.locator('details.bs-inbox__group').all()) {
       await g.evaluate((el) => ((el as HTMLDetailsElement).open = true));
     }
     const lineHeight = await inbox
-      .locator(".bs-inbox__ptitle")
+      .locator('.bs-inbox__ptitle')
       .first()
       .evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
     expect(lineHeight).toBeGreaterThan(0);
-    const waiverTitle = "Approve waiver for 12 minor findings";
-    const titles = inbox.locator(".bs-inbox__ptitle");
+    const waiverTitle = 'Approve waiver for 12 minor findings';
+    const titles = inbox.locator('.bs-inbox__ptitle');
     await expect(titles).toHaveCount(3);
     for (const t of await titles.all()) {
       const h = (await t.boundingBox())?.height ?? 99;
@@ -557,25 +467,21 @@ test.describe("Home: Needs you inbox", () => {
     }
     expect(
       await page.evaluate(
-        () =>
-          document.documentElement.scrollWidth <=
-          document.documentElement.clientWidth,
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
   });
 
   for (const [vpName, viewport] of [
-    ["desktop", VIEWPORTS.desktop],
-    ["375px", PHONE],
+    ['desktop', VIEWPORTS.desktop],
+    ['375px', PHONE],
   ] as const) {
     test(`${vpName}: empty inbox says nothing needs you`, async ({ page }) => {
       await serveInbox(page, []);
       await page.setViewportSize(viewport);
-      await page.goto("/overview");
-      await expect(
-        page.getByText("Nothing needs you right now."),
-      ).toBeVisible();
-      await expect(page.locator(".bs-inbox__group")).toHaveCount(0);
+      await page.goto('/overview');
+      await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
+      await expect(page.locator('.bs-inbox__group')).toHaveCount(0);
     });
   }
 });
@@ -585,73 +491,63 @@ test.describe("Home: Needs you inbox", () => {
 // 4 rows on phone (the rest stay in the DOM, hidden by CSS per §4.1: "the
 // meta line ends with the time" is unpaged kit behaviour, not re-tested
 // here — ui/test/kitTimelineRowCompact.test.ts owns that).
-test.describe("Home: Recent activity", () => {
+test.describe('Home: Recent activity', () => {
   function syntheticEntries(count: number) {
     return Array.from({ length: count }, (_, i) => ({
       eventId: `synth-${i}`,
       ts: minutesAgo(i),
-      eventType: "user_prompt",
-      kind: "prompt",
+      eventType: 'user_prompt',
+      kind: 'prompt',
       taskId: null as string | null,
       agentId: null,
       planVersion: 1,
       causalParent: null,
       payload: { prompt: `Synthetic activity row ${i}` },
-      project: "black-smith",
-      actor: "operator",
+      project: 'black-smith',
+      actor: 'operator',
       nearestPromptId: null,
     }));
   }
 
-  async function serveTimeline(
-    page: Page,
-    entries: { eventId: string }[],
-  ): Promise<void> {
-    await page.route("**/api/timeline?*", (route) => {
+  async function serveTimeline(page: Page, entries: { eventId: string }[]): Promise<void> {
+    await page.route('**/api/timeline?*', (route) => {
       const url = new URL(route.request().url());
-      if (url.searchParams.get("limit") !== "8") {
+      if (url.searchParams.get('limit') !== '8') {
         route.continue();
         return;
       }
       route.fulfill({
-        json: {
-          entries,
-          nextBefore: null,
-          newestId: entries[0]?.eventId ?? null,
-        },
+        json: { entries, nextBefore: null, newestId: entries[0]?.eventId ?? null },
       });
     });
   }
 
-  test("desktop: requests limit=8 and renders what the server returns, link to Activity", async ({
+  test('desktop: requests limit=8 and renders what the server returns, link to Activity', async ({
     page,
   }) => {
     const entries = syntheticEntries(8);
     await serveTimeline(page, entries);
     await page.setViewportSize(VIEWPORTS.desktop);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const section = page.locator("section", {
-      has: page.locator("#recent-activity-heading"),
-    });
-    await expect(section.locator(".bs-home__recent-activity > li")).toHaveCount(
-      8,
+    const section = page.locator('section', { has: page.locator('#recent-activity-heading') });
+    await expect(section.locator('.bs-home__recent-activity > li')).toHaveCount(8);
+    await expect(section.getByText('Synthetic activity row 0')).toBeVisible();
+    await expect(section.getByRole('link', { name: 'View all activity' })).toHaveAttribute(
+      'href',
+      '/activity',
     );
-    await expect(section.getByText("Synthetic activity row 0")).toBeVisible();
-    await expect(
-      section.getByRole("link", { name: "View all activity" }),
-    ).toHaveAttribute("href", "/activity");
   });
 
-  test("375px: only the first 4 rows are visible, the rest stay collapsed off-screen", async ({
+  test('375px: only the first 4 rows are visible, the rest stay collapsed off-screen', async ({
     page,
   }) => {
     const entries = syntheticEntries(8);
     await serveTimeline(page, entries);
     await page.setViewportSize(PHONE);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const rows = page.locator(".bs-home__recent-activity > li");
+    const rows = page.locator('.bs-home__recent-activity > li');
     await expect(rows).toHaveCount(8);
     for (let i = 0; i < 4; i++) {
       await expect(rows.nth(i)).toBeVisible();
@@ -664,9 +560,9 @@ test.describe("Home: Recent activity", () => {
   // The prompt link ends a dispatch's meta line; a long meta must ellipsize
   // its own text, never cut the link off.
   for (const [label, viewport] of [
-    ["1280px", VIEWPORTS.desktop],
-    ["1280px with a 340px column", { width: 1280, height: 900 }],
-    ["375px", PHONE],
+    ['1280px', VIEWPORTS.desktop],
+    ['1280px with a 340px column', { width: 1280, height: 900 }],
+    ['375px', PHONE],
   ] as const) {
     test(`${label}: a caused dispatch with a long meta keeps its prompt link whole`, async ({
       page,
@@ -675,15 +571,15 @@ test.describe("Home: Recent activity", () => {
         i === 1
           ? {
               ...entry,
-              eventType: "dispatch_decision",
-              kind: "Dispatched",
-              nearestPromptId: "synth-2",
-              payload: { agent_role: "coder", round: 12 },
+              eventType: 'dispatch_decision',
+              kind: 'Dispatched',
+              nearestPromptId: 'synth-2',
+              payload: { agent_role: 'coder', round: 12 },
               run: {
                 tokensIn: 1_234_567,
                 tokensOut: 2_345_678,
                 durationMs: 5_025_000,
-                runStatus: "done",
+                runStatus: 'done',
                 dispatchedAt: entry.ts,
                 round: 12,
               },
@@ -692,34 +588,27 @@ test.describe("Home: Recent activity", () => {
       );
       await serveTimeline(page, entries);
       await page.setViewportSize(viewport);
-      await page.goto("/overview");
+      await page.goto('/overview');
       // A narrow column is what makes a real meta line overflow.
-      if (label.includes("column")) {
-        await page.addStyleTag({
-          content: ".bs-home__recent-activity { max-width: 340px; }",
-        });
+      if (label.includes('column')) {
+        await page.addStyleTag({ content: '.bs-home__recent-activity { max-width: 340px; }' });
       }
       // Phone moves the link into the expanded detail (the meta copy is hidden).
       if (viewport.width <= 640) {
         await page
-          .locator(".bs-home__recent-activity")
-          .getByRole("button", { name: "Show details" })
+          .locator('.bs-home__recent-activity')
+          .getByRole('button', { name: 'Show details' })
           .first()
           .click();
       }
-      const link = page.locator(
-        ".bs-home__recent-activity .bs-timeline-row__because-of:visible",
-      );
+      const link = page.locator('.bs-home__recent-activity .bs-timeline-row__because-of:visible');
       await expect(link).toHaveCount(1);
       const m = await link.evaluate((el) => {
-        const meta = (el.closest(".bs-timeline-row__meta") ??
-          el.closest(".bs-timeline-row")) as HTMLElement;
+        const meta = (el.closest('.bs-timeline-row__meta') ??
+          el.closest('.bs-timeline-row')) as HTMLElement;
         const b = el.getBoundingClientRect();
         // A clipped part of the link is not hit-testable: probe its last pixel.
-        const hit = document.elementFromPoint(
-          b.right - 2,
-          b.top + b.height / 2,
-        );
+        const hit = document.elementFromPoint(b.right - 2, b.top + b.height / 2);
         return {
           right: b.right,
           metaRight: meta.getBoundingClientRect().right,
@@ -735,82 +624,64 @@ test.describe("Home: Recent activity", () => {
   // the title link becomes `inline-flex`, so text-overflow needs an inner
   // span to target instead of the button itself — a long task-linked title
   // must still end in an ellipsis, not spill out of the row.
-  test("375px: a long task-linked title still ellipsizes instead of spilling", async ({
-    page,
-  }) => {
+  test('375px: a long task-linked title still ellipsizes instead of spilling', async ({ page }) => {
     const entries = syntheticEntries(8).map((entry, i) =>
       i === 0
         ? {
             ...entry,
-            taskId: "epic-1/task-12-rewrite-onboarding-wizard-copy",
+            taskId: 'epic-1/task-12-rewrite-onboarding-wizard-copy',
             payload: {
-              prompt:
-                "Rewrite the onboarding wizard copy and every validation message end to end",
+              prompt: 'Rewrite the onboarding wizard copy and every validation message end to end',
             },
           }
         : entry,
     );
     await serveTimeline(page, entries);
     await page.setViewportSize(PHONE);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const link = page.getByRole("button", {
-      name: /Rewrite the onboarding wizard copy/,
-    });
+    const link = page.getByRole('button', { name: /Rewrite the onboarding wizard copy/ });
     await expect(link).toBeVisible();
-    const label = link.locator(".bs-timeline-row__title-label");
-    const overflowing = await label.evaluate(
-      (el) => el.scrollWidth > el.clientWidth,
-    );
+    const label = link.locator('.bs-timeline-row__title-label');
+    const overflowing = await label.evaluate((el) => el.scrollWidth > el.clientWidth);
     expect(overflowing).toBe(true);
-    await expect(label).toHaveCSS("text-overflow", "ellipsis");
+    await expect(label).toHaveCSS('text-overflow', 'ellipsis');
   });
 
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
   // meta text (session-started has none) used to render no meta line at
   // all on phone, so it showed no time. Every visible row must show one.
-  test("375px: every visible row shows its time exactly once, even with no details", async ({
+  test('375px: every visible row shows its time exactly once, even with no details', async ({
     page,
   }) => {
     const entries = syntheticEntries(4).map((entry, i) =>
       i === 0
-        ? {
-            ...entry,
-            eventType: "session-started",
-            kind: "system",
-            payload: { prompt: "" },
-          }
+        ? { ...entry, eventType: 'session-started', kind: 'system', payload: { prompt: '' } }
         : entry,
     );
     await serveTimeline(page, entries);
     await page.setViewportSize(PHONE);
-    await page.goto("/overview");
+    await page.goto('/overview');
 
-    const rows = page.locator(".bs-home__recent-activity .bs-timeline-row");
+    const rows = page.locator('.bs-home__recent-activity .bs-timeline-row');
     for (let i = 0; i < 4; i++) {
       const row = rows.nth(i);
       await expect(row).toBeVisible();
-      await expect(row.locator(".bs-timeline-row__ts:visible")).toHaveCount(1);
+      await expect(row.locator('.bs-timeline-row__ts:visible')).toHaveCount(1);
     }
   });
 
   for (const [vpName, viewport] of [
-    ["desktop", VIEWPORTS.desktop],
-    ["375px", PHONE],
+    ['desktop', VIEWPORTS.desktop],
+    ['375px', PHONE],
   ] as const) {
-    test(`${vpName}: empty recent activity says nothing has happened yet`, async ({
-      page,
-    }) => {
+    test(`${vpName}: empty recent activity says nothing has happened yet`, async ({ page }) => {
       await serveTimeline(page, []);
       await page.setViewportSize(viewport);
-      await page.goto("/overview");
-      const section = page.locator("section", {
-        has: page.locator("#recent-activity-heading"),
-      });
-      await expect(
-        section.getByText("Nothing has happened yet."),
-      ).toBeVisible();
-      await expect(section.locator(".bs-home__recent-activity")).toHaveCount(0);
+      await page.goto('/overview');
+      const section = page.locator('section', { has: page.locator('#recent-activity-heading') });
+      await expect(section.getByText('Nothing has happened yet.')).toBeVisible();
+      await expect(section.locator('.bs-home__recent-activity')).toHaveCount(0);
     });
   }
 });
@@ -819,15 +690,15 @@ test.describe("Home: Recent activity", () => {
 // CLI registry, so the card data is served from a fixture instead. The
 // wording and link targets are unit-tested in ui/test/liveSessions.test.ts;
 // this layer proves the template renders them and that the section fits.
-const FOREIGN = { id: "abcd1234", label: "project-b" };
-const HOME_STORE = { id: "home", label: "home" };
+const FOREIGN = { id: 'abcd1234', label: 'project-b' };
+const HOME_STORE = { id: 'home', label: 'home' };
 
 function liveCard(over: Record<string, unknown>): Record<string, unknown> {
   return {
-    cliSessionId: "cli-x",
+    cliSessionId: 'cli-x',
     name: null,
-    cwdLabel: "workspace-c",
-    status: "working",
+    cwdLabel: 'workspace-c',
+    status: 'working',
     statusSince: minutesAgo(12),
     focus: null,
     ...over,
@@ -836,71 +707,64 @@ function liveCard(over: Record<string, unknown>): Record<string, unknown> {
 
 const LIVE_CARDS = [
   liveCard({
-    cliSessionId: "cli-1",
+    cliSessionId: 'cli-1',
     focus: {
       store: HOME_STORE,
-      project: "project-a",
-      epicId: "epic-a",
-      epicTitle: "Checkout redesign",
+      project: 'project-a',
+      epicId: 'epic-a',
+      epicTitle: 'Checkout redesign',
       wave: 6,
       now: [
         {
-          role: "coder",
-          taskId: "task-a1",
-          taskTitle: "Show shipping fee before payment",
+          role: 'coder',
+          taskId: 'task-a1',
+          taskTitle: 'Show shipping fee before payment',
           since: minutesAgo(9),
         },
         {
-          role: "tester",
-          taskId: "task-a2",
-          taskTitle: "Drop the extra confirm step",
+          role: 'tester',
+          taskId: 'task-a2',
+          taskTitle: 'Drop the extra confirm step',
           since: minutesAgo(8),
         },
         {
-          role: "reviewer",
-          taskId: "task-a3",
-          taskTitle: "Check the cart total",
+          role: 'reviewer',
+          taskId: 'task-a3',
+          taskTitle: 'Check the cart total',
           since: minutesAgo(7),
         },
       ],
-      next: { kind: "task", taskId: "task-a4", taskTitle: "Cart summary" },
+      next: { kind: 'task', taskId: 'task-a4', taskTitle: 'Cart summary' },
     },
   }),
   liveCard({
-    cliSessionId: "cli-2",
-    status: "waiting_operator",
+    cliSessionId: 'cli-2',
+    status: 'waiting_operator',
     statusSince: minutesAgo(5),
     focus: {
       store: FOREIGN,
-      project: "project-b",
-      epicId: "epic-b",
-      epicTitle: "Billing retries",
+      project: 'project-b',
+      epicId: 'epic-b',
+      epicTitle: 'Billing retries',
       wave: 2,
       now: [
         {
-          role: "reviewer",
-          taskId: "task-b1",
-          taskTitle: "Retry failed invoices",
+          role: 'reviewer',
+          taskId: 'task-b1',
+          taskTitle: 'Retry failed invoices',
           since: minutesAgo(6),
         },
       ],
-      next: { kind: "waiting_on_you" },
+      next: { kind: 'waiting_on_you' },
     },
   }),
-  liveCard({
-    cliSessionId: "cli-3",
-    status: "idle",
-    statusSince: null,
-    name: "session-c",
-  }),
+  liveCard({ cliSessionId: 'cli-3', status: 'idle', statusSince: null, name: 'session-c' }),
 ];
 
-function liveResponse(
-  over: Record<string, unknown> = {},
-): Record<string, unknown> {
+function liveResponse(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    state: "ok",
-    configSource: "default",
+    state: 'ok',
+    configSource: 'default',
     readAt: FIXTURE_NOW_ISO,
     formatWarning: null,
     hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
@@ -909,63 +773,41 @@ function liveResponse(
   };
 }
 
-async function serveLive(
-  page: Page,
-  body: Record<string, unknown>,
-): Promise<void> {
-  await page.route("**/api/cli-sessions*", (route) =>
-    route.fulfill({ json: body }),
-  );
+async function serveLive(page: Page, body: Record<string, unknown>): Promise<void> {
+  await page.route('**/api/cli-sessions*', (route) => route.fulfill({ json: body }));
 }
 
-async function expectCardsAligned(
-  page: Page,
-  indicators: number,
-): Promise<void> {
-  const items = page
-    .getByRole("list", { name: "Live sessions" })
-    .getByRole("listitem");
+async function expectCardsAligned(page: Page, indicators: number): Promise<void> {
+  const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
   const n = await items.count();
   const lefts: number[] = [];
   for (let i = 0; i < n; i++) {
     const card = await items.nth(i).boundingBox();
-    const title = await items
-      .nth(i)
-      .locator('[class*="__title"]')
-      .first()
-      .boundingBox();
+    const title = await items.nth(i).locator('[class*="__title"]').first().boundingBox();
     expect(card).not.toBeNull();
     expect(title).not.toBeNull();
     expect((title?.x ?? 0) - (card?.x ?? 0)).toBeLessThan(24);
     lefts.push(title?.x ?? 0);
   }
   const firstLeft = lefts[0];
-  if (firstLeft === undefined)
-    throw new Error("no title left edge was measured");
+  if (firstLeft === undefined) throw new Error('no title left edge was measured');
   for (const x of lefts) expect(Math.abs(x - firstLeft)).toBeLessThanOrEqual(1);
   // Only the shell's LiveIndicator may wear .bs-live; the phone shell has none.
-  await expect(page.locator(".bs-live")).toHaveCount(indicators);
+  await expect(page.locator('.bs-live')).toHaveCount(indicators);
 }
 
 const LONG_TITLE =
-  "Reconcile the ledger exports across every regional storefront before the quarterly close so finance can sign off without manual spreadsheet patches";
+  'Reconcile the ledger exports across every regional storefront before the quarterly close so finance can sign off without manual spreadsheet patches';
 const LONG_CARD = liveCard({
-  cliSessionId: "cli-4",
+  cliSessionId: 'cli-4',
   focus: {
     store: HOME_STORE,
-    project: "project-d",
-    epicId: "epic-d",
-    epicTitle: "Ledger close",
+    project: 'project-d',
+    epicId: 'epic-d',
+    epicTitle: 'Ledger close',
     wave: 1,
-    now: [
-      {
-        role: "coder",
-        taskId: "task-d1",
-        taskTitle: LONG_TITLE,
-        since: minutesAgo(3),
-      },
-    ],
-    next: { kind: "task", taskId: "task-d2", taskTitle: "Short next task" },
+    now: [{ role: 'coder', taskId: 'task-d1', taskTitle: LONG_TITLE, since: minutesAgo(3) }],
+    next: { kind: 'task', taskId: 'task-d2', taskTitle: 'Short next task' },
   },
 });
 
@@ -984,22 +826,11 @@ async function measureLiveCards(page: Page): Promise<{
     vTop: number;
   }[];
   titles: { linked: boolean; h: number; lines: number }[];
-  targets: {
-    name: string;
-    h: number;
-    clipped: string | null;
-    inline: boolean;
-  }[];
-  long: {
-    firstTop: number;
-    vTop: number;
-    lineTops: number[];
-    clipBottom: number;
-    lineH: number;
-  };
+  targets: { name: string; h: number; clipped: string | null; inline: boolean }[];
+  long: { firstTop: number; vTop: number; lineTops: number[]; clipBottom: number; lineH: number };
 }> {
   return page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll(".bs-live-card"));
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
     const rows: {
       text: string;
       oneLine: boolean;
@@ -1009,65 +840,46 @@ async function measureLiveCards(page: Page): Promise<{
       vTop: number;
     }[] = [];
     const titles: { linked: boolean; h: number; lines: number }[] = [];
-    const targets: {
-      name: string;
-      h: number;
-      clipped: string | null;
-      inline: boolean;
-    }[] = [];
+    const targets: { name: string; h: number; clipped: string | null; inline: boolean }[] = [];
     // Same definition as touchTargets.spec.ts: an <a> left display:inline whose
     // parent has real text beside it is an inline link inside prose.
     const isInlineProseLink = (el: Element): boolean => {
-      if (el.tagName.toLowerCase() !== "a") return false;
-      if (getComputedStyle(el).display !== "inline") return false;
+      if (el.tagName.toLowerCase() !== 'a') return false;
+      if (getComputedStyle(el).display !== 'inline') return false;
       const parent = el.parentElement;
       if (!parent) return false;
       return Array.from(parent.childNodes).some(
-        (n) =>
-          n.nodeType === Node.TEXT_NODE &&
-          (n.textContent ?? "").trim().length > 0,
+        (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0,
       );
     };
     for (const card of cards) {
-      const t = card.querySelector(".bs-live-card__title") as HTMLElement;
+      const t = card.querySelector('.bs-live-card__title') as HTMLElement;
       const lh = parseFloat(getComputedStyle(t).lineHeight);
       const tcs = getComputedStyle(t);
       const th = t.getBoundingClientRect().height;
-      const content =
-        th - parseFloat(tcs.paddingTop) - parseFloat(tcs.paddingBottom);
-      titles.push({
-        linked: !!t.querySelector("a"),
-        h: th,
-        lines: Math.round(content / lh),
-      });
-      for (const row of Array.from(
-        card.querySelectorAll(".bs-live-card__line"),
-      )) {
-        const k = row.querySelector(".bs-live-card__k") as HTMLElement;
-        const v = row.querySelector(
-          ".bs-live-card__v, .bs-live-card__more",
-        ) as HTMLElement;
+      const content = th - parseFloat(tcs.paddingTop) - parseFloat(tcs.paddingBottom);
+      titles.push({ linked: !!t.querySelector('a'), h: th, lines: Math.round(content / lh) });
+      for (const row of Array.from(card.querySelectorAll('.bs-live-card__line'))) {
+        const k = row.querySelector('.bs-live-card__k') as HTMLElement;
+        const v = row.querySelector('.bs-live-card__v, .bs-live-card__more') as HTMLElement;
         const vlh = parseFloat(getComputedStyle(v).lineHeight) || 0;
         const textRange = document.createRange();
         textRange.selectNodeContents(v);
-        const tops = new Set(
-          Array.from(textRange.getClientRects()).map((r) => Math.round(r.top)),
-        );
+        const tops = new Set(Array.from(textRange.getClientRects()).map((r) => Math.round(r.top)));
         rows.push({
-          text: (v.textContent ?? "").trim().slice(0, 30),
+          text: (v.textContent ?? '').trim().slice(0, 30),
           oneLine: tops.size <= 1,
           rowH: row.getBoundingClientRect().height,
           lineH: vlh,
           kTop: k.getBoundingClientRect().top,
-          vTop: v.classList.contains("bs-live-card__more")
+          vTop: v.classList.contains('bs-live-card__more')
             ? v.getBoundingClientRect().top +
               parseFloat(getComputedStyle(v).borderTopWidth) +
               parseFloat(getComputedStyle(v).paddingTop)
-            : v.getBoundingClientRect().top +
-              parseFloat(getComputedStyle(v).paddingTop),
+            : v.getBoundingClientRect().top + parseFloat(getComputedStyle(v).paddingTop),
         });
       }
-      const els = Array.from(card.querySelectorAll("a[href], button"));
+      const els = Array.from(card.querySelectorAll('a[href], button'));
       for (const el of els) {
         // A wrapped link has one hit box per line box; a line the clamp hides
         // (its glyphs start past the clamped box's content edge) is not a target.
@@ -1078,14 +890,9 @@ async function measureLiveCards(page: Page): Promise<{
         for (const r of rects) {
           let hidden = false;
           let why: string | null = null;
-          for (
-            let p = el.parentElement;
-            p && p !== card.parentElement;
-            p = p.parentElement
-          ) {
+          for (let p = el.parentElement; p && p !== card.parentElement; p = p.parentElement) {
             const cs = getComputedStyle(p);
-            if (cs.overflowX === "visible" && cs.overflowY === "visible")
-              continue;
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
             const pr = p.getBoundingClientRect();
             const top = pr.top + parseFloat(cs.borderTopWidth);
             const bottom = pr.bottom - parseFloat(cs.borderBottomWidth);
@@ -1102,7 +909,7 @@ async function measureLiveCards(page: Page): Promise<{
           if (why && !clipped) clipped = why;
         }
         targets.push({
-          name: (el.textContent ?? "").trim().slice(0, 30),
+          name: (el.textContent ?? '').trim().slice(0, 30),
           h,
           clipped,
           inline: isInlineProseLink(el),
@@ -1110,9 +917,9 @@ async function measureLiveCards(page: Page): Promise<{
       }
     }
     const longCard = cards[cards.length - 1];
-    if (!longCard) throw new Error("no live-session card rendered");
-    const v = longCard.querySelector(".bs-live-card__v") as HTMLElement;
-    const a = v.querySelector("a") as HTMLElement;
+    if (!longCard) throw new Error('no live-session card rendered');
+    const v = longCard.querySelector('.bs-live-card__v') as HTMLElement;
+    const a = v.querySelector('a') as HTMLElement;
     const range = document.createRange();
     range.selectNodeContents(a);
     const rects = Array.from(range.getClientRects());
@@ -1127,7 +934,7 @@ async function measureLiveCards(page: Page): Promise<{
         firstTop: (
           rects[0] ??
           (() => {
-            throw new Error("long link has no client rects");
+            throw new Error('long link has no client rects');
           })()
         ).top,
         vTop: vr.top + parseFloat(cs.paddingTop),
@@ -1156,14 +963,9 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
       const res: Box[] = [];
       for (const rc of Array.from(el.getClientRects())) {
         let box: Box = { l: rc.left, t: rc.top, r: rc.right, b: rc.bottom };
-        for (
-          let p = el.parentElement;
-          p && p !== document.body;
-          p = p.parentElement
-        ) {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
           const cs = getComputedStyle(p);
-          if (cs.overflowX === "visible" && cs.overflowY === "visible")
-            continue;
+          if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
           const pr = p.getBoundingClientRect();
           box = {
             l: Math.max(box.l, pr.left + parseFloat(cs.borderLeftWidth)),
@@ -1176,16 +978,14 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
       }
       return res;
     };
-    const cards = Array.from(document.querySelectorAll(".bs-live-card"));
+    const cards = Array.from(document.querySelectorAll('.bs-live-card'));
     const all: { el: Element; label: string; boxes: Box[] }[] = [];
     for (const card of cards) {
       const cr = card.getBoundingClientRect();
       for (const el of Array.from(
-        card.querySelectorAll(
-          'a[href], button, [tabindex]:not([tabindex="-1"])',
-        ),
+        card.querySelectorAll('a[href], button, [tabindex]:not([tabindex="-1"])'),
       )) {
-        const label = (el.textContent ?? "").trim().slice(0, 30);
+        const label = (el.textContent ?? '').trim().slice(0, 30);
         const boxes = boxesOf(el);
         all.push({ el, label, boxes });
         for (const b of boxes) {
@@ -1207,8 +1007,7 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
           if (lr.width === 0 || lr.height === 0) continue;
           const x = lr.left + lr.width / 2;
           const y = lr.top + lr.height / 2;
-          if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b))
-            continue;
+          if (!boxes.some((b) => x >= b.l && x <= b.r && y >= b.t && y <= b.b)) continue;
           const hit = document.elementFromPoint(x, y);
           if (!hit || !(hit === el || el.contains(hit))) {
             out.misses.push(
@@ -1223,7 +1022,7 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
       for (let j = i + 1; j < all.length; j++) {
         const ai = all[i];
         const aj = all[j];
-        if (!ai || !aj) throw new Error("overlap index out of range");
+        if (!ai || !aj) throw new Error('overlap index out of range');
         for (const a of ai.boxes) {
           for (const b of aj.boxes) {
             const w = Math.min(a.r, b.r) - Math.max(a.l, b.l);
@@ -1240,45 +1039,42 @@ async function expectHitBoxesSound(page: Page): Promise<void> {
     return out;
   });
   expect(r.count).toBeGreaterThanOrEqual(8);
-  expect.soft(r.overlaps, "f. hit boxes overlapping each other").toEqual([]);
-  expect.soft(r.misses, "g. taps on the text land elsewhere").toEqual([]);
-  expect.soft(r.outside, "h. hit box outside its card").toEqual([]);
+  expect.soft(r.overlaps, 'f. hit boxes overlapping each other').toEqual([]);
+  expect.soft(r.misses, 'g. taps on the text land elsewhere').toEqual([]);
+  expect.soft(r.outside, 'h. hit box outside its card').toEqual([]);
 }
 
 const FONT_VARIANTS: { label: string; css: string | null }[] = [
-  { label: "", css: null },
-  {
-    label: " (Arial metrics)",
-    css: ":root { --bs-font-sans: Arial, sans-serif; }",
-  },
+  { label: '', css: null },
+  { label: ' (Arial metrics)', css: ':root { --bs-font-sans: Arial, sans-serif; }' },
 ];
 
-test.describe("Home: Live sessions", () => {
-  test("desktop: one labelled card per session with title, status, Now and Next", async ({
+test.describe('Home: Live sessions', () => {
+  test('desktop: one labelled card per session with title, status, Now and Next', async ({
     page,
   }) => {
     await serveLive(page, liveResponse());
-    await page.goto("/overview");
-    const list = page.getByRole("list", { name: "Live sessions" });
-    await expect(list.getByRole("listitem")).toHaveCount(3);
-    const first = list.getByRole("listitem").nth(0);
+    await page.goto('/overview');
+    const list = page.getByRole('list', { name: 'Live sessions' });
+    await expect(list.getByRole('listitem')).toHaveCount(3);
+    const first = list.getByRole('listitem').nth(0);
     await expectCardsAligned(page, 1);
-    await expect(first).toContainText("project-a · epic-a · wave 6");
-    await expect(first).toContainText("Working");
-    await expect(first).toContainText(
-      "Builder on Show shipping fee before payment",
+    await expect(first).toContainText('project-a · epic-a · wave 6');
+    await expect(first).toContainText('Working');
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).toContainText('Tester on Drop the extra confirm step');
+    await expect(first.getByRole('button', { name: '+ 1 more' })).toBeVisible();
+    await expect(first.getByRole('link', { name: 'Open epic Checkout redesign' })).toHaveAttribute(
+      'href',
+      '/work/kanban?epic=epic-a',
     );
-    await expect(first).toContainText("Tester on Drop the extra confirm step");
-    await expect(first.getByRole("button", { name: "+ 1 more" })).toBeVisible();
-    await expect(
-      first.getByRole("link", { name: "Open epic Checkout redesign" }),
-    ).toHaveAttribute("href", "/work/kanban?epic=epic-a");
-    await expect(
-      first.getByRole("link", { name: "Open task Cart summary" }),
-    ).toHaveAttribute("href", "/tasks/task-a4");
-    await first.getByRole("button", { name: "+ 1 more" }).click();
-    await expect(first).toContainText("Code reviewer on Check the cart total");
-    await expect(first.getByRole("button", { name: /more/ })).toHaveCount(0);
+    await expect(first.getByRole('link', { name: 'Open task Cart summary' })).toHaveAttribute(
+      'href',
+      '/tasks/task-a4',
+    );
+    await first.getByRole('button', { name: '+ 1 more' }).click();
+    await expect(first).toContainText('Code reviewer on Check the cart total');
+    await expect(first.getByRole('button', { name: /more/ })).toHaveCount(0);
   });
 
   test('the status time reads "for N min", not "N min ago", on desktop and at 375px', async ({
@@ -1287,51 +1083,39 @@ test.describe("Home: Live sessions", () => {
     await serveLive(page, liveResponse());
     for (const size of [null, PHONE]) {
       if (size) await page.setViewportSize(size);
-      await page.goto("/overview");
-      const items = page
-        .getByRole("list", { name: "Live sessions" })
-        .getByRole("listitem");
-      const t = items.nth(0).locator(".bs-live-card__status time");
-      await expect(t).toHaveText("for 12 min");
-      await expect(t).toHaveAttribute("datetime", minutesAgo(12));
-      await expect(
-        items.nth(1).locator(".bs-live-card__status time"),
-      ).toHaveText("for 5 min");
-      await expect(items.nth(0)).not.toContainText(" ago");
+      await page.goto('/overview');
+      const items = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem');
+      const t = items.nth(0).locator('.bs-live-card__status time');
+      await expect(t).toHaveText('for 12 min');
+      await expect(t).toHaveAttribute('datetime', minutesAgo(12));
+      await expect(items.nth(1).locator('.bs-live-card__status time')).toHaveText('for 5 min');
+      await expect(items.nth(0)).not.toContainText(' ago');
     }
   });
 
-  test("a foreign store task links with ?store=, and waiting on you reads in words", async ({
+  test('a foreign store task links with ?store=, and waiting on you reads in words', async ({
     page,
   }) => {
     await serveLive(page, liveResponse());
-    await page.goto("/overview");
-    const second = page
-      .getByRole("list", { name: "Live sessions" })
-      .getByRole("listitem")
-      .nth(1);
-    await expect(second).toContainText("Waiting for you");
-    await expect(second).toContainText("Waiting on you");
+    await page.goto('/overview');
+    const second = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(1);
+    await expect(second).toContainText('Waiting for you');
+    await expect(second).toContainText('Waiting on you');
     await expect(
-      second.getByRole("link", { name: "Open task Retry failed invoices" }),
-    ).toHaveAttribute("href", "/tasks/task-b1?store=abcd1234");
+      second.getByRole('link', { name: 'Open task Retry failed invoices' }),
+    ).toHaveAttribute('href', '/tasks/task-b1?store=abcd1234');
   });
 
-  test("an unlinked session shows its folder, name and no Now or Next", async ({
-    page,
-  }) => {
+  test('an unlinked session shows its folder, name and no Now or Next', async ({ page }) => {
     await serveLive(page, liveResponse());
-    await page.goto("/overview");
-    const third = page
-      .getByRole("list", { name: "Live sessions" })
-      .getByRole("listitem")
-      .nth(2);
-    await expect(third).toContainText("workspace-c · session-c");
-    await expect(third).toContainText("Idle");
-    await expect(third).toContainText("Not linked to a Blacksmith epic");
-    await expect(third).not.toContainText("Now");
-    await expect(third).not.toContainText("Next");
-    await expect(third.getByRole("link")).toHaveCount(0);
+    await page.goto('/overview');
+    const third = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(2);
+    await expect(third).toContainText('workspace-c · session-c');
+    await expect(third).toContainText('Idle');
+    await expect(third).toContainText('Not linked to a Blacksmith epic');
+    await expect(third).not.toContainText('Now');
+    await expect(third).not.toContainText('Next');
+    await expect(third.getByRole('link')).toHaveCount(0);
   });
 
   test('375px: one Now line, the rest behind "+ N more", and no sideways scroll', async ({
@@ -1339,25 +1123,16 @@ test.describe("Home: Live sessions", () => {
   }) => {
     await serveLive(page, liveResponse());
     await page.setViewportSize(PHONE);
-    await page.goto("/overview");
-    const first = page
-      .getByRole("list", { name: "Live sessions" })
-      .getByRole("listitem")
-      .nth(0);
-    await expect(first).toContainText(
-      "Builder on Show shipping fee before payment",
-    );
-    await expect(first).not.toContainText("Tester on");
-    await expect(first.getByRole("button", { name: "+ 2 more" })).toBeVisible();
+    await page.goto('/overview');
+    const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+    await expect(first).toContainText('Builder on Show shipping fee before payment');
+    await expect(first).not.toContainText('Tester on');
+    await expect(first.getByRole('button', { name: '+ 2 more' })).toBeVisible();
     await expectCardsAligned(page, 0);
-    const box = await first
-      .getByRole("button", { name: "+ 2 more" })
-      .boundingBox();
+    const box = await first.getByRole('button', { name: '+ 2 more' }).boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     const overflow = await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth >
-        document.documentElement.clientWidth,
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
     );
     expect(overflow).toBe(false);
   });
@@ -1369,14 +1144,11 @@ test.describe("Home: Live sessions", () => {
     test(`375px: tight rows, one title rhythm, 44px unclipped targets, long title clamps inline${font.label}`, async ({
       page,
     }) => {
-      await serveLive(
-        page,
-        liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }),
-      );
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
       await page.setViewportSize(PHONE);
-      await page.goto("/overview");
+      await page.goto('/overview');
       if (font.css) await page.addStyleTag({ content: font.css });
-      await expect(page.locator(".bs-live-card")).toHaveCount(4);
+      await expect(page.locator('.bs-live-card')).toHaveCount(4);
       const m = await measureLiveCards(page);
       // a. one text line per row, key top-aligned with the value
       expect(m.rows.some((r) => r.oneLine)).toBe(true);
@@ -1384,24 +1156,17 @@ test.describe("Home: Live sessions", () => {
         if (!r.oneLine) continue;
         // The "+ N more" row is the one row that carries added gap (20px, so its
         // 44px box and the Next link's box below never overlap), so it is exempt.
-        if (!r.text.startsWith("+")) {
-          expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(
-            r.lineH + 2,
-          );
+        if (!r.text.startsWith('+')) {
+          expect(r.rowH, `row "${r.text}" height`).toBeLessThanOrEqual(r.lineH + 2);
         }
-        expect(
-          Math.abs(r.kTop - r.vTop),
-          `row "${r.text}" key/value tops`,
-        ).toBeLessThanOrEqual(2);
+        expect(Math.abs(r.kTop - r.vTop), `row "${r.text}" key/value tops`).toBeLessThanOrEqual(2);
       }
       // b. linked and unlinked one-line titles share one height
       const one = m.titles.filter((t) => t.lines === 1);
       const linked = one.find((t) => t.linked);
       const unlinked = one.find((t) => !t.linked);
       expect(linked && unlinked).toBeTruthy();
-      expect(
-        Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0)),
-      ).toBeLessThanOrEqual(1);
+      expect(Math.abs((linked?.h ?? 0) - (unlinked?.h ?? 0))).toBeLessThanOrEqual(1);
       // c + d. every target the inline-link-in-prose exemption (WCAG 2.2 SC
       // 2.5.8) does not cover measures >= 44, and no clamped ancestor clips any
       // target. The Now task links read "Builder on <link>", so they are exempt.
@@ -1409,10 +1174,7 @@ test.describe("Home: Live sessions", () => {
       expect(m.targets.some((t) => t.inline)).toBe(true);
       expect(m.targets.some((t) => !t.inline)).toBe(true);
       for (const t of m.targets) {
-        if (!t.inline)
-          expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(
-            44 - 1 / 64,
-          );
+        if (!t.inline) expect(t.h, `target "${t.name}" height`).toBeGreaterThanOrEqual(44 - 1 / 64);
         expect(t.clipped, `target "${t.name}" clipped`).toBeNull();
       }
       // f + g + h. hit boxes never overlap, taps land on the text, cards contain them
@@ -1424,41 +1186,39 @@ test.describe("Home: Live sessions", () => {
       // starts above the clip edge (the box's padding edge) would show through.
       expect(m.long.lineTops.length).toBeGreaterThanOrEqual(3);
       const below = m.long.lineTops.filter(
-        (top) =>
-          top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
+        (top) => top >= m.long.vTop + m.long.lineH * 1.5 && top < m.long.clipBottom,
       );
       expect(below).toEqual([]);
     });
   }
 
-  test("card body padding is space-3 at 375px and space-4 on desktop, on all four sides", async ({
+  test('card body padding is space-3 at 375px and space-4 on desktop, on all four sides', async ({
     page,
   }) => {
     await serveLive(page, liveResponse());
     for (const [size, token] of [
-      [null, "--bs-space-4"],
-      [PHONE, "--bs-space-3"],
+      [null, '--bs-space-4'],
+      [PHONE, '--bs-space-3'],
     ] as const) {
       if (size) await page.setViewportSize(size);
-      await page.goto("/overview");
-      await expect(page.locator(".bs-live-card")).toHaveCount(3);
+      await page.goto('/overview');
+      await expect(page.locator('.bs-live-card')).toHaveCount(3);
       const r = await page.evaluate((t) => {
-        const probe = document.createElement("div");
+        const probe = document.createElement('div');
         probe.style.padding = `var(${t})`;
         document.body.appendChild(probe);
         const want = getComputedStyle(probe).paddingTop;
         probe.remove();
-        const sides = ["Top", "Right", "Bottom", "Left"] as const;
+        const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
         return {
           want,
-          got: [
-            ...document.querySelectorAll(".bs-live-card .bs-card__body"),
-          ].map((b) => sides.map((s) => getComputedStyle(b)[`padding${s}`])),
+          got: [...document.querySelectorAll('.bs-live-card .bs-card__body')].map((b) =>
+            sides.map((s) => getComputedStyle(b)[`padding${s}`]),
+          ),
         };
       }, token);
       expect(r.got.length).toBe(3);
-      for (const g of r.got)
-        expect(g, `${token} on every side`).toEqual(Array(4).fill(r.want));
+      for (const g of r.got) expect(g, `${token} on every side`).toEqual(Array(4).fill(r.want));
     }
   });
 
@@ -1466,28 +1226,18 @@ test.describe("Home: Live sessions", () => {
     test(`375px expanded: two Now links above the next task link still never overlap${font.label}`, async ({
       page,
     }) => {
-      await serveLive(
-        page,
-        liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }),
-      );
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
       await page.setViewportSize(PHONE);
-      await page.goto("/overview");
-      const first = page
-        .getByRole("list", { name: "Live sessions" })
-        .getByRole("listitem")
-        .nth(0);
+      await page.goto('/overview');
+      const first = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
       if (font.css) await page.addStyleTag({ content: font.css });
-      await first.getByRole("button", { name: "+ 2 more" }).click();
-      await expect(first).toContainText(
-        "Code reviewer on Check the cart total",
-      );
+      await first.getByRole('button', { name: '+ 2 more' }).click();
+      await expect(first).toContainText('Code reviewer on Check the cart total');
       await expectHitBoxesSound(page);
     });
   }
 
-  test("empty: says so, with how many sessions were hidden", async ({
-    page,
-  }) => {
+  test('empty: says so, with how many sessions were hidden', async ({ page }) => {
     await serveLive(
       page,
       liveResponse({
@@ -1495,115 +1245,89 @@ test.describe("Home: Live sessions", () => {
         hidden: { outOfScope: 2, dead: 1, unparsed: 0, nonInteractive: 0 },
       }),
     );
-    await page.goto("/overview");
-    await expect(page.getByText("No live Blacksmith sessions")).toBeVisible();
-    await expect(page.getByText("3 other sessions hidden")).toBeVisible();
+    await page.goto('/overview');
+    await expect(page.getByText('No live Blacksmith sessions')).toBeVisible();
+    await expect(page.getByText('3 other sessions hidden')).toBeVisible();
   });
 
-  test("absent: says tracking is not set up, with no count", async ({
-    page,
-  }) => {
-    await serveLive(page, liveResponse({ state: "absent", sessions: [] }));
-    await page.goto("/overview");
-    await expect(
-      page.getByText("Session tracking is not set up on this machine."),
-    ).toBeVisible();
+  test('absent: says tracking is not set up, with no count', async ({ page }) => {
+    await serveLive(page, liveResponse({ state: 'absent', sessions: [] }));
+    await page.goto('/overview');
+    await expect(page.getByText('Session tracking is not set up on this machine.')).toBeVisible();
     await expect(page.getByText(/hidden/)).toHaveCount(0);
   });
 
-  test("unreadable and a failed fetch each show their own banner, never an empty list", async ({
+  test('unreadable and a failed fetch each show their own banner, never an empty list', async ({
     page,
   }) => {
     await serveLive(
       page,
-      liveResponse({
-        state: "unreadable",
-        sessions: [],
-        formatWarning: "unknown format",
-      }),
+      liveResponse({ state: 'unreadable', sessions: [], formatWarning: 'unknown format' }),
     );
-    await page.goto("/overview");
-    await expect(
-      page.getByText("Could not read the live sessions: unknown format"),
-    ).toBeVisible();
-    await expect(page.getByText("No live Blacksmith sessions")).toHaveCount(0);
-    await page.unroute("**/api/cli-sessions*");
-    await page.route("**/api/cli-sessions*", (route) =>
-      route.fulfill({ status: 500, json: {} }),
-    );
+    await page.goto('/overview');
+    await expect(page.getByText('Could not read the live sessions: unknown format')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
+    await page.unroute('**/api/cli-sessions*');
+    await page.route('**/api/cli-sessions*', (route) => route.fulfill({ status: 500, json: {} }));
     await page.reload();
-    await expect(page.getByText("Could not load live sessions")).toBeVisible();
-    await expect(page.getByText("No live Blacksmith sessions")).toHaveCount(0);
+    await expect(page.getByText('Could not load live sessions')).toBeVisible();
+    await expect(page.getByText('No live Blacksmith sessions')).toHaveCount(0);
   });
 
-  for (const theme of ["light", "dark"] as const) {
+  for (const theme of ['light', 'dark'] as const) {
     for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
       test(`screenshot live sessions ${vpName}/${theme}`, async ({ page }) => {
         await serveLive(page, liveResponse());
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto("/overview");
-        const section = page.locator(
-          'section[aria-labelledby="live-sessions-heading"]',
-        );
-        await settleForShot(page, section.getByRole("listitem").first());
+        await page.goto('/overview');
+        const section = page.locator('section[aria-labelledby="live-sessions-heading"]');
+        await settleForShot(page, section.getByRole('listitem').first());
         await shootElement(section, `home-live-sessions-${vpName}-${theme}`);
       });
     }
   }
 });
 
-test.describe("Home: Running now follows Active/All (S8)", () => {
-  const toggle = (page: Page) =>
-    page.getByRole("navigation", { name: "Activity scope" });
-  const running = (page: Page) =>
-    page.locator('section[aria-labelledby="running-heading"]');
+test.describe('Home: Running now follows Active/All (S8)', () => {
+  const toggle = (page: Page) => page.getByRole('navigation', { name: 'Activity scope' });
+  const running = (page: Page) => page.locator('section[aria-labelledby="running-heading"]');
   const oneOfTwo = (page: Page) =>
-    stubActiveScope(page, [], {
-      liveSessions: 1,
-      projects: [activeProject("blacksmith")],
-    });
-  const budget = (page: Page) =>
-    page.locator('section[aria-labelledby="budget-heading"]');
+    stubActiveScope(page, [], { liveSessions: 1, projects: [activeProject('blacksmith')] });
+  const budget = (page: Page) => page.locator('section[aria-labelledby="budget-heading"]');
   // Pins the overview's one-hour budget change to a known figure, whatever the fixture holds.
   const withDelta = (page: Page, delta: number) =>
-    page.route("**/api/overview*", async (route) => {
+    page.route('**/api/overview*', async (route) => {
       const response = await route.fetch();
       const body = await response.json();
       body.budgetUsedPctPointDelta1h = delta;
       await route.fulfill({ response, json: body });
     });
 
-  test("Active hides the quiet project and offers it back; All shows it muted", async ({
+  test('Active hides the quiet project and offers it back; All shows it muted', async ({
     page,
   }) => {
     await oneOfTwo(page);
-    await page.goto("/overview");
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View demo-hub in Work" }),
-    ).toHaveCount(0);
-    await expect(running(page).getByText("demo-hub is quiet ·")).toBeVisible();
-    await running(page).getByRole("link", { name: "Show it" }).click();
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toHaveCount(0);
+    await expect(running(page).getByText('demo-hub is quiet ·')).toBeVisible();
+    await running(page).getByRole('link', { name: 'Show it' }).click();
     await expect(page).toHaveURL(/[?&]scope=all\b/);
-    const quiet = running(page).locator(".bs-home__card--quiet");
+    const quiet = running(page).locator('.bs-home__card--quiet');
     await expect(quiet).toHaveCount(1);
-    await expect(quiet).toContainText("demo-hub");
-    await expect(running(page).getByText("is quiet")).toHaveCount(0);
+    await expect(quiet).toContainText('demo-hub');
+    await expect(running(page).getByText('is quiet')).toHaveCount(0);
   });
 
-  test("the budget follows the cards on screen", async ({ page }) => {
+  test('the budget follows the cards on screen', async ({ page }) => {
     await oneOfTwo(page);
-    await page.goto("/overview");
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
     const budget = page.locator('section[aria-labelledby="budget-heading"]');
     const active = await budget.innerText();
-    await toggle(page).getByRole("link", { name: "All" }).click();
-    await expect(page.locator(".bs-home__card--quiet")).toHaveCount(1);
+    await toggle(page).getByRole('link', { name: 'All' }).click();
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
     await expect(budget).not.toHaveText(active);
   });
 
@@ -1611,68 +1335,46 @@ test.describe("Home: Running now follows Active/All (S8)", () => {
     page,
   }) => {
     await stubActiveScope(page, [], { liveSessions: 0 });
-    await page.goto("/overview");
-    await expect(
-      page.getByText("Nothing is active right now. ·"),
-    ).toBeVisible();
-    await expect(page.locator(".bs-home__cards")).toHaveCount(0);
-    await expect(page.getByText("Nothing is running right now.")).toHaveCount(
-      0,
-    );
-    await running(page).getByRole("link", { name: "Show all" }).click();
+    await page.goto('/overview');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await expect(page.locator('.bs-home__cards')).toHaveCount(0);
+    await expect(page.getByText('Nothing is running right now.')).toHaveCount(0);
+    await running(page).getByRole('link', { name: 'Show all' }).click();
     await expect(page).toHaveURL(/[?&]scope=all\b/);
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
   });
 
-  test("only unlinked sessions: the count line", async ({ page }) => {
+  test('only unlinked sessions: the count line', async ({ page }) => {
     await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
-    await page.goto("/overview");
-    await expect(
-      page.getByText("2 live sessions, none on an epic · Show all"),
-    ).toBeVisible();
-    await expect(page.locator(".bs-home__cards")).toHaveCount(0);
+    await page.goto('/overview');
+    await expect(page.getByText('2 live sessions, none on an epic · Show all')).toBeVisible();
+    await expect(page.locator('.bs-home__cards')).toHaveCount(0);
   });
 
-  test("a project with no live session says so", async ({ page }) => {
+  test('a project with no live session says so', async ({ page }) => {
     await oneOfTwo(page);
-    await page.goto("/overview?project=demo-hub");
-    await expect(
-      page.getByText("No live session is on this project · Show all"),
-    ).toBeVisible();
-    await expect(page.locator(".bs-home__cards")).toHaveCount(0);
+    await page.goto('/overview?project=demo-hub');
+    await expect(page.getByText('No live session is on this project · Show all')).toBeVisible();
+    await expect(page.locator('.bs-home__cards')).toHaveCount(0);
   });
 
-  test('unmeasured: every card, the note under the head, never "none active"', async ({
-    page,
-  }) => {
+  test('unmeasured: every card, the note under the head, never "none active"', async ({ page }) => {
     await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
-    await page.goto("/overview");
-    await expect(
-      running(page).getByText("Live sessions can't be read here"),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View demo-hub in Work" }),
-    ).toBeVisible();
-    await expect(page.locator(".bs-home__card--quiet")).toHaveCount(0);
-    await expect(page.getByText("Nothing is active right now.")).toHaveCount(0);
-    await expect(page.getByText("Nothing is running right now.")).toHaveCount(
-      0,
-    );
+    await page.goto('/overview');
+    await expect(running(page).getByText("Live sessions can't be read here")).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toBeVisible();
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(0);
+    await expect(page.getByText('Nothing is active right now.')).toHaveCount(0);
+    await expect(page.getByText('Nothing is running right now.')).toHaveCount(0);
   });
 
-  test("while the scope answer is delayed, no All cards render under Active", async ({
-    page,
-  }) => {
+  test('while the scope answer is delayed, no All cards render under Active', async ({ page }) => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/api/active-scope*", async (route) => {
+    await page.route('**/api/active-scope*', async (route) => {
       await gate;
       await route.fulfill({
         json: {
@@ -1680,105 +1382,78 @@ test.describe("Home: Running now follows Active/All (S8)", () => {
           readAt: FIXTURE_NOW_ISO,
           liveSessions: 1,
           unlinkedSessions: 0,
-          projects: [activeProject("blacksmith")],
+          projects: [activeProject('blacksmith')],
           epics: [],
           factorySessions: [],
         },
       });
     });
-    await page.goto("/overview");
+    await page.goto('/overview');
     await expect(
-      page.getByRole("heading", { name: "What the factory decided recently" }),
+      page.getByRole('heading', { name: 'What the factory decided recently' }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View demo-hub in Work" }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toHaveCount(0);
     release();
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "View demo-hub in Work" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toHaveCount(0);
   });
 
-  test("while the scope answer is delayed, Budget keeps its loading state too", async ({
+  test('while the scope answer is delayed, Budget keeps its loading state too', async ({
     page,
   }) => {
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/api/active-scope*", async (route) => {
+    await page.route('**/api/active-scope*', async (route) => {
       await gate;
       await route.fulfill({
-        json: activeScopeBody([], {
-          liveSessions: 1,
-          projects: [activeProject("blacksmith")],
-        }),
+        json: activeScopeBody([], { liveSessions: 1, projects: [activeProject('blacksmith')] }),
       });
     });
-    await page.goto("/overview");
+    await page.goto('/overview');
     // Home has mounted (its decisions list starts in its loading state), and
     // the overview is in once that list has left it; only the scope is held.
-    await expect(page.getByRole("heading", { name: "Budget" })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Budget' })).toBeVisible();
     await expect(
       page.locator('section[aria-labelledby="decisions-heading"] .bs-skeleton'),
     ).toHaveCount(0);
-    await expect(budget(page).locator(".bs-skeleton")).toBeVisible();
-    await expect(budget(page).locator(".bs-home__tokens")).toHaveCount(0);
+    await expect(budget(page).locator('.bs-skeleton')).toBeVisible();
+    await expect(budget(page).locator('.bs-home__tokens')).toHaveCount(0);
     release();
-    await expect(budget(page).locator(".bs-home__tokens")).toBeVisible();
-    await expect(budget(page).locator(".bs-skeleton")).toHaveCount(0);
+    await expect(budget(page).locator('.bs-home__tokens')).toBeVisible();
+    await expect(budget(page).locator('.bs-skeleton')).toHaveCount(0);
   });
 
-  test("a ?project= whose only live session is in another store is active", async ({
-    page,
-  }) => {
+  test('a ?project= whose only live session is in another store is active', async ({ page }) => {
     await stubActiveScope(page, [], {
       liveSessions: 1,
-      projects: [{ ...activeProject("demo-hub"), storeId: "store-b" }],
+      projects: [{ ...activeProject('demo-hub'), storeId: 'store-b' }],
     });
-    await page.goto("/overview?project=demo-hub");
-    await expect(
-      page.getByRole("link", { name: "View demo-hub in Work" }),
-    ).toBeVisible();
-    await expect(
-      page.getByText("No live session is on this project"),
-    ).toHaveCount(0);
+    await page.goto('/overview?project=demo-hub');
+    await expect(page.getByRole('link', { name: 'View demo-hub in Work' })).toBeVisible();
+    await expect(page.getByText('No live session is on this project')).toHaveCount(0);
   });
 
-  test("Active with a hidden card drops the one-hour change; All keeps it", async ({
-    page,
-  }) => {
+  test('Active with a hidden card drops the one-hour change; All keeps it', async ({ page }) => {
     await oneOfTwo(page);
     await withDelta(page, 4);
-    await page.goto("/overview");
-    await expect(budget(page).locator(".bs-home__tokens")).toBeVisible();
-    await expect(
-      budget(page).getByText("4 points higher than an hour ago"),
-    ).toHaveCount(0);
-    await page.goto("/overview?scope=all");
-    await expect(page.locator(".bs-home__card--quiet")).toHaveCount(1);
-    await expect(
-      budget(page).getByText("4 points higher than an hour ago"),
-    ).toBeVisible();
+    await page.goto('/overview');
+    await expect(budget(page).locator('.bs-home__tokens')).toBeVisible();
+    await expect(budget(page).getByText('4 points higher than an hour ago')).toHaveCount(0);
+    await page.goto('/overview?scope=all');
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+    await expect(budget(page).getByText('4 points higher than an hour ago')).toBeVisible();
   });
 
-  test("Active with every card hidden: Budget says no epic runs on an active project", async ({
+  test('Active with every card hidden: Budget says no epic runs on an active project', async ({
     page,
   }) => {
     await stubActiveScope(page, [], { liveSessions: 0 });
-    await page.goto("/overview");
-    await expect(
-      page.getByText("Nothing is active right now. ·"),
-    ).toBeVisible();
-    await expect(
-      budget(page).getByText("No epic is running on an active project."),
-    ).toBeVisible();
+    await page.goto('/overview');
+    await expect(page.getByText('Nothing is active right now. ·')).toBeVisible();
+    await expect(budget(page).getByText('No epic is running on an active project.')).toBeVisible();
   });
 
   test('a session on a project before its epic opens: its card shows, no "none on an epic" line', async ({
@@ -1788,206 +1463,142 @@ test.describe("Home: Running now follows Active/All (S8)", () => {
       liveSessions: 2,
       unlinkedSessions: 1,
       factorySessions: [],
-      projects: [activeProject("blacksmith")],
+      projects: [activeProject('blacksmith')],
     });
-    await page.goto("/overview");
-    await expect(
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    ).toBeVisible();
-    await expect(running(page).getByText("none on an epic")).toHaveCount(0);
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View blacksmith in Work' })).toBeVisible();
+    await expect(running(page).getByText('none on an epic')).toHaveCount(0);
   });
 
-  test("an active card with no agent working hides the agents line, keeps the epics line", async ({
+  test('an active card with no agent working hides the agents line, keeps the epics line', async ({
     page,
   }) => {
     await stubActiveScope(page, [], {
       liveSessions: 1,
-      projects: [activeProject("blacksmith", 0)],
+      projects: [activeProject('blacksmith', 0)],
     });
-    await page.goto("/overview");
-    const card = running(page).locator(".bs-card", {
-      has: page.getByRole("link", { name: "View blacksmith in Work" }),
+    await page.goto('/overview');
+    const card = running(page).locator('.bs-card', {
+      has: page.getByRole('link', { name: 'View blacksmith in Work' }),
     });
     await expect(card).toBeVisible();
     await expect(card.getByText(/epics? in flight/)).toBeVisible();
     await expect(card.getByText(/agents? working/)).toHaveCount(0);
   });
 
-  test("phone 375px: the toggle and the quiet-line link are 44px targets, no sideways scroll", async ({
+  test('phone 375px: the toggle and the quiet-line link are 44px targets, no sideways scroll', async ({
     page,
   }) => {
     await page.setViewportSize(PHONE);
     await oneOfTwo(page);
-    await page.goto("/overview");
-    const show = running(page).getByRole("link", { name: "Show it" });
+    await page.goto('/overview');
+    const show = running(page).getByRole('link', { name: 'Show it' });
     await expect(show).toBeVisible();
     expect((await show.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    for (const name of ["Active", "All"]) {
-      const box = await toggle(page).getByRole("link", { name }).boundingBox();
+    for (const name of ['Active', 'All']) {
+      const box = await toggle(page).getByRole('link', { name }).boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
     expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth,
-      ),
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
 
-  for (const theme of ["light", "dark"] as const) {
-    test(`screenshot 1 of 2 projects active, desktop/${theme}`, async ({
-      page,
-    }) => {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot 1 of 2 projects active, desktop/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await oneOfTwo(page);
-      await page.goto("/overview");
-      await settleForShot(
-        page,
-        page.getByRole("link", { name: "View blacksmith in Work" }),
-      );
-      await shootElement(
-        running(page),
-        `home-running-now-scope-active-desktop-${theme}`,
-      );
+      await page.goto('/overview');
+      await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+      await shootElement(running(page), `home-running-now-scope-active-desktop-${theme}`);
     });
   }
 
-  test("screenshot 1 of 2 projects active, phone 375/light", async ({
-    page,
-  }) => {
-    await setTheme(page, "light");
+  test('screenshot 1 of 2 projects active, phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await page.setViewportSize(PHONE);
     await oneOfTwo(page);
-    await page.goto("/overview");
-    await settleForShot(
-      page,
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    );
-    await shootElement(
-      running(page),
-      "home-running-now-scope-active-phone-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-active-phone-light');
   });
 
-  test("screenshot none active, desktop/light", async ({ page }) => {
-    await setTheme(page, "light");
+  test('screenshot none active, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await stubActiveScope(page, [], { liveSessions: 0 });
-    await page.goto("/overview");
-    await settleForShot(page, page.getByText("Nothing is active right now. ·"));
-    await shootElement(
-      running(page),
-      "home-running-now-scope-none-desktop-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByText('Nothing is active right now. ·'));
+    await shootElement(running(page), 'home-running-now-scope-none-desktop-light');
   });
 
-  test("screenshot unmeasured, desktop/light", async ({ page }) => {
-    await setTheme(page, "light");
+  test('screenshot unmeasured, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
-    await page.goto("/overview");
-    await settleForShot(
-      page,
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    );
-    await shootElement(
-      running(page),
-      "home-running-now-scope-unmeasured-desktop-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-unmeasured-desktop-light');
   });
 
   // All with one muted card and one active card whose agents line is hidden at 0.
   const allMutedAndIdle = (page: Page) =>
-    stubActiveScope(page, [], {
-      liveSessions: 1,
-      projects: [activeProject("blacksmith", 0)],
-    });
+    stubActiveScope(page, [], { liveSessions: 1, projects: [activeProject('blacksmith', 0)] });
 
-  for (const theme of ["light", "dark"] as const) {
+  for (const theme of ['light', 'dark'] as const) {
     test(`screenshot All, one muted card and one with no agent working, desktop/${theme}`, async ({
       page,
     }) => {
       await setTheme(page, theme);
       await allMutedAndIdle(page);
-      await page.goto("/overview?scope=all");
-      await expect(page.locator(".bs-home__card--quiet")).toHaveCount(1);
-      await settleForShot(
-        page,
-        page.getByRole("link", { name: "View blacksmith in Work" }),
-      );
-      await shootElement(
-        running(page),
-        `home-running-now-scope-all-desktop-${theme}`,
-      );
+      await page.goto('/overview?scope=all');
+      await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+      await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+      await shootElement(running(page), `home-running-now-scope-all-desktop-${theme}`);
     });
   }
 
-  test("screenshot All, one muted card and one with no agent working, phone 375/light", async ({
+  test('screenshot All, one muted card and one with no agent working, phone 375/light', async ({
     page,
   }) => {
-    await setTheme(page, "light");
+    await setTheme(page, 'light');
     await page.setViewportSize(PHONE);
     await allMutedAndIdle(page);
-    await page.goto("/overview?scope=all");
-    await expect(page.locator(".bs-home__card--quiet")).toHaveCount(1);
-    await settleForShot(
-      page,
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    );
-    await shootElement(running(page), "home-running-now-scope-all-phone-light");
+    await page.goto('/overview?scope=all');
+    await expect(page.locator('.bs-home__card--quiet')).toHaveCount(1);
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-all-phone-light');
   });
 
-  test("screenshot only unlinked sessions, desktop/light", async ({ page }) => {
-    await setTheme(page, "light");
+  test('screenshot only unlinked sessions, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await stubActiveScope(page, [], { liveSessions: 2, unlinkedSessions: 2 });
-    await page.goto("/overview");
-    await settleForShot(
-      page,
-      page.getByText("2 live sessions, none on an epic · Show all"),
-    );
-    await shootElement(
-      running(page),
-      "home-running-now-scope-unlinked-desktop-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByText('2 live sessions, none on an epic · Show all'));
+    await shootElement(running(page), 'home-running-now-scope-unlinked-desktop-light');
   });
 
-  test("screenshot no live session on the project, desktop/light", async ({
-    page,
-  }) => {
-    await setTheme(page, "light");
+  test('screenshot no live session on the project, desktop/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await oneOfTwo(page);
-    await page.goto("/overview?project=demo-hub");
-    await settleForShot(
-      page,
-      page.getByText("No live session is on this project · Show all"),
-    );
-    await shootElement(
-      running(page),
-      "home-running-now-scope-no-session-desktop-light",
-    );
+    await page.goto('/overview?project=demo-hub');
+    await settleForShot(page, page.getByText('No live session is on this project · Show all'));
+    await shootElement(running(page), 'home-running-now-scope-no-session-desktop-light');
   });
 
-  test("screenshot none active, phone 375/light", async ({ page }) => {
-    await setTheme(page, "light");
+  test('screenshot none active, phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await page.setViewportSize(PHONE);
     await stubActiveScope(page, [], { liveSessions: 0 });
-    await page.goto("/overview");
-    await settleForShot(page, page.getByText("Nothing is active right now. ·"));
-    await shootElement(
-      running(page),
-      "home-running-now-scope-none-phone-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByText('Nothing is active right now. ·'));
+    await shootElement(running(page), 'home-running-now-scope-none-phone-light');
   });
 
-  test("screenshot unmeasured, phone 375/light", async ({ page }) => {
-    await setTheme(page, "light");
+  test('screenshot unmeasured, phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
     await page.setViewportSize(PHONE);
     await stubActiveScope(page, [], { measured: false, liveSessions: 0 });
-    await page.goto("/overview");
-    await settleForShot(
-      page,
-      page.getByRole("link", { name: "View blacksmith in Work" }),
-    );
-    await shootElement(
-      running(page),
-      "home-running-now-scope-unmeasured-phone-light",
-    );
+    await page.goto('/overview');
+    await settleForShot(page, page.getByRole('link', { name: 'View blacksmith in Work' }));
+    await shootElement(running(page), 'home-running-now-scope-unmeasured-phone-light');
   });
 });
