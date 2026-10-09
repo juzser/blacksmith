@@ -118,25 +118,28 @@ const selectedEpic = ref<string | null>(null);
  */
 const selectedStore = ref<string | undefined>(undefined);
 
-/** The store of the project a section shows: its milestones carry one, a phase-less project's overview row does. */
-function storeIdFor(sectionProject: string | undefined): string | undefined {
-  if (sectionProject === undefined) return undefined;
-  return (
-    (milestones.value ?? []).find((m) => m.project === sectionProject && m.store)?.store?.id ??
-    overviewProjects.value.find((p) => p.project === sectionProject && p.store)?.store?.id
-  );
-}
-
 /** A pick from a section names that section's store; one from an open block stays in the store it is in. */
-function pickStore(sectionProject: string | undefined) {
-  if (sectionProject !== undefined) selectedStore.value = storeIdFor(sectionProject);
+function pickStore(section: { store: string | undefined } | undefined) {
+  if (section !== undefined) selectedStore.value = section.store;
 }
 
 /** The default or deep-linked selection: the store of the first section that holds it. */
 function settleStore() {
   const pick = { phaseId: selectedPhase.value, epicId: selectedEpic.value };
-  const host = allSections.value.find((s) => sectionHolds(s, pick));
-  selectedStore.value = storeIdFor(host?.project);
+  selectedStore.value = allSections.value.find((s) => sectionHolds(s, pick))?.store?.id;
+}
+
+/** Ids repeat between stores, so a selection belongs only to the sections of its own store. */
+function holdsStore(section: RoadmapSection): boolean {
+  const store = selectedStore.value;
+  return store === undefined || section.store === undefined || section.store.id === store;
+}
+
+function holdsSelection(section: RoadmapSection): boolean {
+  return (
+    holdsStore(section) &&
+    sectionHolds(section, { phaseId: selectedPhase.value, epicId: selectedEpic.value })
+  );
 }
 
 /** The milestones of one store; all of them when the store is unknown. */
@@ -343,8 +346,7 @@ watch([project, sessionKey], load);
 const keepProject = ref<string | null>(null);
 let lastScope = scope.value;
 function syncKeep() {
-  const pick = { phaseId: selectedPhase.value, epicId: selectedEpic.value };
-  keepProject.value = allSections.value.find((sec) => sectionHolds(sec, pick))?.project ?? null;
+  keepProject.value = allSections.value.find(holdsSelection)?.key ?? null;
 }
 
 // Narrowing to Active can hide the lane the selection sits in: fall back to
@@ -380,8 +382,8 @@ watch(
   },
 );
 
-function selectPhase(phaseId: string, sectionProject?: string) {
-  pickStore(sectionProject);
+function selectPhase(phaseId: string, section?: { store: string | undefined }) {
+  pickStore(section);
   selectedPhase.value = phaseId;
   selectedEpic.value = null;
   syncKeep();
@@ -389,8 +391,8 @@ function selectPhase(phaseId: string, sectionProject?: string) {
   ensureEpicFlowsLoaded(epicIdsForPhase(phaseId));
 }
 
-function selectEpic(epicId: string, sectionProject?: string) {
-  pickStore(sectionProject);
+function selectEpic(epicId: string, section?: { store: string | undefined }) {
+  pickStore(section);
   selectedEpic.value = epicId;
   selectedPhase.value = null;
   syncKeep();
@@ -433,12 +435,7 @@ const noneSurvive = () => measured() && sections.value.length === 0 && allSectio
 const showHeadings = computed(() => !project.value);
 
 /** The section whose lanes hold the selection; null when it sits in none. */
-const hostSection = computed(
-  () =>
-    sections.value.find((s) =>
-      sectionHolds(s, { phaseId: selectedPhase.value, epicId: selectedEpic.value }),
-    ) ?? null,
-);
+const hostSection = computed(() => sections.value.find(holdsSelection) ?? null);
 
 /** The one status legend sits under the first section that has phase bars
  * (a phase-less section's rows carry no bars). */
@@ -451,7 +448,7 @@ const legendSection = computed(() => sections.value.find((s) => s.kind === 'phas
  */
 const stackItems = computed(() => {
   const items: Array<{ key: string; section: RoadmapSection | null }> = sections.value.map(
-    (section) => ({ key: `${section.kind}:${section.project}`, section }),
+    (section) => ({ key: `${section.kind}:${section.key}`, section }),
   );
   const host = hostSection.value;
   const at = host === null ? items.length : items.findIndex((item) => item.section === host) + 1;
@@ -473,16 +470,13 @@ const expandedWindows = ref(loadExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE));
 
 function windowExpanded(section: RoadmapSection) {
   return {
-    earlier: expandedWindows.value.has(windowExpandId(section.project, 'earlier')),
-    later: expandedWindows.value.has(windowExpandId(section.project, 'later')),
+    earlier: expandedWindows.value.has(windowExpandId(section.key, 'earlier')),
+    later: expandedWindows.value.has(windowExpandId(section.key, 'later')),
   };
 }
 
 function toggleWindow(section: RoadmapSection, side: WindowSide) {
-  expandedWindows.value = toggleExpanded(
-    expandedWindows.value,
-    windowExpandId(section.project, side),
-  );
+  expandedWindows.value = toggleExpanded(expandedWindows.value, windowExpandId(section.key, side));
   saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
 }
 
@@ -503,7 +497,7 @@ async function revealSelection() {
   revealedFor = key;
   const side = selectionSide(host, { phaseId: selectedPhase.value, epicId: selectedEpic.value });
   if (side === null) return;
-  const id = windowExpandId(host.project, side);
+  const id = windowExpandId(host.key, side);
   if (!expandedWindows.value.has(id)) {
     expandedWindows.value = toggleExpanded(expandedWindows.value, id);
     saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
@@ -684,15 +678,15 @@ async function closePeek() {
           :section="item.section"
           :show-heading="showHeadings"
           :expanded="windowExpanded(item.section)"
-          :selected-phase="selectedPhase"
-          :selected-epic="selectedEpic"
+          :selected-phase="holdsStore(item.section) ? selectedPhase : null"
+          :selected-epic="holdsStore(item.section) ? selectedEpic : null"
           :hosts-selection="item.section === hostSection"
           :picker-label="pickerLabel(item.section)"
           :show-legend="item.section === legendSection"
           :idle-labels="idleLabels"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
-          @select-phase="selectPhase"
-          @select-epic="selectEpic"
+          @select-phase="(id, store) => selectPhase(id, { store })"
+          @select-epic="(id, store) => selectEpic(id, { store })"
         />
         <EpicBlock
           v-else-if="selectedPhaseData"

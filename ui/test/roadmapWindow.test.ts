@@ -209,6 +209,43 @@ describe('groupByProject', () => {
   });
 });
 
+describe('buildRoadmapSections — a label shared by two stores', () => {
+  const rows = [
+    milestone({
+      milestoneId: 'phase-1',
+      project: 'project-a',
+      store: { id: 'store-a', label: 'checkout-a' },
+    }),
+    milestone({
+      milestoneId: 'phase-1',
+      project: 'project-a',
+      store: { id: 'store-b', label: 'checkout-b' },
+    }),
+  ];
+
+  it('keeps one section per store, named apart, each carrying its store', () => {
+    const sections = buildRoadmapSections(rows, [], [], undefined, null);
+    expect(sections.map((s) => [s.title, s.store?.id]).sort()).toEqual([
+      ['project-a · checkout-a', 'store-a'],
+      ['project-a · checkout-b', 'store-b'],
+    ]);
+    expect(new Set(sections.map((s) => s.key)).size).toBe(2);
+  });
+
+  it('leaves the title bare when the labels differ or there is no store', () => {
+    const single = buildRoadmapSections(
+      [milestone({ project: 'project-a' })],
+      [],
+      [],
+      undefined,
+      null,
+    );
+    expect(single.map((s) => [s.title, s.key, s.store])).toEqual([
+      ['project-a', 'project-a', undefined],
+    ]);
+  });
+});
+
 describe('buildRoadmapSections — one section per project, in liveness order', () => {
   it('puts the project holding a running epic first', () => {
     const sections = buildRoadmapSections(

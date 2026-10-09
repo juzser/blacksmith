@@ -11,6 +11,7 @@ import {
   type Swimlane,
   type SwimlaneRow,
 } from './roadmapSwimlane.js';
+import { type StoreRef, storeKey } from './storeKey.js';
 
 /** `expandedRows.ts` scope for the two disclosures, ids from `windowExpandId`. */
 export const ROADMAP_WINDOW_SCOPE = 'roadmap-window';
@@ -108,20 +109,26 @@ export function windowPickerId(project: string): string {
 
 export interface ProjectLanes {
   project: string;
+  /** The store the lanes came from; absent on a single-store payload. */
+  store?: StoreRef;
   lanes: MilestoneProgress[];
 }
 
-/** Projects in first-seen order, each one's lanes in `sequence` order. */
+/**
+ * Projects in first-seen order, each one's lanes in `sequence` order. A label
+ * is not unique across stores, so a project of another store is its own group.
+ */
 export function groupByProject(milestones: readonly MilestoneProgress[]): ProjectLanes[] {
-  const byProject = new Map<string, MilestoneProgress[]>();
+  const groups = new Map<string, ProjectLanes>();
   for (const m of milestones) {
-    const list = byProject.get(m.project) ?? [];
-    list.push(m);
-    byProject.set(m.project, list);
+    const key = storeKey(m, m.project);
+    const group = groups.get(key) ?? { project: m.project, store: m.store, lanes: [] };
+    group.lanes.push(m);
+    groups.set(key, group);
   }
-  return [...byProject].map(([project, lanes]) => ({
-    project,
-    lanes: [...lanes].sort((a, b) => a.sequence - b.sequence),
+  return [...groups.values()].map((g) => ({
+    ...g,
+    lanes: [...g.lanes].sort((a, b) => a.sequence - b.sequence),
   }));
 }
 
@@ -146,6 +153,10 @@ function lastActivity(lanes: readonly MilestoneProgress[]): number | null {
 
 interface SectionBase {
   project: string;
+  /** The store the section reads from; absent on a single-store payload. */
+  store?: StoreRef;
+  /** Names the section across stores (`storeKey`): the bare project when there is no store. */
+  key: string;
   /** The heading text: the project, or "Epics" for the unscoped epic-only fallback. */
   title: string;
   /** Holds an epic in `overview.epicsActivelyRunning`; sorts first, opens on phone. */
@@ -182,6 +193,7 @@ function epicSection(
   title: string,
   epicIds: readonly string[],
   activeEpics: readonly string[],
+  store?: StoreRef,
 ): RoadmapSection {
   const runningIndex = epicIds.findIndex((e) => activeEpics.includes(e));
   const current = { index: Math.max(0, runningIndex), allDone: false };
@@ -192,6 +204,8 @@ function epicSection(
   return {
     kind: 'epic',
     project,
+    store,
+    key: storeKey({ store }, project),
     title,
     running: runningIndex >= 0,
     activity: null,
@@ -218,21 +232,38 @@ export function buildRoadmapSections(
     if (epics.length === 0) return [];
     return [epicSection(projectFilter ?? '', projectFilter ?? 'Epics', epics, activeEpics)];
   }
-  const sections: RoadmapSection[] = groupByProject(milestones).map(({ project, lanes }) => ({
-    kind: 'phase',
-    project,
-    title: project,
-    running: lanes.some((m) => m.epicIds.some((e) => activeEpics.includes(e))),
-    activity: lastActivity(lanes),
-    countLabel: doneCountLabel(lanes),
-    window: cutWindow(lanes, currentLaneIndex(lanes, activeEpics)),
-  }));
-  const declared = new Set(sections.map((s) => s.project));
+  const sections: RoadmapSection[] = groupByProject(milestones).map(
+    ({ project, store, lanes }) => ({
+      kind: 'phase',
+      project,
+      store,
+      key: storeKey({ store }, project),
+      title: project,
+      running: lanes.some((m) => m.epicIds.some((e) => activeEpics.includes(e))),
+      activity: lastActivity(lanes),
+      countLabel: doneCountLabel(lanes),
+      window: cutWindow(lanes, currentLaneIndex(lanes, activeEpics)),
+    }),
+  );
+  const declared = new Set(sections.map((s) => s.key));
   for (const summary of projects ?? []) {
-    if (declared.has(summary.project) || summary.epicsInFlight.length === 0) continue;
+    if (declared.has(storeKey(summary, summary.project)) || summary.epicsInFlight.length === 0)
+      continue;
     sections.push(
-      epicSection(summary.project, summary.project, summary.epicsInFlight, activeEpics),
+      epicSection(
+        summary.project,
+        summary.project,
+        summary.epicsInFlight,
+        activeEpics,
+        summary.store,
+      ),
     );
+  }
+  // Two sections that report one label are told apart by their store's name.
+  const seen = new Map<string, number>();
+  for (const s of sections) seen.set(s.title, (seen.get(s.title) ?? 0) + 1);
+  for (const s of sections) {
+    if (s.store && (seen.get(s.title) ?? 0) > 1) s.title = `${s.title} · ${s.store.label}`;
   }
   return sections.sort(compareSections);
 }
@@ -256,7 +287,7 @@ export function filterActiveSections(
   const projects = new Set(scope.projects.map((p) => p.project));
   const epics = new Set(scope.epics.map((e) => e.epicId));
   return sections.filter((s) => {
-    if (keepProject !== null && s.project === keepProject) return true;
+    if (keepProject !== null && s.key === keepProject) return true;
     if (s.project !== '' && projects.has(s.project)) return true;
     if (s.kind !== 'epic') return false;
     const { earlier, visible, later } = s.window;
@@ -340,7 +371,7 @@ export function sectionSwimlane(
   const regions: LaneRegion[] = [];
   if (w.earlier.length > 0) {
     regions.push({
-      id: windowRegionId(section.project, 'earlier'),
+      id: windowRegionId(section.key, 'earlier'),
       lanes: lanes.slice(0, shownEarlier.length),
     });
   }
@@ -350,7 +381,7 @@ export function sectionSwimlane(
   });
   if (w.later.length > 0) {
     regions.push({
-      id: windowRegionId(section.project, 'later'),
+      id: windowRegionId(section.key, 'later'),
       lanes: lanes.slice(shownEarlier.length + w.visible.length),
     });
   }
