@@ -25,11 +25,7 @@ function epic(over: Partial<LiveLinkedEpic> = {}): LiveLinkedEpic {
   };
 }
 
-function card(
-  epics: LiveLinkedEpic[],
-  focus: LiveCard['focus'] = null,
-  id = 'cli-1',
-): LiveCard {
+function card(epics: LiveLinkedEpic[], focus: LiveCard['focus'] = null, id = 'cli-1'): LiveCard {
   return {
     cliSessionId: id,
     name: null,
@@ -41,7 +37,11 @@ function card(
   };
 }
 
-const agent = (role: string, taskId: string | null) => ({ role, taskId, since: '2026-10-09T10:00:00Z' });
+const agent = (role: string, taskId: string | null) => ({
+  role,
+  taskId,
+  since: '2026-10-09T10:00:00Z',
+});
 const task = (taskId: string, store = A, over: Record<string, unknown> = {}) => ({
   store,
   taskId,

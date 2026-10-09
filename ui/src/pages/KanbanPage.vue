@@ -27,6 +27,7 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
+import { isActiveEpic } from '../lib/activeScope.js';
 import {
   type ActiveScopeResult,
   fetchKanban,
@@ -43,7 +44,6 @@ import {
   epicOptions,
   retainedEpic,
 } from '../lib/epicPicker.js';
-import { isActiveEpic } from '../lib/activeScope.js';
 import { pluralize } from '../lib/format.js';
 import { epicKeyForTask, visibleTaskCount } from '../lib/kanban.js';
 import { liveMarks } from '../lib/liveFocus.js';
@@ -250,7 +250,9 @@ const waitingLines = computed(() => marks.value?.waiting ?? []);
 // With more than one live epic on the board the epics are the columns.
 const defaultGroupBy = computed(() => {
   if (!liveEpicsOnly.value) return null;
-  const epicIds = new Set(boardTasks.value.map((t) => `${t.store?.id ?? ''}:${epicKeyForTask(t.taskId)}`));
+  const epicIds = new Set(
+    boardTasks.value.map((t) => `${t.store?.id ?? ''}:${epicKeyForTask(t.taskId)}`),
+  );
   return epicIds.size > 1 ? 'epic' : null;
 });
 
