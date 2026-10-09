@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { dropRoutes, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 import { stubActiveScope, stubWindowRoadmap, WINDOW_ROADMAP } from './roadmapWindowFixture.js';
@@ -1228,5 +1229,233 @@ test.describe('Roadmap: Active scope (S7)', () => {
     await page.goto('/work/roadmap');
     await settleForShot(page, quiet(page));
     await shoot(page, 'work-roadmap-unmeasured-desktop-light');
+  });
+});
+
+// Every live epic reads Current and opens its running wave. Two stores, one live
+// epic each; /api/roadmap, /api/flow, /api/active-scope and /api/cli-sessions are
+// stubbed so the numbers do not depend on what the fixture db holds.
+const STORE_A = { id: 'store-a', label: 'project-a' };
+const STORE_B = { id: 'store-b', label: 'project-b' };
+
+function liveMilestone(store: typeof STORE_A, epicId: string) {
+  return {
+    store,
+    milestoneId: 'phase-1',
+    name: 'Phase 1',
+    status: 'in-progress',
+    sequence: 1,
+    goal: null,
+    epicIds: [epicId],
+    tasksTotal: 0,
+    tasksCompleted: 0,
+    tokensSpent: 0,
+    tokensBudget: null,
+    unmeasured: 0,
+    project: store.label,
+    kind: 'product',
+    startedAt: '2026-01-05T09:00:00.000Z',
+    finishedAt: null,
+    epics: [],
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 },
+  };
+}
+
+function flowNode(epic: string, slug: string, taskStatus: string, wave: number) {
+  return {
+    taskId: `${epic}/${slug}`,
+    taskStatus,
+    title: `Long objective text of ${slug} that must never be the card name`,
+    liveAgentRole: null,
+    workingAgentRole: null,
+    planVersion: 1,
+    wave,
+  };
+}
+
+// epic-a: Wave 2 of 4, 3/5 done; the working task is the last one in its wave.
+const EPIC_A_WAVES = [
+  [['task-1-scaffold', 'completed']],
+  [
+    ['task-2-parse-input', 'completed'],
+    ['task-3-wire-the-gate', 'completed'],
+    ['task-4-render-rows', 'completed'],
+    ['task-5-write-docs', 'todo'],
+    ['task-6-ship-it', 'in-progress'],
+  ],
+  [['task-7-polish', 'todo']],
+  [['task-8-release', 'todo']],
+] as const;
+const EPIC_B_WAVES = [
+  [['task-1-seed', 'completed']],
+  [
+    ['task-2-index', 'in-progress'],
+    ['task-3-query', 'todo'],
+  ],
+] as const;
+
+function flowBody(epic: string, waves: ReadonlyArray<ReadonlyArray<readonly [string, string]>>) {
+  const nodes = waves.flatMap((w, i) => w.map(([slug, status]) => flowNode(epic, slug, status, i)));
+  return {
+    nodes,
+    edges: [],
+    waves: waves.map((w) => w.map(([slug]) => `${epic}/${slug}`)),
+    planVersions: [1],
+  };
+}
+
+function liveSession(
+  id: string,
+  store: typeof STORE_A,
+  epic: string,
+  working: string,
+  next: string,
+) {
+  const nextTask = { taskId: `${epic}/${next}`, taskTitle: next };
+  return {
+    cliSessionId: id,
+    name: null,
+    cwdLabel: 'workspace-a',
+    status: 'working',
+    statusSince: FIXTURE_NOW_ISO,
+    focus: {
+      store,
+      project: store.label,
+      epicId: epic,
+      epicTitle: null,
+      wave: 2,
+      now: [
+        { role: 'coder', taskId: `${epic}/${working}`, taskTitle: working, since: FIXTURE_NOW_ISO },
+      ],
+      next: { kind: 'task', ...nextTask },
+    },
+    linked: {
+      epics: [
+        {
+          store,
+          epicId: epic,
+          closed: false,
+          workingAgents: [{ role: 'coder', taskId: `${epic}/${working}`, since: FIXTURE_NOW_ISO }],
+          focusParts: { nextTask },
+        },
+      ],
+    },
+  };
+}
+
+async function stubLiveRoadmap(page: Page): Promise<void> {
+  await page.route('**/api/roadmap**', (route) =>
+    route.fulfill({
+      json: [liveMilestone(STORE_A, 'epic-a'), liveMilestone(STORE_B, 'epic-b')],
+    }),
+  );
+  await page.route('**/api/overview**', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.projects = [];
+    await route.fulfill({ response, json: body });
+  });
+  await page.route('**/api/flow**', (route) => {
+    const epic = new URL(route.request().url()).searchParams.get('epic');
+    return route.fulfill({
+      json: epic === 'epic-a' ? flowBody('epic-a', EPIC_A_WAVES) : flowBody('epic-b', EPIC_B_WAVES),
+    });
+  });
+  await page.route('**/api/cli-sessions*', (route) =>
+    route.fulfill({
+      json: {
+        state: 'ok',
+        configSource: 'default',
+        readAt: FIXTURE_NOW_ISO,
+        formatWarning: null,
+        hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+        sessions: [
+          liveSession('cli-1', STORE_A, 'epic-a', 'task-6-ship-it', 'task-5-write-docs'),
+          liveSession('cli-2', STORE_B, 'epic-b', 'task-2-index', 'task-3-query'),
+        ],
+      },
+    }),
+  );
+  await stubActiveScope(page, ['project-a', 'project-b'], {
+    projects: [
+      { storeId: STORE_A.id, project: 'project-a', liveSessions: 1, agentsWorking: 1 },
+      { storeId: STORE_B.id, project: 'project-b', liveSessions: 1, agentsWorking: 1 },
+    ],
+    epics: [
+      { storeId: STORE_A.id, epicId: 'epic-a', project: 'project-a' },
+      { storeId: STORE_B.id, epicId: 'epic-b', project: 'project-b' },
+    ],
+  });
+}
+
+test.describe('Roadmap: every live epic is Current and open', () => {
+  test('desktop 1280: both live lanes Current, both epics open, Now card first', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+
+    await expect(page.locator('.lane-group[aria-current="step"]')).toHaveCount(2);
+    const wave = page.locator('.whead').filter({ hasText: 'Wave 2 of 4' });
+    await expect(wave).toContainText('3/5 done');
+    await expect(wave).toContainText('Running');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toContainText(
+      '0/2 done',
+    );
+
+    const firstCard = page
+      .locator('section.wave.cur')
+      .filter({ hasText: 'Wave 2 of 4' })
+      .locator('.wave-task-card')
+      .first();
+    await expect(firstCard).toContainText('Ship it');
+    await expect(firstCard).toContainText('Now · Builder');
+    await expect(firstCard).not.toContainText('objective');
+    await settleForShot(page, page.locator('.lane').first());
+    await shoot(page, 'work-roadmap-live-epics-desktop-light');
+  });
+
+  test('phone 375: Current in the epic row, waves open, rows 44px, no sideways scroll', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+
+    await expect(
+      page.locator('.bs-roadmap-mobile__row').filter({ hasText: 'Current' }),
+    ).not.toHaveCount(0);
+    const wave = page.locator('.whead').filter({ hasText: 'Wave 2 of 4' });
+    await expect(wave).toContainText('3/5 done');
+    const heights = await page
+      .locator('.bs-roadmap-mobile__row, .wave-list--compact .wave')
+      .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+    expect(heights.length).toBeGreaterThan(0);
+    for (const h of heights) expect(h).toBeGreaterThanOrEqual(44);
+    const sideways = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(sideways).toBe(false);
+  });
+
+  test('screenshot live epics desktop/dark', async ({ page }) => {
+    await setTheme(page, 'dark');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await settleForShot(page, page.locator('section.wave.cur').first());
+    await shoot(page, 'work-roadmap-live-epics-desktop-dark');
+  });
+
+  test('screenshot live epics phone 375/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await settleForShot(page, page.locator('.wave-list--compact .wave').first());
+    await shoot(page, 'work-roadmap-live-epics-phone-375-light');
   });
 });

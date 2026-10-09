@@ -16,6 +16,7 @@ import { useViewport } from '../composables/useViewport.js';
 import { pickerSelection, withIdleLabels } from '../lib/epicPicker.js';
 import {
   disclosureLabel,
+  type LiveEpics,
   laneOptions,
   type RoadmapSection,
   sectionSwimlane,
@@ -41,6 +42,8 @@ const props = defineProps<{
   showLegend?: boolean;
   /** Epic id -> "idle 18d", for the idle epics only. */
   idleLabels: Record<string, string>;
+  /** The epics a live session is on; each reads Current. */
+  live?: LiveEpics | null;
 }>();
 
 // selectPhase/selectEpic carry the picked id and the id of the store the
@@ -53,7 +56,7 @@ const emit = defineEmits<{
 
 const { isPhoneWidth } = useViewport();
 
-const view = computed(() => sectionSwimlane(props.section, props.expanded, new Date()));
+const view = computed(() => sectionSwimlane(props.section, props.expanded, new Date(), props.live));
 
 // DS4 S4 R4 — phase mode only: with an epic of this section selected, the
 // EpicBlock's back link stands in for the picker. A phase-less section's
@@ -66,7 +69,7 @@ const pickerValue = computed(
 );
 const pickerOptions = computed(() => {
   const options = withIdleLabels(
-    laneOptions(view.value.regions, view.value.currentLane),
+    laneOptions(view.value.regions, view.value.currentLanes),
     props.idleLabels,
   );
   if (pickerSelection(pickerValue.value, options) !== '') return options;
@@ -134,7 +137,8 @@ const later = computed(() => disclosure('later'));
       v-if="!isPhoneWidth"
       :swimlane="view.swimlane"
       :regions="view.regions"
-      :current-lane="view.currentLane"
+      :current-lanes="view.currentLanes"
+      :live-epics="view.liveEpics"
       :project="showHeading ? section.title : undefined"
       :selected-phase="selectedPhase"
       :selected-epic="selectedEpic"

@@ -8,7 +8,7 @@
 // UI spec Part 2 — rows come grouped: one `role="group"` per lane (a phase
 // row and its epic rows), lanes in regions. A side region carries the id its
 // disclosure's `aria-controls` names (RoadmapProjectSection.vue); the current
-// lane's group reads `aria-current="step"` and its head row a "Current" Tag —
+// lanes' groups read `aria-current="step"` and its head row a "Current" Tag —
 // separate from the selection's `.sel`/`aria-current="true"`.
 import { computed } from 'vue';
 import type { Swimlane } from '../lib/roadmapSwimlane.js';
@@ -21,7 +21,10 @@ const props = defineProps<{
   selectedEpic: string | null;
   /** Absent: every row is one region with no id (the swimlane unwindowed). */
   regions?: LaneRegion[];
-  currentLane?: string | null;
+  /** Lane heads marked Current: every lane holding a live epic, else the one current lane. */
+  currentLanes?: string[];
+  /** Epic ids a live session is on; each reads Current too. */
+  liveEpics?: string[];
   /** Names the scroll region when several swimlanes share the page. */
   project?: string;
   /** Epic id -> "idle 18d", for the idle epics only. */
@@ -80,7 +83,7 @@ const scrollLabel = computed(() =>
           class="lane-group"
           role="group"
           :aria-label="group.head.label"
-          :aria-current="group.head.id === currentLane ? 'step' : undefined"
+          :aria-current="currentLanes?.includes(group.head.id) ? 'step' : undefined"
         >
           <button
             v-for="row in group.rows"
@@ -105,7 +108,12 @@ const scrollLabel = computed(() =>
                 size="sm"
                 >{{ idleLabels[row.id] }}</Tag
               >
-              <Tag v-if="row === group.head && row.id === currentLane" tone="progress" size="sm">Current</Tag>
+              <Tag
+                v-if="(row === group.head && currentLanes?.includes(row.id)) || (row.kind === 'epic' && liveEpics?.includes(row.id))"
+                tone="progress"
+                size="sm"
+                >Current</Tag
+              >
             </span>
             <div class="track">
               <span

@@ -15,7 +15,7 @@ const SRC = readFileSync(
 describe('WaveList.vue — compact prop (DS4 S4 R3)', () => {
   it('defaults compact to false', () => {
     expect(SRC).toMatch(/compact\?:\s*boolean/);
-    expect(SRC).toMatch(/\{\s*compact:\s*false\s*\}/);
+    expect(SRC).toMatch(/\{\s*compact:\s*false\s*[,}]/);
   });
 
   it('shows a ProgressBarMini on every wave when compact, only on past waves otherwise', () => {
