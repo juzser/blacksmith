@@ -1566,7 +1566,10 @@ than appearing in it.
   names, budgets and the dashboard, so old logs read as before. The
   judge-stop hook still recognises the bare names for one release. A box with
   the plugin installed needs `claude plugin update blacksmith` and a session
-  restart to see the new names.
+  restart to see the new names. A clone must rebuild (`pnpm run build`) after
+  pulling: the judge-stop hook runs from `dist/`, and an old
+  `dist/judgeStopHook.js` does not know the `bs-` names, so it lets a
+  `bs-reviewer` stop without its artifact until the rebuild.
 
 - **The guide an operator reads is not one file.** `docs/guide/operator-guide.md`
   had grown to 184 kB and 3,341 lines — every question about the loop was

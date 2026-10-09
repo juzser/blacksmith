@@ -9,9 +9,10 @@ enforces so a docs/code mismatch fails CI instead of drifting silently.
 Templates live at `.claude/agents/bs-<role>.md` (the subagent is named
 `bs-<role>`, so it cannot collide with another plugin's `coder`; the role
 stays bare in events, policies and env names) — Claude Code subagent
-format (YAML frontmatter + body-as-system-prompt). There are 12 today:
+format (YAML frontmatter + body-as-system-prompt). There are 14 today:
 `planner`, `spec-reviewer`, `researcher`, `coder`, `tester`, `grader`,
-`reviewer`, `verifier`, `security-reviewer`, `merger`, `scribe`, `uiux`.
+`reviewer`, `verifier`, `security-reviewer`, `merger`, `scribe`, `uiux`,
+`auditor`, `wave-runner`.
 
 To add one:
 
