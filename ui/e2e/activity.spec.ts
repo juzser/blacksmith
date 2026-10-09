@@ -752,6 +752,84 @@ test.describe('Activity', () => {
     expect(s.deco).toBe('none');
   });
 
+  // A prompt-linked, non-compact row whose meta is long enough to
+  // overflow: the meta text and the link must behave as before the link
+  // existed (phone ellipsis on the clipping span; desktop inline flow).
+  async function serveLongCausedDispatch(page: import('@playwright/test').Page) {
+    const prompt = {
+      ...synthEntry('plink-prompt', 30),
+      kind: 'prompt',
+      nearestPromptId: null as string | null,
+    };
+    const dispatch = {
+      ...synthEntry('plink-dispatch', 1, { payload: { agent_role: 'coder', round: 12 } }),
+      eventType: 'dispatch_decision',
+      kind: 'Dispatched',
+      nearestPromptId: 'plink-prompt',
+      run: {
+        tokensIn: 1_234_567,
+        tokensOut: 2_345_678,
+        durationMs: 5_025_000,
+        runStatus: 'done',
+        dispatchedAt: new Date(Date.now() - 60_000).toISOString(),
+        round: 12,
+      },
+    };
+    const entries = [dispatch, prompt];
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries, nextBefore: null, newestId: dispatch.eventId } });
+    });
+  }
+
+  test('375px: a long meta on a prompt-linked row still ends in an ellipsis', async ({ page }) => {
+    await serveLongCausedDispatch(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity');
+    // A dispatch's real meta is short; narrow the line so it overflows.
+    await page.addStyleTag({ content: '.bs-timeline-row__meta { max-width: 150px; }' });
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const m = await row.locator('.bs-timeline-row__meta').evaluate((meta) => {
+      const el = meta.firstElementChild as HTMLElement;
+      const cs = getComputedStyle(el);
+      return {
+        ellipsis: cs.textOverflow,
+        display: cs.display,
+        overflowing: el.scrollWidth > el.clientWidth,
+      };
+    });
+    expect(m.ellipsis).toBe('ellipsis');
+    expect(m.display).not.toMatch(/flex/);
+    expect(m.overflowing).toBe(true);
+  });
+
+  test('1280px: the prompt link flows inline after a wrapped meta', async ({ page }) => {
+    await serveLongCausedDispatch(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity');
+    await page.addStyleTag({ content: '.bs-timeline-row__meta { max-width: 300px; }' });
+    const link = page.locator('.bs-timeline-row__meta .bs-timeline-row__because-of').first();
+    await expect(link).toBeVisible();
+    const m = await link.evaluate((el) => {
+      const text = el
+        .closest('.bs-timeline-row__meta')
+        ?.querySelector('.bs-timeline-row__meta-text');
+      if (!text) throw new Error('no meta text');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rects = Array.from(range.getClientRects());
+      const first = el.getClientRects()[0];
+      return {
+        textTop: Math.min(...rects.map((r) => r.top)),
+        textLastTop: Math.max(...rects.map((r) => r.top)),
+        linkFirstTop: first?.top ?? Number.NaN,
+      };
+    });
+    // The text wraps, and the link's first line box is the text's last line.
+    expect(m.textLastTop).toBeGreaterThan(m.textTop + 4);
+    expect(Math.abs(m.linkFirstTop - m.textLastTop)).toBeLessThanOrEqual(4);
+  });
+
   test('1280px: the phone-only "Because of" pair stays hidden when the row is expanded', async ({
     page,
   }) => {

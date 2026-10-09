@@ -726,8 +726,11 @@ a:hover {
   white-space: pre;
   flex: none;
 }
-/* The text beside the link gives way first; the link never shrinks. */
-.bs-timeline-row__meta-main {
+/* Compact rows only: the text beside the link gives way first and the link
+   never shrinks. Elsewhere the wrapper stays a plain block, so the phone
+   ellipsis on the meta's first span still reaches the text and a wrapped
+   meta keeps the link inline after it. */
+.bs-timeline-row--compact .bs-timeline-row__meta-main {
   display: flex;
   min-width: 0;
 }
