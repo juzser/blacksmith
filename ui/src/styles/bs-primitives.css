@@ -4767,7 +4767,7 @@ h2.rm-section__head {
 .bs-analytics-page__phone-stat-value .bs-pring {
   vertical-align: top;
 }
-/* ds-review.html .pnum (~:506) sets no size, so a ring percent inside .mstat .v
+/* ds-review.html .pnum (~:507) sets no size, so a ring percent inside .mstat .v
    (~:727) reads at the tile's 18px; weight stays 400. Only this tile; every
    other .bs-pnum keeps ds-spec 2.1's 14px. */
 .bs-analytics-page__phone-stat-value .bs-pring .bs-pnum {
