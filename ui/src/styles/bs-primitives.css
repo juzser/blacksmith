@@ -2814,12 +2814,75 @@ a:hover {
   color: var(--bs-text-subtle);
   margin: 0;
 }
-/* list-item, not flex: flex drops the disclosure marker, and a closed group
-   must still read as openable. One line, so line-height gives the 44px. */
+/* Phone (ds-review.html .mgroup): the <details> is the card, the summary a
+   44px sunken bar with the count and a chevron that turns when open, the rows
+   sit inside with no chrome of their own. Desktop keeps its plain h3 + list. */
+details.bs-inbox__group {
+  display: block;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  overflow: hidden;
+}
+/* .bs-inbox already gaps its children by --bs-space-3; the mock wants 8px. */
+details.bs-inbox__group + details.bs-inbox__group {
+  margin-top: calc(var(--bs-space-2) - var(--bs-space-3));
+}
 summary.bs-inbox__group-head {
-  display: list-item;
-  line-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-height: var(--bs-touch);
+  padding: 0 var(--bs-m-card-pad);
+  background: var(--bs-surface-sunken);
+  font-size: 13px;
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
+  list-style: none;
   cursor: pointer;
+}
+summary.bs-inbox__group-head::-webkit-details-marker {
+  display: none;
+}
+details.bs-inbox__group[open] > summary.bs-inbox__group-head {
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-inbox__gcount {
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.bs-inbox__chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--bs-text-subtle);
+  transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
+}
+details.bs-inbox__group[open] > summary > .bs-inbox__chev {
+  transform: rotate(180deg);
+}
+/* Phone heading total (mock .ph-h .cnt). */
+.bs-inbox__count {
+  margin-left: var(--bs-space-2);
+  font-weight: 400;
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+/* Read state (pattern 12): the dot is desktop-only markup; both title kinds
+   go 600 while the row is unread. */
+.bs-inbox__udot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--bs-radius-full);
+  flex: none;
+  background: transparent;
+}
+.bs-inbox__row--unread .bs-inbox__udot {
+  background: var(--bs-accent);
+}
+.bs-inbox__row--unread .bs-inbox__title,
+.bs-inbox__row--unread .bs-inbox__ptitle {
+  font-weight: var(--bs-font-weight-semibold);
 }
 .bs-inbox__list {
   list-style: none;
@@ -2828,6 +2891,11 @@ summary.bs-inbox__group-head {
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
   background: var(--bs-surface);
+}
+details.bs-inbox__group > .bs-inbox__list {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .bs-inbox__row {
   display: flex;

@@ -11,11 +11,14 @@
 // every other row is one whole-row link and the description stays
 // desktop-only.
 //
-// Not built (flagged in the DS2 report): the unread dot and the
-// 600/500 read-state title weight (pattern 12 needs a read-state store no
-// DS2 criterion names), and the "Stop points" kind, which has no projected
-// row yet (§4.1: ship three kinds, file the fourth).
-import { Inbox } from '@lucide/vue';
+// Read state (pattern 12): a row is unread until the viewer activates one of
+// its links or its Decide button; lib/inboxSeen.ts keeps that per viewer in
+// localStorage. Unread is a 600 title (plus an accent dot on desktop), read
+// is 500.
+//
+// Not built (flagged in the DS2 report): the "Stop points" kind, which has no
+// projected row yet (§4.1: ship three kinds, file the fourth).
+import { ChevronDown, Inbox } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useViewport } from '../composables/useViewport.js';
@@ -31,6 +34,7 @@ import {
   inboxCopy,
   inboxMetaPrefix,
 } from '../lib/inbox.js';
+import { loadSeen, markSeen } from '../lib/inboxSeen.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
 import EmptyState from './kit/EmptyState.vue';
@@ -60,11 +64,30 @@ const groups = computed(() => {
   return groupInbox(isPhoneWidth.value ? rows : filterInbox(rows, filter.value), props.project);
 });
 const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).length);
+// Phone heading count (mock .ph-h .cnt): the rows listed, never 0.
+const total = computed(() =>
+  props.failed
+    ? 0
+    : groupInbox(props.rows ?? [], props.project).reduce((n, g) => n + g.rows.length, 0),
+);
+
+// window.localStorage can throw on access itself (private browsing), so the
+// lookup stays inside the module's try/catch.
+const storage = {
+  getItem: (k: string) => window.localStorage.getItem(k),
+  setItem: (k: string, v: string) => window.localStorage.setItem(k, v),
+};
+const seen = ref(loadSeen(storage));
+const markRead = (id: string) => {
+  seen.value = markSeen(storage, id);
+};
 </script>
 
 <template>
   <section class="bs-inbox" aria-labelledby="inbox-heading">
-    <h2 id="inbox-heading" class="bs-section-title">Needs you</h2>
+    <h2 id="inbox-heading" class="bs-section-title">
+      Needs you<span v-if="isPhoneWidth && total > 0" class="bs-inbox__count">{{ total }}</span>
+    </h2>
 
     <Banner v-if="failed" show-retry @retry="emit('retry')">Could not load what needs you.</Banner>
 
@@ -103,9 +126,11 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
         class="bs-inbox__group"
         :open="isPhoneWidth && gi === 0 ? true : undefined"
       >
-        <component :is="isPhoneWidth ? 'summary' : 'h3'" class="bs-inbox__group-head">
-          {{ g.label }} · {{ g.rows.length }}
-        </component>
+        <h3 v-if="!isPhoneWidth" class="bs-inbox__group-head">{{ g.label }} · {{ g.rows.length }}</h3>
+        <summary v-else class="bs-inbox__group-head">
+          {{ g.label }} <span class="bs-inbox__gcount">· {{ g.rows.length }}</span>
+          <ChevronDown class="bs-inbox__chev" :size="16" aria-hidden="true" />
+        </summary>
         <ul class="bs-inbox__list">
           <li
             v-for="(r, ri) in g.rows"
@@ -114,6 +139,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             :class="{
               'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,
               'bs-inbox__row--link': isPhoneWidth && (gi > 0 || ri > 0),
+              'bs-inbox__row--unread': !seen.has(r.id),
             }"
             :data-kind="r.kind"
           >
@@ -124,6 +150,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
               v-if="isPhoneWidth && (gi > 0 || ri > 0)"
               class="bs-inbox__rowlink"
               :to="inboxActionTarget(r)"
+              @click="markRead(r.id)"
             >
               <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
@@ -148,11 +175,16 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
                 class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
                 :aria-label="`Decide: ${inboxCopy(r).title}`"
                 :to="inboxActionTarget(r)"
+                @click="markRead(r.id)"
               >
                 Decide
               </RouterLink>
             </template>
             <template v-else>
+              <span
+                class="bs-inbox__udot"
+                v-bind="seen.has(r.id) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
+              ></span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
               <div class="bs-inbox__text">
                 <p class="bs-inbox__title">{{ inboxCopy(r).title }}</p>
@@ -165,6 +197,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
                 class="bs-btn bs-btn--sm bs-btn--secondary"
                 :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
                 :to="inboxActionTarget(r)"
+                @click="markRead(r.id)"
               >
                 {{ INBOX_KIND[r.kind].action }}
               </RouterLink>

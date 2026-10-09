@@ -473,6 +473,136 @@ test.describe('Home: Needs you inbox', () => {
     ).toBe(true);
   });
 
+  test('375px: each group is a card with a 44px chevron summary and a total in the heading', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('#inbox-heading')).toHaveText(/^\s*Needs you\s*3\s*$/);
+
+    const group = inbox.locator('details.bs-inbox__group').nth(1);
+    const summary = group.locator('summary');
+    expect((await summary.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(await summary.evaluate((el) => getComputedStyle(el).listStyleType)).toBe('none');
+    await expect(group.locator('.bs-inbox__list')).toBeAttached();
+    const chev = summary.locator('.bs-inbox__chev');
+    const turn = () => chev.evaluate((el) => getComputedStyle(el).transform);
+    const closed = await turn();
+    await summary.click();
+    await expect.poll(turn).not.toBe(closed);
+  });
+
+  test('375px: no count while loading, on error or when empty', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.route('**/api/inbox*', () => {}); // never answers: stays loading
+    await page.goto('/overview');
+    await expect(page.locator('.bs-inbox__loading')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    await page.unroute('**/api/inbox*');
+
+    await page.route('**/api/inbox*', (route) => route.abort('failed'));
+    await page.reload();
+    await expect(page.getByText('Could not load what needs you.')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    await page.unroute('**/api/inbox*');
+
+    await serveInbox(page, []);
+    await page.reload();
+    await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+  });
+
+  test('desktop: no count in the heading', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    await expect(page.locator('#inbox-heading')).toHaveText('Needs you');
+  });
+
+  test('desktop: rows start unread; opening one reads it, the others stay unread', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const rows = inbox.locator('.bs-inbox__row');
+    const weight = (i: number) =>
+      rows
+        .nth(i)
+        .locator('.bs-inbox__title')
+        .evaluate((el) => getComputedStyle(el).fontWeight);
+    await expect(rows).toHaveCount(3);
+    for (let i = 0; i < 3; i++) {
+      expect(await weight(i)).toBe('600');
+      await expect(rows.nth(i).getByRole('img', { name: 'Unread' })).toBeVisible();
+    }
+    await rows
+      .nth(1)
+      .getByRole('link', { name: /^Review/ })
+      .click();
+    await page.goto('/overview');
+    await expect(rows).toHaveCount(3);
+    expect(await weight(1)).toBe('500');
+    await expect(rows.nth(1).getByRole('img', { name: 'Unread' })).toHaveCount(0);
+    await expect(rows.nth(1).locator('.bs-inbox__udot')).toHaveAttribute('aria-hidden', 'true');
+    expect(await weight(0)).toBe('600');
+    expect(await weight(2)).toBe('600');
+    await expect(rows.nth(0).getByRole('img', { name: 'Unread' })).toBeVisible();
+  });
+
+  test('375px: opening a row reads it at once, without a reload', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const title = (kind: string) =>
+      inbox.locator(`.bs-inbox__row[data-kind="${kind}"] .bs-inbox__ptitle`);
+    const weight = (kind: string) => title(kind).evaluate((el) => getComputedStyle(el).fontWeight);
+    expect(await weight('escalation')).toBe('600');
+    await expect(inbox.locator('.bs-inbox__udot')).toHaveCount(0);
+    await inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' }).click();
+    await page.goto('/overview');
+    expect(await weight('escalation')).toBe('500');
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    expect(await weight('waiver')).toBe('600');
+  });
+
+  test('a localStorage that throws leaves every row unread and the page quiet', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    // Only the inbox's key throws: a localStorage that throws on every access
+    // takes the whole app's startup down, which is not this box's concern.
+    await page.addInitScript(() => {
+      const proto = Storage.prototype;
+      const realGet = proto.getItem;
+      const realSet = proto.setItem;
+      const guard = (key: string) => {
+        if (key.startsWith('bs.inbox.')) throw new Error('denied');
+      };
+      proto.getItem = function (this: Storage, key: string) {
+        guard(key);
+        return realGet.call(this, key);
+      };
+      proto.setItem = function (this: Storage, key: string, value: string) {
+        guard(key);
+        realSet.call(this, key, value);
+      };
+    });
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const rows = page.locator('section.bs-inbox .bs-inbox__row');
+    await expect(rows).toHaveCount(3);
+    await expect(page.getByRole('img', { name: 'Unread' })).toHaveCount(3);
+    await rows.nth(0).getByRole('link', { name: 'Open' }).click();
+    expect(errors).toEqual([]);
+  });
+
   for (const [vpName, viewport] of [
     ['desktop', VIEWPORTS.desktop],
     ['375px', PHONE],
