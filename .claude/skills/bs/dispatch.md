@@ -40,8 +40,9 @@ judge prompt missing or mismatching its artifact line are each a lint
 failure, not a maybe.
 
 In this clone a PreToolUse guard also refuses, at the `Agent` call, a judge-role
-dispatch (reviewer, verifier, grader, spec-reviewer, security-reviewer,
-auditor, bare or `blacksmith:`-prefixed) whose prompt lacks an absolute
+dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
+`bs-security-reviewer`, `bs-auditor`, with or without a namespace such as
+`blacksmith:`; the bare pre-prefix names too) whose prompt lacks an absolute
 `Declared artifact: <path>` line. It reads the prompt itself, so a dispatch
 that points the agent at a brief file still carries the line inline. It checks
 the line only; `dispatch lint` still checks it against the ledger. An ad-hoc

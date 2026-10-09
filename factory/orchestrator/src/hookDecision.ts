@@ -13,6 +13,7 @@
 // same function rather than a second copy of it.
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { roleOfAgentType } from './agentNames.js';
 import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
 import { JUDGE_ROLES } from './judgeRoles.js';
 import {
@@ -46,8 +47,10 @@ function decideAgentDispatch(
   input: { subagent_type?: unknown; prompt?: unknown } | undefined,
 ): HookDecisionOutput | null {
   const type = typeof input?.subagent_type === 'string' ? input.subagent_type : '';
-  const role = type.startsWith('blacksmith:') ? type.slice('blacksmith:'.length) : type;
-  if (!JUDGE_ROLE_NAMES.has(role)) return null;
+  // Same mapping as judge-stop: `bs-reviewer`, `blacksmith:bs-reviewer` and the
+  // bare pre-prefix names all reach the role; a foreign namespace is stripped too.
+  const role = roleOfAgentType(type);
+  if (role === null || !JUDGE_ROLE_NAMES.has(role)) return null;
   const prompt = typeof input?.prompt === 'string' ? input.prompt : '';
   const declared = parseDeclaredArtifactLine(prompt);
   if (declared !== null && path.isAbsolute(declared)) return null;
