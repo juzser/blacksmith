@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -367,7 +367,8 @@ describe('Agent dispatches (judge artifact line)', () => {
           ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
           prompt,
         },
-        // Not a git repo: an Agent payload must not reach branch or lease work.
+        // Outside any repo, so no case here leans on a branch. This does not
+        // show the order; the last test in this block does.
         cwd: path.join(scratch, 'not-a-repo'),
       }),
       path.join(scratch, 'not-a-repo'),
@@ -404,6 +405,22 @@ describe('Agent dispatches (judge artifact line)', () => {
     expect(agent('reviewer', 42)).not.toBeNull();
   });
 
+  // Parity with judge-stop, which reads the line with the same parser.
+  it('allows an absolute line in a CRLF prompt', () => {
+    expect(agent('reviewer', `Role: reviewer.\r\nDeclared artifact: ${abs}\r\nGo.\r\n`)).toBeNull();
+  });
+
+  it('denies a line with text after the path', () => {
+    expect(agent('reviewer', `Declared artifact: ${abs} extra\n`)).not.toBeNull();
+  });
+
+  it('lets the first of two lines decide', () => {
+    const relative = 'Declared artifact: state/results/x.json';
+    const absolute = `Declared artifact: ${abs}`;
+    expect(agent('reviewer', `${relative}\n${absolute}\n`)).not.toBeNull();
+    expect(agent('reviewer', `${absolute}\n${relative}\n`)).toBeNull();
+  });
+
   it.each([
     ['reviewer', `Role: reviewer.\nDeclared artifact: ${abs}\n`],
     ['blacksmith:grader', `Declared artifact: ${abs}`],
@@ -414,5 +431,28 @@ describe('Agent dispatches (judge artifact line)', () => {
     [undefined, 'no line needed'],
   ])('allows %s silently (%j)', (type, prompt) => {
     expect(agent(type, prompt)).toBeNull();
+  });
+
+  // The command alone cannot show the order: the guardrail inspects only Bash
+  // and file tools, so it never reads an Agent payload's `command` either way.
+  // The lease read can, because an unreadable lease makes it throw: an Agent
+  // payload answered after that read would throw here instead of allowing.
+  it('answers an Agent payload before any lease or command work', () => {
+    const cwd = path.join(scratch, 'not-a-repo');
+    const badLeases = path.join(scratch, 'bad-leases');
+    mkdirSync(badLeases, { recursive: true });
+    writeFileSync(path.join(badLeases, 'corrupt.json'), '{');
+    const forcePush = 'git push --force origin main';
+    const payload = (toolName: string) =>
+      JSON.stringify({
+        tool_name: toolName,
+        tool_input: { subagent_type: 'coder', prompt: 'no line needed', command: forcePush },
+        cwd,
+      });
+    // The same payload as Bash: the command is denied, and the lease read throws.
+    expect(reasonOf(decideHookPayload(payload('Bash'), cwd, leaseDir))).toMatch(/^BLOCKED:/);
+    expect(() => decideHookPayload(payload('Bash'), cwd, badLeases)).toThrow();
+    expect(decideHookPayload(payload('Agent'), cwd, badLeases)).toBeNull();
+    expect(decideHookPayload(payload('Task'), cwd, badLeases)).toBeNull();
   });
 });
