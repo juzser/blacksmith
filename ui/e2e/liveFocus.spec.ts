@@ -279,25 +279,47 @@ test.describe('Kanban: Now and Next marks', () => {
     await expect(page.locator('.bs-kanban-card__mark').first()).toBeVisible();
     const marked = await page.locator('.bs-kanban-card__mark').count();
 
+    const unreadable = {
+      state: 'unreadable',
+      configSource: 'default',
+      readAt: FIXTURE_NOW_ISO,
+      formatWarning: null,
+      hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+      sessions: [],
+    };
+    // The page sends its next sessions request only after it has applied and
+    // rendered the previous read. So the first unreadable read answers at once
+    // and the next one is held: its arrival proves the first was applied.
+    let calls = 0;
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     await page.unroute('**/api/cli-sessions*');
-    await page.route('**/api/cli-sessions*', (route) =>
-      route.fulfill({
-        json: {
-          state: 'unreadable',
-          configSource: 'default',
-          readAt: FIXTURE_NOW_ISO,
-          formatWarning: null,
-          hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
-          sessions: [],
-        },
-      }),
-    );
-    const second = page.waitForResponse('**/api/cli-sessions*');
+    await page.route('**/api/cli-sessions*', async (route) => {
+      calls += 1;
+      if (calls > 1) await released;
+      await route.fulfill({ json: unreadable });
+    });
     await page.clock.runFor(15_000);
-    await second;
-    // Real time for the answer to reach the page; the page clock stays paused.
-    await page.waitForTimeout(300);
+    for (let step = 0; step < 4 && calls < 2; step += 1) {
+      await page.clock.runFor(15_000);
+      await expect
+        .poll(() => calls, { timeout: 1_000 })
+        .toBeGreaterThanOrEqual(2)
+        .catch(() => undefined);
+    }
+    expect(calls).toBe(2);
+
+    // The first unreadable read is applied and the failures are younger than
+    // the grace: the tags stay and the board does not claim to be empty.
     await expect(page.locator('.bs-kanban-card__mark')).toHaveCount(marked);
+    await expect(page.getByText('Nothing is active right now. ·')).toHaveCount(0);
+
+    // Once the held read lands the failures are a full interval old: the tags
+    // go, and an unknown read still shows no empty state.
+    release();
+    await expect(page.locator('.bs-kanban-card__mark')).toHaveCount(0);
     await expect(page.getByText('Nothing is active right now. ·')).toHaveCount(0);
   });
 
