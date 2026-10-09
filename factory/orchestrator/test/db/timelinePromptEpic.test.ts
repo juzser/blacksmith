@@ -181,3 +181,89 @@ describe('timeline() epic filter shows a prompt under every epic it led to', () 
     expect(ids('epic-a')).not.toContain('mixed-main#2');
   });
 });
+
+describe('timeline() epic filter links a prompt through the epic session start', () => {
+  const LATE = { ts: '2029-06-01T01:00:00.000Z' };
+  let stateDir: string;
+  let dbDir: string;
+  let handle: DbHandle;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-prompt-start-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-prompt-start-db-'));
+    // The session start is the only entry naming the home prompt.
+    await appendFile(
+      path.join(stateDir, 'link-main.jsonl'),
+      line('link-main', 0, 'session-start', { parent_prompt_id: `${HOME}#1` }) +
+        line('link-main', 1, 'task-added', { epic_id: 'epic-x' }, { task_id: 'epic-x/task-1' }) +
+        // A prompt that names its own epic wins over the session's epic.
+        line('link-main', 2, 'user_prompt', { prompt: 'own epic', epic_id: 'epic-y' }),
+      'utf8',
+    );
+    await appendFile(
+      path.join(stateDir, 'epic-z-main.jsonl'),
+      line('epic-z-main', 0, 'session-start', {}) +
+        line('epic-z-main', 1, 'task-added', { epic_id: 'epic-z' }, { task_id: 'epic-z/task-1' }),
+      'utf8',
+    );
+    // A second epic-x entry names a different home prompt directly.
+    await appendFile(
+      path.join(stateDir, 'epic-x-main.jsonl'),
+      line('epic-x-main', 0, 'session-start', {}) +
+        line(
+          'epic-x-main',
+          1,
+          'dispatch_decision',
+          {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            parent_prompt_id: `${HOME}#2`,
+          },
+          { task_id: 'epic-x/task-1' },
+        ),
+      'utf8',
+    );
+    await appendFile(
+      path.join(stateDir, `${HOME}.jsonl`),
+      line(HOME, 0, 'session-start', { kind: 'prompt-log' }) +
+        line(HOME, 1, 'user_prompt', { prompt: 'linked by session start' }, LATE) +
+        line(HOME, 2, 'user_prompt', { prompt: 'named by dispatch' }, LATE),
+      'utf8',
+    );
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    handle = openDb(dbPath);
+  });
+
+  afterEach(async () => {
+    handle?.sqlite.close();
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  const ids = (filter: Parameters<typeof timeline>[1]) =>
+    timeline(handle.db, filter).map((e) => e.eventId);
+
+  it('shows a prompt named only by the epic session start, not under another epic', () => {
+    expect(ids({ epicId: 'epic-x' })).toContain(`${HOME}#1`);
+    expect(ids({ epicId: 'epic-z' })).not.toContain(`${HOME}#1`);
+  });
+
+  it('lets a prompt that names its own epic decide, not its session', () => {
+    expect(ids({ epicId: 'epic-y' })).toContain('link-main#2');
+    expect(ids({ epicId: 'epic-x' })).not.toContain('link-main#2');
+  });
+
+  it('reads the linking entries before the kinds filter', () => {
+    const got = ids({ epicId: 'epic-x', kinds: ['Prompt'] });
+    expect(got).toContain(`${HOME}#1`);
+    expect(got).toContain(`${HOME}#2`);
+  });
+
+  it('reads the linking entries before the page is cut', () => {
+    const got = ids({ epicId: 'epic-x', limit: 2 });
+    expect(got).toContain(`${HOME}#1`);
+    expect(got).toContain(`${HOME}#2`);
+  });
+});

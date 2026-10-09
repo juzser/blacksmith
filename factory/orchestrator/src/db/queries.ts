@@ -2778,27 +2778,35 @@ function epicOfEntry(entry: TimelineEntry): string | null {
 }
 
 /**
- * Whether an entry belongs to `epicId`. A `user_prompt` names no epic itself,
- * so one is derived at read (nothing stored): a prompt shows under every epic
- * its session's other entries belong to, and under every epic of an entry
- * whose `parent_prompt_id` names it (the `prompts-<uuid>` home log has no
- * entries of its own). Every other entry is decided by `epicOfEntry` alone.
+ * Whether an entry belongs to `epicId`. An entry that names an epic itself
+ * (`epicOfEntry` non-null) is decided by that alone: its own epic wins. A
+ * `user_prompt` naming none is derived at read (nothing stored) and shows
+ * under `epicId` when its session holds an entry of that epic, or when its id
+ * is named by a `parent_prompt_id` of such an entry or of any epic-less entry
+ * (the root `session-start`, which carries only `parent_prompt_id`) in one of
+ * those sessions. The `prompts-<uuid>` home log has no entries of its own.
+ * Every other epic-less entry is dropped.
  */
 function promptInEpic(
   entries: readonly TimelineEntry[],
   epicId: string,
 ): (e: TimelineEntry) => boolean {
   const sessions = new Set<string>();
+  for (const e of entries) {
+    if (epicOfEntry(e) === epicId) sessions.add(e.sessionId);
+  }
   const named = new Set<string>();
   for (const e of entries) {
-    if (epicOfEntry(e) !== epicId) continue;
-    sessions.add(e.sessionId);
+    const own = epicOfEntry(e);
+    if (own !== null ? own !== epicId : !sessions.has(e.sessionId)) continue;
     const parent = e.payload.parent_prompt_id;
     if (typeof parent === 'string') named.add(parent);
   }
-  return (e) =>
-    epicOfEntry(e) === epicId ||
-    (e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId)));
+  return (e) => {
+    const own = epicOfEntry(e);
+    if (own !== null) return own === epicId;
+    return e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId));
+  };
 }
 
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
