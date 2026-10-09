@@ -169,6 +169,10 @@ type World = {
   below: 'engine' | 'line' | 'empty'
   /** each `bs-prompt-hook` call's argv, in call order */
   hookCalls: string[][]
+  /** each `node <entry> --resolve` call's argv, in call order */
+  nodeCalls: string[][]
+  /** the files `$.fs.exists` answers true for, besides every seeded one */
+  present: Set<string>
   /** what `bs-prompt-hook --resolve` answers: a stdout and exit code, or null for no such bin (the call is denied) */
   hook: { stdout: string; exitCode: number } | null
   /** a tool's result, as the engine answers `$.tool.call`; the default is an empty Bash result */
@@ -176,7 +180,7 @@ type World = {
 }
 
 function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World {
-  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], hook: null, tools: {} }
+  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], nodeCalls: [], present: new Set(), hook: null, tools: {} }
   const ran = (exitCode: number, stdout: string) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
   on('session.id', () => ({ value: sid }))
@@ -190,8 +194,13 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
       value: paths.map(p => ({ name: p.slice(prefix.length), kind: 'file' as const, size: (files.get(p) ?? '').length, mtimeMs: w.mtimes.get(p) ?? T0, isLink: false })),
     }
   })
+  on('fs.exists', ($, e) => ({ value: files.has(e.path) || w.present.has(e.path) }))
   on('process.run', ($, e) => {
     const [cmd, ...rest] = e.argv
+    if (cmd === 'node') {
+      w.nodeCalls.push(e.argv.slice(1))
+      return w.hook ? ran(w.hook.exitCode, w.hook.stdout) : { deny: 'no such command: node' }
+    }
     // grep -m1 -oE -H -- <ERE> <paths>: per file, every match on its first matching line, as `path:match`
     if (cmd === 'grep' && rest.includes('-oE')) {
       const at = rest.indexOf('--')
@@ -1698,6 +1707,48 @@ describe('prompts and task progress outside an epic', () => {
       await clock.advance(4000)
       await clock.advance(4000)
       expect(w.hookCalls).toEqual([['--resolve', ELSE]])
+    })
+
+    describe('BS_PROMPT_HOOK names the entry first', () => {
+      const ENTRY = '/home/u/bs/promptHook.js'
+      const upWith = async ($: Engine, on: On, env: Record<string, string>) => {
+        const clock = mock.clock(on, { now: T0 })
+        mock.store(on)
+        mock.env(on, { HOME: '/home/u', ...env })
+        await boot($, clock, ELSE)
+      }
+
+      test('an absolute existing file runs under node and its store feeds the band', async ($, on) => {
+        const w = cloneWorld(on)
+        w.present.add(ENTRY)
+        await upWith($, on, { BS_PROMPT_HOOK: ENTRY })
+
+        const ui = await mountBand($)
+        expect(w.nodeCalls).toEqual([[ENTRY, '--resolve', ELSE]])
+        expect(w.hookCalls).toEqual([])
+        expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${HOME_ID}#2`, `prompt:${HOME_ID}#1`, 'idle'])
+      })
+
+      for (const [name, entry] of [['a relative path', 'bs/promptHook.js'], ['an absolute path with no file', '/home/u/missing.js']] as const) {
+        test(`${name} is never run; bs-prompt-hook answers`, async ($, on) => {
+          const w = cloneWorld(on)
+          w.present.add('bs/promptHook.js')
+          await upWith($, on, { BS_PROMPT_HOOK: entry })
+
+          const ui = await mountBand($)
+          expect(w.nodeCalls).toEqual([])
+          expect(w.hookCalls[0]).toEqual(['--resolve', ELSE])
+          expect(await rowKeys(ui)).toContain(`prompt:${HOME_ID}#2`)
+        })
+      }
+
+      test('unset asks bs-prompt-hook', async ($, on) => {
+        const w = cloneWorld(on)
+        await upWith($, on, {})
+        await mountBand($)
+        expect(w.nodeCalls).toEqual([])
+        expect(w.hookCalls[0]).toEqual(['--resolve', ELSE])
+      })
     })
 
     const BROKEN = {
