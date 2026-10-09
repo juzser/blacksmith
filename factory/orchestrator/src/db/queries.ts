@@ -953,10 +953,11 @@ function countStatuses(rows: readonly { taskStatus: string }[]): StatusCounts {
  * holds the epic open. Every live task done is `done`; any task in the
  * review or inProgress buckets means at least `in_progress`, rising to
  * `review` only when every non-done live task is itself in the review bucket
- * (no inProgress, no todo left over); otherwise, with nothing done and
- * nothing open yet, `todo` — also the answer for a zero-task epic and for an
- * epic whose tasks are ALL superseded (`live === 0`, so `done === live` is
- * never true).
+ * (no inProgress, no todo left over); some tasks done with the rest not
+ * all done is `in_progress` even between waves; otherwise, with nothing
+ * done and nothing open yet, `todo` — also the answer for a zero-task epic
+ * and for an epic whose tasks are ALL superseded (`live === 0`, so
+ * `done === live` is never true).
  */
 function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
   const live = tasksTotal - counts.superseded;
@@ -964,7 +965,7 @@ function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicSta
   if (counts.review > 0 || counts.inProgress > 0) {
     return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
   }
-  return 'todo';
+  return counts.done > 0 ? 'in_progress' : 'todo';
 }
 
 /**
