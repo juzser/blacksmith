@@ -199,6 +199,17 @@ describe('checkDelegationGrants', () => {
     expect(details(report)).toMatch(/to name `coder`, which is no agent; use `bs-coder`/);
   });
 
+  it('suggests the agent name built from the role for a namespaced scope entry', () => {
+    template('wave-runner', 'Read, Agent(blacksmith:coder)');
+    const report = grants(
+      policyOf([{ role: 'wave-runner', mayDispatch: ['coder'], mustOpenSession: true }]),
+    );
+    const scopeProblems = report.checks.filter((c) => /to name `blacksmith:coder`/.test(c.detail));
+    expect(scopeProblems).toHaveLength(1);
+    expect(scopeProblems[0]?.detail).toMatch(/use `bs-coder`/);
+    expect(scopeProblems[0]?.detail).not.toMatch(/bs-blacksmith:coder/);
+  });
+
   it('does not read a tool that merely starts with Agent as a grant', () => {
     template('wave-runner', 'Read, AgentOutput');
     const report = grants(

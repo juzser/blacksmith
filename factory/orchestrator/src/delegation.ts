@@ -26,7 +26,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { agentNameFor, roleOfTemplateFile, templateFileFor } from './agentNames.js';
+import {
+  AGENT_PREFIX,
+  agentNameFor,
+  roleOfAgentType,
+  roleOfTemplateFile,
+  templateFileFor,
+} from './agentNames.js';
 import {
   DISPATCH_EVENT_TYPE,
   ERROR_EVENT_TYPE,
@@ -247,9 +253,9 @@ export function checkDelegationGrants(
       const scope = agentScope(tools);
       if (scope !== null) {
         for (const name of scope) {
-          if (name.startsWith('bs-')) continue;
+          if (name.startsWith(AGENT_PREFIX)) continue;
           problems.push(
-            `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no agent; use \`${agentNameFor(name)}\`. The harness enforces the agent names, and the bare role no longer exists as one.`,
+            `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no agent; use \`${agentNameFor(roleOfAgentType(name) ?? name)}\`. The harness enforces the agent names, and the bare role no longer exists as one.`,
           );
         }
         const declared = [...grant.mayDispatch].map(agentNameFor).sort().join(', ');
