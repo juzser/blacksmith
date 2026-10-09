@@ -34,7 +34,7 @@ import {
   inboxCopy,
   inboxMetaPrefix,
 } from '../lib/inbox.js';
-import { inboxSeenId, loadSeen, markSeen } from '../lib/inboxSeen.js';
+import { inboxSeenId, isSeen, loadSeen, markSeen } from '../lib/inboxSeen.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
 import EmptyState from './kit/EmptyState.vue';
