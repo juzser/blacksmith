@@ -390,29 +390,64 @@ test.describe('Home: Needs you inbox', () => {
     await expect(inbox.locator('details.bs-inbox__group').first()).toHaveAttribute('open', '');
     await expect(inbox.locator('details.bs-inbox__group').nth(1)).not.toHaveAttribute('open', '');
 
-    // §3.1: the single most urgent row (the escalation, first group/row)
-    // gets one full-width 44px "Decide" action; every other row keeps its
-    // small per-kind link ("Open"/"Review"), not a primary button.
+    // §3.1 + ds-review.html: the single most urgent row (the escalation,
+    // first group/row) gets one full-width 44px "Decide" action; every other
+    // row is one whole-row link. Nothing shows a description.
     await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
     const decide = inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' });
     await expect(decide).toHaveClass(/bs-btn--primary/);
     await expect(decide).toHaveClass(/bs-btn--touch/);
     await expect(decide).toHaveClass(/bs-btn--block/);
-    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveCount(0);
-    await expect(
-      inbox.getByText('Tester stopped on Checkout flow; the task stays blocked until you choose'),
-    ).toBeVisible();
-    // The title keeps to one line, and the action stays a 44px target.
-    const title = inbox.locator('.bs-inbox__title').first();
-    expect((await title.boundingBox())?.height ?? 99).toBeLessThan(30);
     expect((await decide.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(inbox.locator('.bs-inbox__desc')).toHaveCount(0);
+    await expect(inbox.getByText(/the task stays blocked|merge is waiting/)).toHaveCount(0);
 
-    // A folded group opens from its summary.
+    // The escalation's time line starts with its short task name.
+    const escRow = inbox.locator('.bs-inbox__row[data-kind="escalation"]');
+    await expect(escRow.locator('.bs-inbox__pmeta')).toHaveText(/^Checkout flow · .*ago$/);
+
+    // A folded group opens from its summary; its row is one link.
     await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
-    await expect(inbox.getByText('Approve waiver for 2 minor findings')).toBeVisible();
-    await expect(
-      inbox.getByText('Show fee · review found 2 issues; merge is waiting on you'),
-    ).toBeVisible();
+    const waiverLink = inbox.getByRole('link', { name: /Approve waiver for 2 minor findings/ });
+    await expect(waiverLink).toBeVisible();
+    await expect(waiverLink).toHaveAttribute('href', /\/tasks\/epic-9%2Ftask-2-show-fee/);
+    await inbox.locator('summary', { hasText: 'All projects · 1' }).click();
+    await expect(inbox.getByRole('link', { name: /Review a new lesson candidate/ })).toBeVisible();
+
+    // Every visible row: a 44px+ target, a title of at most two lines, a time
+    // line, and no button or link nested in a link row.
+    for (const row of await inbox.locator('.bs-inbox__row').all()) {
+      const box = await row.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      const titleBox = await row.locator('.bs-inbox__ptitle').boundingBox();
+      expect(titleBox?.height ?? 99).toBeLessThanOrEqual(2 * 20);
+      await expect(row.locator('.bs-inbox__pmeta')).toContainText(/ago|now/);
+    }
+    await expect(inbox.locator('a.bs-inbox__rowlink a, a.bs-inbox__rowlink button')).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  });
+
+  test('320px: row titles wrap to at most two lines and nothing scrolls sideways', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize({ width: 320, height: 700 });
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('.bs-inbox__ptitle').first()).toBeVisible();
+    for (const t of await inbox.locator('.bs-inbox__ptitle').all()) {
+      if (!(await t.isVisible())) continue;
+      expect((await t.boundingBox())?.height ?? 99).toBeLessThanOrEqual(2 * 20);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   for (const [vpName, viewport] of [

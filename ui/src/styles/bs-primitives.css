@@ -2717,8 +2717,7 @@ a:hover {
 }
 
 /* NeedsYouInbox (ds-spec.md §2.2): group header "name · count" 12px/500
-   subtle; row = tag, two-line text column, meta (hidden below 480px),
-   action. On phone the groups are <details> with a 44px summary (§3.1). */
+   subtle; row = tag, two-line text column, meta, action. On phone the groups are <details> with a 44px summary (§3.1). */
 .bs-inbox {
   display: flex;
   flex-direction: column;
@@ -2812,10 +2811,58 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
 }
-@media (max-width: 479px) {
-  .bs-inbox__meta {
-    display: none;
-  }
+/* Phone rows (ds-review.html .mrow/.mt/.mm): a title that wraps to two lines
+   then ellipsizes, the tag at the right, a faint one-line time line below.
+   Only the phone markup uses these classes, so desktop is untouched. */
+.bs-inbox__prow,
+.bs-inbox__rowlink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--bs-space-2);
+  align-items: center;
+  min-width: 0;
+}
+.bs-inbox__prow {
+  flex: 1 1 100%;
+}
+.bs-inbox__rowlink {
+  flex: 1;
+  min-height: var(--bs-touch);
+  padding: 10px var(--bs-m-card-pad);
+  color: var(--bs-text);
+  text-decoration: none;
+  border-radius: var(--bs-radius-md);
+}
+.bs-inbox__rowlink:hover {
+  background: var(--bs-surface-selected);
+}
+.bs-inbox__rowlink:focus-visible {
+  outline: 2px solid var(--bs-focus-ring);
+  outline-offset: -2px;
+}
+.bs-inbox__row--link {
+  padding: 0;
+}
+.bs-inbox__ptitle {
+  min-width: 0;
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.bs-inbox__pmeta {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* HomePage (ds-spec.md §4.1): stacked sections, project cards in a wrap

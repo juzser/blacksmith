@@ -68,19 +68,41 @@ describe('NeedsYouInbox.vue', () => {
   // inline per-kind label; every other row keeps the small inline link.
   it('gives only the most urgent row on phone a full-width 44px "Decide" button, not the per-kind label', () => {
     expect(SRC).toMatch(
-      /<RouterLink\s+v-if="isPhoneWidth && gi === 0 && ri === 0"[\s\S]*?class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"[\s\S]*?:aria-label="`Decide: \$\{inboxCopy\(r\)\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"[\s\S]*?>\s*Decide\s*<\/RouterLink>/,
+      /<RouterLink\s+class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"[\s\S]*?:aria-label="`Decide: \$\{inboxCopy\(r\)\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"[\s\S]*?>\s*Decide\s*<\/RouterLink>/,
     );
   });
 
-  it('keeps the small secondary link for every row that is not the single most urgent one', () => {
+  it('keeps the small secondary link on desktop', () => {
     expect(SRC).toMatch(
-      /<RouterLink\s+v-else[\s\S]*?class="bs-btn bs-btn--sm bs-btn--secondary"[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{inboxCopy\(r\)\.title\}`"/,
+      /<RouterLink\s+class="bs-btn bs-btn--sm bs-btn--secondary"[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{inboxCopy\(r\)\.title\}`"/,
     );
   });
 
   it('marks the decide row so it can wrap the button onto its own full-width line', () => {
     expect(SRC).toMatch(
-      /:class="\{ 'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0 \}"/,
+      /:class="\{\s*'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,/,
     );
+  });
+
+  // Phone rows follow ds-review.html's .mrow: title + tag, a faint time line,
+  // no description; all but the Decide row are the link itself.
+  it('phone: every non-decide row is one whole-row link with no nested button or link', () => {
+    expect(SRC).toMatch(
+      /<RouterLink\s+v-if="isPhoneWidth && \(gi > 0 \|\| ri > 0\)"[\s\S]*?class="bs-inbox__rowlink"[\s\S]*?:to="inboxActionTarget\(r\)"/,
+    );
+    const link =
+      SRC.match(
+        /<RouterLink\s+v-if="isPhoneWidth && \(gi > 0 \|\| ri > 0\)"[\s\S]*?<\/RouterLink>/,
+      )?.[0] ?? '';
+    expect(link).not.toMatch(/<Button|<button|<a\b|bs-btn/);
+    expect(link).toMatch(/inboxCopy\(r\)\.title/);
+    expect(link).toMatch(/<RelativeTime[^>]*\bplain\b/);
+  });
+
+  it('phone: the meta line is the optional task name then the time, and no description', () => {
+    expect(SRC).toMatch(/inboxMetaPrefix\(r\)/);
+    const phone = SRC.match(/<RouterLink\s+v-if="isPhoneWidth[\s\S]*?<template v-else>/)?.[0] ?? '';
+    expect(phone).toMatch(/<RelativeTime/);
+    expect(phone).not.toMatch(/description/);
   });
 });

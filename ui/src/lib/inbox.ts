@@ -114,6 +114,15 @@ export function inboxCopy(row: InboxRow): { title: string; description: string }
 }
 
 /**
+ * The phone meta line's lead: the short task name of an escalation (never the
+ * task's objective), null for every other row, which shows its time alone.
+ */
+export function inboxMetaPrefix(row: InboxRow): string | null {
+  if (row.kind !== 'escalation' || row.taskId === null) return null;
+  return shortTaskName(row.taskId, row.taskTitle);
+}
+
+/**
  * Where a row's action goes: the existing page for that kind. Waivers and
  * escalations are decided on the task's own page; lesson candidates on
  * Lessons.

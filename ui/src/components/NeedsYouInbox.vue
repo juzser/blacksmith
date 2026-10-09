@@ -5,6 +5,11 @@
 // driven by props. Grouping, filtering and per-kind wording live in
 // lib/inbox.ts, where the DOM-free unit suite can hold them to the spec.
 //
+// On phone each row follows ds-review.html's .mrow: title and tag, then a
+// faint time line (plain: no tooltip, so no tab stop inside the row link and no
+// hit box over the title); only the first row carries a (Decide) button, every other
+// row is one whole-row link and the description stays desktop-only.
+//
 // Not built (flagged in the DS2 report): the unread dot and the
 // 600/500 read-state title weight (pattern 12 needs a read-state store no
 // DS2 criterion names), and the "Stop points" kind, which has no projected
@@ -23,6 +28,7 @@ import {
   type InboxFilter,
   inboxActionTarget,
   inboxCopy,
+  inboxMetaPrefix,
 } from '../lib/inbox.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
@@ -104,37 +110,64 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             v-for="(r, ri) in g.rows"
             :key="r.id"
             class="bs-inbox__row"
-            :class="{ 'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0 }"
+            :class="{
+              'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,
+              'bs-inbox__row--link': isPhoneWidth && (gi > 0 || ri > 0),
+            }"
             :data-kind="r.kind"
           >
-            <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
-            <div class="bs-inbox__text">
-              <p class="bs-inbox__title">{{ inboxCopy(r).title }}</p>
-              <Tooltip mode="describe" :text="inboxCopy(r).description">
-                <span class="bs-inbox__desc">{{ inboxCopy(r).description }}</span>
-              </Tooltip>
-            </div>
-            <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
-            <!-- §3.1: the single most urgent row (first group, first row) on
-                 phone gets one full-width --bs-touch-sized "Decide" action
-                 instead of the inline per-kind label; every other row keeps
-                 the small link. -->
+            <!-- Phone (ds-review.html .mrow): title and tag, then a faint line
+                 with the time (and the task name for an escalation); no
+                 description. Every row but the Decide one is the link itself. -->
             <RouterLink
-              v-if="isPhoneWidth && gi === 0 && ri === 0"
-              class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
-              :aria-label="`Decide: ${inboxCopy(r).title}`"
-              :to="inboxActionTarget(r)"
+              v-if="isPhoneWidth && (gi > 0 || ri > 0)"
+              class="bs-inbox__rowlink"
+                            :to="inboxActionTarget(r)"
             >
-              Decide
+              <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
+              <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+              <span class="bs-inbox__pmeta"
+                ><template v-if="inboxMetaPrefix(r)">{{ inboxMetaPrefix(r) }} · </template
+                ><RelativeTime :iso="r.createdAt" plain
+              /></span>
             </RouterLink>
-            <RouterLink
-              v-else
-              class="bs-btn bs-btn--sm bs-btn--secondary"
-              :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
-              :to="inboxActionTarget(r)"
-            >
-              {{ INBOX_KIND[r.kind].action }}
-            </RouterLink>
+            <template v-else-if="isPhoneWidth">
+              <span class="bs-inbox__prow">
+                <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
+                <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+                <span class="bs-inbox__pmeta"
+                  ><template v-if="inboxMetaPrefix(r)">{{ inboxMetaPrefix(r) }} · </template
+                  ><RelativeTime :iso="r.createdAt" plain
+                /></span>
+              </span>
+              <!-- §3.1: the single most urgent row (first group, first row)
+                   gets one full-width --bs-touch-sized "Decide" action; it
+                   is the only button in the box. -->
+              <RouterLink
+                class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
+                :aria-label="`Decide: ${inboxCopy(r).title}`"
+                :to="inboxActionTarget(r)"
+              >
+                Decide
+              </RouterLink>
+            </template>
+            <template v-else>
+              <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
+              <div class="bs-inbox__text">
+                <p class="bs-inbox__title">{{ inboxCopy(r).title }}</p>
+                <Tooltip mode="describe" :text="inboxCopy(r).description">
+                  <span class="bs-inbox__desc">{{ inboxCopy(r).description }}</span>
+                </Tooltip>
+              </div>
+              <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
+              <RouterLink
+                class="bs-btn bs-btn--sm bs-btn--secondary"
+                :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
+                :to="inboxActionTarget(r)"
+              >
+                {{ INBOX_KIND[r.kind].action }}
+              </RouterLink>
+            </template>
           </li>
         </ul>
       </component>

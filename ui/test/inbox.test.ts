@@ -8,6 +8,7 @@ import {
   INBOX_KIND,
   inboxActionTarget,
   inboxCopy,
+  inboxMetaPrefix,
 } from '../src/lib/inbox.js';
 
 function row(over: Partial<InboxRow> & Pick<InboxRow, 'id' | 'kind'>): InboxRow {
@@ -219,5 +220,24 @@ describe('lib/inbox.ts inboxCopy()', () => {
       const text = `${title} ${description}`;
       expect(text).not.toMatch(/undefined|null|S3|S4|opus|sonnet|haiku|· ;|· $/i);
     }
+  });
+});
+
+describe('lib/inbox.ts inboxMetaPrefix()', () => {
+  const esc = (over: Partial<InboxRow> = {}) =>
+    row({ id: 'e', kind: 'escalation', taskId: 'epic-a/task-4-checkout-flow', ...over });
+
+  it('escalation: the short task title', () => {
+    expect(inboxMetaPrefix(esc({ taskTitle: 'Checkout flow' }))).toBe('Checkout flow');
+  });
+
+  it('escalation with no title: the slug name, never the objective', () => {
+    expect(inboxMetaPrefix(esc())).toBe('Checkout flow');
+  });
+
+  it('escalation with no task, waiver and lesson: null', () => {
+    expect(inboxMetaPrefix(esc({ taskId: null }))).toBeNull();
+    expect(inboxMetaPrefix(row({ id: 'w', kind: 'waiver', taskId: 'a/t-1-x' }))).toBeNull();
+    expect(inboxMetaPrefix(row({ id: 'l', kind: 'lesson_candidate' }))).toBeNull();
   });
 });
