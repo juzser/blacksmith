@@ -1,10 +1,17 @@
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readEvents } from '../src/events.js';
 import { capturePrompt } from '../src/promptCapture.js';
 import { importTranscript } from '../src/promptImport.js';
+
+// The old whole-file reader is made to fail the way a >512 MB file does, so a
+// reader that still calls it is caught without writing a huge file.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 // Every transcript, session id and prompt below is invented. Every store is a
 // temp dir reached through BS_HOME, never a real one.
@@ -390,5 +397,58 @@ describe('importTranscript and the hook share one key per prompt', () => {
     expect(summary.imported).toBe(0);
     expect(summary.skipped.duplicate).toBe(1);
     expect(await stored()).toHaveLength(2);
+  });
+});
+
+describe('importTranscript: streaming reads', () => {
+  it('never loads the whole file as one string', async () => {
+    const fs = await import('node:fs');
+    vi.mocked(fs.readFileSync).mockImplementation(((p: unknown) => {
+      if (p === file) {
+        throw Object.assign(new Error('Cannot create a string longer than 0x1fffffe8 characters'), {
+          code: 'ERR_STRING_TOO_LONG',
+        });
+      }
+      throw new Error(`unexpected read of ${String(p)}`);
+    }) as typeof fs.readFileSync);
+    try {
+      write(typed(1, 'Add the beta-app export.'), typed(2, 'Second prompt.'));
+      const { summary } = await run(true);
+      expect(summary.imported).toBe(2);
+    } finally {
+      vi.mocked(fs.readFileSync).mockReset();
+    }
+  });
+
+  it('keeps a multibyte prompt intact across stream chunk boundaries', async () => {
+    // Escapes keep the source ASCII: multibyte letters (2-3 bytes) and an astral emoji (4 bytes).
+    const text =
+      'Th\u00eam xu\u1ea5t d\u1eef li\u1ec7u \u{1F680} \u0111\u1ed5i t\u00ean c\u1edd \u2014 \u1ee9ng d\u1ee5ng.';
+    for (const pad of [0, 1, 2, 3]) {
+      const filler = Array.from({ length: 700 }, (_, i) =>
+        JSON.stringify(line(100 + i, { type: 'assistant', pad: 'x'.repeat(90) })),
+      ).join('\n');
+      const body = `${filler}\n${'y'.repeat(pad)}\n${JSON.stringify(typed(1, text))}\n`;
+      expect(Buffer.byteLength(body)).toBeGreaterThan(65536);
+      writeFileSync(file, body);
+      const { events } = await run(true);
+      const prompts = events.map((e) => e.payload.prompt);
+      expect(prompts).toContain(text);
+    }
+  });
+
+  it('parses CRLF endings and a last line with no trailing newline', async () => {
+    writeFileSync(
+      file,
+      `${[typed(1, 'First.'), typed(2, 'Last.')].map((l) => JSON.stringify(l)).join('\r\n')}`,
+    );
+    const { summary } = await run(true);
+    expect(summary.imported).toBe(2);
+  });
+
+  it('surfaces a missing file as a read error', async () => {
+    await expect(importTranscript(path.join(base, 'nope.jsonl'), ctx())).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });
