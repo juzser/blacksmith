@@ -2956,6 +2956,64 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     expect(inboxRows(handle.db)[0]?.createdAt).toBe(parkedAt);
   });
 
+  describe('createdAt and reason name the error that parked the task', () => {
+    const parkedAt = '2026-03-01T12:00:00.000Z';
+    const seedErrors = (
+      rowsIn: { id: string; ts: string; detail: string | null; severity: string }[],
+    ) => {
+      handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
+      handle.db
+        .insert(errors)
+        .values(
+          rowsIn.map((r) => ({
+            sessionId: SESSION_ID,
+            taskRef: TASK_3,
+            errorGroup: 'coordination',
+            eventId: r.id,
+            ts: r.ts,
+            errorClass: 'coordination.deadlock',
+            severity: r.severity,
+            detail: r.detail,
+          })),
+        )
+        .run();
+      handle.db
+        .update(tasks)
+        .set({ terminalAt: parkedAt, updatedAt: '2026-04-01T00:00:00.000Z' })
+        .where(eq(tasks.taskId, TASK_3))
+        .run();
+    };
+
+    it('ignores a matching error logged before the park time', () => {
+      seedErrors([
+        {
+          id: 'evt-earlier',
+          ts: '2026-03-01T11:00:00.000Z',
+          detail: 'earlier',
+          severity: 'S2-major',
+        },
+        { id: 'evt-parked', ts: parkedAt, detail: 'parked', severity: 'S1-stop-the-line' },
+      ]);
+      expect(inboxRows(handle.db)[0]).toMatchObject({ createdAt: parkedAt, reason: 'parked' });
+    });
+
+    it('keeps the parking error detail over a later detailed error', () => {
+      seedErrors([
+        { id: 'evt-parked', ts: parkedAt, detail: 'parked', severity: 'S1-stop-the-line' },
+        { id: 'evt-later', ts: '2026-03-02T00:00:00.000Z', detail: 'later', severity: 'S2-major' },
+      ]);
+      expect(inboxRows(handle.db)[0]?.reason).toBe('parked');
+    });
+
+    it('falls back to the newest later detail when the parking error has none', () => {
+      seedErrors([
+        { id: 'evt-parked', ts: parkedAt, detail: null, severity: 'S1-stop-the-line' },
+        { id: 'evt-later', ts: '2026-03-02T00:00:00.000Z', detail: 'later', severity: 'S2-major' },
+      ]);
+      expect(inboxRows(handle.db)[0]?.reason).toBe('later');
+    });
+  });
+
   it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
     const rows = inboxRows(handle.db);
     expect(rows[0]?.project).toBe(DEFAULT_PROJECT);

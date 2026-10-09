@@ -1830,23 +1830,25 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       if (d.taskId) lastDispatchByTask.set(d.taskId, d);
     }
   }
-  // The error that parked a task is a `coordination.*` one above a note-only
-  // severity (projector.ts); its detail is free text the logger wrote.
-  const reasonByTask = new Map<string, string>();
-  // When that error was logged: the decision's own date. The projector never
-  // moves an escalated task again, so the FIRST parking error is the one that
-  // parked it (detail or not). `tasks.updatedAt` moves on every later touch.
-  const parkedAtByTask = new Map<string, string>();
+  // The date is `terminalAt`, written once by the error that parked the task.
+  // The reason is that error's detail, else the newest detail logged since;
+  // errors before the park time (a same-named id of another epic) are ignored.
+  const terminalAtByTask = new Map(taskRows.map((t) => [t.taskId, t.terminalAt]));
+  const reasonByTask = new Map<string, { at: string; detail: string }>();
   if (escalatedTaskIds.length > 0) {
     const parked = inLogOrder(
       db.select().from(errors).where(eq(errors.errorGroup, 'coordination')).all(),
     ).filter((e) => !/^S[34]-/.test(e.severity));
     for (const e of parked) {
+      if (!e.detail) continue;
       for (const ref of (e.taskRef ?? '').split(',')) {
         const id = escalatedTaskIds.find((tid) => taskIdsMatch(tid, ref.trim()));
         if (!id) continue;
-        if (e.detail) reasonByTask.set(id, e.detail);
-        if (!parkedAtByTask.has(id)) parkedAtByTask.set(id, e.ts);
+        const parkedAt = terminalAtByTask.get(id);
+        if (parkedAt && e.ts < parkedAt) continue;
+        const have = reasonByTask.get(id);
+        if (have && parkedAt && have.at === parkedAt && e.ts !== parkedAt) continue;
+        reasonByTask.set(id, { at: e.ts, detail: e.detail });
       }
     }
   }
@@ -1858,10 +1860,10 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       kind: 'escalation',
       taskTitle: t.title,
       role: lastDispatchByTask.get(t.taskId)?.agentRole ?? null,
-      reason: reasonByTask.get(t.taskId) ?? null,
+      reason: reasonByTask.get(t.taskId)?.detail ?? null,
       project: projectOf(t.project),
       taskId: t.taskId,
-      createdAt: parkedAtByTask.get(t.taskId) ?? t.terminalAt ?? t.updatedAt,
+      createdAt: t.terminalAt ?? t.updatedAt,
     });
   }
 
