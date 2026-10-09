@@ -726,6 +726,48 @@ test.describe('Activity', () => {
     expect(await link.evaluate((el) => getComputedStyle(el).outlineOffset)).toBe('2px');
   });
 
+  // ds-review.html `.edet a` inherits the global `a`: link colour at rest, no
+  // underline at rest. Only the meta-line copy is subtle (`.emeta a`).
+  test('375px: the detail prompt link is link-coloured at rest', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const link = row.locator('.bs-timeline-row__detail .bs-timeline-row__because-of');
+    await expect(link).toBeVisible();
+    const s = await link.evaluate((el) => {
+      const probe = document.createElement('a');
+      probe.style.color = 'var(--bs-link-text)';
+      document.body.append(probe);
+      const expected = getComputedStyle(probe).color;
+      probe.remove();
+      const cs = getComputedStyle(el);
+      return { color: cs.color, expected, deco: cs.textDecorationLine };
+    });
+    expect(s.color).toBe(s.expected);
+    expect(s.deco).toBe('none');
+  });
+
+  test('1280px: the phone-only "Because of" pair stays hidden when the row is expanded', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const cause = row.locator('.bs-timeline-row__cause');
+    await expect(cause).toHaveCount(2);
+    for (const el of await cause.all()) await expect(el).toBeHidden();
+  });
+
   // ds-review.html #ap-1: on phone "Because of" is the detail's last pair.
   test('375px: the detail lists "Because of" last', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });

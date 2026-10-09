@@ -698,17 +698,22 @@ a:hover {
   border: none;
   /* A <button> does not inherit the font; the mock's `.emeta a` is meta-sized. */
   font: inherit;
-  color: var(--bs-text-subtle);
+  color: var(--bs-link-text);
   text-decoration: none;
   text-decoration-color: var(--bs-link-underline);
   cursor: pointer;
   padding: 0;
   white-space: nowrap;
 }
-/* ds-review.html `.emeta a` + ds-spec.md: subtle at rest, link colour and
-   underline on hover and focus. */
+/* ds-review.html `.edet a` (the global `a`): link colour at rest, underline on
+   hover and focus. The meta line's copy is `.emeta a`: subtle at rest. */
+.bs-timeline-row__meta .bs-timeline-row__because-of {
+  color: var(--bs-text-subtle);
+}
 .bs-timeline-row__because-of:hover,
-.bs-timeline-row__because-of:focus-visible {
+.bs-timeline-row__because-of:focus-visible,
+.bs-timeline-row__meta .bs-timeline-row__because-of:hover,
+.bs-timeline-row__meta .bs-timeline-row__because-of:focus-visible {
   color: var(--bs-link-text);
   text-decoration: underline;
 }
@@ -716,7 +721,22 @@ a:hover {
   outline: 2px solid var(--bs-focus-ring);
   outline-offset: 2px;
 }
+/* `pre` keeps the leading " · " that a flex item would otherwise collapse. */
 .bs-timeline-row__because-of--meta {
+  white-space: pre;
+  flex: none;
+}
+/* The text beside the link gives way first; the link never shrinks. */
+.bs-timeline-row__meta-main {
+  display: flex;
+  min-width: 0;
+}
+.bs-timeline-row__meta-text {
+  min-width: 0;
+}
+.bs-timeline-row--compact .bs-timeline-row__meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* The detail's copy of the link is phone-only; the meta line's copy is
