@@ -389,15 +389,12 @@ describe('Agent dispatches (judge artifact line)', () => {
     'bs-security-reviewer',
     'other:bs-reviewer',
     'other:reviewer',
-  ])(
-    'denies %s with no declared-artifact line',
-    (type) => {
-      const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
-      expect(reason).toContain('Declared artifact: <absolute path>');
-      expect(reason).toContain('judge dispatch');
-      expect(reason).toContain('expected_line');
-    },
-  );
+  ])('denies %s with no declared-artifact line', (type) => {
+    const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
+    expect(reason).toContain('Declared artifact: <absolute path>');
+    expect(reason).toContain('judge dispatch');
+    expect(reason).toContain('expected_line');
+  });
 
   it('treats Task like Agent', () => {
     expect(agent('reviewer', 'no line', 'Task')).not.toBeNull();
