@@ -148,6 +148,13 @@ describe('importTranscript: what counts as a prompt', () => {
     });
   });
 
+  it('drops a subagent hand-back even when the line claims a human origin', async () => {
+    write(typed(1, '<agent-message from="a1">\n[Subagent hand-back] model output.'));
+    const { summary } = await run();
+    expect(summary.imported).toBe(0);
+    expect(readdirSync(eventsDir)).toEqual([]);
+  });
+
   it('skips peer, task-notification, meta, compact-summary and sidechain lines', async () => {
     write(
       typed(1, 'from a peer', { origin: { kind: 'peer' } }),
