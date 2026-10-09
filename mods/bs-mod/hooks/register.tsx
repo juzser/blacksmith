@@ -787,7 +787,7 @@ async function ownRoots($: EngineInterface): Promise<string[]> {
 /**
  * The events dir the prompt hook's own resolver names for this session's cwd (a checkout whose store is elsewhere), asked
  * once per session and cwd. The entry is found in the capture hook's order: `$BS_PROMPT_HOOK` when it is an absolute path
- * to an existing file (run with node), else `bs-prompt-hook` on PATH. A missing entry, no output, a non-zero exit or bad
+ * to an existing regular file (run with node), else `bs-prompt-hook` on PATH. A missing entry, no output, a non-zero exit or bad
  * JSON is no root, and no error.
  */
 async function resolvedRoot($: EngineInterface, st: State, sid: string): Promise<string | null> {
@@ -797,7 +797,7 @@ async function resolvedRoot($: EngineInterface, st: State, sid: string): Promise
   let dir: string | null = null
   try {
     const entry = await $.env.get('BS_PROMPT_HOOK')
-    const named = entry !== undefined && entry.startsWith('/') && (await $.fs.exists(entry))
+    const named = entry !== undefined && entry.startsWith('/') && (await $.fs.stat(entry).catch(() => null))?.kind === 'file'
     const res = await $.process.run(named ? ['node', entry, '--resolve', cwd] : ['bs-prompt-hook', '--resolve', cwd])
     const out = res.exitCode === 0 ? (JSON.parse(res.stdout.trim().split('\n')[0] ?? '') as { events_dir?: unknown } | null) : null
     if (typeof out?.events_dir === 'string' && out.events_dir.startsWith('/')) dir = out.events_dir.replace(/\/$/, '')

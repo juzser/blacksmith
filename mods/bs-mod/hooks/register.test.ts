@@ -171,8 +171,10 @@ type World = {
   hookCalls: string[][]
   /** each `node <entry> --resolve` call's argv, in call order */
   nodeCalls: string[][]
-  /** the files `$.fs.exists` answers true for, besides every seeded one */
+  /** the files `$.fs.stat` answers `file` for, besides every seeded one */
   present: Set<string>
+  /** the paths `$.fs.stat` answers `dir` for */
+  dirs: Set<string>
   /** what `bs-prompt-hook --resolve` answers: a stdout and exit code, or null for no such bin (the call is denied) */
   hook: { stdout: string; exitCode: number } | null
   /** a tool's result, as the engine answers `$.tool.call`; the default is an empty Bash result */
@@ -180,7 +182,7 @@ type World = {
 }
 
 function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World {
-  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], nodeCalls: [], present: new Set(), hook: null, tools: {} }
+  const w: World = { files, toasts: [], statuses: [], opened: [], commands: [], resolves: [], mtimes: new Map(), tails: [], unreadable: new Set(), agents: [], below: 'engine', hookCalls: [], nodeCalls: [], present: new Set(), dirs: new Set(), hook: null, tools: {} }
   const ran = (exitCode: number, stdout: string) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
   on('session.id', () => ({ value: sid }))
@@ -194,7 +196,11 @@ function world(on: On, files: Map<string, string>, sid = SID, cwd = CWD): World 
       value: paths.map(p => ({ name: p.slice(prefix.length), kind: 'file' as const, size: (files.get(p) ?? '').length, mtimeMs: w.mtimes.get(p) ?? T0, isLink: false })),
     }
   })
-  on('fs.exists', ($, e) => ({ value: files.has(e.path) || w.present.has(e.path) }))
+  on('fs.stat', ($, e) => {
+    if (files.has(e.path) || w.present.has(e.path)) return { value: { kind: 'file' as const, size: 0, mtimeMs: T0, isLink: false } }
+    if (w.dirs.has(e.path)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: T0, isLink: false } }
+    return { deny: `no such path: ${e.path}` }
+  })
   on('process.run', ($, e) => {
     const [cmd, ...rest] = e.argv
     if (cmd === 'node') {
@@ -1729,10 +1735,11 @@ describe('prompts and task progress outside an epic', () => {
         expect(await rowKeys(ui)).toEqual(['blank', 'rule', 'tabs', 'agents', `prompt:${HOME_ID}#2`, `prompt:${HOME_ID}#1`, 'idle'])
       })
 
-      for (const [name, entry] of [['a relative path', 'bs/promptHook.js'], ['an absolute path with no file', '/home/u/missing.js']] as const) {
+      for (const [name, entry] of [['a relative path', 'bs/promptHook.js'], ['an absolute path with no file', '/home/u/missing.js'], ['an absolute directory', '/home/u/bs']] as const) {
         test(`${name} is never run; bs-prompt-hook answers`, async ($, on) => {
           const w = cloneWorld(on)
           w.present.add('bs/promptHook.js')
+          w.dirs.add('/home/u/bs')
           await upWith($, on, { BS_PROMPT_HOOK: entry })
 
           const ui = await mountBand($)
