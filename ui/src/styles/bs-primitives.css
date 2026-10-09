@@ -2871,7 +2871,14 @@ summary.bs-inbox__group-head {
 .bs-inbox details.bs-inbox__group[open] > summary > .bs-inbox__chev {
   transform: rotate(180deg);
 }
-/* Phone heading total (mock .ph-h .cnt); the gap is the space before it. */
+/* Phone heading (mock .ph-h): the words left, the total on the right edge. */
+.bs-inbox__heading--count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+/* Phone heading total (mock .ph-h .cnt). */
 .bs-inbox__count {
   font-weight: 400;
   color: var(--bs-text-subtle);

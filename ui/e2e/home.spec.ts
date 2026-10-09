@@ -482,6 +482,25 @@ test.describe('Home: Needs you inbox', () => {
     const inbox = page.locator('section.bs-inbox');
     await expect(inbox.locator('#inbox-heading')).toHaveText(/^\s*Needs you\s*3\s*$/);
     await expect(page.getByRole('heading', { name: 'Needs you 3', exact: true })).toBeVisible();
+    // Mock .ph-h: the words stay left, the count sits on the cards' right edge.
+    const firstCard = (await inbox.locator('details.bs-inbox__group').first().boundingBox()) as {
+      x: number;
+      width: number;
+    };
+    const count = (await inbox.locator('.bs-inbox__count').boundingBox()) as {
+      x: number;
+      width: number;
+    };
+    expect(Math.abs(count.x + count.width - (firstCard.x + firstCard.width))).toBeLessThanOrEqual(1);
+    const textLeft = await inbox
+      .locator('#inbox-heading')
+      .evaluate((el) => {
+        const range = document.createRange();
+        range.setStart(el.firstChild as Node, 0);
+        range.setEnd(el.firstChild as Node, 1);
+        return range.getBoundingClientRect().left;
+      });
+    expect(Math.abs(textLeft - firstCard.x)).toBeLessThanOrEqual(1);
 
     const group = inbox.locator('details.bs-inbox__group').nth(1);
     const summary = group.locator('summary');
@@ -520,6 +539,10 @@ test.describe('Home: Needs you inbox', () => {
     await page.setViewportSize(VIEWPORTS.desktop);
     await page.goto('/overview');
     await expect(page.locator('#inbox-heading')).toHaveText('Needs you');
+    await expect(page.locator('.bs-inbox__count')).toHaveCount(0);
+    expect(
+      await page.locator('#inbox-heading').evaluate((el) => getComputedStyle(el).display),
+    ).toBe('block');
   });
 
   test('desktop: rows start unread; opening one reads it, the others stay unread', async ({
@@ -554,7 +577,7 @@ test.describe('Home: Needs you inbox', () => {
     await expect(rows.nth(0).getByRole('img', { name: 'Unread' })).toBeVisible();
   });
 
-  test('375px: opening a row reads it at once, without a reload', async ({ page }) => {
+  test('375px: a row opened and returned to by history still reads as read, without a reload', async ({ page }) => {
     await serveInbox(page, INBOX_ROWS);
     await page.setViewportSize(PHONE);
     await page.goto('/overview');

@@ -89,7 +89,11 @@ const markReadAux = (e: MouseEvent, id: string) => {
 
 <template>
   <section class="bs-inbox" aria-labelledby="inbox-heading">
-    <h2 id="inbox-heading" class="bs-section-title">
+    <h2
+      id="inbox-heading"
+      class="bs-section-title"
+      :class="{ 'bs-inbox__heading--count': isPhoneWidth && total > 0 }"
+    >
       Needs you <span v-if="isPhoneWidth && total > 0" class="bs-inbox__count">{{ total }}</span>
     </h2>
 
