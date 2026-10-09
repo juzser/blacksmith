@@ -115,7 +115,12 @@ describe('timeline() epic filter shows a prompt under every epic it led to', () 
         session,
         i,
         'dispatch_decision',
-        { agent_role: 'coder', provider: 'claude', model_tier: 'mid', parent_prompt_id: `${HOME}#1` },
+        {
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+          parent_prompt_id: `${HOME}#1`,
+        },
         { task_id: task },
       );
     // One session log holding task entries of two epics, plus its own prompt.
@@ -161,8 +166,7 @@ describe('timeline() epic filter shows a prompt under every epic it led to', () 
     await rm(dbDir, { recursive: true, force: true });
   });
 
-  const ids = (epicId: string) =>
-    timeline(handle.db, { epicId }).map((e) => e.eventId);
+  const ids = (epicId: string) => timeline(handle.db, { epicId }).map((e) => e.eventId);
 
   it('shows a home-log prompt under each epic whose entries name it', () => {
     expect(ids('epic-a')).toContain(`${HOME}#1`);
