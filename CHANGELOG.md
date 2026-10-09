@@ -41,7 +41,7 @@ than appearing in it.
 - **0.5.0 — the CLI is `bs`, the subagents are `bs-<role>`, budgets scale
   per tier, and every operator prompt is captured.** Two hundred and one
   pull requests since 0.4.0 (#208–#440), grouped by theme rather than by
-  order. Four entries above this one landed after 0.4.0 and ship in it:
+  order. Four entries below this one landed after 0.4.0 and ship in it:
   pr-mod (#412, with #426 and #438), bs-mod (#406, #408, #409, #417, #425),
   the `tier` on `wave-admitted` (#398), the factory project named
   `blacksmith` (#358); the `bs-<role>` agent names (#440) are under
@@ -58,7 +58,9 @@ than appearing in it.
   (`bs-coder`, `bs-reviewer`, ...); roles in logs, policies, env names and
   the dashboard did not change. A box with the plugin installed needs
   `claude plugin update blacksmith` and a session restart before the new
-  names show; the `Changed` entry below says the rest.
+  names show; the `Changed` entry below says the rest. A clone must also
+  rebuild `dist/` (`pnpm run build`), and the judge-stop hook keeps
+  accepting the bare names for one release.
 
   *Budgets scale with the tier (#264).* Token and diff caps are sized per
   effort tier (small 0.5x, medium, huge 2x of the per-role medium cap) and
@@ -70,7 +72,8 @@ than appearing in it.
   the tier on admission (#398). One rule for measured tokens now holds
   across every reader (#389), a `{measured:false}` usage shows as not
   measured instead of a fabricated 0 (#227), and the budget alarm treats
-  placeholder counts as unmeasured (#324).
+  placeholder counts as unmeasured (#324). The gate reads the live plan row,
+  not a superseded one, so an amended cap applies (#320).
 
   *Prompt capture (#411, #416, #417, #419, #423, #429, #430, #431, #435,
   #436).* The plugin ships a non-blocking `UserPromptSubmit` and
@@ -106,6 +109,11 @@ than appearing in it.
   class, `spec` and `visual` turn kinds, a `ui_affecting` task flag required
   when claims touch UI paths, and a gate stage that checks screenshot
   freshness. A uiux dispatch with no `--kind` is refused.
+
+  *Audit fixes (#209, #247, #355).* A cut epic spec no longer carries the
+  clone's absolute path, `audit resolve` counts a superseded task whose
+  change already merged, and an audit axis row closes on the auditor's
+  report.
 
   *Results and artifacts (#267, #268, #272).* `bs results record` projects
   tester artifacts, the dashboard shows task screenshots during a run, and
@@ -172,8 +180,9 @@ than appearing in it.
   release rebuilds it on the BS design kit (DS0-DS9: app shell, Home,
   Work with Kanban and Roadmap, Activity, Cost & quality, Lessons,
   Sessions), reads every project's own store, and centers on one Active/All
-  scope driven by live CLI sessions (#387, #397, #400-#402). Dependabot
-  bumps ride along.
+  scope driven by live CLI sessions (#387, #397, #400-#402). An agent with
+  no result after 4 hours reads "No result after 4h", not Running (#390).
+  Dependabot bumps ride along.
 
   *Packaging and migrations.* `package.json` gains the bins `bs`, `bs-run`
   and `bs-prompt-hook` beside `smith` and `smith-run`; `files` and `engines`
