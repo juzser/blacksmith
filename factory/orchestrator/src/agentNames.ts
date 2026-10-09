@@ -28,7 +28,11 @@ export function roleOfTemplateFile(file: string): string | null {
  * `subagent_type` -> the role. Strips an optional `<namespace>:` and then the
  * `bs-` prefix. For one transition the bare pre-prefix name (`reviewer`,
  * `blacksmith:reviewer`) is accepted too, because a newer CLI can run with an
- * older plugin still installed. Null when nothing maps.
+ * older plugin still installed. Returns a *candidate* role, not a verified one:
+ * any other non-empty name (`general-purpose`) comes back as itself, so the
+ * caller must check the result against its own role set. Null only for an
+ * empty name, a bare `bs-` or `<ns>:`, or (with `bareAccepted: false`) a name
+ * without the prefix.
  */
 export function roleOfAgentType(
   agentType: string,
