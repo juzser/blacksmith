@@ -119,7 +119,7 @@ function persist() {
 
 const optionsOpen = ref(false);
 function setGroupBy(value: KanbanGroupBy) {
-  options.value = { ...options.value, groupBy: value };
+  options.value = { ...options.value, groupBy: value, groupByChosen: true };
   groupByChosen.value = true;
   persist();
 }

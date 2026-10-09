@@ -94,6 +94,41 @@ describe('lib/kanbanDisplayOptions.ts — hasChosenKanbanGroupBy()', () => {
     expect(loadKanbanDisplayOptions(storage).groupBy).toBe('project');
   });
 
+  it('is true for an explicit status choice, which a later whole-object save keeps', () => {
+    const storage = memoryStorage();
+    saveKanbanDisplayOptions(storage, {
+      ...DEFAULT_KANBAN_DISPLAY_OPTIONS,
+      groupBy: 'status',
+      groupByChosen: true,
+    });
+    expect(hasChosenKanbanGroupBy(storage)).toBe(true);
+    // The Summary path: load, change one field, save the whole object.
+    saveKanbanDisplayOptions(storage, { ...loadKanbanDisplayOptions(storage), summary: false });
+    expect(hasChosenKanbanGroupBy(storage)).toBe(true);
+    expect(loadKanbanDisplayOptions(storage).groupBy).toBe('status');
+  });
+
+  it('is false for an older object with status and no marker, true with project and no marker', () => {
+    const old = (groupBy: string) =>
+      memoryStorage({
+        'bs.kanban.displayOptions': JSON.stringify({ summary: true, groupBy, hidden: [] }),
+      });
+    expect(hasChosenKanbanGroupBy(old('status'))).toBe(false);
+    expect(hasChosenKanbanGroupBy(old('project'))).toBe(true);
+  });
+
+  it('falls back to the default when the marker is malformed', () => {
+    const storage = memoryStorage({
+      'bs.kanban.displayOptions': JSON.stringify({
+        summary: true,
+        groupBy: 'project',
+        hidden: [],
+        groupByChosen: 'yes',
+      }),
+    });
+    expect(loadKanbanDisplayOptions(storage)).toEqual(DEFAULT_KANBAN_DISPLAY_OPTIONS);
+  });
+
   it('is false for a malformed stored value', () => {
     expect(hasChosenKanbanGroupBy(memoryStorage({ 'bs.kanban.displayOptions': '{nope' }))).toBe(
       false,

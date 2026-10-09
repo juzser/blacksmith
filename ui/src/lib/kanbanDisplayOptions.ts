@@ -15,6 +15,8 @@ export interface KanbanDisplayOptions {
   summary: boolean;
   groupBy: KanbanGroupBy;
   hidden: string[];
+  /** Set only when the operator picks a Group by; absent in options saved by an older build. */
+  groupByChosen?: boolean;
 }
 
 const STORAGE_KEY = 'bs.kanban.displayOptions';
@@ -35,7 +37,8 @@ function isWellFormed(value: unknown): value is KanbanDisplayOptions {
     typeof v.groupBy === 'string' &&
     GROUP_BY_VALUES.includes(v.groupBy as KanbanGroupBy) &&
     Array.isArray(v.hidden) &&
-    v.hidden.every((h) => typeof h === 'string')
+    v.hidden.every((h) => typeof h === 'string') &&
+    (v.groupByChosen === undefined || typeof v.groupByChosen === 'boolean')
   );
 }
 
@@ -61,13 +64,14 @@ export function loadKanbanDisplayOptions(
 
 /**
  * Whether the operator picked a Group by, so a page default never overrides it.
- * A save writes the whole options object, so a stored value alone proves
- * nothing: options saved by an older build carry no marker of the choice, so
- * a stored groupBy other than the default 'status' counts as chosen and a
- * stored 'status' as not chosen.
+ * The stored `groupByChosen` marker decides when present: only picking a Group
+ * by sets it, and every later whole-object save carries it along. Options saved
+ * by an older build have no marker, so there a stored groupBy other than the
+ * default 'status' counts as chosen and a stored 'status' as not chosen.
  */
 export function hasChosenKanbanGroupBy(storage: KanbanDisplayOptionsStorage): boolean {
-  return loadKanbanDisplayOptions(storage).groupBy !== DEFAULT_KANBAN_DISPLAY_OPTIONS.groupBy;
+  const options = loadKanbanDisplayOptions(storage);
+  return options.groupByChosen ?? options.groupBy !== DEFAULT_KANBAN_DISPLAY_OPTIONS.groupBy;
 }
 
 /** Never throws: a save that fails (quota, private browsing) is silently dropped. */
