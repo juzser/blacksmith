@@ -59,6 +59,15 @@ export function loadKanbanDisplayOptions(
   }
 }
 
+/** Whether the operator has ever saved options, so a page default never overrides a choice. */
+export function hasSavedKanbanDisplayOptions(storage: KanbanDisplayOptionsStorage): boolean {
+  try {
+    return !!storage.getItem(STORAGE_KEY);
+  } catch {
+    return false;
+  }
+}
+
 /** Never throws: a save that fails (quota, private browsing) is silently dropped. */
 export function saveKanbanDisplayOptions(
   storage: KanbanDisplayOptionsStorage,
