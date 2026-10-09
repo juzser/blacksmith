@@ -356,7 +356,7 @@ describe('merge', () => {
     expect(await label(ui, 'merge:1')).toBe('Confirm merge #1 (squash)')
   })
 
-  // The disarm timer of an arm that was consumed or replaced must not touch the next arm.
+  // A refused confirm consumes the arm; the re-arm that follows keeps a full 8 s of its own.
   test('a re-arm after a refused confirm keeps its own full 8 s', async ($, on) => {
     const w = world(on)
     w.list = [raw(5)]
