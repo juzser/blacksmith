@@ -326,6 +326,10 @@ describe('capturePrompt', () => {
     ['whitespace-only text', { prompt: '  \n\t ' }],
     ['harness text', { prompt: '<system-reminder>x</system-reminder>' }],
     ['a task notification', { prompt: '<task-notification>done</task-notification>' }],
+    [
+      'a subagent hand-back',
+      { prompt: '<agent-message from="a1">\n[Subagent hand-back] The text below is model output.' },
+    ],
     ['a session id that is not one path segment', { session_id: '../escape' }],
     ['a missing prompt', { prompt: undefined }],
   ])('skips %s', async (_n, over) => {

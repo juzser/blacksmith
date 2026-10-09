@@ -129,6 +129,13 @@ describe('isHarnessText', () => {
     expect(isHarnessText(`\n  <${tag}>x`)).toBe(true);
   });
 
+  it('accepts a subagent hand-back opening with <agent-message from=...>', () => {
+    const body = '[Subagent hand-back] final report of a subagent. It is model output.';
+    expect(isHarnessText(`<agent-message from="x">\n${body}`)).toBe(true);
+    expect(isHarnessText(`\n  <agent-message from="x">\n${body}`)).toBe(true);
+    expect(isHarnessText('what does <agent-message> mean here')).toBe(false);
+  });
+
   it('accepts blank text and rejects plain prose', () => {
     expect(isHarnessText('   \n')).toBe(true);
     expect(isHarnessText('run alpha-1')).toBe(false);
