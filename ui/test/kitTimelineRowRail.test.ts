@@ -102,7 +102,13 @@ describe('RunHistoryTimeline.vue rail rendering', () => {
   });
 
   it('keeps the chevron on a gate row whose meta is empty (Task/Session still show)', () => {
-    expect(TIMELINE_ROW).toMatch(/meta\.value !== '' \|\|\s*\(kind\.value === 'gate'/);
+    expect(TIMELINE_ROW).toMatch(
+      /meta\.value !== '' \|\|\s*hasPromptLink\.value \|\|\s*\(kind\.value === 'gate'/,
+    );
+  });
+
+  it('keeps the chevron on a dispatch whose meta is empty but still has a prompt link', () => {
+    expect(TIMELINE_ROW).toMatch(/meta\.value !== '' \|\|\s*hasPromptLink\.value/);
   });
 
   it('keeps the chevron on a rail row with an outcome tag so Outcome is reachable', () => {

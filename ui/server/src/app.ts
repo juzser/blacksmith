@@ -87,7 +87,14 @@ import {
 import { mergeAnalytics } from './analyticsFanout.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
-import { fanOut, mergeInbox, mergeKanban, mergeOverview, relabelProject } from './fanout.js';
+import {
+  fanOut,
+  mergeInbox,
+  mergeKanban,
+  mergeOverview,
+  mergeRoadmap,
+  relabelProject,
+} from './fanout.js';
 import { loopbackGuard, writeGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
 import type { StoreEntry, StoreRef } from './stores.js';
@@ -1445,23 +1452,35 @@ export function createApp(opts: AppOpts): AppHandle {
     const project = c.req.query('project');
     const epic = c.req.query('epic');
     const planVersion = parsePlanVersion(c.req.query('planVersion'));
-    return c.json(
-      flowGraph(
-        handle.db,
-        {
-          ...sessionScope(c),
-          ...(project ? { project } : {}),
-          ...(epic ? { epicId: epic } : {}),
-          ...(planVersion !== undefined ? { planVersion } : {}),
-        },
-        clock,
-      ),
+    const filter = (p: string | undefined) => ({
+      ...sessionScope(c),
+      ...(p ? { project: p } : {}),
+      ...(epic ? { epicId: epic } : {}),
+      ...(planVersion !== undefined ? { planVersion } : {}),
+    });
+    // An explicit `?store=` reads that store alone.
+    if (c.req.query('store') !== undefined) {
+      const only = storeOf(c);
+      const graph = flowGraph(only.handle.db, filter(project), clock);
+      return c.json(only.home ? graph : relabelProject(graph, only.label));
+    }
+    // An epic belongs to one store: the served store first, then the first
+    // other store that has tasks for it. Without an epic the graph is the served store's.
+    const parts = fanOut(epic ? readable(c) : [homeStore], project, (db, p) =>
+      flowGraph(db, filter(p), clock),
     );
+    return c.json((parts.find((p) => p.data.nodes.length > 0) ?? parts[0])?.data);
   });
 
   app.get('/api/roadmap', (c) => {
     const project = c.req.query('project');
-    return c.json(roadmapPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json(
+      mergeRoadmap(
+        fanOut(readable(c), project, (db, p) =>
+          roadmapPage(db, { ...sessionScope(c), ...(p ? { project: p } : {}) }),
+        ),
+      ),
+    );
   });
 
   // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----

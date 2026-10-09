@@ -119,6 +119,8 @@ export interface MilestoneTaskRef {
   dependencyReady: boolean;
 }
 export interface MilestoneProgress {
+  /** Which store the milestone came from; set by the merged roadmap read, absent on a single-store payload. */
+  store?: StoreRef;
   milestoneId: string;
   name: string;
   status: string;
@@ -1006,10 +1008,18 @@ export interface FlowGraph {
 }
 
 export function fetchFlow(
-  params: { session?: SessionScope; project?: string; epic?: string; planVersion?: number } = {},
+  params: {
+    session?: SessionScope;
+    project?: string;
+    epic?: string;
+    planVersion?: number;
+    /** Reads this one store; epic ids repeat across stores, so a caller that knows the owner names it. */
+    store?: string;
+  } = {},
 ): Promise<FlowGraph> {
   const q = new URLSearchParams();
   applySessionScope(q, params.session);
+  applyStores(q, undefined, params.store);
   if (params.project) q.set('project', params.project);
   if (params.epic) q.set('epic', params.epic);
   if (params.planVersion !== undefined) q.set('planVersion', String(params.planVersion));

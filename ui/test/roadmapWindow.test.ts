@@ -209,6 +209,60 @@ describe('groupByProject', () => {
   });
 });
 
+describe('buildRoadmapSections — a label shared by two stores', () => {
+  const rows = [
+    milestone({
+      milestoneId: 'phase-1',
+      project: 'project-a',
+      store: { id: 'store-a', label: 'checkout-a' },
+    }),
+    milestone({
+      milestoneId: 'phase-1',
+      project: 'project-a',
+      store: { id: 'store-b', label: 'checkout-b' },
+    }),
+  ];
+
+  it('keeps one section per store, named apart, each carrying its store', () => {
+    const sections = buildRoadmapSections(rows, [], [], undefined, null);
+    expect(sections.map((s) => [s.title, s.store?.id]).sort()).toEqual([
+      ['project-a · checkout-a', 'store-a'],
+      ['project-a · checkout-b', 'store-b'],
+    ]);
+    expect(new Set(sections.map((s) => s.key)).size).toBe(2);
+  });
+
+  it('leaves the title bare when the labels differ', () => {
+    const sections = buildRoadmapSections(
+      [
+        milestone({ project: 'project-a', store: { id: 'store-a', label: 'checkout-a' } }),
+        milestone({ project: 'project-b', store: { id: 'store-b', label: 'checkout-b' } }),
+      ],
+      [],
+      [],
+      undefined,
+      null,
+    );
+    expect(sections.map((s) => [s.title, s.store?.id]).sort()).toEqual([
+      ['project-a', 'store-a'],
+      ['project-b', 'store-b'],
+    ]);
+  });
+
+  it('leaves the title bare when there is no store', () => {
+    const single = buildRoadmapSections(
+      [milestone({ project: 'project-a' })],
+      [],
+      [],
+      undefined,
+      null,
+    );
+    expect(single.map((s) => [s.title, s.key, s.store])).toEqual([
+      ['project-a', 'project-a', undefined],
+    ]);
+  });
+});
+
 describe('buildRoadmapSections — one section per project, in liveness order', () => {
   it('puts the project holding a running epic first', () => {
     const sections = buildRoadmapSections(
@@ -494,6 +548,7 @@ describe('filterActiveSections', () => {
   ];
   const foreign = {
     project: 'project-c',
+    store: { id: 'other', label: 'other' },
     epicsInFlight: ['epic-c'],
     epicsActivelyRunning: ['epic-c'],
   } as unknown as ProjectOverviewSummary;
@@ -529,6 +584,58 @@ describe('filterActiveSections', () => {
     expect(filterActiveSections(all, scope(), 'project-b').map((s) => s.project)).toEqual(plain);
     expect(filterActiveSections(all, scope(), 'project-z').map((s) => s.project)).toEqual(plain);
     expect(filterActiveSections(all, scope(), null).map((s) => s.project)).toEqual(plain);
+  });
+
+  it('keeps only the store a live session is on when two stores share a label', () => {
+    const twin = (id: string) =>
+      milestone({ project: 'project-a', store: { id, label: id }, milestoneId: `${id}-1` });
+    const twins = buildRoadmapSections([twin('store-a'), twin('store-b')], [], [], undefined, null);
+    const live = scope({
+      projects: [{ storeId: 'store-b', project: 'project-a', liveSessions: 1, agentsWorking: 0 }],
+    });
+    expect(filterActiveSections(twins, live).map((s) => s.store?.id)).toEqual(['store-b']);
+  });
+
+  it('keeps only the store whose epic is live when two stores hold one epic id', () => {
+    const summary = (id: string) =>
+      ({
+        project: 'project-a',
+        store: { id, label: id },
+        epicsInFlight: ['epic-a'],
+        epicsActivelyRunning: [],
+      }) as unknown as ProjectOverviewSummary;
+    const twins = buildRoadmapSections(
+      [milestone({ project: 'project-z' })],
+      [],
+      [],
+      [summary('store-a'), summary('store-b')],
+      null,
+    ).filter((s) => s.project === 'project-a');
+    const live = scope({
+      projects: [],
+      epics: [{ storeId: 'store-b', epicId: 'epic-a', project: null }],
+    });
+    expect(filterActiveSections(twins, live).map((s) => s.store?.id)).toEqual(['store-b']);
+  });
+
+  it('matches a store-less phase section as the home store', () => {
+    const bare = buildRoadmapSections(
+      [milestone({ project: 'project-b' })],
+      [],
+      [],
+      undefined,
+      null,
+    );
+    expect(filterActiveSections(bare, scope())).toHaveLength(1);
+    const elsewhere = scope({
+      projects: [{ storeId: 'other', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+    });
+    expect(filterActiveSections(bare, elsewhere)).toEqual([]);
+  });
+
+  it('matches a store-less epic section by name in any store', () => {
+    const merged = buildRoadmapSections([], ['epic-x'], [], undefined, 'project-c');
+    expect(filterActiveSections(merged, scope()).map((s) => s.project)).toEqual(['project-c']);
   });
 
   it('an unmeasured scope still returns every section when a project is kept', () => {

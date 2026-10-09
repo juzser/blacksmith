@@ -111,19 +111,62 @@ const loading = ref(true);
 const selectedPhase = ref<string | null>(null);
 const selectedEpic = ref<string | null>(null);
 
-/** One in-flight (or settled) FlowGraph fetch per epic this phase/project shows. */
+/**
+ * The store the selection lives in. Epic and phase ids repeat between
+ * projects, so an id alone does not name one; undefined for a payload with no
+ * store (single-store), which reads as it always did.
+ */
+const selectedStore = ref<string | undefined>(undefined);
+
+/** A pick from a section names that section's store; one from an open block stays in the store it is in. */
+function pickStore(section: { store: string | undefined } | undefined) {
+  if (section !== undefined) selectedStore.value = section.store;
+}
+
+/** The default or deep-linked selection: the store of the first section that holds it. */
+function settleStore() {
+  const pick = { phaseId: selectedPhase.value, epicId: selectedEpic.value };
+  selectedStore.value = allSections.value.find((s) => sectionHolds(s, pick))?.store?.id;
+}
+
+/** Ids repeat between stores, so a selection belongs only to the sections of its own store. */
+function holdsStore(section: RoadmapSection): boolean {
+  const store = selectedStore.value;
+  return store === undefined || section.store === undefined || section.store.id === store;
+}
+
+function holdsSelection(section: RoadmapSection): boolean {
+  return (
+    holdsStore(section) &&
+    sectionHolds(section, { phaseId: selectedPhase.value, epicId: selectedEpic.value })
+  );
+}
+
+/** The milestones of one store; all of them when the store is unknown. */
+function milestonesOf(store: string | undefined): MilestoneProgress[] {
+  return (milestones.value ?? []).filter(
+    (m) => store === undefined || m.store === undefined || m.store.id === store,
+  );
+}
+
+const flowKey = (store: string | undefined, epicId: string) =>
+  store === undefined ? epicId : `${store}:${epicId}`;
+
+/** One in-flight (or settled) FlowGraph fetch per epic this phase/project shows, keyed by store and id. */
 const epicFlows = ref<Map<string, FlowGraph | 'failed'>>(new Map());
 
-async function loadEpicFlow(epicId: string) {
+async function loadEpicFlow(epicId: string, store: string | undefined) {
+  const key = flowKey(store, epicId);
   try {
     const flow = await fetchFlow({
       session: sessionScope.value,
       project: project.value,
       epic: epicId,
+      store,
     });
-    epicFlows.value.set(epicId, flow);
+    epicFlows.value.set(key, flow);
   } catch {
-    epicFlows.value.set(epicId, 'failed');
+    epicFlows.value.set(key, 'failed');
   }
   // Map mutation alone does not trigger a ref's reactivity; replace it.
   epicFlows.value = new Map(epicFlows.value);
@@ -149,6 +192,7 @@ let epicModeFlowSeq = 0;
 async function loadEpicModeFlow(options: { background?: boolean } = {}) {
   if (!selectedEpic.value) return;
   const epicId = selectedEpic.value;
+  const store = selectedStore.value;
   const background = options.background ?? false;
   // A later fetch (another epic, another plan version) supersedes this one:
   // a slow poll response must not overwrite what the operator now picked.
@@ -159,6 +203,7 @@ async function loadEpicModeFlow(options: { background?: boolean } = {}) {
       session: sessionScope.value,
       project: project.value,
       epic: epicId,
+      store,
       planVersion: epicPlanVersion.value ? Number(epicPlanVersion.value) : undefined,
     });
     if (seq !== epicModeFlowSeq) return;
@@ -176,13 +221,14 @@ usePoll(() => loadEpicModeFlow({ background: true }), 15000);
 
 function epicIdsForPhase(phaseId: string | null): string[] {
   if (phaseId === null) return [];
-  const phase = (milestones.value ?? []).find((m) => m.milestoneId === phaseId);
+  const phase = milestonesOf(selectedStore.value).find((m) => m.milestoneId === phaseId);
   return phase ? phase.epicIds : [];
 }
 
 function ensureEpicFlowsLoaded(epicIds: string[]) {
+  const store = selectedStore.value;
   for (const epicId of epicIds) {
-    if (!epicFlows.value.has(epicId)) loadEpicFlow(epicId);
+    if (!epicFlows.value.has(flowKey(store, epicId))) loadEpicFlow(epicId, store);
   }
 }
 
@@ -251,6 +297,7 @@ async function load() {
     );
     selectedPhase.value = selection.phaseId;
     selectedEpic.value = selection.epicId;
+    settleStore();
     if (
       (fromQuery.phase || fromQuery.epic) &&
       filterScope() !== null &&
@@ -274,6 +321,7 @@ async function load() {
         );
         selectedPhase.value = next.phaseId;
         selectedEpic.value = next.epicId;
+        settleStore();
         void router.replace({ query: { ...route.query, phase: undefined, epic: undefined } });
       }
     }
@@ -298,8 +346,7 @@ watch([project, sessionKey], load);
 const keepProject = ref<string | null>(null);
 let lastScope = scope.value;
 function syncKeep() {
-  const pick = { phaseId: selectedPhase.value, epicId: selectedEpic.value };
-  keepProject.value = allSections.value.find((sec) => sectionHolds(sec, pick))?.project ?? null;
+  keepProject.value = allSections.value.find(holdsSelection)?.key ?? null;
 }
 
 // Narrowing to Active can hide the lane the selection sits in: fall back to
@@ -327,6 +374,7 @@ watch(
     );
     selectedPhase.value = next.phaseId;
     selectedEpic.value = next.epicId;
+    settleStore();
     ensureEpicFlowsLoaded(next.epicId ? [next.epicId] : epicIdsForPhase(next.phaseId));
     if (next.epicId) loadEpicModeFlow();
     void router.replace({ query: { ...route.query, phase: undefined, epic: undefined } });
@@ -334,7 +382,8 @@ watch(
   },
 );
 
-function selectPhase(phaseId: string) {
+function selectPhase(phaseId: string, section?: { store: string | undefined }) {
+  pickStore(section);
   selectedPhase.value = phaseId;
   selectedEpic.value = null;
   syncKeep();
@@ -342,7 +391,8 @@ function selectPhase(phaseId: string) {
   ensureEpicFlowsLoaded(epicIdsForPhase(phaseId));
 }
 
-function selectEpic(epicId: string) {
+function selectEpic(epicId: string, section?: { store: string | undefined }) {
+  pickStore(section);
   selectedEpic.value = epicId;
   selectedPhase.value = null;
   syncKeep();
@@ -385,12 +435,7 @@ const noneSurvive = () => measured() && sections.value.length === 0 && allSectio
 const showHeadings = computed(() => !project.value);
 
 /** The section whose lanes hold the selection; null when it sits in none. */
-const hostSection = computed(
-  () =>
-    sections.value.find((s) =>
-      sectionHolds(s, { phaseId: selectedPhase.value, epicId: selectedEpic.value }),
-    ) ?? null,
-);
+const hostSection = computed(() => sections.value.find(holdsSelection) ?? null);
 
 /** The one status legend sits under the first section that has phase bars
  * (a phase-less section's rows carry no bars). */
@@ -403,7 +448,7 @@ const legendSection = computed(() => sections.value.find((s) => s.kind === 'phas
  */
 const stackItems = computed(() => {
   const items: Array<{ key: string; section: RoadmapSection | null }> = sections.value.map(
-    (section) => ({ key: `${section.kind}:${section.project}`, section }),
+    (section) => ({ key: `${section.kind}:${section.key}`, section }),
   );
   const host = hostSection.value;
   const at = host === null ? items.length : items.findIndex((item) => item.section === host) + 1;
@@ -425,16 +470,13 @@ const expandedWindows = ref(loadExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE));
 
 function windowExpanded(section: RoadmapSection) {
   return {
-    earlier: expandedWindows.value.has(windowExpandId(section.project, 'earlier')),
-    later: expandedWindows.value.has(windowExpandId(section.project, 'later')),
+    earlier: expandedWindows.value.has(windowExpandId(section.key, 'earlier')),
+    later: expandedWindows.value.has(windowExpandId(section.key, 'later')),
   };
 }
 
 function toggleWindow(section: RoadmapSection, side: WindowSide) {
-  expandedWindows.value = toggleExpanded(
-    expandedWindows.value,
-    windowExpandId(section.project, side),
-  );
+  expandedWindows.value = toggleExpanded(expandedWindows.value, windowExpandId(section.key, side));
   saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
 }
 
@@ -455,7 +497,7 @@ async function revealSelection() {
   revealedFor = key;
   const side = selectionSide(host, { phaseId: selectedPhase.value, epicId: selectedEpic.value });
   if (side === null) return;
-  const id = windowExpandId(host.project, side);
+  const id = windowExpandId(host.key, side);
   if (!expandedWindows.value.has(id)) {
     expandedWindows.value = toggleExpanded(expandedWindows.value, id);
     saveExpanded(sessionStorage, ROADMAP_WINDOW_SCOPE, expandedWindows.value);
@@ -468,20 +510,22 @@ async function revealSelection() {
 }
 
 const selectedPhaseData = computed(
-  () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
+  () =>
+    milestonesOf(selectedStore.value).find((m) => m.milestoneId === selectedPhase.value) ?? null,
 );
 
 /** Epic mode (spec §1) — one epic, standalone, built from `epicModeFlow`. */
 const selectedEpicData = computed(() => {
   if (!selectedEpic.value) return null;
   const epicId = selectedEpic.value;
+  const own = milestonesOf(selectedStore.value);
   const flow = epicModeFlow.value;
   if (flow === undefined) {
     return {
       epicId,
       statusTone: 'neutral' as KitTone,
       statusLabel: 'Loading',
-      project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
+      project: epicProject(own, epicId, project.value ?? null),
       planVersionOptions: planVersionOptions(null),
       planVersion: epicPlanVersion.value,
       loading: true,
@@ -489,7 +533,7 @@ const selectedEpicData = computed(() => {
       tasksTotal: 0,
       tasksCompleted: 0,
       waves: [],
-      phase: epicPhase(milestones.value ?? [], epicId),
+      phase: epicPhase(own, epicId),
     };
   }
   if (flow === 'failed') {
@@ -497,7 +541,7 @@ const selectedEpicData = computed(() => {
       epicId,
       statusTone: 'neutral' as KitTone,
       statusLabel: 'Unavailable',
-      project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
+      project: epicProject(own, epicId, project.value ?? null),
       planVersionOptions: planVersionOptions(null),
       planVersion: epicPlanVersion.value,
       loading: false,
@@ -505,10 +549,10 @@ const selectedEpicData = computed(() => {
       tasksTotal: 0,
       tasksCompleted: 0,
       waves: [],
-      phase: epicPhase(milestones.value ?? [], epicId),
+      phase: epicPhase(own, epicId),
     };
   }
-  const epicDates = epicDatesFor(milestones.value ?? [], epicId);
+  const epicDates = epicDatesFor(own, epicId);
   const { statusTone, statusLabel } = epicDates
     ? epicStatusFromServerStatus(epicDates.status)
     : epicStatusFromFlow(flow);
@@ -516,7 +560,7 @@ const selectedEpicData = computed(() => {
     epicId,
     statusTone,
     statusLabel,
-    project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
+    project: epicProject(own, epicId, project.value ?? null),
     planVersionOptions: planVersionOptions(flow),
     planVersion: epicPlanVersion.value,
     loading: false,
@@ -524,7 +568,7 @@ const selectedEpicData = computed(() => {
     tasksTotal: flow.nodes.length,
     tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
     waves: buildWaveList(flow),
-    phase: epicPhase(milestones.value ?? [], epicId),
+    phase: epicPhase(own, epicId),
     statusCounts: epicDates?.statusCounts,
     prUrl: epicDates?.prUrl ?? null,
     sourcePrompt: epicDates?.sourcePrompt ?? null,
@@ -536,7 +580,7 @@ const epicSections = computed(() => {
   const phase = selectedPhaseData.value;
   if (!phase) return [];
   return phase.epicIds.map((epicId) => {
-    const flow = epicFlows.value.get(epicId);
+    const flow = epicFlows.value.get(flowKey(selectedStore.value, epicId));
     if (flow === undefined) {
       return {
         epicId,
@@ -558,7 +602,7 @@ const epicSections = computed(() => {
         waves: [],
       };
     }
-    const epicDates = epicDatesFor(milestones.value ?? [], epicId);
+    const epicDates = epicDatesFor([phase], epicId);
     const { statusTone, statusLabel } = epicDates
       ? epicStatusFromServerStatus(epicDates.status)
       : epicStatusFromFlow(flow);
@@ -634,15 +678,15 @@ async function closePeek() {
           :section="item.section"
           :show-heading="showHeadings"
           :expanded="windowExpanded(item.section)"
-          :selected-phase="selectedPhase"
-          :selected-epic="selectedEpic"
+          :selected-phase="holdsStore(item.section) ? selectedPhase : null"
+          :selected-epic="holdsStore(item.section) ? selectedEpic : null"
           :hosts-selection="item.section === hostSection"
           :picker-label="pickerLabel(item.section)"
           :show-legend="item.section === legendSection"
           :idle-labels="idleLabels"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
-          @select-phase="selectPhase"
-          @select-epic="selectEpic"
+          @select-phase="(id, store) => selectPhase(id, { store })"
+          @select-epic="(id, store) => selectEpic(id, { store })"
         />
         <EpicBlock
           v-else-if="selectedPhaseData"

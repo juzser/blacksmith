@@ -487,10 +487,7 @@ test.describe('Home: Recent activity', () => {
     }));
   }
 
-  async function serveTimeline(
-    page: Page,
-    entries: ReturnType<typeof syntheticEntries>,
-  ): Promise<void> {
+  async function serveTimeline(page: Page, entries: { eventId: string }[]): Promise<void> {
     await page.route('**/api/timeline?*', (route) => {
       const url = new URL(route.request().url());
       if (url.searchParams.get('limit') !== '8') {
@@ -537,6 +534,69 @@ test.describe('Home: Recent activity', () => {
       await expect(rows.nth(i)).not.toBeVisible();
     }
   });
+
+  // The prompt link ends a dispatch's meta line; a long meta must ellipsize
+  // its own text, never cut the link off.
+  for (const [label, viewport] of [
+    ['1280px', VIEWPORTS.desktop],
+    ['1280px with a 340px column', { width: 1280, height: 900 }],
+    ['375px', PHONE],
+  ] as const) {
+    test(`${label}: a caused dispatch with a long meta keeps its prompt link whole`, async ({
+      page,
+    }) => {
+      const entries = syntheticEntries(8).map((entry, i) =>
+        i === 1
+          ? {
+              ...entry,
+              eventType: 'dispatch_decision',
+              kind: 'Dispatched',
+              nearestPromptId: 'synth-2',
+              payload: { agent_role: 'coder', round: 12 },
+              run: {
+                tokensIn: 1_234_567,
+                tokensOut: 2_345_678,
+                durationMs: 5_025_000,
+                runStatus: 'done',
+                dispatchedAt: entry.ts,
+                round: 12,
+              },
+            }
+          : entry,
+      );
+      await serveTimeline(page, entries);
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      // A narrow column is what makes a real meta line overflow.
+      if (label.includes('column')) {
+        await page.addStyleTag({ content: '.bs-home__recent-activity { max-width: 340px; }' });
+      }
+      // Phone moves the link into the expanded detail (the meta copy is hidden).
+      if (viewport.width <= 640) {
+        await page
+          .locator('.bs-home__recent-activity')
+          .getByRole('button', { name: 'Show details' })
+          .first()
+          .click();
+      }
+      const link = page.locator('.bs-home__recent-activity .bs-timeline-row__because-of:visible');
+      await expect(link).toHaveCount(1);
+      const m = await link.evaluate((el) => {
+        const meta = (el.closest('.bs-timeline-row__meta') ??
+          el.closest('.bs-timeline-row')) as HTMLElement;
+        const b = el.getBoundingClientRect();
+        // A clipped part of the link is not hit-testable: probe its last pixel.
+        const hit = document.elementFromPoint(b.right - 2, b.top + b.height / 2);
+        return {
+          right: b.right,
+          metaRight: meta.getBoundingClientRect().right,
+          whole: hit === el,
+        };
+      });
+      expect(m.right).toBeLessThanOrEqual(m.metaRight + 0.5);
+      expect(m.whole).toBe(true);
+    });
+  }
 
   // Fix round item 4 (ds-review.html, bs-primitives.css ~455): below 640px
   // the title link becomes `inline-flex`, so text-overflow needs an inner

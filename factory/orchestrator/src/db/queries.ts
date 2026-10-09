@@ -2810,6 +2810,31 @@ function epicOfEntry(entry: TimelineEntry): string | null {
   return typeof fromPayload === 'string' ? fromPayload : null;
 }
 
+/**
+ * The epic of a `user_prompt`, which names none itself (derived at read, nothing
+ * stored). A prompt captured into an epic's log takes the epic of that session's
+ * other entries; a `prompts-<uuid>` home log has none, so it takes the epic of
+ * any entry whose `parent_prompt_id` names it. Other entries answer null, so
+ * `epicOfEntry` decides them as before.
+ */
+function promptEpicResolver(
+  entries: readonly TimelineEntry[],
+): (e: TimelineEntry) => string | null {
+  const bySession = new Map<string, string>();
+  const byPrompt = new Map<string, string>();
+  for (const e of entries) {
+    const epic = epicOfEntry(e);
+    if (epic === null) continue;
+    if (!bySession.has(e.sessionId)) bySession.set(e.sessionId, epic);
+    const named = e.payload.parent_prompt_id;
+    if (typeof named === 'string' && !byPrompt.has(named)) byPrompt.set(named, epic);
+  }
+  return (e) =>
+    e.eventType !== 'user_prompt'
+      ? null
+      : (epicOfEntry(e) ?? bySession.get(e.sessionId) ?? byPrompt.get(e.eventId) ?? null);
+}
+
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
   if (filter.causalChainFor) {
     if (!filter.sessionId) {
@@ -2851,7 +2876,10 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   // that actually survive onto the page — see `memoizedNearestPromptId`.
   let entries = rows.map((row) => toEntry(row, null));
   entries = filterByProject(entries, filter);
-  if (filter.epicId) entries = entries.filter((e) => epicOfEntry(e) === filter.epicId);
+  if (filter.epicId) {
+    const promptEpic = promptEpicResolver(entries);
+    entries = entries.filter((e) => (promptEpic(e) ?? epicOfEntry(e)) === filter.epicId);
+  }
   if (filter.kinds?.length) {
     const kinds = new Set(filter.kinds);
     entries = entries.filter((e) => kinds.has(e.kind));

@@ -27,14 +27,16 @@ export class PromptError extends SmithError {}
 /**
  * True when `text` is harness-injected rather than something the operator
  * typed: blank, or a record opening with one of the CLI's own tags (reminders,
- * local and shell command echoes, task notifications, memory input). The one
- * list, shared by the dashboard's reader and any writer of operator prompts.
+ * local and shell command echoes, task notifications, memory input, and a
+ * subagent's hand-back, which is model output delivered as a user turn). The
+ * one list, shared by the dashboard's reader and any writer of operator
+ * prompts.
  */
 export function isHarnessText(text: string): boolean {
   const trimmed = text.trim();
   return (
     trimmed === '' ||
-    /^<(system-reminder|local-command|command-message|bash-input|bash-stdout|bash-stderr|task-notification|user-memory-input)/.test(
+    /^<(system-reminder|local-command|command-message|bash-input|bash-stdout|bash-stderr|task-notification|user-memory-input|agent-message)/.test(
       trimmed,
     )
   );

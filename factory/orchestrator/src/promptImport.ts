@@ -3,7 +3,8 @@
  * log, writing what the UserPromptSubmit and AskUserQuestion hooks would have
  * written had they been installed (design/prompt-capture.md §2.7, §2.8).
  */
-import { readFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import {
   appendWithin,
   type EventInput,
@@ -148,39 +149,59 @@ function classify(l: Obj): Classified {
   return null;
 }
 
-function parseTranscript(file: string): {
+/** Every line of a file, decoded as UTF-8, without ever holding the whole file. */
+async function* linesOf(file: string): AsyncGenerator<string> {
+  const decoder = new StringDecoder('utf8');
+  let rest = '';
+  for await (const chunk of createReadStream(file)) {
+    rest += decoder.write(chunk as Buffer);
+    let nl = rest.indexOf('\n');
+    while (nl !== -1) {
+      yield rest.slice(0, nl);
+      rest = rest.slice(nl + 1);
+      nl = rest.indexOf('\n');
+    }
+  }
+  rest += decoder.end();
+  if (rest !== '') yield rest;
+}
+
+async function parseTranscript(file: string): Promise<{
   cli: string;
   candidates: Candidate[];
   harness: number;
   afk: number;
-} {
-  const lines: Obj[] = [];
-  for (const raw of readFileSync(file, 'utf8').split('\n')) {
-    if (raw.trim() === '') continue;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      if (isObj(parsed)) lines.push(parsed);
-    } catch {
-      // A torn line (a transcript still being written) is not a prompt.
-    }
-  }
-  const ids = [...new Set(lines.map((l) => str(l.sessionId)).filter((v) => v !== undefined))];
-  const cli = ids[0];
-  if (ids.length !== 1 || cli === undefined || !CLI_ID.test(cli)) {
-    throw new PromptError(
-      'prompts.import-session-id',
-      `A transcript must carry exactly one valid sessionId; "${file}" has ${ids.length === 0 ? 'none' : `${ids.length} (${ids.join(', ')})`}. Nothing was written.`,
-      { transcript: file, session_ids: ids },
-    );
-  }
+}> {
+  const ids = new Set<string>();
   const candidates: Candidate[] = [];
   let harness = 0;
   let afk = 0;
-  for (const l of lines) {
+  for await (const raw of linesOf(file)) {
+    if (raw.trim() === '') continue;
+    let l: Obj;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isObj(parsed)) continue;
+      l = parsed;
+    } catch {
+      // A torn line (a transcript still being written) is not a prompt.
+      continue;
+    }
+    const id = str(l.sessionId);
+    if (id !== undefined) ids.add(id);
     const c = classify(l);
     if (c === 'harness') harness++;
     else if (c === 'afk') afk++;
     else if (c !== null) candidates.push(c);
+  }
+  const all = [...ids];
+  const cli = all[0];
+  if (all.length !== 1 || cli === undefined || !CLI_ID.test(cli)) {
+    throw new PromptError(
+      'prompts.import-session-id',
+      `A transcript must carry exactly one valid sessionId; "${file}" has ${all.length === 0 ? 'none' : `${all.length} (${all.join(', ')})`}. Nothing was written.`,
+      { transcript: file, session_ids: all },
+    );
   }
   candidates.sort((a, b) => a.ms - b.ms);
   return { cli, candidates, harness, afk };
@@ -195,7 +216,7 @@ export async function importTranscript(
   ctx: CaptureContext,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ events: EventInput[]; summary: ImportSummary }> {
-  const { cli, candidates, harness, afk } = parseTranscript(file);
+  const { cli, candidates, harness, afk } = await parseTranscript(file);
   const home = `prompts-${cli}`;
   const summary: ImportSummary = {
     session_id: home,

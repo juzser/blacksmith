@@ -3,7 +3,7 @@
 // actual outcome renders as a Lozenge (taxonomy.ts) alongside it, never via
 // the kind colour alone.
 import type { DispatchRun, TimelineEntry } from './api.js';
-import { formatCompactNumber, formatElapsed, formatTime, taskLabel } from './format.js';
+import { formatCompactNumber, formatElapsed, taskLabel } from './format.js';
 import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
@@ -57,19 +57,6 @@ function durationItem(ms: number | null | undefined): string | null {
   if (ms == null) return null;
   const minutes = Math.round(ms / 60_000);
   return minutes < 1 ? `${Math.round(ms / 1000)} s` : `${minutes} min`;
-}
-
-// Visual pass round 4, item 2: an unlinked dispatch — one whose
-// `nearestPromptId` points outside the current page/task's own loaded
-// entries (TaskDetailPage's History tab scopes the lookup to just that
-// task) — is a legitimate state, not a failed measurement: the prompt was
-// never missing, the caller just couldn't resolve its timestamp from what
-// it has in hand. Returning NOT_MEASURED here showed it stacked next to a
-// real measured token count on the same row, reading as broken data where
-// none was.
-function becauseOfItem(ctx: MetaContext): string | null {
-  if (ctx.promptTs == null) return null;
-  return `because of your prompt at ${formatTime(ctx.promptTs)}`;
 }
 
 /** Human check name for the broad set of event types `kindFor` buckets as
@@ -910,11 +897,11 @@ function humanizeEventType(eventType: string): string {
  * field the kind IS supposed to carry but this particular row's payload
  * came back null for (D-169's own "say the absence" rule, one level down:
  * a null counts, a field that doesn't exist for this kind never did).
- * Two exceptions, both visual pass round 4 item 2: `duration_ms` (only some results
- * carry it) and an unresolved "because of" prompt link (the
- * prompt exists, the caller just couldn't resolve it from what it has in
- * hand) are both omitted rather than labelled — see `durationItem` and
- * `becauseOfItem`.
+ * One exception, visual pass round 4 item 2: `duration_ms` (only some
+ * results carry it) is omitted rather than labelled — see `durationItem`.
+ * A dispatch's "because of your prompt" reference is not part of the meta
+ * string: TimelineRow renders it itself, as a link (`ctx.promptTs` only
+ * tells the row whether it can).
  */
 /** Fix brief item 1 (S2): the `feedback` kind covers six event types, not
  * just the two waivers, and each needs its own honest meta label rather than
@@ -951,7 +938,6 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
         parts.push(tokensItem(entry.run));
         parts.push(durationItem(entry.run.durationMs));
       }
-      parts.push(becauseOfItem(ctx));
       break;
     }
     case 'returned': {
@@ -1138,6 +1124,8 @@ export function sessionDividerBefore(
   );
 }
 
+const PROMPT_LOG_PREFIX = 'prompts-';
+
 /**
  * The divider's own "Session: <label>" text (fix round 5 item 3). The
  * server (`joinSessionTitles`) already falls `sessionTitle` back to the raw
@@ -1146,7 +1134,11 @@ export function sessionDividerBefore(
  * the divider never reads a bare "Session: ".
  */
 export function sessionDividerLabel(entry: TimelineEntry): string {
-  return entry.sessionTitle || entry.sessionId;
+  const label = entry.sessionTitle || entry.sessionId;
+  // Only the raw prompt-log session id is shortened; a real title is kept.
+  return label === entry.sessionId && label.startsWith(PROMPT_LOG_PREFIX)
+    ? `Prompts \u00b7 ${label.slice(PROMPT_LOG_PREFIX.length, PROMPT_LOG_PREFIX.length + 8)}`
+    : label;
 }
 
 /**

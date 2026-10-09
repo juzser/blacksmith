@@ -1131,12 +1131,9 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     expect(metaFor(e)).toBe('round 1 · 1.5K tokens');
   });
 
-  // Visual pass round 4, item 2: an unlinked "because of" prompt (the
-  // caller's lookup table couldn't resolve `nearestPromptId`'s timestamp,
-  // e.g. the History tab scoping it to one task's own entries) is a
-  // legitimate state, not a failed measurement — it is omitted, never shown
-  // as "not measured" next to the real token count.
-  it('omits "because of" from a finished dispatch\'s meta when the prompt link cannot be resolved', () => {
+  // The prompt reference has one owner: TimelineRow renders it as a link, so
+  // the meta string never spells it, resolved prompt or not.
+  it('leaves "because of" out of a finished dispatch\'s meta, resolved prompt or not', () => {
     const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
     (e as unknown as { run: unknown }).run = {
       tokensIn: 1000,
@@ -1146,6 +1143,7 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
       dispatchedAt: e.ts,
       round: 1,
     };
+    expect(metaFor(e, { promptTs: e.ts })).toBe('round 1 · 1.5K tokens · 1 min');
     expect(metaFor(e, { promptTs: null })).toBe('round 1 · 1.5K tokens · 1 min');
   });
 
@@ -1648,8 +1646,26 @@ describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
     );
   });
 
+  it('labels a prompt-log session by the first 8 characters of its uuid', () => {
+    const sessionId = 'prompts-0a1b2c3d-1111-4111-8111-aaaaaaaaaaaa';
+    expect(sessionDividerLabel(entry({ sessionId, sessionTitle: sessionId }))).toBe(
+      'Prompts \u00b7 0a1b2c3d',
+    );
+  });
+
+  it('counts a home-log prompt under the Prompts chip', () => {
+    const sessionId = 'prompts-0a1b2c3d-1111-4111-8111-aaaaaaaaaaaa';
+    expect(matchesKind(entry({ eventType: 'user_prompt', sessionId }), ['user_prompt'])).toBe(true);
+  });
+
   it('falls back to the session id when sessionTitle is empty', () => {
     expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
+  });
+
+  it('shows an operator title that starts with prompts- unchanged', () => {
+    expect(
+      sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: 'prompts-roadmap' })),
+    ).toBe('prompts-roadmap');
   });
 });
 

@@ -696,10 +696,74 @@ a:hover {
 .bs-timeline-row__because-of {
   background: none;
   border: none;
+  /* A <button> does not inherit the font; the mock's `.emeta a` is meta-sized. */
+  font: inherit;
   color: var(--bs-link-text);
-  text-decoration: underline;
+  text-decoration: none;
+  text-decoration-color: var(--bs-link-underline);
   cursor: pointer;
   padding: 0;
+  white-space: nowrap;
+}
+/* ds-review.html `.edet a` (the global `a`): link colour at rest, underline on
+   hover and focus. The meta line's copy is `.emeta a`: subtle at rest. */
+.bs-timeline-row__meta .bs-timeline-row__because-of {
+  color: var(--bs-text-subtle);
+}
+.bs-timeline-row__because-of:hover,
+.bs-timeline-row__because-of:focus-visible,
+.bs-timeline-row__meta .bs-timeline-row__because-of:hover,
+.bs-timeline-row__meta .bs-timeline-row__because-of:focus-visible {
+  color: var(--bs-link-text);
+  text-decoration: underline;
+}
+.bs-timeline-row__because-of:focus-visible {
+  outline: 2px solid var(--bs-focus-ring);
+  outline-offset: 2px;
+}
+/* `pre` keeps the leading " · " that a flex item would otherwise collapse. */
+.bs-timeline-row__because-of--meta {
+  white-space: pre;
+  flex: none;
+}
+/* Compact rows only: the text beside the link gives way first and the link
+   never shrinks. Elsewhere the wrapper stays a plain block, so the phone
+   ellipsis on the meta's first span still reaches the text and a wrapped
+   meta keeps the link inline after it. */
+.bs-timeline-row--compact .bs-timeline-row__meta-main {
+  display: flex;
+  min-width: 0;
+}
+.bs-timeline-row__meta-text {
+  min-width: 0;
+}
+.bs-timeline-row--compact .bs-timeline-row__meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The detail's copy of the link is phone-only; the meta line's copy is
+   desktop-only (ds-review.html #p-activity: on phone "because of" moves into
+   the detail, so the meta line stays one line ending in the time). */
+.bs-timeline-row__cause {
+  display: none;
+}
+@media (max-width: 640px) {
+  .bs-timeline-row__because-of--meta {
+    display: none;
+  }
+  .bs-timeline-row__cause {
+    display: revert;
+  }
+  /* Tap target: same box trick as the Session link below. */
+  .bs-timeline-row__detail .bs-timeline-row__because-of {
+    display: inline-block;
+    min-width: var(--bs-touch);
+    padding-top: calc(var(--bs-touch) - 1lh);
+    margin-top: calc(1lh - var(--bs-touch));
+    text-align: left;
+    font: inherit;
+  }
 }
 .bs-timeline-row__detail {
   margin: var(--bs-space-1) 0 0 calc(16px + var(--bs-space-2));
