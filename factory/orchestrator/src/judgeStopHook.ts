@@ -25,12 +25,16 @@
  *
  * Fail closed ONLY on a readable absolute declared path that does not exist.
  *
- * The dispatch prompt is read from `agent_transcript_path`. Per
+ * The hook reads the subagent's first non-meta user text -- its dispatch
+ * prompt -- from `agent_transcript_path`. Per
  * https://code.claude.com/docs/en/hooks#subagentstop: "The `transcript_path`
  * is the main session's transcript, while `agent_transcript_path` is the
- * subagent's own transcript stored in a nested `subagents/` folder." Only an
- * older CLI that sends no `agent_transcript_path` falls back to
- * `transcript_path`, which fails open (its last user turn is not the dispatch).
+ * subagent's own transcript stored in a nested `subagents/` folder." Later
+ * user-role entries (meta reminders, resumes, compaction notices) are never
+ * the prompt. An older CLI that sends no `agent_transcript_path` falls back
+ * to `transcript_path`: the main session's first prompt, which carries no
+ * Declared line unless that session was itself dispatched as a judge, so the
+ * hook fails open there.
  *
  * SubagentStop stdin fields: https://code.claude.com/docs/en/hooks
  */
@@ -128,15 +132,17 @@ export function decideJudgeStop(
 }
 
 /**
- * The last user-role message's text in a Claude Code JSONL transcript --
- * where a dispatch prompt and its "Declared artifact:" line live. Streams
+ * The text of the first non-meta user-role entry in a Claude Code JSONL
+ * transcript -- in a subagent's own transcript that is its dispatch prompt,
+ * where the "Declared artifact:" line lives; meta reminders, resumes, tool
+ * results and compaction notices all come after it or are skipped. Streams
  * the file in fixed-size chunks (a transcript can pass 512 MB, where a
- * whole-file read throws), splitting on `\n` only and keeping the last
- * user-role text seen; work is linear in file size because only the newly
- * read chunk is scanned for line breaks. A torn or unparseable line is
- * skipped. Returns `null` on any read failure or when no user text exists.
+ * whole-file read throws), splitting on `\n` only, and stops reading as soon
+ * as the prompt is found; work is linear in the bytes read because only the
+ * newly read chunk is scanned for line breaks. A torn or unparseable line is
+ * skipped. Returns `null` on any read failure or when no such entry exists.
  */
-export function extractLastUserPromptText(
+export function extractDispatchPromptText(
   transcriptPath: string,
   chunkSize = 64 * 1024,
 ): string | null {
@@ -146,17 +152,16 @@ export function extractLastUserPromptText(
   } catch {
     return null;
   }
-  let last: string | null = null;
-  const consume = (line: string): void => {
-    if (line.trim() === '') return;
+  const consume = (line: string): string | null => {
+    if (line.trim() === '') return null;
     let entry: unknown;
     try {
       entry = JSON.parse(line);
     } catch {
-      return;
+      return null;
     }
-    const text = userTextOf(entry);
-    if (text !== null) last = text;
+    if ((entry as { isMeta?: unknown } | null)?.isMeta === true) return null;
+    return userTextOf(entry);
   };
   try {
     const buf = Buffer.alloc(chunkSize);
@@ -169,14 +174,15 @@ export function extractLastUserPromptText(
       let start = 0;
       for (let nl = chunk.indexOf('\n'); nl !== -1; nl = chunk.indexOf('\n', start)) {
         carry.push(chunk.slice(start, nl));
-        consume(carry.join(''));
+        const found = consume(carry.join(''));
+        if (found !== null) return found;
         carry = [];
         start = nl + 1;
       }
       if (start < chunk.length) carry.push(chunk.slice(start));
     }
     carry.push(decoder.end());
-    consume(carry.join(''));
+    return consume(carry.join(''));
   } catch {
     return null;
   } finally {
@@ -186,7 +192,6 @@ export function extractLastUserPromptText(
       // nothing to do about a failed close
     }
   }
-  return last;
 }
 
 function userTextOf(entry: unknown): string | null {
@@ -236,13 +241,14 @@ export function runJudgeStopHook(rawStdin: string): JudgeStopHookResult {
   }
 
   // Older CLIs send no agent_transcript_path; the fallback then reads the
-  // main transcript, whose last user turn carries no declared line, so the
-  // hook fails open there exactly as before.
+  // main session's transcript, whose first prompt carries no declared line
+  // unless that session was itself dispatched as a judge, so the hook
+  // fails open there.
   const promptPath =
     typeof input.agent_transcript_path === 'string' && input.agent_transcript_path !== ''
       ? input.agent_transcript_path
       : input.transcript_path;
-  const promptText = promptPath ? extractLastUserPromptText(promptPath) : null;
+  const promptText = promptPath ? extractDispatchPromptText(promptPath) : null;
   const result = decideJudgeStop(input, promptText);
   if (result.decision === 'block') {
     return {
