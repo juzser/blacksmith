@@ -1663,6 +1663,12 @@ describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
   it('falls back to the session id when sessionTitle is empty', () => {
     expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
   });
+
+  it('shows an operator title that starts with prompts- unchanged', () => {
+    expect(
+      sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: 'prompts-roadmap' })),
+    ).toBe('prompts-roadmap');
+  });
 });
 
 // Gate rows carry a Passed/Failed status tag (ds-spec.md §4.3), so the title

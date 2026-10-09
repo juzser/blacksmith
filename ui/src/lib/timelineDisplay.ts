@@ -1138,6 +1138,8 @@ export function sessionDividerBefore(
   );
 }
 
+const PROMPT_LOG_PREFIX = 'prompts-';
+
 /**
  * The divider's own "Session: <label>" text (fix round 5 item 3). The
  * server (`joinSessionTitles`) already falls `sessionTitle` back to the raw
@@ -1147,7 +1149,10 @@ export function sessionDividerBefore(
  */
 export function sessionDividerLabel(entry: TimelineEntry): string {
   const label = entry.sessionTitle || entry.sessionId;
-  return label.startsWith('prompts-') ? `Prompts \u00b7 ${label.slice(8, 16)}` : label;
+  // Only the raw prompt-log session id is shortened; a real title is kept.
+  return label === entry.sessionId && label.startsWith(PROMPT_LOG_PREFIX)
+    ? `Prompts \u00b7 ${label.slice(PROMPT_LOG_PREFIX.length, PROMPT_LOG_PREFIX.length + 8)}`
+    : label;
 }
 
 /**
