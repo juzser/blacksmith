@@ -60,3 +60,33 @@ describe('auto-open on peek (spec 1.4)', () => {
     expect(GROUP).toMatch(/revealTaskId/);
   });
 });
+
+describe('live marks in the follow-up group', () => {
+  it('the group takes the live marks and the board passes them with the caption switch', () => {
+    expect(GROUP).toMatch(/live\?:\s*LiveMarks/);
+    expect(GROUP).toMatch(/groupMark\(/);
+    expect(GROUP).toMatch(/orderGroupRows\(/);
+    expect(BOARD).toMatch(/orderLiveItems\(/);
+    expect(BOARD).toMatch(/:live="live"/);
+  });
+
+  it('the summary tag replaces the agent chip and its +N, on phone too', () => {
+    expect(GROUP).toMatch(/<KanbanMarkTag v-if="summaryMark && summaryText"/);
+    expect(GROUP).toMatch(/<AgentChip v-else-if="liveChipTask && !compact"/);
+    expect(GROUP).toMatch(/v-if="!summaryMark && liveMembers\.length > 1 && !compact"/);
+  });
+
+  it('a marked row shows its tag in place of the chip and time, and its open label says so', () => {
+    expect(GROUP).toMatch(/v-if="rowMark\(task\)"/);
+    expect(GROUP).toMatch(/<AgentChip v-else-if="agentChip\(task\)\?\.live"/);
+    expect(GROUP).toMatch(
+      /\$\{rowTitle\(task\)\}\$\{markLabel\(rowMark\(task\)\)\}, opens task detail/,
+    );
+    expect(GROUP).toMatch(/markLabel\(summaryMark\.value\)\}, expand\/collapse/);
+  });
+
+  it('the card and the group share one tag component', () => {
+    expect(CARD).toMatch(/<KanbanMarkTag/);
+    expect(GROUP).toMatch(/import KanbanMarkTag/);
+  });
+});

@@ -10,6 +10,9 @@ const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'KanbanTaskCard.vue'),
   'utf8',
 );
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const MARK_TAG = readFileSync(join(SRC_DIR, 'components', 'KanbanMarkTag.vue'), 'utf8');
+const LIVE_FOCUS = readFileSync(join(SRC_DIR, 'lib', 'liveFocus.ts'), 'utf8');
 const PRIMITIVES_CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
   'utf8',
@@ -181,13 +184,14 @@ describe('KanbanTaskCard.vue — Now / Next mark', () => {
   });
 
   it('uses the progress tone for Now and the todo tone for Next', () => {
-    expect(SRC).toMatch(/mark\.kind === 'now' \? 'progress' : 'todo'/);
+    expect(MARK_TAG).toMatch(/mark\.kind === 'now' \? 'progress' : 'todo'/);
+    expect(SRC).toMatch(/<KanbanMarkTag/);
   });
 
   it('names the mark in the open button label', () => {
     expect(SRC).toMatch(/\$\{title\}\$\{markLabel\}, opens task detail/);
-    expect(SRC).toMatch(/', next'/);
-    expect(SRC).toMatch(/, now \$\{/);
+    expect(LIVE_FOCUS).toMatch(/', next'/);
+    expect(LIVE_FOCUS).toMatch(/, now \$\{/);
   });
 
   it('keeps the caption off phone cards and ellipsizes it', () => {

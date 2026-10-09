@@ -19,9 +19,19 @@ import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
 import { agentChip, titleCase } from '../lib/kanban.js';
+import {
+  groupMark,
+  type LiveMarks,
+  markFor,
+  markLabel,
+  markText,
+  orderGroupRows,
+  type TaskMark,
+} from '../lib/liveFocus.js';
 import { foreignStoreId, storeKey } from '../lib/storeKey.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
 import AgentChip from './AgentChip.vue';
+import KanbanMarkTag from './KanbanMarkTag.vue';
 import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
@@ -43,6 +53,10 @@ const props = defineProps<{
   /** A task a quick-look targets: a row hidden past the cap is revealed for it. */
   revealTaskId?: string | null;
   revealStoreId?: string;
+  /** What live sessions work on and do next; a marked fix carries its tag. */
+  live?: LiveMarks | null;
+  /** The board is not grouped by epic: the marked fix's "<project> · <epic>" shows beside the time. */
+  showCaption?: boolean;
 }>();
 const emit = defineEmits<{
   toggle: [];
@@ -53,11 +67,26 @@ const count = computed(() => props.members.length);
 const title = computed(() =>
   props.parentLabel ? `${count.value} fixes · ${props.parentLabel}` : `${count.value} fixes`,
 );
+const marked = computed(() => groupMark(props.live ?? null, props.members));
+const summaryMark = computed(() => marked.value?.mark ?? null);
+const summaryText = computed(() =>
+  marked.value ? markText(marked.value.mark, marked.value.task.agentActivity) : null,
+);
+const summaryCaption = computed(() => {
+  const label = marked.value?.task.epicLabel;
+  return props.showCaption && !props.compact && label ? label.replace(': ', ' · ') : null;
+});
 const ariaName = computed(() =>
   props.parentLabel
-    ? `${count.value} fixes for ${props.parentLabel}, expand/collapse`
-    : `${count.value} fixes, expand/collapse`,
+    ? `${count.value} fixes for ${props.parentLabel}${markLabel(summaryMark.value)}, expand/collapse`
+    : `${count.value} fixes${markLabel(summaryMark.value)}, expand/collapse`,
 );
+
+// Marked fixes lead the rows, so the row cap never hides one.
+const orderedMembers = computed(() => orderGroupRows(props.members, props.live ?? null));
+function rowMark(task: KanbanTask): TaskMark | null {
+  return markFor(props.live ?? null, task);
+}
 
 const newest = computed(() => props.members[0]);
 const liveMembers = computed(() => props.members.filter((m) => agentChip(m)?.live));
@@ -74,14 +103,16 @@ const showAllRows = ref(false);
 watch(
   () => props.revealTaskId,
   (id) => {
-    const index = props.members.findIndex(
+    const index = orderedMembers.value.findIndex(
       (m) => m.taskId === id && foreignStoreId(m) === props.revealStoreId,
     );
     if (index >= ROW_CAP) showAllRows.value = true;
   },
   { immediate: true },
 );
-const rows = computed(() => (showAllRows.value ? props.members : props.members.slice(0, ROW_CAP)));
+const rows = computed(() =>
+  showAllRows.value ? orderedMembers.value : orderedMembers.value.slice(0, ROW_CAP),
+);
 const hiddenRows = computed(() => Math.max(0, props.members.length - ROW_CAP));
 
 function rowTitle(task: KanbanTask): string {
@@ -133,8 +164,10 @@ function onRowClick(event: MouseEvent, task: KanbanTask) {
         <Icon :icon="ChevronDown" :size="16" class="bs-kanban-group__chev" />
       </span>
       <span class="bs-kanban-group__meta">
-        <AgentChip v-if="liveChipTask && !compact" :task="liveChipTask" />
-        <span v-if="liveMembers.length > 1 && !compact" class="bs-kanban-card__overflow">+{{ liveMembers.length - 1 }}</span>
+        <KanbanMarkTag v-if="summaryMark && summaryText" :mark="summaryMark" :text="summaryText" />
+        <AgentChip v-else-if="liveChipTask && !compact" :task="liveChipTask" />
+        <span v-if="!summaryMark && liveMembers.length > 1 && !compact" class="bs-kanban-card__overflow">+{{ liveMembers.length - 1 }}</span>
+        <span v-if="summaryCaption" class="bs-kanban-card__caption">{{ summaryCaption }}</span>
         <span v-if="newest" class="bs-kanban-card__meta">
           <Icon :icon="Clock" :size="14" />
           <RelativeTime :iso="newest.updatedAt" />
@@ -147,7 +180,7 @@ function onRowClick(event: MouseEvent, task: KanbanTask) {
           <button
             type="button"
             class="bs-kanban-group__row-open"
-            :aria-label="`${rowTitle(task)}, opens task detail`"
+            :aria-label="`${rowTitle(task)}${markLabel(rowMark(task))}, opens task detail`"
             :title="compact ? undefined : rowTitle(task)"
             @click="onRowSelect($event, task)"
           ></button>
@@ -165,7 +198,12 @@ function onRowClick(event: MouseEvent, task: KanbanTask) {
             <Tag v-if="showStatus()" :tone="taskStatusKitTone(task.taskStatus)" size="sm">
               {{ titleCase(task.taskStatus) }}
             </Tag>
-            <AgentChip v-if="agentChip(task)?.live" :task="task" />
+            <KanbanMarkTag
+              v-if="rowMark(task)"
+              :mark="rowMark(task) as TaskMark"
+              :text="markText(rowMark(task) as TaskMark, task.agentActivity)"
+            />
+            <AgentChip v-else-if="agentChip(task)?.live" :task="task" />
             <span v-else class="bs-kanban-card__meta">
               <Icon :icon="Clock" :size="14" />
               <RelativeTime :iso="task.updatedAt" />

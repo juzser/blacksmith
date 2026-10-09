@@ -188,6 +188,50 @@ test.describe('Kanban: Now and Next marks', () => {
     await shoot(page, 'work-kanban-now-next-phone375-light');
   });
 
+  test('desktop: a Next fix stacked in a follow-up group lifts the group and tags it', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    const fix = (slug: string, updatedAt: string): KanbanTask => ({
+      ...task('epic-9', slug, 'todo', 'demo-hub'),
+      title: `Fix ${slug}`,
+      parentTaskId: 'epic-9/task-2',
+      parentTitle: 'Task task-2',
+      updatedAt,
+    });
+    const tasks = [
+      ...epicTasks('epic-9', 'demo-hub'),
+      ...epicTasks('epic-1', 'blacksmith'),
+      fix('task-5', '2026-01-03T00:00:00.000Z'),
+      fix('task-6', '2026-01-02T00:00:00.000Z'),
+      fix('task-4', '2026-01-01T00:00:00.000Z'),
+    ].filter((t) => t.taskId !== 'epic-9/task-4' || t.parentTaskId !== null);
+    await page.route('**/api/kanban*', (route) =>
+      route.fulfill({
+        json: ['todo', 'in-progress', 'completed'].map((taskStatus) => ({
+          taskStatus,
+          tasks: tasks.filter((t) => t.taskStatus === taskStatus),
+        })),
+      }),
+    );
+    await stubSessions(page, TWO_LIVE);
+    await stubActiveScope(page, ['epic-9', 'epic-1']);
+    await page.goto('/work/kanban');
+    const items = page
+      .locator('.bs-kanban-col', { hasText: 'Task task-3 of epic-9' })
+      .locator('.bs-kanban-col__list > li');
+    await expect(items.nth(0)).toContainText(/Now · Builder/);
+    const group = items.nth(1).locator('.bs-kanban-group');
+    await expect(group.locator('.bs-kanban-group__summary')).toContainText('Next');
+    await expect(group.locator('.bs-kanban-group__summary')).not.toContainText('Now');
+    await expect(group).not.toHaveAttribute('open', '');
+    await group.locator('.bs-kanban-group__summary').click();
+    const rows = group.locator('.bs-kanban-group__row');
+    await expect(rows.first()).toContainText('Fix task-4');
+    await expect(rows.first()).toContainText('Next');
+    await expect(rows.nth(1)).not.toContainText('Next');
+  });
+
   test('an epic waiting on you gets one muted line', async ({ page }) => {
     await stubBoard(page);
     await stubSessions(page, [session('cli-1', 'demo-hub', 'epic-9', 'coder', null)]);

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   afterRead,
+  groupMark,
   liveMarks,
   markFor,
   matchNow,
   nextMark,
   nowText,
+  orderGroupRows,
   orderLive,
+  orderLiveItems,
   taskMarkKey,
 } from '../src/lib/liveFocus.js';
 import type { LiveCard, LiveLinkedEpic } from '../src/lib/liveSessions.js';
@@ -242,5 +245,63 @@ describe('afterRead', () => {
       sessions: null,
       misses: 2,
     });
+  });
+});
+
+describe('group ordering', () => {
+  const marks = liveMarks([
+    card([
+      epic({
+        workingAgents: [agent('coder', 'epic-a/n1')],
+        focusParts: { nextTask: { taskId: 'epic-a/x', taskTitle: 'x' } },
+      }),
+    ]),
+  ]);
+  const plain = (t: ReturnType<typeof task>) => ({ kind: 'task' as const, key: t.taskId, task: t });
+  const group = (key: string, ...members: ReturnType<typeof task>[]) => ({
+    kind: 'group' as const,
+    key,
+    members,
+  });
+  const keys = (items: { key: string }[]) => items.map((i) => i.key);
+
+  it('ranks a group by its best-marked member', () => {
+    const items = [
+      plain(task('epic-a/p')),
+      group('g-next', task('epic-a/q'), task('epic-a/x')),
+      plain(task('epic-a/r')),
+      group('g-now', task('epic-a/s'), task('epic-a/n1')),
+    ];
+    expect(keys(orderLiveItems(items, marks))).toEqual(['g-now', 'g-next', 'epic-a/p', 'epic-a/r']);
+  });
+
+  it('keeps the input order for ties and when nothing is marked', () => {
+    const items = [group('g1', task('epic-a/a'), task('epic-a/b')), plain(task('epic-a/c'))];
+    expect(orderLiveItems(items, marks)).toEqual(items);
+    expect(orderLiveItems(items, null)).toBe(items);
+    const two = [plain(task('epic-a/y')), group('g2', task('epic-a/x'), task('epic-a/z'))];
+    const twoNext = [group('g2', task('epic-a/x'), task('epic-a/z')), plain(task('epic-a/x'))];
+    expect(keys(orderLiveItems(twoNext, marks))).toEqual(['g2', 'epic-a/x']);
+    expect(keys(orderLiveItems(two, marks))).toEqual(['g2', 'epic-a/y']);
+  });
+
+  it('groupMark takes the best member mark, Now over Next', () => {
+    const m = groupMark(marks, [task('epic-a/x'), task('epic-a/n1')]);
+    expect(m?.mark).toEqual({ kind: 'now', roles: ['coder'] });
+    expect(m?.task.taskId).toBe('epic-a/n1');
+    expect(groupMark(marks, [task('epic-a/x')])?.mark).toEqual({ kind: 'next' });
+    expect(groupMark(marks, [task('epic-a/a')])).toBeNull();
+    expect(groupMark(null, [task('epic-a/x')])).toBeNull();
+  });
+
+  it('orderGroupRows leads with Now, then Next, then the given order', () => {
+    const rows = [task('epic-a/a'), task('epic-a/x'), task('epic-a/b'), task('epic-a/n1')];
+    expect(orderGroupRows(rows, marks).map((t) => t.taskId)).toEqual([
+      'epic-a/n1',
+      'epic-a/x',
+      'epic-a/a',
+      'epic-a/b',
+    ]);
+    expect(orderGroupRows(rows, null)).toBe(rows);
   });
 });

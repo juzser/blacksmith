@@ -101,6 +101,20 @@ export function markFor(marks: LiveMarks | null, task: Keyed): TaskMark | null {
   return marks.next.has(key) ? { kind: 'next' } : null;
 }
 
+// Now 0, Next 1, the rest (and finished tasks) 2.
+function liveRank(marks: LiveMarks, t: MarkTask): number {
+  if (isDoneStatus(t.taskStatus)) return 2;
+  const kind = markFor(marks, t)?.kind;
+  return kind === 'now' ? 0 : kind === 'next' ? 1 : 2;
+}
+
+function stableByRank<T>(list: T[], rank: (x: T) => number): T[] {
+  return list
+    .map((x, i) => ({ x, i, r: rank(x) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((e) => e.x);
+}
+
 /**
  * Stable partition of one column: Now cards, then Next, then the rest in
  * their order. Finished tasks stay put. Runs before the column is capped, so
@@ -108,15 +122,50 @@ export function markFor(marks: LiveMarks | null, task: Keyed): TaskMark | null {
  */
 export function orderLive<T extends MarkTask>(tasks: T[], marks: LiveMarks | null): T[] {
   if (!marks) return tasks;
-  const rank = (t: T): number => {
-    if (isDoneStatus(t.taskStatus)) return 2;
-    const kind = markFor(marks, t)?.kind;
-    return kind === 'now' ? 0 : kind === 'next' ? 1 : 2;
-  };
-  return tasks
-    .map((t, i) => ({ t, i, r: rank(t) }))
-    .sort((a, b) => a.r - b.r || a.i - b.i)
-    .map((x) => x.t);
+  return stableByRank(tasks, (t) => liveRank(marks, t));
+}
+
+/** The same partition over a column's items; a follow-up group ranks by its best-marked member. */
+export function orderLiveItems<
+  T extends MarkTask,
+  I extends { kind: 'task'; task: T } | { kind: 'group'; members: T[] },
+>(items: I[], marks: LiveMarks | null): I[] {
+  if (!marks) return items;
+  return stableByRank(items, (i) =>
+    i.kind === 'task'
+      ? liveRank(marks, i.task)
+      : Math.min(...i.members.map((m) => liveRank(marks, m))),
+  );
+}
+
+/** A group's rows: Now, then Next, then the given order. */
+export function orderGroupRows<T extends MarkTask>(members: T[], marks: LiveMarks | null): T[] {
+  return marks ? orderLive(members, marks) : members;
+}
+
+/** The mark a group's summary carries (Now beats Next) and the member it belongs to. */
+export function groupMark<T extends Keyed>(
+  marks: LiveMarks | null,
+  members: readonly T[],
+): { mark: TaskMark; task: T } | null {
+  let best: { mark: TaskMark; task: T } | null = null;
+  for (const task of members) {
+    const mark = markFor(marks, task);
+    if (!mark || (best && (best.mark.kind === 'now' || mark.kind === 'next'))) continue;
+    best = { mark, task };
+  }
+  return best;
+}
+
+/** The tag text: "Now · Builder" (with " · stalled") or "Next". */
+export function markText(mark: TaskMark, activity: 'working' | 'stalled' | null): string {
+  return mark.kind === 'now' ? nowText(mark.roles, activity) : 'Next';
+}
+
+/** The words a marked card or row adds to its open button's name. */
+export function markLabel(mark: TaskMark | null): string {
+  if (!mark) return '';
+  return mark.kind === 'now' ? `, now ${mark.roles.map(roleLabel).join(' and ')}` : ', next';
 }
 
 /**

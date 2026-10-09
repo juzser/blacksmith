@@ -40,7 +40,7 @@ import {
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
 } from '../lib/kanbanDisplayOptions.js';
-import { type LiveMarks, markFor, orderLive } from '../lib/liveFocus.js';
+import { type LiveMarks, markFor, orderLive, orderLiveItems } from '../lib/liveFocus.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
 import KanbanFollowupGroup from './KanbanFollowupGroup.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
@@ -176,7 +176,11 @@ const columns = computed(() =>
     // Follow-ups of one parent stack into a single item; the stack counts as
     // one toward the cap below, while `total` stays the task count.
     const visibleTasks = showDone ? [...active, ...done] : active;
-    const visible = groupFollowups(visibleTasks, col.key);
+    // A group ranks by its best-marked member, so a marked fix stacked in
+    // a group still leads the column.
+    const visible = props.live
+      ? orderLiveItems(groupFollowups(visibleTasks, col.key), props.live)
+      : groupFollowups(visibleTasks, col.key);
     // A simple windowed slice rather than a scroll-driven virtualizer: past
     // KANBAN_VIRTUALIZE_THRESHOLD the column reuses the same capColumn()/
     // "view more" control the rest of the board already has, so a very
@@ -429,6 +433,8 @@ function captionFor(task: KanbanTask): string | null {
               :open="openGroups.has(item.key)"
               :status-in-column="groupBy === 'status' && !showAll"
               :compact="isPhoneWidth"
+              :live="live"
+              :show-caption="groupBy !== 'epic'"
               :reveal-task-id="peekTaskId"
               :reveal-store-id="peekStoreId"
               @toggle="toggleGroup(item.key)"

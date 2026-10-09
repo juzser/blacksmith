@@ -12,7 +12,7 @@
 // Wired to that rather than removed, gated behind `summaryEnabled` so the
 // toolbar's "Show summary" option actually does something again.
 
-import { Bot, Clock, Link } from '@lucide/vue';
+import { Clock, Link } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import { useFittedTitle } from '../composables/useFittedTitle.js';
@@ -27,10 +27,15 @@ import {
   hasWaitingDependency,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
-import { nowText, type TaskMark } from '../lib/liveFocus.js';
+import {
+  markText as markTagText,
+  markLabel as markWords,
+  type TaskMark,
+} from '../lib/liveFocus.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { foreignStoreId } from '../lib/storeKey.js';
 import AgentChip from './AgentChip.vue';
+import KanbanMarkTag from './KanbanMarkTag.vue';
 import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
@@ -68,16 +73,10 @@ const chip = computed(() => agentChip(props.task));
 const showRoleLabel = computed(
   () => props.groupBy !== 'role' && !!props.task.agentRole && !chip.value,
 );
-const markText = computed(() => {
-  const m = props.mark;
-  if (!m) return null;
-  return m.kind === 'now' ? nowText(m.roles, props.task.agentActivity) : 'Next';
-});
-const markLabel = computed(() => {
-  const m = props.mark;
-  if (!m) return '';
-  return m.kind === 'now' ? `, now ${m.roles.map(roleLabel).join(' and ')}` : ', next';
-});
+const markText = computed(() =>
+  props.mark ? markTagText(props.mark, props.task.agentActivity) : null,
+);
+const markLabel = computed(() => markWords(props.mark ?? null));
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
 const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
@@ -126,16 +125,7 @@ function onCardClick(event: MouseEvent) {
       @click="onSelect"
     ></button>
     <div v-if="!compact && (markText || chip)" class="bs-kanban-card__row bs-kanban-card__row--1">
-      <Tag
-        v-if="mark && markText"
-        class="bs-agent-chip bs-kanban-card__mark"
-        :tone="mark.kind === 'now' ? 'progress' : 'todo'"
-        variant="subtle"
-        size="sm"
-      >
-        <Icon v-if="mark.kind === 'now'" :icon="Bot" :size="14" />
-        <span class="bs-agent-chip__text">{{ markText }}</span>
-      </Tag>
+      <KanbanMarkTag v-if="mark && markText" :mark="mark" :text="markText" />
       <AgentChip v-else :task="{ ...task, updatedAt: task.updatedAt }" />
     </div>
 
@@ -150,15 +140,7 @@ function onCardClick(event: MouseEvent) {
     <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 
     <div v-if="compact && mark && markText" class="bs-kanban-card__row bs-kanban-card__chips">
-      <Tag
-        class="bs-agent-chip bs-kanban-card__mark"
-        :tone="mark.kind === 'now' ? 'progress' : 'todo'"
-        variant="subtle"
-        size="sm"
-      >
-        <Icon v-if="mark.kind === 'now'" :icon="Bot" :size="14" />
-        <span class="bs-agent-chip__text">{{ markText }}</span>
-      </Tag>
+      <KanbanMarkTag :mark="mark" :text="markText" />
     </div>
     <div v-else-if="chips.chips.length > 0" class="bs-kanban-card__row bs-kanban-card__chips">
       <Tag
