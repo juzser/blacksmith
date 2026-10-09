@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "blacksmith",
-      "description": "The Blacksmith operator console: /bs plans an epic, drives a wave of agents through TDD, review and a merge queue, and audits a project on four axes. Needs the smith CLI from npm (@juzser/blacksmith).",
+      "description": "The Blacksmith operator console: /bs plans an epic, drives a wave of agents through TDD, review and a merge queue, and audits a project on four axes. Needs the bs CLI from npm (@juzser/blacksmith).",
       "author": {
         "name": "juzser"
       },
