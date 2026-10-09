@@ -1833,20 +1833,20 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   // The error that parked a task is a `coordination.*` one above a note-only
   // severity (projector.ts); its detail is free text the logger wrote.
   const reasonByTask = new Map<string, string>();
-  // When that error was logged: the decision's own date. `tasks.updatedAt`
-  // moves on every later touch of the task, which would re-date it.
+  // When that error was logged: the decision's own date. The projector never
+  // moves an escalated task again, so the FIRST parking error is the one that
+  // parked it (detail or not). `tasks.updatedAt` moves on every later touch.
   const parkedAtByTask = new Map<string, string>();
   if (escalatedTaskIds.length > 0) {
     const parked = inLogOrder(
       db.select().from(errors).where(eq(errors.errorGroup, 'coordination')).all(),
-    ).filter((e) => e.detail && !/^S[34]-/.test(e.severity));
+    ).filter((e) => !/^S[34]-/.test(e.severity));
     for (const e of parked) {
       for (const ref of (e.taskRef ?? '').split(',')) {
         const id = escalatedTaskIds.find((tid) => taskIdsMatch(tid, ref.trim()));
-        if (id) {
-          reasonByTask.set(id, e.detail as string);
-          parkedAtByTask.set(id, e.ts);
-        }
+        if (!id) continue;
+        if (e.detail) reasonByTask.set(id, e.detail);
+        if (!parkedAtByTask.has(id)) parkedAtByTask.set(id, e.ts);
       }
     }
   }
@@ -1861,7 +1861,7 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       reason: reasonByTask.get(t.taskId) ?? null,
       project: projectOf(t.project),
       taskId: t.taskId,
-      createdAt: parkedAtByTask.get(t.taskId) ?? t.updatedAt,
+      createdAt: parkedAtByTask.get(t.taskId) ?? t.terminalAt ?? t.updatedAt,
     });
   }
 

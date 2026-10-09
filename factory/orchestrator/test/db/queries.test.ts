@@ -2922,6 +2922,40 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     expect(inboxRows(handle.db)[0]?.createdAt).toBe(parked?.ts);
   });
 
+  it('createdAt stays the park time when a detail-less error parked the task and an S4 error touched it later', () => {
+    const parkedAt = '2026-01-01T00:00:00.000Z';
+    const laterAt = '2026-02-01T00:00:00.000Z';
+    handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
+    const base = { sessionId: SESSION_ID, taskRef: TASK_3, errorGroup: 'coordination' };
+    handle.db
+      .insert(errors)
+      .values([
+        {
+          ...base,
+          eventId: 'evt-park',
+          ts: parkedAt,
+          errorClass: 'coordination.deadlock',
+          severity: 'S1-stop-the-line',
+          detail: null,
+        },
+        {
+          ...base,
+          eventId: 'evt-later',
+          ts: laterAt,
+          errorClass: 'coordination.note',
+          severity: 'S4-nit',
+          detail: 'a later nit',
+        },
+      ])
+      .run();
+    handle.db
+      .update(tasks)
+      .set({ terminalAt: parkedAt, updatedAt: laterAt })
+      .where(eq(tasks.taskId, TASK_3))
+      .run();
+    expect(inboxRows(handle.db)[0]?.createdAt).toBe(parkedAt);
+  });
+
   it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
     const rows = inboxRows(handle.db);
     expect(rows[0]?.project).toBe(DEFAULT_PROJECT);
