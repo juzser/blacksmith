@@ -630,8 +630,16 @@ test.describe('Activity', () => {
       expect(meta.height).toBeLessThanOrEqual(meta.lineHeight + 2);
       expect(meta.right).toBeLessThanOrEqual(meta.rowRight);
 
+      // The collapsed meta line does not mention the prompt at all.
+      await expect(row.locator('.bs-timeline-row__meta')).not.toContainText(/prompt/i, {
+        useInnerText: true,
+      });
+
       // Detail: the link keeps its words on one line and clears --bs-touch.
       await row.getByRole('button', { name: 'Show details' }).click();
+      // The expanded row names the prompt once: the "Because of" pair.
+      expect((await row.innerText()).match(/your prompt at/g)).toHaveLength(1);
+      await expect(row.locator('.bs-timeline-row__detail')).toContainText('Because of');
       const link = row.locator('.bs-timeline-row__detail .bs-timeline-row__because-of');
       await expect(link).toBeVisible();
       const m = await link.evaluate((el) => {
@@ -652,6 +660,35 @@ test.describe('Activity', () => {
       expect(m.right).toBeLessThanOrEqual(width);
     });
   }
+
+  // ds-review.html `.emeta`: "round 2 · ... · because of <a>your prompt at
+  // 10:05</a>". The reference appears once, "because of" is plain text after
+  // a " · " separator, and only the time phrase is the link.
+  test('1280px: the dispatch meta line names the causing prompt once, as the mock spells it', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    const meta = row.locator('.bs-timeline-row__meta');
+    await expect(meta).toContainText(/ · because of your prompt at \d\d:\d\d/, {
+      useInnerText: true,
+    });
+    const link = meta.locator('.bs-timeline-row__because-of');
+    await expect(link).toHaveText(/^your prompt at \d\d:\d\d$/);
+    expect((await meta.innerText()).match(/because of/g)).toHaveLength(1);
+
+    await row.getByRole('button', { name: 'Show details' }).click();
+    // Expanded: still once in the whole row; the detail does not repeat it.
+    expect((await row.innerText()).match(/your prompt at/g)).toHaveLength(1);
+    await expect(row.locator('.bs-timeline-row__detail')).not.toContainText(/prompt/i, {
+      useInnerText: true,
+    });
+  });
 
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
   // is one line, ellipsised -- the app used to wrap a long title to 2-3

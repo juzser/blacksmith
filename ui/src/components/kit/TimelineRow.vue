@@ -128,6 +128,7 @@ const hasPromptLink = computed(
 const hasDetails = computed(
   () =>
     meta.value !== '' ||
+    hasPromptLink.value ||
     (kind.value === 'gate' && props.variant !== 'rail') ||
     (props.variant === 'rail' && !!props.tag),
 );
@@ -177,15 +178,11 @@ function onBecauseOf() {
         <span v-else class="bs-timeline-row__title">{{ title }}</span>
       </div>
       <div v-if="hasDetails" class="bs-timeline-row__meta">
-        <span v-if="meta">{{ meta }}</span>
-        <button
-          v-if="hasPromptLink"
-          type="button"
-          class="bs-timeline-row__because-of bs-timeline-row__because-of--meta"
-          @click="onBecauseOf"
-        >
-          because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
-        </button>
+        <!-- The prompt reference has one owner: this row. metaFor() no longer
+             spells it, so "because of" stays plain text after the " · "
+             separator and only the time phrase is the link (ds-review.html
+             `.emeta`). Phone hides it here; the detail carries it. -->
+        <span v-if="meta || hasPromptLink">{{ meta }}<span v-if="hasPromptLink" class="bs-timeline-row__because-of--meta">{{ meta ? ' · ' : '' }}because of <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">your prompt at {{ formatTime(ctx?.promptTs ?? '') }}</button></span></span>
         <!-- Phone (ds-spec.md §4.1 1b): the meta line ends with the time
              instead of the dedicated time column below, which hides there. -->
         <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
@@ -219,9 +216,7 @@ function onBecauseOf() {
         <template v-if="hasPromptLink">
           <dt class="bs-timeline-row__cause">Because of</dt>
           <dd class="bs-timeline-row__cause">
-            <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
-              your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
-            </button>
+            <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">your prompt at {{ formatTime(ctx?.promptTs ?? '') }}</button>
           </dd>
         </template>
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline

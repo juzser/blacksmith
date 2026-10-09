@@ -702,6 +702,9 @@ a:hover {
   padding: 0;
   white-space: nowrap;
 }
+.bs-timeline-row__because-of--meta {
+  white-space: nowrap;
+}
 /* The detail's copy of the link is phone-only; the meta line's copy is
    desktop-only (ds-review.html #p-activity: on phone "because of" moves into
    the detail, so the meta line stays one line ending in the time). */
