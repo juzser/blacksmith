@@ -4758,6 +4758,14 @@ h2.rm-section__head {
   font-size: var(--bs-text-lg);
   line-height: var(--bs-leading-lg);
   font-weight: 600;
+  /* ds-review.html .mstat .v (~:727) */
+  font-variant-numeric: tabular-nums;
+}
+/* ds-review.html .mstat (~:720-730) is one 28.8px value line. The inline-flex ring
+   sat on the baseline of that line and stretched the box to 32px; top-aligning it
+   lets the ring (centred in its own 28px text line) set the line height. */
+.bs-analytics-page__phone-stat-value .bs-pring {
+  vertical-align: top;
 }
 /* ds-review.html .pnum (~:506) sets no size, so a ring percent inside .mstat .v
    (~:727) reads at the tile's 18px; weight stays 400. Only this tile; every
