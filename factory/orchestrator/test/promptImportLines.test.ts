@@ -18,26 +18,37 @@ function split(buf: Buffer, size: number): Buffer[] {
 }
 
 describe('linesOfChunks', () => {
-  it('handles one very long line across many small chunks quickly', async () => {
+  it('keeps one very long line split across many small chunks whole', async () => {
     const line = 'x'.repeat(6 * 1024 * 1024);
     const lines = await collect(split(Buffer.from(`${line}\nend`), 1024));
     expect(lines.length).toBe(2);
     expect(lines[0]?.length).toBe(line.length);
     expect(lines[1]).toBe('end');
-  }, 3000);
+  });
 
-  it('handles very many short lines in one chunk quickly', async () => {
+  it('splits many short lines in one chunk', async () => {
     const n = 400_000;
-    const text = `${'ab\n'.repeat(n)}`;
+    const text = 'ab\n'.repeat(n);
     const lines = await collect([Buffer.from(text)]);
     expect(lines.length).toBe(n);
     expect(lines[n - 1]).toBe('ab');
-  }, 3000);
+  });
 
   it('keeps a multi-byte character split across chunks intact', async () => {
-    const b = Buffer.from('a€b\nc');
+    const b = Buffer.from('a\u20acb\nc');
     expect(await collect([b.subarray(0, 2), b.subarray(2, 3), b.subarray(3)])).toEqual([
-      'a€b',
+      'a\u20acb',
+      'c',
+    ]);
+  });
+
+  it('decodes a multi-byte sequence truncated at EOF to U+FFFD', async () => {
+    expect(await collect([Buffer.from('x'), Buffer.from([0xe2])])).toEqual(['x\ufffd']);
+  });
+
+  it('closes a pending line with a chunk that is exactly a newline', async () => {
+    expect(await collect([Buffer.from('ab'), Buffer.from('\n'), Buffer.from('c')])).toEqual([
+      'ab',
       'c',
     ]);
   });

@@ -154,7 +154,12 @@ async function* linesOf(file: string): AsyncGenerator<string> {
   yield* linesOfChunks(createReadStream(file));
 }
 
-/** Split byte chunks into `\n`-terminated lines (the terminator is dropped). */
+/**
+ * Split byte chunks into `\n`-terminated lines (the terminator is dropped; a
+ * `\r` before it is kept). A final unterminated line is yielded, empty input
+ * yields nothing. UTF-8 is decoded across chunk boundaries, and a sequence cut
+ * off at EOF decodes to U+FFFD.
+ */
 export async function* linesOfChunks(
   chunks: AsyncIterable<Buffer | Uint8Array>,
 ): AsyncGenerator<string> {
