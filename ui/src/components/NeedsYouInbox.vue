@@ -143,7 +143,7 @@ const markReadAux = (e: MouseEvent, id: string) => {
             :class="{
               'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,
               'bs-inbox__row--link': isPhoneWidth && (gi > 0 || ri > 0),
-              'bs-inbox__row--unread': !seen.has(inboxSeenId(r)),
+              'bs-inbox__row--unread': !isSeen(seen, r),
             }"
             :data-kind="r.kind"
           >
@@ -189,7 +189,7 @@ const markReadAux = (e: MouseEvent, id: string) => {
             <template v-else>
               <span
                 class="bs-inbox__udot"
-                v-bind="seen.has(inboxSeenId(r)) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
+                v-bind="isSeen(seen, r) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
               ></span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
               <div class="bs-inbox__text">

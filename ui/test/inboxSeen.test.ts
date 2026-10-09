@@ -4,6 +4,7 @@ import {
   INBOX_SEEN_CAP,
   INBOX_SEEN_KEY,
   inboxSeenId,
+  isSeen,
   loadSeen,
   markSeen,
 } from '../src/lib/inboxSeen.js';
@@ -79,5 +80,40 @@ describe('inboxSeen', () => {
     const seen = markSeen(store, inboxSeenId(old));
     expect(seen.has(inboxSeenId(old))).toBe(true);
     expect(seen.has(inboxSeenId({ ...old, createdAt: '2026-10-03T00:00:00.000Z' }))).toBe(false);
+  });
+
+  describe('isSeen', () => {
+    const row = (id: string, createdAt: string) => ({ id, createdAt });
+    const seenOf = (id: string, at: string) => new Set([inboxSeenId(row(id, at))]);
+
+    it('reads a row with an older createdAt than the stored one as seen', () => {
+      expect(isSeen(seenOf('waiver:t1', '2026-02-01T00:00:00Z'), row('waiver:t1', '2026-01-01T00:00:00Z'))).toBe(true);
+    });
+
+    it('reads the same createdAt as seen and a newer one as unseen', () => {
+      const seen = seenOf('waiver:t1', '2026-02-01T00:00:00Z');
+      expect(isSeen(seen, row('waiver:t1', '2026-02-01T00:00:00Z'))).toBe(true);
+      expect(isSeen(seen, row('waiver:t1', '2026-03-01T00:00:00Z'))).toBe(false);
+    });
+
+    it('does not count a different row id with a later date', () => {
+      expect(isSeen(seenOf('waiver:t2', '2026-09-01T00:00:00Z'), row('waiver:t1', '2026-01-01T00:00:00Z'))).toBe(false);
+    });
+
+    it('parses a key whose id contains @ or :', () => {
+      const id = 'escalation:store@a:task@1';
+      const seen = seenOf(id, '2026-02-01T00:00:00Z');
+      expect(isSeen(seen, row(id, '2026-01-01T00:00:00Z'))).toBe(true);
+      expect(isSeen(seen, row(id, '2026-03-01T00:00:00Z'))).toBe(false);
+      expect(isSeen(seen, row('escalation:store', '2026-01-01T00:00:00Z'))).toBe(false);
+    });
+  });
+
+  it('markSeen drops older keys of the same row id', () => {
+    const s = memory();
+    markSeen(s, 'waiver:t1@2026-01-01T00:00:00Z');
+    markSeen(s, 'lesson:l1@2026-01-01T00:00:00Z');
+    const next = markSeen(s, 'waiver:t1@2026-02-01T00:00:00Z');
+    expect([...next]).toEqual(['lesson:l1@2026-01-01T00:00:00Z', 'waiver:t1@2026-02-01T00:00:00Z']);
   });
 });
