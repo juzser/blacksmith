@@ -447,6 +447,17 @@ export function boardTitle(
   return parent ? `Follow-up fix · ${parent}` : 'Follow-up fix';
 }
 
+/**
+ * The short name a one-line row gives a task: its `title` when set and short,
+ * else the plan-task slug, else "Follow-up fix" for a minted id. Never the
+ * objective (boardTitle() with none) and never the hex.
+ */
+export function shortTaskName(taskId: string, title?: string | null): string {
+  const trimmed = title?.trim();
+  if (trimmed && trimmed.length <= SHORT_TASK_LABEL_MAX) return trimmed;
+  return boardTitle(taskId);
+}
+
 /** The origin task's readable title for a follow-up, or null when only a minted id is left. */
 export function parentLabel(
   parentTaskId: string | null,

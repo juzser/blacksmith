@@ -7,14 +7,19 @@ import {
   INBOX_FILTERS,
   INBOX_KIND,
   inboxActionTarget,
+  inboxCopy,
 } from '../src/lib/inbox.js';
 
 function row(over: Partial<InboxRow> & Pick<InboxRow, 'id' | 'kind'>): InboxRow {
   return {
-    title: over.id,
-    description: null,
     project: null,
     taskId: null,
+    taskTitle: null,
+    role: null,
+    reason: null,
+    findingCount: 0,
+    findingSummaries: [],
+    statement: null,
     createdAt: '2026-09-30T00:00:00Z',
     ...over,
   };
@@ -93,7 +98,126 @@ describe('lib/inbox.ts per-kind wording and targets', () => {
     );
   });
 
+  it('carries the store of a foreign row, and none for the served store', () => {
+    const base = { id: 'w', kind: 'waiver', taskId: 'epic/t1' } as const;
+    expect(inboxActionTarget(row({ ...base, store: { id: 'ab12cd34', label: 'p' } }))).toBe(
+      '/tasks/epic%2Ft1?store=ab12cd34',
+    );
+    expect(inboxActionTarget(row({ ...base, store: { id: 'home', label: 'h' } }))).toBe(
+      '/tasks/epic%2Ft1',
+    );
+  });
+
   it('falls back to Lessons when a task row somehow has no task id', () => {
     expect(inboxActionTarget(row({ id: 'w', kind: 'waiver' }))).toBe('/lessons');
+  });
+});
+
+describe('lib/inbox.ts inboxCopy()', () => {
+  const waiver = (over: Partial<InboxRow> = {}) =>
+    row({
+      id: 'waiver:epic-a/task-3-show-fee',
+      kind: 'waiver',
+      taskId: 'epic-a/task-3-show-fee',
+      findingCount: 1,
+      findingSummaries: ['Stray console.log in the widget renderer. More detail follows.'],
+      ...over,
+    });
+  const escalation = (over: Partial<InboxRow> = {}) =>
+    row({
+      id: 'escalation:epic-a/task-4-checkout-flow',
+      kind: 'escalation',
+      taskId: 'epic-a/task-4-checkout-flow',
+      role: 'coder',
+      ...over,
+    });
+
+  it('waiver: names the count and the one finding', () => {
+    expect(inboxCopy(waiver())).toEqual({
+      title: 'Approve waiver for 1 minor finding',
+      description: 'Show fee · Stray console.log in the widget renderer; merge is waiting on you',
+    });
+  });
+
+  it('waiver: several findings say how many issues review found', () => {
+    const copy = inboxCopy(
+      waiver({ findingCount: 3, findingSummaries: ['One.', 'Two.', 'Three.'] }),
+    );
+    expect(copy.title).toBe('Approve waiver for 3 minor findings');
+    expect(copy.description).toBe('Show fee · review found 3 issues; merge is waiting on you');
+  });
+
+  it('waiver: no summaries drops that clause', () => {
+    expect(inboxCopy(waiver({ findingSummaries: [] })).description).toBe(
+      'Show fee; merge is waiting on you',
+    );
+  });
+
+  it('escalation: the role label and the short task name', () => {
+    expect(inboxCopy(escalation())).toEqual({
+      title: 'Decide on an escalated task',
+      description: 'Builder stopped on Checkout flow; the task stays blocked until you choose',
+    });
+  });
+
+  it('escalation: a readable reason goes before the semicolon', () => {
+    expect(
+      inboxCopy(escalation({ reason: 'worker deadlocked waiting on a claim' })).description,
+    ).toBe(
+      'Builder stopped on Checkout flow (worker deadlocked waiting on a claim); the task stays blocked until you choose',
+    );
+  });
+
+  it('escalation: a long reason is left out', () => {
+    const reason = 'x'.repeat(200);
+    expect(inboxCopy(escalation({ reason })).description).not.toContain('xxx');
+  });
+
+  it('escalation: no role drops the role clause', () => {
+    expect(inboxCopy(escalation({ role: null })).description).toBe(
+      'Checkout flow stopped; the task stays blocked until you choose',
+    );
+  });
+
+  it('lesson: the rule text without its trailing period', () => {
+    expect(
+      inboxCopy(row({ id: 'l', kind: 'lesson_candidate', statement: 'Run the linter first.' })),
+    ).toEqual({
+      title: 'Review a new lesson candidate',
+      description: 'Run the linter first; approving applies it to future runs',
+    });
+  });
+
+  it('lesson: an empty statement drops the rule clause', () => {
+    expect(inboxCopy(row({ id: 'l', kind: 'lesson_candidate', statement: '  ' })).description).toBe(
+      'Approving applies it to future runs',
+    );
+  });
+
+  it('uses the task title when short, the slug when the title is long', () => {
+    expect(inboxCopy(waiver({ taskTitle: 'Fee on the cart' })).description).toMatch(
+      /^Fee on the cart · /,
+    );
+    expect(inboxCopy(waiver({ taskTitle: 'y'.repeat(61) })).description).toMatch(/^Show fee · /);
+  });
+
+  it('a minted id reads Follow-up fix, never the hex', () => {
+    const copy = inboxCopy(waiver({ taskId: 'epic-a/followup-1a2b3c4d' }));
+    expect(copy.description).toMatch(/^Follow-up fix · /);
+    expect(copy.description).not.toContain('1a2b3c4d');
+  });
+
+  it('never leaks a severity code, a model name or an undefined', () => {
+    for (const r of [
+      waiver(),
+      waiver({ findingSummaries: [] }),
+      escalation(),
+      escalation({ role: null }),
+      row({ id: 'l', kind: 'lesson_candidate', statement: '' }),
+    ]) {
+      const { title, description } = inboxCopy(r);
+      const text = `${title} ${description}`;
+      expect(text).not.toMatch(/undefined|null|S3|S4|opus|sonnet|haiku|· ;|· $/i);
+    }
   });
 });

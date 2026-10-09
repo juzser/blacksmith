@@ -16,30 +16,42 @@ const minutesAgo = (minutes: number): string =>
 
 // One row of each kind, across two projects plus the project-less group, so
 // the grouping, the per-kind tag and the per-kind action are all on screen.
+const FACTS = {
+  taskTitle: null,
+  role: null,
+  reason: null,
+  findingCount: 0,
+  findingSummaries: [],
+  statement: null,
+};
 const INBOX_ROWS = [
   {
+    ...FACTS,
     id: 'esc-1',
     kind: 'escalation',
-    title: 'Checkout flow',
-    description: 'Tester found a failing refund path; the task stays blocked until you choose.',
+    taskTitle: 'Checkout flow',
+    role: 'tester',
     project: 'black-smith',
     taskId: 'epic-1/task-3-checkout',
     createdAt: minutesAgo(5),
   },
   {
+    ...FACTS,
     id: 'waiver-1',
     kind: 'waiver',
-    title: 'Show fee',
-    description: null,
+    taskTitle: 'Show fee',
+    findingCount: 2,
+    findingSummaries: ['Fee shown before tax.', 'Rounding drifts.'],
     project: 'demo-hub',
     taskId: 'epic-9/task-2-show-fee',
+    store: { id: 'ab12cd34', label: 'demo-hub' },
     createdAt: minutesAgo(30),
   },
   {
+    ...FACTS,
     id: 'lesson-1',
     kind: 'lesson_candidate',
-    title: 'Run the full suite before a gate check',
-    description: null,
+    statement: 'Run the full suite before a gate check.',
     project: null,
     taskId: null,
     createdAt: minutesAgo(90),
@@ -323,15 +335,32 @@ test.describe('Home: Needs you inbox', () => {
       'demo-hub · 1',
       'All projects · 1',
     ]);
+    // The mock's wording: what to decide, then the task and why.
+    await expect(inbox.getByText('Decide on an escalated task')).toBeVisible();
     await expect(
-      inbox.getByText('Tester found a failing refund path', { exact: false }),
+      inbox.getByText('Tester stopped on Checkout flow; the task stays blocked until you choose'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Approve waiver for 2 minor findings')).toBeVisible();
+    await expect(
+      inbox.getByText('Show fee · review found 2 issues; merge is waiting on you'),
+    ).toBeVisible();
+    await expect(inbox.getByText('Review a new lesson candidate')).toBeVisible();
+    await expect(
+      inbox.getByText(
+        'Run the full suite before a gate check; approving applies it to future runs',
+      ),
     ).toBeVisible();
     await expect(inbox.getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       '/tasks/epic-1%2Ftask-3-checkout',
     );
-    const reviews = inbox.getByRole('link', { name: 'Review' });
+    const reviews = inbox.getByRole('link', { name: /^Review/ });
     await expect(reviews).toHaveCount(2);
+    // A foreign store's row opens its task in that store.
+    await expect(reviews.first()).toHaveAttribute(
+      'href',
+      '/tasks/epic-9%2Ftask-2-show-fee?store=ab12cd34',
+    );
     await expect(reviews.last()).toHaveAttribute('href', '/lessons');
 
     // The filter chips narrow the list and say which one is pressed.
@@ -365,15 +394,25 @@ test.describe('Home: Needs you inbox', () => {
     // gets one full-width 44px "Decide" action; every other row keeps its
     // small per-kind link ("Open"/"Review"), not a primary button.
     await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
-    const decide = inbox.getByRole('link', { name: 'Decide: Checkout flow' });
+    const decide = inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' });
     await expect(decide).toHaveClass(/bs-btn--primary/);
     await expect(decide).toHaveClass(/bs-btn--touch/);
     await expect(decide).toHaveClass(/bs-btn--block/);
     await expect(inbox.getByRole('link', { name: 'Open' })).toHaveCount(0);
+    await expect(
+      inbox.getByText('Tester stopped on Checkout flow; the task stays blocked until you choose'),
+    ).toBeVisible();
+    // The title keeps to one line, and the action stays a 44px target.
+    const title = inbox.locator('.bs-inbox__title').first();
+    expect((await title.boundingBox())?.height ?? 99).toBeLessThan(30);
+    expect((await decide.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
 
     // A folded group opens from its summary.
     await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
-    await expect(inbox.getByText('Show fee')).toBeVisible();
+    await expect(inbox.getByText('Approve waiver for 2 minor findings')).toBeVisible();
+    await expect(
+      inbox.getByText('Show fee · review found 2 issues; merge is waiting on you'),
+    ).toBeVisible();
   });
 
   for (const [vpName, viewport] of [

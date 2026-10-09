@@ -468,11 +468,17 @@ export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
 export interface InboxRow {
   id: string;
   kind: InboxKind;
-  title: string;
-  description: string | null;
   project: string | null;
   taskId: string | null;
   createdAt: string;
+  taskTitle: string | null;
+  role: string | null;
+  reason: string | null;
+  findingCount: number;
+  findingSummaries: string[];
+  statement: string | null;
+  /** Which store the row came from; absent from an API that predates multi-store reads. */
+  store?: StoreRef;
 }
 export interface InboxResult {
   rows: InboxRow[];

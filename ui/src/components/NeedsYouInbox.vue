@@ -22,6 +22,7 @@ import {
   INBOX_KIND,
   type InboxFilter,
   inboxActionTarget,
+  inboxCopy,
 } from '../lib/inbox.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
@@ -108,9 +109,9 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
           >
             <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
             <div class="bs-inbox__text">
-              <p class="bs-inbox__title">{{ r.title }}</p>
-              <Tooltip v-if="r.description" mode="describe" :text="r.description">
-                <span class="bs-inbox__desc">{{ r.description }}</span>
+              <p class="bs-inbox__title">{{ inboxCopy(r).title }}</p>
+              <Tooltip mode="describe" :text="inboxCopy(r).description">
+                <span class="bs-inbox__desc">{{ inboxCopy(r).description }}</span>
               </Tooltip>
             </div>
             <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
@@ -121,7 +122,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             <RouterLink
               v-if="isPhoneWidth && gi === 0 && ri === 0"
               class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
-              :aria-label="`Decide: ${r.title}`"
+              :aria-label="`Decide: ${inboxCopy(r).title}`"
               :to="inboxActionTarget(r)"
             >
               Decide
@@ -129,7 +130,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             <RouterLink
               v-else
               class="bs-btn bs-btn--sm bs-btn--secondary"
-              :aria-label="`${INBOX_KIND[r.kind].action}: ${r.title}`"
+              :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
               :to="inboxActionTarget(r)"
             >
               {{ INBOX_KIND[r.kind].action }}

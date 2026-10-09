@@ -26,10 +26,10 @@ describe('NeedsYouInbox.vue', () => {
     expect(SRC).toMatch(/\{\{ g\.label \}\} · \{\{ g\.rows\.length \}\}/);
   });
 
-  it('renders the description only when present, never a placeholder', () => {
-    expect(SRC).toMatch(/v-if="r\.description"/);
-    expect(SRC).not.toMatch(/r\.description \?\?/);
-    expect(SRC).not.toMatch(/r\.description \|\|/);
+  it('renders the composed copy (inboxCopy), never a server sentence or a placeholder', () => {
+    expect(SRC).toMatch(/\{\{ inboxCopy\(r\)\.title \}\}/);
+    expect(SRC).toMatch(/\{\{ inboxCopy\(r\)\.description \}\}/);
+    expect(SRC).not.toMatch(/r\.description|r\.title/);
   });
 
   it('links each row to the page for its kind', () => {
@@ -59,7 +59,7 @@ describe('NeedsYouInbox.vue', () => {
 
   it('labels each action link with its verb and the row title, not just "Open"/"Review" (F5)', () => {
     expect(SRC).toMatch(
-      /<RouterLink[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{r\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"/,
+      /<RouterLink[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{inboxCopy\(r\)\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"/,
     );
   });
 
@@ -68,13 +68,13 @@ describe('NeedsYouInbox.vue', () => {
   // inline per-kind label; every other row keeps the small inline link.
   it('gives only the most urgent row on phone a full-width 44px "Decide" button, not the per-kind label', () => {
     expect(SRC).toMatch(
-      /<RouterLink\s+v-if="isPhoneWidth && gi === 0 && ri === 0"[\s\S]*?class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"[\s\S]*?:aria-label="`Decide: \$\{r\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"[\s\S]*?>\s*Decide\s*<\/RouterLink>/,
+      /<RouterLink\s+v-if="isPhoneWidth && gi === 0 && ri === 0"[\s\S]*?class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"[\s\S]*?:aria-label="`Decide: \$\{inboxCopy\(r\)\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"[\s\S]*?>\s*Decide\s*<\/RouterLink>/,
     );
   });
 
   it('keeps the small secondary link for every row that is not the single most urgent one', () => {
     expect(SRC).toMatch(
-      /<RouterLink\s+v-else[\s\S]*?class="bs-btn bs-btn--sm bs-btn--secondary"[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{r\.title\}`"/,
+      /<RouterLink\s+v-else[\s\S]*?class="bs-btn bs-btn--sm bs-btn--secondary"[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{inboxCopy\(r\)\.title\}`"/,
     );
   });
 

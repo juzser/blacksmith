@@ -347,6 +347,19 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(title(page)).toHaveText(FOREIGN_TITLE_2);
   });
 
+  test('N1: Home lists the foreign escalation under its project and opens it in its store', async ({
+    page,
+  }) => {
+    await page.goto(`${origin}/overview`);
+    const inbox = page.locator('section.bs-inbox');
+    const group = inbox.locator('.bs-inbox__group', { hasText: 'project-b' });
+    const row = group.locator('.bs-inbox__row[data-kind="escalation"]');
+    await expect(row.locator('.bs-inbox__title')).toHaveText('Decide on an escalated task');
+    await expect(row.locator('.bs-inbox__desc')).toContainText('stopped on Task 3');
+    await row.getByRole('link', { name: /^Open/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/tasks/epic-1%2Ftask-3\\?store=${foreignId}$`));
+  });
+
   test('B3: changing task or store on the open page loads the new one at once, once', async ({
     page,
   }) => {
