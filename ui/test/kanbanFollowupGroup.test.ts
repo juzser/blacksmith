@@ -90,3 +90,13 @@ describe('live marks in the follow-up group', () => {
     expect(GROUP).toMatch(/import KanbanMarkTag/);
   });
 });
+
+describe('KanbanMarkTag.vue — a cut tag stays readable on hover', () => {
+  it('carries its full text as a title, like AgentChip, above the row open button', () => {
+    const TAG = read('components', 'KanbanMarkTag.vue');
+    expect(TAG).toMatch(/<Tag[^>]*:title="text"/);
+    expect(CSS).toMatch(
+      /\.bs-kanban-group__row-meta \.bs-agent-chip,[^{]*\{\s*position: relative;\s*z-index: 1;/,
+    );
+  });
+});

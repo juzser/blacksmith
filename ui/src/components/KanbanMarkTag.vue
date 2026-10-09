@@ -15,6 +15,7 @@ defineProps<{ mark: TaskMark; text: string }>();
     :tone="mark.kind === 'now' ? 'progress' : 'todo'"
     variant="subtle"
     size="sm"
+    :title="text"
   >
     <Icon v-if="mark.kind === 'now'" :icon="Bot" :size="14" />
     <span class="bs-agent-chip__text">{{ text }}</span>
