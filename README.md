@@ -210,7 +210,10 @@ get two of everything (`bs` and `blacksmith:bs`, `auditor` and
 `blacksmith:auditor`, once per role), pay the always-on cost twice, and the two
 copies are free to disagree: the plugin's is a pinned checkout of `main`, the
 project's is whatever branch you have out. `claude plugin disable blacksmith`
-settles it.
+settles it. It also turns off the prompt recorder in that clone, which only
+the plugin registers; a clone that wants its prompts recorded keeps the plugin
+enabled and accepts the double listing
+([INSTALL.md](INSTALL.md#the-install--bs-and-bs)).
 
 The dashboard is clone-only because `ui/` is in neither the tarball nor the
 plugin, so `bs ui serve` answers `ui.not-built` in an install and means it.
