@@ -696,11 +696,25 @@ a:hover {
 .bs-timeline-row__because-of {
   background: none;
   border: none;
-  color: var(--bs-link-text);
-  text-decoration: underline;
+  /* A <button> does not inherit the font; the mock's `.emeta a` is meta-sized. */
+  font: inherit;
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+  text-decoration-color: var(--bs-link-underline);
   cursor: pointer;
   padding: 0;
   white-space: nowrap;
+}
+/* ds-review.html `.emeta a` + ds-spec.md: subtle at rest, link colour and
+   underline on hover and focus. */
+.bs-timeline-row__because-of:hover,
+.bs-timeline-row__because-of:focus-visible {
+  color: var(--bs-link-text);
+  text-decoration: underline;
+}
+.bs-timeline-row__because-of:focus-visible {
+  outline: 2px solid var(--bs-focus-ring);
+  outline-offset: 2px;
 }
 .bs-timeline-row__because-of--meta {
   white-space: nowrap;

@@ -690,6 +690,56 @@ test.describe('Activity', () => {
     });
   });
 
+  // ds-review.html `.emeta a` + ds-spec.md ~:344/350: the meta-line link reads
+  // as meta text at rest (no underline, the line's colour and size), and its
+  // focus ring is 2px offset by 2px.
+  test('1280px: the meta-line prompt link matches the meta text at rest and rings on focus', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    const link = row.locator('.bs-timeline-row__meta .bs-timeline-row__because-of');
+    const styles = await link.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const meta = getComputedStyle(el.closest('.bs-timeline-row__meta') as Element);
+      return {
+        color: cs.color,
+        metaColor: meta.color,
+        deco: cs.textDecorationLine,
+        size: cs.fontSize,
+        metaSize: meta.fontSize,
+      };
+    });
+    expect(styles.color).toBe(styles.metaColor);
+    expect(styles.deco).toBe('none');
+    expect(styles.size).toBe(styles.metaSize);
+
+    await link.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(link).toBeFocused();
+    expect(await link.evaluate((el) => getComputedStyle(el).outlineOffset)).toBe('2px');
+  });
+
+  // ds-review.html #ap-1: on phone "Because of" is the detail's last pair.
+  test('375px: the detail lists "Because of" last', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/activity?session=sess-fixture');
+    const row = page
+      .locator('.bs-timeline-row')
+      .filter({ has: page.locator('.bs-timeline-row__because-of') })
+      .first();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Show details' }).click();
+    const last = row.locator('.bs-timeline-row__detail dt').last();
+    await expect(last).toHaveText('Because of');
+  });
+
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
   // is one line, ellipsised -- the app used to wrap a long title to 2-3
   // lines in bold. The full title stays reachable: it is still the

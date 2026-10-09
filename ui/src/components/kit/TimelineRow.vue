@@ -211,14 +211,6 @@ function onBecauseOf() {
           <dt>Meta</dt>
           <dd>{{ meta }}</dd>
         </template>
-        <!-- Phone only (ds-review.html #p-activity: "because of" moves into the
-             detail); on desktop the link stays in the meta line above. -->
-        <template v-if="hasPromptLink">
-          <dt class="bs-timeline-row__cause">Because of</dt>
-          <dd class="bs-timeline-row__cause">
-            <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">your prompt at {{ formatTime(ctx?.promptTs ?? '') }}</button>
-          </dd>
-        </template>
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
              on TaskDetailPage), and TaskRun carries no taskId. An event with no
              task (epic-level, a prompt) has nothing to show, so no Task pair. -->
@@ -241,6 +233,14 @@ function onBecauseOf() {
                  opens and scrolls to the exact run; fall back to the plain
                  list only when the entry carries no sessionId at all. -->
             <RouterLink :to="sessionLink">{{ entry.sessionTitle }}</RouterLink>
+          </dd>
+        </template>
+        <!-- Phone only (ds-review.html #p-activity: "because of" moves into the
+             detail, last as in #ap-1); on desktop the link stays in the meta line above. -->
+        <template v-if="hasPromptLink">
+          <dt class="bs-timeline-row__cause">Because of</dt>
+          <dd class="bs-timeline-row__cause">
+            <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">your prompt at {{ formatTime(ctx?.promptTs ?? '') }}</button>
           </dd>
         </template>
       </dl>
