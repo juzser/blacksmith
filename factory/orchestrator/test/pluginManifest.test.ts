@@ -161,19 +161,69 @@ describe('plugin payload', () => {
     expect(agents.length).toBeGreaterThanOrEqual(14);
   });
 
-  it('ships no top-level hooks.json, because the policy hook is clone-shaped', () => {
-    // `.claude/hooks/guard.sh` resolves its policy binary relative to a
-    // checkout and degrades to `ask` when it cannot find one -- which in an
-    // install means a confirmation prompt in front of every command. A plugin
-    // loads hooks registered THIS way only from `hooks/hooks.json`, so the
-    // absence of that file keeps guard.sh's payload inert. It is a decision,
-    // not an oversight.
-    //
-    // This says nothing about a template's own frontmatter Stop hook, which
-    // Claude Code reads regardless of `hooks/hooks.json` -- see "judge
-    // templates are inert outside a clone" below for that mechanism's own,
-    // separately-proved invariant.
-    expect(existsSync(path.join(root, 'hooks/hooks.json'))).toBe(false);
+  describe('hooks/hooks.json', () => {
+    type Group = {
+      matcher?: string;
+      hooks: { type: string; command: string; timeout?: number; async?: boolean }[];
+    };
+    const registered = (): Record<string, Group[]> =>
+      (
+        JSON.parse(readFileSync(path.join(root, 'hooks/hooks.json'), 'utf8')) as {
+          hooks: Record<string, Group[]>;
+        }
+      ).hooks;
+
+    it('registers exactly one UserPromptSubmit and one PostToolUse on AskUserQuestion, both the capture wrapper', () => {
+      // The one hook the plugin ships: a non-blocking recorder. The policy hook
+      // (guard.sh) stays clone-shaped and is never registered here, because a
+      // guard that cannot find its binary degrades to `ask` in front of every
+      // command (plugin-port-scope Fork 4).
+      const hooks = registered();
+      expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'UserPromptSubmit']);
+      const submit = hooks.UserPromptSubmit as Group[];
+      expect(submit).toHaveLength(1);
+      expect(submit[0]?.hooks).toHaveLength(1);
+      expect(submit[0]?.hooks[0]?.command).toMatch(/prompt-capture\.sh"?$/);
+      const post = hooks.PostToolUse as Group[];
+      expect(post).toHaveLength(1);
+      expect(post[0]?.matcher).toBe('AskUserQuestion');
+      expect(post[0]?.hooks).toHaveLength(1);
+      expect(post[0]?.hooks[0]?.command).toMatch(/prompt-capture\.sh" answer$/);
+    });
+
+    it('is synchronous with a timeout of at most 5 s, and names neither guard.sh nor judge-stop.sh', () => {
+      const text = readFileSync(path.join(root, 'hooks/hooks.json'), 'utf8');
+      expect(text).not.toMatch(/guard\.sh|judge-stop\.sh/);
+      for (const group of Object.values(registered()).flat()) {
+        for (const h of group.hooks) {
+          expect(h.type).toBe('command');
+          expect(h.timeout).toBeLessThanOrEqual(5);
+          expect(h).not.toHaveProperty('async');
+        }
+      }
+    });
+
+    it('ships a wrapper that is inert with an empty PATH and a project dir holding no dist', () => {
+      const emptyProjectDir = mkdtempSync(path.join(tmpdir(), 'smith-capture-inert-'));
+      try {
+        for (const args of [[], ['answer']]) {
+          const run = runProcess(
+            '/bin/bash',
+            [path.join(root, 'hooks/prompt-capture.sh'), ...args],
+            {
+              input: JSON.stringify({ session_id: 'sess-1', prompt: 'hi', cwd: emptyProjectDir }),
+              env: { PATH: '', CLAUDE_PROJECT_DIR: emptyProjectDir, CLAUDE_PLUGIN_ROOT: root },
+            },
+          );
+          expect(run.status).toBe(0);
+          expect(run.stdout).toBe('');
+          expect(run.stderr).toBe('');
+        }
+        expect(readdirSync(emptyProjectDir)).toEqual([]);
+      } finally {
+        rmSync(emptyProjectDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('every judge agent template declares judge-stop.sh as its Stop hook', () => {

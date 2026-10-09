@@ -635,3 +635,120 @@ describe('resolveLine (--resolve)', () => {
     expect(readdirSync(beta)).toEqual(before);
   });
 });
+
+describe('capturePrompt in answer mode', () => {
+  const answerInput = (over: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      session_id: CLI,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'AskUserQuestion',
+      tool_use_id: 'toolu_01',
+      tool_input: {},
+      tool_response: {
+        questions: [
+          {
+            question: 'Which store?',
+            header: 'Store',
+            options: [{ label: 'A' }],
+            multiSelect: false,
+          },
+          {
+            question: 'Which flags?',
+            header: 'Flags',
+            options: [{ label: 'x' }],
+            multiSelect: true,
+          },
+        ],
+        answers: { 'Which store?': 'A', 'Which flags?': 'x, y' },
+        annotations: { 'Which store?': { notes: 'the old one' } },
+      },
+      ...over,
+    });
+  const respond = (over: Record<string, unknown>): string =>
+    answerInput({
+      tool_response: {
+        questions: [{ question: 'Q1', header: 'H1', options: [], multiSelect: false }],
+        answers: {},
+        ...over,
+      },
+    });
+
+  it('records an answer as a user_prompt with kind answer and prompt_id = tool_use_id', async () => {
+    const { env, dir, cwd } = homeStore();
+    const out = await capturePrompt(answerInput(), ctxFor(env, cwd), 'answer');
+    const home = `prompts-${CLI}`;
+    const [, row] = readLog(dir, home);
+    expect(row).toMatchObject({ actor: 'user', event_type: 'user_prompt' });
+    expect(row.payload).toEqual({
+      prompt: 'Store: A\nFlags: x, y',
+      source: 'hook',
+      kind: 'answer',
+      prompt_id: 'toolu_01',
+      answers: [
+        { question: 'Which store?', header: 'Store', answer: 'A', notes: 'the old one' },
+        { question: 'Which flags?', header: 'Flags', answer: 'x, y' },
+      ],
+    });
+    expect(out).toBe(
+      `bs prompt capture: ${JSON.stringify({ event_id: `${home}#1`, session_id: home })}`,
+    );
+  });
+
+  it('leaves an unanswered question out', async () => {
+    const { env, dir, cwd } = homeStore();
+    await capturePrompt(
+      answerInput({
+        tool_response: {
+          questions: [
+            { question: 'Q1', header: 'H1', options: [], multiSelect: false },
+            { question: 'Q2', header: 'H2', options: [], multiSelect: false },
+          ],
+          answers: { Q2: 'yes' },
+        },
+      }),
+      ctxFor(env, cwd),
+      'answer',
+    );
+    const [, row] = readLog(dir, `prompts-${CLI}`);
+    expect(row.payload.prompt).toBe('H2: yes');
+    expect(row.payload.answers).toHaveLength(1);
+  });
+
+  it('records a free-text response when no question is answered', async () => {
+    const { env, dir, cwd } = homeStore();
+    await capturePrompt(respond({ response: 'neither, do C' }), ctxFor(env, cwd), 'answer');
+    const [, row] = readLog(dir, `prompts-${CLI}`);
+    expect(row.payload).toMatchObject({ prompt: 'neither, do C', response: 'neither, do C' });
+  });
+
+  it('writes nothing when afkTimeoutMs is set', async () => {
+    const { env, dir, cwd } = homeStore();
+    const raw = respond({ answers: { Q1: 'yes' }, afkTimeoutMs: 30000 });
+    expect(await capturePrompt(raw, ctxFor(env, cwd), 'answer')).toBeNull();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('writes nothing when no question is answered and there is no response', async () => {
+    const { env, dir, cwd } = homeStore();
+    expect(await capturePrompt(respond({}), ctxFor(env, cwd), 'answer')).toBeNull();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('skips an agent_id, a missing tool_use_id and a non-AskUserQuestion tool', async () => {
+    const { env, dir, cwd } = homeStore();
+    for (const over of [{ agent_id: 'sub-1' }, { tool_use_id: undefined }, { tool_name: 'Bash' }]) {
+      expect(await capturePrompt(answerInput(over), ctxFor(env, cwd), 'answer')).toBeNull();
+    }
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('keeps two identical answers within 10 s, but dedupes a repeated tool_use_id', async () => {
+    const { env, dir, cwd } = homeStore();
+    const ctx = ctxFor(env, cwd);
+    await capturePrompt(answerInput({ tool_use_id: 'toolu_a' }), ctx, 'answer');
+    await capturePrompt(answerInput({ tool_use_id: 'toolu_b' }), ctx, 'answer');
+    expect(await capturePrompt(answerInput({ tool_use_id: 'toolu_b' }), ctx, 'answer')).toBeNull();
+    const rows = readLog(dir, `prompts-${CLI}`).filter((e) => e.event_type === 'user_prompt');
+    expect(rows.map((r) => r.payload.prompt_id)).toEqual(['toolu_a', 'toolu_b']);
+  });
+});

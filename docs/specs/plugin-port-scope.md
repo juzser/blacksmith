@@ -37,9 +37,11 @@ Added 2026-09-16. Everything here was run, not recalled.
   plugin cache alongside the working tree, which is why README and INSTALL
   now tell a clone to keep one or the other.
 - **Fork 4, still open, and shipped closed for now.** The plugin activates no
-  enforcement: a plugin's component set has no permissions in it, and hooks
-  load only from a `hooks/hooks.json` that is deliberately absent, so the
-  inventory reads `Hooks (0)`. `.claude/hooks/guard.sh` resolves its policy
+  enforcement: a plugin's component set has no permissions in it. Its
+  `hooks/hooks.json` now ships one non-blocking prompt recorder: one script
+  (`prompt-capture.sh`), registered for two events (`UserPromptSubmit`, plus
+  `PostToolUse` on `AskUserQuestion`). The policy hook is
+  still not shipped, for the reason that follows. `.claude/hooks/guard.sh` resolves its policy
   binary against a checkout and degrades to `ask`, which in an install would
   mean a confirmation prompt in front of every command. The twelve deny rules
   stay clone-only until fork 4 is answered properly.

@@ -206,8 +206,9 @@ settles it.
 The dashboard is clone-only because `ui/` is in neither the tarball nor the
 plugin, so `bs ui serve` answers `ui.not-built` in an install and means it.
 Enforcement is clone-only because this repo's `.claude/settings.json` deny
-rules and its policy hook resolve paths against a checkout; the plugin ships no
-`hooks/hooks.json` and loads neither (`Hooks (0)`), since a `/bs` that asked
+rules and its policy hook resolve paths against a checkout; the plugin ships one
+`hooks/hooks.json`, holding only the non-blocking prompt-capture hook, and
+loads neither the deny rules nor the policy guard, since a `/bs` that asked
 you about every Bash command would be worse than one that asks about none. The
 rest of that port is scoped in
 [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).

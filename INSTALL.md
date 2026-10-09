@@ -219,9 +219,31 @@ What the plugin deliberately does **not** activate is this repo's enforcement:
 the twelve `permissions.deny` rules in `.claude/settings.json` and the policy
 hook in `.claude/hooks/`. A plugin's component set — skills, agents,
 commands, hooks, MCP and LSP servers — has no permissions in it, and it loads
-hooks only from a `hooks/hooks.json` this plugin does not ship — so
-`claude plugin details blacksmith` reports `Hooks (0)`, which is the intended
-result, not an omission. Both resolve paths against a checkout, and a hook that
+hooks only from a `hooks/hooks.json`, and this plugin ships one non-blocking
+recorder: one script, registered for two events (`UserPromptSubmit` and
+`PostToolUse`), which is the intended result, not an omission. The recorder
+(`prompt-capture.sh`) writes each prompt and each option answer to the event
+log, never blocks, and exits silently when it finds no entry. It runs only an
+entry you named, never a file from the project that is open: first the
+absolute path in `$BS_PROMPT_HOOK`, then `bs-prompt-hook` on `PATH`.
+
+- **A global install** of the package has `bs-prompt-hook` on `PATH`; nothing
+  more is needed.
+- **A clone** sets `BS_PROMPT_HOOK` to the absolute path of
+  `<clone>/factory/orchestrator/dist/promptHook.js`, in the `env` block of
+  `~/.claude/settings.json`:
+
+  ```json
+  { "env": { "BS_PROMPT_HOOK": "/absolute/path/to/blacksmith/factory/orchestrator/dist/promptHook.js" } }
+  ```
+
+  Use the main clone's path (worktrees have no build), and build the clone
+  first. This edits a file outside the clone, so under Part 0 propose the
+  exact line and wait for a yes.
+- **With neither**, the hook records nothing and never blocks.
+
+The guard and the deny rules
+are not shipped. Both resolve paths against a checkout, and a hook that
 cannot find its policy binary degrades to `ask`: installed as-is it would put a
 confirmation prompt in front of every command you run. A clone keeps them,
 because in a clone the paths are real.

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readEvents } from '../src/events.js';
+import { capturePrompt } from '../src/promptCapture.js';
 import { importTranscript } from '../src/promptImport.js';
 
 // Every transcript, session id and prompt below is invented. Every store is a
@@ -327,5 +328,60 @@ describe('importTranscript: refusals', () => {
     write(slash(1, '/bs', 'status'));
     const { summary } = await run(true, ctx({ env: {}, isClone: true }));
     expect(summary.imported).toBe(1);
+  });
+});
+
+describe('importTranscript and the hook share one key per prompt', () => {
+  const hookCtx = () => ({ ...ctx(), cwd: path.join(base, 'acme') });
+  const answerHook = JSON.stringify({
+    session_id: CLI,
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_use_id: 'toolu_5',
+    tool_input: {},
+    tool_response: {
+      questions: [{ question: 'Which store?', header: 'Store', options: [], multiSelect: false }],
+      answers: { 'Which store?': 'Home log' },
+    },
+  });
+  const typedHook = JSON.stringify({
+    session_id: CLI,
+    hook_event_name: 'UserPromptSubmit',
+    prompt: 'Add the beta-app export.',
+    prompt_id: 'prompt-1',
+  });
+
+  it('an import first, then the answer hook for the same tool_use_id: the hook writes nothing', async () => {
+    write(answer(5));
+    await run();
+    const before = await stored();
+    expect(await capturePrompt(answerHook, hookCtx(), 'answer')).toBeNull();
+    expect(await stored()).toEqual(before);
+  });
+
+  it('the answer hook first, then an import holding that answer: counted duplicate', async () => {
+    expect(await capturePrompt(answerHook, hookCtx(), 'answer')).not.toBeNull();
+    write(answer(5));
+    const { summary } = await run();
+    expect(summary.imported).toBe(0);
+    expect(summary.skipped.duplicate).toBe(1);
+    expect(await stored()).toHaveLength(2);
+  });
+
+  it('a typed prompt: import first, then the hook with the same prompt_id writes nothing', async () => {
+    write(typed(1, 'Add the beta-app export.'));
+    await run();
+    const before = await stored();
+    expect(await capturePrompt(typedHook, hookCtx())).toBeNull();
+    expect(await stored()).toEqual(before);
+  });
+
+  it('a typed prompt: the hook first, then an import of it: counted duplicate', async () => {
+    expect(await capturePrompt(typedHook, hookCtx())).not.toBeNull();
+    write(typed(1, 'Add the beta-app export.'));
+    const { summary } = await run();
+    expect(summary.imported).toBe(0);
+    expect(summary.skipped.duplicate).toBe(1);
+    expect(await stored()).toHaveLength(2);
   });
 });
