@@ -59,7 +59,7 @@ there means "not looked at", not "looked at and clean".
 
    The prompt also carries, inline on its own line,
    `Declared artifact: /abs/path/to/state/results/<epic-id>.spec-review.json`
-   — the absolute form of the path `spec-reviewer.md` names. The PreToolUse
+   — the absolute form of the path `bs-spec-reviewer.md` names. The PreToolUse
    guard refuses a judge dispatch without it.
 
    When `size.small` reads true on the draft (`bs wave schedule` or

@@ -41,8 +41,8 @@ failure, not a maybe.
 
 In this clone a PreToolUse guard also refuses, at the `Agent` call, a judge-role
 dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
-`bs-security-reviewer`, `bs-auditor`, with or without a namespace such as
-`blacksmith:`; the bare pre-prefix names too) whose prompt lacks an absolute
+`bs-security-reviewer`, `bs-auditor`, with or without the
+`blacksmith:` namespace; the bare pre-prefix names too) whose prompt lacks an absolute
 `Declared artifact: <path>` line. It reads the prompt itself, so a dispatch
 that points the agent at a brief file still carries the line inline. It checks
 the line only; `dispatch lint` still checks it against the ledger. An ad-hoc
