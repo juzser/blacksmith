@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { agentNameFor } from '../src/agentNames.js';
 import { planWorkerTurn, type WorkerInvocation } from '../src/harness.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { RunnerError, runInvocation } from '../src/runner.js';
@@ -87,7 +88,7 @@ describe('runner.ts', () => {
       promptFile: '/dev/null',
       worktree: null,
       sandboxRequired: false,
-      subagentType: 'coder',
+      subagentType: agentNameFor('coder'),
       template: CODER_TEMPLATE,
     };
 

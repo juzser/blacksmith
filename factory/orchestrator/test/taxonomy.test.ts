@@ -263,19 +263,21 @@ describe('judge briefs enumerate finding_category (P9-20)', () => {
       const bullet = categoryBullet(
         readFileSync(path.join(AGENTS_DIR, templateFileFor(role)), 'utf8'),
       );
-      expect(bullet, `${role}.md has no finding_category bullet`).not.toBe('');
-      expect(bullet, `${role}.md points at taxonomy.yml instead of listing the values`).toContain(
-        'one of:',
-      );
+      expect(bullet, `${templateFileFor(role)} has no finding_category bullet`).not.toBe('');
+      expect(
+        bullet,
+        `${templateFileFor(role)} points at taxonomy.yml instead of listing the values`,
+      ).toContain('one of:');
 
       const listed = new Set(
         [...bullet.matchAll(/`([a-z0-9-]+)`/g)]
           .map((m) => m[1] as string)
           .filter((value) => value !== 'finding_category'),
       );
-      expect([...listed].sort(), `${role}.md finding_category list has drifted`).toEqual(
-        [...declared].sort(),
-      );
+      expect(
+        [...listed].sort(),
+        `${templateFileFor(role)} finding_category list has drifted`,
+      ).toEqual([...declared].sort());
     }
   });
 
@@ -284,7 +286,7 @@ describe('judge briefs enumerate finding_category (P9-20)', () => {
     for (const role of CATEGORY_WRITING_BRIEFS) {
       const text = readFileSync(path.join(AGENTS_DIR, templateFileFor(role)), 'utf8');
       for (const value of declared) {
-        expect(text, `${role}.md omits severity ${value}`).toContain(value);
+        expect(text, `${templateFileFor(role)} omits severity ${value}`).toContain(value);
       }
     }
   });

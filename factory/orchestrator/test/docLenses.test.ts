@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { roleOfTemplateFile } from '../src/agentNames.js';
+import { roleOfTemplateFile, templateFileFor } from '../src/agentNames.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { instructionFiles } from './helpers/instructionSurface.js';
 
@@ -81,7 +81,10 @@ function claims(): Claim[] {
 
 /** The `## <name> lens` headings a role template carries, lowercased. */
 function lensHeadings(role: string): string[] {
-  const template = readFileSync(path.join(REPO_ROOT, '.claude', 'agents', `bs-${role}.md`), 'utf8');
+  const template = readFileSync(
+    path.join(REPO_ROOT, '.claude', 'agents', templateFileFor(role)),
+    'utf8',
+  );
   return [...template.matchAll(/^##\s+(.+?)\s+lens\b/gm)].map((match) =>
     (match[1] as string).toLowerCase(),
   );
