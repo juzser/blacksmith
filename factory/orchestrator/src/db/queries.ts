@@ -510,9 +510,11 @@ export interface StatusCounts {
 /**
  * DS4 S5b — an epic's own status, derived from `statusCounts`: every task
  * done is `done`; any open task puts it at least at `in_progress`, rising to
- * `review` only when every open task is itself in the review bucket; no open
- * task and nothing done yet is `todo` (also the answer for an epic with no
- * tasks at all — see roadmapPage()'s caller doc).
+ * `review` only when every open task is itself in the review bucket; some
+ * tasks done with the rest still to do is `in_progress` even with nothing
+ * open (between waves); no open task and nothing done yet is `todo` (also
+ * the answer for an epic with no tasks at all — see roadmapPage()'s caller
+ * doc).
  */
 export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';
 
@@ -953,10 +955,11 @@ function countStatuses(rows: readonly { taskStatus: string }[]): StatusCounts {
  * holds the epic open. Every live task done is `done`; any task in the
  * review or inProgress buckets means at least `in_progress`, rising to
  * `review` only when every non-done live task is itself in the review bucket
- * (no inProgress, no todo left over); otherwise, with nothing done and
- * nothing open yet, `todo` — also the answer for a zero-task epic and for an
- * epic whose tasks are ALL superseded (`live === 0`, so `done === live` is
- * never true).
+ * (no inProgress, no todo left over); some tasks done with the rest not
+ * all done is `in_progress` even between waves; otherwise, with nothing
+ * done and nothing open yet, `todo` — also the answer for a zero-task epic
+ * and for an epic whose tasks are ALL superseded (`live === 0`, so
+ * `done === live` is never true).
  */
 function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
   const live = tasksTotal - counts.superseded;
@@ -964,7 +967,7 @@ function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicSta
   if (counts.review > 0 || counts.inProgress > 0) {
     return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
   }
-  return 'todo';
+  return counts.done > 0 ? 'in_progress' : 'todo';
 }
 
 /**

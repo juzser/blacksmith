@@ -382,6 +382,28 @@ describe('milestones projection + roadmap queries', () => {
       expect(phaseS?.epics[0]?.status).toBe('in_progress');
     });
 
+    it('one completed + one todo task: epic reads in_progress (part-way, between waves)', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'todo');
+      const phaseS = await buildAndRoadmap();
+      expect(phaseS?.epics[0]?.status).toBe('in_progress');
+    });
+
+    it('one completed + one todo + one superseded task: epic reads in_progress', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'todo');
+      await addTask('epic-super/task-3', 'superseded');
+      const phaseS = await buildAndRoadmap();
+      expect(phaseS?.epics[0]?.status).toBe('in_progress');
+    });
+
+    it('one completed + one reviewing task and nothing left to do: epic still reads review', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'reviewing');
+      const phaseS = await buildAndRoadmap();
+      expect(phaseS?.epics[0]?.status).toBe('review');
+    });
+
     it('an epic whose tasks are ALL superseded reads todo (nothing live to call done)', async () => {
       await addTask('epic-super/task-1', 'superseded');
       await addTask('epic-super/task-2', 'superseded');
