@@ -132,9 +132,11 @@ describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
 describe('RoadmapPage.vue / EpicBlock.vue — server roadmap reads (DS4 S5c)', () => {
   it('prefers the server status over the flow-derived guess, in both selectedEpicData and epicSections', () => {
     expect(SFC).toMatch(/epicDatesFor\(own, epicId\)/);
-    expect(SFC).toMatch(
-      /epicDates\s*\?\s*epicStatusFromServerStatus\(epicDates\.status\)\s*:\s*epicStatusFromFlow\(flow\)/,
-    );
+    expect(SFC).toMatch(/epicDatesFor\(\[phase\], epicId\)/);
+    // One server-status-over-flow choice per call site: dropping it from either path fails.
+    const choice =
+      /epicDates\s*\?\s*epicStatusFromServerStatus\(epicDates\.status\)\s*:\s*epicStatusFromFlow\(flow\)/g;
+    expect(SFC.match(choice)?.length).toBe(2);
   });
 
   it('still keeps the flow fetch — waves come from nowhere else', () => {
