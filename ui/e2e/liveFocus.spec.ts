@@ -262,6 +262,62 @@ test.describe('Kanban: Now and Next marks', () => {
     await expect(page.getByText('Waiting on you')).toHaveCount(0);
   });
 
+  test('a poll that cannot read the sessions keeps the tags for one grace interval', async ({
+    page,
+  }) => {
+    // The board's 15 s poll runs on a clock this test owns: paused, then
+    // advanced past exactly one interval. The stream is refused so the
+    // interval is the only trigger.
+    await page.route('**/api/stream', (route) => route.abort());
+    const start = new Date(FIXTURE_NOW_ISO);
+    await page.clock.install({ time: start });
+    await page.clock.pauseAt(new Date(start.getTime() + 1000));
+    await stubBoard(page);
+    await stubSessions(page, TWO_LIVE);
+    await stubActiveScope(page, ['epic-9', 'epic-1']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card__mark').first()).toBeVisible();
+    const marked = await page.locator('.bs-kanban-card__mark').count();
+
+    await page.unroute('**/api/cli-sessions*');
+    await page.route('**/api/cli-sessions*', (route) =>
+      route.fulfill({
+        json: {
+          state: 'unreadable',
+          configSource: 'default',
+          readAt: FIXTURE_NOW_ISO,
+          formatWarning: null,
+          hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+          sessions: [],
+        },
+      }),
+    );
+    const second = page.waitForResponse('**/api/cli-sessions*');
+    await page.clock.runFor(15_000);
+    await second;
+    // Real time for the answer to reach the page; the page clock stays paused.
+    await page.waitForTimeout(300);
+    await expect(page.locator('.bs-kanban-card__mark')).toHaveCount(marked);
+    await expect(page.getByText('Nothing is active right now. ·')).toHaveCount(0);
+  });
+
+  test('a Group by picked as Status survives a reload on a board that defaults to epic', async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await expect(page.locator('.bs-kanban-col')).toHaveCount(2);
+    await expect(page.getByRole('region', { name: 'Todo column' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await page.getByLabel('Group by', { exact: true }).selectOption('status');
+    await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
+
+    await page.reload();
+
+    await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await expect(page.getByLabel('Group by', { exact: true })).toHaveValue('status');
+  });
+
   test('a waiting line shows only for an epic the board shows', async ({ page }) => {
     await stubBoard(page);
     await stubSessions(page, [
