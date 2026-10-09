@@ -1,6 +1,6 @@
 {
   "name": "pr-mod",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "The repo's open pull requests in a pane and a band line: CI and merge state, merge, update branch, and fix-conflict / fix-CI prompts.",
   "author": {
     "name": "juzser",

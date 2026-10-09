@@ -45,7 +45,7 @@ deliberately does not carry is the dashboard and this repo's own enforcement;
 record. Installed, `bs`
 writes under `.blacksmith/` in the directory you run it from, or wherever
 `BS_HOME` points — true of every release since `0.1.1`; the registry
-carries `0.4.0`.
+carries `0.5.0`.
 `0.1.0`, the release before it, predates `bs init`, ships no roadmap for
 `bs new` to read, and keeps state inside its own install directory.
 
