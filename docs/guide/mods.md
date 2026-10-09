@@ -46,11 +46,12 @@ The prompt lines are `user_prompt` events:
 
 The blacksmith plugin's recorder writes those events. Its `hooks/hooks.json`
 runs one script on each prompt you submit and each option you pick. The
-script runs `$BS_PROMPT_HOOK` when you set it (a clone does), else
-`bs-prompt-hook` on `PATH` (a global install has it). It writes only when the
-session's directory belongs to a Blacksmith store: for example a project where
-`bs init` ran, a clone, a worktree of either, or any directory when `BS_HOME`
-names a store that exists. INSTALL.md has
+script runs `$BS_PROMPT_HOOK` when you set it, else `bs-prompt-hook` on
+`PATH` (a global install has it); a checkout records only while the
+blacksmith plugin is enabled in it. It writes only when the session's
+directory belongs to a Blacksmith store: for example a project where `bs init`
+ran, a clone, a worktree of either, or any directory when `BS_HOME` names a
+store that exists. INSTALL.md has
 [the recorder and how to set it up](../../INSTALL.md#the-install--bs-and-bs).
 
 With nothing recorded, the band still draws. The idle band has no prompt
@@ -100,16 +101,26 @@ claude plugin disable bs-mod
 ## When it does not show
 
 - **No band at all.** The plugin is not installed or enabled, or the session
-  started before the install: start a new session. bs-mod hidden with
-  `/bs-mod off` comes back with `/bs-mod on`. A Claude Code build that does
-  not load plugin modules shows nothing; check `claude --version`.
+  started before the install: `claude plugin details bs-mod` (or `pr-mod`)
+  says whether it is installed, and a new session picks it up. bs-mod hidden
+  with `/bs-mod off` comes back with `/bs-mod on`. A Claude Code build that
+  does not load plugin modules shows nothing; check `claude --version`
+  against [What each needs](#what-each-needs).
 - **bs-mod is idle while an epic runs.** The band follows the epic this
   session drives, or the one you pinned. Pin another session's epic with
   `/bs-mod <epic-id>`. If that says no event log was found, the logs sit under
-  no directory bs-mod knows: start the session with `BS_HOME` set to the
-  absolute path of their store.
+  no directory bs-mod knows
+  ([where it looks](../../mods/bs-mod/README.md#where-it-looks-for-event-logs)):
+  start the session with `BS_HOME` set to the absolute path of their store.
 - **bs-mod has no prompt lines.** Nothing was recorded for this session or
-  epic. See [Where bs-mod gets its data](#where-bs-mod-gets-its-data).
+  epic: the blacksmith plugin's recorder did not run, found neither
+  `BS_PROMPT_HOOK` nor `bs-prompt-hook` on `PATH`, or the session's directory
+  belongs to no Blacksmith store. In a checkout with the blacksmith plugin
+  disabled, nothing registers the recorder: keep the plugin enabled there to
+  record, at the cost of the double listing INSTALL.md describes. Set up
+  [the recorder](../../INSTALL.md#the-install--bs-and-bs), then start a new
+  session. [Where bs-mod gets its data](#where-bs-mod-gets-its-data) has
+  where the lines come from.
 - **No pr-mod band.** That is by design while no PR is open. `/pr-mod` says
   when the directory is not a GitHub repo, and `gh auth status` says whether
   `gh` is signed in.
