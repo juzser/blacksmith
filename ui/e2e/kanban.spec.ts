@@ -169,15 +169,20 @@ test.describe('Kanban: the Active/All scope', () => {
   const toggle = (page: import('@playwright/test').Page) =>
     page.getByRole('navigation', { name: 'Activity scope' });
 
-  test('Active offers only the active epic, no "All epics", and boards its tasks', async ({
+  test('Active offers "All live epics" first, then the active epic, and boards only live epics', async ({
     page,
   }) => {
     await stubActiveScope(page, ['epic-9']);
     await page.goto('/work/kanban');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
-    expect(await optionValues(page)).toEqual(['epic-9']);
-    await expect(picker(page)).toHaveValue('epic-9');
-    await expect(page.getByRole('option', { name: 'All epics' })).toHaveCount(0);
+    expect(await optionValues(page)).toEqual(['', 'epic-9']);
+    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page).locator('option:checked')).toHaveText('All live epics');
+    await expect(page.getByRole('option', { name: 'All epics', exact: true })).toHaveCount(0);
+    await picker(page).selectOption('epic-9');
+    await expect(page).toHaveURL(/[?&]epic=epic-9\b/);
+    await picker(page).selectOption('');
+    await expect(page).not.toHaveURL(/epic=/);
     await expect(toggle(page).locator('[aria-current="page"]')).toHaveText('Active');
   });
 
@@ -195,7 +200,7 @@ test.describe('Kanban: the Active/All scope', () => {
     expect((await optionValues(page))[0]).toBe('');
     await toggle(page).getByRole('link', { name: 'Active' }).click();
     await expect(page).not.toHaveURL(/scope=/);
-    await expect.poll(() => optionValues(page)).toEqual(['epic-9']);
+    await expect.poll(() => optionValues(page)).toEqual(['', 'epic-9']);
   });
 
   test('a pinned ?epic= that is not active stays listed, selected and rendered', async ({
@@ -204,7 +209,7 @@ test.describe('Kanban: the Active/All scope', () => {
     await stubActiveScope(page, ['epic-9']);
     await page.goto('/work/kanban?epic=epic-1');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
-    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    expect((await optionValues(page)).sort()).toEqual(['', 'epic-1', 'epic-9']);
     await expect(picker(page)).toHaveValue('epic-1');
   });
 
@@ -280,7 +285,7 @@ test.describe('Kanban: the Active/All scope', () => {
     release();
     await expect(picker(page)).toBeEnabled();
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
-    expect(await optionValues(page)).toEqual(['epic-9']);
+    expect(await optionValues(page)).toEqual(['', 'epic-9']);
   });
 
   test('an empty Active offer keeps "All epics" in the picker when nothing is on the edge line', async ({
@@ -319,27 +324,24 @@ test.describe('Kanban: the Active/All scope', () => {
     await page.getByRole('button', { name: 'Refresh now' }).click();
   };
 
-  test('a selection the scope stops offering falls back to "All epics", and the board follows', async ({
+  test('a picked epic is pinned to the URL, so it stays offered when the scope drops it', async ({
     page,
   }) => {
     const state = await steerable(page, ['epic-9']);
-    const kanbanUrls: string[] = [];
-    page.on('request', (r) => {
-      if (r.url().includes('/api/kanban')) kanbanUrls.push(r.url());
-    });
     await page.goto('/work/kanban');
-    await expect(picker(page)).toHaveValue('epic-9');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await picker(page).selectOption('epic-9');
+    await expect(page).toHaveURL(/[?&]epic=epic-9/);
 
     state.epics = [];
     state.overviewUp = false;
     await refresh(page);
     await expect(page.getByText('Epic list unavailable', { exact: false })).toBeVisible();
-    await expect(picker(page)).toHaveValue('');
+    await expect(picker(page)).toHaveValue('epic-9');
+
+    await picker(page).selectOption('');
+    await expect(page).not.toHaveURL(/[?&]epic=/);
     await expect(picker(page).locator('option:checked')).toHaveText('All epics');
-    await expect
-      .poll(() => new URL(kanbanUrls.at(-1) ?? 'http://x/').searchParams.has('epic'))
-      .toBe(false);
   });
 
   test('a ?epic= pin survives a fall back to "All epics"', async ({ page }) => {
@@ -391,11 +393,11 @@ test.describe('Kanban: the Active/All scope', () => {
     await stubActiveScope(page, ['epic-9', 'epic-1']);
     await page.goto('/work/kanban');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
-    expect((await optionValues(page)).sort()).toEqual(['epic-1', 'epic-9']);
+    expect((await optionValues(page)).sort()).toEqual(['', 'epic-1', 'epic-9']);
     await page.getByLabel('Project', { exact: true }).selectOption('blacksmith');
     await expect(page).toHaveURL(/[?&]project=blacksmith/);
-    await expect.poll(() => optionValues(page)).toEqual(['epic-1']);
-    await expect(picker(page)).toHaveValue('epic-1');
+    await expect.poll(() => optionValues(page)).toEqual(['', 'epic-1']);
+    await expect(picker(page)).toHaveValue('');
   });
 
   test('a project switch to a project with nothing active shows the project line', async ({

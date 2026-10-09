@@ -46,9 +46,9 @@ describe('KanbanTaskCard.vue — row 1 drops the id text (operator fix 2026-10-0
     expect(SRC).not.toMatch(/:icon="Copy"/);
   });
 
-  it('row 1 holds only the AgentChip and renders only when there is a chip (no empty band)', () => {
+  it('row 1 holds the Now/Next tag or the AgentChip and renders only when there is one (no empty band)', () => {
     expect(SRC).toMatch(
-      /v-if="!compact && chip"\s+class="bs-kanban-card__row bs-kanban-card__row--1">\s*<AgentChip[^>]*\/>\s*<\/div>/,
+      /v-if="!compact && \(markText \|\| chip\)"\s+class="bs-kanban-card__row bs-kanban-card__row--1">[\s\S]*?<AgentChip v-else[^>]*\/>\s*<\/div>/,
     );
   });
 
@@ -139,7 +139,7 @@ describe('KanbanTaskCard.vue — title-copy icon flows inline with the title tex
     expect(FIT).toMatch(/TITLE_LINES\s*=\s*2/);
     expect(FIT).toMatch(/fitTitleText\(/);
     expect(SRC).toMatch(/:title="fitted \? title : undefined"/);
-    expect(SRC).toMatch(/aria-label="`\$\{title\}, opens task detail`"/);
+    expect(SRC).toMatch(/aria-label="`\$\{title\}\$\{markLabel\}, opens task detail`"/);
   });
 });
 
@@ -170,5 +170,28 @@ describe('KanbanTaskCard.vue — hide duplicate role label (audit finding 5)', (
 
   it('gates showRoleLabel on there being no AgentChip for the task', () => {
     expect(SRC).toMatch(/showRoleLabel\s*=\s*computed\(\s*\(\)\s*=>[^;]*!chip\.value/);
+  });
+});
+
+describe('KanbanTaskCard.vue — Now / Next mark', () => {
+  it('shows the mark in the agent chip slot on desktop and in the single tag slot on phone', () => {
+    expect(SRC).toMatch(/v-if="!compact && \(markText \|\| chip\)"/);
+    expect(SRC).toMatch(/v-if="compact && mark && markText"/);
+    expect(SRC).toMatch(/<AgentChip v-else/);
+  });
+
+  it('uses the progress tone for Now and the todo tone for Next', () => {
+    expect(SRC).toMatch(/mark\.kind === 'now' \? 'progress' : 'todo'/);
+  });
+
+  it('names the mark in the open button label', () => {
+    expect(SRC).toMatch(/\$\{title\}\$\{markLabel\}, opens task detail/);
+    expect(SRC).toMatch(/', next'/);
+    expect(SRC).toMatch(/, now \$\{/);
+  });
+
+  it('keeps the caption off phone cards and ellipsizes it', () => {
+    expect(SRC).toMatch(/v-if="caption && !compact"/);
+    expect(rule(PRIMITIVES_CSS, '.bs-kanban-card__caption')).toMatch(/text-overflow:\s*ellipsis/);
   });
 });
