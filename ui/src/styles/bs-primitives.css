@@ -2814,10 +2814,19 @@ a:hover {
   color: var(--bs-text-subtle);
   margin: 0;
 }
-/* Phone (ds-review.html .mgroup): the <details> is the card, the summary a
-   44px sunken bar with the count and a chevron that turns when open, the rows
-   sit inside with no chrome of their own. Desktop keeps its plain h3 + list. */
-details.bs-inbox__group {
+/* list-item, not flex: flex drops the disclosure marker, and a closed group
+   must still read as openable. One line, so line-height gives the 44px.
+   RoadmapProjectSection reuses this summary, so it keeps this rule as is. */
+summary.bs-inbox__group-head {
+  display: list-item;
+  line-height: var(--bs-touch);
+  cursor: pointer;
+}
+/* Phone (ds-review.html .mgroup): inside Home's Needs-you box only, the
+   <details> is the card, the summary a 44px sunken bar with the count and a
+   chevron that turns when open, the rows sit inside with no chrome of their
+   own. Desktop keeps its plain h3 + list. */
+.bs-inbox details.bs-inbox__group {
   display: block;
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
@@ -2825,10 +2834,10 @@ details.bs-inbox__group {
   overflow: hidden;
 }
 /* .bs-inbox already gaps its children by --bs-space-3; the mock wants 8px. */
-details.bs-inbox__group + details.bs-inbox__group {
+.bs-inbox details.bs-inbox__group + details.bs-inbox__group {
   margin-top: calc(var(--bs-space-2) - var(--bs-space-3));
 }
-summary.bs-inbox__group-head {
+.bs-inbox summary.bs-inbox__group-head {
   display: flex;
   align-items: center;
   gap: var(--bs-space-2);
@@ -2838,13 +2847,14 @@ summary.bs-inbox__group-head {
   font-size: 13px;
   font-weight: var(--bs-font-weight-semibold);
   color: var(--bs-text);
+  line-height: inherit;
   list-style: none;
   cursor: pointer;
 }
-summary.bs-inbox__group-head::-webkit-details-marker {
+.bs-inbox summary.bs-inbox__group-head::-webkit-details-marker {
   display: none;
 }
-details.bs-inbox__group[open] > summary.bs-inbox__group-head {
+.bs-inbox details.bs-inbox__group[open] > summary.bs-inbox__group-head {
   border-bottom: 1px solid var(--bs-border);
 }
 .bs-inbox__gcount {
@@ -2858,12 +2868,11 @@ details.bs-inbox__group[open] > summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
   transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
 }
-details.bs-inbox__group[open] > summary > .bs-inbox__chev {
+.bs-inbox details.bs-inbox__group[open] > summary > .bs-inbox__chev {
   transform: rotate(180deg);
 }
-/* Phone heading total (mock .ph-h .cnt). */
+/* Phone heading total (mock .ph-h .cnt); the gap is the space before it. */
 .bs-inbox__count {
-  margin-left: var(--bs-space-2);
   font-weight: 400;
   color: var(--bs-text-subtle);
   font-variant-numeric: tabular-nums;
@@ -2892,7 +2901,7 @@ details.bs-inbox__group[open] > summary > .bs-inbox__chev {
   border-radius: var(--bs-radius-md);
   background: var(--bs-surface);
 }
-details.bs-inbox__group > .bs-inbox__list {
+.bs-inbox details.bs-inbox__group > .bs-inbox__list {
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -3962,7 +3971,7 @@ details.bs-inbox__group > .bs-inbox__list {
    component. list-item, not flex: flex drops the browser's native
    disclosure marker (it only renders for the default list-item display),
    leaving a closed row with no visible sign it opens -- the same pitfall
-   summary.bs-inbox__group-head's own comment already names. line-height
+   the summary.bs-inbox__group-head rule above avoids. line-height
    gives the --bs-touch tap target instead of min-height + flex centering. */
 .bs-task-detail__tech-details summary {
   cursor: pointer;

@@ -462,6 +462,18 @@ test.describe('Roadmap window (spec Part 2)', () => {
     await expect(page.locator('h2.rm-section__head')).toHaveCount(2);
   });
 
+  test('375px: a project section is a plain disclosure with its native marker, not a card', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/work/roadmap');
+    const heads = page.locator('summary.rm-section__head');
+    await expect(heads).toHaveCount(2);
+    const section = page.locator('details.rm-section').first();
+    expect(await heads.first().evaluate((el) => getComputedStyle(el).display)).toBe('list-item');
+    expect(await section.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('0px');
+  });
+
   test('the disclosure buttons clear 24px on desktop', async ({ page }) => {
     await page.goto('/work/roadmap');
     const box = await earlierToggle(page).boundingBox();
