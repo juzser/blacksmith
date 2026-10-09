@@ -2727,7 +2727,9 @@ describe('the write-tool roster is one roster, in four places', () => {
     const matchers = (settings.hooks?.PreToolUse ?? []).map((entry) => entry.matcher);
     // A tool the matcher omits never reaches guard.sh, so the rules above are
     // not consulted for it at all — the quietest way to lose a guard.
-    expect(matchers).toContain(INSPECTED.join('|'));
+    // `Agent|Task` ride the same matcher for the judge-dispatch artifact line
+    // (hookDecision.ts), not for the write-tool rules above.
+    expect(matchers).toContain([...INSPECTED, 'Agent', 'Task'].join('|'));
   });
 
   it('is the roster a claude judge is stripped of before it may hold a worktree', () => {

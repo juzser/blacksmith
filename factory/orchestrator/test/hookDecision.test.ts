@@ -352,3 +352,67 @@ describe('decideHookPayload — the shortcut forfeits any shape it cannot read w
     expect(reasonOf(decide('cd ./link/.. && git merge feat/side', sideRepo))).toMatch(/on main/);
   });
 });
+
+describe('Agent dispatches (judge artifact line)', () => {
+  const abs = '/abs/state/results/task-1.reviewer.json';
+  const agent = (
+    subagentType: string | undefined,
+    prompt: unknown,
+    toolName = 'Agent',
+  ): ReturnType<typeof decideHookPayload> =>
+    decideHookPayload(
+      JSON.stringify({
+        tool_name: toolName,
+        tool_input: {
+          ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
+          prompt,
+        },
+        // Not a git repo: an Agent payload must not reach branch or lease work.
+        cwd: path.join(scratch, 'not-a-repo'),
+      }),
+      path.join(scratch, 'not-a-repo'),
+      leaseDir,
+    );
+
+  it.each(['reviewer', 'blacksmith:reviewer', 'auditor', 'spec-reviewer'])(
+    'denies %s with no declared-artifact line',
+    (type) => {
+      const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
+      expect(reason).toContain('Declared artifact: <absolute path>');
+      expect(reason).toContain('judge dispatch');
+      expect(reason).toContain('expected_line');
+    },
+  );
+
+  it('treats Task like Agent', () => {
+    expect(agent('reviewer', 'no line', 'Task')).not.toBeNull();
+    expect(agent('reviewer', `Declared artifact: ${abs}\n`, 'Task')).toBeNull();
+  });
+
+  it('names a relative path it found', () => {
+    const reason = reasonOf(agent('verifier', 'Declared artifact: state/results/x.json\n'));
+    expect(reason).toContain('state/results/x.json');
+    expect(reason).toMatch(/relative/);
+  });
+
+  it('does not count an indented line', () => {
+    expect(agent('reviewer', `  Declared artifact: ${abs}\n`)).not.toBeNull();
+  });
+
+  it('reads a non-string prompt as no line', () => {
+    expect(agent('reviewer', undefined)).not.toBeNull();
+    expect(agent('reviewer', 42)).not.toBeNull();
+  });
+
+  it.each([
+    ['reviewer', `Role: reviewer.\nDeclared artifact: ${abs}\n`],
+    ['blacksmith:grader', `Declared artifact: ${abs}`],
+    ['coder', 'no line needed'],
+    ['uiux', 'no line needed'],
+    ['general-purpose', 'no line needed'],
+    ['other:reviewer', 'no line needed'],
+    [undefined, 'no line needed'],
+  ])('allows %s silently (%j)', (type, prompt) => {
+    expect(agent(type, prompt)).toBeNull();
+  });
+});

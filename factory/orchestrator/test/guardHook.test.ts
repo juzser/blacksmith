@@ -123,6 +123,19 @@ describe('guard.sh (PreToolUse transport shim)', () => {
       expect(stdout).toBe('');
     });
 
+    it('denies a judge Agent dispatch that carries no declared-artifact line', () => {
+      const input = JSON.stringify({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'blacksmith:verifier', prompt: 'verify it' },
+        cwd: REPO_ROOT,
+      });
+      const { stdout, status } = askGuard(input);
+      expect(status).toBe(0);
+      const decision = decisionOf(stdout);
+      expect(decision.permissionDecision).toBe('deny');
+      expect(decision.permissionDecisionReason).toContain('Declared artifact: <absolute path>');
+    });
+
     it('ignores tools other than Bash', () => {
       const input = JSON.stringify({
         tool_name: 'Read',

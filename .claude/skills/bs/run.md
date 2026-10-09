@@ -200,7 +200,10 @@ playbooks are written to prevent.
     that can see a criterion the finished code proves wrong. The envkit epic
     deadlocked on exactly that: a correct S2 whose fix criterion 3 mandated
     and criterion 1 forbade (D-33). It writes to a close-specific path so it
-    cannot clobber the pre-code artifact; hand that file — each item naming the
+    cannot clobber the pre-code artifact. Put
+    `Declared artifact: /abs/path/to/state/results/<epic>.spec-review-close-vN.json`
+    inline on its own line in the dispatch prompt (the PreToolUse guard refuses
+    a judge dispatch without it); hand that file — each item naming the
     `criterion_ref` it is against — to:
 
     ```bash
@@ -262,7 +265,9 @@ playbooks are written to prevent.
     dispatch that predates the previous record has already answered for that
     one, so two sessions fired up front leave this record unaccounted for and
     `bs dispatch check` reports that record `unverifiable`. Take back one
-    verdict per clause, in the goal's order, and record it:
+    verdict per clause, in the goal's order, and record it. Its prompt carries
+    `Declared artifact: /abs/path/to/state/results/<epic>.goal-coverage-vN.json`
+    inline on its own line, for the same reason:
 
     ```bash
     bs epic goal-check --epic <epic> \

@@ -476,6 +476,15 @@ export async function recordJudgeDispatch(
       { task_id: input.taskId, agent_role: input.role },
     );
   }
+  // The dispatch guard and judge-stop both read an absolute path only; a
+  // relative one would be a finish line no hook can check.
+  if (!path.isAbsolute(input.artifactPath)) {
+    throw new JudgeError(
+      'judges.artifact-not-absolute',
+      `The declared artifact "${input.artifactPath}" is not an absolute path; pass an absolute one.`,
+      { task_id: input.taskId, agent_role: input.role },
+    );
+  }
   // appendEvent would reject this too, on taxonomy grounds. Caught here anyway,
   // so the message names the judge that was about to be dispatched instead of
   // the record type that failed validation.
