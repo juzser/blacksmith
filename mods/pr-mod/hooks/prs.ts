@@ -305,6 +305,14 @@ export function toastsBetween(prev: readonly Pr[], next: readonly Pr[], mine: re
   return out
 }
 
+/**
+ * The merges this session made that the list has not yet lost: a number is only needed to mute the
+ * "left the open list" toast, which fires on the poll that sees the PR gone, so it is dropped then.
+ */
+export function unconsumedMerges(mergedHere: readonly number[], next: readonly Pr[]): number[] {
+  return mergedHere.filter(n => next.some(p => p.number === n))
+}
+
 export function isHeld(hold: FixHold | undefined, pr: Pr | undefined, now: number): boolean {
   if (!hold || !pr) return false
   return hold.oid === pr.headRefOid && now < hold.at + FIX_HOLD_MS
