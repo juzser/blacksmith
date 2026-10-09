@@ -156,7 +156,7 @@ describe('decideJudgeStop (pure decision)', () => {
 });
 
 describe('extractDispatchPromptText', () => {
-  it('reads the last user-role message off a JSONL transcript', () => {
+  it('reads the first user-role message off a JSONL transcript', () => {
     const transcriptPath = transcriptWithPrompt(root, 'Declared artifact: /abs/t.json\n');
     expect(extractDispatchPromptText(transcriptPath)).toContain('Declared artifact: /abs/t.json');
   });
@@ -237,7 +237,7 @@ describe('extractDispatchPromptText', () => {
     expect(extractDispatchPromptText(transcriptPath)).toBeNull();
   });
 
-  it('still returns the prompt when the last line is torn JSON', () => {
+  it('returns the prompt without reading a torn JSON line that follows it', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const torn = userLine('later').slice(0, 20);
     writeFileSync(transcriptPath, `${userLine('Declared artifact: /abs/t.json\n')}\n${torn}`);
@@ -267,7 +267,7 @@ describe('extractDispatchPromptText', () => {
     expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/x.json');
   });
 
-  it('returns null when the last user message has content that is neither a string nor an array', () => {
+  it('returns null when the only user message has content that is neither a string nor an array', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const entry = { type: 'user', message: { role: 'user', content: { unexpected: 'shape' } } };
     writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
