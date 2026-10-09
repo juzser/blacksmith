@@ -457,6 +457,7 @@ test.describe('Home: Needs you inbox', () => {
     const waiverTitle = 'Approve waiver for 12 minor findings';
     const titles = inbox.locator('.bs-inbox__ptitle');
     await expect(titles).toHaveCount(3);
+    await expect(titles.filter({ hasText: waiverTitle })).toHaveCount(1);
     for (const t of await titles.all()) {
       const h = (await t.boundingBox())?.height ?? 99;
       expect(h).toBeLessThanOrEqual(2 * lineHeight + 1);
