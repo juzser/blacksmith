@@ -43,10 +43,12 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
 }>();
 
+// selectPhase/selectEpic carry the picked id and the project of the section it
+// sits in; the page maps that project to its store.
 const emit = defineEmits<{
   toggle: [WindowSide];
-  selectPhase: [string];
-  selectEpic: [string];
+  selectPhase: [string, string];
+  selectEpic: [string, string];
 }>();
 
 const { isPhoneWidth } = useViewport();
@@ -82,8 +84,8 @@ const effectivePickerValue = computed(() =>
 
 function onPick(value: string) {
   if (value === '') return;
-  if (props.section.kind === 'phase') emit('selectPhase', value);
-  else emit('selectEpic', value);
+  if (props.section.kind === 'phase') emit('selectPhase', value, props.section.project);
+  else emit('selectEpic', value, props.section.project);
 }
 
 /** A side's disclosure, absent when that side hides nothing (or the picker is out). */
@@ -137,8 +139,8 @@ const later = computed(() => disclosure('later'));
       :selected-phase="selectedPhase"
       :selected-epic="selectedEpic"
       :idle-labels="idleLabels"
-      @select-phase="(id) => emit('selectPhase', id)"
-      @select-epic="(id) => emit('selectEpic', id)"
+      @select-phase="(id) => emit('selectPhase', id, section.project)"
+      @select-epic="(id) => emit('selectEpic', id, section.project)"
     />
     <Select
       v-else-if="showPicker"

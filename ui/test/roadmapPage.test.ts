@@ -131,7 +131,7 @@ describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
 // exercised by ui/e2e/roadmap*.spec.ts.
 describe('RoadmapPage.vue / EpicBlock.vue — server roadmap reads (DS4 S5c)', () => {
   it('prefers the server status over the flow-derived guess, in both selectedEpicData and epicSections', () => {
-    expect(SFC).toMatch(/epicDatesFor\(milestones\.value/);
+    expect(SFC).toMatch(/epicDatesFor\(own, epicId\)/);
     expect(SFC).toMatch(
       /epicDates\s*\?\s*epicStatusFromServerStatus\(epicDates\.status\)\s*:\s*epicStatusFromFlow\(flow\)/,
     );
