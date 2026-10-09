@@ -1,8 +1,9 @@
 # Changelog
 
 Blacksmith has one versioned artifact and it is not the whole factory. The
-`smith` CLI — the binary plus the policies, schemas, scaffold templates, agent
-role files and migrations it reads — is published to npm as
+`bs` CLI (`smith` is kept as a deprecated alias) — the binary plus the
+policies, schemas, scaffold templates, agent role files and migrations it
+reads — is published to npm as
 `@juzser/blacksmith`; `package.json` carries that version and a `v<version>`
 git tag marks each publish. Everything else — the `/bs` console, the
 dashboard, the docs, the roadmap — runs from a clone, and the only supported
@@ -36,6 +37,164 @@ than appearing in it.
   history.
 
 ### Added
+
+- **0.5.0 — the CLI is `bs`, the subagents are `bs-<role>`, budgets scale
+  per tier, and every operator prompt is captured.** Two hundred and one
+  pull requests since 0.4.0 (#208–#440), grouped by theme rather than by
+  order. Four entries below this one landed after 0.4.0 and ship in it:
+  pr-mod (#412, with #426 and #438), bs-mod (#406, #408, #409, #417, #425),
+  the `tier` on `wave-admitted` (#398), the factory project named
+  `blacksmith` (#358); the `bs-<role>` agent names (#440) are under
+  *Changed*. This entry does not repeat them.
+
+  *The `smith` to `bs` rename (#277, #281, #282, #283).* The headline for
+  anyone installing the CLI. The binaries are `bs` and `bs-run`, factory
+  branches are `bs/<epic>/<task>`, and the prose, help text, runtime strings
+  and policies say `bs`. `smith` and `smith-run` stay as deprecated aliases
+  that print one notice to stderr and will go in a later release, so an
+  existing script keeps working. State, event logs and roles are untouched.
+
+  *The subagent rename (#440).* The fourteen agents are now `bs-<role>`
+  (`bs-coder`, `bs-reviewer`, ...); roles in logs, policies, env names and
+  the dashboard did not change. A box with the plugin installed needs
+  `claude plugin update blacksmith` and a session restart before the new
+  names show; the `Changed` entry below says the rest. A clone must also
+  rebuild `dist/` (`pnpm run build`), and the judge-stop hook keeps
+  accepting the bare names for one release.
+
+  *Budgets scale with the tier (#264).* Token and diff caps are sized per
+  effort tier (small 0.5x, medium, huge 2x of the per-role medium cap) and
+  the epic cap per tier (4M / 16M / 32M), on the effective tier after the
+  security floor, in every reader: wave check, budget alarm, plan quorum,
+  the runner and the daemon. The shared `judges` bucket splits into
+  per-role caps and the agent turn caps are raised (#212, #214). Env
+  overrides take `_SMALL|_MEDIUM|_HUGE` before the bare name. The log names
+  the tier on admission (#398). One rule for measured tokens now holds
+  across every reader (#389), a `{measured:false}` usage shows as not
+  measured instead of a fabricated 0 (#227), and the budget alarm treats
+  placeholder counts as unmeasured (#324). The gate reads the live plan row,
+  not a superseded one, so an amended cap applies (#320).
+
+  *Prompt capture (#411, #416, #417, #419, #423, #429, #430, #431, #435,
+  #436).* The plugin ships a non-blocking `UserPromptSubmit` and
+  `AskUserQuestion` hook that records every operator prompt and chosen
+  answer as a `user_prompt` event, through the new lean `bs-prompt-hook`
+  bin or `bs prompt capture`. A resolver decides whether a directory is
+  managed and which store gets the prompt; nothing is written outside a
+  managed project. `bs prompt import` backfills a session's earlier prompts
+  by streaming its transcript, which survives files over 512 MB and splits
+  lines in linear time; subagent hand-backs are not captured. `bs session
+  start --prompt <event-id>` links a session to the prompt that began it.
+  The hook finds its entry through `BS_PROMPT_HOOK` before `PATH` (#425).
+
+  *The CLI session stamp (#369, #370, #371, #372).* Each event carries an
+  optional `cli_session_id` taken from `CLAUDE_CODE_SESSION_ID`, never
+  standing in for `session_id` or `causal_parent`. The dashboard serves the
+  live Claude Code sessions and links them to the factory session each is
+  writing into.
+
+  *Operator feedback (#274).* `bs feedback record | pending | resolve` keeps
+  a comment on a running task and closes it, with a follow-up task when the
+  resolution asks for one.
+
+  *Cross-provider judges (#278).* OpenRouter can substitute for a default
+  provider that has no key of its own, and each model in `OPENROUTER_MODELS`
+  is an extra judge in shadow mode. A project may overlay `providers:` in
+  `.blacksmith/crosscheck.yml`; `--project` reaches every verb that runs a
+  cross-check. The DeepSeek judge moves to `deepseek-v4-pro` and the codex
+  judge is pinned (#208).
+
+  *uiux turns, stages and kinds (#296, #299, #303, #306, #368).* The uiux
+  judge gains a visual-pass rubric and screenshot contract with a serious
+  class, `spec` and `visual` turn kinds, a `ui_affecting` task flag required
+  when claims touch UI paths, and a gate stage that checks screenshot
+  freshness. A uiux dispatch with no `--kind` is refused.
+
+  *Audit fixes (#209, #247, #355).* A cut epic spec no longer carries the
+  clone's absolute path, `audit resolve` counts a superseded task whose
+  change already merged, and an audit axis row closes on the auditor's
+  report.
+
+  *Results and artifacts (#267, #268, #272).* `bs results record` projects
+  tester artifacts, the dashboard shows task screenshots during a run, and
+  the legacy name-to-path artifacts map is read rather than skipped.
+
+  *Judge dispatch guard (#439, #434, #260, #236, #225).* A judge-role Agent
+  dispatch whose prompt lacks a `Declared artifact: <absolute path>` line
+  is refused before it runs, and the judge-stop hook reads the same line
+  through one shared parser; recording a relative or whitespace path is
+  refused. The hook reads the judge's own dispatch prompt at stop. A stale
+  judge artifact is refused, evidence shape is validated before a judge
+  turn is minted, and the delegated session owner is the dispatch actor.
+
+  *Ids and small verbs (#238, #288, #318, #319, #241, #242, #245, #321).*
+  Write verbs print the id of the event they appended (`judge report`,
+  `findings transition`, plan ingest, gate run, results record, epic
+  verdict). `lessons compile` keeps entries with no store row and
+  `lessons candidates` takes `--state-dir`; `judge outstanding` prints an
+  object, not a bare array; judge turns open only for judge roles, errors
+  accept either actor key and EPIPE is quiet; dispatch helpers resolve a
+  short task id as the gate does.
+
+  *Waivers and findings (#226, #254, #289, #326, #261).* A self-merge no
+  longer stales its own finding and a denied diff finding is routed to a
+  follow-up; `--findings` shape is checked before routing; a waived task is
+  not ungated; findings for dispatch are epic-wide and a wave admits only
+  live tasks of an ingested plan.
+
+  *Closing an epic (#216, #223, #246, #255, #323, #328, #357, #396).* The
+  verdict honours the closing-review tier, words satisfied amendments as
+  already landed, labels discretionary findings plainly, names each
+  outstanding obligation's reason, reuses a fresh quorum decision, and
+  reports merged-but-unlinked waves truthfully. A follow-up whose findings
+  are fixed or refuted counts as terminal, and a task added by the log can
+  be superseded by `plan amend`. Plan edges are rewired through a supersede
+  (#235), `--from` accepts transitive successor chains (#240), and
+  `plan approve` and `plan amend` resolve the specs directory from `--plan`
+  (#224, #290).
+
+  *Epic status between waves, and the epic tier in the log (#433, #398).*
+  An epic part-way between waves reads as in progress, not idle, and the
+  admission records the tier its cap was sized for.
+
+  *The guard hook (#257, #265, #266, #291, #293, #297).* The force-push flag
+  is read from push commands only, shell tricks that bypassed it are closed,
+  command words are parsed the same way in the removal and push checks, a
+  hidden-git-word check no longer trips on ordinary text, and a command that
+  names another directory explains the rule-3 fallback.
+
+  *Policy and playbook wording (#262, #243, #256, #281, #283).* Operator-
+  facing text follows a plain-language rule, the wave-runner playbook states
+  its actor and that the gate unit check is the full suite, and the
+  integration PR body is written from a verified fact pack. The queue
+  refuses to merge without an event log (#322).
+
+  *The mods (#406, #412, #438).* bs-mod and pr-mod install from the repo's
+  plugin marketplace, not from the npm package, and each manifest's version
+  moves with the package (`pluginManifest.test.ts` holds them equal).
+  `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) and a
+  new session pick up a release. A guide and install steps cover both
+  (#438).
+
+  *The dashboard.* It runs from a clone and is not in the npm package. This
+  release rebuilds it on the BS design kit (DS0-DS9: app shell, Home,
+  Work with Kanban and Roadmap, Activity, Cost & quality, Lessons,
+  Sessions), reads every project's own store, and centers on one Active/All
+  scope driven by live CLI sessions (#387, #397, #400-#402). An agent with
+  no result after 4 hours reads "No result after 4h", not Running (#390).
+  Dependabot bumps ride along.
+
+  *Packaging and migrations.* `package.json` gains the bins `bs`, `bs-run`
+  and `bs-prompt-hook` beside `smith` and `smith-run`; `files` and `engines`
+  are unchanged. Runtime dependencies move only `drizzle-orm` 0.45.2 to
+  0.45.3; the rest is dev tooling. Five migrations are added since 0.4.0:
+  `0013_operator_feedback` (#274), `0014_misty_madripoor` (`title` and
+  `summary` on tasks), `0015_gifted_omega_flight` (`terminal_at` on tasks),
+  `0016_milestones_project_default` (#358) and
+  `0017_events_raw_cli_session_id` (#369). The requirement floors in
+  INSTALL.md Part 1 (Node 22, git 2.38) did not move; it gains optional
+  rows for a Claude Code build that loads plugin modules, the `gh` CLI
+  (pr-mod) and `OPENROUTER_API_KEY`.
 
 - **pr-mod, an optional pull-request view, ships as the marketplace's third
   plugin.** `/plugin install pr-mod@blacksmith` adds a `/pr-mod` pane
