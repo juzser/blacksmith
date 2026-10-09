@@ -16,8 +16,8 @@
 // localStorage. Unread is a 600 title (plus an accent dot on desktop), read
 // is 500.
 //
-// Not built (flagged in the DS2 report): the "Stop points" kind, which has no
-// projected row yet (§4.1: ship three kinds, file the fourth).
+// The "Stop points" kind has no projected row yet (§4.1: ship three kinds,
+// file the fourth).
 import { ChevronDown, Inbox } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
@@ -34,7 +34,7 @@ import {
   inboxCopy,
   inboxMetaPrefix,
 } from '../lib/inbox.js';
-import { loadSeen, markSeen } from '../lib/inboxSeen.js';
+import { inboxSeenId, loadSeen, markSeen } from '../lib/inboxSeen.js';
 import Banner from './kit/Banner.vue';
 import Button from './kit/Button.vue';
 import EmptyState from './kit/EmptyState.vue';
@@ -81,12 +81,16 @@ const seen = ref(loadSeen(storage));
 const markRead = (id: string) => {
   seen.value = markSeen(storage, id);
 };
+// A middle-click opens the link in a new tab and fires auxclick, never click.
+const markReadAux = (e: MouseEvent, id: string) => {
+  if (e.button === 1) markRead(id);
+};
 </script>
 
 <template>
   <section class="bs-inbox" aria-labelledby="inbox-heading">
     <h2 id="inbox-heading" class="bs-section-title">
-      Needs you<span v-if="isPhoneWidth && total > 0" class="bs-inbox__count">{{ total }}</span>
+      Needs you <span v-if="isPhoneWidth && total > 0" class="bs-inbox__count">{{ total }}</span>
     </h2>
 
     <Banner v-if="failed" show-retry @retry="emit('retry')">Could not load what needs you.</Banner>
@@ -139,7 +143,7 @@ const markRead = (id: string) => {
             :class="{
               'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0,
               'bs-inbox__row--link': isPhoneWidth && (gi > 0 || ri > 0),
-              'bs-inbox__row--unread': !seen.has(r.id),
+              'bs-inbox__row--unread': !seen.has(inboxSeenId(r)),
             }"
             :data-kind="r.kind"
           >
@@ -150,7 +154,8 @@ const markRead = (id: string) => {
               v-if="isPhoneWidth && (gi > 0 || ri > 0)"
               class="bs-inbox__rowlink"
               :to="inboxActionTarget(r)"
-              @click="markRead(r.id)"
+              @click="markRead(inboxSeenId(r))"
+              @auxclick="markReadAux($event, inboxSeenId(r))"
             >
               <span class="bs-inbox__ptitle">{{ inboxCopy(r).title }}</span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
@@ -175,7 +180,8 @@ const markRead = (id: string) => {
                 class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
                 :aria-label="`Decide: ${inboxCopy(r).title}`"
                 :to="inboxActionTarget(r)"
-                @click="markRead(r.id)"
+                @click="markRead(inboxSeenId(r))"
+                @auxclick="markReadAux($event, inboxSeenId(r))"
               >
                 Decide
               </RouterLink>
@@ -183,7 +189,7 @@ const markRead = (id: string) => {
             <template v-else>
               <span
                 class="bs-inbox__udot"
-                v-bind="seen.has(r.id) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
+                v-bind="seen.has(inboxSeenId(r)) ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': 'Unread' }"
               ></span>
               <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
               <div class="bs-inbox__text">
@@ -197,7 +203,8 @@ const markRead = (id: string) => {
                 class="bs-btn bs-btn--sm bs-btn--secondary"
                 :aria-label="`${INBOX_KIND[r.kind].action}: ${inboxCopy(r).title}`"
                 :to="inboxActionTarget(r)"
-                @click="markRead(r.id)"
+                @click="markRead(inboxSeenId(r))"
+                @auxclick="markReadAux($event, inboxSeenId(r))"
               >
                 {{ INBOX_KIND[r.kind].action }}
               </RouterLink>

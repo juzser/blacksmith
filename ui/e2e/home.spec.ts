@@ -481,6 +481,7 @@ test.describe('Home: Needs you inbox', () => {
     await page.goto('/overview');
     const inbox = page.locator('section.bs-inbox');
     await expect(inbox.locator('#inbox-heading')).toHaveText(/^\s*Needs you\s*3\s*$/);
+    await expect(page.getByRole('heading', { name: 'Needs you 3', exact: true })).toBeVisible();
 
     const group = inbox.locator('details.bs-inbox__group').nth(1);
     const summary = group.locator('summary');
@@ -564,10 +565,60 @@ test.describe('Home: Needs you inbox', () => {
     expect(await weight('escalation')).toBe('600');
     await expect(inbox.locator('.bs-inbox__udot')).toHaveCount(0);
     await inbox.getByRole('link', { name: 'Decide: Decide on an escalated task' }).click();
-    await page.goto('/overview');
+    await expect(page).not.toHaveURL(/\/overview$/);
+    // Back by the history stack: the SPA stays mounted, nothing reloads.
+    await page.evaluate(() => {
+      (window as unknown as { __kept: boolean }).__kept = true;
+    });
+    await page.goBack();
+    await expect(inbox).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __kept?: boolean }).__kept)).toBe(
+      true,
+    );
     expect(await weight('escalation')).toBe('500');
     await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
     expect(await weight('waiver')).toBe('600');
+    // The state outlives a reload too.
+    await page.reload();
+    expect(await weight('escalation')).toBe('500');
+  });
+
+  test('375px: a middle-click reads the row too', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const weight = (kind: string) =>
+      inbox
+        .locator(`.bs-inbox__row[data-kind="${kind}"] .bs-inbox__ptitle`)
+        .evaluate((el) => getComputedStyle(el).fontWeight);
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    expect(await weight('waiver')).toBe('600');
+    await inbox
+      .getByRole('link', { name: /Approve waiver for 2 minor findings/ })
+      .click({ button: 'middle' });
+    expect(await weight('waiver')).toBe('500');
+  });
+
+  test('a row seen before reads as unread again once a newer decision reuses its id', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const inbox = page.locator('section.bs-inbox');
+    const row = inbox.locator('.bs-inbox__row[data-kind="escalation"]');
+    await row.getByRole('link', { name: /^Open/ }).click();
+    await page.goto('/overview');
+    await expect(row.getByRole('img', { name: 'Unread' })).toHaveCount(0);
+    // The same task escalates again: same row id, a later createdAt.
+    await page.unroute('**/api/inbox*');
+    await serveInbox(
+      page,
+      INBOX_ROWS.map((r) => (r.kind === 'escalation' ? { ...r, createdAt: minutesAgo(1) } : r)),
+    );
+    await page.goto('/overview');
+    await expect(row.getByRole('img', { name: 'Unread' })).toBeVisible();
   });
 
   test('a localStorage that throws leaves every row unread and the page quiet', async ({
