@@ -242,6 +242,7 @@ disabled-control text under WCAG 1.4.3 and is never used for anything else.
 | `--bs-text-sm` | 13px / 20px | secondary body, card meta row |
 | `--bs-text-base` | 14px / 20px | default body, table cells |
 | `--bs-text-md` | 16px / 24px | card titles, section labels |
+| `--bs-text-lg` | 18px / 28px | phone stat values |
 | `--bs-text-xl` | 20px / 28px | page H1 |
 | `--bs-text-2xl` | 24px / 32px | rare — big stat numbers only |
 | `--bs-font-weight-normal` / `-medium` / `-semibold` | 400 / 500 / 600 | 600 is for the one title of a block (below); 500 for table headers, tags, the active nav label and selected chip; 400 for everything else |

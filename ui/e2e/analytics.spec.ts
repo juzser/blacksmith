@@ -263,6 +263,30 @@ test.describe('Analytics', () => {
         await expect(box).not.toContainText('No second-opinion reviews in this period.');
       }
     });
+
+    if (name === 'phone') {
+      // ds-review.html .mstat .v: a measured value is 18px, a not-measured one 13px.
+      const valueSize = (page: Page) =>
+        scope(page)
+          .locator('.bs-analytics-page__phone-stat-value')
+          .evaluate((el) => getComputedStyle(el).fontSize);
+
+      test('phone: a measured stat value is 18px', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        expect(await valueSize(page)).toBe('18px');
+      });
+
+      test('phone: a not-measured stat value stays 13px', async ({ page }) => {
+        await stubProviderAgreement(page, []);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page)).toContainText('Not enough data yet');
+        expect(await valueSize(page)).toBe('13px');
+      });
+    }
   }
 });
 

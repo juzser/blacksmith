@@ -4755,12 +4755,14 @@ h2.rm-section__head {
   font-size: var(--bs-text-xs);
 }
 .bs-analytics-page__phone-stat-value {
-  font-size: var(--bs-text-md);
+  font-size: var(--bs-text-lg);
+  line-height: var(--bs-leading-lg);
   font-weight: 600;
 }
 /* The mock's .mstat .v.nd: a value that was not measured reads quieter than a figure. */
 .bs-analytics-page__phone-stat-value--nd {
   font-size: var(--bs-text-sm);
+  line-height: var(--bs-leading-base);
   font-weight: var(--bs-font-weight-normal);
   color: var(--bs-text-subtle);
 }
