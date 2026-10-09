@@ -1766,20 +1766,30 @@ function needsOperatorWaiver(
 
 export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
 
+/** What a row says, as facts: the client composes the sentences (it owns the
+ *  role labels and the short task name rule). */
 export interface InboxRow {
   id: string;
   kind: InboxKind;
-  /** The row's headline. Never a placeholder: when there is nothing more to
-   *  say than the title, `description` is null and the client renders the
-   *  title alone. */
-  title: string;
-  description: string | null;
   /** Null for rows with no project affiliation (lesson candidates today) —
    *  the client's last, catch-all "All projects" group. */
   project: string | null;
   taskId: string | null;
   createdAt: string;
+  /** The task's `title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
+  /** Escalation: the role of the task's last dispatch. */
+  role: string | null;
+  /** Escalation: the latest coordination error's detail for the task, if any. */
+  reason: string | null;
+  /** Waiver: how many findings await the decision, and the first few summaries. */
+  findingCount: number;
+  findingSummaries: string[];
+  /** Lesson candidate: the proposed rule. */
+  statement: string | null;
 }
+
+const INBOX_SUMMARY_CAP = 3;
 
 const INBOX_KIND_RANK: Record<InboxKind, number> = {
   escalation: 0,
@@ -1787,11 +1797,14 @@ const INBOX_KIND_RANK: Record<InboxKind, number> = {
   lesson_candidate: 2,
 };
 
-/** A task's Kanban display text — the same `objective ?? taskId` fallback
- *  every other query on this table uses; tasks have no `title` column. */
-function taskDisplayText(t: { objective: string | null; taskId: string }): string {
-  return t.objective ?? t.taskId;
-}
+const noFacts = () => ({
+  taskTitle: null,
+  role: null,
+  reason: null,
+  findingCount: 0,
+  findingSummaries: [] as string[],
+  statement: null,
+});
 
 export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   const taskRows = allTasksForScope(db, scope);
@@ -1814,14 +1827,29 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       if (d.taskId) lastDispatchByTask.set(d.taskId, d);
     }
   }
+  // The error that parked a task is a `coordination.*` one above a note-only
+  // severity (projector.ts); its detail is free text the logger wrote.
+  const reasonByTask = new Map<string, string>();
+  if (escalatedTaskIds.length > 0) {
+    const parked = inLogOrder(
+      db.select().from(errors).where(eq(errors.errorGroup, 'coordination')).all(),
+    ).filter((e) => e.detail && !/^S[34]-/.test(e.severity));
+    for (const e of parked) {
+      for (const ref of (e.taskRef ?? '').split(',')) {
+        const id = escalatedTaskIds.find((tid) => taskIdsMatch(tid, ref.trim()));
+        if (id) reasonByTask.set(id, e.detail as string);
+      }
+    }
+  }
   for (const t of taskRows) {
     if (t.taskStatus !== 'escalated') continue;
-    const lastDispatch = lastDispatchByTask.get(t.taskId);
     rows.push({
+      ...noFacts(),
       id: `escalation:${t.taskId}`,
       kind: 'escalation',
-      title: taskDisplayText(t),
-      description: lastDispatch ? `Escalated while dispatched as ${lastDispatch.agentRole}` : null,
+      taskTitle: t.title,
+      role: lastDispatchByTask.get(t.taskId)?.agentRole ?? null,
+      reason: reasonByTask.get(t.taskId) ?? null,
       project: projectOf(t.project),
       taskId: t.taskId,
       createdAt: t.updatedAt,
@@ -1848,12 +1876,17 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   }
   for (const [taskId, { t, findingRows }] of pendingByTask) {
     const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
-    const count = findingRows.length;
     rows.push({
+      ...noFacts(),
       id: `waiver:${taskId}`,
       kind: 'waiver',
-      title: t ? taskDisplayText(t) : taskId,
-      description: `${count} finding${count === 1 ? '' : 's'} awaiting a waiver decision`,
+      taskTitle: t?.title ?? null,
+      findingCount: findingRows.length,
+      findingSummaries: inLogOrder(
+        findingRows.map((f) => ({ ts: f.raisedAt, eventId: f.findingId, summary: f.summary })),
+      )
+        .slice(0, INBOX_SUMMARY_CAP)
+        .map((f) => f.summary),
       project: projectOf(latest.project ?? t?.project ?? null),
       taskId,
       createdAt: latest.raisedAt,
@@ -1870,10 +1903,10 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
     for (const l of lessonRows) {
       if (LESSON_BUCKET_FOR_STATUS[l.lessonStatus] !== 'pending') continue;
       rows.push({
+        ...noFacts(),
         id: `lesson_candidate:${l.lessonId}`,
         kind: 'lesson_candidate',
-        title: l.statement,
-        description: null,
+        statement: l.statement,
         project: null,
         taskId: null,
         createdAt: l.validFrom,

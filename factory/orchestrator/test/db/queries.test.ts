@@ -27,7 +27,7 @@ import {
   taskRuns,
   timeline,
 } from '../../src/db/queries.js';
-import { epics, eventsRaw, findings, tasks } from '../../src/db/schema.js';
+import { epics, errors, eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
@@ -2875,7 +2875,34 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     const rows = inboxRows(handle.db);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
-    expect(rows[0]?.title.length).toBeGreaterThan(0);
+  });
+
+  it('carries facts, not sentences: the last dispatch role and the coordination error detail', () => {
+    const [row] = inboxRows(handle.db);
+    expect(row).toMatchObject({
+      role: 'coder',
+      reason: 'worker deadlocked waiting on a claim it never held',
+      findingCount: 0,
+      findingSummaries: [],
+      statement: null,
+    });
+    expect(row).not.toHaveProperty('title');
+    expect(row).not.toHaveProperty('description');
+  });
+
+  it('taskTitle is the title column, null when unset, never the objective', () => {
+    expect(inboxRows(handle.db)[0]?.taskTitle).toBeNull();
+    handle.db
+      .update(tasks)
+      .set({ title: 'Stop the deadlock' })
+      .where(eq(tasks.taskId, TASK_3))
+      .run();
+    expect(inboxRows(handle.db)[0]?.taskTitle).toBe('Stop the deadlock');
+  });
+
+  it('reason is null when no coordination error is projected for the task', () => {
+    handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
+    expect(inboxRows(handle.db)[0]?.reason).toBeNull();
   });
 
   it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
@@ -2940,12 +2967,17 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
       const rows = inboxRows(fresh.db);
       expect(rows.map((r) => r.kind)).toEqual(['escalation', 'waiver', 'lesson_candidate']);
       const waiverRow = rows.find((r) => r.kind === 'waiver');
-      expect(waiverRow).toMatchObject({ taskId: TASK_1, project: DEFAULT_PROJECT });
+      expect(waiverRow).toMatchObject({
+        taskId: TASK_1,
+        project: DEFAULT_PROJECT,
+        findingCount: 1,
+        findingSummaries: ['a stray console.log in the widget renderer'],
+      });
       const scoped = inboxRows(fresh.db, { project: DEFAULT_PROJECT });
       expect(scoped.some((r) => r.kind === 'waiver' && r.taskId === TASK_1)).toBe(true);
       const lessonRow = rows.find((r) => r.kind === 'lesson_candidate');
       expect(lessonRow).toMatchObject({ taskId: null, project: null });
-      expect(lessonRow?.title).toContain('linter');
+      expect(lessonRow?.statement).toContain('linter');
     } finally {
       fresh.sqlite.close();
     }
@@ -3059,7 +3091,7 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     it('finds the task of a bare-id finding on a task row stored qualified', () => {
       seedTask('epic-a/task-9', 'completed');
       seedFinding('f-bare', 'task-9', { epicId: null });
-      expect(waiverRows().filter((r) => r.title !== '')).toHaveLength(1);
+      expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-9')).toHaveLength(1);
       const before = counts();
       handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
       expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
@@ -3105,10 +3137,8 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
       expect(rows[0]).toMatchObject({
         id: 'waiver:epic-a/task-9',
         taskId: 'epic-a/task-9',
-        description: '2 findings awaiting a waiver decision',
+        findingCount: 2,
       });
-      const [t] = handle.db.select().from(tasks).where(eq(tasks.taskId, 'epic-a/task-9')).all();
-      expect(rows[0]?.title).toBe(t?.objective ?? 'epic-a/task-9');
     });
 
     it('never lists a decided finding or an S1/S2 finding', () => {

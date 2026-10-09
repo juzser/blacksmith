@@ -9,10 +9,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
-import { appendEvent } from '../../../factory/orchestrator/src/events.js';
+import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
+import { raiseFinding } from '../../../factory/orchestrator/src/findings.js';
 import {
   buildFixture,
   EPIC_ID,
+  SESSION_ID,
   TASK_1,
   TASK_2,
   TASK_3,
@@ -1077,6 +1079,115 @@ describe('multi-store dashboard reads', () => {
       ]) {
         expect([route, (await a.app.request(route)).status]).toEqual([route, 404]);
       }
+    });
+  });
+
+  describe('Needs you reads every store', () => {
+    interface InboxRow {
+      id: string;
+      kind: string;
+      project: string | null;
+      taskId: string | null;
+      statement: string | null;
+      findingCount: number;
+      store?: Store;
+    }
+    const inbox = async (a: AppHandle, query = ''): Promise<InboxRow[]> =>
+      (await get<{ rows: InboxRow[] }>(a, `/api/inbox${query}`)).rows;
+
+    /** A pending waiver: a minor finding on the completed task-1 of one store. */
+    async function pendingWaiver(eventsDir: string): Promise<void> {
+      const opts = { stateDir: eventsDir };
+      const last = (await readEvents(SESSION_ID, opts)).at(-1);
+      await raiseFinding(
+        {
+          finding: {
+            finding_id: 'inbox-w-1',
+            task_id: TASK_1,
+            finding_category: 'correctness',
+            severity: 'S3-minor',
+            finding_status: 'raised',
+            summary: 'a stray console.log',
+            failure_scenario: { inputs: 'n', expected: 'none', actual: 'a log' },
+            found_by: 'reviewer',
+          },
+          filePath: 'src/widget.ts',
+        },
+        { sessionId: SESSION_ID, planVersion: 1, causalParent: last?.event_id ?? null },
+        opts,
+      );
+    }
+
+    it('returns the foreign escalation and waiver, relabelled and tagged, beside the served ones', async () => {
+      await pendingWaiver(eventsB);
+      const rows = await inbox(app());
+      const foreign = rows.filter((r) => r.store?.label === 'project-b');
+      expect(foreign.map((r) => `${r.kind}:${r.taskId}`).sort()).toEqual([
+        `escalation:${TASK_3}`,
+        `waiver:${TASK_1}`,
+      ]);
+      for (const r of foreign) expect(r.project).toBe('project-b');
+      const home = rows.filter((r) => r.store?.id === 'home');
+      expect(home.map((r) => r.kind)).toEqual(['escalation']);
+      expect(home[0]?.project).not.toBe('project-b');
+    });
+
+    it('?project narrows to that project, ?session reads only the served store', async () => {
+      await pendingWaiver(eventsB);
+      const a = app();
+      const narrowed = await inbox(a, '?project=project-b');
+      expect(narrowed.length).toBe(2);
+      for (const r of narrowed) expect(r.project).toBe('project-b');
+      const session = await inbox(a, '?session=sess-fixture');
+      expect(session.every((r) => r.store === undefined || r.store.id === 'home')).toBe(true);
+      expect(session.some((r) => r.project === 'project-b')).toBe(false);
+    });
+
+    it('row ids cannot collide across stores, and the order is kind, oldest, id', async () => {
+      await pendingWaiver(eventsB);
+      const rows = await inbox(app());
+      expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
+      const rank: Record<string, number> = { escalation: 0, waiver: 1, lesson_candidate: 2 };
+      const kinds = rows.map((r) => rank[r.kind] ?? 9);
+      expect(kinds).toEqual([...kinds].sort((x, y) => x - y));
+    });
+
+    it('lesson candidates stay with the served store', async () => {
+      for (const dir of [path.join(projectA, 'state', 'events'), eventsB]) {
+        const last = (await readEvents(SESSION_ID, { stateDir: dir })).at(-1);
+        await appendEvent(
+          {
+            session_id: SESSION_ID,
+            actor: 'scribe',
+            event_type: 'lesson-candidate-raised',
+            plan_version: 1,
+            causal_parent: last?.event_id ?? null,
+            payload: {
+              lesson_id: 'inbox-lesson-1',
+              lesson_type: 'rule',
+              lesson_level: 'principle',
+              lesson_status: 'candidate',
+              lesson_scope: 'claim-path',
+              claim_path: 'src/**',
+              statement: 'Run the linter first.',
+              valid_from: new Date().toISOString(),
+              provenance_event_ids: [last?.event_id ?? 'none'],
+            },
+          },
+          { stateDir: dir },
+        );
+      }
+      const lessons = (await inbox(app())).filter((r) => r.kind === 'lesson_candidate');
+      expect(lessons).toHaveLength(1);
+      expect(lessons[0]?.store?.id).toBe('home');
+    });
+
+    it('skips a foreign store whose cache cannot be read, never a 500', async () => {
+      const a = app();
+      await inbox(a);
+      await rm(path.join(path.dirname(dbPath), 'ui-stores'), { recursive: true, force: true });
+      const res = await a.app.request('/api/inbox');
+      expect(res.status).toBe(200);
     });
   });
 

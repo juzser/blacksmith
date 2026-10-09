@@ -11,6 +11,7 @@
 
 import type { SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type {
+  InboxRow,
   KanbanColumn,
   KanbanTask,
   OverviewResult,
@@ -202,4 +203,32 @@ export function mergeKanban(
             )
           : tasks,
     }));
+}
+
+const INBOX_RANK: Record<InboxRow['kind'], number> = {
+  escalation: 0,
+  waiver: 1,
+  lesson_candidate: 2,
+};
+
+/**
+ * Combines per-store Needs-you rows in the order one store sorts them (kind,
+ * oldest, id). A foreign row's id is prefixed with its store id, since task
+ * ids repeat between stores. Lesson candidates stay with the served store: the
+ * Lessons page reads only that one, so a foreign row would link to nothing.
+ */
+export function mergeInbox(parts: { store: StoreRef; data: InboxRow[] }[]): Tagged<InboxRow>[] {
+  const rows = parts.flatMap((p) => {
+    const home = p.store.id === 'home';
+    return tag(
+      p.data.filter((r) => home || r.kind !== 'lesson_candidate'),
+      p.store,
+    ).map((r) => (home ? r : { ...r, id: `${p.store.id}:${r.id}` }));
+  });
+  return rows.sort(
+    (a, b) =>
+      INBOX_RANK[a.kind] - INBOX_RANK[b.kind] ||
+      a.createdAt.localeCompare(b.createdAt) ||
+      a.id.localeCompare(b.id),
+  );
 }
