@@ -134,7 +134,7 @@ The command used to be `smith`. `smith` and `smith-run` still work as
 deprecated aliases of `bs` and `bs-run`, each printing one notice to stderr,
 and will be removed in a future release.
 
-**Take `latest`** — `0.4.0`. `0.1.1` was the first release that knew it is a
+**Take `latest`** — `0.5.0`. `0.1.1` was the first release that knew it is a
 package.
 `0.1.0` has no `bs init`, ships no roadmap for `bs new` to read, and
 keeps state inside its own install directory, which the next `npm install`
