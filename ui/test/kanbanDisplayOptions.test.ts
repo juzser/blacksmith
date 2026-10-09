@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KANBAN_DISPLAY_OPTIONS,
+  hasChosenKanbanGroupBy,
   type KanbanDisplayOptionsStorage,
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
@@ -70,5 +71,32 @@ describe('lib/kanbanDisplayOptions.ts — saveKanbanDisplayOptions()', () => {
     expect(() =>
       saveKanbanDisplayOptions(throwingStorage(), DEFAULT_KANBAN_DISPLAY_OPTIONS),
     ).not.toThrow();
+  });
+});
+
+describe('lib/kanbanDisplayOptions.ts — hasChosenKanbanGroupBy()', () => {
+  it('is false with nothing stored or storage throwing', () => {
+    expect(hasChosenKanbanGroupBy(memoryStorage())).toBe(false);
+    expect(hasChosenKanbanGroupBy(throwingStorage())).toBe(false);
+  });
+
+  it('stays false after a Summary toggle, which saves the default Group by', () => {
+    const storage = memoryStorage();
+    saveKanbanDisplayOptions(storage, { ...DEFAULT_KANBAN_DISPLAY_OPTIONS, summary: false });
+    expect(hasChosenKanbanGroupBy(storage)).toBe(false);
+  });
+
+  it('is true for an options object saved by an older build with a non-default Group by', () => {
+    const storage = memoryStorage({
+      'bs.kanban.displayOptions': JSON.stringify({ summary: true, groupBy: 'project', hidden: [] }),
+    });
+    expect(hasChosenKanbanGroupBy(storage)).toBe(true);
+    expect(loadKanbanDisplayOptions(storage).groupBy).toBe('project');
+  });
+
+  it('is false for a malformed stored value', () => {
+    expect(hasChosenKanbanGroupBy(memoryStorage({ 'bs.kanban.displayOptions': '{nope' }))).toBe(
+      false,
+    );
   });
 });

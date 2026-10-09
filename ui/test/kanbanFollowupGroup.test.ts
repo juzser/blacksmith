@@ -65,7 +65,7 @@ describe('live marks in the follow-up group', () => {
   it('the group takes the live marks and the board passes them with the caption switch', () => {
     expect(GROUP).toMatch(/live\?:\s*LiveMarks/);
     expect(GROUP).toMatch(/groupMark\(/);
-    expect(GROUP).toMatch(/orderGroupRows\(/);
+    expect(GROUP).toMatch(/orderLive\(/);
     expect(BOARD).toMatch(/orderLiveItems\(/);
     expect(BOARD).toMatch(/:live="live"/);
   });

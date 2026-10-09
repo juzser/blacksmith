@@ -240,6 +240,40 @@ test.describe('Kanban: Now and Next marks', () => {
     await expect(page.getByText('demo-hub · epic-9: Waiting on you')).toBeVisible();
   });
 
+  test('an unreadable sessions read shows no tag and no empty state', async ({ page }) => {
+    await stubBoard(page);
+    await page.route('**/api/cli-sessions*', (route) =>
+      route.fulfill({
+        json: {
+          state: 'unreadable',
+          configSource: 'default',
+          readAt: FIXTURE_NOW_ISO,
+          formatWarning: null,
+          hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+          sessions: [],
+        },
+      }),
+    );
+    await stubActiveScope(page, ['epic-9', 'epic-1']);
+    await page.goto('/work/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    await expect(page.locator('.bs-kanban-card__mark')).toHaveCount(0);
+    await expect(page.getByText('Nothing is active right now. ·')).toHaveCount(0);
+    await expect(page.getByText('Waiting on you')).toHaveCount(0);
+  });
+
+  test('a waiting line shows only for an epic the board shows', async ({ page }) => {
+    await stubBoard(page);
+    await stubSessions(page, [
+      session('cli-1', 'demo-hub', 'epic-9', 'coder', null),
+      session('cli-2', 'project-b', 'epic-77', 'coder', null),
+    ]);
+    await stubActiveScope(page, ['epic-9', 'epic-77']);
+    await page.goto('/work/kanban');
+    await expect(page.getByText('demo-hub · epic-9: Waiting on you')).toBeVisible();
+    await expect(page.getByText('project-b · epic-77: Waiting on you')).toHaveCount(0);
+  });
+
   test('nothing live: the existing line, and no tags', async ({ page }) => {
     await stubBoard(page);
     await stubSessions(page, []);

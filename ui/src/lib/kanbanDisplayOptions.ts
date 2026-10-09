@@ -59,13 +59,15 @@ export function loadKanbanDisplayOptions(
   }
 }
 
-/** Whether the operator has ever saved options, so a page default never overrides a choice. */
-export function hasSavedKanbanDisplayOptions(storage: KanbanDisplayOptionsStorage): boolean {
-  try {
-    return !!storage.getItem(STORAGE_KEY);
-  } catch {
-    return false;
-  }
+/**
+ * Whether the operator picked a Group by, so a page default never overrides it.
+ * A save writes the whole options object, so a stored value alone proves
+ * nothing: options saved by an older build carry no marker of the choice, so
+ * a stored groupBy other than the default 'status' counts as chosen and a
+ * stored 'status' as not chosen.
+ */
+export function hasChosenKanbanGroupBy(storage: KanbanDisplayOptionsStorage): boolean {
+  return loadKanbanDisplayOptions(storage).groupBy !== DEFAULT_KANBAN_DISPLAY_OPTIONS.groupBy;
 }
 
 /** Never throws: a save that fails (quota, private browsing) is silently dropped. */

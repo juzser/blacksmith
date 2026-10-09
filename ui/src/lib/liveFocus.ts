@@ -3,13 +3,19 @@
 // ("Next"). Pure reads over `GET /api/cli-sessions`; the Kanban page and
 // card lay the result out. Everything is keyed by store + task id, since a
 // task id can repeat between two stores.
-import { isDoneStatus } from './kanban.js';
-import type { LiveCard, LiveLinkedEpic } from './liveSessions.js';
+import { epicKeyForTask, isDoneStatus } from './kanban.js';
+import type { LiveCard, LiveLinkedEpic, LiveSessionsResult } from './liveSessions.js';
 import { roleLabel } from './roleLabels.js';
 import { HOME_STORE_ID, type StoreRef } from './storeKey.js';
 
 type Keyed = { store?: StoreRef; taskId: string };
 type MarkTask = Keyed & { taskStatus: string; agentActivity?: 'working' | 'stalled' | null };
+
+export interface WaitingEpic {
+  label: string;
+  store: StoreRef;
+  epicId: string;
+}
 
 export type TaskMark = { kind: 'now'; roles: string[] } | { kind: 'next' };
 
@@ -18,8 +24,8 @@ export interface LiveMarks {
   now: Map<string, string[]>;
   /** Cards a session picks up next, by `taskMarkKey`. */
   next: Set<string>;
-  /** "<project> · <epic>" of each epic waiting on the operator. */
-  waiting: string[];
+  /** Each epic waiting on the operator, with its "<project> · <epic>" line. */
+  waiting: WaitingEpic[];
 }
 
 /** The key a card and a session's task id meet on: store id + task id. */
@@ -67,15 +73,19 @@ export function nowText(roles: readonly string[], activity: 'working' | 'stalled
  */
 export function nextMark(sessions: readonly LiveCard[]): {
   tasks: Set<string>;
-  waiting: string[];
+  waiting: WaitingEpic[];
 } {
   const tasks = new Set<string>();
-  const waiting = new Set<string>();
+  const waiting = new Map<string, WaitingEpic>();
   for (const s of sessions) {
     const f = s.focus;
     if (f?.next?.kind === 'task') tasks.add(taskMarkKey({ store: f.store, taskId: f.next.taskId }));
     if (f?.next?.kind === 'waiting_on_you') {
-      waiting.add(f.project ? `${f.project} · ${f.epicId}` : f.epicId);
+      waiting.set(`${f.store.id}:${f.epicId}`, {
+        label: f.project ? `${f.project} · ${f.epicId}` : f.epicId,
+        store: f.store,
+        epicId: f.epicId,
+      });
     }
     for (const e of s.linked?.epics ?? []) {
       if (e.closed || e.epicId === null) continue;
@@ -84,7 +94,7 @@ export function nextMark(sessions: readonly LiveCard[]): {
       if (t) tasks.add(taskMarkKey({ store: e.store, taskId: qualified(e.epicId, t.taskId) }));
     }
   }
-  return { tasks, waiting: [...waiting] };
+  return { tasks, waiting: [...waiting.values()] };
 }
 
 export function liveMarks(sessions: readonly LiveCard[]): LiveMarks {
@@ -92,9 +102,24 @@ export function liveMarks(sessions: readonly LiveCard[]): LiveMarks {
   return { now: matchNow(sessions), next: next.tasks, waiting: next.waiting };
 }
 
-/** A card's mark: Now when a session works on it (it wins over Next), else Next, else none. */
-export function markFor(marks: LiveMarks | null, task: Keyed): TaskMark | null {
-  if (!marks) return null;
+/** The "<project> · <epic>" lines of the waiting epics that have a card on the board. */
+export function waitingLines(marks: LiveMarks | null, boardTasks: readonly Keyed[]): string[] {
+  if (!marks) return [];
+  const onBoard = new Set(
+    boardTasks.map((t) => `${t.store?.id ?? HOME_STORE_ID}:${epicKeyForTask(t.taskId)}`),
+  );
+  return marks.waiting.filter((w) => onBoard.has(`${w.store.id}:${w.epicId}`)).map((w) => w.label);
+}
+
+/**
+ * A card's mark: Now when a session works on it (it wins over Next), else
+ * Next, else none. A finished task carries none.
+ */
+export function markFor(
+  marks: LiveMarks | null,
+  task: Keyed & { taskStatus: string },
+): TaskMark | null {
+  if (!marks || isDoneStatus(task.taskStatus)) return null;
   const key = taskMarkKey(task);
   const roles = marks.now.get(key);
   if (roles) return { kind: 'now', roles };
@@ -103,7 +128,6 @@ export function markFor(marks: LiveMarks | null, task: Keyed): TaskMark | null {
 
 // Now 0, Next 1, the rest (and finished tasks) 2.
 function liveRank(marks: LiveMarks, t: MarkTask): number {
-  if (isDoneStatus(t.taskStatus)) return 2;
   const kind = markFor(marks, t)?.kind;
   return kind === 'now' ? 0 : kind === 'next' ? 1 : 2;
 }
@@ -138,13 +162,8 @@ export function orderLiveItems<
   );
 }
 
-/** A group's rows: Now, then Next, then the given order. */
-export function orderGroupRows<T extends MarkTask>(members: T[], marks: LiveMarks | null): T[] {
-  return marks ? orderLive(members, marks) : members;
-}
-
 /** The mark a group's summary carries (Now beats Next) and the member it belongs to. */
-export function groupMark<T extends Keyed>(
+export function groupMark<T extends Keyed & { taskStatus: string }>(
   marks: LiveMarks | null,
   members: readonly T[],
 ): { mark: TaskMark; task: T } | null {
@@ -168,16 +187,26 @@ export function markLabel(mark: TaskMark | null): string {
   return mark.kind === 'now' ? `, now ${mark.roles.map(roleLabel).join(' and ')}` : ', next';
 }
 
+/** A sessions read as `afterRead` takes it: absent (no session directory) is a measured empty list. */
+export function readOf(r: LiveSessionsResult): LiveCard[] | 'failed' {
+  if (r.state === 'unreadable') return 'failed';
+  return r.state === 'ok' ? r.sessions : [];
+}
+
 /**
- * What a poll leaves behind: a good read replaces the sessions; a failed one
- * keeps the last good sessions for one cycle, then drops them to unknown
- * (null) rather than leave stale marks on the board.
+ * What a poll leaves behind: a good read replaces the sessions; failed reads
+ * keep the last good sessions until `graceMs` after the first of them, then
+ * drop them to unknown (null) rather than leave stale marks on the board.
+ * `failedAt` is the clock of that first failure, null while reads are good.
  */
 export function afterRead(
   prev: LiveCard[] | null,
-  misses: number,
+  failedAt: number | null,
   read: LiveCard[] | 'failed',
-): { sessions: LiveCard[] | null; misses: number } {
-  if (read !== 'failed') return { sessions: read, misses: 0 };
-  return { sessions: misses === 0 ? prev : null, misses: misses + 1 };
+  now: number,
+  graceMs: number,
+): { sessions: LiveCard[] | null; failedAt: number | null } {
+  if (read !== 'failed') return { sessions: read, failedAt: null };
+  const since = failedAt ?? now;
+  return { sessions: now - since < graceMs ? prev : null, failedAt: since };
 }

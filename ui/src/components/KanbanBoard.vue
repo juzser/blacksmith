@@ -35,7 +35,7 @@ import {
 } from '../lib/kanban.js';
 import {
   DEFAULT_KANBAN_DISPLAY_OPTIONS,
-  hasSavedKanbanDisplayOptions,
+  hasChosenKanbanGroupBy,
   type KanbanDisplayOptionsStorage,
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
@@ -108,10 +108,10 @@ const browserStorage: KanbanDisplayOptionsStorage | null =
 const options = ref(
   browserStorage ? loadKanbanDisplayOptions(browserStorage) : DEFAULT_KANBAN_DISPLAY_OPTIONS,
 );
-const groupBySaved = ref(browserStorage ? hasSavedKanbanDisplayOptions(browserStorage) : false);
-// A saved Group by wins; otherwise the page's default (if any) applies.
+const groupByChosen = ref(browserStorage ? hasChosenKanbanGroupBy(browserStorage) : false);
+// A Group by the operator chose wins; otherwise the page's default (if any) applies.
 const groupBy = computed<KanbanGroupBy>(() =>
-  groupBySaved.value ? options.value.groupBy : (props.defaultGroupBy ?? options.value.groupBy),
+  groupByChosen.value ? options.value.groupBy : (props.defaultGroupBy ?? options.value.groupBy),
 );
 function persist() {
   if (browserStorage) saveKanbanDisplayOptions(browserStorage, options.value);
@@ -120,7 +120,7 @@ function persist() {
 const optionsOpen = ref(false);
 function setGroupBy(value: KanbanGroupBy) {
   options.value = { ...options.value, groupBy: value };
-  groupBySaved.value = true;
+  groupByChosen.value = true;
   persist();
 }
 function setSummary(summary: boolean) {
@@ -169,7 +169,7 @@ function revealMore(key: string) {
 const columns = computed(() =>
   grouped.value.map((col) => {
     // Marked cards lead the column, before the done split and the cap below.
-    const ordered = props.live ? orderLive(col.tasks, props.live) : col.tasks;
+    const ordered = orderLive(col.tasks, props.live);
     const active = ordered.filter((t) => !isDoneStatus(t.taskStatus));
     const done = ordered.filter((t) => isDoneStatus(t.taskStatus));
     const showDone = expandedDone.value[col.key] ?? false;
@@ -178,9 +178,7 @@ const columns = computed(() =>
     const visibleTasks = showDone ? [...active, ...done] : active;
     // A group ranks by its best-marked member, so a marked fix stacked in
     // a group still leads the column.
-    const visible = props.live
-      ? orderLiveItems(groupFollowups(visibleTasks, col.key), props.live)
-      : groupFollowups(visibleTasks, col.key);
+    const visible = orderLiveItems(groupFollowups(visibleTasks, col.key), props.live);
     // A simple windowed slice rather than a scroll-driven virtualizer: past
     // KANBAN_VIRTUALIZE_THRESHOLD the column reuses the same capColumn()/
     // "view more" control the rest of the board already has, so a very
@@ -333,7 +331,7 @@ defineExpose({ focusFirstCard });
 
 // "<project> · <epic>" for a marked card on a board not grouped by epic.
 function captionFor(task: KanbanTask): string | null {
-  if (!props.live || !markFor(props.live, task) || !task.epicLabel) return null;
+  if (!markFor(props.live, task) || !task.epicLabel) return null;
   return task.epicLabel.replace(': ', ' · ');
 }
 </script>
@@ -446,8 +444,8 @@ function captionFor(task: KanbanTask): string | null {
               :task="item.task"
               :group-by="groupBy"
               :summary-enabled="options.summary"
-              :mark="live ? markFor(live, item.task) : null"
-              :caption="live && groupBy !== 'epic' ? captionFor(item.task) : null"
+              :mark="markFor(live, item.task)"
+              :caption="groupBy !== 'epic' ? captionFor(item.task) : null"
               :compact="isPhoneWidth"
               @select="onCardSelect"
               @keydown="onNavKeydown"

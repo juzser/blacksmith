@@ -46,7 +46,7 @@ import {
 } from '../lib/epicPicker.js';
 import { pluralize } from '../lib/format.js';
 import { epicKeyForTask, visibleTaskCount } from '../lib/kanban.js';
-import { liveMarks } from '../lib/liveFocus.js';
+import { liveMarks, waitingLines } from '../lib/liveFocus.js';
 import type { StoreRef } from '../lib/storeKey.js';
 
 const router = useRouter();
@@ -246,7 +246,7 @@ const displayedColumns = computed(() => {
 const marks = computed(() =>
   activeView() && !loading.value && liveSessions.value ? liveMarks(liveSessions.value) : null,
 );
-const waitingLines = computed(() => marks.value?.waiting ?? []);
+const waiting = computed(() => waitingLines(marks.value, boardTasks.value));
 // With more than one live epic on the board the epics are the columns.
 const defaultGroupBy = computed(() => {
   if (!liveEpicsOnly.value) return null;
@@ -343,7 +343,7 @@ function goToTask(taskId: string, storeId?: string) {
     />
 
     <template v-else-if="columns !== null">
-      <p v-for="line in waitingLines" :key="line" class="bs-sessions__quiet">{{ line }}: Waiting on you</p>
+      <p v-for="line in waiting" :key="line" class="bs-sessions__quiet">{{ line }}: Waiting on you</p>
       <KanbanBoard :tasks="boardTasks" :live="marks" :default-group-by="defaultGroupBy" @select="goToTask" />
     </template>
   </div>

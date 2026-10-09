@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   afterRead,
@@ -7,10 +10,11 @@ import {
   matchNow,
   nextMark,
   nowText,
-  orderGroupRows,
   orderLive,
   orderLiveItems,
+  readOf,
   taskMarkKey,
+  waitingLines,
 } from '../src/lib/liveFocus.js';
 import type { LiveCard, LiveLinkedEpic } from '../src/lib/liveSessions.js';
 
@@ -140,7 +144,7 @@ describe('nextMark', () => {
   it('reports waiting_on_you as a line, not a card', () => {
     const n = nextMark([card([epic()], focus({ kind: 'waiting_on_you' }))]);
     expect(n.tasks.size).toBe(0);
-    expect(n.waiting).toEqual(['project-a · epic-a']);
+    expect(n.waiting).toEqual([{ label: 'project-a · epic-a', store: A, epicId: 'epic-a' }]);
   });
 
   it('shows nothing for none and null', () => {
@@ -192,6 +196,12 @@ describe('markFor', () => {
     expect(markFor(marks, task('epic-a/t9'))).toBeNull();
     expect(markFor(null, task('epic-a/t1'))).toBeNull();
   });
+
+  it('never tags a finished task, Now or Next', () => {
+    const done = { taskStatus: 'completed' };
+    expect(markFor(marks, task('epic-a/t1', A, done))).toBeNull();
+    expect(markFor(marks, task('epic-c/t2', A, done))).toBeNull();
+  });
 });
 
 describe('orderLive', () => {
@@ -233,18 +243,71 @@ describe('orderLive', () => {
 
 describe('afterRead', () => {
   const s = [card([epic()])];
+  const GRACE = 15000;
 
-  it('takes a good read and clears the miss count', () => {
-    expect(afterRead(null, 1, s)).toEqual({ sessions: s, misses: 0 });
+  it('takes a good read and clears the failure clock', () => {
+    expect(afterRead(null, 1000, s, 5000, GRACE)).toEqual({ sessions: s, failedAt: null });
   });
 
-  it('keeps the last good sessions for one failed read, then clears them', () => {
-    const first = afterRead(s, 0, 'failed');
-    expect(first).toEqual({ sessions: s, misses: 1 });
-    expect(afterRead(first.sessions, first.misses, 'failed')).toEqual({
+  it('keeps the last good sessions for one poll interval of failures, then clears them', () => {
+    const first = afterRead(s, null, 'failed', 1000, GRACE);
+    expect(first).toEqual({ sessions: s, failedAt: 1000 });
+    // A manual refresh and a stream tick failing back to back stay inside the grace.
+    const second = afterRead(first.sessions, first.failedAt, 'failed', 3000, GRACE);
+    expect(second).toEqual({ sessions: s, failedAt: 1000 });
+    expect(afterRead(second.sessions, second.failedAt, 'failed', 1000 + GRACE, GRACE)).toEqual({
       sessions: null,
-      misses: 2,
+      failedAt: 1000,
     });
+  });
+});
+
+describe('readOf', () => {
+  const result = (state: 'ok' | 'absent' | 'unreadable', sessions: LiveCard[] = []) => ({
+    state,
+    formatWarning: null,
+    hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
+    sessions,
+  });
+
+  it('reads ok as its sessions and absent as a measured empty list', () => {
+    const s = [card([epic()])];
+    expect(readOf(result('ok', s))).toBe(s);
+    expect(readOf(result('absent'))).toEqual([]);
+  });
+
+  it('treats an unreadable read as a failed one', () => {
+    expect(readOf(result('unreadable'))).toBe('failed');
+  });
+});
+
+describe('waitingLines', () => {
+  const waitingFocus = (store: typeof A, project: string, epicId: string) => ({
+    store,
+    project,
+    epicId,
+    epicTitle: null,
+    wave: 1,
+    now: [],
+    next: { kind: 'waiting_on_you' as const },
+  });
+  const waiting = liveMarks([
+    card([epic()], waitingFocus(A, 'project-a', 'epic-a')),
+    card([epic({ store: B, epicId: 'epic-b' })], waitingFocus(B, 'project-b', 'epic-b'), 'cli-2'),
+  ]);
+
+  it('keeps only the epics the board shows', () => {
+    expect(waitingLines(waiting, [task('epic-a/t1')])).toEqual(['project-a · epic-a']);
+    expect(waitingLines(waiting, [task('epic-a/t1'), task('epic-b/t1', B)])).toEqual([
+      'project-a · epic-a',
+      'project-b · epic-b',
+    ]);
+  });
+
+  it('shows none for an epic of another store, or with no marks', () => {
+    expect(waitingLines(waiting, [task('epic-a/t1', B)])).toEqual([]);
+    expect(waitingLines(waiting, [])).toEqual([]);
+    expect(waitingLines(null, [task('epic-a/t1')])).toEqual([]);
   });
 });
 
@@ -294,14 +357,26 @@ describe('group ordering', () => {
     expect(groupMark(null, [task('epic-a/x')])).toBeNull();
   });
 
-  it('orderGroupRows leads with Now, then Next, then the given order', () => {
-    const rows = [task('epic-a/a'), task('epic-a/x'), task('epic-a/b'), task('epic-a/n1')];
-    expect(orderGroupRows(rows, marks).map((t) => t.taskId)).toEqual([
-      'epic-a/n1',
-      'epic-a/x',
-      'epic-a/a',
-      'epic-a/b',
-    ]);
-    expect(orderGroupRows(rows, null)).toBe(rows);
+  it('groupMark skips a finished member', () => {
+    const done = task('epic-a/n1', A, { taskStatus: 'completed' });
+    expect(groupMark(marks, [done])).toBeNull();
+    expect(groupMark(marks, [done, task('epic-a/x')])?.mark).toEqual({ kind: 'next' });
+  });
+});
+
+// useLiveFocus needs a mounted component, which the node environment cannot
+// give (see usePollLive.test.ts); the contract is locked at source level.
+describe('useLiveFocus unmount', () => {
+  const SRC = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'composables', 'useLiveFocus.ts'),
+    'utf8',
+  );
+
+  it('drops a read that finishes after the last caller unmounted', () => {
+    const body = SRC.slice(SRC.indexOf('const run = '), SRC.indexOf('current = run;'));
+    expect(body.indexOf('if (users === 0) return;')).toBeGreaterThan(-1);
+    expect(body.indexOf('if (users === 0) return;')).toBeLessThan(
+      body.indexOf('sessions.value = next.sessions'),
+    );
   });
 });

@@ -25,7 +25,7 @@ import {
   markFor,
   markLabel,
   markText,
-  orderGroupRows,
+  orderLive,
   type TaskMark,
 } from '../lib/liveFocus.js';
 import { foreignStoreId, storeKey } from '../lib/storeKey.js';
@@ -83,7 +83,7 @@ const ariaName = computed(() =>
 );
 
 // Marked fixes lead the rows, so the row cap never hides one.
-const orderedMembers = computed(() => orderGroupRows(props.members, props.live ?? null));
+const orderedMembers = computed(() => orderLive(props.members, props.live ?? null));
 function rowMark(task: KanbanTask): TaskMark | null {
   return markFor(props.live ?? null, task);
 }
