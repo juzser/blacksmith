@@ -41,8 +41,10 @@ If you are a Claude Code session executing this runbook, these are binding:
 
 - **Ask before touching the machine outside the clone.** Package-manager
   installs (`brew`, `apt`, `dnf`, `apk`), anything with `sudo`, global npm
-  installs, and `corepack enable` all change the user's system — propose the
-  exact command and wait for a yes. Everything inside the clone (`pnpm
+  installs, `corepack enable`, and Claude Code plugin installs and marketplace
+  adds (`claude plugin …`, `/plugin …`, which write into `~/.claude/`) all
+  change the user's system — propose the exact command and wait for a yes.
+  Everything inside the clone (`pnpm
   install`, `pnpm run build`, creating `.venv`) you may just do.
 - **Never report a step as passing without running it.** Paste the real
   output. `check.sh` degrades to a printed `SKIP` rather than a false `OK`
@@ -293,7 +295,8 @@ plugin are in. Each mod is its own question:
    opening a pane in a repo with a GitHub remote.
 
    **If it fails**, report the command, its output and `claude --version`,
-   and do not retry with other flags. A mod is optional, so go on with the
+   and do not retry with other flags. One failure ends that mod's step,
+   sooner than Part 0's two attempts: a mod is optional, so go on with the
    rest of the install. Name every mod that was declined or failed in your
    summary. When `claude plugin details` lists the mod but a new session
    shows nothing, [`docs/guide/mods.md`](docs/guide/mods.md#when-it-does-not-show)
