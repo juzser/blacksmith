@@ -210,6 +210,17 @@ describe('checkDelegationGrants', () => {
     expect(scopeProblems[0]?.detail).not.toMatch(/bs-blacksmith:coder/);
   });
 
+  it('suggests no agent name for a scope entry that maps to no granted role', () => {
+    template('wave-runner', 'Read, Agent(general-purpose)');
+    const report = grants(
+      policyOf([{ role: 'wave-runner', mayDispatch: ['coder'], mustOpenSession: true }]),
+    );
+    const scopeProblems = report.checks.filter((c) => /to name `general-purpose`/.test(c.detail));
+    expect(scopeProblems).toHaveLength(1);
+    expect(scopeProblems[0]?.detail).not.toMatch(/bs-general-purpose/);
+    expect(scopeProblems[0]?.detail).toMatch(/no Blacksmith agent/);
+  });
+
   it('does not read a tool that merely starts with Agent as a grant', () => {
     template('wave-runner', 'Read, AgentOutput');
     const report = grants(

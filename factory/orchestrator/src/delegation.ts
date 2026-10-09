@@ -254,8 +254,13 @@ export function checkDelegationGrants(
       if (scope !== null) {
         for (const name of scope) {
           if (name.startsWith(AGENT_PREFIX)) continue;
+          // Suggest a name only for a role this grant covers: `general-purpose`
+          // maps to itself, and `bs-general-purpose` is no agent either.
+          const role = roleOfAgentType(name);
           problems.push(
-            `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no agent; use \`${agentNameFor(roleOfAgentType(name) ?? name)}\`. The harness enforces the agent names, and the bare role no longer exists as one.`,
+            role !== null && grant.mayDispatch.includes(role)
+              ? `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no agent; use \`${agentNameFor(role)}\`. The harness enforces the agent names, and the bare role no longer exists as one.`
+              : `${templateFileFor(grant.role)} scopes \`Agent\` to name \`${name}\`, which is no Blacksmith agent. A scope names only the \`${AGENT_PREFIX}<role>\` agents of the roles delegation.yml grants.`,
           );
         }
         const declared = [...grant.mayDispatch].map(agentNameFor).sort().join(', ');
