@@ -168,6 +168,15 @@ and two inside Claude Code:
 /plugin install blacksmith@blacksmith
 ```
 
+Two optional plugin modules come from the same marketplace, bs-mod (a live
+HUD of your epic above the prompt) and pr-mod (the repo's open pull requests),
+and [`docs/guide/mods.md`](docs/guide/mods.md) has what each needs:
+
+```
+/plugin install bs-mod@blacksmith
+/plugin install pr-mod@blacksmith
+```
+
 Then `bs init` in the project you want it to work on. That creates
 `.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
 a `stack.yml` to answer — and writes nothing anywhere else; `BS_HOME` moves
@@ -201,7 +210,10 @@ get two of everything (`bs` and `blacksmith:bs`, `auditor` and
 `blacksmith:auditor`, once per role), pay the always-on cost twice, and the two
 copies are free to disagree: the plugin's is a pinned checkout of `main`, the
 project's is whatever branch you have out. `claude plugin disable blacksmith`
-settles it.
+settles it. It also turns off the prompt recorder in that clone, which only
+the plugin registers; a clone that wants its prompts recorded keeps the plugin
+enabled and accepts the double listing
+([INSTALL.md](INSTALL.md#the-install--bs-and-bs)).
 
 The dashboard is clone-only because `ui/` is in neither the tarball nor the
 plugin, so `bs ui serve` answers `ui.not-built` in an install and means it.
@@ -429,6 +441,7 @@ version in
 | [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) | What `/bs audit` promises an audited project, and why |
 | [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | How `/bs` runs without a clone, and what the plugin leaves behind |
 | [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
+| [`docs/guide/mods.md`](docs/guide/mods.md) | The optional bs-mod HUD and pr-mod |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `bs daemon` unattended |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
