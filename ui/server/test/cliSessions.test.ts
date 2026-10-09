@@ -1162,6 +1162,13 @@ describe('cliSessions reader', () => {
     const total = (c: object | undefined): number =>
       Object.values(c ?? {}).reduce((a: number, b: number) => a + b, 0);
 
+    it('links a CLI session whose only log is its prompt home log to no epic', async () => {
+      const home = await factorySession(`prompts-${SID_B}`, SID_B);
+      await home.add('user_prompt', { prompt: 'hello', source: 'hook' }, { actor: 'user' });
+      const epics = await linkedEpics(190, SID_B);
+      expect(epics.map((e) => e.epicId)).toEqual([null]);
+    });
+
     it('reads every wave of the epic when a wave session sorts before its epic session', async () => {
       const root = await factorySession('sess-root', SID_B);
       await root.addTask('epic-9', 'epic-9/task-1');

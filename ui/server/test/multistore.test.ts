@@ -527,6 +527,46 @@ describe('multi-store dashboard reads', () => {
       expect((await a.app.request(all(`limit=5&sessions=${id}/a/b`))).status).toBe(400);
     });
 
+    it('keeps a captured prompt under the epic filter of one named store', async () => {
+      const a = app();
+      const id = await foreignStoreId(a);
+      const home = 'prompts-0a1b2c3d-2222-4222-8222-bbbbbbbbbbbb';
+      const put = async (
+        session: string,
+        n: number,
+        eventType: string,
+        payload: Record<string, unknown>,
+        taskId?: string,
+      ): Promise<void> => {
+        await appendEvent(
+          {
+            session_id: session,
+            actor: eventType === 'user_prompt' ? 'user' : 'system',
+            event_type: eventType,
+            plan_version: 1,
+            causal_parent: n === 0 ? null : `${session}#0`,
+            payload,
+            ...(taskId ? { task_id: taskId } : {}),
+          },
+          { stateDir: eventsB },
+        );
+      };
+      await put(home, 0, 'session-start', { kind: 'prompt-log' });
+      await put(home, 1, 'user_prompt', { prompt: 'named', source: 'hook' });
+      await put(home, 2, 'user_prompt', { prompt: 'unnamed', source: 'hook' });
+      await put('sess-b-prompt', 0, 'session-start', {});
+      await put(
+        'sess-b-prompt',
+        1,
+        'operator-note',
+        { note: 'x', parent_prompt_id: `${home}#1` },
+        TASK_1,
+      );
+      const page = await get<Page>(a, `/api/timeline?store=${id}&epic=${EPIC_ID}&limit=200`);
+      const prompts = page.entries.filter((r) => r.eventId.startsWith('prompts-'));
+      expect(prompts.map((r) => r.eventId)).toEqual([`${home}#1`]);
+    });
+
     it('refuses stores=all with a filter that names one store, and bad values and cursors', async () => {
       const a = app();
       const id = await foreignStoreId(a);

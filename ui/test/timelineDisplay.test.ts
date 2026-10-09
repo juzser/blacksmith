@@ -1648,6 +1648,18 @@ describe('lib/timelineDisplay.ts sessionDividerLabel() (fix round 5)', () => {
     );
   });
 
+  it('labels a prompt-log session by the first 8 characters of its uuid', () => {
+    const sessionId = 'prompts-0a1b2c3d-1111-4111-8111-aaaaaaaaaaaa';
+    expect(sessionDividerLabel(entry({ sessionId, sessionTitle: sessionId }))).toBe(
+      'Prompts \u00b7 0a1b2c3d',
+    );
+  });
+
+  it('counts a home-log prompt under the Prompts chip', () => {
+    const sessionId = 'prompts-0a1b2c3d-1111-4111-8111-aaaaaaaaaaaa';
+    expect(matchesKind(entry({ eventType: 'user_prompt', sessionId }), ['user_prompt'])).toBe(true);
+  });
+
   it('falls back to the session id when sessionTitle is empty', () => {
     expect(sessionDividerLabel(entry({ sessionId: 'sess-a', sessionTitle: '' }))).toBe('sess-a');
   });

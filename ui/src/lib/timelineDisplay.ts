@@ -1146,7 +1146,8 @@ export function sessionDividerBefore(
  * the divider never reads a bare "Session: ".
  */
 export function sessionDividerLabel(entry: TimelineEntry): string {
-  return entry.sessionTitle || entry.sessionId;
+  const label = entry.sessionTitle || entry.sessionId;
+  return label.startsWith('prompts-') ? `Prompts \u00b7 ${label.slice(8, 16)}` : label;
 }
 
 /**
