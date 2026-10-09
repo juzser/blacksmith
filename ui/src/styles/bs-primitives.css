@@ -4759,10 +4759,17 @@ h2.rm-section__head {
   line-height: var(--bs-leading-lg);
   font-weight: 600;
 }
+/* ds-review.html .pnum (~:506) sets no size, so a ring percent inside .mstat .v
+   (~:727) reads at the tile's 18px; weight stays 400. Only this tile; every
+   other .bs-pnum keeps ds-spec 2.1's 14px. */
+.bs-analytics-page__phone-stat-value .bs-pring .bs-pnum {
+  font-size: var(--bs-text-lg);
+  font-weight: var(--bs-font-weight-normal);
+}
 /* The mock's .mstat .v.nd: a value that was not measured reads quieter than a figure. */
 .bs-analytics-page__phone-stat-value--nd {
   font-size: var(--bs-text-sm);
-  line-height: var(--bs-leading-base);
+  line-height: var(--bs-leading-sm);
   font-weight: var(--bs-font-weight-normal);
   color: var(--bs-text-subtle);
 }

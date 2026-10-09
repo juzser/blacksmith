@@ -264,6 +264,20 @@ test.describe('Analytics', () => {
       }
     });
 
+    if (name === 'desktop') {
+      // ds-spec.md 2.1: every ProgressRing number outside a phone stat tile stays 14px.
+      test('desktop: the second-opinion card ring percent stays 14px', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        const size = await scope(page)
+          .locator('.bs-pnum')
+          .evaluate((el) => getComputedStyle(el).fontSize);
+        expect(size).toBe('14px');
+      });
+    }
+
     if (name === 'phone') {
       // ds-review.html .mstat .v: a measured value is 18px, a not-measured one 13px.
       const valueSize = (page: Page) =>
@@ -277,6 +291,26 @@ test.describe('Analytics', () => {
         await page.goto('/analytics');
         await expect(scope(page).getByRole('img')).toBeVisible();
         expect(await valueSize(page)).toBe('18px');
+      });
+
+      // ds-review.html .pnum sets no size, so the ring percent inherits .mstat .v.
+      test('phone: the ring percent in a stat tile follows the 18px value', async ({ page }) => {
+        await stubProviderAgreement(page, [providerRow(4, 0.5)]);
+        await page.setViewportSize(viewport);
+        await page.goto('/analytics');
+        await expect(scope(page).getByRole('img')).toBeVisible();
+        const pnum = await scope(page)
+          .locator('.bs-pnum')
+          .evaluate((el) => {
+            const cs = getComputedStyle(el);
+            return { size: cs.fontSize, weight: cs.fontWeight, line: cs.lineHeight };
+          });
+        const value = await scope(page)
+          .locator('.bs-analytics-page__phone-stat-value')
+          .evaluate((el) => getComputedStyle(el).lineHeight);
+        expect(pnum.size).toBe('18px');
+        expect(pnum.weight).toBe('400');
+        expect(pnum.line).toBe(value);
       });
 
       test('phone: a not-measured stat value stays 13px', async ({ page }) => {
