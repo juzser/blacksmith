@@ -87,7 +87,12 @@ describe('inboxSeen', () => {
     const seenOf = (id: string, at: string) => new Set([inboxSeenId(row(id, at))]);
 
     it('reads a row with an older createdAt than the stored one as seen', () => {
-      expect(isSeen(seenOf('waiver:t1', '2026-02-01T00:00:00Z'), row('waiver:t1', '2026-01-01T00:00:00Z'))).toBe(true);
+      expect(
+        isSeen(
+          seenOf('waiver:t1', '2026-02-01T00:00:00Z'),
+          row('waiver:t1', '2026-01-01T00:00:00Z'),
+        ),
+      ).toBe(true);
     });
 
     it('reads the same createdAt as seen and a newer one as unseen', () => {
@@ -97,7 +102,12 @@ describe('inboxSeen', () => {
     });
 
     it('does not count a different row id with a later date', () => {
-      expect(isSeen(seenOf('waiver:t2', '2026-09-01T00:00:00Z'), row('waiver:t1', '2026-01-01T00:00:00Z'))).toBe(false);
+      expect(
+        isSeen(
+          seenOf('waiver:t2', '2026-09-01T00:00:00Z'),
+          row('waiver:t1', '2026-01-01T00:00:00Z'),
+        ),
+      ).toBe(false);
     });
 
     it('parses a key whose id contains @ or :', () => {

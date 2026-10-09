@@ -491,15 +491,15 @@ test.describe('Home: Needs you inbox', () => {
       x: number;
       width: number;
     };
-    expect(Math.abs(count.x + count.width - (firstCard.x + firstCard.width))).toBeLessThanOrEqual(1);
-    const textLeft = await inbox
-      .locator('#inbox-heading')
-      .evaluate((el) => {
-        const range = document.createRange();
-        range.setStart(el.firstChild as Node, 0);
-        range.setEnd(el.firstChild as Node, 1);
-        return range.getBoundingClientRect().left;
-      });
+    expect(Math.abs(count.x + count.width - (firstCard.x + firstCard.width))).toBeLessThanOrEqual(
+      1,
+    );
+    const textLeft = await inbox.locator('#inbox-heading').evaluate((el) => {
+      const range = document.createRange();
+      range.setStart(el.firstChild as Node, 0);
+      range.setEnd(el.firstChild as Node, 1);
+      return range.getBoundingClientRect().left;
+    });
     expect(Math.abs(textLeft - firstCard.x)).toBeLessThanOrEqual(1);
 
     const group = inbox.locator('details.bs-inbox__group').nth(1);
@@ -577,7 +577,9 @@ test.describe('Home: Needs you inbox', () => {
     await expect(rows.nth(0).getByRole('img', { name: 'Unread' })).toBeVisible();
   });
 
-  test('375px: a row opened and returned to by history still reads as read, without a reload', async ({ page }) => {
+  test('375px: a row opened and returned to by history still reads as read, without a reload', async ({
+    page,
+  }) => {
     await serveInbox(page, INBOX_ROWS);
     await page.setViewportSize(PHONE);
     await page.goto('/overview');
