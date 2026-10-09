@@ -25,7 +25,9 @@ lists the repo's open pull requests. Blacksmith runs the same without them.
 Code session. This file is a runbook, not a description — every step is a
 command with an expected result and a failure branch — so the session can
 execute it top to bottom. It stops and asks before anything that touches the
-machine outside the project.
+machine outside the project. It offers each optional mod on its own, installs
+one only after a yes, and names any you declined in its closing report;
+[The install](#the-install--bs-and-bs) has that step.
 
 [Part 2](#part-2--the-clone-runbook) is the long form, and it is the **clone**
 path: building a checkout of the factory itself. If you ran the commands
@@ -58,13 +60,16 @@ If you are a Claude Code session executing this runbook, these are binding:
 
 ## Part 1 — What it needs
 
-**The install** — package and plugin — needs three things:
+**The install** — package and plugin — needs the first three things; the
+last two are for the optional mods only:
 
 | Requirement | Why |
 |---|---|
 | **Node ≥ 22** | `engines` in `package.json`; ESM + `node:` builtins throughout |
 | **Claude Code CLI** | `/bs` is a Claude Code skill, and every worker it dispatches is a Claude Code session |
 | **git ≥ 2.38** | `worktree add` / `remove` / `list --porcelain` *is* the isolation mechanism, once you run an epic; the merge queue needs `merge-tree --write-tree` (2.38) |
+| A Claude Code build that loads plugin modules *(optional)* | bs-mod and pr-mod are plugin modules; bs-mod was written and tested on 2.1.292, and no older build has been checked |
+| `gh` CLI signed in to GitHub *(optional)* | pr-mod reads, merges and updates the repo's pull requests through it, in a session that stands in a repo with a GitHub remote |
 
 **A clone** needs those, plus the toolchain this repo's own gates run on:
 
@@ -109,7 +114,7 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | Command | the block at the top of this file | Part 2 below |
 | You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
-| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith` | `git pull` |
+| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`; an installed mod moves only when its manifest `version` changes, at a release, so then run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) and start a new session | `git pull`; a mod loaded with `--plugin-dir` is the checkout's copy |
 | Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
 Take the install unless you are hacking on Blacksmith itself.
@@ -170,6 +175,53 @@ repo's open pull requests with their CI and merge state, and a one-line band
 of counts shows above the prompt. It needs the `gh` CLI signed in, and the same
 kind of Claude Code build as bs-mod.
 [`mods/pr-mod/README.md`](mods/pr-mod/README.md) has the details.
+
+**An agent running this file offers the two mods** after the two required
+plugin lines. Each mod is its own question:
+
+1. **Ask.** Say in one line what it does: bs-mod is a live HUD of the epic
+   above the prompt; pr-mod shows the repo's open pull requests and can merge
+   them. The install writes into `~/.claude/` and applies to every session on
+   the machine, so [Part 0](#part-0--rules-for-an-agent-running-this-file)'s
+   ask-first rule applies. A no ends it for that mod.
+2. **Check what it needs**, with read-only commands:
+
+   ```bash
+   claude --version                    # both: a build that loads modules
+   gh auth status                      # pr-mod: gh signed in to GitHub
+   gh repo view --json nameWithOwner   # pr-mod: a GitHub remote here
+   ```
+
+   **Expect:** a version, a signed-in github.com account, and the repo's
+   `nameWithOwner`. bs-mod was written and tested on 2.1.292, and no older
+   build has been checked: say so if the version is older. If `gh` is
+   missing or signed out, pr-mod has nothing to show; tell the operator
+   before installing it. A project with no GitHub remote gets no pr-mod band
+   or pane, though the install still works.
+3. **Install** after the yes, in a shell:
+
+   ```bash
+   claude plugin install bs-mod@blacksmith
+   claude plugin install pr-mod@blacksmith
+   ```
+
+   One line per mod the operator took. Inside a session, the matching
+   `/plugin install` line above does the same.
+
+   **Expect:** `claude plugin details bs-mod` (or `pr-mod`) lists it, and a
+   new session shows it: bs-mod's band above the prompt, and `/pr-mod`
+   opening a pane in a repo with a GitHub remote.
+
+   **If it fails**, report the command, its output and `claude --version`,
+   and do not retry with other flags. A mod is optional, so go on with the
+   rest of the install. Name every mod that was declined or failed in your
+   summary.
+
+bs-mod's prompt lines need the prompt recorder this section describes
+further down: the blacksmith plugin's hook, with `bs-prompt-hook` on `PATH`
+or `BS_PROMPT_HOOK` set. Without it the band still draws, with no prompts.
+[`docs/guide/mods.md`](docs/guide/mods.md#where-bs-mod-gets-its-data) has
+where the rest of its data comes from.
 
 `init` creates `.blacksmith/` beside your code and nothing else:
 
@@ -528,39 +580,51 @@ either way, so every `state/...` path in these docs stays true.
 Every `BS_*` variable in these docs was `SMITH_*` before the rename, and the
 old name still works as a fallback: `BS_<X>` wins when both are set.
 
-### Step 8 — The bs-mod HUD *(optional)*
+### Step 8 — The mods: bs-mod and pr-mod *(optional)*
 
 A clone has no use for the `blacksmith` plugin, because its `.claude/`
-already is that plugin. bs-mod is different: it lives in `mods/bs-mod/`, not
-in `.claude/`, so a checkout does not load it on its own. It comes last
-because it needs the `claude` CLI from Step 6, and, like Step 7, it is
-optional and has a variant that writes outside the clone. Pick one of two:
+already is that plugin. The two mods are different: they live in `mods/`, not
+in `.claude/`, so a checkout does not load them on its own. bs-mod is the
+live HUD of an epic; pr-mod shows the repo's open pull requests. They come
+last because they need the `claude` CLI from Step 6, and, like Step 7, each
+is optional and has a variant that writes outside the clone. Ask about each
+mod on its own, then pick one of two ways for it:
 
 ```
 # inside Claude Code: the released copy, in every session on this machine
 /plugin marketplace add juzser/blacksmith
 /plugin install bs-mod@blacksmith
+/plugin install pr-mod@blacksmith
 ```
 
 ```bash
-# working on the mod itself: this checkout's copy, for one session only
-claude --plugin-dir "$PWD/mods/bs-mod"
+# working on a mod itself: this checkout's copy, for one session only
+claude --plugin-dir "$PWD/mods/bs-mod" --plugin-dir "$PWD/mods/pr-mod"
 ```
 
-The install writes into `~/.claude/` and applies to every session on the
-machine, so an agent running this file must ask before it. `--plugin-dir`
-installs nothing: it loads the checkout's copy into the one session it starts,
-which is how a change to the mod is seen before it is released.
+Keep the install lines and `--plugin-dir` flags for the mods the operator
+took; the flag repeats, once per mod. The install writes into `~/.claude/`
+and applies to every session on the machine, so an agent running this file
+must ask before it. `--plugin-dir` installs nothing: it loads the checkout's
+copy into the one session it starts, which is how a change to a mod is seen
+before it is released.
 
-**Expect:** after the install, `claude plugin details bs-mod` lists it, and
-a new session shows the band above its prompt. With `--plugin-dir`, the
-band shows in that session.
+pr-mod also needs the `gh` CLI signed in, in a repo with a GitHub remote.
+Check it before you offer pr-mod:
 
-pr-mod, the open-pull-request view, is installed the same way and is optional
-too: `/plugin install pr-mod@blacksmith`, or `claude --plugin-dir
-"$PWD/mods/pr-mod"` for one session. The same rule applies: an agent running
-this file asks before the install. **Expect:** `claude plugin details pr-mod`
-lists it, and `/pr-mod` opens its pane in a repo with a GitHub remote.
+```bash
+gh auth status
+```
+
+**Expect:** after the install, `claude plugin details bs-mod` (or `pr-mod`)
+lists it. A new session shows bs-mod's band above its prompt, and `/pr-mod`
+opens its pane in a repo with a GitHub remote. With `--plugin-dir`, both show
+in that session. pr-mod's band shows only while a pull request is open.
+
+**If it fails:** when `claude plugin details` does not list the mod, the
+install did not land; report the command, its output and `claude --version`.
+When it is listed but a new session shows nothing,
+[Troubleshooting](#troubleshooting) has the causes.
 
 ---
 
@@ -639,6 +703,10 @@ every command and namespace, and `claude plugin details blacksmith` reports
 `Skills (1)` and `Agents (14)`. If both do, you are installed; the rest of
 this part is the clone's. If you took an optional plugin,
 `claude plugin details bs-mod` or `claude plugin details pr-mod` shows it.
+Then start a new session and look. bs-mod's band sits above the prompt; with
+no epic in view it is idle and ends in the dim line `no running epic ·
+/bs-mod <epic-id> pins one`. `/pr-mod` opens its pane in a repo with a GitHub
+remote, and pr-mod's band shows only while a pull request is open.
 
 In a clone, one command answers "did this work":
 
@@ -699,6 +767,10 @@ Stated rather than papered over, in this repo's usual style:
 | `dist/cli.js` not found | build not run, or stale after a pull | `pnpm run build` |
 | `check.sh: command not found` / syntax errors on Alpine | running under `sh`, not `bash` | `apk add bash` and invoke `bash scripts/check.sh` |
 | Guard hook never fires in Claude Code | no bash on `PATH` (native Windows) | Use WSL2 |
+| The bs-mod band does not show | the mod is not installed or not enabled, the session started before the install, the band was hidden with `/bs-mod off`, or the Claude Code build does not load plugin modules | `claude plugin details bs-mod`; start a new session; `/bs-mod on`; check `claude --version` (bs-mod was tested on 2.1.292) |
+| bs-mod shows no epic while one is running | the band follows the epic this session drives, or the one pinned, so another session's epic is not in view; or the epic's event logs sit under no directory bs-mod knows | `/bs-mod <epic-id>` pins it; if that says no event log was found, start the session with `BS_HOME` set to the absolute path of the epic's store ([where it looks](mods/bs-mod/README.md#where-it-looks-for-event-logs)) |
+| bs-mod shows no prompt lines | nothing was recorded: the blacksmith plugin's recorder did not run in that session, found neither `BS_PROMPT_HOOK` nor `bs-prompt-hook` on `PATH`, or the directory belongs to no Blacksmith store | Set up the recorder as [The install](#the-install--bs-and-bs) describes, then start a new session; [`docs/guide/mods.md`](docs/guide/mods.md#where-bs-mod-gets-its-data) has where the lines come from |
+| pr-mod shows `stale`, or nothing | nothing: no pull request is open (the band shows only while one is), the directory has no GitHub remote, or `gh` is not signed in. `stale`: the last read of the PR list failed | `/pr-mod` names the error; `gh auth status`; Refresh in the pane reads again, and it rereads every 60 s while a PR is open or the pane is shown |
 
 Still stuck: [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md)
 covers behaviour once installed, and
