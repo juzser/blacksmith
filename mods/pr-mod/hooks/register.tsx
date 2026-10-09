@@ -26,6 +26,7 @@ import {
   sortPrs,
   statePart,
   toastsBetween,
+  unconsumedMerges,
 } from './prs'
 import type { Tone } from './prs'
 import { paletteOf } from './palette'
@@ -58,6 +59,7 @@ type St = {
   running: Promise<void> | null
   timer: Timer | null
   recheckTimer: Timer | null
+  disarmTimer: Timer | null
   recheck: number
   /** PRs this mod merged: their leaving the list is no news */
   mergedHere: number[]
@@ -186,6 +188,7 @@ async function tick($: EngineInterface, st: St, isRecheck: boolean): Promise<voi
     const mine = await read($, mineAtom)
     for (const text of toastsBetween(prev.prs, next, mine, st.mergedHere)) $.ui.toast(text)
   }
+  st.mergedHere = unconsumedMerges(st.mergedHere, next)
   const holds = await read($, fixAtom)
   const stillHeld = Object.entries(holds).filter(([key, hold]) => {
     const pr = next.find(p => p.number === Number(key.slice(key.indexOf(':') + 1)))
@@ -271,11 +274,15 @@ async function pressMerge($: EngineInterface, st: St, n: number): Promise<void> 
     const until = now + ARM_MS
     const oid = pr.headRefOid
     await update($, armedAtom, () => ({ number: n, until, oid }))
-    $.clock.after(ARM_MS, () => {
+    st.disarmTimer?.cancel()
+    st.disarmTimer = $.clock.after(ARM_MS, () => {
+      st.disarmTimer = null
       void update($, armedAtom, a => (a && a.number === n && a.until === until ? null : a))
     })
     return
   }
+  st.disarmTimer?.cancel()
+  st.disarmTimer = null
   await update($, armedAtom, () => null)
   if (!stillMergeable(pr, armed.oid)) {
     $.ui.toast(`#${n} changed since you armed it; press Merge again`)
@@ -377,7 +384,7 @@ function textOf(ran: unknown): string {
 // ---------------------------------------------------------------- register
 
 export const register: Register = on => {
-  const st: St = { running: null, timer: null, recheckTimer: null, recheck: 0, mergedHere: [] }
+  const st: St = { running: null, timer: null, recheckTimer: null, disarmTimer: null, recheck: 0, mergedHere: [] }
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

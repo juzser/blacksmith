@@ -22,6 +22,7 @@ import {
   sortPrs,
   statePart,
   toastsBetween,
+  unconsumedMerges,
 } from './prs'
 
 // The shapes `gh pr list --json statusCheckRollup` answers with, as measured
@@ -365,5 +366,15 @@ describe('stillMergeable', () => {
 
   test('false when the PR is gone', () => {
     expect(stillMergeable(undefined, 'oid1')).toBe(false)
+  })
+})
+
+describe('merges this session made', () => {
+  const open = (...ns: number[]) => parsePrs(JSON.stringify(ns.map(n => raw(n))))
+
+  test('a number stays while its PR is still listed and goes once the list has lost it', () => {
+    expect(unconsumedMerges([1, 2, 3], open(2, 9))).toEqual([2])
+    expect(unconsumedMerges([1], open())).toEqual([])
+    expect(unconsumedMerges([], open(1))).toEqual([])
   })
 })
