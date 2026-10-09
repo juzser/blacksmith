@@ -4,6 +4,7 @@
 // rest. Pure, like roadmapSwimlane.ts beside it, so the current-lane rule and
 // the window cut run under vitest's node environment; RoadmapPage.vue and
 // RoadmapProjectSection.vue are wiring.
+import { isActiveEpic, isActiveProject, isActiveProjectName } from './activeScope.js';
 import type { ActiveScopeResult, MilestoneProgress, ProjectOverviewSummary } from './api.js';
 import {
   buildEpicOnlySwimlane,
@@ -269,14 +270,17 @@ export function buildRoadmapSections(
 }
 
 /**
- * Active scope: keep the sections a live CLI session is on. Sections key by
- * project name (milestones are home-only; a foreign-store project arrives
- * through `overview.projects`), so the match is by name. A phase-less epic
- * section also counts when one of its epics is active, which is how the
- * unscoped "Epics" fallback (no project) qualifies. A null or unmeasured
- * scope is "unknown", not "nothing active": the sections come back as they are.
- * `keepProject` names the section the user is reading: it stays listed when its
- * project turns quiet (Sessions' rule), in its place.
+ * Active scope: keep the sections a live CLI session is on. A section with a
+ * store matches by store + project, and its epics by store + epic id, because
+ * two stores can hold the same label or epic id and only one of them has the
+ * session. A section with no store is read as the home store's, except a
+ * phase-less epic section: its epic ids come from the overview, which merges
+ * every store by id, so it matches by project name and by epic id in any
+ * store (which is also how the unscoped "Epics" fallback, with no project,
+ * qualifies). A null or unmeasured scope is "unknown", not "nothing active":
+ * the sections come back as they are. `keepProject` names the section the
+ * user is reading: it stays listed when its project turns quiet (Sessions'
+ * rule), in its place.
  */
 export function filterActiveSections(
   sections: readonly RoadmapSection[],
@@ -284,14 +288,19 @@ export function filterActiveSections(
   keepProject: string | null = null,
 ): RoadmapSection[] {
   if (scope?.measured !== true) return [...sections];
-  const projects = new Set(scope.projects.map((p) => p.project));
-  const epics = new Set(scope.epics.map((e) => e.epicId));
   return sections.filter((s) => {
     if (keepProject !== null && s.key === keepProject) return true;
-    if (s.project !== '' && projects.has(s.project)) return true;
+    const merged = s.kind === 'epic' && s.store === undefined;
+    if (s.project !== '') {
+      if (merged ? isActiveProjectName(scope, s.project) : isActiveProject(scope, s, s.project)) {
+        return true;
+      }
+    }
     if (s.kind !== 'epic') return false;
     const { earlier, visible, later } = s.window;
-    return [...earlier, ...visible, ...later].some((e) => epics.has(e));
+    return [...earlier, ...visible, ...later].some((id) =>
+      merged ? scope.epics.some((e) => e.epicId === id) : isActiveEpic(scope, s, id),
+    );
   });
 }
 
