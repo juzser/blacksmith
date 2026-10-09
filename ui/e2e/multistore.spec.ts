@@ -26,6 +26,7 @@ const HOME_TITLE_2 = 'Simplify the config loader.';
 const FOREIGN_TITLE_1 = 'Foreign widget renderer.';
 const FOREIGN_TITLE_2 = 'Foreign config loader.';
 const EXTRA_NOTES = 40;
+const FOREIGN_EPIC = 'epic-b';
 
 let tmp = '';
 let origin = '';
@@ -152,6 +153,34 @@ test.describe('a foreign store in the dashboard', () => {
     for (const eventsDir of [homeEvents, foreignEvents]) {
       const opts = { stateDir: eventsDir };
       await buildFixture(opts);
+      if (eventsDir === foreignEvents) {
+        // An epic and a milestone only the foreign store has, for the Roadmap. Its
+        // tasks join the fixture's session so no extra session row appears.
+        for (const n of [1, 2]) {
+          const parent = (await readEvents('sess-fixture', { stateDir: foreignEvents })).at(-1);
+          await appendEvent(
+            {
+              session_id: 'sess-fixture',
+              actor: 'planner',
+              event_type: 'task-added',
+              task_id: `${FOREIGN_EPIC}/task-${n}`,
+              plan_version: 1,
+              causal_parent: parent?.event_id ?? null,
+              payload: {
+                epic_id: FOREIGN_EPIC,
+                case: 'feature',
+                origin: 'user',
+                task_status: 'todo',
+                plan_version: 1,
+                objective: `Foreign roadmap work ${n}.`,
+                claims: [],
+                budget_tokens: 100,
+              },
+            },
+            { stateDir: foreignEvents },
+          );
+        }
+      }
       // A waivable finding on task-4, so a store-blind page would offer Waive.
       const events = await readEvents('sess-fixture', opts);
       const last = events[events.length - 1];
@@ -200,6 +229,12 @@ test.describe('a foreign store in the dashboard', () => {
         },
       },
       homeOpts,
+    );
+    const foreignSpecs = path.join(foreign, '.blacksmith', 'factory', 'specs');
+    await mkdir(foreignSpecs, { recursive: true });
+    await writeFile(
+      path.join(foreignSpecs, 'roadmap.md'),
+      `## Foreign phase\n- id: phase-b\n- status: in-progress\n- epics: [${FOREIGN_EPIC}]\n`,
     );
     // The foreign store's own wording, and each store's own project on every
     // event, so the merged Activity feed spans two projects.
@@ -330,6 +365,19 @@ test.describe('a foreign store in the dashboard', () => {
     await page.goto(taskUrl(TASK_4));
     await page.getByRole('tab', { name: 'Findings' }).click();
     await expect(page.getByRole('button', { name: 'Waive' })).toBeVisible();
+  });
+
+  test('R1: the Roadmap shows a foreign epic with its tasks and waves, and its milestone', async ({
+    page,
+  }) => {
+    await page.goto(`${origin}/work/roadmap?scope=all&phase=phase-b`);
+    const block = page.getByRole('region', { name: /Foreign phase.*goal and epics/ });
+    await expect(block).toBeVisible();
+    const section = block.locator('.esec', { hasText: FOREIGN_EPIC });
+    await expect(section.getByText('0 of 2 tasks done')).toBeVisible();
+    await expect(section.getByText('No tasks tracked')).toHaveCount(0);
+    await section.getByRole('button', { name: /Show waves|Hide waves/ }).click();
+    await expect(section.locator(`#waves-${FOREIGN_EPIC}`)).toContainText('Foreign roadmap work');
   });
 
   test('B2: a foreign Kanban card peeks its own task and opens the store-scoped page', async ({
