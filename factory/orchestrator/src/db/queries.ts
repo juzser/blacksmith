@@ -2778,28 +2778,27 @@ function epicOfEntry(entry: TimelineEntry): string | null {
 }
 
 /**
- * The epic of a `user_prompt`, which names none itself (derived at read, nothing
- * stored). A prompt captured into an epic's log takes the epic of that session's
- * other entries; a `prompts-<uuid>` home log has none, so it takes the epic of
- * any entry whose `parent_prompt_id` names it. Other entries answer null, so
- * `epicOfEntry` decides them as before.
+ * Whether an entry belongs to `epicId`. A `user_prompt` names no epic itself,
+ * so one is derived at read (nothing stored): a prompt shows under every epic
+ * its session's other entries belong to, and under every epic of an entry
+ * whose `parent_prompt_id` names it (the `prompts-<uuid>` home log has no
+ * entries of its own). Every other entry is decided by `epicOfEntry` alone.
  */
-function promptEpicResolver(
+function promptInEpic(
   entries: readonly TimelineEntry[],
-): (e: TimelineEntry) => string | null {
-  const bySession = new Map<string, string>();
-  const byPrompt = new Map<string, string>();
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  const sessions = new Set<string>();
+  const named = new Set<string>();
   for (const e of entries) {
-    const epic = epicOfEntry(e);
-    if (epic === null) continue;
-    if (!bySession.has(e.sessionId)) bySession.set(e.sessionId, epic);
-    const named = e.payload.parent_prompt_id;
-    if (typeof named === 'string' && !byPrompt.has(named)) byPrompt.set(named, epic);
+    if (epicOfEntry(e) !== epicId) continue;
+    sessions.add(e.sessionId);
+    const parent = e.payload.parent_prompt_id;
+    if (typeof parent === 'string') named.add(parent);
   }
   return (e) =>
-    e.eventType !== 'user_prompt'
-      ? null
-      : (epicOfEntry(e) ?? bySession.get(e.sessionId) ?? byPrompt.get(e.eventId) ?? null);
+    epicOfEntry(e) === epicId ||
+    (e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId)));
 }
 
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
@@ -2844,8 +2843,7 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   let entries = rows.map((row) => toEntry(row, null));
   entries = filterByProject(entries, filter);
   if (filter.epicId) {
-    const promptEpic = promptEpicResolver(entries);
-    entries = entries.filter((e) => (promptEpic(e) ?? epicOfEntry(e)) === filter.epicId);
+    entries = entries.filter(promptInEpic(entries, filter.epicId));
   }
   if (filter.kinds?.length) {
     const kinds = new Set(filter.kinds);
