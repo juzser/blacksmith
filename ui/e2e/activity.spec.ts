@@ -165,6 +165,8 @@ test.describe('Activity', () => {
 
   test("Expand all opens every row's detail", async ({ page }) => {
     await page.goto('/activity?kind=prompt');
+    // Expand all expands only the rows loaded at click time, so wait for one.
+    await expect(page.locator('.bs-timeline-row').first()).toBeVisible();
     // v-show, not v-if (TimelineRow.vue, D-227): the detail <dl> exists while
     // collapsed, just hidden, so this checks visibility, not presence.
     const detail = page.locator('.bs-timeline-row__detail').first();
@@ -206,6 +208,8 @@ test.describe('Activity', () => {
   // A row with no task (a prompt) offers no Task term in its details.
   test('a prompt row, which has no task, shows no Task term when expanded', async ({ page }) => {
     await page.goto('/activity?kind=prompt');
+    // Expand all expands only the rows loaded at click time, so wait for one.
+    await expect(page.locator('.bs-timeline-row').first()).toBeVisible();
     await page.getByRole('button', { name: 'Expand all' }).click();
     const detail = page.locator('.bs-timeline-row__detail').first();
     await expect(detail).toBeVisible();

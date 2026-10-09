@@ -1,5 +1,5 @@
 ---
-name: researcher
+name: bs-researcher
 description: Produces a targeted research brief for a planner's pre-code question or a worker's mid-flight research_request. Use before code starts on an unknown, or when a worker returns a research_request in its structured_output.
 model: sonnet
 effort: medium

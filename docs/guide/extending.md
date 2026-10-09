@@ -1,20 +1,23 @@
 # Extending Blacksmith
 
 Contributor guide: how to add an agent template, add a judge provider, change
-the taxonomy, add a policy, and what invariants `scripts/check.sh` enforces so
-a docs/code mismatch fails CI instead of drifting silently.
+the taxonomy, add a policy, add a mod, and what invariants `scripts/check.sh`
+enforces so a docs/code mismatch fails CI instead of drifting silently.
 
 ## Add an agent template
 
-Templates live at `.claude/agents/<role>.md` — Claude Code subagent
-format (YAML frontmatter + body-as-system-prompt). There are 12 today:
+Templates live at `.claude/agents/bs-<role>.md` (the subagent is named
+`bs-<role>`, so it cannot collide with another plugin's `coder`; the role
+stays bare in events, policies and env names) — Claude Code subagent
+format (YAML frontmatter + body-as-system-prompt). There are 14 today:
 `planner`, `spec-reviewer`, `researcher`, `coder`, `tester`, `grader`,
-`reviewer`, `verifier`, `security-reviewer`, `merger`, `scribe`, `uiux`.
+`reviewer`, `verifier`, `security-reviewer`, `merger`, `scribe`, `uiux`,
+`auditor`, `wave-runner`.
 
 To add one:
 
-1. **Write the file** `.claude/agents/<role>.md` with required
-   frontmatter fields `name`, `description`, `model`, `tools`, and
+1. **Write the file** `.claude/agents/bs-<role>.md` with required
+   frontmatter fields `name` (`bs-<role>`), `description`, `model`, `tools`, and
    `maxTurns` — a positive integer that Claude Code enforces as the agent's
    turn ceiling, so leaving it out ships an uncapped role. Add a matching
    `BS_MAXTURNS_<ROLE>` line to `.env.example` at the same value
@@ -35,7 +38,7 @@ To add one:
 4. **`check.sh`'s contract**, which every template must satisfy:
    - starts with `---`, has a well-formed frontmatter block;
    - `name`, `description`, `model`, `tools` all present and non-empty;
-   - the set of `.claude/agents/*.md` basenames equals `taxonomy.yml`'s
+   - the set of `.claude/agents/bs-*.md` basenames, prefix stripped, equals `taxonomy.yml`'s
      `agent` dimension exactly (Section "Agent templates: frontmatter" in
      `scripts/check.sh`).
 
@@ -223,6 +226,51 @@ hand-authored). To add a new one:
 4. Reference the new policy from `AGENTS.md`'s "Policies" row and from
    `docs/README.md`'s policy table so it's discoverable.
 
+## Add a mod
+
+A mod is a Claude Code plugin module under `mods/<name>/`. The operator side
+is in [`mods.md`](mods.md); this is what the repo expects of a new one.
+
+1. Lay the folder out the way `mods/bs-mod/` and `mods/pr-mod/` are:
+   - `.claude-plugin/plugin.json`: `name`, `version`, `description`, and
+     `types` pointing at `./types/index.d.ts`.
+   - `hooks/hooks.json`, which names the entry module (`./register.tsx`).
+     The engine loads only what it names.
+   - `hooks/register.tsx` and any helpers beside it, with `hooks/*.test.ts`.
+   - `types/index.d.ts`: the mod's contract for the state it keeps, which
+     `claude plugin validate` checks against. It is committed.
+   - `tsconfig.json`, extending `./.claude-plugin/types/tsconfig.json`.
+     Claude Code writes `.claude-plugin/types/` when a session loads the mod,
+     so add that folder to `.gitignore` the way the two mods do.
+   - A `README.md`: what it shows, its command, and "Developing it".
+2. List it in `.claude-plugin/marketplace.json`, with its `source` set to
+   `./mods/<name>`.
+3. Set its `version` to the package's. `pluginManifest.test.ts` fails when
+   any listed plugin's version differs, because an installed plugin stays on
+   its cached copy until that string changes. Add the mod's name to that
+   test's `it.each` list, which checks that `hooks.json` names modules that
+   exist, and to its typed-entries check, which checks that the `types` file
+   is there.
+4. Give it a block in `scripts/check.sh`, as each mod has. The block runs
+   `claude plugin validate mods/<name>` and `claude plugin test mods/<name>`
+   when `claude` is on PATH, and prints `SKIP` when it is not. CI has no
+   `claude`, so there it is always a `SKIP`, and `pluginManifest.test.ts` is
+   the check that runs.
+5. Expect the repo's own tooling to leave it out. The root vitest runs only
+   `factory/orchestrator/test/`, and neither Biome's `files.includes` nor the
+   repo's other tsconfigs name a `mods/` path. That is on purpose: a mod's
+   tests import Claude Code's own test kit, which only its plugin runner
+   provides. Type-check it by hand with `pnpm exec tsc -p mods/<name>` after
+   a session has loaded it once. The bs-mod README's
+   [Developing it](../../mods/bs-mod/README.md#developing-it) has all three
+   checks.
+6. Write its prose in English. The repo-wide guards read the tracked files,
+   `mods/` included, and `repoLanguage.test.ts` reads `.ts`, `.tsx` and
+   `.json` as well as Markdown.
+7. Keep it self-contained: a plugin cannot import another's files. Copy
+   what you need and say where it came from, as
+   `mods/pr-mod/hooks/palette.ts` does with bs-mod's colors.
+
 ## Docs-mirror invariants
 
 Three invariants are enforced mechanically — two by `scripts/check.sh`
@@ -230,7 +278,7 @@ directly, one by the test suite it runs — and one is not (own it in review):
 
 | Invariant | Enforced by |
 |---|---|
-| `taxonomy.yml`'s `agent` dimension == `.claude/agents/*.md` basenames | `scripts/check.sh` "Agent templates: frontmatter" section |
+| `taxonomy.yml`'s `agent` dimension == `.claude/agents/bs-*.md` basenames, prefix stripped | `scripts/check.sh` "Agent templates: frontmatter" section |
 | Every `x-taxonomy` value in `factory/specs/schema/*.json` names a real `taxonomy.yml` dimension | `scripts/check.sh` "x-taxonomy dimensions referenced in schemas exist in taxonomy.yml" section |
 | Every `SHARED:<name>` region in `.claude/agents/*.md` equals `.claude/fragments/<name>.md` byte for byte, and every fragment has a carrier | `factory/orchestrator/test/templateFragments.test.ts` (repair with `node scripts/sync-shared-fragments.mjs`) |
 | `taxonomy.yml` mirrors architecture.md §8 prose value-for-value | **Not mechanically checked** — a manual review item on every taxonomy PR |

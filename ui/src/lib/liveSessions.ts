@@ -6,6 +6,15 @@ import { foreignStoreId, type StoreRef } from './storeKey.js';
 
 export type LiveStatus = 'working' | 'waiting_answer' | 'waiting_operator' | 'idle' | 'unknown';
 
+/** The part of a `/api/cli-sessions` linked epic the Kanban Now / Next marks read. */
+export interface LiveLinkedEpic {
+  store: StoreRef;
+  epicId: string | null;
+  closed: boolean;
+  workingAgents: { role: string; taskId: string | null; since: string }[];
+  focusParts: { nextTask: { taskId: string; taskTitle: string } | null };
+}
+
 /** The part of the `/api/cli-sessions` card this view reads. */
 export interface LiveCard {
   cliSessionId: string;
@@ -26,6 +35,7 @@ export interface LiveCard {
       | { kind: 'none' }
       | null;
   } | null;
+  linked?: { epics: LiveLinkedEpic[] } | null;
 }
 
 export interface LiveSessionsResult {

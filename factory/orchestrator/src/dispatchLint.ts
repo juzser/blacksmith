@@ -17,6 +17,7 @@
  */
 import path from 'node:path';
 import { readTemplateMaxTurns } from './agentsSync.js';
+import { formatDeclaredArtifactLine, parseDeclaredArtifactLine } from './declaredArtifactLine.js';
 import type { EventOpts } from './events.js';
 import { JUDGE_ROLES } from './judgeRoles.js';
 import { readJudgeTurns } from './judges.js';
@@ -32,7 +33,7 @@ export type { JudgeRole } from './judgeRoles.js';
  * dispatch (never carries one) reads `not-applicable` rather than a false
  * `undeclared`.
  */
-export { JUDGE_ROLES };
+export { formatDeclaredArtifactLine, JUDGE_ROLES, parseDeclaredArtifactLine };
 
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
 
@@ -91,19 +92,6 @@ export function parseStatedTurns(prompt: string): number | null {
   return /^[0-9]+$/.test(raw) ? Number(raw) : null;
 }
 
-const DECLARED_ARTIFACT_LINE = /^Declared artifact:[ \t]*(\S+)[ \t]*$/m;
-
-/** `Declared artifact: <path>` in a dispatch prompt, or null when the line is not there. */
-export function parseDeclaredArtifactLine(prompt: string): string | null {
-  const match = DECLARED_ARTIFACT_LINE.exec(prompt);
-  return match?.[1] ?? null;
-}
-
-/** The line a dispatch is expected to carry verbatim, given the ledger's declared path. */
-export function formatDeclaredArtifactLine(artifactPath: string): string {
-  return `Declared artifact: ${artifactPath}`;
-}
-
 function checkTurns(prompt: string, role: string, agentsDir: string): TurnsCheck {
   const stated = parseStatedTurns(prompt);
   const template = readTemplateMaxTurns(agentsDir, role) ?? null;
@@ -135,11 +123,11 @@ async function checkArtifact(
   if (declaredLine === null) {
     return { status: 'missing', expected_line: expectedLine, declared_line: null };
   }
-  if (declaredLine === turn.declaredArtifact) {
-    return { status: 'ok', expected_line: expectedLine, declared_line: declaredLine };
-  }
   if (!path.isAbsolute(declaredLine)) {
     return { status: 'relative', expected_line: expectedLine, declared_line: declaredLine };
+  }
+  if (declaredLine === turn.declaredArtifact) {
+    return { status: 'ok', expected_line: expectedLine, declared_line: declaredLine };
   }
   return { status: 'mismatch', expected_line: expectedLine, declared_line: declaredLine };
 }

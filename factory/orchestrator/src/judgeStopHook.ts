@@ -2,7 +2,7 @@
 /**
  * `.claude/hooks/judge-stop.sh` — the SubagentStop decision for a judge-class
  * agent (reviewer, verifier, grader, spec-reviewer, security-reviewer,
- * auditor; `JUDGE_ROLES` in dispatchLint.ts is the authoritative set).
+ * auditor; `JUDGE_ROLES` in judgeRoles.ts is the authoritative set).
  *
  * A judge can end its turn without ever writing the artifact its dispatch
  * declared, and today that gap is found only downstream, when `smith judge
@@ -11,10 +11,11 @@
  * while the declared path does not exist, allow it once it does. A harness
  * `maxTurns` cap is out of scope; this hook cannot override it.
  *
- * The declared-artifact line and its parser come from `dispatchLint.ts`,
- * never redefined — `dispatch lint` already refuses, before dispatch, any
- * judge prompt whose line is missing, relative, or mismatched, so this hook
- * only asks "does the file exist yet", never "is the line well-formed".
+ * The declared-artifact line and its parser come from
+ * `declaredArtifactLine.ts`, never redefined — in this clone the PreToolUse
+ * guard refuses, before dispatch, any judge dispatch whose prompt lacks an
+ * absolute line (and `dispatch lint` checks it against the ledger), so this
+ * hook only asks "does the file exist yet", never "is the line well-formed".
  *
  * Fail open on anything this hook cannot read: a non-judge `agent_type`, a
  * prompt with no declared-artifact line, a relative path, unparseable stdin,
@@ -25,12 +26,26 @@
  *
  * Fail closed ONLY on a readable absolute declared path that does not exist.
  *
+ * The hook reads the subagent's first non-meta user text -- its dispatch
+ * prompt -- from `agent_transcript_path`. Per
+ * https://code.claude.com/docs/en/hooks#subagentstop: "The `transcript_path`
+ * is the main session's transcript, while `agent_transcript_path` is the
+ * subagent's own transcript stored in a nested `subagents/` folder." Later
+ * user-role entries (meta reminders, resumes, compaction notices) are never
+ * the prompt. An older CLI that sends no `agent_transcript_path` falls back
+ * to `transcript_path`: the main session's first prompt, which carries no
+ * Declared line unless that session was itself dispatched as a judge, so the
+ * hook fails open there.
+ *
  * SubagentStop stdin fields: https://code.claude.com/docs/en/hooks
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { pathToFileURL } from 'node:url';
-import { JUDGE_ROLES, parseDeclaredArtifactLine } from './dispatchLint.js';
+import { roleOfAgentType } from './agentNames.js';
+import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
+import { JUDGE_ROLES } from './judgeRoles.js';
 
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
 
@@ -38,7 +53,12 @@ const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
 export interface SubagentStopHookInput {
   session_id?: string;
   prompt_id?: string;
+  /** The MAIN session's transcript, not the subagent's. */
   transcript_path?: string;
+  /** The subagent's own transcript (nested `subagents/` folder). */
+  agent_transcript_path?: string;
+  /** Documented on SubagentStop; this hook does not read it. */
+  last_assistant_message?: string;
   cwd?: string;
   scratchpad_dir?: string;
   permission_mode?: string;
@@ -63,8 +83,10 @@ export function decideJudgeStop(
   input: SubagentStopHookInput,
   promptText: string | null,
 ): JudgeStopDecision {
-  const agentType = input.agent_type;
-  if (agentType === undefined || !JUDGE_ROLE_SET.has(agentType)) {
+  // `bs-reviewer`, `blacksmith:bs-reviewer` and (transition) the bare old names
+  // all map to the role; a name that maps to nothing is not a judge.
+  const role = input.agent_type === undefined ? null : roleOfAgentType(input.agent_type);
+  if (role === null || !JUDGE_ROLE_SET.has(role)) {
     // Not one of the six judge roles -- a coder's turn carries no declared
     // artifact at all, so there is nothing for this hook to check.
     return { decision: 'allow' };
@@ -86,7 +108,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         'judge-stop: no "Declared artifact: <path>" line in this prompt; allowing ' +
-        "the stop. dispatch lint refuses this before dispatch, and judge report's " +
+        "the stop. The PreToolUse guard refuses this before dispatch in this clone, and judge report's " +
         'judges.artifact-missing catches it downstream.',
     };
   }
@@ -96,7 +118,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         `judge-stop: declared artifact "${declared}" is not an absolute path; ` +
-        'allowing the stop. dispatch lint refuses this before dispatch, and judge ' +
+        'allowing the stop. The PreToolUse guard refuses this before dispatch in this clone, and judge ' +
         "report's judges.artifact-missing catches it downstream.",
     };
   }
@@ -115,33 +137,66 @@ export function decideJudgeStop(
 }
 
 /**
- * The last user-role message's text in a Claude Code JSONL transcript --
- * where a dispatch prompt and its "Declared artifact:" line live. Walks
- * backward from the end, since a subagent's transcript can carry many turns
- * and the dispatch prompt need not be the only user turn. Returns `null` on
- * any read or parse failure.
+ * The text of the first non-meta user-role entry in a Claude Code JSONL
+ * transcript -- in a subagent's own transcript that is its dispatch prompt,
+ * where the "Declared artifact:" line lives; meta reminders, resumes, tool
+ * results and compaction notices all come after it or are skipped. Streams
+ * the file in fixed-size chunks (a transcript can pass 512 MB, where a
+ * whole-file read throws), splitting on `\n` only, and stops reading as soon
+ * as the prompt is found; work is linear in the bytes read because only the
+ * newly read chunk is scanned for line breaks. A torn or unparseable line is
+ * skipped. Returns `null` on any read failure or when no such entry exists.
  */
-export function extractLastUserPromptText(transcriptPath: string): string | null {
-  let raw: string;
+export function extractDispatchPromptText(
+  transcriptPath: string,
+  chunkSize = 64 * 1024,
+): string | null {
+  let fd: number;
   try {
-    raw = readFileSync(transcriptPath, 'utf8');
+    fd = openSync(transcriptPath, 'r');
   } catch {
     return null;
   }
-  const lines = raw.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (line === undefined || line.trim() === '') continue;
+  const consume = (line: string): string | null => {
+    if (line.trim() === '') return null;
     let entry: unknown;
     try {
       entry = JSON.parse(line);
     } catch {
-      continue;
+      return null;
     }
-    const text = userTextOf(entry);
-    if (text !== null) return text;
+    if ((entry as { isMeta?: unknown } | null)?.isMeta === true) return null;
+    return userTextOf(entry);
+  };
+  try {
+    const buf = Buffer.alloc(chunkSize);
+    const decoder = new StringDecoder('utf8');
+    let carry: string[] = [];
+    for (;;) {
+      const n = readSync(fd, buf, 0, chunkSize, null);
+      if (n === 0) break;
+      const chunk = decoder.write(buf.subarray(0, n));
+      let start = 0;
+      for (let nl = chunk.indexOf('\n'); nl !== -1; nl = chunk.indexOf('\n', start)) {
+        carry.push(chunk.slice(start, nl));
+        const found = consume(carry.join(''));
+        if (found !== null) return found;
+        carry = [];
+        start = nl + 1;
+      }
+      if (start < chunk.length) carry.push(chunk.slice(start));
+    }
+    carry.push(decoder.end());
+    return consume(carry.join(''));
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // nothing to do about a failed close
+    }
   }
-  return null;
 }
 
 function userTextOf(entry: unknown): string | null {
@@ -190,9 +245,15 @@ export function runJudgeStopHook(rawStdin: string): JudgeStopHookResult {
     };
   }
 
-  const promptText = input.transcript_path
-    ? extractLastUserPromptText(input.transcript_path)
-    : null;
+  // Older CLIs send no agent_transcript_path; the fallback then reads the
+  // main session's transcript, whose first prompt carries no declared line
+  // unless that session was itself dispatched as a judge, so the hook
+  // fails open there.
+  const promptPath =
+    typeof input.agent_transcript_path === 'string' && input.agent_transcript_path !== ''
+      ? input.agent_transcript_path
+      : input.transcript_path;
+  const promptText = promptPath ? extractDispatchPromptText(promptPath) : null;
   const result = decideJudgeStop(input, promptText);
   if (result.decision === 'block') {
     return {

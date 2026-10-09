@@ -40,7 +40,7 @@ prints three harnesses:
 ```
 
 (`roles` trimmed above for width — `summarizeHarnesses()` lists every
-taxonomy `agent` role that ships a `.claude/agents/<role>.md` template and
+taxonomy `agent` role that ships a `.claude/agents/bs-<role>.md` template and
 that this harness serves; see §4 for what makes a judge role show up there
 at all.)
 
@@ -84,7 +84,7 @@ bs harness plan --harness codex-cli --role coder --task epic-1/task-3 \
 ```
 
 ```json
-{"harness":"codex-cli","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":"../wt/task-3","sandboxRequired":false,"kind":"cli","command":"codex","args":["exec","--json","--color","never","--skip-git-repo-check","-","-s","workspace-write","--output-schema","/abs/path/factory/specs/schema/result.schema.json"],"cwd":"../wt/task-3","envAllowlist":["HOME","PATH","CODEX_HOME"],"template":".claude/agents/coder.md","output":"codex-json","model":null,"tier":"mid","schema":"result","stdin":"prompt","budget":{"timeout_ms":1800000,"max_output_bytes":2097152,"cap_tokens":220000}}
+{"harness":"codex-cli","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":"../wt/task-3","sandboxRequired":false,"kind":"cli","command":"codex","args":["exec","--json","--color","never","--skip-git-repo-check","-","-s","workspace-write","--output-schema","/abs/path/factory/specs/schema/result.schema.json"],"cwd":"../wt/task-3","envAllowlist":["HOME","PATH","CODEX_HOME"],"template":".claude/agents/bs-coder.md","output":"codex-json","model":null,"tier":"mid","schema":"result","stdin":"prompt","budget":{"timeout_ms":1800000,"max_output_bytes":2097152,"cap_tokens":220000}}
 ```
 
 `--output-schema` is last because it comes from `schema_args`, appended after
@@ -97,7 +97,7 @@ An `in-process` invocation (the shipped default, `claude-code`) renders the
 separate program to start:
 
 ```json
-{"harness":"claude-code","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":null,"sandboxRequired":false,"kind":"in-process","subagentType":"coder","template":".claude/agents/coder.md"}
+{"harness":"claude-code","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":null,"sandboxRequired":false,"kind":"in-process","subagentType":"bs-coder","template":".claude/agents/bs-coder.md"}
 ```
 
 `envAllowlist` on a `cli` invocation is variable **names**, never values. The

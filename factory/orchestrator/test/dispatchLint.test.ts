@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { templateFileFor } from '../src/agentNames.js';
 // TDD red step, observed and recorded verbatim before this module existed:
 //   Error: Cannot find module '.../factory/orchestrator/src/dispatchLint.js'
 //   imported from '.../factory/orchestrator/test/dispatchLint.test.ts'
@@ -38,10 +39,10 @@ const sessionId = 'sess-dispatch-lint';
 beforeEach(async () => {
   agentsDir = await mkdtemp(path.join(tmpdir(), 'smith-dispatch-lint-agents-'));
   stateDir = await mkdtemp(path.join(tmpdir(), 'smith-dispatch-lint-state-'));
-  await writeFile(path.join(agentsDir, 'planner.md'), template('planner', 20));
-  await writeFile(path.join(agentsDir, 'coder.md'), template('coder', 40));
-  await writeFile(path.join(agentsDir, 'reviewer.md'), template('reviewer', 15));
-  await writeFile(path.join(agentsDir, 'no-max-turns.md'), template('no-max-turns', null));
+  await writeFile(path.join(agentsDir, templateFileFor('planner')), template('planner', 20));
+  await writeFile(path.join(agentsDir, templateFileFor('coder')), template('coder', 40));
+  await writeFile(path.join(agentsDir, templateFileFor('reviewer')), template('reviewer', 15));
+  await writeFile(path.join(agentsDir, 'bs-no-max-turns.md'), template('no-max-turns', null));
   await appendEvent(
     {
       session_id: sessionId,
@@ -219,7 +220,7 @@ describe('lintDispatchPrompt — turn budget', () => {
     });
     expect(first.turns).toEqual({ status: 'ok', stated: 20, template: 20 });
 
-    await writeFile(path.join(agentsDir, 'planner.md'), template('planner', 30));
+    await writeFile(path.join(agentsDir, templateFileFor('planner')), template('planner', 30));
 
     const second = await lintDispatchPrompt({
       prompt: 'Turn budget: 20',
@@ -251,6 +252,40 @@ describe('lintDispatchPrompt — declared artifact', () => {
 
   it('is "relative" and exits 1 when the declared path is not absolute', async () => {
     await dispatchJudge();
+    const report = await lintDispatchPrompt({
+      prompt: 'Turn budget: 15\nDeclared artifact: task-1.reviewer.json\n',
+      role: 'reviewer',
+      taskId: 'epic-1/task-1',
+      sessionId,
+      agentsDir,
+      eventOpts: eventOpts(),
+    });
+    expect(report.artifact.status).toBe('relative');
+    expect(report.exitCode).toBe(1);
+  });
+
+  it('is "relative", not "ok", when a relative line equals a relative ledger path', async () => {
+    // An old log can hold a relative declared_artifact; recordJudgeDispatch no
+    // longer writes one, so the event goes straight to the log.
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-1/task-1',
+        plan_version: 1,
+        causal_parent: `${sessionId}#0`,
+        payload: {
+          agent_role: 'reviewer',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+          round: 1,
+          declared_artifact: 'task-1.reviewer.json',
+        },
+      },
+      eventOpts(),
+    );
     const report = await lintDispatchPrompt({
       prompt: 'Turn budget: 15\nDeclared artifact: task-1.reviewer.json\n',
       role: 'reviewer',

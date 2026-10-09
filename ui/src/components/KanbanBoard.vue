@@ -35,10 +35,12 @@ import {
 } from '../lib/kanban.js';
 import {
   DEFAULT_KANBAN_DISPLAY_OPTIONS,
+  hasChosenKanbanGroupBy,
   type KanbanDisplayOptionsStorage,
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
 } from '../lib/kanbanDisplayOptions.js';
+import { type LiveMarks, markFor, orderLive, orderLiveItems } from '../lib/liveFocus.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
 import KanbanFollowupGroup from './KanbanFollowupGroup.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
@@ -61,9 +63,17 @@ const TONE_ICON = {
   neutral: CircleDashed,
 } as const;
 
-const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean }>(), {
-  showAll: false,
-});
+const props = withDefaults(
+  defineProps<{
+    tasks: KanbanTask[];
+    showAll?: boolean;
+    /** What live sessions work on and do next; null marks nothing. */
+    live?: LiveMarks | null;
+    /** Group by to use until the operator saves their own. */
+    defaultGroupBy?: KanbanGroupBy | null;
+  }>(),
+  { showAll: false, live: null, defaultGroupBy: null },
+);
 const emit = defineEmits<{ select: [taskId: string, storeId?: string] }>();
 
 const { isPhoneWidth } = useViewport();
@@ -98,13 +108,19 @@ const browserStorage: KanbanDisplayOptionsStorage | null =
 const options = ref(
   browserStorage ? loadKanbanDisplayOptions(browserStorage) : DEFAULT_KANBAN_DISPLAY_OPTIONS,
 );
+const groupByChosen = ref(browserStorage ? hasChosenKanbanGroupBy(browserStorage) : false);
+// A Group by the operator chose wins; otherwise the page's default (if any) applies.
+const groupBy = computed<KanbanGroupBy>(() =>
+  groupByChosen.value ? options.value.groupBy : (props.defaultGroupBy ?? options.value.groupBy),
+);
 function persist() {
   if (browserStorage) saveKanbanDisplayOptions(browserStorage, options.value);
 }
 
 const optionsOpen = ref(false);
-function setGroupBy(groupBy: KanbanGroupBy) {
-  options.value = { ...options.value, groupBy };
+function setGroupBy(value: KanbanGroupBy) {
+  options.value = { ...options.value, groupBy: value, groupByChosen: true };
+  groupByChosen.value = true;
   persist();
 }
 function setSummary(summary: boolean) {
@@ -134,7 +150,7 @@ function hideColumnFromMenu(key: string) {
 }
 
 const grouped = computed(() =>
-  groupByKanban(props.tasks as GroupableTask[], options.value.groupBy, props.showAll).filter(
+  groupByKanban(props.tasks as GroupableTask[], groupBy.value, props.showAll).filter(
     (col) => !options.value.hidden.includes(col.key),
   ),
 );
@@ -152,13 +168,17 @@ function revealMore(key: string) {
 
 const columns = computed(() =>
   grouped.value.map((col) => {
-    const active = col.tasks.filter((t) => !isDoneStatus(t.taskStatus));
-    const done = col.tasks.filter((t) => isDoneStatus(t.taskStatus));
+    // Marked cards lead the column, before the done split and the cap below.
+    const ordered = orderLive(col.tasks, props.live);
+    const active = ordered.filter((t) => !isDoneStatus(t.taskStatus));
+    const done = ordered.filter((t) => isDoneStatus(t.taskStatus));
     const showDone = expandedDone.value[col.key] ?? false;
     // Follow-ups of one parent stack into a single item; the stack counts as
     // one toward the cap below, while `total` stays the task count.
     const visibleTasks = showDone ? [...active, ...done] : active;
-    const visible = groupFollowups(visibleTasks, col.key);
+    // A group ranks by its best-marked member, so a marked fix stacked in
+    // a group still leads the column.
+    const visible = orderLiveItems(groupFollowups(visibleTasks, col.key), props.live);
     // A simple windowed slice rather than a scroll-driven virtualizer: past
     // KANBAN_VIRTUALIZE_THRESHOLD the column reuses the same capColumn()/
     // "view more" control the rest of the board already has, so a very
@@ -308,6 +328,12 @@ async function focusFirstCard() {
   cardEls()[0]?.focus();
 }
 defineExpose({ focusFirstCard });
+
+// "<project> · <epic>" for a marked card on a board not grouped by epic.
+function captionFor(task: KanbanTask): string | null {
+  if (!markFor(props.live, task) || !task.epicLabel) return null;
+  return task.epicLabel.replace(': ', ' · ');
+}
 </script>
 
 <template>
@@ -324,7 +350,7 @@ defineExpose({ focusFirstCard });
         :as-menu-item="isPhoneWidth"
         :open="optionsOpen"
         :summary="options.summary"
-        :group-by="options.groupBy"
+        :group-by="groupBy"
         :hidden="options.hidden"
         @open="optionsOpen = true"
         @close="optionsOpen = false"
@@ -368,11 +394,11 @@ defineExpose({ focusFirstCard });
       >
         <div v-if="!isPhoneWidth" class="bs-kanban-col__head">
           <component
-            :is="TONE_ICON[columnTone(options.groupBy, col.key)]"
+            :is="TONE_ICON[columnTone(groupBy, col.key)]"
             :size="16"
             :stroke-width="1.75"
             class="bs-kanban-col__icon"
-            :style="{ color: `var(--bs-tone-${columnTone(options.groupBy, col.key)}-text)` }"
+            :style="{ color: `var(--bs-tone-${columnTone(groupBy, col.key)}-text)` }"
             aria-hidden="true"
           />
           <h3 class="bs-kanban-col__title">{{ col.label }}</h3>
@@ -403,8 +429,10 @@ defineExpose({ focusFirstCard });
               :members="item.members"
               :parent-label="parentLabel(item.parentTaskId, item.parentTitle)"
               :open="openGroups.has(item.key)"
-              :status-in-column="options.groupBy === 'status' && !showAll"
+              :status-in-column="groupBy === 'status' && !showAll"
               :compact="isPhoneWidth"
+              :live="live"
+              :show-caption="groupBy !== 'epic'"
               :reveal-task-id="peekTaskId"
               :reveal-store-id="peekStoreId"
               @toggle="toggleGroup(item.key)"
@@ -414,8 +442,10 @@ defineExpose({ focusFirstCard });
             <KanbanTaskCard
               v-else
               :task="item.task"
-              :group-by="options.groupBy"
+              :group-by="groupBy"
               :summary-enabled="options.summary"
+              :mark="markFor(live, item.task)"
+              :caption="groupBy !== 'epic' ? captionFor(item.task) : null"
               :compact="isPhoneWidth"
               @select="onCardSelect"
               @keydown="onNavKeydown"

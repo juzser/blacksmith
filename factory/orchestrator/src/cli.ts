@@ -65,6 +65,7 @@ import {
 } from './crossFinding.js';
 import type { TickOptions } from './daemon.js';
 import type { DbOpts } from './db/projector.js';
+import { formatDeclaredArtifactLine } from './declaredArtifactLine.js';
 import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { lintDispatchPrompt } from './dispatchLint.js';
@@ -1062,7 +1063,7 @@ function mintFromEvidence(
 
 /**
  * Mint a uiux visual pass's deviations under the `uiux` judge. `--uiux-visual`
- * hands over the whole Result document (uiux.md's output contract), not a
+ * hands over the whole Result document (bs-uiux.md's output contract), not a
  * findings-evidence array, so this reads `structured_output.deviations` the
  * same way `readJudgeArtifact`'s uiux branch does (judges.ts) before handing
  * the mapped evidence to the same `mintFindings` every other judge goes
@@ -4859,7 +4860,10 @@ async function main(): Promise<number> {
       eventContextFromFlags(flags),
       eventOptsFromFlags(flags),
     );
-    printJson(stored);
+    printJson({
+      ...stored,
+      expected_line: formatDeclaredArtifactLine(requireFlag(flags, 'artifact')),
+    });
     return 0;
   }
 

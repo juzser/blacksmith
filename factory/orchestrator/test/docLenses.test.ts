@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { roleOfTemplateFile, templateFileFor } from '../src/agentNames.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { instructionFiles } from './helpers/instructionSurface.js';
 
@@ -12,7 +13,7 @@ import { instructionFiles } from './helpers/instructionSurface.js';
 // about a *different file*, and nothing checked that the file agreed.
 //
 // It did not. `severity.yml` and `agent-constraints.md` both named that lens
-// as the thing enforcing YAGNI; `.claude/agents/reviewer.md` carried a
+// as the thing enforcing YAGNI; `.claude/agents/bs-reviewer.md` carried a
 // behavioral-drift lens and no over-engineering lens at all. The category
 // survived only as one string in a closed vocabulary list -- a rule two
 // documents promise and no agent was ever told to apply.
@@ -26,7 +27,7 @@ import { instructionFiles } from './helpers/instructionSurface.js';
 const ROLES = new Set(
   readdirSync(path.join(REPO_ROOT, '.claude', 'agents'))
     .filter((name) => name.endsWith('.md'))
-    .map((name) => name.slice(0, -'.md'.length)),
+    .flatMap((name) => roleOfTemplateFile(name) ?? []),
 );
 
 /**
@@ -80,7 +81,10 @@ function claims(): Claim[] {
 
 /** The `## <name> lens` headings a role template carries, lowercased. */
 function lensHeadings(role: string): string[] {
-  const template = readFileSync(path.join(REPO_ROOT, '.claude', 'agents', `${role}.md`), 'utf8');
+  const template = readFileSync(
+    path.join(REPO_ROOT, '.claude', 'agents', templateFileFor(role)),
+    'utf8',
+  );
   return [...template.matchAll(/^##\s+(.+?)\s+lens\b/gm)].map((match) =>
     (match[1] as string).toLowerCase(),
   );

@@ -34,13 +34,13 @@ there means "not looked at", not "looked at and clean".
 
 1. **Static analysis for claims first.** Before any decomposition, get the
    target repo's import/dependency graph so claims are computed, not
-   guessed (architecture §5) — dispatch `researcher`
-   (`.claude/agents/researcher.md`) for an unfamiliar repo, or do it
+   guessed (architecture §5) — dispatch `bs-researcher`
+   (`.claude/agents/bs-researcher.md`) for an unfamiliar repo, or do it
    directly with Grep/Read for a small one.
-2. Dispatch a **`planner`** session (`.claude/agents/planner.md`, frontier
+2. Dispatch a **`bs-planner`** session (`.claude/agents/bs-planner.md`, frontier
    tier) with the goal + the claims analysis. It drafts the epic spec and
    task specs (`factory/specs/schema/task-spec.schema.json` shape).
-3. Dispatch a **`spec-reviewer`** session (`.claude/agents/spec-reviewer.md`)
+3. Dispatch a **`bs-spec-reviewer`** session (`.claude/agents/bs-spec-reviewer.md`)
    — a *different model* than the planner's, per its own frontmatter — to
    hunt spec gaps/ambiguities/missing-nonfunctional clauses
    (`docs/standards/agent-constraints.md` "planner"; `severity.yml`: most
@@ -56,6 +56,11 @@ there means "not looked at", not "looked at and clean".
    5. Acceptance-criterion coverage -- every epic criterion maps to a task.
    6. From round 2 on, only the previous round's findings plus any task
       that changed since then.
+
+   The prompt also carries, inline on its own line,
+   `Declared artifact: /abs/path/to/state/results/<epic-id>.spec-review.json`
+   — the absolute form of the path `bs-spec-reviewer.md` names. The PreToolUse
+   guard refuses a judge dispatch without it.
 
    When `size.small` reads true on the draft (`bs wave schedule` or
    `bs plan ingest`'s `parallelism.size`, run against the draft plan

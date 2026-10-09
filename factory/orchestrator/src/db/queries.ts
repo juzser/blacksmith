@@ -510,9 +510,11 @@ export interface StatusCounts {
 /**
  * DS4 S5b — an epic's own status, derived from `statusCounts`: every task
  * done is `done`; any open task puts it at least at `in_progress`, rising to
- * `review` only when every open task is itself in the review bucket; no open
- * task and nothing done yet is `todo` (also the answer for an epic with no
- * tasks at all — see roadmapPage()'s caller doc).
+ * `review` only when every open task is itself in the review bucket; some
+ * tasks done with the rest still to do is `in_progress` even with nothing
+ * open (between waves); no open task and nothing done yet is `todo` (also
+ * the answer for an epic with no tasks at all — see roadmapPage()'s caller
+ * doc).
  */
 export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';
 
@@ -953,10 +955,11 @@ function countStatuses(rows: readonly { taskStatus: string }[]): StatusCounts {
  * holds the epic open. Every live task done is `done`; any task in the
  * review or inProgress buckets means at least `in_progress`, rising to
  * `review` only when every non-done live task is itself in the review bucket
- * (no inProgress, no todo left over); otherwise, with nothing done and
- * nothing open yet, `todo` — also the answer for a zero-task epic and for an
- * epic whose tasks are ALL superseded (`live === 0`, so `done === live` is
- * never true).
+ * (no inProgress, no todo left over); some tasks done with the rest not
+ * all done is `in_progress` even between waves; otherwise, with nothing
+ * done and nothing open yet, `todo` — also the answer for a zero-task epic
+ * and for an epic whose tasks are ALL superseded (`live === 0`, so
+ * `done === live` is never true).
  */
 function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
   const live = tasksTotal - counts.superseded;
@@ -964,7 +967,7 @@ function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicSta
   if (counts.review > 0 || counts.inProgress > 0) {
     return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
   }
-  return 'todo';
+  return counts.done > 0 ? 'in_progress' : 'todo';
 }
 
 /**
@@ -2811,28 +2814,38 @@ function epicOfEntry(entry: TimelineEntry): string | null {
 }
 
 /**
- * The epic of a `user_prompt`, which names none itself (derived at read, nothing
- * stored). A prompt captured into an epic's log takes the epic of that session's
- * other entries; a `prompts-<uuid>` home log has none, so it takes the epic of
- * any entry whose `parent_prompt_id` names it. Other entries answer null, so
- * `epicOfEntry` decides them as before.
+ * Whether an entry belongs to `epicId`. An entry that names an epic itself
+ * (`epicOfEntry` non-null) is decided by that alone: its own epic wins. A
+ * `user_prompt` naming none is derived at read (nothing stored) and shows
+ * under `epicId` when its session holds an entry of that epic, or when its id
+ * is named by a `parent_prompt_id` of such an entry or of any epic-less entry
+ * (the root `session-start`, which carries only `parent_prompt_id`) in one of
+ * those sessions. A prompt carrying its own epic does not make its session an
+ * epic session; it only decides itself. A session holding entries of two
+ * epics shares its epic-less prompts, and the `parent_prompt_id` naming of its
+ * epic-less entries, with both. The `prompts-<uuid>` home log has no entries
+ * of its own. Every other epic-less entry is dropped.
  */
-function promptEpicResolver(
+function promptInEpic(
   entries: readonly TimelineEntry[],
-): (e: TimelineEntry) => string | null {
-  const bySession = new Map<string, string>();
-  const byPrompt = new Map<string, string>();
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  const sessions = new Set<string>();
   for (const e of entries) {
-    const epic = epicOfEntry(e);
-    if (epic === null) continue;
-    if (!bySession.has(e.sessionId)) bySession.set(e.sessionId, epic);
-    const named = e.payload.parent_prompt_id;
-    if (typeof named === 'string' && !byPrompt.has(named)) byPrompt.set(named, epic);
+    if (e.eventType !== 'user_prompt' && epicOfEntry(e) === epicId) sessions.add(e.sessionId);
   }
-  return (e) =>
-    e.eventType !== 'user_prompt'
-      ? null
-      : (epicOfEntry(e) ?? bySession.get(e.sessionId) ?? byPrompt.get(e.eventId) ?? null);
+  const named = new Set<string>();
+  for (const e of entries) {
+    const own = epicOfEntry(e);
+    if (own !== null ? own !== epicId : !sessions.has(e.sessionId)) continue;
+    const parent = e.payload.parent_prompt_id;
+    if (typeof parent === 'string') named.add(parent);
+  }
+  return (e) => {
+    const own = epicOfEntry(e);
+    if (own !== null) return own === epicId;
+    return e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId));
+  };
 }
 
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
@@ -2877,8 +2890,7 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   let entries = rows.map((row) => toEntry(row, null));
   entries = filterByProject(entries, filter);
   if (filter.epicId) {
-    const promptEpic = promptEpicResolver(entries);
-    entries = entries.filter((e) => (promptEpic(e) ?? epicOfEntry(e)) === filter.epicId);
+    entries = entries.filter(promptInEpic(entries, filter.epicId));
   }
   if (filter.kinds?.length) {
     const kinds = new Set(filter.kinds);

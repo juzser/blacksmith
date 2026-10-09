@@ -60,8 +60,8 @@ bs worktree fingerprint <worktree-dir> > /tmp/<audit-id>.before.json
 ## 4. Dispatch the four axes in parallel
 
 One judge per axis, under the ordinary dispatch contract — nothing about an
-audit relaxes it. Three axes are `auditor` (`.claude/agents/auditor.md`, the
-axis named in the prompt); the security axis is `security-reviewer`,
+audit relaxes it. Three axes are `bs-auditor` (`.claude/agents/bs-auditor.md`, the
+axis named in the prompt); the security axis is `bs-security-reviewer`,
 unchanged, with the two audit-specific differences its template already
 states. Per axis:
 
@@ -99,7 +99,8 @@ states. Per axis:
   model, and a thin return is a re-poke (below), not a bigger model.
 - **Compose the prompt** with: the axis name (exactly one); the
   absolute worktree path, and that it is read-only; the artifact path
-  from the declaration above, verbatim; the turn budget from the
+  from the declaration above, verbatim, on its own line spelled
+  `Declared artifact: <absolute path>`; the turn budget from the
   template's `maxTurns` (the harness enforces that number, so the
   prompt may restate it but never raise it — `dispatch.md`); the fenced
   excerpts; the lessons block; and for the security

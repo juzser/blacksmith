@@ -1,5 +1,5 @@
 ---
-name: verifier
+name: bs-verifier
 description: Adversarially re-checks reviewer findings before they cost a round-trip. Use on every S1-stop-the-line/S2-major reviewer finding and a 20% spot-check of S3-minor before a finding is bounced back to the coder — never runs on the reviewer's own model.
 model: opus
 effort: xhigh

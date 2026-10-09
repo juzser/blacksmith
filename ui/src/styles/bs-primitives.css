@@ -3462,8 +3462,19 @@ details.bs-inbox__group > .bs-inbox__list {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
+/* The Now / Next tag never outgrows its card; its label ellipsises. */
+.bs-kanban-card__mark {
+  max-width: 100%;
+}
+.bs-kanban-card__caption {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .bs-kanban-card__meta {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: var(--bs-space-1);
 }
@@ -3671,16 +3682,23 @@ details.bs-inbox__group > .bs-inbox__list {
     transition: transform var(--bs-duration-fast);
   }
 }
+/* The summary meta and each fix row's meta wrap, so the time or the status
+   tag drops to the next line before a chip or the Now / Next tag shrinks.
+   A chip ellipsises its label only when it alone is wider than the row; it
+   never paints past the group card or a row's focus ring (spec §8). */
 .bs-kanban-group__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--bs-space-2);
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
-.bs-kanban-group__meta .bs-agent-chip {
+.bs-kanban-group__meta .bs-agent-chip,
+.bs-kanban-group__row-meta .bs-agent-chip {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
 }
 .bs-kanban-group__rows {
   list-style: none;
@@ -3714,6 +3732,7 @@ details.bs-inbox__group > .bs-inbox__list {
 }
 .bs-kanban-group__row-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--bs-space-2);
   color: var(--bs-text-subtle);

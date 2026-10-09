@@ -1,5 +1,5 @@
 ---
-name: security-reviewer
+name: bs-security-reviewer
 description: Deep security review of a task diff — conditional dispatch only. Use when a task's claims touch auth/session/secrets/input-parsing/network paths, when the epic is tagged case infra or security-sensitive, or on a scheduled recheck of sensitive claim paths. Never dispatched per-task by default.
 model: sonnet
 effort: high

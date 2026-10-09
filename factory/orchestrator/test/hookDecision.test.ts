@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, symlinkSync } from 'node:fs';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -350,5 +350,123 @@ describe('decideHookPayload — the shortcut forfeits any shape it cannot read w
     // physically — into the main clone.
     expect(reasonOf(decide('git -C link/.. merge feat/side', sideRepo))).toMatch(/on main/);
     expect(reasonOf(decide('cd ./link/.. && git merge feat/side', sideRepo))).toMatch(/on main/);
+  });
+});
+
+describe('Agent dispatches (judge artifact line)', () => {
+  const abs = '/abs/state/results/task-1.reviewer.json';
+  const agent = (
+    subagentType: string | undefined,
+    prompt: unknown,
+    toolName = 'Agent',
+  ): ReturnType<typeof decideHookPayload> =>
+    decideHookPayload(
+      JSON.stringify({
+        tool_name: toolName,
+        tool_input: {
+          ...(subagentType === undefined ? {} : { subagent_type: subagentType }),
+          prompt,
+        },
+        // Outside any repo, so no case here leans on a branch. This does not
+        // show the order; the last test in this block does.
+        cwd: path.join(scratch, 'not-a-repo'),
+      }),
+      path.join(scratch, 'not-a-repo'),
+      leaseDir,
+    );
+
+  // `bs-<role>` is the agent name; the bare names stay denied for a box whose
+  // installed plugin predates the prefix.
+  it.each([
+    'reviewer',
+    'blacksmith:reviewer',
+    'auditor',
+    'spec-reviewer',
+    'bs-reviewer',
+    'blacksmith:bs-reviewer',
+    'bs-spec-reviewer',
+    'bs-security-reviewer',
+  ])('denies %s with no declared-artifact line', (type) => {
+    const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
+    expect(reason).toContain('Declared artifact: <absolute path>');
+    expect(reason).toContain('judge dispatch');
+    expect(reason).toContain('expected_line');
+  });
+
+  it('treats Task like Agent', () => {
+    expect(agent('reviewer', 'no line', 'Task')).not.toBeNull();
+    expect(agent('reviewer', `Declared artifact: ${abs}\n`, 'Task')).toBeNull();
+  });
+
+  it('names a relative path it found', () => {
+    const reason = reasonOf(agent('verifier', 'Declared artifact: state/results/x.json\n'));
+    expect(reason).toContain('state/results/x.json');
+    expect(reason).toMatch(/relative/);
+  });
+
+  it('does not count an indented line', () => {
+    expect(agent('reviewer', `  Declared artifact: ${abs}\n`)).not.toBeNull();
+  });
+
+  it('reads a non-string prompt as no line', () => {
+    expect(agent('reviewer', undefined)).not.toBeNull();
+    expect(agent('reviewer', 42)).not.toBeNull();
+  });
+
+  // Parity with judge-stop, which reads the line with the same parser.
+  it('allows an absolute line in a CRLF prompt', () => {
+    expect(agent('reviewer', `Role: reviewer.\r\nDeclared artifact: ${abs}\r\nGo.\r\n`)).toBeNull();
+  });
+
+  it('denies a line with text after the path', () => {
+    expect(agent('reviewer', `Declared artifact: ${abs} extra\n`)).not.toBeNull();
+  });
+
+  it('lets the first of two lines decide', () => {
+    const relative = 'Declared artifact: state/results/x.json';
+    const absolute = `Declared artifact: ${abs}`;
+    expect(agent('reviewer', `${relative}\n${absolute}\n`)).not.toBeNull();
+    expect(agent('reviewer', `${absolute}\n${relative}\n`)).toBeNull();
+  });
+
+  it.each([
+    ['reviewer', `Role: reviewer.\nDeclared artifact: ${abs}\n`],
+    ['blacksmith:grader', `Declared artifact: ${abs}`],
+    ['bs-reviewer', `Declared artifact: ${abs}`],
+    ['blacksmith:bs-reviewer', `Declared artifact: ${abs}`],
+    ['other:reviewer', 'no line needed'],
+    ['other:bs-reviewer', 'no line needed'],
+    ['bs-coder', 'no line needed'],
+    ['blacksmith:bs-uiux', 'no line needed'],
+    ['bs-', 'no line needed'],
+    ['coder', 'no line needed'],
+    ['uiux', 'no line needed'],
+    ['general-purpose', 'no line needed'],
+    [undefined, 'no line needed'],
+  ])('allows %s silently (%j)', (type, prompt) => {
+    expect(agent(type, prompt)).toBeNull();
+  });
+
+  // The command alone cannot show the order: the guardrail inspects only Bash
+  // and file tools, so it never reads an Agent payload's `command` either way.
+  // The lease read can, because an unreadable lease makes it throw: an Agent
+  // payload answered after that read would throw here instead of allowing.
+  it('answers an Agent payload before any lease or command work', () => {
+    const cwd = path.join(scratch, 'not-a-repo');
+    const badLeases = path.join(scratch, 'bad-leases');
+    mkdirSync(badLeases, { recursive: true });
+    writeFileSync(path.join(badLeases, 'corrupt.json'), '{');
+    const forcePush = 'git push --force origin main';
+    const payload = (toolName: string) =>
+      JSON.stringify({
+        tool_name: toolName,
+        tool_input: { subagent_type: 'coder', prompt: 'no line needed', command: forcePush },
+        cwd,
+      });
+    // The same payload as Bash: the command is denied, and the lease read throws.
+    expect(reasonOf(decideHookPayload(payload('Bash'), cwd, leaseDir))).toMatch(/^BLOCKED:/);
+    expect(() => decideHookPayload(payload('Bash'), cwd, badLeases)).toThrow();
+    expect(decideHookPayload(payload('Agent'), cwd, badLeases)).toBeNull();
+    expect(decideHookPayload(payload('Task'), cwd, badLeases)).toBeNull();
   });
 });

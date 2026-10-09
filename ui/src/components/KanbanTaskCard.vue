@@ -27,9 +27,15 @@ import {
   hasWaitingDependency,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
+import {
+  markText as markTagText,
+  markLabel as markWords,
+  type TaskMark,
+} from '../lib/liveFocus.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { foreignStoreId } from '../lib/storeKey.js';
 import AgentChip from './AgentChip.vue';
+import KanbanMarkTag from './KanbanMarkTag.vue';
 import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import RelativeTime from './kit/RelativeTime.vue';
@@ -41,6 +47,10 @@ const props = defineProps<{
   summaryEnabled?: boolean;
   /** ds-spec.md §3.1 Work/Kanban row — phone cards show only title, one tag, one meta line. */
   compact?: boolean;
+  /** A live session's mark: Now replaces the agent chip, Next takes its slot. */
+  mark?: TaskMark | null;
+  /** "<project> · <epic>", shown beside the time on a marked card when the board is not grouped by epic. */
+  caption?: string | null;
 }>();
 const emit = defineEmits<{ select: [taskId: string, storeId?: string] }>();
 
@@ -63,6 +73,10 @@ const chip = computed(() => agentChip(props.task));
 const showRoleLabel = computed(
   () => props.groupBy !== 'role' && !!props.task.agentRole && !chip.value,
 );
+const markText = computed(() =>
+  props.mark ? markTagText(props.mark, props.task.agentActivity) : null,
+);
+const markLabel = computed(() => markWords(props.mark ?? null));
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
 const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
@@ -106,12 +120,13 @@ function onCardClick(event: MouseEvent) {
       ref="openEl"
       type="button"
       class="bs-kanban-card__open"
-      :aria-label="`${title}, opens task detail`"
+      :aria-label="`${title}${markLabel}, opens task detail`"
       :title="fitted ? title : undefined"
       @click="onSelect"
     ></button>
-    <div v-if="!compact && chip" class="bs-kanban-card__row bs-kanban-card__row--1">
-      <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
+    <div v-if="!compact && (markText || chip)" class="bs-kanban-card__row bs-kanban-card__row--1">
+      <KanbanMarkTag v-if="mark && markText" :mark="mark" :text="markText" />
+      <AgentChip v-else :task="{ ...task, updatedAt: task.updatedAt }" />
     </div>
 
     <p ref="titleEl" class="bs-kanban-card__title">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
@@ -124,7 +139,10 @@ function onCardClick(event: MouseEvent) {
 
     <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 
-    <div v-if="chips.chips.length > 0" class="bs-kanban-card__row bs-kanban-card__chips">
+    <div v-if="compact && mark && markText" class="bs-kanban-card__row bs-kanban-card__chips">
+      <KanbanMarkTag :mark="mark" :text="markText" />
+    </div>
+    <div v-else-if="chips.chips.length > 0" class="bs-kanban-card__row bs-kanban-card__chips">
       <Tag
         v-for="cardChip in chips.chips.slice(0, compact ? 1 : 2)"
         :key="cardChip.text"
@@ -138,6 +156,7 @@ function onCardClick(event: MouseEvent) {
 
     <div class="bs-kanban-card__row bs-kanban-card__row--5">
       <span v-if="showRoleLabel && !compact" class="bs-kanban-card__role">{{ roleLabel(task.agentRole as string) }}</span>
+      <span v-if="caption && !compact" class="bs-kanban-card__caption">{{ caption }}</span>
       <span class="bs-kanban-card__meta">
         <template v-if="attemptLabelText">
           {{ attemptLabelText }}

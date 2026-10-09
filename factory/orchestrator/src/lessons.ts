@@ -30,6 +30,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import picomatch from 'picomatch';
 import { isOperatorActor } from './actors.js';
+import { templateFileFor } from './agentNames.js';
 import { foldLessons, type LessonFoldRow } from './db/projector.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
@@ -840,7 +841,7 @@ export function scopesForRole(role: string, opts: DispatchLessonsOptions = {}): 
       { role },
     );
   }
-  const templatePath = path.join(opts.agentsDir ?? AGENTS_DIR, `${role}.md`);
+  const templatePath = path.join(opts.agentsDir ?? AGENTS_DIR, templateFileFor(role));
   let template: string;
   try {
     template = readFileSync(templatePath, 'utf8');
@@ -858,7 +859,7 @@ export function scopesForRole(role: string, opts: DispatchLessonsOptions = {}): 
     if (!(VALID_SCOPES as readonly string[]).includes(scope)) {
       throw new LessonsError(
         'lessons.unknown-lesson-scope',
-        `${role}.md declares lesson scope "${scope}", which is not one of: ${VALID_SCOPES.join(', ')}.`,
+        `${templateFileFor(role)} declares lesson scope "${scope}", which is not one of: ${VALID_SCOPES.join(', ')}.`,
         { role, scope, templatePath },
       );
     }
@@ -867,7 +868,7 @@ export function scopesForRole(role: string, opts: DispatchLessonsOptions = {}): 
   if (scopes.length === 0) {
     throw new LessonsError(
       'lessons.role-template-has-no-scope-marker',
-      `${role}.md carries no <!-- LESSONS:<scope> --> marker, so no lesson can reach it.`,
+      `${templateFileFor(role)} carries no <!-- LESSONS:<scope> --> marker, so no lesson can reach it.`,
       { role, templatePath },
     );
   }

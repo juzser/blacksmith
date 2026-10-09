@@ -10277,7 +10277,7 @@ describe('cli.ts (built binary)', () => {
           '--task',
           'epic-1/task-1',
           '--artifact',
-          'spec.json',
+          path.join(scratchDir, 'spec.json'),
           '--model',
           'claude-opus-5',
           '--session',
@@ -10297,7 +10297,7 @@ describe('cli.ts (built binary)', () => {
           '--task',
           'epic-1/task-1',
           '--artifact',
-          'visual.json',
+          path.join(scratchDir, 'visual.json'),
           '--model',
           'claude-opus-5',
           '--session',
@@ -11101,6 +11101,8 @@ describe('cli.ts (built binary)', () => {
         declared_artifact: artifact,
         model: 'claude-opus-5',
       });
+      // The line the dispatcher pastes into the prompt, so judge-stop reads it.
+      expect(JSON.parse(dispatched.stdout).expected_line).toBe(`Declared artifact: ${artifact}`);
 
       // Exit 1, not 0: this is the re-poke signal. A wrapper that only reads
       // stdout still gets the list; a shell loop gets a status it can branch on.

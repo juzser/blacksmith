@@ -12,7 +12,7 @@ import { REPO_ROOT } from '../src/paths.js';
 // infer" -- and the scribe's own mission carries the same rule.
 
 const RUN_MD = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/run.md'), 'utf8');
-const SCRIBE_MD = readFileSync(path.join(REPO_ROOT, '.claude/agents/scribe.md'), 'utf8');
+const SCRIBE_MD = readFileSync(path.join(REPO_ROOT, '.claude/agents/bs-scribe.md'), 'utf8');
 
 /**
  * Step 17 runs from its numbered marker to the next step marker, or EOF.

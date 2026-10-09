@@ -1,5 +1,5 @@
 ---
-name: merger
+name: bs-merger
 description: Resolves merge-queue conflicts when an automatic rebase fails. Use only after an automatic rebase attempt has already failed on a task entering bs/<epic>/integration.
 model: sonnet
 effort: medium

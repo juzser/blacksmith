@@ -2,7 +2,7 @@
 // without holding the rest of the orchestrator.
 //
 // `.claude/hooks/guard.sh` fires on every Bash/Write/Edit/MultiEdit/
-// NotebookEdit call an agent makes, which makes whatever it execs the most
+// NotebookEdit/Agent/Task call an agent makes, which makes whatever it execs the most
 // frequently run code in this repo by orders of magnitude. It used to exec
 // `dist/cli.js policy hook`; cli.ts imports the whole orchestrator at module
 // scope, `db/projector.js` and so drizzle-orm among it, and that graph cost
@@ -13,6 +13,9 @@
 // same function rather than a second copy of it.
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { roleOfAgentType } from './agentNames.js';
+import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
+import { JUDGE_ROLES } from './judgeRoles.js';
 import {
   detectCurrentBranch,
   detectRepoRoot,
@@ -29,6 +32,45 @@ export interface HookDecisionOutput {
     readonly hookEventName: 'PreToolUse';
     readonly permissionDecision: 'deny';
     readonly permissionDecisionReason: string;
+  };
+}
+
+const JUDGE_ROLE_NAMES: ReadonlySet<string> = new Set(JUDGE_ROLES);
+
+/**
+ * A judge-role subagent dispatch must carry `Declared artifact: <absolute path>`
+ * in its prompt, because judge-stop.sh reads the prompt (never a brief file) to
+ * know what the judge owes. Same parser as judge-stop, so what is accepted here
+ * is what it reads. Any other role, prefix or missing type is allowed silently.
+ */
+function decideAgentDispatch(
+  input: { subagent_type?: unknown; prompt?: unknown } | undefined,
+): HookDecisionOutput | null {
+  const type = typeof input?.subagent_type === 'string' ? input.subagent_type : '';
+  // Same mapping as judge-stop: `bs-reviewer`, `blacksmith:bs-reviewer` and the
+  // bare pre-prefix names all reach the role. Another plugin's namespace
+  // (`other:reviewer`) is not a Blacksmith agent, so it is skipped, not stripped.
+  const colon = type.indexOf(':');
+  if (colon !== -1 && type.slice(0, colon) !== 'blacksmith') return null;
+  const role = roleOfAgentType(type);
+  if (role === null || !JUDGE_ROLE_NAMES.has(role)) return null;
+  const prompt = typeof input?.prompt === 'string' ? input.prompt : '';
+  const declared = parseDeclaredArtifactLine(prompt);
+  if (declared !== null && path.isAbsolute(declared)) return null;
+  const found =
+    declared === null
+      ? ''
+      : ` The prompt has "${declared}", which is relative; the path must be absolute.`;
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason:
+        `A "${role}" dispatch must declare the artifact it writes. The prompt needs a line reading exactly ` +
+        '`Declared artifact: <absolute path>` on its own line, not indented, and in the prompt itself ' +
+        `(judge-stop reads the prompt, not a brief file the agent reads).${found} ` +
+        '`judge dispatch` prints the line to paste, as `expected_line`.',
+    },
   };
 }
 
@@ -59,9 +101,17 @@ export function decideHookPayload(
 ): HookDecisionOutput | null {
   const payload = JSON.parse(raw) as {
     tool_name?: unknown;
-    tool_input?: { command?: unknown; file_path?: unknown };
+    tool_input?: {
+      command?: unknown;
+      file_path?: unknown;
+      subagent_type?: unknown;
+      prompt?: unknown;
+    };
     cwd?: unknown;
   };
+  if (payload.tool_name === 'Agent' || payload.tool_name === 'Task') {
+    return decideAgentDispatch(payload.tool_input);
+  }
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   const command = typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
   // A `Write`/`Edit`/`MultiEdit` payload carries no command; its target is

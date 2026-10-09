@@ -4,10 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // TDD red step (recorded before judgeStopHook.ts existed): "Cannot find
 // module '.../src/judgeStopHook.js'". Everything below is the green step.
+import { roleOfAgentType } from '../src/agentNames.js';
 import { parseDeclaredArtifactLine as dispatchLintParser } from '../src/dispatchLint.js';
 import {
   decideJudgeStop,
-  extractLastUserPromptText,
+  extractDispatchPromptText,
   runJudgeStopHook,
   type SubagentStopHookInput,
 } from '../src/judgeStopHook.js';
@@ -19,8 +20,8 @@ const DIST_HOOK = path.join(REPO_ROOT, 'factory', 'orchestrator', 'dist', 'judge
 
 /**
  * SubagentStop stdin, as documented at https://code.claude.com/docs/en/hooks:
- * session_id, prompt_id, transcript_path, cwd, scratchpad_dir,
- * permission_mode, hook_event_name, agent_id, agent_type.
+ * session_id, prompt_id, transcript_path, agent_transcript_path, cwd,
+ * scratchpad_dir, permission_mode, hook_event_name, agent_id, agent_type.
  */
 function stdinFixture(overrides: Partial<SubagentStopHookInput> = {}): SubagentStopHookInput {
   return {
@@ -47,6 +48,33 @@ function transcriptWithPrompt(dir: string, promptText: string): string {
   return transcriptPath;
 }
 
+function userLine(content: string, isMeta = false): string {
+  return JSON.stringify({
+    type: 'user',
+    ...(isMeta ? { isMeta: true } : {}),
+    message: { role: 'user', content },
+  });
+}
+
+/** A subagent transcript in the real shape: prompt first, noise after it. */
+function realisticSubagentTranscript(dir: string, artifactPath: string): string {
+  const lines = [
+    userLine(`Role: reviewer.\nDeclared artifact: ${artifactPath}\nDo the review.\n`),
+    userLine('<system-reminder>\nYour final report is delivered through SubagentHandback\n', true),
+    JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'working' } }),
+    JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', content: 'file contents' }] },
+    }),
+    userLine('The coordinator sent a message while you were working: carry on', true),
+    userLine('This session is being continued from a previous conversation that ran out.'),
+    JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'done' } }),
+  ];
+  const transcriptPath = path.join(dir, 'agent-realistic.jsonl');
+  writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
+  return transcriptPath;
+}
+
 let root: string;
 
 beforeEach(() => {
@@ -58,6 +86,23 @@ afterEach(() => {
 });
 
 describe('decideJudgeStop (pure decision)', () => {
+  it.each(['bs-reviewer', 'blacksmith:bs-reviewer', 'reviewer', 'blacksmith:reviewer'])(
+    'blocks %s when the declared artifact is missing',
+    (agentType) => {
+      const artifactPath = path.join(root, 'missing.reviewer.json');
+      const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;
+      const decision = decideJudgeStop(stdinFixture({ agent_type: agentType }), prompt);
+      expect(decision.decision).toBe('block');
+    },
+  );
+
+  it('allows bs-coder, which is no judge', () => {
+    const prompt = `Role: coder.\nDeclared artifact: ${path.join(root, 'nope.json')}\n`;
+    expect(decideJudgeStop(stdinFixture({ agent_type: 'bs-coder' }), prompt).decision).toBe(
+      'allow',
+    );
+  });
+
   it('blocks a judge whose declared artifact does not exist yet', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;
@@ -85,6 +130,14 @@ describe('decideJudgeStop (pure decision)', () => {
   it('allows a non-judge agent type such as coder, regardless of the prompt', () => {
     const prompt = 'Role: coder. Turn budget: 40\n(no declared-artifact line at all)';
     expect(decideJudgeStop(stdinFixture({ agent_type: 'coder' }), prompt)).toEqual({
+      decision: 'allow',
+    });
+  });
+
+  it('maps an unknown name to a candidate role, which the judge role set then rejects', () => {
+    expect(roleOfAgentType('general-purpose')).toBe('general-purpose');
+    const prompt = 'Role: coder. Turn budget: 40\n(no declared-artifact line at all)';
+    expect(decideJudgeStop(stdinFixture({ agent_type: 'general-purpose' }), prompt)).toEqual({
       decision: 'allow',
     });
   });
@@ -128,14 +181,14 @@ describe('decideJudgeStop (pure decision)', () => {
   });
 });
 
-describe('extractLastUserPromptText', () => {
-  it('reads the last user-role message off a JSONL transcript', () => {
+describe('extractDispatchPromptText', () => {
+  it('reads the first user-role message off a JSONL transcript', () => {
     const transcriptPath = transcriptWithPrompt(root, 'Declared artifact: /abs/t.json\n');
-    expect(extractLastUserPromptText(transcriptPath)).toContain('Declared artifact: /abs/t.json');
+    expect(extractDispatchPromptText(transcriptPath)).toContain('Declared artifact: /abs/t.json');
   });
 
   it('returns null for an unreadable transcript -- covered downstream by judge report judges.artifact-missing', () => {
-    expect(extractLastUserPromptText(path.join(root, 'no-such-file.jsonl'))).toBeNull();
+    expect(extractDispatchPromptText(path.join(root, 'no-such-file.jsonl'))).toBeNull();
   });
 
   it('reads content given as an array of text blocks, joining them', () => {
@@ -152,56 +205,182 @@ describe('extractLastUserPromptText', () => {
       },
     };
     writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
-    const text = extractLastUserPromptText(transcriptPath);
+    const text = extractDispatchPromptText(transcriptPath);
     expect(text).toContain('Role: reviewer.');
     expect(text).toContain('Declared artifact: /abs/t.json');
   });
 
-  it('walks backward past a later assistant turn to find the last USER message, not just the last line', () => {
+  it('returns the FIRST non-meta user text, not a later user entry', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const lines = [
-      JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: 'Declared artifact: /abs/stale.json\n' },
-      }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'warm up' } }),
+      userLine('Declared artifact: /abs/first.json\n'),
       JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'mid turn' } }),
-      JSON.stringify({
-        type: 'user',
-        message: { role: 'user', content: 'Declared artifact: /abs/fresh.json\n' },
-      }),
-      JSON.stringify({
-        type: 'assistant',
-        message: { role: 'assistant', content: 'final turn, no declared line here' },
-      }),
+      userLine('Declared artifact: /abs/later.json\n'),
     ];
     writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
-    expect(extractLastUserPromptText(transcriptPath)).toContain('/abs/fresh.json');
+    expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/first.json');
   });
 
-  it('skips blank lines and unparseable JSON lines while walking backward', () => {
+  it('skips meta user strings and tool_result entries before the dispatch prompt', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const lines = [
+      userLine(
+        '<system-reminder>\nYour final report is delivered through SubagentHandback\n',
+        true,
+      ),
       JSON.stringify({
         type: 'user',
-        message: { role: 'user', content: 'Declared artifact: /abs/x.json\n' },
+        message: { role: 'user', content: [{ type: 'tool_result', content: 'ok' }] },
       }),
-      '',
-      'not json at all',
-      '   ',
+      userLine('Declared artifact: /abs/real.json\n'),
     ];
     writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
-    expect(extractLastUserPromptText(transcriptPath)).toContain('/abs/x.json');
+    expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/real.json');
   });
 
-  it('returns null when the last user message has content that is neither a string nor an array', () => {
+  it('returns null when every user entry is meta (fail open)', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const lines = [
+      userLine('reminder one', true),
+      userLine('The coordinator sent a message', true),
+    ];
+    writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
+    expect(extractDispatchPromptText(transcriptPath)).toBeNull();
+  });
+
+  it('finds a dispatch prompt larger than the chunk size', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const text = `${'filler '.repeat(50)}\nDeclared artifact: /abs/big.json\n`;
+    writeFileSync(transcriptPath, `${userLine(text)}\n${userLine('later')}\n`);
+    expect(extractDispatchPromptText(transcriptPath, 16)).toBe(text);
+  });
+
+  it('reads CRLF line endings', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const lines = [userLine('reminder', true), userLine('Declared artifact: /abs/crlf.json\n')];
+    writeFileSync(transcriptPath, `${lines.join('\r\n')}\r\n`);
+    expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/crlf.json');
+  });
+
+  it('returns null for an empty file', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    writeFileSync(transcriptPath, '');
+    expect(extractDispatchPromptText(transcriptPath)).toBeNull();
+  });
+
+  it('returns the prompt without reading a torn JSON line that follows it', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const torn = userLine('later').slice(0, 20);
+    writeFileSync(transcriptPath, `${userLine('Declared artifact: /abs/t.json\n')}\n${torn}`);
+    expect(extractDispatchPromptText(transcriptPath, 8)).toContain('/abs/t.json');
+  });
+
+  it('reads a dispatch prompt given as an array of text blocks after meta entries', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const prompt = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Role: reviewer.' },
+          { type: 'text', text: 'Declared artifact: /abs/blocks.json' },
+        ],
+      },
+    };
+    writeFileSync(transcriptPath, `${userLine('reminder', true)}\n${JSON.stringify(prompt)}\n`);
+    expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/blocks.json');
+  });
+
+  it('skips blank lines and unparseable JSON lines before the prompt', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const lines = ['', 'not json at all', '   ', userLine('Declared artifact: /abs/x.json\n')];
+    writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
+    expect(extractDispatchPromptText(transcriptPath)).toContain('/abs/x.json');
+  });
+
+  it('returns null when the only user message has content that is neither a string nor an array', () => {
     const transcriptPath = path.join(root, 'transcript.jsonl');
     const entry = { type: 'user', message: { role: 'user', content: { unexpected: 'shape' } } };
     writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
-    expect(extractLastUserPromptText(transcriptPath)).toBeNull();
+    expect(extractDispatchPromptText(transcriptPath)).toBeNull();
+  });
+  it('decodes a multi-byte character split across chunk boundaries', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const text = 'xé€😀 Declared artifact: /abs/ü.json';
+    writeFileSync(
+      transcriptPath,
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`,
+    );
+    for (const chunk of [1, 2, 3, 5]) {
+      expect(extractDispatchPromptText(transcriptPath, chunk)).toBe(text);
+    }
+  });
+
+  it('reads a prompt on a last line with no trailing newline', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const first = userLine('meta', true);
+    writeFileSync(transcriptPath, `${first}\n${userLine('last')}`);
+    expect(extractDispatchPromptText(transcriptPath, 4)).toBe('last');
+  });
+
+  it('returns null for an unreadable path', () => {
+    expect(extractDispatchPromptText(path.join(root, 'nope.jsonl'), 4)).toBeNull();
   });
 });
 
 describe('runJudgeStopHook (stdin JSON in, decision out)', () => {
+  it("reads the subagent's own transcript, not the main session's, and blocks on a missing artifact", () => {
+    const artifactPath = path.join(root, 't.reviewer.json');
+    const mainPath = path.join(root, 'main.jsonl');
+    writeFileSync(
+      mainPath,
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'operator says hi' } })}\n`,
+    );
+    const agentPath = path.join(root, 'agent.jsonl');
+    writeFileSync(
+      agentPath,
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: `Declared artifact: ${artifactPath}\n` } })}\n`,
+    );
+    const raw = JSON.stringify(
+      stdinFixture({ transcript_path: mainPath, agent_transcript_path: agentPath }),
+    );
+    const parsed = JSON.parse(runJudgeStopHook(raw).stdout) as { decision: string; reason: string };
+    expect(parsed).toEqual({ decision: 'block', reason: expect.stringContaining(artifactPath) });
+  });
+
+  it('allows when agent_transcript_path is present and the declared file exists', () => {
+    const artifactPath = path.join(root, 't.reviewer.json');
+    writeFileSync(artifactPath, '[]');
+    const mainPath = path.join(root, 'main.jsonl');
+    writeFileSync(mainPath, '');
+    const agentPath = path.join(root, 'agent.jsonl');
+    writeFileSync(
+      agentPath,
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: `Declared artifact: ${artifactPath}\n` } })}\n`,
+    );
+    const raw = JSON.stringify(
+      stdinFixture({ transcript_path: mainPath, agent_transcript_path: agentPath }),
+    );
+    expect(runJudgeStopHook(raw)).toEqual({ stdout: '', stderr: '' });
+  });
+
+  it('blocks on a realistic subagent transcript (prompt first, meta and resumes after) when the artifact is missing', () => {
+    const artifactPath = path.join(root, 't.reviewer.json');
+    const agentPath = realisticSubagentTranscript(root, artifactPath);
+    const raw = JSON.stringify(stdinFixture({ agent_transcript_path: agentPath }));
+    const parsed = JSON.parse(runJudgeStopHook(raw).stdout) as { decision: string; reason: string };
+    expect(parsed).toEqual({ decision: 'block', reason: expect.stringContaining(artifactPath) });
+  });
+
+  it('allows on a realistic subagent transcript when the artifact exists', () => {
+    const artifactPath = path.join(root, 't.reviewer.json');
+    writeFileSync(artifactPath, '[]');
+    const agentPath = realisticSubagentTranscript(root, artifactPath);
+    const raw = JSON.stringify(stdinFixture({ agent_transcript_path: agentPath }));
+    expect(runJudgeStopHook(raw)).toEqual({ stdout: '', stderr: '' });
+  });
+
   it('blocks with the absolute path named in the reason', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     const transcriptPath = transcriptWithPrompt(root, `Declared artifact: ${artifactPath}\n`);

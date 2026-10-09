@@ -93,6 +93,28 @@ describe('judges.ts', () => {
       });
     });
 
+    it('refuses a relative artifact path', async () => {
+      await expect(dispatch({ artifactPath: 'state/results/reviewer.json' })).rejects.toMatchObject(
+        {
+          code: 'judges.artifact-not-absolute',
+          message: expect.stringContaining('state/results/reviewer.json'),
+        },
+      );
+    });
+
+    // The `Declared artifact:` line is parsed with `\S+`, so a path with a
+    // space records fine but prints an expected_line the Agent guard refuses.
+    it('refuses an artifact path that contains whitespace', async () => {
+      const spaced = path.join(artifactDir, 'a b', 'reviewer.json');
+      await expect(dispatch({ artifactPath: spaced })).rejects.toMatchObject({
+        code: 'judges.artifact-has-whitespace',
+        message: expect.stringContaining(spaced),
+      });
+      await expect(
+        dispatch({ artifactPath: path.join(artifactDir, 'tab\there.json') }),
+      ).rejects.toMatchObject({ code: 'judges.artifact-has-whitespace' });
+    });
+
     // `code-reviewer` is not a taxonomy agent at all, so it used to surface
     // taxonomy validation's own message; the judge-role check below now
     // catches it first (it is not one of the six judge roles either) with a

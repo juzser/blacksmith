@@ -1,5 +1,5 @@
 ---
-name: tester
+name: bs-tester
 description: Owns unit-test depth per task and e2e/screenshot coverage at epic level. Use after the coder's implementation to add missing unit coverage, run the project's e2e suite, and capture UI screenshots.
 model: sonnet
 effort: medium

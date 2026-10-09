@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { templateFileFor } from '../src/agentNames.js';
 import { AGENTS_DIR, REPO_ROOT } from '../src/paths.js';
 import {
   loadTaxonomy,
@@ -259,29 +260,33 @@ describe('judge briefs enumerate finding_category (P9-20)', () => {
     expect(declared.length).toBeGreaterThan(0);
 
     for (const role of CATEGORY_WRITING_BRIEFS) {
-      const bullet = categoryBullet(readFileSync(path.join(AGENTS_DIR, `${role}.md`), 'utf8'));
-      expect(bullet, `${role}.md has no finding_category bullet`).not.toBe('');
-      expect(bullet, `${role}.md points at taxonomy.yml instead of listing the values`).toContain(
-        'one of:',
+      const bullet = categoryBullet(
+        readFileSync(path.join(AGENTS_DIR, templateFileFor(role)), 'utf8'),
       );
+      expect(bullet, `${templateFileFor(role)} has no finding_category bullet`).not.toBe('');
+      expect(
+        bullet,
+        `${templateFileFor(role)} points at taxonomy.yml instead of listing the values`,
+      ).toContain('one of:');
 
       const listed = new Set(
         [...bullet.matchAll(/`([a-z0-9-]+)`/g)]
           .map((m) => m[1] as string)
           .filter((value) => value !== 'finding_category'),
       );
-      expect([...listed].sort(), `${role}.md finding_category list has drifted`).toEqual(
-        [...declared].sort(),
-      );
+      expect(
+        [...listed].sort(),
+        `${templateFileFor(role)} finding_category list has drifted`,
+      ).toEqual([...declared].sort());
     }
   });
 
   it('every brief that writes a severity still spells all four out in full', () => {
     const declared = loadTaxonomy().dimensions.severity ?? [];
     for (const role of CATEGORY_WRITING_BRIEFS) {
-      const text = readFileSync(path.join(AGENTS_DIR, `${role}.md`), 'utf8');
+      const text = readFileSync(path.join(AGENTS_DIR, templateFileFor(role)), 'utf8');
       for (const value of declared) {
-        expect(text, `${role}.md omits severity ${value}`).toContain(value);
+        expect(text, `${templateFileFor(role)} omits severity ${value}`).toContain(value);
       }
     }
   });

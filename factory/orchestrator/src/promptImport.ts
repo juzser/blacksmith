@@ -151,19 +151,37 @@ function classify(l: Obj): Classified {
 
 /** Every line of a file, decoded as UTF-8, without ever holding the whole file. */
 async function* linesOf(file: string): AsyncGenerator<string> {
+  yield* linesOfChunks(createReadStream(file));
+}
+
+/**
+ * Split byte chunks into `\n`-terminated lines (the terminator is dropped; a
+ * `\r` before it is kept). A final unterminated line is yielded, empty input
+ * yields nothing. UTF-8 is decoded across chunk boundaries, and a sequence cut
+ * off at EOF decodes to U+FFFD.
+ */
+export async function* linesOfChunks(
+  chunks: AsyncIterable<Buffer | Uint8Array>,
+): AsyncGenerator<string> {
   const decoder = new StringDecoder('utf8');
-  let rest = '';
-  for await (const chunk of createReadStream(file)) {
-    rest += decoder.write(chunk as Buffer);
-    let nl = rest.indexOf('\n');
+  // Pieces of the unfinished line; each chunk is searched once, from its start.
+  let pending: string[] = [];
+  for await (const chunk of chunks) {
+    const text = decoder.write(chunk as Buffer);
+    let from = 0;
+    let nl = text.indexOf('\n');
     while (nl !== -1) {
-      yield rest.slice(0, nl);
-      rest = rest.slice(nl + 1);
-      nl = rest.indexOf('\n');
+      pending.push(text.slice(from, nl));
+      yield pending.length === 1 ? (pending[0] as string) : pending.join('');
+      pending = [];
+      from = nl + 1;
+      nl = text.indexOf('\n', from);
     }
+    if (from < text.length) pending.push(from === 0 ? text : text.slice(from));
   }
-  rest += decoder.end();
-  if (rest !== '') yield rest;
+  pending.push(decoder.end());
+  const last = pending.join('');
+  if (last !== '') yield last;
 }
 
 async function parseTranscript(file: string): Promise<{
