@@ -178,7 +178,12 @@ function onBecauseOf() {
       </div>
       <div v-if="hasDetails" class="bs-timeline-row__meta">
         <span v-if="meta">{{ meta }}</span>
-        <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
+        <button
+          v-if="hasPromptLink"
+          type="button"
+          class="bs-timeline-row__because-of bs-timeline-row__because-of--meta"
+          @click="onBecauseOf"
+        >
           because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
         </button>
         <!-- Phone (ds-spec.md §4.1 1b): the meta line ends with the time
@@ -208,6 +213,16 @@ function onBecauseOf() {
         <template v-if="meta">
           <dt>Meta</dt>
           <dd>{{ meta }}</dd>
+        </template>
+        <!-- Phone only (ds-review.html #p-activity: "because of" moves into the
+             detail); on desktop the link stays in the meta line above. -->
+        <template v-if="hasPromptLink">
+          <dt class="bs-timeline-row__cause">Because of</dt>
+          <dd class="bs-timeline-row__cause">
+            <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
+              your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
+            </button>
+          </dd>
         </template>
         <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
              on TaskDetailPage), and TaskRun carries no taskId. An event with no

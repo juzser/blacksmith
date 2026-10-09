@@ -599,6 +599,60 @@ test.describe('Activity', () => {
     expect(box?.height ?? 0).toBeLessThanOrEqual(lineHeight + 2);
   });
 
+  // ds-review.html (#p-activity phone note): on a phone "because of" moves
+  // into the expanded detail; the meta line stays one line ending in the time.
+  // The link was left in the meta line, where it shrank to one word per line.
+  for (const width of [375, 390]) {
+    test(`${width}px: the prompt link leaves the meta line and is a one-line tap target in the detail`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto('/activity?session=sess-fixture');
+      const row = page
+        .locator('.bs-timeline-row')
+        .filter({ has: page.locator('.bs-timeline-row__because-of') })
+        .first();
+      await expect(row).toBeVisible();
+
+      // Meta line: no link, one line, nothing past the row's right edge.
+      const metaLink = row.locator('.bs-timeline-row__meta .bs-timeline-row__because-of');
+      await expect(metaLink).toBeHidden();
+      const meta = await row.locator('.bs-timeline-row__meta').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const rowRect = (el.closest('li') as HTMLElement).getBoundingClientRect();
+        return {
+          height: r.height,
+          lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+          right: r.right,
+          rowRight: rowRect.right,
+        };
+      });
+      expect(meta.height).toBeLessThanOrEqual(meta.lineHeight + 2);
+      expect(meta.right).toBeLessThanOrEqual(meta.rowRight);
+
+      // Detail: the link keeps its words on one line and clears --bs-touch.
+      await row.getByRole('button', { name: 'Show details' }).click();
+      const link = row.locator('.bs-timeline-row__detail .bs-timeline-row__because-of');
+      await expect(link).toBeVisible();
+      const m = await link.evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return {
+          height: b.height,
+          lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+          right: b.right,
+        };
+      });
+      expect(m.height).toBeGreaterThanOrEqual(43.5);
+      const text = await link.evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getClientRects().length;
+      });
+      expect(text).toBe(1);
+      expect(m.right).toBeLessThanOrEqual(width);
+    });
+  }
+
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
   // is one line, ellipsised -- the app used to wrap a long title to 2-3
   // lines in bold. The full title stays reachable: it is still the
