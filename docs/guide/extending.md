@@ -6,15 +6,17 @@ enforces so a docs/code mismatch fails CI instead of drifting silently.
 
 ## Add an agent template
 
-Templates live at `.claude/agents/<role>.md` — Claude Code subagent
+Templates live at `.claude/agents/bs-<role>.md` (the subagent is named
+`bs-<role>`, so it cannot collide with another plugin's `coder`; the role
+stays bare in events, policies and env names) — Claude Code subagent
 format (YAML frontmatter + body-as-system-prompt). There are 12 today:
 `planner`, `spec-reviewer`, `researcher`, `coder`, `tester`, `grader`,
 `reviewer`, `verifier`, `security-reviewer`, `merger`, `scribe`, `uiux`.
 
 To add one:
 
-1. **Write the file** `.claude/agents/<role>.md` with required
-   frontmatter fields `name`, `description`, `model`, `tools`, and
+1. **Write the file** `.claude/agents/bs-<role>.md` with required
+   frontmatter fields `name` (`bs-<role>`), `description`, `model`, `tools`, and
    `maxTurns` — a positive integer that Claude Code enforces as the agent's
    turn ceiling, so leaving it out ships an uncapped role. Add a matching
    `BS_MAXTURNS_<ROLE>` line to `.env.example` at the same value
@@ -35,7 +37,7 @@ To add one:
 4. **`check.sh`'s contract**, which every template must satisfy:
    - starts with `---`, has a well-formed frontmatter block;
    - `name`, `description`, `model`, `tools` all present and non-empty;
-   - the set of `.claude/agents/*.md` basenames equals `taxonomy.yml`'s
+   - the set of `.claude/agents/bs-*.md` basenames, prefix stripped, equals `taxonomy.yml`'s
      `agent` dimension exactly (Section "Agent templates: frontmatter" in
      `scripts/check.sh`).
 
@@ -275,7 +277,7 @@ directly, one by the test suite it runs — and one is not (own it in review):
 
 | Invariant | Enforced by |
 |---|---|
-| `taxonomy.yml`'s `agent` dimension == `.claude/agents/*.md` basenames | `scripts/check.sh` "Agent templates: frontmatter" section |
+| `taxonomy.yml`'s `agent` dimension == `.claude/agents/bs-*.md` basenames, prefix stripped | `scripts/check.sh` "Agent templates: frontmatter" section |
 | Every `x-taxonomy` value in `factory/specs/schema/*.json` names a real `taxonomy.yml` dimension | `scripts/check.sh` "x-taxonomy dimensions referenced in schemas exist in taxonomy.yml" section |
 | Every `SHARED:<name>` region in `.claude/agents/*.md` equals `.claude/fragments/<name>.md` byte for byte, and every fragment has a carrier | `factory/orchestrator/test/templateFragments.test.ts` (repair with `node scripts/sync-shared-fragments.mjs`) |
 | `taxonomy.yml` mirrors architecture.md §8 prose value-for-value | **Not mechanically checked** — a manual review item on every taxonomy PR |
