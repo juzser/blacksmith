@@ -110,7 +110,7 @@ would cost:
 - **In a session of its own**, when it is not, but you still want to drive
   it yourself: `bs session start <wave-id> --continues <session-id>#<n>`,
   where `<n>` is the index of the event that admitted this wave.
-- **Dispatched**, as the **`wave-runner`** agent, when the wave would eat
+- **Dispatched**, as the **`bs-wave-runner`** agent, when the wave would eat
   the window this epic needs to reach its own end. It is the only role
   `factory/policies/delegation.yml` grants `Agent`, and it earns that by
   opening its own log first — so hand it the event id of *your dispatch*,
@@ -149,7 +149,7 @@ playbooks are written to prevent.
 
 11. Repeat until every task in the live plan version is `completed`/`waived`,
     or `superseded` by a successor that is itself terminal-OK (recursively —
-    a successor chain counts too). Dispatch the **`planner`** again for
+    a successor chain counts too). Dispatch the **`bs-planner`** again for
     the epic verdict against acceptance criteria — gaps found → a NEW
     `plan-v(n+1)` with inferred tasks (never a live-graph mutation,
     architecture §12), auto-scheduled at confidence ≥0.8 else parked for an
@@ -194,7 +194,7 @@ playbooks are written to prevent.
     integration check and its closing spec review both stamped v1; the goal
     check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
     pass it every time.
-13. Dispatch the **`spec-reviewer`** again — this time against the code.
+13. Dispatch the **`bs-spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
     this one reads it against the assembled branch, which is the only reading
     that can see a criterion the finished code proves wrong. The envkit epic
@@ -258,7 +258,7 @@ playbooks are written to prevent.
     bs epic goal --epic <epic>
     ```
 
-    Hand those clauses and the live plan to a **`spec-reviewer`** session —
+    Hand those clauses and the live plan to a **`bs-spec-reviewer`** session —
     a fresh one, never the planner's, and never the same dispatch as step 13:
     `bs dispatch check` refuses to let one dispatch answer for both.
     Dispatch it *after* step 13's record is written, not alongside it — a

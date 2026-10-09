@@ -141,7 +141,12 @@ with open(os.path.join(root, "factory", "policies", "taxonomy.yml")) as fh:
 # false declaration, so the equality below is over dispatched roles only.
 never_dispatched = {"operator"}
 tax_agents -= never_dispatched
-template_names = {os.path.splitext(os.path.basename(f))[0] for f in files}
+# The subagent is `bs-<role>` (agentNames.ts); the role stays bare in taxonomy.
+unprefixed = [os.path.basename(f) for f in files if not os.path.basename(f).startswith("bs-")]
+if unprefixed:
+    print(f"FAIL: template file without the bs- prefix: {', '.join(unprefixed)}")
+    fail = True
+template_names = {os.path.splitext(os.path.basename(f))[0].removeprefix("bs-") for f in files}
 if template_names & never_dispatched:
     print(f"FAIL: template for a never-dispatched role: {', '.join(sorted(template_names & never_dispatched))}")
     fail = True
@@ -183,6 +188,9 @@ for f in files:
         fail = True
     elif not (isinstance(turns, int) and not isinstance(turns, bool) and turns > 0):
         print(f"FAIL {rel}: {turn_key} must be a positive integer (the harness enforces it as the turn ceiling), got {turns!r}")
+        fail = True
+    elif fm["name"] != os.path.splitext(os.path.basename(f))[0]:
+        print(f"FAIL {rel}: name {fm['name']!r} must equal the file name (bs-<role>)")
         fail = True
     else:
         print(f"OK   {rel}: name={fm['name']} model={fm['model']} {turn_key}={turns}")

@@ -33,7 +33,7 @@ both:
   than every turn in between — which is the point, because an epic outlives
   its waves, and a window spent on this wave's dispatches is a window the
   epic does not have for the wave after next (D13). Every event you write in
-  that session carries `--actor wave-runner` — `.claude/agents/wave-runner.md`'s
+  that session carries `--actor wave-runner` — `.claude/agents/bs-wave-runner.md`'s
   Constraints has the rule and the check it satisfies.
 
 After any `error-logged` this wave writes — a worker that died, a judge turn
@@ -49,7 +49,7 @@ not cosmetic — it is the edge an audit walks:
 
 - **The epic ran you** and you opened a wave session yourself: continue from
   the epic event that admitted this wave.
-- **You were dispatched as a `wave-runner`**: continue from the
+- **You were dispatched as a `bs-wave-runner`**: continue from the
   `dispatch_decision` that dispatched you, the event id handed to you with
   the wave. `bs delegation check` resolves your session by matching a
   `session-start`'s `causal_parent` against that dispatch, and it is the
@@ -126,8 +126,8 @@ one thing this playbook never asks you to.
 
 2. Per admitted task, and for all of them together: `bs worktree create
    <project-dir> <epic> <task-id>`.
-3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
-   `uiux` (`.claude/agents/uiux.md`) for any UI-affecting acceptance
+3. Pre-code, if the task needs it: dispatch `bs-researcher` for an unknown, or
+   `bs-uiux` (`.claude/agents/bs-uiux.md`) for any UI-affecting acceptance
    criterion — before the coder starts, not after. Bracket the uiux spec
    turn with `bs judge dispatch --role uiux --kind spec` / `bs judge report
    --role uiux --kind spec`, the same way every judge turn in steps 5–7 is
@@ -147,7 +147,7 @@ one thing this playbook never asks you to.
      `recommendation.provenance` into the coder's prompt so the task knows
      whether its research rests on this repo or on a fetched page. Any raw
      fetched text you quote alongside it is wrapped with `bs prompt wrap`.
-4. Dispatch **`coder`** (`.claude/agents/coder.md`) in that worktree.
+4. Dispatch **`bs-coder`** (`.claude/agents/bs-coder.md`) in that worktree.
    Token/diff caps (`budgets.yml`, sized per effort tier) and YAGNI
    are the coder's own constraints — don't restate them here, the template
    does. What the template does not read is the schema, so when the spec
@@ -181,7 +181,7 @@ one thing this playbook never asks you to.
      the session gets linked under `--continues` next time.
    - `parallel` or `single` — nothing further; the wave ran as wide as it
      was admitted.
-5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
+5. Dispatch **`bs-tester`** (`.claude/agents/bs-tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
    - The moment it returns, project its result: `bs results record --task
      <task-id> --result <tester-result.json> --agent tester --provider <name>
@@ -215,9 +215,9 @@ one thing this playbook never asks you to.
      primitive, not only the task's screens. The tester determines that
      list — from the screenshot suite already on disk or from the
      primitive's importers — and records it alongside the screenshots it
-     captures. The "max 4 per feature" screenshot cap (tester.md) still applies per
+     captures. The "max 4 per feature" screenshot cap (bs-tester.md) still applies per
      screen; it is the screen count that grows, not the shots on each one.
-6. Dispatch **`grader`** (`.claude/agents/grader.md`) — bounded rubric
+6. Dispatch **`bs-grader`** (`.claude/agents/bs-grader.md`) — bounded rubric
    loop, `profile.graderRounds` rounds (2 at `huge`, 1 below; never more
    than 2, agent-constraints.md "grader (v3)"), before any gate
    runs; it never decides pass/fail itself. At one round the grader scores
@@ -255,9 +255,9 @@ one thing this playbook never asks you to.
      reporter or the include glob, not the code. Ask the same question
      outside a gate run with `bs coverage check <worktree-dir> --plan
      <plan.json> --task <task-id>` (§5c).
-   - Findings come from dispatching **`reviewer`**
-     (`.claude/agents/reviewer.md`, fresh context, read-only) then
-     **`verifier`** (`.claude/agents/verifier.md`, adversarial refute
+   - Findings come from dispatching **`bs-reviewer`**
+     (`.claude/agents/bs-reviewer.md`, fresh context, read-only) then
+     **`bs-verifier`** (`.claude/agents/bs-verifier.md`, adversarial refute
      mandate) — never skip the adversarial stage on an S1/S2 finding
      (`crosscheck.yml` `asymmetric_roles`). Which findings that covers is
      `profile.verifierSeverities`, plus a
@@ -267,7 +267,7 @@ one thing this playbook never asks you to.
      thing a cheaper tier drops; `S1-stop-the-line` is in every tier's list
      and no tier may remove it. A finding outside the tier's list still goes
      to the coder — it is verified by the coder's fix, not waived.
-   - Dispatch **`security-reviewer`** only when its conditional triggers
+   - Dispatch **`bs-security-reviewer`** only when its conditional triggers
      fire — never per-task by default. Ask, do not recall:
      `bs security triggers --task <spec.json>` and dispatch iff
      `dispatchSecurityReviewer` is true ("Dispatching the security-reviewer"
@@ -340,8 +340,8 @@ one thing this playbook never asks you to.
     <event-id>` — the same write triple as every other dispatch above; a
     merge that lands with no session to log it into is a fact the
     timeline never gets. On a
-    `rebase-conflict` outcome, dispatch **`merger`**
-    (`.claude/agents/merger.md`) with both diffs + specs, and note three
+    `rebase-conflict` outcome, dispatch **`bs-merger`**
+    (`.claude/agents/bs-merger.md`) with both diffs + specs, and note three
     things the queue's own behaviour forces (agent-interviews.md N-12):
     - **Into the failing task's existing worktree** — a fresh one would not
       reproduce the conflict. The result gives you only `taskId` and

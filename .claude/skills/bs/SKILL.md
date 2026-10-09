@@ -11,9 +11,10 @@ deterministic mechanics run through the real `bs` CLI, spelled `bs` in
 every command below — on PATH from `npm i -g @juzser/blacksmith`, or inside a
 clone `node factory/orchestrator/dist/cli.js` instead, `pnpm build` first if
 `dist/` is stale. The judgment steps — planning, spec review, coding, testing,
-reviewing — are separate Claude Code sessions you dispatch by role, each under
+reviewing — are separate Claude Code sessions you dispatch by agent name
+(`bs-<role>`), each under
 the contract in its own agent template beside this skill
-(`.claude/agents/<role>.md`). **This skill never calls an LLM directly and
+(`.claude/agents/bs-<role>.md`). **This skill never calls an LLM directly and
 never embeds a role prompt** — the templates own that; duplicating them here
 would let this file drift out of sync with the real contracts. Cite policy
 files (`factory/policies/*.yml`) rather than restating their numbers.

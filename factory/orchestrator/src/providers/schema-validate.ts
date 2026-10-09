@@ -106,7 +106,7 @@ export type JudgeOutputResult =
 /**
  * Schemas that describe ONE item a `kind: review` judge returns MANY of. Both
  * of them: `finding` is the stored record (the native reviewer's contract,
- * .claude/agents/reviewer.md), `finding-evidence` is the judge's half of it —
+ * .claude/agents/bs-reviewer.md), `finding-evidence` is the judge's half of it —
  * the same evidence without the six identity fields the orchestrator owns.
  * A set, not a comparison, because the second entry was added a year after the
  * first and the `=== 'finding'` it replaced would have silently validated an
@@ -146,7 +146,7 @@ function describeShape(parsed: unknown): string {
 /**
  * Extract + schema-validate a judge's raw text response. `finding.schema.json`
  * describes ONE finding, but a `kind: review` judge's contract
- * (.claude/agents/reviewer.md) returns an ARRAY of findings — so against an
+ * (.claude/agents/bs-reviewer.md) returns an ARRAY of findings — so against an
  * ARRAY_VALUED_SCHEMAS name the top-level value must be that array, bare or
  * wrapped in one single-key object (see `unwrapArray`), and validates
  * element-wise; the value returned is the array itself, unwrapped. A bare

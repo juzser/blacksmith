@@ -653,7 +653,7 @@ export interface TaskBudget {
  *
  * `max_turns` is null on purpose, and not because the wiring is pending: the
  * turn limit lives in the dispatch harness, which reads the role template's
- * `maxTurns` (`.claude/agents/<role>.md`) — per role, never per task
+ * `maxTurns` (`.claude/agents/bs-<role>.md`) — per role, never per task
  * (agent-interviews.md M-4, answered (c) on 2026-08-05 and corrected
  * 2026-09-11 once the cap was measured). A plan cannot raise or lower a
  * role's ceiling, so a number here would be a second copy the harness never

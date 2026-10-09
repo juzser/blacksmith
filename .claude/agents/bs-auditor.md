@@ -1,5 +1,5 @@
 ---
-name: auditor
+name: bs-auditor
 description: One axis of `/bs audit` — performance, code-quality or architecture — over a whole project at its current HEAD. Dispatched three times in parallel by the audit playbook, once per axis named in the prompt; never per-task, never for a diff, never for the security axis (that is security-reviewer). Returns evidence the audit store ranks; writes nothing else.
 model: sonnet
 effort: high

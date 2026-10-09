@@ -123,7 +123,7 @@ verbs underneath are `bs audit open|record|consolidate|decide|cut|resolve|close`
 ## 1. Say what you want — `/bs plan <goal>`
 
 Describe the goal in plain language. The planner
-([`.claude/agents/planner.md`](../../.claude/agents/planner.md)) turns it into
+([`.claude/agents/bs-planner.md`](../../.claude/agents/bs-planner.md)) turns it into
 an epic spec plus task specs, and a spec-reviewer goes hunting for holes in it
 before you ever look. You get something concrete to react to instead of a
 blank page.

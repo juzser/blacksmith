@@ -40,7 +40,7 @@ It runs, in order:
 | `factory/policies/*.yml` | every policy file parses |
 | `factory/specs/schema/*.json` | every JSON Schema parses |
 | `x-taxonomy` resolution | every schema annotation names a real dimension in `taxonomy.yml` |
-| agent frontmatter | the set of `.claude/agents/*.md` equals the taxonomy's `agent` dimension |
+| agent frontmatter | the set of `.claude/agents/bs-*.md` (prefix stripped) equals the taxonomy's `agent` dimension |
 | `bash -n .claude/hooks/*.sh` | the safety hooks are syntactically valid |
 | `gitleaks dir .` | no credential-shaped string is about to be committed |
 | `biome check .` | lint + format |

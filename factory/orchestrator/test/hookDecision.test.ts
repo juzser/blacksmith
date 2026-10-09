@@ -375,15 +375,23 @@ describe('Agent dispatches (judge artifact line)', () => {
       leaseDir,
     );
 
-  it.each(['reviewer', 'blacksmith:reviewer', 'auditor', 'spec-reviewer'])(
-    'denies %s with no declared-artifact line',
-    (type) => {
-      const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
-      expect(reason).toContain('Declared artifact: <absolute path>');
-      expect(reason).toContain('judge dispatch');
-      expect(reason).toContain('expected_line');
-    },
-  );
+  // `bs-<role>` is the agent name; the bare names stay denied for a box whose
+  // installed plugin predates the prefix.
+  it.each([
+    'reviewer',
+    'blacksmith:reviewer',
+    'auditor',
+    'spec-reviewer',
+    'bs-reviewer',
+    'blacksmith:bs-reviewer',
+    'bs-spec-reviewer',
+    'bs-security-reviewer',
+  ])('denies %s with no declared-artifact line', (type) => {
+    const reason = reasonOf(agent(type, 'Role: reviewer. Do the review.'));
+    expect(reason).toContain('Declared artifact: <absolute path>');
+    expect(reason).toContain('judge dispatch');
+    expect(reason).toContain('expected_line');
+  });
 
   it('treats Task like Agent', () => {
     expect(agent('reviewer', 'no line', 'Task')).not.toBeNull();
@@ -424,10 +432,16 @@ describe('Agent dispatches (judge artifact line)', () => {
   it.each([
     ['reviewer', `Role: reviewer.\nDeclared artifact: ${abs}\n`],
     ['blacksmith:grader', `Declared artifact: ${abs}`],
+    ['bs-reviewer', `Declared artifact: ${abs}`],
+    ['blacksmith:bs-reviewer', `Declared artifact: ${abs}`],
+    ['other:reviewer', 'no line needed'],
+    ['other:bs-reviewer', 'no line needed'],
+    ['bs-coder', 'no line needed'],
+    ['blacksmith:bs-uiux', 'no line needed'],
+    ['bs-', 'no line needed'],
     ['coder', 'no line needed'],
     ['uiux', 'no line needed'],
     ['general-purpose', 'no line needed'],
-    ['other:reviewer', 'no line needed'],
     [undefined, 'no line needed'],
   ])('allows %s silently (%j)', (type, prompt) => {
     expect(agent(type, prompt)).toBeNull();

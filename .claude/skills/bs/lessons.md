@@ -51,8 +51,8 @@ none of it is restated here.
    candidates from decision checkpoints (plan sign-offs, waiver decisions,
    escalations, gate blocks) before this review — it needs the same
    `--session/--plan-version/--causal-parent` envelope. Candidates it
-   raises carry `needs_distillation: true`; dispatch **`scribe`**
-   (`.claude/agents/scribe.md`) to turn a promising raw one into a
+   raises carry `needs_distillation: true`; dispatch **`bs-scribe`**
+   (`.claude/agents/bs-scribe.md`) to turn a promising raw one into a
    checkable, principle-level statement before presenting it, rather than
    showing the operator raw event text.
 5. Once a batch is approved, recompile the committed file:

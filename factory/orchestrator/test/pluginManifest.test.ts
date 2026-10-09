@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { templateFileFor } from '../src/agentNames.js';
 import { JUDGE_ROLES } from '../src/dispatchLint.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { runProcess } from './helpers/process.js';
@@ -232,8 +233,11 @@ describe('plugin payload', () => {
     // via settings.json or a plugin hooks.json -- pins the reference against
     // a future rename of the hook script.
     for (const role of JUDGE_ROLES) {
-      const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
-      expect(body, `${role}.md frontmatter is missing the judge-stop.sh Stop hook`).toMatch(
+      const body = readFileSync(path.join(root, 'agents', templateFileFor(role)), 'utf8');
+      expect(
+        body,
+        `${templateFileFor(role)} frontmatter is missing the judge-stop.sh Stop hook`,
+      ).toMatch(
         /hooks:\s*\n\s*Stop:\s*\n[\s\S]*?\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\/judge-stop\.sh/,
       );
     }
@@ -247,14 +251,15 @@ describe('plugin payload', () => {
     const judgeRoleSet: ReadonlySet<string> = new Set(JUDGE_ROLES);
     const allTemplates = readdirSync(path.join(root, 'agents'))
       .filter((f) => f.endsWith('.md'))
-      .map((f) => f.replace(/\.md$/, ''));
+      .map((f) => f.replace(/^bs-/, '').replace(/\.md$/, ''));
     const nonJudgeTemplates = allTemplates.filter((role) => !judgeRoleSet.has(role));
     expect(nonJudgeTemplates.length).toBeGreaterThan(0);
     for (const role of nonJudgeTemplates) {
-      const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
-      expect(body, `${role}.md should not declare the judge-stop.sh hook`).not.toMatch(
-        /judge-stop\.sh/,
-      );
+      const body = readFileSync(path.join(root, 'agents', templateFileFor(role)), 'utf8');
+      expect(
+        body,
+        `${templateFileFor(role)} should not declare the judge-stop.sh hook`,
+      ).not.toMatch(/judge-stop\.sh/);
     }
   });
 
@@ -271,10 +276,11 @@ describe('plugin payload', () => {
   // it for real, so a command that forgets its own existence guard is caught
   // here instead of in an operator's plugin install.
   function extractHookCommand(role: string): string {
-    const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
+    const body = readFileSync(path.join(root, 'agents', templateFileFor(role)), 'utf8');
     const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
     const frontmatterText = match?.[1];
-    if (frontmatterText === undefined) throw new Error(`${role}.md has no frontmatter block`);
+    if (frontmatterText === undefined)
+      throw new Error(`${templateFileFor(role)} has no frontmatter block`);
     const frontmatter = parseYaml(frontmatterText) as {
       hooks?: { Stop?: { hooks?: { command?: string }[] }[] };
     };

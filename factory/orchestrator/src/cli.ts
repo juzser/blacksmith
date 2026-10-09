@@ -1063,7 +1063,7 @@ function mintFromEvidence(
 
 /**
  * Mint a uiux visual pass's deviations under the `uiux` judge. `--uiux-visual`
- * hands over the whole Result document (uiux.md's output contract), not a
+ * hands over the whole Result document (bs-uiux.md's output contract), not a
  * findings-evidence array, so this reads `structured_output.deviations` the
  * same way `readJudgeArtifact`'s uiux branch does (judges.ts) before handing
  * the mapped evidence to the same `mintFindings` every other judge goes

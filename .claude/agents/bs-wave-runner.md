@@ -1,9 +1,9 @@
 ---
-name: wave-runner
+name: bs-wave-runner
 description: Runs one admitted wave of an epic — worktrees through merge queue — in a session of its own, so the epic session spends its window on the epic. Use when a wave is too wide to carry inline; never to plan, re-plan, or close an epic.
 model: sonnet
 effort: medium
-tools: Read, Write, Bash, Grep, Glob, Agent(coder, tester, grader, reviewer, verifier, security-reviewer, uiux, researcher, merger, scribe)
+tools: Read, Write, Bash, Grep, Glob, Agent(bs-coder, bs-tester, bs-grader, bs-reviewer, bs-verifier, bs-security-reviewer, bs-uiux, bs-researcher, bs-merger, bs-scribe)
 maxTurns: 150
 ---
 

@@ -21,7 +21,7 @@
 // conditions delegation.ts enforces are exactly the two this reading needs: a
 // grantee owns its own log, and no grant hands a role its own auditor from the
 // `role_isolation` pairs below. Run `smith delegation check` beside this one;
-// a coder granted `Agent(tester)` would make every pass here meaningless.
+// a coder granted `Agent(bs-tester)` would make every pass here meaningless.
 //
 // Required-role semantics, which is why this is not another pair in
 // dispatchAudit.ts. There, a critic that never ran raises no check at all —

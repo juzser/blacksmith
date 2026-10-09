@@ -41,7 +41,7 @@ export type JudgeRole = (typeof JUDGE_ROLES)[number];
  * ("owes a declared-artifact line and a blocked Stop") stays exactly the six
  * roles it always was for `dispatchLint.ts`'s `checkArtifact()` and
  * `judgeStopHook.ts`'s SubagentStop guard — uiux's artifact is always the
- * OBJECT `{run_status, structured_output, artifacts}` (uiux.md), never the
+ * OBJECT `{run_status, structured_output, artifacts}` (bs-uiux.md), never the
  * array shape those two callers check for, so widening `JUDGE_ROLES` itself
  * would start demanding a declared-artifact line and a blocked Stop uiux was
  * never designed to carry.

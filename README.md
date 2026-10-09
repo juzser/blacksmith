@@ -206,8 +206,8 @@ bash scripts/check.sh                   # the gate CI runs; ends in `== PASS ==`
 
 Open a Claude Code session in the clone and you have `/bs` already, from the
 checkout's own `.claude/` — **do not also install the plugin there.** You would
-get two of everything (`bs` and `blacksmith:bs`, `auditor` and
-`blacksmith:auditor`, once per role), pay the always-on cost twice, and the two
+get two of everything (`bs` and `blacksmith:bs`, `bs-auditor` and
+`blacksmith:bs-auditor`, once per role), pay the always-on cost twice, and the two
 copies are free to disagree: the plugin's is a pinned checkout of `main`, the
 project's is whatever branch you have out. `claude plugin disable blacksmith`
 settles it. It also turns off the prompt recorder in that clone, which only

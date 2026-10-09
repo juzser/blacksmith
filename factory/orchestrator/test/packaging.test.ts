@@ -243,7 +243,7 @@ describe('the published package', () => {
     // out of it. `.claude/skills/bs` is the other half of the same product --
     // the `/bs` playbooks that dispatch those roles -- and an install that
     // carries the roles without the playbooks is a CLI with no way in.
-    for (const rel of ['.claude/agents/coder.md', '.claude/skills/bs/SKILL.md']) {
+    for (const rel of ['.claude/agents/bs-coder.md', '.claude/skills/bs/SKILL.md']) {
       expect(isShipped(rel), `${rel} is part of the product and not in package.json#files`).toBe(
         true,
       );

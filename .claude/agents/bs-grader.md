@@ -1,5 +1,5 @@
 ---
-name: grader
+name: bs-grader
 description: Runs a bounded rubric loop on a worker's output against its task's acceptance criteria before the output reaches the gates. Use once a coder/tester task reports done, before schema/test/review gates.
 model: sonnet
 effort: low

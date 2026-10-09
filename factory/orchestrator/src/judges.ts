@@ -637,7 +637,7 @@ function graderFindingCount(parsed: unknown): number | undefined {
  * Count what a uiux result document holds, for the turn `kind` it closes.
  *
  * uiux's declared artifact is always the Result object `{run_status,
- * structured_output, artifacts}` (uiux.md), never a findings-evidence array —
+ * structured_output, artifacts}` (bs-uiux.md), never a findings-evidence array —
  * the bug this slice fixes is exactly that `readJudgeArtifact` used to throw
  * on this real shape. A pre-code spec names no findings of its own (its
  * `structured_output.deviations` are design-token departures the spec itself
@@ -666,7 +666,7 @@ function uiuxFindingCount(parsed: unknown, kind: JudgeKind | null): number | und
   return 0;
 }
 
-/** One entry of a uiux visual pass's `structured_output.deviations` (uiux.md). */
+/** One entry of a uiux visual pass's `structured_output.deviations` (bs-uiux.md). */
 export interface UiuxDeviation {
   screenshot: string;
   viewport: string;
@@ -734,9 +734,9 @@ function describeShapeFailures(
  * report` specifically, `.claude/skills/bs/wave.md`'s list of the judges that
  * bracket ("uiux visual pass, grader, reviewer, verifier, security-reviewer").
  *
- * - `reviewer` (reviewer.md): its whole array is exactly the five
+ * - `reviewer` (bs-reviewer.md): its whole array is exactly the five
  *   finding-evidence keys.
- * - `security-reviewer` (security-reviewer.md): its per-task array is the
+ * - `security-reviewer` (bs-security-reviewer.md): its per-task array is the
  *   same five keys as `reviewer`'s. Its OTHER artifact — the security axis of
  *   `/bs audit` — carries a sixth key, `confidence`, and drops
  *   `finding_category`, which `additionalProperties: false` rejects; that
@@ -752,17 +752,17 @@ function describeShapeFailures(
  *   <file>` verdict-document path, so the role belongs here for that case.
  *
  * Every other role keeps the old count-only behaviour:
- * - `verifier` (verifier.md) reports `{finding_id, verdict, rationale,
+ * - `verifier` (bs-verifier.md) reports `{finding_id, verdict, rationale,
  *   failure_scenario}` — echoing a finding back rather than describing a
  *   fresh one — a different, and never finding-evidence, shape by design.
- * - `uiux` (uiux.md): its artifact is always the OBJECT `{run_status,
+ * - `uiux` (bs-uiux.md): its artifact is always the OBJECT `{run_status,
  *   structured_output, artifacts}`, never an array, so this check never
  *   applies to it regardless of allow-listing.
  * - `auditor`: the other three audit axes, the same AuditEvidenceItem shape
  *   as security-reviewer's audit path — but auditor never reviews a single
- *   task (auditor.md: "never per-task, never for a diff"), so there is no
+ *   task (bs-auditor.md: "never per-task, never for a diff"), so there is no
  *   taskId to gate on; it stays exempt unconditionally.
- * - `spec-reviewer` (spec-reviewer.md): not on the list. Neither of its two
+ * - `spec-reviewer` (bs-spec-reviewer.md): not on the list. Neither of its two
  *   array artifacts — the pre-code/close spec review (finding-evidence
  *   shaped) and the spec-vs-goal coverage check (`{clause, verdict,
  *   taskIds?, reason?}`, not finding-evidence shaped) — currently reaches

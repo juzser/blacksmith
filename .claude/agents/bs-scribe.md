@@ -1,5 +1,5 @@
 ---
-name: scribe
+name: bs-scribe
 description: Distills errors and decision checkpoints into lesson candidates, and writes PR bodies/timeline summaries. Use for the offline "dreaming" pass over event logs, or to draft an integration PR body.
 model: haiku
 effort: low

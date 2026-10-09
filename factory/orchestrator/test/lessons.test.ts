@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { roleOfTemplateFile, templateFileFor } from '../src/agentNames.js';
 import { foldLessons } from '../src/db/projector.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { appendEvent, readEvents } from '../src/events.js';
@@ -2206,7 +2207,7 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
   let lessonsPath: string;
 
   function writeRole(role: string, body: string): void {
-    writeFileSync(path.join(agentsDir, `${role}.md`), body, 'utf8');
+    writeFileSync(path.join(agentsDir, templateFileFor(role)), body, 'utf8');
   }
 
   beforeEach(() => {
@@ -2469,7 +2470,7 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
   it('every shipped role template carries at least one valid scope marker', () => {
     const roles = readdirSync(AGENTS_DIR)
       .filter((f) => f.endsWith('.md'))
-      .map((f) => path.basename(f, '.md'));
+      .flatMap((f) => roleOfTemplateFile(f) ?? []);
     expect(roles.length).toBeGreaterThan(0);
     for (const role of roles) {
       const scopes = scopesForRole(role);

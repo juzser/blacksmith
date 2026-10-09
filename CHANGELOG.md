@@ -1555,6 +1555,22 @@ than appearing in it.
 
 ### Changed
 
+- **Blacksmith's subagents are named `bs-<role>`.** Claude Code listed them
+  under bare names (`coder`, `reviewer`, ...) that collide with any other
+  plugin's or user's agents of the same name; they are now `bs-auditor`,
+  `bs-coder`, `bs-grader`, `bs-merger`, `bs-planner`, `bs-researcher`,
+  `bs-reviewer`, `bs-scribe`, `bs-security-reviewer`, `bs-spec-reviewer`,
+  `bs-tester`, `bs-uiux`, `bs-verifier` and `bs-wave-runner`, and the
+  templates are `.claude/agents/bs-<role>.md`. Only the agent name changes:
+  the role stays bare in event logs, policies, `BS_MAXTURNS_<ROLE>` env
+  names, budgets and the dashboard, so old logs read as before. The
+  judge-stop hook still recognises the bare names for one release. A box with
+  the plugin installed needs `claude plugin update blacksmith` and a session
+  restart to see the new names. A clone must rebuild (`pnpm run build`) after
+  pulling: the judge-stop hook runs from `dist/`, and an old
+  `dist/judgeStopHook.js` does not know the `bs-` names, so it lets a
+  `bs-reviewer` stop without its artifact until the rebuild.
+
 - **The guide an operator reads is not one file.** `docs/guide/operator-guide.md`
   had grown to 184 kB and 3,341 lines — every question about the loop was
   answered somewhere in it, and every agent handed it for one of those

@@ -187,7 +187,7 @@ that is yours; the rest of it builds a checkout you do not have.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of
-everything — `bs` and `blacksmith:bs`, `auditor` and `blacksmith:auditor`,
+everything — `bs` and `blacksmith:bs`, `bs-auditor` and `blacksmith:bs-auditor`,
 once for each of the fourteen roles — and pays the always-on cost twice. The
 two can also disagree. The plugin's copy is a clone of `main` pinned at the
 moment you installed it; the project's copy is whatever branch you have

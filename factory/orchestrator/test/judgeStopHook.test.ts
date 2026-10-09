@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // TDD red step (recorded before judgeStopHook.ts existed): "Cannot find
 // module '.../src/judgeStopHook.js'". Everything below is the green step.
+import { roleOfAgentType } from '../src/agentNames.js';
 import { parseDeclaredArtifactLine as dispatchLintParser } from '../src/dispatchLint.js';
 import {
   decideJudgeStop,
@@ -85,6 +86,23 @@ afterEach(() => {
 });
 
 describe('decideJudgeStop (pure decision)', () => {
+  it.each(['bs-reviewer', 'blacksmith:bs-reviewer', 'reviewer', 'blacksmith:reviewer'])(
+    'blocks %s when the declared artifact is missing',
+    (agentType) => {
+      const artifactPath = path.join(root, 'missing.reviewer.json');
+      const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;
+      const decision = decideJudgeStop(stdinFixture({ agent_type: agentType }), prompt);
+      expect(decision.decision).toBe('block');
+    },
+  );
+
+  it('allows bs-coder, which is no judge', () => {
+    const prompt = `Role: coder.\nDeclared artifact: ${path.join(root, 'nope.json')}\n`;
+    expect(decideJudgeStop(stdinFixture({ agent_type: 'bs-coder' }), prompt).decision).toBe(
+      'allow',
+    );
+  });
+
   it('blocks a judge whose declared artifact does not exist yet', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     const prompt = `Role: reviewer.\nDeclared artifact: ${artifactPath}\n`;
@@ -112,6 +130,14 @@ describe('decideJudgeStop (pure decision)', () => {
   it('allows a non-judge agent type such as coder, regardless of the prompt', () => {
     const prompt = 'Role: coder. Turn budget: 40\n(no declared-artifact line at all)';
     expect(decideJudgeStop(stdinFixture({ agent_type: 'coder' }), prompt)).toEqual({
+      decision: 'allow',
+    });
+  });
+
+  it('maps an unknown name to a candidate role, which the judge role set then rejects', () => {
+    expect(roleOfAgentType('general-purpose')).toBe('general-purpose');
+    const prompt = 'Role: coder. Turn budget: 40\n(no declared-artifact line at all)';
+    expect(decideJudgeStop(stdinFixture({ agent_type: 'general-purpose' }), prompt)).toEqual({
       decision: 'allow',
     });
   });

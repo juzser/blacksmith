@@ -60,8 +60,8 @@ bs worktree fingerprint <worktree-dir> > /tmp/<audit-id>.before.json
 ## 4. Dispatch the four axes in parallel
 
 One judge per axis, under the ordinary dispatch contract — nothing about an
-audit relaxes it. Three axes are `auditor` (`.claude/agents/auditor.md`, the
-axis named in the prompt); the security axis is `security-reviewer`,
+audit relaxes it. Three axes are `bs-auditor` (`.claude/agents/bs-auditor.md`, the
+axis named in the prompt); the security axis is `bs-security-reviewer`,
 unchanged, with the two audit-specific differences its template already
 states. Per axis:
 

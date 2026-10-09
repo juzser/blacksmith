@@ -1,5 +1,5 @@
 ---
-name: spec-reviewer
+name: bs-spec-reviewer
 description: Hunts deficiencies in a planner's epic spec — before it becomes an immutable plan, again at epic close against the code that now exists, and once more as the spec-vs-goal check that grades the plan against the roadmap goal it was cut from. Never runs on the planner's own model.
 model: sonnet
 effort: high

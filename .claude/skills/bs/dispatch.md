@@ -2,7 +2,11 @@
 
 Applies to every agent you dispatch, in every `/bs` playbook. This is the
 per-dispatch envelope, not a role prompt — the templates still own those
-(`.claude/agents/<role>.md`), and nothing here restates them.
+(`.claude/agents/bs-<role>.md`), and nothing here restates them.
+
+The agent you dispatch is named `bs-<role>` (`bs-coder`, `bs-spec-reviewer`);
+the **role** stays bare (`coder`) wherever it is data: `--role`, `--agent`,
+`--actor`, event payloads, policies and lessons scopes.
 
 ## Carry into the prompt
 
@@ -19,7 +23,7 @@ with nothing written). So state the template's number, never a higher one,
 and tell every role that owes a file to write it before it refines it. A
 role that keeps running out is a template to raise, not a prompt to inflate.
 
-Read that number from `.claude/agents/<role>.md` as the file stands now, at
+Read that number from `.claude/agents/bs-<role>.md` as the file stands now, at
 dispatch time — not from memory, an earlier dispatch, or a doc that quotes
 it. `bs agents sync` may have rewritten it locally from
 `BS_MAXTURNS_<ROLE>` (an uncommitted, per-box edit), and Claude Code
@@ -36,8 +40,9 @@ judge prompt missing or mismatching its artifact line are each a lint
 failure, not a maybe.
 
 In this clone a PreToolUse guard also refuses, at the `Agent` call, a judge-role
-dispatch (reviewer, verifier, grader, spec-reviewer, security-reviewer,
-auditor, bare or `blacksmith:`-prefixed) whose prompt lacks an absolute
+dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
+`bs-security-reviewer`, `bs-auditor`, with or without the
+`blacksmith:` namespace; the bare pre-prefix names too) whose prompt lacks an absolute
 `Declared artifact: <path>` line. It reads the prompt itself, so a dispatch
 that points the agent at a brief file still carries the line inline. It checks
 the line only; `dispatch lint` still checks it against the ledger. An ad-hoc

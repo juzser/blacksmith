@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { agentNameFor, templateFileFor } from './agentNames.js';
 import { type BudgetPolicy, loadBudgetPolicy, roleCapTokens } from './budgets.js';
 import { epicBudgetPolicies } from './epicBudget.js';
 import { SmithError } from './errors.js';
@@ -130,7 +131,7 @@ export const HARNESS_POLICY_VERSION = 2;
  * How a turn is held.
  *
  * `in-process` — the runner spawns a subagent inside its own session, from
- * `.claude/agents/<role>.md`. This is what every turn has always been.
+ * `.claude/agents/bs-<role>.md`. This is what every turn has always been.
  *
  * `cli` — the runner starts a separate program. `smith-run` is the runner;
  * this module only ever describes the process, never starts it.
@@ -435,7 +436,7 @@ export function roleAccess(
 
 /** Where a role's prompt template lives, and whether it is there. */
 function templateFor(role: string, agentsDir: string): { file: string; exists: boolean } {
-  const file = path.join(agentsDir, `${role}.md`);
+  const file = path.join(agentsDir, templateFileFor(role));
   return { file, exists: existsSync(file) };
 }
 
@@ -575,7 +576,7 @@ export interface HarnessBudget {
 export type WorkerInvocation =
   | (InvocationBase & {
       readonly kind: 'in-process';
-      /** The `Agent` tool's `subagent_type`, which is the role. */
+      /** The `Agent` tool's `subagent_type`: the agent name (`bs-<role>`), not the bare role. */
       readonly subagentType: string;
       /** Repo-relative, so the invocation reads the same on every machine. */
       readonly template: string;
@@ -587,7 +588,7 @@ export type WorkerInvocation =
       readonly cwd: string | null;
       /** Variable names, never values. See the header. */
       readonly envAllowlist: readonly string[];
-      /** Repo-relative `.claude/agents/<role>.md`; smith-run prepends its body (frontmatter stripped) to the prompt on stdin. */
+      /** Repo-relative `.claude/agents/bs-<role>.md`; smith-run prepends its body (frontmatter stripped) to the prompt on stdin. */
       readonly template: string;
       /** How smith-run should read this program's output. */
       readonly output: HarnessOutputMode;
@@ -823,7 +824,7 @@ export function planWorkerTurn(
     return {
       ...base,
       kind: 'in-process',
-      subagentType: role,
+      subagentType: agentNameFor(role),
       template: templateRelative,
     };
   }

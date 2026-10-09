@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { roleOfTemplateFile, templateFileFor } from '../src/agentNames.js';
 import { loadBudgetPolicy } from '../src/budgets.js';
 import {
   HARNESS_DEFAULT_MAX_OUTPUT_BYTES,
@@ -45,7 +46,7 @@ const AGENT_ROLES = taxonomy.dimensions.agent ?? [];
 /** Every role with a template on disk — the ones any harness can start. */
 const TEMPLATED_ROLES = readdirSync(AGENTS_DIR)
   .filter((entry) => entry.endsWith('.md'))
-  .map((entry) => entry.slice(0, -'.md'.length))
+  .flatMap((entry) => roleOfTemplateFile(entry) ?? [])
   .sort();
 
 const tmpDirs: string[] = [];
@@ -166,8 +167,8 @@ describe('an in-process turn', () => {
     expect(invocation.kind).toBe('in-process');
     if (invocation.kind !== 'in-process') throw new Error('unreachable');
     expect(invocation.harness).toBe('claude-code');
-    expect(invocation.subagentType).toBe('coder');
-    expect(invocation.template).toBe('.claude/agents/coder.md');
+    expect(invocation.subagentType).toBe('bs-coder');
+    expect(invocation.template).toBe('.claude/agents/bs-coder.md');
     expect(invocation.worktree).toBe('/tmp/wt');
     expect(invocation.access).toBe('worker');
     expect(invocation.sandboxRequired).toBe(false);
@@ -196,7 +197,7 @@ describe('an in-process turn', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(HarnessError);
       expect((error as HarnessError).code).toBe('harness.no-template');
-      expect((error as HarnessError).message).toContain('.claude/agents/operator.md');
+      expect((error as HarnessError).message).toContain('.claude/agents/bs-operator.md');
     }
   });
 });
@@ -260,7 +261,7 @@ harnesses:
     ]);
     expect(invocation.cwd).toBe('/tmp/wt');
     expect(invocation.stdin).toBe('prompt');
-    expect(invocation.template).toBe('.claude/agents/coder.md');
+    expect(invocation.template).toBe('.claude/agents/bs-coder.md');
   });
 
   it('carries env variable names and never their values', () => {
@@ -604,7 +605,10 @@ describe('schema_args: appended only when the turn names a schema (F1)', () => {
   });
 
   it('(d) shipped policy, claude-cli, planner, no worktree: renders, cwd null, model from the template’s own tier', () => {
-    const templateModelLine = readFileSync(path.join(AGENTS_DIR, 'planner.md'), 'utf8')
+    const templateModelLine = readFileSync(
+      path.join(AGENTS_DIR, templateFileFor('planner')),
+      'utf8',
+    )
       .split('\n')
       .find((l) => l.startsWith('model:'));
     const templateModel = templateModelLine?.slice('model:'.length).trim();

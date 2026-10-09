@@ -343,7 +343,7 @@ directions), a scoped `Agent(…)` whose scope disagrees with the policy, and
 above all three shapes of self-judging: a role granted **itself**, a worker
 granted its own **auditor** from `role_isolation.pairs`, or a finder granted
 its own **critic** from `asymmetric_roles.pairs`. That last group is the whole
-point. A `coder` granted `Agent(tester)` picks and prompts the agent that
+point. A `coder` granted `Agent(bs-tester)` picks and prompts the agent that
 grades it, and §2d goes green over a coder grading itself — widening one list
 in one file would silently disarm a check in another.
 
