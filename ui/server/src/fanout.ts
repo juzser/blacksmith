@@ -13,6 +13,7 @@ import type { SmithDb } from '../../../factory/orchestrator/dist/db/projector.js
 import type {
   KanbanColumn,
   KanbanTask,
+  MilestoneProgress,
   OverviewResult,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { DEFAULT_PROJECT } from '../../../factory/orchestrator/dist/db/queries.js';
@@ -202,4 +203,12 @@ export function mergeKanban(
             )
           : tasks,
     }));
+}
+
+/** Combines per-store Roadmap pages: roadmap sequence, store id breaking a tie. */
+export function mergeRoadmap(
+  parts: { store: StoreRef; data: MilestoneProgress[] }[],
+): Tagged<MilestoneProgress>[] {
+  const rows = parts.flatMap((p) => tag(p.data, p.store));
+  return parts.length > 1 ? rows.sort((a, b) => a.sequence - b.sequence || byStore(a, b)) : rows;
 }

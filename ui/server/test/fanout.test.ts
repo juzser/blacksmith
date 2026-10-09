@@ -3,7 +3,8 @@
 // the tie-breaker.
 import { describe, expect, it } from 'vitest';
 import type { OverviewResult } from '../../../factory/orchestrator/src/db/queries.js';
-import { mergeOverview } from '../src/fanout.js';
+import { fanOut, mergeOverview, mergeRoadmap } from '../src/fanout.js';
+import type { StoreEntry } from '../src/stores.js';
 
 const part = (id: string, over: Record<string, unknown>) => ({
   store: { id, label: id },
@@ -120,5 +121,38 @@ describe('mergeOverview order', () => {
       'epic-z',
       'epic-a',
     ]);
+  });
+});
+
+describe('mergeRoadmap', () => {
+  const ms = (milestoneId: string, sequence: number) =>
+    ({ milestoneId, sequence }) as unknown as Parameters<typeof mergeRoadmap>[0][0]['data'][0];
+
+  it('sorts milestones by sequence, store id breaking a tie, and tags each with its store', () => {
+    const merged = mergeRoadmap([
+      { store: { id: 'b-store', label: 'b' }, data: [ms('b-1', 1), ms('b-2', 3)] },
+      { store: { id: 'a-store', label: 'a' }, data: [ms('a-1', 1), ms('a-2', 2)] },
+    ]);
+    expect(merged.map((m) => m.milestoneId)).toEqual(['a-1', 'b-1', 'a-2', 'b-2']);
+    expect(merged[1]?.store.id).toBe('b-store');
+  });
+
+  it('leaves a single store as it came', () => {
+    const merged = mergeRoadmap([
+      { store: { id: 'only', label: 'only' }, data: [ms('z', 2), ms('y', 1)] },
+    ]);
+    expect(merged.map((m) => m.milestoneId)).toEqual(['z', 'y']);
+  });
+});
+
+describe('fanOut', () => {
+  it('skips a foreign store whose read throws, and keeps the home store', () => {
+    const entry = (id: string, home: boolean) =>
+      ({ id, label: id, home, handle: { db: id } }) as unknown as StoreEntry;
+    const parts = fanOut([entry('home', true), entry('store-b', false)], undefined, (db) => {
+      if ((db as unknown) === 'store-b') throw new Error('database disk image is malformed');
+      return 1;
+    });
+    expect(parts.map((p) => p.store.id)).toEqual(['home']);
   });
 });

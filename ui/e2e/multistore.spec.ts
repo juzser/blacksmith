@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { ARIAL_FONT_CSS, arialInit } from './fontSwitch.js';
-import { expect, type Page, test } from './harness.js';
+import { expect, type Locator, type Page, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +26,10 @@ const HOME_TITLE_2 = 'Simplify the config loader.';
 const FOREIGN_TITLE_1 = 'Foreign widget renderer.';
 const FOREIGN_TITLE_2 = 'Foreign config loader.';
 const EXTRA_NOTES = 40;
+const FOREIGN_EPIC = 'epic-b';
+// The epic id both stores carry, and the task only the foreign store's copy has.
+const SHARED_EPIC = 'epic-1';
+const SHARED_FOREIGN_TASK = 'epic-1/task-extra';
 
 let tmp = '';
 let origin = '';
@@ -152,6 +156,40 @@ test.describe('a foreign store in the dashboard', () => {
     for (const eventsDir of [homeEvents, foreignEvents]) {
       const opts = { stateDir: eventsDir };
       await buildFixture(opts);
+      if (eventsDir === foreignEvents) {
+        // An epic and a milestone only the foreign store has, for the Roadmap. Its
+        // tasks join the fixture's session so no extra session row appears.
+        // Plus one more task in epic-1, which both stores have: the Roadmap must
+        // tell the two apart by store.
+        const foreignTasks = [
+          ...[1, 2].map((n) => ({ epic: FOREIGN_EPIC, id: `${FOREIGN_EPIC}/task-${n}`, n })),
+          { epic: SHARED_EPIC, id: SHARED_FOREIGN_TASK, n: 3 },
+        ];
+        for (const { epic, id, n } of foreignTasks) {
+          const parent = (await readEvents('sess-fixture', { stateDir: foreignEvents })).at(-1);
+          await appendEvent(
+            {
+              session_id: 'sess-fixture',
+              actor: 'planner',
+              event_type: 'task-added',
+              task_id: id,
+              plan_version: 1,
+              causal_parent: parent?.event_id ?? null,
+              payload: {
+                epic_id: epic,
+                case: 'feature',
+                origin: 'user',
+                task_status: 'todo',
+                plan_version: 1,
+                objective: `Foreign roadmap work ${n}.`,
+                claims: [],
+                budget_tokens: 100,
+              },
+            },
+            { stateDir: foreignEvents },
+          );
+        }
+      }
       // A waivable finding on task-4, so a store-blind page would offer Waive.
       const events = await readEvents('sess-fixture', opts);
       const last = events[events.length - 1];
@@ -200,6 +238,12 @@ test.describe('a foreign store in the dashboard', () => {
         },
       },
       homeOpts,
+    );
+    const foreignSpecs = path.join(foreign, '.blacksmith', 'factory', 'specs');
+    await mkdir(foreignSpecs, { recursive: true });
+    await writeFile(
+      path.join(foreignSpecs, 'roadmap.md'),
+      `## Foreign phase\n- id: phase-b\n- status: in-progress\n- epics: [${FOREIGN_EPIC}, ${SHARED_EPIC}]\n`,
     );
     // The foreign store's own wording, and each store's own project on every
     // event, so the merged Activity feed spans two projects.
@@ -331,6 +375,142 @@ test.describe('a foreign store in the dashboard', () => {
     await page.getByRole('tab', { name: 'Findings' }).click();
     await expect(page.getByRole('button', { name: 'Waive' })).toBeVisible();
   });
+
+  test('R1: the Roadmap shows a foreign epic with its tasks and waves, and its milestone', async ({
+    page,
+  }) => {
+    await page.goto(`${origin}/work/roadmap?scope=all&phase=phase-b`);
+    const block = page.getByRole('region', { name: /Foreign phase.*goal and epics/ });
+    await expect(block).toBeVisible();
+    const section = block.locator('.esec', { hasText: FOREIGN_EPIC });
+    await expect(section.getByText('0 of 2 tasks done')).toBeVisible();
+    await expect(section.getByText('No tasks tracked')).toHaveCount(0);
+    await section.getByRole('button', { name: /Show waves|Hide waves/ }).click();
+    await expect(section.locator(`#waves-${FOREIGN_EPIC}`)).toContainText('Foreign roadmap work');
+  });
+
+  for (const [name, viewport] of [
+    ['desktop', VIEWPORTS.desktop],
+    ['phone', { width: 390, height: 844 }],
+  ] as const) {
+    test(`R2: an epic id both stores have shows each store's own tasks and waves (${name})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      const openPhase = async (phase: string, label: RegExp) => {
+        await page.goto(`${origin}/work/roadmap?scope=all&phase=${phase}`);
+        const block = page.getByRole('region', { name: label });
+        await expect(block).toBeVisible();
+        return block;
+      };
+      // The phone list carries the same per-epic progress label, but only the
+      // current wave; the full waves are checked on the desktop stack.
+      const waves = async (block: Locator) => {
+        if (name === 'phone') return;
+        const section = block.locator('.esec', { hasText: SHARED_EPIC });
+        const toggle = section.getByRole('button', { name: /Show waves|Hide waves/ });
+        if ((await toggle.innerText()).includes('Show')) await toggle.click();
+        return section.locator(`#waves-${SHARED_EPIC}`);
+      };
+      // Home's copy has the four fixture tasks; the foreign copy has one more.
+      const home = await openPhase('phase-a', /Phase A.*goal and epics/);
+      await expect(
+        home.getByLabel(new RegExp(`^${SHARED_EPIC}, \\d+ of 4 tasks done`), { exact: true }),
+      ).toBeVisible();
+      const homeWaves = await waves(home);
+      if (homeWaves) await expect(homeWaves).not.toContainText('Foreign roadmap work');
+      const foreign = await openPhase('phase-b', /Foreign phase.*goal and epics/);
+      await expect(
+        foreign.getByLabel(new RegExp(`^${SHARED_EPIC}, \\d+ of 5 tasks done`), { exact: true }),
+      ).toBeVisible();
+      const foreignWaves = await waves(foreign);
+      if (foreignWaves) await expect(foreignWaves).toContainText('Foreign roadmap work 3');
+    });
+  }
+
+  for (const [name, viewport] of [
+    ['desktop', VIEWPORTS.desktop],
+    ['phone', { width: 390, height: 844 }],
+  ] as const) {
+    // The section that lists a phase, picked in place: a lane button on desktop,
+    // the section's picker on phone (its <details> opened first when closed).
+    const pickPhase = async (page: Page, phaseName: string, phaseId: string) => {
+      const section = page.locator('.rm-section').filter({ hasText: phaseName });
+      await expect(section).toHaveCount(1);
+      if (name === 'phone') {
+        await section.evaluate((el) => {
+          (el as HTMLDetailsElement).open = true;
+        });
+        await section.locator('select').selectOption(phaseId);
+      } else {
+        await section.getByRole('button', { name: new RegExp(phaseName) }).click();
+      }
+    };
+    const epicLabel = (block: Locator, tasks: number) =>
+      block.getByLabel(new RegExp(`^${SHARED_EPIC}, \\d+ of ${tasks} tasks done`), {
+        exact: true,
+      });
+
+    test(`R3: switching stores on the open page shows each store's own epic (${name})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto(`${origin}/work/roadmap?scope=all&phase=phase-a`);
+      await expect(
+        epicLabel(page.getByRole('region', { name: /Phase A.*goal and epics/ }), 4),
+      ).toBeVisible();
+      // No reload: the flow cache must keep the two stores' epic-1 apart.
+      await pickPhase(page, 'Foreign phase', 'phase-b');
+      await expect(
+        epicLabel(page.getByRole('region', { name: /Foreign phase.*goal and epics/ }), 5),
+      ).toBeVisible();
+      await pickPhase(page, 'Phase A', 'phase-a');
+      await expect(
+        epicLabel(page.getByRole('region', { name: /Phase A.*goal and epics/ }), 4),
+      ).toBeVisible();
+    });
+
+    test(`R4: two stores that report one project label keep their own sections (${name})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      // Both stores' milestones report the home project's label, as two
+      // checkouts of one project would.
+      const labels = { home: '', foreign: '' };
+      await page.route('**/api/roadmap**', async (route) => {
+        const res = await route.fetch();
+        const rows = (await res.json()) as {
+          project: string;
+          store: { id: string; label: string };
+        }[];
+        const shared = rows.find((m) => m.store.id === 'home')?.project ?? '';
+        for (const m of rows) {
+          labels[m.store.id === 'home' ? 'home' : 'foreign'] = m.store.label;
+          m.project = shared;
+        }
+        await route.fulfill({ response: res, json: rows });
+      });
+      await page.goto(`${origin}/work/roadmap?scope=all&phase=phase-a`);
+      // The phase sections only: the fixture's projects with epics in flight add epic sections.
+      const heads = page.locator('.rm-section__head', { hasText: / phases? done/ });
+      await expect(heads).toHaveCount(2);
+      await expect(page.locator('.rm-section').filter({ hasText: 'Phase A' })).toHaveCount(1);
+      await expect(page.locator('.rm-section').filter({ hasText: 'Foreign phase' })).toHaveCount(1);
+      // Told apart on screen by the store name beside the shared label.
+      for (const label of [labels.home, labels.foreign]) {
+        await expect(heads.filter({ hasText: ` · ${label}` })).toHaveCount(1);
+      }
+      expect(labels.home).not.toBe(labels.foreign);
+      await expect(
+        epicLabel(page.getByRole('region', { name: /Phase A.*goal and epics/ }), 4),
+      ).toBeVisible();
+      await pickPhase(page, 'Foreign phase', 'phase-b');
+      await expect(
+        epicLabel(page.getByRole('region', { name: /Foreign phase.*goal and epics/ }), 5),
+      ).toBeVisible();
+      await expect(page.getByRole('region', { name: /Phase A.*goal and epics/ })).toHaveCount(0);
+    });
+  }
 
   test('B2: a foreign Kanban card peeks its own task and opens the store-scoped page', async ({
     page,

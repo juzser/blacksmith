@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
-import { appendEvent } from '../../../factory/orchestrator/src/events.js';
+import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
 import {
   buildFixture,
   EPIC_ID,
@@ -347,6 +347,133 @@ describe('multi-store dashboard reads', () => {
     const foreign = o.milestoneProgress.filter((m) => m.store.label === 'project-b');
     expect(foreign).toHaveLength(1);
     expect(foreign[0]?.project).toBe('project-b');
+  });
+
+  describe('Roadmap reads every store', () => {
+    type Graph = { nodes: { taskId: string }[]; waves: string[][] };
+    type Ms = { milestoneId: string; project: string; store: Store; sequence: number };
+    const FOREIGN_EPIC = 'epic-b';
+    const FOREIGN_ROADMAP = `## Phase B
+- id: phase-b
+- status: in-progress
+- epics: [${FOREIGN_EPIC}]
+`;
+    // Two tasks of `epic` in the foreign store's `session`, appended to that
+    // session's log (a new session gets its own session-start first).
+    const foreignTasks = async (
+      epic: string,
+      taskIds: string[],
+      session: string,
+    ): Promise<void> => {
+      const opts = { stateDir: eventsB };
+      const base = { session_id: session, actor: 'planner', plan_version: 1 };
+      let parent = (await readEvents(session, opts)).at(-1)?.event_id ?? null;
+      if (parent === null) {
+        await appendEvent(
+          { ...base, event_type: 'session-start', causal_parent: null, payload: {} },
+          opts,
+        );
+        parent = (await readEvents(session, opts)).at(-1)?.event_id ?? null;
+      }
+      for (const taskId of taskIds) {
+        await appendEvent(
+          {
+            ...base,
+            event_type: 'task-added',
+            task_id: taskId,
+            causal_parent: parent,
+            payload: {
+              epic_id: epic,
+              case: 'feature',
+              origin: 'user',
+              task_status: 'todo',
+              plan_version: 1,
+              objective: `Foreign work ${taskId}.`,
+              claims: [],
+              budget_tokens: 100,
+            },
+          },
+          opts,
+        );
+        parent = (await readEvents(session, opts)).at(-1)?.event_id ?? null;
+      }
+    };
+    // An epic only the foreign store has, and a milestone naming it.
+    const foreignOnlyEpic = async (session = 'sess-b-epic'): Promise<void> => {
+      await foreignTasks(
+        FOREIGN_EPIC,
+        [1, 2].map((n) => `${FOREIGN_EPIC}/task-${n}`),
+        session,
+      );
+      const specs = path.join(projectB, '.blacksmith', 'factory', 'specs');
+      await mkdir(specs, { recursive: true });
+      await writeFile(path.join(specs, 'roadmap.md'), FOREIGN_ROADMAP);
+    };
+    const foreignStoreId = async (a: AppHandle): Promise<string> => {
+      const projects = await get<{ project: string; store: Store }[]>(a, '/api/projects');
+      return projects.find((p) => p.store.label === 'project-b')?.store.id as string;
+    };
+
+    it('flow answers a foreign-only epic from the store that owns it', async () => {
+      await foreignOnlyEpic();
+      const a = app();
+      const flow = await get<Graph>(a, `/api/flow?epic=${FOREIGN_EPIC}`);
+      expect(flow.nodes.map((n) => n.taskId).sort()).toEqual([
+        `${FOREIGN_EPIC}/task-1`,
+        `${FOREIGN_EPIC}/task-2`,
+      ]);
+      expect(flow.waves.flat()).toHaveLength(2);
+    });
+
+    it('flow keeps the served store for an epic both stores have, and for no epic', async () => {
+      await foreignOnlyEpic();
+      // The foreign store's copy of the shared epic differs, so only home can answer.
+      await foreignTasks(EPIC_ID, [`${EPIC_ID}/task-only-b`], 'sess-fixture');
+      const a = app();
+      const shared = await get<Graph>(a, `/api/flow?epic=${EPIC_ID}`);
+      expect(shared.nodes.map((n) => n.taskId).sort()).toEqual(
+        [TASK_1, TASK_2, TASK_3, TASK_4].sort(),
+      );
+      const whole = await get<Graph>(a, '/api/flow');
+      expect(whole.nodes.map((n) => n.taskId)).not.toContain(`${FOREIGN_EPIC}/task-1`);
+    });
+
+    it('flow honours ?store= and answers 404 for an unknown store', async () => {
+      await foreignOnlyEpic();
+      const a = app();
+      const id = await foreignStoreId(a);
+      const own = await get<Graph>(a, `/api/flow?epic=${EPIC_ID}&store=${id}`);
+      expect(own.nodes).toHaveLength(4);
+      const homeOnly = await get<Graph>(a, `/api/flow?epic=${FOREIGN_EPIC}&store=home`);
+      expect(homeOnly.nodes).toEqual([]);
+      const missing = await a.app.request('/api/flow?store=nope');
+      expect(missing.status).toBe(404);
+    });
+
+    it('flow reads only the served store under ?session=', async () => {
+      // The foreign store holds the epic under the very session the request names.
+      await foreignOnlyEpic('sess-fixture');
+      const a = app();
+      const flow = await get<Graph>(a, `/api/flow?epic=${FOREIGN_EPIC}&session=sess-fixture`);
+      expect(flow.nodes).toEqual([]);
+    });
+
+    it('roadmap lists both stores milestones, each foreign one under its label', async () => {
+      await foreignOnlyEpic();
+      const a = app();
+      const all = await get<Ms[]>(a, '/api/roadmap');
+      expect(all.map((m) => `${m.store.label}:${m.milestoneId}`).sort()).toEqual([
+        'home:phase-a',
+        'project-b:phase-b',
+      ]);
+      expect(all.find((m) => m.milestoneId === 'phase-b')?.project).toBe('project-b');
+      const foreign = await get<Ms[]>(a, '/api/roadmap?project=project-b');
+      expect(foreign.map((m) => m.milestoneId)).toEqual(['phase-b']);
+      const home = await get<Ms[]>(a, '/api/roadmap?project=blacksmith');
+      expect(home.map((m) => m.milestoneId)).toEqual(['phase-a']);
+      const session = await get<Ms[]>(a, '/api/roadmap?session=sess-fixture');
+      expect(session.every((m) => m.store.id === 'home')).toBe(true);
+    });
   });
 
   describe('local-only, like /api/cli-sessions', () => {

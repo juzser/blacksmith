@@ -43,10 +43,12 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
 }>();
 
+// selectPhase/selectEpic carry the picked id and the id of the store the
+// section reads from (undefined on a single-store payload).
 const emit = defineEmits<{
   toggle: [WindowSide];
-  selectPhase: [string];
-  selectEpic: [string];
+  selectPhase: [string, string | undefined];
+  selectEpic: [string, string | undefined];
 }>();
 
 const { isPhoneWidth } = useViewport();
@@ -82,8 +84,8 @@ const effectivePickerValue = computed(() =>
 
 function onPick(value: string) {
   if (value === '') return;
-  if (props.section.kind === 'phase') emit('selectPhase', value);
-  else emit('selectEpic', value);
+  if (props.section.kind === 'phase') emit('selectPhase', value, props.section.store?.id);
+  else emit('selectEpic', value, props.section.store?.id);
 }
 
 /** A side's disclosure, absent when that side hides nothing (or the picker is out). */
@@ -93,8 +95,8 @@ function disclosure(side: WindowSide) {
   return {
     expanded: props.expanded[side],
     controls: isPhoneWidth.value
-      ? windowPickerId(props.section.project)
-      : windowRegionId(props.section.project, side),
+      ? windowPickerId(props.section.key)
+      : windowRegionId(props.section.key, side),
     label: disclosureLabel(side, hidden, props.expanded[side]),
   };
 }
@@ -137,12 +139,12 @@ const later = computed(() => disclosure('later'));
       :selected-phase="selectedPhase"
       :selected-epic="selectedEpic"
       :idle-labels="idleLabels"
-      @select-phase="(id) => emit('selectPhase', id)"
-      @select-epic="(id) => emit('selectEpic', id)"
+      @select-phase="(id) => emit('selectPhase', id, section.store?.id)"
+      @select-epic="(id) => emit('selectEpic', id, section.store?.id)"
     />
     <Select
       v-else-if="showPicker"
-      :id="windowPickerId(section.project)"
+      :id="windowPickerId(section.key)"
       class="bs-roadmap-mobile__phase-select"
       :model-value="effectivePickerValue"
       :options="pickerOptions"
