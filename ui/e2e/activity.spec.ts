@@ -442,6 +442,46 @@ test.describe('Activity', () => {
     expect(rowWithChevron?.x).toBeCloseTo(rowNoChevron?.x ?? -1, 0);
   });
 
+  // ds-review.html `.ev` / `.ev .ehead`: the row's column gap is --bs-space-3
+  // (12px) and its row gap 4px; the head wraps, 4px rows and 8px columns, and
+  // a long head wraps inside the row instead of widening the page.
+  test('desktop: row and head gaps follow the mock, a long head stays inside the row', async ({
+    page,
+  }) => {
+    const longHead = synthEntry('long-head', 0, {
+      payload: { prompt: `${'A long synthetic prompt title '.repeat(12)}${'x'.repeat(60)}` },
+    });
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: { entries: [longHead], nextBefore: null, newestId: longHead.eventId },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    const row = page.locator('.bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const rowGaps = await row.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { column: cs.columnGap, row: cs.rowGap };
+    });
+    expect(rowGaps).toEqual({ column: '12px', row: '4px' });
+    const head = row.locator('.bs-timeline-row__head');
+    const headStyle = await head.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { wrap: cs.flexWrap, column: cs.columnGap, row: cs.rowGap, minWidth: cs.minWidth };
+    });
+    expect(headStyle).toEqual({ wrap: 'wrap', column: '8px', row: '4px', minWidth: '0px' });
+    const rowBox = await row.boundingBox();
+    const headBox = await head.boundingBox();
+    expect((headBox?.x ?? 0) + (headBox?.width ?? 0)).toBeLessThanOrEqual(
+      (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
+    );
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
   // Fix round 2 item 1: a row with no meta text used to render no meta
   // line at all on phone, so it showed no time. Both a row that already has
   // details (the old coverage) and one that has none must each show their
