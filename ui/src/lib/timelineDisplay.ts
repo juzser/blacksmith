@@ -813,7 +813,10 @@ export function titleFor(entry: TimelineEntry): string {
     // "recheck-proposed" with no task on it asks a question nobody can answer.
     case 'recheck-proposed': {
       const reasons = Array.isArray(p.reasons) ? p.reasons.join(', ') : '';
-      return `Recheck proposed: ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
+      const subject = p.taskId
+        ? shortTaskName(String(p.taskId), p.taskId === entry.taskId ? entry.taskTitle : null)
+        : String(p.epicId ?? '');
+      return `Recheck proposed: ${subject}${reasons ? ` (${reasons})` : ''}`;
     }
     case 'maintenance-proposed': {
       const packages = Array.isArray(p.packages) ? p.packages : [];

@@ -390,7 +390,25 @@ describe('lib/timelineDisplay.ts', () => {
           reasons: ['merge-threshold', 'low-confidence'],
         },
       });
-      expect(titleFor(e)).toBe('Recheck proposed: epic-9/task-3 (merge-threshold, low-confidence)');
+      expect(titleFor(e)).toBe('Recheck proposed: Task 3 (merge-threshold, low-confidence)');
+    });
+
+    it('names the recheck task by its title when the entry is that task', () => {
+      const e = entry({
+        eventType: 'recheck-proposed',
+        taskId: 'epic-9/task-3',
+        taskTitle: 'Fix the login form',
+        payload: { kind: 'recheck', taskId: 'epic-9/task-3', epicId: 'epic-9', reasons: ['x'] },
+      });
+      expect(titleFor(e)).toBe('Recheck proposed: Fix the login form (x)');
+    });
+
+    it('keeps the epic id when the recheck names no task', () => {
+      const e = entry({
+        eventType: 'recheck-proposed',
+        payload: { kind: 'recheck', epicId: 'epic-9', reasons: [] },
+      });
+      expect(titleFor(e)).toBe('Recheck proposed: epic-9');
     });
 
     it('counts the outdated packages and names the first few', () => {
