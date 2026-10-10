@@ -385,6 +385,7 @@ test.describe('Cost & quality phone role list', () => {
               lineHeight: Number.parseFloat(lcs.lineHeight),
               clipped: label.scrollWidth > label.clientWidth,
               labelWeight: lcs.fontWeight,
+              labelSize: lcs.fontSize,
               right: row.getBoundingClientRect().right,
               rowHeight: row.getBoundingClientRect().height,
               padLeft: Number.parseFloat(rcs.paddingLeft),
@@ -428,6 +429,8 @@ test.describe('Cost & quality phone role list', () => {
         expect(r.padLeft, `${r.text} padding`).toBe(12);
         expect(r.border, `${r.text} divider`).toBe(r.last ? '0px' : '1px');
         expect(r.labelWeight, `${r.text} weight`).toBe('500');
+        // The mock's .mt inherits the phone's 14px.
+        expect(r.labelSize, `${r.text} label size`).toBe('14px');
         expect(r.numFont, `${r.text} number size`).toBe(12);
         // min-width 4ch: four zero-widths of the 12px number, about 29px.
         expect(r.numWidth, `${r.text} number width`).toBeGreaterThanOrEqual(26);

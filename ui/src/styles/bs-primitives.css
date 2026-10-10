@@ -5055,7 +5055,7 @@ h2.rm-section__head {
 }
 .bs-analytics-page__phone-role-label {
   min-width: 0;
-  font-size: var(--bs-text-sm);
+  font-size: var(--bs-text-base);
   font-weight: var(--bs-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
