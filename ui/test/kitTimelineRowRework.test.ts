@@ -25,7 +25,7 @@ describe('kit/TimelineRow.vue row rework (round 2 item 4)', () => {
 
   it('carries a second RelativeTime at the end of the meta line for phone', () => {
     expect(TIMELINE_ROW).toMatch(
-      /<RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry\.ts" \/>/,
+      /<RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry\.ts" plain \/>/,
     );
   });
 

@@ -12,7 +12,7 @@ const PRIMITIVES = readFileSync(join(dirname(dirname(KIT)), 'styles', 'bs-primit
 describe('kit/TimelineRow.vue fix round 2 item 1 (every phone row shows its time once)', () => {
   it('renders a time-only meta line when the row has no details', () => {
     expect(TIMELINE_ROW).toMatch(
-      /<div v-else class="bs-timeline-row__meta">\s*<RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry\.ts" \/>\s*<\/div>/,
+      /<div v-else class="bs-timeline-row__meta">\s*<RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry\.ts" plain \/>\s*<\/div>/,
     );
   });
 });

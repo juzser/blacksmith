@@ -6,7 +6,9 @@ import { VIEWPORTS } from './helpers.js';
 // Every relative time ("5 min ago") is a tooltip trigger with its own tab stop,
 // so on a phone it is a tap target and must reach --bs-touch. The hit box has
 // to grow without moving anything: the card or row holding it keeps its height,
-// and the bigger box must not sit on top of another target.
+// and the bigger box must not sit on top of another target. Three cramped
+// phone rows (the timeline meta line, the live card status, a fix row) have no
+// room for that box, so their time is plain text there; see the last describes.
 
 const FONT_VARIANTS: { label: string; css: string | null }[] = [
   { label: '', css: null },
@@ -24,12 +26,11 @@ interface Box {
   holder: number;
   top: number;
   overlaps: string[];
-  inRow: boolean;
 }
 
 // Runs in the page: the box of every visible match, the height of the card or
 // row holding it, and the other targets whose box it intersects by over 1px.
-function measure(args: { selector: string; neighbours: string; exempt: string }): Box[] {
+function measure(args: { selector: string; neighbours: string }): Box[] {
   const out: Box[] = [];
   // The hit box: the bare box, or the ::after centred on it when that grows it.
   const hit = (e: Element) => {
@@ -52,8 +53,10 @@ function measure(args: { selector: string; neighbours: string; exempt: string })
       if (o === el || o.contains(el) || el.contains(o)) continue;
       const b = o.getBoundingClientRect();
       if (b.width === 0 || b.height === 0) continue;
-      // The top and tab bars sit over whatever scrolls under them.
-      if (o.closest('header, nav')) continue;
+      // The top and tab bars sit over whatever scrolls under them; the skip
+      // link is parked above the viewport, and a row scrolled up there is not
+      // on top of anything a finger can reach.
+      if (o.closest('header, nav, .skip-link')) continue;
       // Fixed or sticky chrome (the tab bar) overlaps whatever scrolls under it.
       let fixed = false;
       for (let a: Element | null = o; a; a = a.parentElement) {
@@ -80,7 +83,6 @@ function measure(args: { selector: string; neighbours: string; exempt: string })
       holder: holder?.getBoundingClientRect().height ?? 0,
       top: own.top,
       overlaps,
-      inRow: el.matches(args.exempt),
     });
   }
   return out;
@@ -157,13 +159,11 @@ function widthsFor(args: { selector: string; texts: string[] }): Record<string, 
 // which element a tap 2px inside each edge of its hit box would land on.
 // `sizes` measures the points of boxes given by `sizes` (the box before the
 // rules were dropped) around the element's centre instead of its own box.
-function tapMisses(args: {
-  selector: string;
-  exempt: string;
-  sizes?: { w: number; h: number }[];
-}): { sizes: { w: number; h: number }[]; exempt: boolean[]; misses: string[][] } {
+function tapMisses(args: { selector: string; sizes?: { w: number; h: number }[] }): {
+  sizes: { w: number; h: number }[];
+  misses: string[][];
+} {
   const sizes: { w: number; h: number }[] = [];
-  const exempt: boolean[] = [];
   const misses: string[][] = [];
   // Same as `hit` in `measure`: a page.evaluate body cannot share a closure.
   const hit = (e: Element) => {
@@ -186,15 +186,14 @@ function tapMisses(args: {
     const w = args.sizes?.[i]?.w ?? r.width;
     const h = args.sizes?.[i]?.h ?? r.height;
     sizes.push({ w: r.width, h: r.height });
-    exempt.push(el.matches(args.exempt));
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
     const points: [string, number, number][] = [
       ['left', cx - w / 2 + 2, cy],
       ['right', cx + w / 2 - 2, cy],
+      ['top', cx, cy - h / 2 + 2],
+      ['bottom', cx, cy + h / 2 - 2],
     ];
-    if (!el.matches(args.exempt))
-      points.push(['top', cx, cy - h / 2 + 2], ['bottom', cx, cy + h / 2 - 2]);
     const missed: string[] = [];
     for (const [side, x, y] of points) {
       const hit = document.elementFromPoint(x, y);
@@ -207,7 +206,7 @@ function tapMisses(args: {
     }
     misses.push(missed);
   });
-  return { sizes, exempt, misses };
+  return { sizes, misses };
 }
 
 // The e2e server's CLI registry is empty, so the live card is served from a stub.
@@ -236,13 +235,10 @@ async function serveLiveCards(page: Page): Promise<void> {
   );
 }
 
-const EXEMPT =
-  '.bs-timeline-row__ts--meta, .bs-live-card__status .bs-reltime, .bs-kanban-group__row-meta .bs-reltime';
-
+// Activity is not here: at phone width every one of its times is plain text.
 const PAGES = [
   ['kanban', '/kanban'],
   ['kanban-group', '/work/kanban?scope=all'],
-  ['activity', '/activity'],
   ['errors', '/activity?kind=errors'],
   ['overview', '/overview'],
   ['sessions', '/sessions'],
@@ -343,7 +339,7 @@ async function reveal(page: Page, name: string): Promise<void> {
   }
   if (name !== 'kanban-group') return;
   await page.locator('.bs-kanban-group summary').first().click();
-  await expect(page.locator('.bs-kanban-group__row-meta .bs-reltime').first()).toBeVisible();
+  await expect(page.locator('.bs-kanban-group__row-meta time').first()).toBeVisible();
 }
 
 test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target', () => {
@@ -363,7 +359,6 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const boxes = await page.evaluate(measure, {
           selector: TIME,
           neighbours: NEIGHBOURS,
-          exempt: EXEMPT,
         });
         expect(boxes.length).toBeGreaterThan(0);
         // Sessions: the head line's time plus one per agent row are measured, so
@@ -381,17 +376,6 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           ),
         ).toBeLessThanOrEqual(0);
         for (const b of boxes) {
-          // Only these three keep their text height (bs-primitives.css): a
-          // neighbour's 44px box sits right against each (a row's title button, the
-          // live card's head link, a fix row's copy button above and next open
-          // button below), so a second 44px box would lie on it. Their width is
-          // still a floor.
-          if (b.inRow) {
-            expect(b.w, `${name}: a row's time is narrower than --bs-touch`).toBeGreaterThanOrEqual(
-              floor,
-            );
-            continue;
-          }
           const where = `${name}: a relative time measures ${b.w.toFixed(1)}x${b.h.toFixed(1)}`;
           expect(b.w, `${where}, narrower than --bs-touch`).toBeGreaterThanOrEqual(floor);
           expect(b.h, `${where}, shorter than --bs-touch`).toBeGreaterThanOrEqual(floor);
@@ -399,7 +383,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           expect(b.h, `${where}, taller than one --bs-touch box`).toBeLessThanOrEqual(floor + 1.5);
         }
         expect(
-          [...new Set(boxes.filter((b) => !b.inRow).flatMap((b) => b.overlaps))],
+          [...new Set(boxes.flatMap((b) => b.overlaps))],
           `${name}: covers another target`,
         ).toEqual([]);
         // The hit box is an absolutely positioned ::after, so it takes no layout
@@ -410,7 +394,6 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const before = await page.evaluate(measure, {
           selector: TIME,
           neighbours: NEIGHBOURS,
-          exempt: EXEMPT,
         });
         expect(boxes.map((b) => round(b.holder))).toEqual(before.map((b) => round(b.holder)));
         expect(boxes.map((b) => round(b.top))).toEqual(before.map((b) => round(b.top)));
@@ -424,13 +407,10 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
     for (const [label, path, selector] of [
       ['card time', '/kanban', TIME],
       ['session roster time', '/sessions', ROSTER_TIME],
-      ['live-card time', '/overview', '.bs-live-card__status .bs-reltime'],
-      ['meta-line time', '/activity', '.bs-timeline-row__ts--meta'],
     ] as const) {
       test(`${label}: the shortest time texts still reach --bs-touch wide${font.label}`, async ({
         page,
       }) => {
-        if (path === '/overview') await serveLiveCards(page);
         await page.setViewportSize(VIEWPORTS.mobile);
         await page.goto(path);
         if (font.css) await page.addStyleTag({ content: font.css });
@@ -463,7 +443,7 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         await expect(page.locator('.bs-skeleton')).toHaveCount(0);
         await reveal(page, name);
         await expect(page.locator(`${TIME}:visible`).first()).toBeVisible();
-        const real = await page.evaluate(tapMisses, { selector: TIME, exempt: EXEMPT });
+        const real = await page.evaluate(tapMisses, { selector: TIME });
         expect(real.misses.length).toBeGreaterThan(0);
         if (name === 'sessions') {
           const agentRows = await page.locator(AGENT_ROW).count();
@@ -475,16 +455,9 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
           `${name}: a tap inside a time's box lands elsewhere`,
         ).toEqual([]);
         // Control: without the hit-box rules the same points miss, so the check
-        // above cannot pass by accident. Times with a grown box only: the two
-        // exempt ones have no vertical box to lose.
-        const grown = real.sizes.filter((_, i) => !real.exempt[i]);
-        if (grown.length === 0) return;
+        // above cannot pass by accident.
         await page.evaluate(dropHitBoxRules);
-        const bare = await page.evaluate(tapMisses, {
-          selector: `${TIME}:not(${EXEMPT})`,
-          exempt: EXEMPT,
-          sizes: grown,
-        });
+        const bare = await page.evaluate(tapMisses, { selector: TIME, sizes: real.sizes });
         const missing = bare.misses.filter((m) => m.length > 0).length;
         expect(missing, `${name}: the control misses for only ${missing} times`).toBeGreaterThan(
           bare.misses.length / 2,
@@ -580,7 +553,6 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const boxes = await page.evaluate(measure, {
           selector: SESSION_LINK,
           neighbours: NEIGHBOURS,
-          exempt: EXEMPT,
         });
         for (const b of boxes) {
           const at = `${where}: the Session link measures ${b.w.toFixed(1)}x${b.h.toFixed(1)}`;
@@ -595,10 +567,148 @@ test.describe('Phone: the relative-time tooltip trigger is a --bs-touch target',
         const before = await page.evaluate(measure, {
           selector: SESSION_LINK,
           neighbours: NEIGHBOURS,
-          exempt: EXEMPT,
         });
         expect(boxes.map((b) => round(b.holder))).toEqual(before.map((b) => round(b.holder)));
       });
     }
   }
+});
+
+// Three phone rows are too cramped for a 44px time box (it would sit on the
+// title or copy buttons beside it), so at <=640px their time is plain text: a
+// bare <time>, no tooltip, no tab stop. Desktop keeps the tooltip everywhere,
+// and the timeline row's expanded phone detail carries the full time instead.
+const PLAIN_TIMES = [
+  ['timeline meta-line', '/activity', '.bs-timeline-row__meta time'],
+  ['live card status', '/overview', '.bs-live-card__status time'],
+  ['kanban fix row', '/work/kanban?scope=all', '.bs-kanban-group__row-meta time'],
+] as const;
+
+// "30 Sep 2026, 14:07:12": lib/format.ts formatAbsolute, in the page's zone.
+function absoluteOf(iso: string): string {
+  const d = new Date(iso);
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}, ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+async function openPlainPage(page: Page, name: string, path: string, width: 'mobile' | 'desktop') {
+  if (path === '/overview') await serveLiveCards(page);
+  const key = path.startsWith('/work') ? 'kanban-group' : name;
+  await prepare(page, key);
+  await page.setViewportSize(VIEWPORTS[width]);
+  await page.goto(path);
+  await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+  if (key === 'kanban-group') await reveal(page, key);
+}
+
+test.describe('Phone: three cramped rows show their time as plain text', () => {
+  for (const [name, path, selector] of PLAIN_TIMES) {
+    test(`${name}: the time has no tooltip trigger, no tab stop, and a tap shows no tooltip`, async ({
+      page,
+    }) => {
+      await openPlainPage(page, name, path, 'mobile');
+      const times = page.locator(`${selector}:visible`);
+      await expect(times.first()).toBeVisible();
+      const found = await page.evaluate((sel) => {
+        const out: string[] = [];
+        for (const t of Array.from(document.querySelectorAll(sel))) {
+          const wrap = t.closest('.bs-tooltip-trigger');
+          if (wrap) out.push(`inside ${wrap.className}`);
+          if ((t as HTMLElement).tabIndex >= 0) out.push('tab stop on time');
+          if (t.parentElement?.closest('.bs-tooltip-trigger, [tabindex]:not([tabindex="-1"])'))
+            out.push('focusable ancestor');
+        }
+        return out;
+      }, selector);
+      expect(found, `${name}: still a tooltip trigger`).toEqual([]);
+      await times.first().click({ force: true });
+      await page.waitForTimeout(700);
+      await expect(page.getByRole('tooltip')).toHaveCount(0);
+    });
+  }
+
+  test('activity: an expanded row shows a Time pair with the full time', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    const chevrons = page.locator('.bs-timeline-row__chevron:visible');
+    await expect(chevrons.first()).toBeVisible();
+    for (let i = 0; i < Math.min(12, await chevrons.count()); i++) await chevrons.nth(i).click();
+    const rows = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.bs-timeline-row'))
+        .filter((li) => li.querySelector('.bs-timeline-row__detail:not([style*="display: none"])'))
+        .map((li) => {
+          const dts = Array.from(li.querySelectorAll('.bs-timeline-row__detail > dt'));
+          const labels = dts.map((d) => d.textContent?.trim() ?? '');
+          const at = labels.indexOf('Time');
+          const dd = at >= 0 ? dts[at]?.nextElementSibling : null;
+          const t = dd?.querySelector('time');
+          return {
+            labels,
+            visible: !!dd && getComputedStyle(dd).display !== 'none',
+            shown: dd?.textContent?.trim() ?? null,
+            datetime: t?.getAttribute('datetime') ?? null,
+            rowTs:
+              li
+                .querySelector('.bs-timeline-row__body > .bs-timeline-row__meta time')
+                ?.getAttribute('datetime') ?? null,
+          };
+        }),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(
+        r.labels.filter((l) => l === 'Time'),
+        JSON.stringify(r.labels),
+      ).toHaveLength(1);
+      expect(r.visible).toBe(true);
+      expect(r.datetime).toBe(r.rowTs);
+      expect(r.shown).toBe(absoluteOf(r.rowTs ?? ''));
+    }
+  });
+});
+
+test.describe('Desktop: the relative times keep their tooltip, and the detail has no Time pair', () => {
+  const DESKTOP_TIMES = [
+    ['timeline end-column', '/activity', '.bs-timeline-row__ts'],
+    ['live card status', '/overview', '.bs-live-card__status .bs-reltime'],
+    ['kanban fix row', '/work/kanban?scope=all', '.bs-kanban-group__row-meta .bs-reltime'],
+  ] as const;
+  for (const [name, path, selector] of DESKTOP_TIMES) {
+    test(`${name}: hovering the time shows the full time`, async ({ page }) => {
+      await openPlainPage(page, name, path, 'desktop');
+      const trigger = page.locator(`${selector}:visible`).first();
+      await expect(trigger).toBeVisible();
+      const iso = await trigger.locator('time').getAttribute('datetime');
+      await trigger.hover();
+      await expect(page.getByRole('tooltip')).toHaveText(absoluteOf(iso ?? ''));
+    });
+  }
+
+  test('activity: an expanded row has no visible Time pair', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    const chevrons = page.locator('.bs-timeline-row__chevron:visible');
+    await expect(chevrons.first()).toBeVisible();
+    for (let i = 0; i < Math.min(12, await chevrons.count()); i++) await chevrons.nth(i).click();
+    await expect(page.locator('.bs-timeline-row__detail:visible').first()).toBeVisible();
+    await expect(
+      page.locator('.bs-timeline-row__detail dt:visible', { hasText: /^Time$/ }),
+    ).toHaveCount(0);
+  });
 });
