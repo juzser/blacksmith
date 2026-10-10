@@ -323,6 +323,7 @@ const phoneRoleHeading = computed(() => {
               stacked
               legend
               hide-empty-track
+              day-axis
               :stacked-bars="dailyBars"
               :series="dailySeries"
               :bars="[]"

@@ -21,6 +21,7 @@
 // such as a chart token reference) via inline style, same as ProgressBar's
 // tone-to-colour approach.
 import { computed } from 'vue';
+import { formatCalendarDay } from '../../lib/format';
 
 type StackedBar = { label: string; values: Record<string, number> };
 
@@ -43,6 +44,15 @@ const props = withDefaults(
      * data. Defaults false so every existing stacked caller is unchanged.
      */
     hideEmptyTrack?: boolean;
+    /**
+     * Opt-in: the stacked chart's labels are `YYYY-MM-DD` days. Instead of one
+     * date under every column (which clips once the columns are narrow), the
+     * columns sit on a baseline and one row under the plot names the first and
+     * the last day (ds-review.html `.vchart` / `.xaxis`). The "0 … max" row is
+     * dropped: under a date axis it reads as a second x-axis. The screen-reader
+     * table keeps every day's full date. Stacked charts only.
+     */
+    dayAxis?: boolean;
   }>(),
   {
     height: 200,
@@ -52,6 +62,7 @@ const props = withDefaults(
     stackedBars: () => [],
     legend: false,
     hideEmptyTrack: false,
+    dayAxis: false,
   },
 );
 
@@ -83,6 +94,14 @@ function stackedTotal(entry: StackedBar): number {
 
 const stackedMax = computed(() => Math.max(...cappedStacked.value.map(stackedTotal), 1));
 
+// One label for a single day, not the same date twice.
+const axisDays = computed(() => {
+  const first = cappedStacked.value[0];
+  const last = cappedStacked.value[cappedStacked.value.length - 1];
+  if (!first || !last) return [];
+  return (first === last ? [first] : [first, last]).map((e) => formatCalendarDay(e.label));
+});
+
 function segmentHeight(entry: StackedBar, seriesIndex: number): string {
   const value = entry.values[props.series[seriesIndex]?.key ?? ''] ?? 0;
   return `${(value / stackedMax.value) * 100}%`;
@@ -100,7 +119,11 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
   <div class="bs-chart">
     <p class="bs-chart__takeaway">{{ takeaway }}</p>
     <div v-if="stacked" class="bs-bars" role="img" :aria-label="summary">
-      <div class="bs-bars__plot" :style="{ height: `${height}px` }">
+      <div
+        class="bs-bars__plot"
+        :class="{ 'bs-bars__plot--axis': dayAxis }"
+        :style="{ height: `${height}px` }"
+      >
         <div v-for="entry in cappedStacked" :key="entry.label" class="bs-bars__col">
           <span
             class="bs-bars__track"
@@ -113,10 +136,11 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
               :style="{ height: segmentHeight(entry, i), bottom: segmentBottom(entry, i), background: s.tone }"
             />
           </span>
-          <span class="bs-bars__x">{{ entry.label }}</span>
+          <span v-if="!dayAxis" class="bs-bars__x">{{ entry.label }}</span>
         </div>
       </div>
-      <div class="bs-bars__scale"><span>0</span><span>{{ format(stackedMax) }}</span></div>
+      <div v-if="dayAxis" class="bs-bars__axis"><span v-for="d in axisDays" :key="d">{{ d }}</span></div>
+      <div v-if="!dayAxis" class="bs-bars__scale"><span>0</span><span>{{ format(stackedMax) }}</span></div>
       <ul v-if="legend" class="bs-bars__legend">
         <li v-for="s in series" :key="s.key" class="bs-bars__legend-item">
           <span class="bs-bars__legend-swatch" :style="{ background: s.tone }" />

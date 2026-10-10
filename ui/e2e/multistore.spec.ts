@@ -839,6 +839,43 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(page.getByText('in another store')).toHaveCount(0);
     });
 
+    // 1280 is the desktop baseline; 901 is the narrowest width where the two
+    // chart cards still sit side by side (they stack at 900 and below).
+    for (const width of [1280, 901]) {
+      test(`the daily token chart labels its ends and cuts no date at ${width}px`, async ({
+        page,
+      }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize({ width, height: 900 });
+        await pinDays(page);
+        await page.goto(`${origin}/analytics?scope=all`);
+        const card = page.locator('.bs-card').filter({
+          has: page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+        });
+        await expect(card.locator('.bs-bars__col').first()).toBeVisible();
+        // No date label under any column is cut off.
+        const cut = await card.locator('.bs-bars__x').evaluateAll(
+          (els) =>
+            els.filter((el) => {
+              // scrollWidth and clientWidth are rounded to whole pixels, so a
+              // label clipped by a fraction of a pixel (the ellipsis still
+              // shows) reads as not cut: compare the text's own box with the
+              // element's instead.
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
+            }).length,
+        );
+        expect(cut).toBe(0);
+        // The axis names the first and the last plotted day, and only those.
+        const days = (
+          await card.locator('table.sr-only tbody td:first-child').allTextContents()
+        ).map((d) => Number(d.slice(-2)));
+        const axis = card.locator('.bs-bars__axis > span');
+        await expect(axis).toHaveText([`${days[0]} Jan`, `${days[days.length - 1]} Jan`]);
+      });
+    }
+
     for (const [name, viewport] of [
       ['desktop-light', VIEWPORTS.desktop],
       ['phone-light', { width: 375, height: 812 }],

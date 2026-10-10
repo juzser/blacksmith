@@ -69,4 +69,21 @@ describe('kit/BarChart.vue', () => {
     expect(CHART).toMatch(/bs-bars__track--empty/);
     expect(CHART).toMatch(/hideEmptyTrack\s*&&\s*stackedTotal\(entry\)\s*===\s*0/);
   });
+
+  it('declares an opt-in dayAxis prop, defaulting false, that drops the per-column label', () => {
+    expect(CHART).toMatch(/dayAxis\?:\s*boolean;/);
+    const match = CHART.match(
+      /withDefaults\(\s*defineProps<\{[\s\S]*?\}>\(\),\s*\{([\s\S]*?)\}\s*,?\s*\)/,
+    );
+    expect(match?.[1]).toMatch(/dayAxis:\s*false/);
+    expect(CHART).toMatch(/v-if="!dayAxis"\s+class="bs-bars__x"/);
+  });
+
+  it('drops the 0..max scale row under a day axis', () => {
+    expect(CHART).toMatch(/v-if="!dayAxis"\s+class="bs-bars__scale"/);
+  });
+
+  it('names a single day once on the axis', () => {
+    expect(CHART).toMatch(/first === last \? \[first\] : \[first, last\]/);
+  });
 });

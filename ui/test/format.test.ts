@@ -3,6 +3,7 @@ import {
   boardTitle,
   formatAbsolute,
   formatBudgetPct,
+  formatCalendarDay,
   formatCompactNumber,
   formatCompactValue,
   formatDurationMs,
@@ -542,5 +543,30 @@ describe('lib/format.ts boardTitle() / parentLabel() (Kanban readable titles)', 
 
   it('leaves taskLabel() as it was: a long title still falls back to the slug', () => {
     expect(taskLabel('epic-a/followup-0a1b2c3d', long)).toBe('Followup 0a1b2c3d');
+  });
+});
+
+describe('lib/format.ts formatCalendarDay()', () => {
+  it('renders day and short month, no leading zero', () => {
+    expect(formatCalendarDay('2026-01-23')).toBe('23 Jan');
+    expect(formatCalendarDay('2026-09-05')).toBe('5 Sep');
+  });
+
+  it('does not shift the day west of UTC', () => {
+    const before = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // The trap this guards against: a date-only string parses as UTC midnight.
+      expect(new Date('2026-01-23').getDate()).toBe(22);
+      expect(formatCalendarDay('2026-01-23')).toBe('23 Jan');
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+
+  it('returns anything that is not a YYYY-MM-DD day unchanged', () => {
+    expect(formatCalendarDay('Builder')).toBe('Builder');
+    expect(formatCalendarDay('2026-13-01')).toBe('2026-13-01');
   });
 });

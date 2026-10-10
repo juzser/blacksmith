@@ -2164,6 +2164,18 @@ a:hover {
   gap: var(--bs-space-2);
   width: 100%;
 }
+/* Opt-in (BarChart's dayAxis prop): the columns sit on a baseline and the
+   dates move to one row under it (ds-review.html .vchart / .xaxis). */
+.bs-bars__plot--axis {
+  border-bottom: 1px solid var(--bs-border-bold);
+}
+.bs-bars__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  margin-top: var(--bs-space-1);
+}
 .bs-bars__col {
   display: flex;
   flex-direction: column;
