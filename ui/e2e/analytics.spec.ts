@@ -361,7 +361,7 @@ test.describe('Analytics', () => {
 // every label on one line, and the bar's number at least 4ch wide. The
 // "Not measured" row keeps its "of runs" unit on that same line.
 test.describe('Cost & quality phone role list', () => {
-  for (const width of [375, 390]) {
+  for (const width of [320, 375, 390]) {
     test(`${width}px: every role label is one line inside the list card`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
       await withMultiRoleFixture(page);
@@ -383,6 +383,7 @@ test.describe('Cost & quality phone role list', () => {
               text: label.textContent?.trim() ?? '',
               labelHeight: label.getBoundingClientRect().height,
               lineHeight: Number.parseFloat(lcs.lineHeight),
+              clipped: label.scrollWidth > label.clientWidth,
               labelWeight: lcs.fontWeight,
               right: row.getBoundingClientRect().right,
               rowHeight: row.getBoundingClientRect().height,
@@ -401,13 +402,20 @@ test.describe('Cost & quality phone role list', () => {
           rows,
         };
       });
-      expect(m.border).toBe('1px');
-      expect(m.radius).not.toBe('0px');
-      expect(m.rows.at(-1)?.text).toContain('Not measured');
-      expect(m.rows.at(-1)?.text).toContain('of runs');
+      // The defect's own checks first: one-line labels inside the list, and
+      // the "Not measured" row keeping its unit set apart by a separator.
       for (const r of m.rows) {
         expect(r.labelHeight, `${r.text} is one line`).toBeLessThan(r.lineHeight * 1.5);
         expect(r.right, `${r.text} stays inside the list`).toBeLessThanOrEqual(m.listRight);
+      }
+      expect(m.rows.at(-1)?.clipped, 'the unit is not ellipsized').toBe(false);
+      expect(m.rows.at(-1)?.text).toContain('Not measured');
+      expect(m.rows.at(-1)?.text).toContain('of runs');
+      expect(m.rows.at(-1)?.text).toBe('Not measured · of runs');
+      // Then the mock values.
+      expect(m.border).toBe('1px');
+      expect(m.radius).not.toBe('0px');
+      for (const r of m.rows) {
         expect(r.rowHeight, `${r.text} row height`).toBeGreaterThanOrEqual(44);
         expect(r.padLeft, `${r.text} padding`).toBe(12);
         expect(r.border, `${r.text} divider`).toBe(r.last ? '0px' : '1px');
