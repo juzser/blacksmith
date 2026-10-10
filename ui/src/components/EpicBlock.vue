@@ -80,6 +80,8 @@ const props = defineProps<{
   tasksTotal?: number;
   tasksCompleted?: number;
   epics?: EpicSection[];
+  /** Phone phase mode: only the epic rows, without the phase's name, tag and totals. */
+  epicsOnly?: boolean;
   /** DS4 S5c §1 — phase-mode's own stacked bar, same server data. */
   statusCounts?: StatusCounts;
   // Epic mode — set instead of the phase-mode props above.
@@ -234,11 +236,11 @@ function toggle(epic: EpicSection) {
     <!-- DS4 S4 §1 — phone phase mode: a stacked list, no swimlane, no bar
          chart. Hidden entirely on desktop/tablet. -->
     <template v-if="isPhoneWidth">
-      <div class="card-meta">
+      <div v-if="!epicsOnly" class="card-meta">
         {{ name }}
         <Tag :tone="statusTone ?? 'neutral'" size="sm">{{ statusLabel }}</Tag>
       </div>
-      <div v-if="(tasksTotal ?? 0) > 0" class="bs-roadmap-mobile__summary">
+      <div v-if="!epicsOnly && (tasksTotal ?? 0) > 0" class="bs-roadmap-mobile__summary">
         <div class="bs-roadmap-mobile__summary-cell">
           <span class="muted small">Tasks done</span>
           <span class="bs-roadmap-mobile__summary-value">{{ tasksCompleted ?? 0 }} of {{ tasksTotal }}</span>
@@ -252,7 +254,7 @@ function toggle(epic: EpicSection) {
           />
         </div>
       </div>
-      <p v-else class="card-sum muted">No tasks tracked</p>
+      <p v-else-if="!epicsOnly" class="card-sum muted">No tasks tracked</p>
 
       <ul class="bs-roadmap-mobile__list" role="list">
         <li v-for="sec in epics" :key="sec.epicId" class="bs-roadmap-mobile__item">

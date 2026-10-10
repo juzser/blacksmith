@@ -168,9 +168,13 @@ const flowKey = (store: string | undefined, epicId: string) =>
 
 /** One in-flight (or settled) FlowGraph fetch per epic this phase/project shows, keyed by store and id. */
 const epicFlows = ref<Map<string, FlowGraph | 'failed'>>(new Map());
+const flowsInFlight = new Set<string>();
 
+/** Fetches an epic's flow unless one is settled or already on its way. */
 async function loadEpicFlow(epicId: string, store: string | undefined) {
   const key = flowKey(store, epicId);
+  if (epicFlows.value.has(key) || flowsInFlight.has(key)) return;
+  flowsInFlight.add(key);
   try {
     const flow = await fetchFlow({
       session: sessionScope.value,
@@ -181,6 +185,8 @@ async function loadEpicFlow(epicId: string, store: string | undefined) {
     epicFlows.value.set(key, flow);
   } catch {
     epicFlows.value.set(key, 'failed');
+  } finally {
+    flowsInFlight.delete(key);
   }
   // Map mutation alone does not trigger a ref's reactivity; replace it.
   epicFlows.value = new Map(epicFlows.value);
@@ -241,9 +247,7 @@ function epicIdsForPhase(phaseId: string | null): string[] {
 
 function ensureEpicFlowsLoaded(epicIds: string[]) {
   const store = selectedStore.value;
-  for (const epicId of epicIds) {
-    if (!epicFlows.value.has(flowKey(store, epicId))) loadEpicFlow(epicId, store);
-  }
+  for (const epicId of epicIds) loadEpicFlow(epicId, store);
 }
 
 // Under Active the page waits for the first scope answer (`loading` holds the
@@ -476,6 +480,8 @@ const stackItems = computed(() => {
     key: string;
     section: RoadmapSection | null;
     live?: LiveBlock;
+    /** Phone: the phase listing a live block's epic, so it reads as a row, not a full block. */
+    liveInPhase?: MilestoneProgress;
     livePhase?: LivePhase;
   };
   const host = hostSection.value;
@@ -495,7 +501,16 @@ const stackItems = computed(() => {
     }
     for (const block of blocks.filter((b) => b.section === section)) {
       if (livePhase?.phase.epicIds.includes(block.epicId)) continue;
-      items.push({ key: `live:${block.store ?? ''}:${block.epicId}`, section: null, live: block });
+      const liveInPhase =
+        isPhoneWidth.value && section.kind === 'phase'
+          ? milestonesOf(block.store).find((m) => m.epicIds.includes(block.epicId))
+          : undefined;
+      items.push({
+        key: `live:${block.store ?? ''}:${block.epicId}`,
+        section: null,
+        live: block,
+        liveInPhase,
+      });
     }
   }
   if (host === null) items.push({ key: 'selection', section: null });
@@ -598,9 +613,7 @@ const liveBlocks = computed<LiveBlock[]>(() => {
 });
 
 watch(liveBlocks, (blocks) => {
-  for (const b of blocks) {
-    if (!epicFlows.value.has(flowKey(b.store, b.epicId))) loadEpicFlow(b.epicId, b.store);
-  }
+  for (const b of blocks) loadEpicFlow(b.epicId, b.store);
 });
 
 /** A phase on the phone's stack for a section that does not hold the selection. */
@@ -630,9 +643,7 @@ const livePhases = computed(() => {
 
 watch(livePhases, (phases) => {
   for (const { phase, store } of phases.values()) {
-    for (const epicId of phase.epicIds) {
-      if (!epicFlows.value.has(flowKey(store, epicId))) loadEpicFlow(epicId, store);
-    }
+    for (const epicId of phase.epicIds) loadEpicFlow(epicId, store);
   }
 });
 
@@ -731,46 +742,48 @@ const selectedEpicData = computed(() =>
 
 /** Phase mode (S2/S3) — one section per epic, each with its own WaveList. */
 function phaseEpicSections(phase: MilestoneProgress, store: string | undefined) {
-  return phase.epicIds.map((epicId) => {
-    const flow = epicFlows.value.get(flowKey(store, epicId));
-    const liveNow = isLive(store, epicId);
-    if (flow === undefined) {
-      return {
-        epicId,
-        live: liveNow,
-        statusTone: 'neutral' as KitTone,
-        statusLabel: 'Loading',
-        tasksTotal: null,
-        tasksCompleted: null,
-        waves: [],
-      };
-    }
-    if (flow === 'failed') {
-      return {
-        epicId,
-        live: liveNow,
-        statusTone: 'neutral' as KitTone,
-        statusLabel: 'Unavailable',
-        tasksTotal: 0,
-        tasksCompleted: 0,
-        failed: true,
-        waves: [],
-      };
-    }
-    const epicDates = epicDatesFor([phase], epicId);
-    const { statusTone, statusLabel } = epicDates
-      ? epicStatusFromServerStatus(epicDates.status)
-      : epicStatusFromFlow(flow);
+  return phase.epicIds.map((epicId) => phaseEpicSection(phase, store, epicId));
+}
+
+function phaseEpicSection(phase: MilestoneProgress, store: string | undefined, epicId: string) {
+  const flow = epicFlows.value.get(flowKey(store, epicId));
+  const liveNow = isLive(store, epicId);
+  if (flow === undefined) {
     return {
       epicId,
       live: liveNow,
-      statusTone,
-      statusLabel,
-      tasksTotal: flow.nodes.length,
-      tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
-      waves: buildWaveList(flow),
+      statusTone: 'neutral' as KitTone,
+      statusLabel: 'Loading',
+      tasksTotal: null,
+      tasksCompleted: null,
+      waves: [],
     };
-  });
+  }
+  if (flow === 'failed') {
+    return {
+      epicId,
+      live: liveNow,
+      statusTone: 'neutral' as KitTone,
+      statusLabel: 'Unavailable',
+      tasksTotal: 0,
+      tasksCompleted: 0,
+      failed: true,
+      waves: [],
+    };
+  }
+  const epicDates = epicDatesFor([phase], epicId);
+  const { statusTone, statusLabel } = epicDates
+    ? epicStatusFromServerStatus(epicDates.status)
+    : epicStatusFromFlow(flow);
+  return {
+    epicId,
+    live: liveNow,
+    statusTone,
+    statusLabel,
+    tasksTotal: flow.nodes.length,
+    tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+    waves: buildWaveList(flow),
+  };
 }
 
 const epicSections = computed(() => {
@@ -870,6 +883,17 @@ async function closePeek() {
           :store-id="item.livePhase.store"
           @select="openPeek"
           @select-epic="(id) => item.livePhase && selectEpic(id, { store: item.livePhase.store })"
+        />
+        <EpicBlock
+          v-else-if="item.live && item.liveInPhase"
+          name="Live epic"
+          epics-only
+          :epics="[phaseEpicSection(item.liveInPhase, item.live.store, item.live.epicId)]"
+          :idle-labels="idleLabels"
+          :marks="marks"
+          :store-id="item.live.store"
+          @select="openPeek"
+          @select-epic="(id) => item.live && selectEpic(id, { store: item.live.store })"
         />
         <EpicBlock
           v-else-if="item.live"
