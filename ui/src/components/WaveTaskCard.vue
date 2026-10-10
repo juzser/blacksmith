@@ -21,6 +21,12 @@ const emit = defineEmits<{ select: [taskId: string] }>();
 const shortId = computed(() => shortTaskId(props.task.taskId));
 // Never `task.title`: on a flow node that is the task's whole objective.
 const title = computed(() => shortTaskName(props.task.taskId));
+// The objective is the hover text, as on the Kanban card; absent when there is none.
+const objective = computed(() => props.task.title?.trim() || undefined);
+// A bare id ("task-2") humanizes to the very name shown beside it: show one.
+const showId = computed(
+  () => shortId.value.replace(/-/g, ' ').toLowerCase() !== title.value.toLowerCase(),
+);
 const mark = computed(() =>
   markFor(props.marks ?? null, {
     store: props.storeId ? { id: props.storeId, label: props.storeId } : undefined,
@@ -52,9 +58,10 @@ const agentChipTask = computed(() =>
     type="button"
     class="wave-task-card"
     :aria-label="`${title}${markLabel(mark)}, opens task detail`"
+    :title="objective"
     @click="emit('select', task.taskId)"
   >
-    <span class="bs-kanban-card__id">{{ shortId }}</span>
+    <span v-if="showId" class="bs-kanban-card__id">{{ shortId }}</span>
     <span class="wave-task-card__title">{{ title }}</span>
     <Tag :tone="taskStatusKitTone(task.taskStatus)" size="sm">{{ titleCase(task.taskStatus) }}</Tag>
     <KanbanMarkTag v-if="mark" :mark="mark" :text="markText(mark, null)" />

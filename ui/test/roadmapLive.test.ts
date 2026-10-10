@@ -238,7 +238,7 @@ describe('WaveTaskCard name', () => {
 
   it('names the card from the id alone, never from the objective in title', () => {
     expect(SRC).toMatch(/shortTaskName\(props\.task\.taskId\)/);
-    expect(SRC).not.toMatch(/props\.task\.title/);
+    expect(SRC).not.toMatch(/shortTaskName\([^)]*title/);
     expect(SRC).not.toMatch(/taskLabel/);
   });
 });
