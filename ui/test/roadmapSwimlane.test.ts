@@ -239,6 +239,16 @@ describe('buildAxisMarks (fix round 2 #1)', () => {
   });
 });
 
+describe('buildAxisMarks day ticks', () => {
+  it('draws no tick for a midnight before the window opens', () => {
+    const bounds = { start: Date.UTC(2026, 0, 3, 12), end: Date.UTC(2026, 0, 10) };
+    const marks = buildAxisMarks(bounds);
+    expect(marks[0]?.label).toBe('Jan 4');
+    expect(marks.every((m) => m.left >= 0)).toBe(true);
+    expect(marks.map((m) => m.left)).toEqual([...marks.map((m) => m.left)].sort((a, b) => a - b));
+  });
+});
+
 describe('buildMonthMarks', () => {
   it('returns one mark per calendar month boundary within bounds, left-to-right', () => {
     const bounds = {
@@ -246,11 +256,17 @@ describe('buildMonthMarks', () => {
       end: Date.UTC(2026, 2, 10),
     };
     const marks = buildMonthMarks(bounds);
-    expect(marks.map((m) => m.label)).toEqual(['Jan', 'Feb', 'Mar']);
-    expect(marks[0]?.left).toBe(0);
+    expect(marks.map((m) => m.label)).toEqual(['Feb', 'Mar']);
+    expect(marks[0]?.left).toBeGreaterThan(0);
     for (let i = 1; i < marks.length; i++) {
       expect(marks[i]!.left).toBeGreaterThan(marks[i - 1]!.left);
     }
+  });
+
+  it('keeps the mark for a window that opens exactly on the 1st', () => {
+    const marks = buildMonthMarks({ start: Date.UTC(2026, 0, 1), end: Date.UTC(2026, 2, 10) });
+    expect(marks.map((m) => m.label)).toEqual(['Jan', 'Feb', 'Mar']);
+    expect(marks[0]?.left).toBe(0);
   });
 });
 
