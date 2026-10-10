@@ -386,7 +386,7 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(section.getByText('0 of 2 tasks done')).toBeVisible();
     await expect(section.getByText('No tasks tracked')).toHaveCount(0);
     await section.getByRole('button', { name: /Show waves|Hide waves/ }).click();
-    await expect(section.locator(`#waves-${FOREIGN_EPIC}`)).toContainText('Foreign roadmap work');
+    await expect(section.locator(`#waves-${FOREIGN_EPIC}`)).toContainText('Task 1');
   });
 
   for (const [name, viewport] of [
@@ -418,13 +418,13 @@ test.describe('a foreign store in the dashboard', () => {
         home.getByLabel(new RegExp(`^${SHARED_EPIC}, \\d+ of 4 tasks done`), { exact: true }),
       ).toBeVisible();
       const homeWaves = await waves(home);
-      if (homeWaves) await expect(homeWaves).not.toContainText('Foreign roadmap work');
+      if (homeWaves) await expect(homeWaves).not.toContainText('Task extra');
       const foreign = await openPhase('phase-b', /Foreign phase.*goal and epics/);
       await expect(
         foreign.getByLabel(new RegExp(`^${SHARED_EPIC}, \\d+ of 5 tasks done`), { exact: true }),
       ).toBeVisible();
       const foreignWaves = await waves(foreign);
-      if (foreignWaves) await expect(foreignWaves).toContainText('Foreign roadmap work 3');
+      if (foreignWaves) await expect(foreignWaves).toContainText('Task extra');
     });
   }
 

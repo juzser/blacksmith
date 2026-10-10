@@ -12,7 +12,7 @@ import {
   type Swimlane,
   type SwimlaneRow,
 } from './roadmapSwimlane.js';
-import { type StoreRef, storeKey } from './storeKey.js';
+import { HOME_STORE_ID, type StoreRef, storeKey } from './storeKey.js';
 
 /** `expandedRows.ts` scope for the two disclosures, ids from `windowExpandId`. */
 export const ROADMAP_WINDOW_SCOPE = 'roadmap-window';
@@ -354,18 +354,109 @@ export function groupLanes(rows: readonly SwimlaneRow[]): LaneGroup[] {
   return lanes;
 }
 
+/**
+ * The epics a live CLI session is on, keyed by store and id (an epic id can
+ * repeat between stores). `known` is false while the read is missing or
+ * unmeasured: that is "unknown", never "nothing is live".
+ */
+export interface LiveEpics {
+  known: boolean;
+  keys: ReadonlySet<string>;
+  /** The same epics by bare id, for a section that merges several stores. */
+  ids: ReadonlySet<string>;
+}
+
+export function liveEpicKeys(scope: ActiveScopeResult | null): LiveEpics {
+  if (scope?.measured !== true) return { known: false, keys: new Set(), ids: new Set() };
+  return {
+    known: true,
+    keys: new Set(scope.epics.map((e) => `${e.storeId}:${e.epicId}`)),
+    ids: new Set(scope.epics.map((e) => e.epicId)),
+  };
+}
+
+/** `anyStore`: the caller's section merges stores, so the id alone is the key. */
+export function isLiveEpic(
+  live: LiveEpics | null | undefined,
+  storeId: string,
+  epicId: string,
+  anyStore = false,
+): boolean {
+  if (!live?.known) return false;
+  return anyStore ? live.ids.has(epicId) : live.keys.has(`${storeId}:${epicId}`);
+}
+
+/** The store a section's lanes belong to, and whether it spans several (a store-less epic section). */
+export function sectionStore(section: RoadmapSection): { storeId: string; anyStore: boolean } {
+  return {
+    storeId: section.store?.id ?? HOME_STORE_ID,
+    anyStore: section.store === undefined && section.kind === 'epic',
+  };
+}
+
+/** True when a live session is on an epic of this section, shown or behind a closed disclosure. */
+function sectionHasLive(section: RoadmapSection, live: LiveEpics | null | undefined): boolean {
+  const { storeId, anyStore } = sectionStore(section);
+  const { earlier, visible, later } = section.window as LaneWindow<MilestoneProgress | string>;
+  return [...earlier, ...visible, ...later].some((lane) =>
+    (typeof lane === 'string' ? [lane] : lane.epicIds).some((id) =>
+      isLiveEpic(live, storeId, id, anyStore),
+    ),
+  );
+}
+
+/**
+ * One Current rule per screen: with any epic on the page live, only live
+ * lanes are marked, in every section; otherwise each section keeps its single
+ * `currentLane`. Hidden lanes count, so a closed disclosure cannot hand the
+ * mark to a lane that is not live.
+ */
+export function pageHasLive(
+  sections: readonly RoadmapSection[],
+  live: LiveEpics | null | undefined,
+): boolean {
+  return sections.some((s) => sectionHasLive(s, live));
+}
+
+/**
+ * The section a live-scope entry belongs to. A store-bound section must be
+ * the entry's own store; the epic-only section that merges every store knows
+ * no store per epic, so it takes the entry by epic id and the entry carries
+ * its own store from there.
+ */
+export function liveEntrySection(
+  sections: readonly RoadmapSection[],
+  entry: { storeId: string; epicId: string },
+): RoadmapSection | undefined {
+  return sections.find((sec) => {
+    const { storeId, anyStore } = sectionStore(sec);
+    return (
+      (anyStore || storeId === entry.storeId) &&
+      sectionHolds(sec, { phaseId: null, epicId: entry.epicId })
+    );
+  });
+}
+
 export interface SectionView {
   /** The shown lanes only, so the time axis spans what is on screen. */
   swimlane: Swimlane;
   /** [earlier container,] the window, [later container] — a side only when it hides lanes. */
   regions: LaneRegion[];
+  /** The lane the window is cut around (`currentLaneIndex`). */
   currentLane: string | null;
+  /** Lane heads marked Current: those holding a live epic, or the single `currentLane` when nothing on the page is live. */
+  currentLanes: string[];
+  /** Shown epic rows a live session is on. */
+  liveEpics: string[];
 }
 
 export function sectionSwimlane(
   section: RoadmapSection,
   expanded: { earlier: boolean; later: boolean },
   now: Date,
+  live?: LiveEpics | null,
+  /** `pageHasLive` over every section; defaults to this section alone. */
+  pageLive: boolean = sectionHasLive(section, live),
 ): SectionView {
   const w = section.window as LaneWindow<MilestoneProgress | string>;
   const shownEarlier = expanded.earlier ? w.earlier : [];
@@ -397,18 +488,31 @@ export function sectionSwimlane(
   const current = w.current;
   const currentLane =
     current === null ? null : typeof current === 'string' ? current : current.milestoneId;
-  return { swimlane, regions, currentLane };
+  const { storeId, anyStore } = sectionStore(section);
+  const liveEpics: string[] = [];
+  const liveHeads: string[] = [];
+  for (const group of regions.flatMap((r) => r.lanes)) {
+    const held = group.rows.filter(
+      (r) => r.kind === 'epic' && isLiveEpic(live, storeId, r.id, anyStore),
+    );
+    liveEpics.push(...held.map((r) => r.id));
+    if (held.length > 0) liveHeads.push(group.head.id);
+  }
+  // Nothing live on the page (or the read is unknown): keep the single "where are we" mark.
+  const currentLanes = pageLive ? liveHeads : currentLane === null ? [] : [currentLane];
+  return { swimlane, regions, currentLane, currentLanes, liveEpics };
 }
 
 /** The phone picker's options: every shown lane head, in order. */
 export function laneOptions(
   regions: readonly LaneRegion[],
-  current: string | null = null,
+  current: string | readonly string[] | null = null,
 ): Array<{ value: string; label: string }> {
+  const marked = typeof current === 'string' ? [current] : (current ?? []);
   return regions.flatMap((r) =>
     r.lanes.map((lane) => ({
       value: lane.head.id,
-      label: lane.head.id === current ? `${lane.head.label} (current)` : lane.head.label,
+      label: marked.includes(lane.head.id) ? `${lane.head.label} (current)` : lane.head.label,
     })),
   );
 }

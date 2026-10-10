@@ -222,6 +222,25 @@ export function mobileEpicStatusLine(input: {
 }
 
 /**
+ * A live epic's wave line: "Wave 2 of 4 · 3/5 done". Without a total it is
+ * "Wave 2", and with no wave known at all just "Running" -- never a made-up
+ * "of 0". Callers pass `buildWaveList` output only, so the numbers are the
+ * plan's, not a session's admitted-wave counter.
+ */
+export function waveLabel(
+  wave?: Partial<Pick<WaveInfo, 'index' | 'total' | 'doneCount' | 'taskCount'>> | null,
+): string {
+  if (wave?.index === undefined) return 'Running';
+  const label = `Wave ${wave.index + 1}`;
+  if (!wave.total) return label;
+  const counts =
+    wave.doneCount !== undefined && wave.taskCount !== undefined
+      ? ` · ${wave.doneCount}/${wave.taskCount} done`
+      : '';
+  return `${label} of ${wave.total}${counts}`;
+}
+
+/**
  * §2's three-way split: a wave is `past` when every one of its nodes is
  * over, `current` is the lowest-indexed wave that is not past, and every
  * wave after it is `upcoming`. An empty graph (no waves) returns `[]`.
