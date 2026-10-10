@@ -443,9 +443,10 @@ test.describe('Activity', () => {
   });
 
   // ds-review.html `.ev` / `.ev .ehead`: the row's column gap is --bs-space-3
-  // (12px) and its row gap 4px; the head wraps, 4px rows and 8px columns, and
-  // a long head wraps inside the row instead of widening the page.
-  test('desktop: row and head gaps follow the mock, a long head stays inside the row', async ({
+  // (12px) and its row gap 4px; the head wraps, 4px rows and 8px columns. A
+  // title too long to sit beside the kind tag drops under it as a unit and
+  // wraps there (`.ev .ehead` wraps whole items), inside the row.
+  test('desktop: row and head gaps follow the mock, a long title drops under its tag', async ({
     page,
   }) => {
     const longHead = synthEntry('long-head', 0, {
@@ -476,6 +477,9 @@ test.describe('Activity', () => {
     expect((headBox?.x ?? 0) + (headBox?.width ?? 0)).toBeLessThanOrEqual(
       (rowBox?.x ?? 0) + (rowBox?.width ?? 0),
     );
+    const tagBox = await head.locator('.bs-event-kind-tag').boundingBox();
+    const titleBox = await head.locator('.bs-timeline-row__title').boundingBox();
+    expect(titleBox?.y ?? 0).toBeGreaterThanOrEqual((tagBox?.y ?? 0) + (tagBox?.height ?? 0));
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
