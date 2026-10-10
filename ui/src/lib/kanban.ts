@@ -528,6 +528,16 @@ export function hasWaitingDependency(dependencies: DependencyLike[]): boolean {
   return waitingDependencies(dependencies).length > 0;
 }
 
+/**
+ * The footer's hover text: the visible line plus the first waiting
+ * dependency's raw id, which names its epic. Two epics can each have a "Task 3".
+ */
+export function dependencyChainTitle(dependencies: DependencyLike[]): string {
+  const text = dependencyChainText(dependencies);
+  const first = waitingDependencies(dependencies)[0];
+  return first ? `${text} · ${first.taskId}` : text;
+}
+
 export function dependencyChainText(dependencies: DependencyLike[]): string {
   const waiting = waitingDependencies(dependencies);
   const first = waiting[0];

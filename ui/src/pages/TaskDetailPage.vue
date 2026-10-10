@@ -69,7 +69,7 @@ import {
   type TaskTotals,
 } from '../lib/api.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
-import { formatDurationMs, formatElapsedRange, shortTaskName } from '../lib/format.js';
+import { formatDurationMs, formatElapsedRange, parentLabel, shortTaskName } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
@@ -89,6 +89,17 @@ const { show: showToast } = useToast();
 const { isPhoneWidth } = useViewport();
 
 const detail = ref<TaskDetail | null>(null);
+// One naming function: a minted follow-up reads "Follow-up fix · <parent>" here
+// as it does on its Kanban card.
+const pageName = computed(() =>
+  detail.value
+    ? shortTaskName(
+        detail.value.task.taskId,
+        detail.value.task.title,
+        parentLabel(detail.value.parentTaskId, detail.value.parentTaskTitle),
+      )
+    : '',
+);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const activeTab = ref('overview');
@@ -380,7 +391,7 @@ const factsRowText = computed(() => {
 
     <template v-else-if="detail">
       <PageHeader
-        :title="shortTaskName(detail.task.taskId, detail.task.title)"
+        :title="pageName"
         :description="objectiveDescription(detail.task.objective)"
         title-visible
       >

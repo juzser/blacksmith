@@ -992,7 +992,7 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
     }
     case 'merge': {
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
-      parts.push(ids.join(', ') || shortTaskName(String(entry.taskId ?? '')));
+      parts.push(ids.join(', ') || shortTaskName(String(entry.taskId ?? ''), entry.taskTitle));
       const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
       parts.push(files === null ? NOT_MEASURED : `${files} file${files === 1 ? '' : 's'} changed`);
       break;
@@ -1016,13 +1016,15 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
     }
     case 'feedback': {
       parts.push(FEEDBACK_LABEL[entry.eventType] ?? 'Waiver');
-      if (entry.taskId) parts.push(shortTaskName(entry.taskId));
+      if (entry.taskId) parts.push(shortTaskName(entry.taskId, entry.taskTitle));
       break;
     }
     case 'system':
       return '';
     default:
-      return entry.taskId ? `${shortTaskName(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+      return entry.taskId
+        ? `${shortTaskName(entry.taskId, entry.taskTitle)} · ${entry.eventType}`
+        : entry.eventType;
   }
   const filtered = parts.filter((part): part is string => Boolean(part));
   return filtered.join(' · ');

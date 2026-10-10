@@ -1050,7 +1050,7 @@ describe('lib/timelineDisplay.ts', () => {
 
 // DS6 PR3: metaFor() is now the row's per-kind meta line (ds-spec.md §4.3's
 // table), rather than a bare "<task> · <eventType>" fallback. A merge row
-// humanizes its taskId via taskLabel(); an unmapped kind (System) renders
+// is named via shortTaskName(); an unmapped kind (System) renders
 // no meta at all, per the table's own "— (no meta, no chevron)" row.
 describe('lib/timelineDisplay.ts metaFor()', () => {
   it('says "nothing to check" for a gate row whose check counted nothing, never "0 of 0"', () => {
@@ -1242,6 +1242,16 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
       payload: {},
     });
     expect(metaFor(e)).toBe('Judge verdict · Follow-up fix');
+  });
+
+  it('names a task by its title where the entry carries one', () => {
+    const base = { taskId: 'epic-9/task-29-readme-merge-trim', payload: {} };
+    expect(metaFor(entry({ ...base, eventType: 'judge-verdict', taskTitle: 'Trim readme' }))).toBe(
+      'Judge verdict · Trim readme',
+    );
+    expect(metaFor(entry({ ...base, eventType: 'wave-merged', taskTitle: 'Trim readme' }))).toBe(
+      'Trim readme · not measured',
+    );
   });
 
   it('appends the task label to a feedback meta line when there is one', () => {

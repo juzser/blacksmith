@@ -652,6 +652,16 @@ describe('db/queries.ts', () => {
       expect([...timestamps].sort()).toEqual(timestamps);
     });
 
+    it('carries the task title on each entry that names a task, null elsewhere', () => {
+      const entries = timeline(handle.db, { sessionId: SESSION_ID });
+      const named = entries.filter((e) => e.taskId === TASK_1);
+      expect(named.length).toBeGreaterThan(0);
+      for (const e of named) expect(e.taskTitle).toBe('Widget renderer');
+      const unnamed = entries.filter((e) => e.taskId === null);
+      expect(unnamed.length).toBeGreaterThan(0);
+      for (const e of unnamed) expect(e.taskTitle).toBeNull();
+    });
+
     it('includes the error-logged event on task-3', () => {
       const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_3 });
       expect(entries.map((e) => e.eventType)).toEqual([
@@ -1132,6 +1142,35 @@ describe('db/queries.ts', () => {
             .flatMap((c) => c.tasks)
             .find((t) => t.taskId === `${epicId}/followup-2c3d4e5f`);
           expect(fix?.parentTaskId).toBe(`${epicId}/task-1-settings`);
+        } finally {
+          h.sqlite.close();
+        }
+      });
+
+      it('gives the task detail the same parent id and short title as the card', async () => {
+        await appendFile(
+          path.join(stateDir, `${session}.jsonl`),
+          tiedLine(
+            'task-added',
+            ts,
+            {
+              task_id: `${epicId}/task-1-settings`,
+              epic_id: epicId,
+              title: 'Settings layout page',
+            },
+            session,
+          ),
+          'utf8',
+        );
+        await board();
+        const h = openDb(path.join(dbDir, 'followups.db'));
+        try {
+          const fix = taskDetail(h.db, `${epicId}/followup-0a1b2c3d`);
+          expect(fix?.parentTaskId).toBe(`${epicId}/task-1-settings`);
+          expect(fix?.parentTaskTitle).toBe('Settings layout page');
+          const plain = taskDetail(h.db, `${epicId}/task-1-settings`);
+          expect(plain?.parentTaskId).toBeNull();
+          expect(plain?.parentTaskTitle).toBeNull();
         } finally {
           h.sqlite.close();
         }

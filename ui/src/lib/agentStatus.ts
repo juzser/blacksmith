@@ -4,6 +4,7 @@
 // line should say. Kept as pure functions so the badge mapping is
 // unit-tested without mounting AgentStatusBadge.vue.
 import type { SessionAgent } from './api.js';
+import { shortTaskName } from './format.js';
 import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { titleFor } from './timelineDisplay.js';
@@ -124,14 +125,18 @@ const PAYLOAD_FREE_LABEL: Record<string, string> = {
  */
 export function lastStepLabel(
   lastEventType: string | null,
-  dispatch: { role: string | null; task: string | null } = { role: null, task: null },
+  dispatch: { role: string | null; taskId: string | null; taskTitle: string | null } = {
+    role: null,
+    taskId: null,
+    taskTitle: null,
+  },
 ): string {
   if (lastEventType === null) return 'No events yet';
   // A dispatch's role and task are known to the sessions API, so the row can
   // say who was sent where instead of a bare "Dispatched Agent".
   if (lastEventType === 'dispatch_decision' && dispatch.role !== null) {
     const who = `Dispatched ${roleLabel(dispatch.role)}`;
-    return dispatch.task ? `${who} · ${dispatch.task}` : who;
+    return dispatch.taskId ? `${who} · ${shortTaskName(dispatch.taskId, dispatch.taskTitle)}` : who;
   }
   const fixed = PAYLOAD_FREE_LABEL[lastEventType];
   if (fixed !== undefined) return fixed;

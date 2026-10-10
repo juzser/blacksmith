@@ -58,7 +58,8 @@ const agentCountLabel = computed(() => {
 const lastStep = computed(() =>
   lastStepLabel(props.session.lastEventType, {
     role: props.session.lastStepRole,
-    task: props.session.lastStepTask,
+    taskId: props.session.lastStepTaskId,
+    taskTitle: props.session.lastStepTaskTitle,
   }),
 );
 </script>

@@ -68,16 +68,38 @@ async function mockBoard(page: Page) {
 }
 
 // Serve the real detail with a chosen title and objective.
-async function mockDetail(page: Page, taskId: string, title: string | null) {
+async function mockDetail(
+  page: Page,
+  taskId: string,
+  title: string | null,
+  extra: { taskStatus?: string; parentTaskId?: string; parentTaskTitle?: string } = {},
+) {
   const detailPath = `/api/tasks/${encodeURIComponent(taskId)}`;
   await page.route(
     (url) => url.pathname === detailPath,
     async (route) => {
-      const response = await route.fetch();
+      // A task the fixture store does not hold borrows the shape of one it does.
+      const known = 'epic-9/task-3';
+      const url = route
+        .request()
+        .url()
+        .replace(encodeURIComponent(taskId), encodeURIComponent(known));
+      const response = await route.fetch({ url });
       const body = await response.json();
       await route.fulfill({
         response,
-        json: { ...body, task: { ...body.task, title, objective: OBJECTIVE } },
+        json: {
+          ...body,
+          parentTaskId: extra.parentTaskId ?? null,
+          parentTaskTitle: extra.parentTaskTitle ?? null,
+          task: {
+            ...body.task,
+            taskId,
+            title,
+            objective: OBJECTIVE,
+            ...(extra.taskStatus ? { taskStatus: extra.taskStatus } : {}),
+          },
+        },
       });
     },
   );
@@ -149,6 +171,104 @@ test.describe('Short task names', () => {
     expect(heading).not.toContain('Rebuild the settings screen');
     expect(heading).not.toMatch(/[0-9a-f]{8}/);
     await expect(page.getByText(OBJECTIVE)).toBeVisible();
+  });
+
+  test('the peek and the task page name a minted follow-up after its parent, as the card does', async ({
+    page,
+  }) => {
+    const parent = { parentTaskId: 'epic-9/task-3', parentTaskTitle: 'Settings layout page' };
+    await mockBoard(page);
+    await mockDetail(page, MINTED.taskId, null, { ...parent, taskStatus: 'in-progress' });
+    await page.goto('/work/kanban');
+    await page
+      .locator('.bs-kanban-card')
+      .filter({ hasText: 'Follow-up fix · Settings layout page' })
+      .locator('.bs-kanban-card__open')
+      .click();
+    const peek = page.getByRole('dialog');
+    await expect(peek.locator('.bs-dialog__title')).toHaveText(
+      'Follow-up fix · Settings layout page',
+    );
+    // The status reads as on the task page: "In Progress", not the raw slug.
+    await expect(peek.locator('.bs-task-peek__meta .bs-tag').first()).toHaveText('In Progress');
+    await page.goto(`/tasks/${encodeURIComponent(MINTED.taskId)}`);
+    await expect(page.locator('h1')).toHaveText('Follow-up fix · Settings layout page');
+  });
+
+  test('a follow-up with no known parent stays "Follow-up fix" in the peek', async ({ page }) => {
+    await mockBoard(page);
+    await mockDetail(page, ORPHAN.taskId, null);
+    await page.goto('/work/kanban');
+    await page
+      .locator('.bs-kanban-card')
+      .filter({ hasText: /^Follow-up fix(?! ·)/ })
+      .locator('.bs-kanban-card__open')
+      .click();
+    await expect(page.getByRole('dialog').locator('.bs-dialog__title')).toHaveText('Follow-up fix');
+  });
+
+  test('320px: a follow-up of a long-named parent stays on its card and the page does not scroll sideways', async ({
+    page,
+  }) => {
+    const long = 'Reconcile the migration ledger with every store snapshot';
+    const parentA = card('epic-a/task-5', { taskTitle: long });
+    const parentB = card('epic-b/task-1', { taskTitle: long });
+    const fixes = [
+      card('epic-a/followup-0a1b2c3d', {
+        title: FIX_OBJECTIVE,
+        parentTaskId: parentA.taskId,
+        parentTaskTitle: long,
+      }),
+      card('epic-b/followup-1b2c3d4e', {
+        title: FIX_OBJECTIVE,
+        parentTaskId: parentB.taskId,
+        parentTaskTitle: long,
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      }),
+      card('epic-b/followup-2c3d4e5f', {
+        title: FIX_OBJECTIVE,
+        parentTaskId: parentB.taskId,
+        parentTaskTitle: long,
+      }),
+    ];
+    await page.route('**/api/kanban*', (route) =>
+      route.fulfill({
+        json: [{ taskStatus: 'todo', tasks: [parentA, parentB, ...fixes] }],
+      }),
+    );
+    await page.setViewportSize({ width: 320, height: 812 });
+    await page.goto('/work/kanban');
+    // The board cuts a title longer than two lines with an ellipsis, so the
+    // card is found by the start of its name.
+    const single = page.locator('.bs-kanban-card').filter({ hasText: 'Follow-up fix · Reconcile' });
+    await expect(single).toHaveCount(1);
+    const name = single.locator('.bs-kanban-card__title');
+    const { height, lineHeight } = await name.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(getComputedStyle(el).lineHeight),
+    }));
+    expect(height).toBeLessThanOrEqual(2 * lineHeight + 1);
+    const group = page.locator('.bs-kanban-group').first();
+    await expect(group).toBeVisible();
+    for (const box of [single, group]) {
+      const fits = await box.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          left: r.left,
+          right: r.right,
+          view: window.innerWidth,
+          scroll: el.scrollWidth,
+          client: el.clientWidth,
+        };
+      });
+      expect(fits.left).toBeGreaterThanOrEqual(0);
+      expect(fits.right).toBeLessThanOrEqual(fits.view);
+      // scrollWidth and clientWidth are rounded separately, so allow 1px.
+      expect(fits.scroll).toBeLessThanOrEqual(fits.client + 1);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   });
 
   for (const [name, vp] of [

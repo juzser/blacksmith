@@ -33,9 +33,9 @@ describe('KanbanTaskCard.vue — card chip variant (audit finding 2)', () => {
 });
 
 describe('KanbanTaskCard.vue — footer dependency line (operator fix 2026-10-05)', () => {
-  it('clamps the footer dependency text to one line with a native title tooltip', () => {
+  it('clamps the footer dependency text to one line with a native title tooltip that also names the dependency id', () => {
     expect(SRC).toMatch(
-      /<span\s+v-if="hasWaiting"\s+class="bs-kanban-card__footer-dep"\s+:title="footerDependency"\s*>\{\{ footerDependency \}\}<\/span\s*>/,
+      /<span\s+v-if="hasWaiting"\s+class="bs-kanban-card__footer-dep"\s+:title="footerDependencyTitle"\s*>\{\{ footerDependency \}\}<\/span\s*>/,
     );
   });
 });

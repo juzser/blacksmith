@@ -12,6 +12,7 @@ import {
   columnTone,
   defaultMobileColumnKey,
   dependencyChainText,
+  dependencyChainTitle,
   epicKeyForTask,
   findGroupMember,
   foldIntoColumns,
@@ -612,6 +613,18 @@ describe('lib/kanban.ts — hasWaitingDependency() (operator fix 2026-10-05: no 
       ]),
     ).toBe(true);
     expect(hasWaitingDependency([{ taskId: 't3', taskTitle: null, status: null }])).toBe(true);
+  });
+});
+
+describe('lib/kanban.ts — dependencyChainTitle() (footer hover)', () => {
+  it('adds the dependency raw id, which names its epic, after the visible text', () => {
+    const deps = [{ taskId: 'epic-a/task-3', taskTitle: null, status: 'in-progress' }];
+    expect(dependencyChainTitle(deps)).toBe('Waits for: Task 3 (in progress) · epic-a/task-3');
+    expect(dependencyChainText(deps)).toBe('Waits for: Task 3 (in progress)');
+  });
+
+  it('is the plain text when nothing is waited on', () => {
+    expect(dependencyChainTitle([])).toBe('Waits for: nothing');
   });
 });
 

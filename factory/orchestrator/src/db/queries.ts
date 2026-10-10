@@ -393,8 +393,10 @@ export interface RunningSession {
   lastEventType: string | null;
   /** The agent role of the last event when it is a dispatch, else null. */
   lastStepRole: string | null;
-  /** The dispatched task's title (its id when untitled) when the last event is a dispatch, else null. */
-  lastStepTask: string | null;
+  /** The dispatched task's id when the last event is a dispatch, else null. */
+  lastStepTaskId: string | null;
+  /** That task's `title` column (null when unset); the UI names it with the id. */
+  lastStepTaskTitle: string | null;
   /**
    * Projects this session worked on, sorted. `sessions` has no project
    * column of its own (schema.ts), so membership is derived (sessionProjects):
@@ -1403,10 +1405,11 @@ export function runningSessions(
   }
   const lastStep = (sessionId: string) => {
     const e = lastEvent.get(sessionId);
-    if (e?.eventType !== 'dispatch_decision') return { role: null, task: null };
+    if (e?.eventType !== 'dispatch_decision') return { role: null, taskId: null, taskTitle: null };
     return {
       role: roleByEvent.get(e.eventId) ?? null,
-      task: (e.taskId && (titleByTask.get(e.taskId) || e.taskId)) || null,
+      taskId: e.taskId || null,
+      taskTitle: (e.taskId && titleByTask.get(e.taskId)) || null,
     };
   };
 
@@ -1421,7 +1424,8 @@ export function runningSessions(
         workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
         lastStepRole: lastStep(s.sessionId).role,
-        lastStepTask: lastStep(s.sessionId).task,
+        lastStepTaskId: lastStep(s.sessionId).taskId,
+        lastStepTaskTitle: lastStep(s.sessionId).taskTitle,
         projects: [...(projectsBySession.get(s.sessionId) ?? [])].sort(),
         title: titles.get(s.sessionId) ?? null,
       }))
@@ -2619,6 +2623,8 @@ export interface TimelineEntry {
    * neither exists.
    */
   sessionTitle: string;
+  /** The `title` column of the task this event names; null when it names none or the task has no title. */
+  taskTitle: string | null;
 }
 
 /** DS6 PR2 — a Dispatched row's run result (§4.3 table). */
@@ -2688,6 +2694,8 @@ function toEntry(
     sessionId: row.sessionId,
     // Filled per-page by joinSessionTitles() below, same as run/gateCounts.
     sessionTitle: row.sessionId,
+    // Filled per-page by joinTaskTitles() below.
+    taskTitle: null,
   };
 }
 
@@ -2893,6 +2901,7 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     }
     const chain = causalChain(db, filter.sessionId, filter.causalChainFor);
     joinSessionTitles(db, chain);
+    joinTaskTitles(db, chain);
     return chain;
   }
 
@@ -2941,7 +2950,25 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   joinDispatchRuns(db, page);
   joinGateCounts(page);
   joinSessionTitles(db, page);
+  joinTaskTitles(db, page);
   return page;
+}
+
+/** Fills `taskTitle` on every entry in `page`: one lookup for the page's task ids. */
+function joinTaskTitles(db: SmithDb, page: TimelineEntry[]): void {
+  const taskIds = [...new Set(page.flatMap((e) => (e.taskId ? [e.taskId] : [])))];
+  if (taskIds.length === 0) return;
+  const titleByTask = new Map(
+    db
+      .select({ taskId: tasks.taskId, title: tasks.title })
+      .from(tasks)
+      .where(inArray(tasks.taskId, taskIds))
+      .all()
+      .map((t) => [t.taskId, t.title] as const),
+  );
+  for (const entry of page) {
+    entry.taskTitle = (entry.taskId && titleByTask.get(entry.taskId)) || null;
+  }
 }
 
 /**
@@ -3398,6 +3425,36 @@ export function epicSourcePrompt(db: SmithDb, anySessionIdInEpic: string): Reque
 }
 
 /**
+ * A follow-up's origin lives only on the `finding-reattributed` event that
+ * follows its `task-added`; one read of those events, keyed by the follow-up.
+ */
+function followUpParents(db: SmithDb): Map<string, string> {
+  const parentByFollowUp = new Map<string, string>();
+  for (const e of db
+    .select({ payload: eventsRaw.payload })
+    .from(eventsRaw)
+    .where(eq(eventsRaw.eventType, 'finding-reattributed'))
+    .orderBy(sql`rowid`)
+    .all()) {
+    const p = JSON.parse(e.payload) as {
+      from_task_id?: unknown;
+      to_task_id?: unknown;
+      attribution?: unknown;
+    };
+    if (
+      p.attribution === 'follow-up' &&
+      typeof p.from_task_id === 'string' &&
+      typeof p.to_task_id === 'string' &&
+      !parentByFollowUp.has(p.to_task_id)
+    ) {
+      // First event wins: the origin never moves once it is recorded.
+      parentByFollowUp.set(p.to_task_id, p.from_task_id);
+    }
+  }
+  return parentByFollowUp;
+}
+
+/**
  * DS3 §4.7 — the operator prompt that led to `taskId`: a bounded, cycle-safe
  * walk up `causal_parent` from the task's own events to the nearest
  * `user_prompt` (reuses `causalChain`'s `seen` guard), falling back to the
@@ -3579,30 +3636,7 @@ export function kanban(
   // call: bounds the N+1 causal walk/epic-fallback cost that scaled with the
   // task count (see QuoteMemo's doc comment).
   const quoteMemo = createQuoteMemo();
-  // A follow-up's origin lives only on the `finding-reattributed` event that
-  // follows its `task-added`; one read of those events, keyed by the follow-up.
-  const parentByFollowUp = new Map<string, string>();
-  for (const e of db
-    .select({ payload: eventsRaw.payload })
-    .from(eventsRaw)
-    .where(eq(eventsRaw.eventType, 'finding-reattributed'))
-    .orderBy(sql`rowid`)
-    .all()) {
-    const p = JSON.parse(e.payload) as {
-      from_task_id?: unknown;
-      to_task_id?: unknown;
-      attribution?: unknown;
-    };
-    if (
-      p.attribution === 'follow-up' &&
-      typeof p.from_task_id === 'string' &&
-      typeof p.to_task_id === 'string' &&
-      !parentByFollowUp.has(p.to_task_id)
-    ) {
-      // First event wins: the origin never moves once it is recorded.
-      parentByFollowUp.set(p.to_task_id, p.from_task_id);
-    }
-  }
+  const parentByFollowUp = followUpParents(db);
   const columns = new Map<string, KanbanTask[]>();
   for (const t of taskRows) {
     const column = columns.get(t.taskStatus) ?? [];
@@ -3700,6 +3734,10 @@ export interface TaskDetail {
   requestQuote: RequestQuote | null;
   /** DS3 part 2 item 1 — same "is anybody still on this task" answer as kanban()'s field of the same name, for the Task-detail/TaskPeekPanel `AgentChip`. */
   agentActivity: KanbanAgentActivity | null;
+  /** A follow-up's origin task (kanban()'s `parentTaskId`), else null. */
+  parentTaskId: string | null;
+  /** The origin task's `title` column; null when there is no parent or it has none. */
+  parentTaskTitle: string | null;
 }
 
 /**
@@ -3771,6 +3809,12 @@ export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): T
     .where(eq(operatorFeedback.taskId, taskId))
     .all();
 
+  const parentTaskId = followUpParents(db).get(taskId) ?? null;
+  const parentTaskTitle = parentTaskId
+    ? (db.select({ title: tasks.title }).from(tasks).where(eq(tasks.taskId, parentTaskId)).get()
+        ?.title ?? null)
+    : null;
+
   return {
     task,
     claims: task.claims ? (JSON.parse(task.claims) as string[]) : [],
@@ -3782,6 +3826,8 @@ export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): T
     branch: task.branch,
     requestQuote: requestQuoteForTask(db, task.taskId, task.sessionId),
     agentActivity,
+    parentTaskId,
+    parentTaskTitle,
   };
 }
 

@@ -24,6 +24,7 @@ import {
   attemptLabel,
   cardChips,
   dependencyChainText,
+  dependencyChainTitle,
   hasWaitingDependency,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
@@ -80,6 +81,7 @@ const markText = computed(() =>
 );
 const markLabel = computed(() => markWords(props.mark ?? null));
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
+const footerDependencyTitle = computed(() => dependencyChainTitle(props.task.dependencies));
 const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
@@ -177,7 +179,7 @@ function onCardClick(event: MouseEvent) {
       <span
         v-if="hasWaiting"
         class="bs-kanban-card__footer-dep"
-        :title="footerDependency"
+        :title="footerDependencyTitle"
         >{{ footerDependency }}</span
       >
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>

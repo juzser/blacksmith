@@ -87,8 +87,10 @@ export interface RunningSession {
   lastEventType: string | null;
   /** Agent role of the last event when it is a dispatch, else null. */
   lastStepRole: string | null;
-  /** Title (id when untitled) of the task that dispatch was for, else null. */
-  lastStepTask: string | null;
+  /** Id of the task that dispatch was for, else null. */
+  lastStepTaskId: string | null;
+  /** That task's `title` column, null when unset; name it with shortTaskName(). */
+  lastStepTaskTitle: string | null;
   /**
    * Projects the session worked on: those of the tasks it created, and of
    * every task and epic its own events and agents name. Empty for a run that
@@ -286,6 +288,8 @@ export interface TimelineEntry {
   sessionId: string;
   /** DS6 PR4b: the owning session's title, falling back to its id when untitled. */
   sessionTitle: string;
+  /** The `title` column of the task the event names; null when none. Name it with shortTaskName(). */
+  taskTitle?: string | null;
 }
 
 export interface KanbanTag {
@@ -428,6 +432,10 @@ export interface TaskDetail {
   requestQuote: RequestQuote | null;
   /** DS3 part 2 item 1 — same "is anybody still on this task" field as `KanbanTask.agentActivity`. */
   agentActivity: 'working' | 'stalled' | null;
+  /** A follow-up's origin task, else null (same derivation as `KanbanTask.parentTaskId`). */
+  parentTaskId: string | null;
+  /** The origin task's `title` column; null when there is no parent or it has none. */
+  parentTaskTitle: string | null;
 }
 
 /** DS3 §4.7 — one entry per dispatch attempt, judge round, result, or error, for `RunHistoryTimeline`. */

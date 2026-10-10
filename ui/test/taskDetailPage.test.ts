@@ -47,7 +47,7 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
   });
 
   // Operator fix: the crumb reads the plain taskId, but PageHeader's title
-  // is taskLabel() (the task name when there is one) — not a pure
+  // is shortTaskName() (the task name when there is one) — not a pure
   // duplicate, so this page opts out of the default sr-only title.
   it('keeps its PageHeader title visible, since it differs from the crumb', () => {
     expect(SFC).toMatch(/<PageHeader[\s\S]{0,200}title-visible/);
@@ -83,7 +83,7 @@ describe('TaskDetailPage.vue — role labels', () => {
 
 // Task 4 (humanized task label helper): a task with no objective used to
 // head the page with its raw id ("epic-9/task-29-readme-merge-trim").
-// taskLabel() humanizes it instead; PageHeader has no spare prop for a
+// shortTaskName() names it instead; PageHeader has no spare prop for a
 // tooltip (its own `title` prop IS the heading), so the raw id stays
 // reachable via the Details rail's always-visible "Task ID" field, not a
 // hover tooltip.
@@ -101,8 +101,9 @@ describe('TaskDetailPage.vue — role labels', () => {
 describe('TaskDetailPage.vue — one short name, the objective as description', () => {
   it('heads the page with the short name from the title column', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/format\.js'/);
+    expect(SFC).toMatch(/<PageHeader\s+:title="pageName"/);
     expect(SFC).toMatch(
-      /<PageHeader\s+:title="shortTaskName\(detail\.task\.taskId, detail\.task\.title\)"/,
+      /shortTaskName\(\s*detail\.value\.task\.taskId,\s*detail\.value\.task\.title,\s*parentLabel\(/,
     );
     expect(SFC).not.toMatch(/taskLabel/);
   });
