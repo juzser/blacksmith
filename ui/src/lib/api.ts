@@ -289,7 +289,7 @@ export interface TimelineEntry {
   /** DS6 PR4b: the owning session's title, falling back to its id when untitled. */
   sessionTitle: string;
   /** The `title` column of the task the event names; null when none. Name it with shortTaskName(). */
-  taskTitle?: string | null;
+  taskTitle: string | null;
 }
 
 export interface KanbanTag {

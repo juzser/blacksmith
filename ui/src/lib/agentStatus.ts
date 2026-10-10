@@ -153,5 +153,6 @@ export function lastStepLabel(
     actor: null,
     sessionId: '',
     sessionTitle: '',
+    taskTitle: null,
   });
 }

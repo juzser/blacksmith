@@ -44,6 +44,7 @@ function entry(overrides: Partial<TimelineEntry>): TimelineEntry {
     actor: null,
     sessionId: 'sess-1',
     sessionTitle: 'sess-1',
+    taskTitle: null,
     ...overrides,
   };
 }
@@ -613,7 +614,7 @@ describe('lib/timelineDisplay.ts', () => {
         titleFor(
           entry({ eventType: 'edge-recorded', taskId: 'e/t2', payload: { depends_on: 'e/t1' } }),
         ),
-      ).toBe('Edge: e/t2 depends on e/t1');
+      ).toBe('Edge: T2 depends on T1');
       expect(
         titleFor(
           entry({ eventType: 'wave-admitted', payload: { task_ids: ['a', 'b', 'c', 'd'] } }),
@@ -626,13 +627,59 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { task_ids: ['a'], files_changed: ['x.ts'] },
           }),
         ),
-      ).toBe('Merged a (1 file changed)');
+      ).toBe('Merged A (1 file changed)');
       expect(titleFor(entry({ eventType: 'wave-merged', payload: { task_ids: ['a'] } }))).toBe(
-        'Merged a',
+        'Merged A',
       );
       expect(titleFor(entry({ eventType: 'task-superseded', taskId: 'e/t9' }))).toBe(
-        'Task superseded: e/t9',
+        'Task superseded: T9',
       );
+    });
+
+    describe('names the task by its short name, never the raw id or the objective', () => {
+      const taskId = 'epic-a/t3-trim-readme';
+      const objective = 'A long objective paragraph that must stay out of the row title.';
+      const named = { taskId, taskTitle: 'Trim the readme' };
+
+      it('task-added', () => {
+        const e = entry({ eventType: 'task-added', ...named, payload: { objective } });
+        expect(titleFor(e)).toBe('Task added: Trim the readme');
+        expect(titleFor(entry({ eventType: 'task-added', taskId, payload: { objective } }))).toBe(
+          'Task added: T3 trim readme',
+        );
+      });
+
+      it('task-split and task-superseded', () => {
+        expect(titleFor(entry({ eventType: 'task-split', ...named }))).toBe(
+          'Task split: Trim the readme',
+        );
+        expect(titleFor(entry({ eventType: 'task-superseded', ...named }))).toBe(
+          'Task superseded: Trim the readme',
+        );
+      });
+
+      it('edge-recorded titles the task and slugs the dependency', () => {
+        const e = entry({
+          eventType: 'edge-recorded',
+          ...named,
+          payload: { depends_on: 'epic-a/t2-write-spec' },
+        });
+        expect(titleFor(e)).toBe('Edge: Trim the readme depends on T2 write spec');
+      });
+
+      it('wave-merged titles the entry task and slugs any other id', () => {
+        const e = entry({
+          eventType: 'wave-merged',
+          ...named,
+          payload: { task_ids: [taskId, 'epic-a/t2-write-spec'], files_changed: ['x.ts'] },
+        });
+        expect(titleFor(e)).toBe('Merged Trim the readme, T2 write spec (1 file changed)');
+        expect(
+          titleFor(entry({ eventType: 'wave-merged', ...named, payload: { task_ids: [] } })),
+        ).toBe('Merged Trim the readme');
+        expect(metaFor(e)).toContain('Trim the readme, T2 write spec');
+        expect(metaFor(e)).not.toContain('epic-a/');
+      });
     });
 
     /**
@@ -1081,7 +1128,7 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
       taskId: 'epic-9/task-29-readme-merge-trim',
       payload: { task_ids: ['epic-9/task-29'], files_changed: ['a.ts', 'b.ts'] },
     });
-    expect(metaFor(e)).toBe('epic-9/task-29 · 2 files changed');
+    expect(metaFor(e)).toBe('Task 29 · 2 files changed');
   });
 
   it('shows a running dispatch as "Running for" rather than a token/duration total', () => {
@@ -1589,6 +1636,7 @@ describe('groupByRoleMinute', () => {
     actor: null,
     sessionId: 'sess-1',
     sessionTitle: 'sess-1',
+    taskTitle: null,
     kind: 'Dispatched',
   };
 
