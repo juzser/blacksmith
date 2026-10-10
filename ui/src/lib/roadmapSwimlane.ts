@@ -149,6 +149,12 @@ export function buildMonthMarks(bounds: { start: number; end: number }): MonthMa
   let cursor = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1);
   while (cursor <= bounds.end) {
     const d = new Date(cursor);
+    // The 1st of the opening month can sit before the window opens; no mark
+    // for a boundary the window does not contain.
+    if (cursor < bounds.start) {
+      cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+      continue;
+    }
     marks.push({
       label: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
       left: clamp(pct(cursor, bounds)),
@@ -220,6 +226,12 @@ function buildFixedStepMarks(bounds: { start: number; end: number }, stepMs: num
     startDate.getUTCDate(),
   );
   while (cursor <= bounds.end) {
+    // The first midnight can sit before the window opens; a label clamped to
+    // the track edge would then claim a tick it is not over.
+    if (cursor < bounds.start) {
+      cursor += stepMs;
+      continue;
+    }
     marks.push({
       label: new Date(cursor).toLocaleString('en-US', {
         month: 'short',

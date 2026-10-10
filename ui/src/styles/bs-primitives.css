@@ -4287,10 +4287,15 @@ h2.rm-section__head {
   transform: translateX(-50%);
   white-space: nowrap;
 }
-.months-mark:first-child {
+.months-mark--start {
   transform: none;
 }
-/* Right-end ticks: the label ends at the tick, so it stays inside the track. */
+/* A label that would touch its neighbour keeps its box and is not drawn. */
+.months-mark--dropped {
+  visibility: hidden;
+}
+/* Centred would cross the track's edge: the label starts (--start) or ends
+   (--end) at its tick instead, so it stays inside the track. */
 .months-mark--end {
   transform: translateX(-100%);
 }
