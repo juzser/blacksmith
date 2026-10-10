@@ -394,6 +394,49 @@ export function sectionStore(section: RoadmapSection): { storeId: string; anySto
   };
 }
 
+/** True when a live session is on an epic of this section, shown or behind a closed disclosure. */
+function sectionHasLive(section: RoadmapSection, live: LiveEpics | null | undefined): boolean {
+  const { storeId, anyStore } = sectionStore(section);
+  const { earlier, visible, later } = section.window as LaneWindow<MilestoneProgress | string>;
+  return [...earlier, ...visible, ...later].some((lane) =>
+    (typeof lane === 'string' ? [lane] : lane.epicIds).some((id) =>
+      isLiveEpic(live, storeId, id, anyStore),
+    ),
+  );
+}
+
+/**
+ * One Current rule per screen: with any epic on the page live, only live
+ * lanes are marked, in every section; otherwise each section keeps its single
+ * `currentLane`. Hidden lanes count, so a closed disclosure cannot hand the
+ * mark to a lane that is not live.
+ */
+export function pageHasLive(
+  sections: readonly RoadmapSection[],
+  live: LiveEpics | null | undefined,
+): boolean {
+  return sections.some((s) => sectionHasLive(s, live));
+}
+
+/**
+ * The section a live-scope entry belongs to. A store-bound section must be
+ * the entry's own store; the epic-only section that merges every store knows
+ * no store per epic, so it takes the entry by epic id and the entry carries
+ * its own store from there.
+ */
+export function liveEntrySection(
+  sections: readonly RoadmapSection[],
+  entry: { storeId: string; epicId: string },
+): RoadmapSection | undefined {
+  return sections.find((sec) => {
+    const { storeId, anyStore } = sectionStore(sec);
+    return (
+      (anyStore || storeId === entry.storeId) &&
+      sectionHolds(sec, { phaseId: null, epicId: entry.epicId })
+    );
+  });
+}
+
 export interface SectionView {
   /** The shown lanes only, so the time axis spans what is on screen. */
   swimlane: Swimlane;
@@ -401,7 +444,7 @@ export interface SectionView {
   regions: LaneRegion[];
   /** The lane the window is cut around (`currentLaneIndex`). */
   currentLane: string | null;
-  /** Lane heads marked Current: those holding a live epic, else the single `currentLane`. */
+  /** Lane heads marked Current: those holding a live epic, or the single `currentLane` when nothing on the page is live. */
   currentLanes: string[];
   /** Shown epic rows a live session is on. */
   liveEpics: string[];
@@ -412,6 +455,8 @@ export function sectionSwimlane(
   expanded: { earlier: boolean; later: boolean },
   now: Date,
   live?: LiveEpics | null,
+  /** `pageHasLive` over every section; defaults to this section alone. */
+  pageLive: boolean = sectionHasLive(section, live),
 ): SectionView {
   const w = section.window as LaneWindow<MilestoneProgress | string>;
   const shownEarlier = expanded.earlier ? w.earlier : [];
@@ -453,8 +498,8 @@ export function sectionSwimlane(
     liveEpics.push(...held.map((r) => r.id));
     if (held.length > 0) liveHeads.push(group.head.id);
   }
-  // Nothing live here (or the read is unknown): keep the single "where are we" mark.
-  const currentLanes = liveHeads.length > 0 ? liveHeads : currentLane === null ? [] : [currentLane];
+  // Nothing live on the page (or the read is unknown): keep the single "where are we" mark.
+  const currentLanes = pageLive ? liveHeads : currentLane === null ? [] : [currentLane];
   return { swimlane, regions, currentLane, currentLanes, liveEpics };
 }
 

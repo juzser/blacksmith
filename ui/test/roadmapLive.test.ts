@@ -7,7 +7,9 @@ import { shortTaskName } from '../src/lib/format.js';
 import {
   buildRoadmapSections,
   isLiveEpic,
+  liveEntrySection,
   liveEpicKeys,
+  pageHasLive,
   type RoadmapSection,
   sectionSwimlane,
 } from '../src/lib/roadmapWindow.js';
@@ -141,6 +143,85 @@ describe('Current marks follow every live epic', () => {
     const live = liveEpicKeys(scope([{ storeId: 'home', epicId: 'epic-a' }], false));
     const view = sectionSwimlane(section(lanes), OPEN, NOW, live);
     expect(view.currentLanes).toEqual(['phase-4']);
+  });
+});
+
+function inStore(m: MilestoneProgress, id: string, project: string): MilestoneProgress {
+  return { ...m, project, store: { id, label: id } } as MilestoneProgress;
+}
+
+const OPEN_ALL = { earlier: true, later: true };
+
+describe('one Current rule for the whole page', () => {
+  const a = [1, 2, 3, 4, 5].map((n) =>
+    inStore(phase(n, n === 5 ? ['epic-a'] : []), 'store-a', 'project-a'),
+  );
+  const b = [1, 2, 3, 4, 5].map((n) => inStore(phase(n), 'store-b', 'project-b'));
+  const sections = () => buildRoadmapSections([...a, ...b], [], [], undefined, null);
+  const byProject = (name: string) => {
+    const s = sections().find((x) => x.project === name);
+    if (!s) throw new Error('no section');
+    return s;
+  };
+
+  it('marks nothing in a section with no live epic once any epic on the page is live', () => {
+    const live = liveEpicKeys(scope([{ storeId: 'store-a', epicId: 'epic-a' }]));
+    const pageLive = pageHasLive(sections(), live);
+    expect(pageLive).toBe(true);
+    const va = sectionSwimlane(byProject('project-a'), OPEN_ALL, NOW, live, pageLive);
+    const vb = sectionSwimlane(byProject('project-b'), OPEN_ALL, NOW, live, pageLive);
+    expect(va.currentLanes).toEqual(['phase-5']);
+    expect(vb.currentLanes).toEqual([]);
+  });
+
+  it('keeps each section single Current mark when nothing on the page is live', () => {
+    const live = liveEpicKeys(scope([]));
+    expect(pageHasLive(sections(), live)).toBe(false);
+    for (const name of ['project-a', 'project-b']) {
+      const v = sectionSwimlane(byProject(name), OPEN_ALL, NOW, live, false);
+      expect(v.currentLanes).toEqual([v.currentLane]);
+      expect(v.currentLane).not.toBeNull();
+    }
+  });
+
+  it('reads an unmeasured read as no live epic', () => {
+    const live = liveEpicKeys(scope([{ storeId: 'store-a', epicId: 'epic-a' }], false));
+    expect(pageHasLive(sections(), live)).toBe(false);
+  });
+
+  it('counts a live epic in a lane behind a closed disclosure, so no visible lane takes the mark', () => {
+    const many = [1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+      inStore(phase(n, n === 1 ? ['epic-a'] : []), 'store-a', 'project-a'),
+    );
+    const s = buildRoadmapSections(many, [], [], undefined, null)[0] as RoadmapSection;
+    const live = liveEpicKeys(scope([{ storeId: 'store-a', epicId: 'epic-a' }]));
+    const pageLive = pageHasLive([s], live);
+    expect(pageLive).toBe(true);
+    const closed = sectionSwimlane(s, { earlier: false, later: false }, NOW, live, pageLive);
+    expect(closed.currentLanes).toEqual([]);
+    const open = sectionSwimlane(s, OPEN_ALL, NOW, live, pageLive);
+    expect(open.currentLanes).toEqual(['phase-1']);
+  });
+});
+
+describe('a live epic is keyed by its own store in a merged section', () => {
+  const epicOnly = () => buildRoadmapSections([], ['epic-a', 'epic-x'], [], undefined, null);
+
+  it('finds the merged section for a foreign store live epic', () => {
+    const found = liveEntrySection(epicOnly(), { storeId: 'store-b', epicId: 'epic-a' });
+    expect(found?.kind).toBe('epic');
+  });
+
+  it('still refuses a store-bound section of another store', () => {
+    const sections = buildRoadmapSections(
+      [inStore(phase(1, ['epic-a']), 'store-a', 'project-a')],
+      [],
+      [],
+      undefined,
+      null,
+    );
+    expect(liveEntrySection(sections, { storeId: 'store-b', epicId: 'epic-a' })).toBeUndefined();
+    expect(liveEntrySection(sections, { storeId: 'store-a', epicId: 'epic-a' })).toBeDefined();
   });
 });
 

@@ -44,6 +44,8 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
   /** The epics a live session is on; each reads Current. */
   live?: LiveEpics | null;
+  /** Some epic on the page is live (`pageHasLive`): only live lanes are marked, here too. */
+  pageLive?: boolean;
 }>();
 
 // selectPhase/selectEpic carry the picked id and the id of the store the
@@ -56,7 +58,9 @@ const emit = defineEmits<{
 
 const { isPhoneWidth } = useViewport();
 
-const view = computed(() => sectionSwimlane(props.section, props.expanded, new Date(), props.live));
+const view = computed(() =>
+  sectionSwimlane(props.section, props.expanded, new Date(), props.live, props.pageLive),
+);
 
 // DS4 S4 R4 — phase mode only: with an epic of this section selected, the
 // EpicBlock's back link stands in for the picker. A phase-less section's

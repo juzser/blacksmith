@@ -1026,7 +1026,7 @@ This same `TaskCard` and its keyboard model (peek + no drag) also apply inside R
   page shows one "Epics" section. Lanes keep declared order.
 - **Window.** Each section shows 1 earlier lane + the current lane + 2 later lanes. The
   current lane is the one holding a running epic, else the first declared lane not done
-  (else the last); it decides the window cut only. Every live epic (store-keyed, from the active scope) is marked "Current" with `aria-current="step"` and opens its running wave; with nothing live or the read unmeasured, only this lane is marked. Selecting
+  (else the last); it decides the window cut only. Every live epic (store-keyed, from the active scope) is marked "Current" with `aria-current="step"` and opens its running wave; the rule is page-wide: with any epic on the page live, only live lanes are marked, in every section (a section with none marks nothing, and a live epic behind a closed disclosure counts); with nothing live on the page or the read unmeasured, each section marks only this lane. Selecting
   another lane never moves it. Hidden lanes sit behind "Show N earlier lane(s)" / "Show N
   later lane(s)" disclosures (`aria-expanded`, `aria-controls`; "Show fewer ..." when open),
   rendered only when a side hides something. The open/closed state is kept per tab session

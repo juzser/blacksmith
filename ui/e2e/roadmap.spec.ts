@@ -1343,16 +1343,28 @@ function liveSession(
   };
 }
 
-async function stubLiveRoadmap(page: Page): Promise<void> {
+async function stubLiveRoadmap(
+  page: Page,
+  opts: { liveStores?: Array<typeof STORE_A>; merged?: boolean } = {},
+): Promise<void> {
+  const liveStores = opts.liveStores ?? [STORE_A, STORE_B];
+  const isLive = (store: typeof STORE_A) => liveStores.some((s) => s.id === store.id);
+  // merged: no phase anywhere, so every store's epic lands in the one epic-only section.
   await page.route('**/api/roadmap**', (route) =>
     route.fulfill({
-      json: [liveMilestone(STORE_A, 'epic-a'), liveMilestone(STORE_B, 'epic-b')],
+      json: opts.merged ? [] : [liveMilestone(STORE_A, 'epic-a'), liveMilestone(STORE_B, 'epic-b')],
     }),
   );
   await page.route('**/api/overview**', async (route) => {
     const response = await route.fetch();
     const body = await response.json();
     body.projects = [];
+    if (opts.merged) {
+      body.epicsInFlight = ['epic-a', 'epic-b'];
+      body.epicsIdle = [];
+      body.closedEpics = [];
+      body.epicsActivelyRunning = [];
+    }
     await route.fulfill({ response, json: body });
   });
   await page.route('**/api/flow**', (route) => {
@@ -1370,22 +1382,33 @@ async function stubLiveRoadmap(page: Page): Promise<void> {
         formatWarning: null,
         hidden: { outOfScope: 0, dead: 0, unparsed: 0, nonInteractive: 0 },
         sessions: [
-          liveSession('cli-1', STORE_A, 'epic-a', 'task-6-ship-it', 'task-5-write-docs'),
-          liveSession('cli-2', STORE_B, 'epic-b', 'task-2-index', 'task-3-query'),
+          ...(isLive(STORE_A)
+            ? [liveSession('cli-1', STORE_A, 'epic-a', 'task-6-ship-it', 'task-5-write-docs')]
+            : []),
+          ...(isLive(STORE_B)
+            ? [liveSession('cli-2', STORE_B, 'epic-b', 'task-2-index', 'task-3-query')]
+            : []),
         ],
       },
     }),
   );
-  await stubActiveScope(page, ['project-a', 'project-b'], {
-    projects: [
-      { storeId: STORE_A.id, project: 'project-a', liveSessions: 1, agentsWorking: 1 },
-      { storeId: STORE_B.id, project: 'project-b', liveSessions: 1, agentsWorking: 1 },
-    ],
-    epics: [
-      { storeId: STORE_A.id, epicId: 'epic-a', project: 'project-a' },
-      { storeId: STORE_B.id, epicId: 'epic-b', project: 'project-b' },
-    ],
-  });
+  await stubActiveScope(
+    page,
+    liveStores.map((s) => s.label),
+    {
+      projects: liveStores.map((s) => ({
+        storeId: s.id,
+        project: s.label,
+        liveSessions: 1,
+        agentsWorking: 1,
+      })),
+      epics: liveStores.map((s) => ({
+        storeId: s.id,
+        epicId: s === STORE_A ? 'epic-a' : 'epic-b',
+        project: s.label,
+      })),
+    },
+  );
 }
 
 test.describe('Roadmap: every live epic is Current and open', () => {
@@ -1439,6 +1462,56 @@ test.describe('Roadmap: every live epic is Current and open', () => {
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
     );
     expect(sideways).toBe(false);
+  });
+
+  test('desktop 1280: a section with no live epic marks no Current lane while another does', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubLiveRoadmap(page, { liveStores: [STORE_A] });
+    await page.goto('/work/roadmap?scope=all');
+
+    const sectionOf = (name: string) =>
+      page.locator('section.rm-section').filter({ hasText: name });
+    await expect(sectionOf('project-a').locator('.lane-group[aria-current="step"]')).toHaveCount(1);
+    await expect(sectionOf('project-b').locator('.lane-group')).not.toHaveCount(0);
+    await expect(sectionOf('project-b').locator('.lane-group[aria-current="step"]')).toHaveCount(0);
+    await expect(page.locator('.lane-group[aria-current="step"]')).toHaveCount(1);
+  });
+
+  test('phone 375: only the live lane reads (current) when the other project is quiet', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page, { liveStores: [STORE_A] });
+    await page.goto('/work/roadmap?scope=all');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 4' })).toBeVisible();
+    await expect(page.getByText('Wave 2 of 2')).toHaveCount(0);
+    await expect(
+      page.locator('.bs-roadmap-mobile__row').filter({ hasText: 'Current' }),
+    ).toHaveCount(1);
+  });
+
+  test('a store-b epic in the merged Epics section opens its own wave, read from store-b', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    const flowStores: Array<string | null> = [];
+    page.on('request', (req) => {
+      const url = new URL(req.url());
+      if (url.pathname === '/api/flow' && url.searchParams.get('epic') === 'epic-b')
+        flowStores.push(url.searchParams.get('store'));
+    });
+    await stubLiveRoadmap(page, { liveStores: [STORE_B], merged: true });
+    await page.goto('/work/roadmap');
+
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toContainText(
+      '0/2 done',
+    );
+    expect(flowStores).toContain('store-b');
   });
 
   test('screenshot live epics desktop/dark', async ({ page }) => {

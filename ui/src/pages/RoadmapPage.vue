@@ -53,7 +53,9 @@ import {
   buildRoadmapSections,
   filterActiveSections,
   isLiveEpic,
+  liveEntrySection,
   liveEpicKeys,
+  pageHasLive,
   ROADMAP_WINDOW_SCOPE,
   type RoadmapSection,
   sectionHolds,
@@ -105,6 +107,7 @@ const measured = () => live()?.measured === true;
 const liveEpics = computed(() => liveEpicKeys(live()));
 const { sessions: liveSessions } = useLiveFocus();
 const marks = computed(() => (liveSessions.value ? liveMarks(liveSessions.value) : null));
+const pageLive = computed(() => pageHasLive(sections.value, liveEpics.value));
 const isLive = (store: string | undefined, epicId: string) =>
   isLiveEpic(liveEpics.value, store ?? HOME_STORE_ID, epicId);
 /** The scope the section filter reads: only under Active; null leaves the list whole. */
@@ -550,13 +553,11 @@ const liveBlocks = computed<LiveBlock[]>(() => {
   const found: LiveBlock[] = [];
   for (const entry of live()?.epics ?? []) {
     if (!measured()) break;
-    const section = sections.value.find(
-      (sec) =>
-        (sec.store?.id ?? HOME_STORE_ID) === entry.storeId &&
-        sectionHolds(sec, { phaseId: null, epicId: entry.epicId }),
-    );
+    const section = liveEntrySection(sections.value, entry);
     if (!section) continue;
-    const store = section.store?.id;
+    // A merged section knows no store per epic: the entry's own store keys the block.
+    const store =
+      section.store?.id ?? (entry.storeId === HOME_STORE_ID ? undefined : entry.storeId);
     if (selectionShows(entry.epicId, store)) continue;
     const flow = epicFlows.value.get(flowKey(store, entry.epicId));
     if (
@@ -783,6 +784,7 @@ async function closePeek() {
           :show-legend="item.section === legendSection"
           :idle-labels="idleLabels"
           :live="liveEpics"
+          :page-live="pageLive"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
           @select-phase="(id, store) => selectPhase(id, { store })"
           @select-epic="(id, store) => selectEpic(id, { store })"
