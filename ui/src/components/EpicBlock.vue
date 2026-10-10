@@ -8,6 +8,7 @@ import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import { useViewport } from '../composables/useViewport.js';
 import type { RequestQuote as RequestQuoteData, StatusCounts } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
+import type { LiveMarks } from '../lib/liveFocus.js';
 import type { PlanVersionOption } from '../lib/planVersion.js';
 import { taskCountLabel } from '../lib/roadmapSwimlane.js';
 import type { KitTone } from '../lib/taxonomy.js';
@@ -16,6 +17,7 @@ import {
   mobileEpicStatusLine,
   statusCountsBar,
   type WaveInfo,
+  waveLabel,
 } from '../lib/waveList.js';
 import IconButton from './kit/IconButton.vue';
 import ProgressBar from './kit/ProgressBar.vue';
@@ -38,6 +40,8 @@ export interface EpicSection {
   tasksTotal: number | null;
   tasksCompleted: number | null;
   failed?: boolean;
+  /** A live session is on this epic: it reads Current and opens its waves. */
+  live?: boolean;
   /** Empty until tasksTotal resolves; feeds the "Show waves" toggle below. */
   waves: WaveInfo[];
 }
@@ -52,6 +56,8 @@ export interface EpicModeData {
   planVersion: string;
   loading: boolean;
   error: boolean;
+  /** A live session is on this epic: it reads Current. */
+  live?: boolean;
   tasksTotal: number;
   tasksCompleted: number;
   waves: WaveInfo[];
@@ -74,12 +80,20 @@ const props = defineProps<{
   tasksTotal?: number;
   tasksCompleted?: number;
   epics?: EpicSection[];
+  /** Phone phase mode: only the epic rows, without the phase's name, tag and totals. */
+  epicsOnly?: boolean;
+  /** With epicsOnly: the name of the phase the live epic is listed in. */
+  liveInPhase?: string;
   /** DS4 S5c §1 — phase-mode's own stacked bar, same server data. */
   statusCounts?: StatusCounts;
   // Epic mode — set instead of the phase-mode props above.
   epic?: EpicModeData;
   /** Epic id -> "idle 18d", for the idle epics only. */
   idleLabels: Record<string, string>;
+  /** Live Now/Next marks for the wave cards; null while unknown. */
+  marks?: LiveMarks | null;
+  /** The store the epics belong to, so a mark matches by store too. */
+  storeId?: string;
 }>();
 
 /** DS4 S5c §1 — statusCounts-aware segments/aria-label, falling back to the
@@ -129,7 +143,16 @@ const emit = defineEmits<{
 // at all for a zero-task epic (`epics` loop below gates the button on that).
 const openWaves = reactive<Record<string, boolean>>({});
 function isOpen(epic: EpicSection): boolean {
-  return openWaves[epic.epicId] ?? epic.statusLabel === 'In progress';
+  return (
+    openWaves[epic.epicId] ??
+    (epic.statusLabel === 'In progress' ||
+      (epic.live === true && epic.waves.some((w) => w.kind === 'current')))
+  );
+}
+/** Live epic whose flow is not in: "Wave N" only if known, else "Running". */
+function pendingWave(epic: EpicSection): string | null {
+  if (!epic.live || (epic.tasksTotal !== null && !epic.failed)) return null;
+  return waveLabel(epic.waves.find((w) => w.kind === 'current') ?? null);
 }
 function toggle(epic: EpicSection) {
   openWaves[epic.epicId] = !isOpen(epic);
@@ -174,7 +197,9 @@ function toggle(epic: EpicSection) {
       <Tag v-if="epic.project" tone="neutral" variant="outline" size="sm" class="eh-project">{{
         epic.project
       }}</Tag>
+      <Tag v-if="epic.live" tone="progress" size="sm">Current</Tag>
       <Tag :tone="epic.statusTone" size="sm">{{ epic.statusLabel }}</Tag>
+      <span v-if="epic.live && (epic.loading || epic.error)" class="muted small">{{ waveLabel(null) }}</span>
       <Select
         class="select-trailing"
         :model-value="epic.planVersion"
@@ -199,7 +224,13 @@ function toggle(epic: EpicSection) {
       <RequestQuote v-if="epic.sourcePrompt" :quote="epic.sourcePrompt" />
       <!-- DS4 S4 R3 — epic mode always shows WaveList in compact form on
            phone: past, current and upcoming, one line each. -->
-      <WaveList :waves="epic.waves" :compact="isPhoneWidth" @select="emit('select', $event)" />
+      <WaveList
+        :waves="epic.waves"
+        :compact="isPhoneWidth"
+        :marks="marks"
+        :store-id="storeId"
+        @select="emit('select', $event)"
+      />
     </template>
   </div>
 
@@ -207,11 +238,14 @@ function toggle(epic: EpicSection) {
     <!-- DS4 S4 §1 — phone phase mode: a stacked list, no swimlane, no bar
          chart. Hidden entirely on desktop/tablet. -->
     <template v-if="isPhoneWidth">
-      <div class="card-meta">
+      <p v-if="epicsOnly && liveInPhase" class="card-sum muted bs-roadmap-mobile__live-in">
+        Live in {{ liveInPhase }}
+      </p>
+      <div v-if="!epicsOnly" class="card-meta">
         {{ name }}
         <Tag :tone="statusTone ?? 'neutral'" size="sm">{{ statusLabel }}</Tag>
       </div>
-      <div v-if="(tasksTotal ?? 0) > 0" class="bs-roadmap-mobile__summary">
+      <div v-if="!epicsOnly && (tasksTotal ?? 0) > 0" class="bs-roadmap-mobile__summary">
         <div class="bs-roadmap-mobile__summary-cell">
           <span class="muted small">Tasks done</span>
           <span class="bs-roadmap-mobile__summary-value">{{ tasksCompleted ?? 0 }} of {{ tasksTotal }}</span>
@@ -225,7 +259,7 @@ function toggle(epic: EpicSection) {
           />
         </div>
       </div>
-      <p v-else class="card-sum muted">No tasks tracked</p>
+      <p v-else-if="!epicsOnly" class="card-sum muted">No tasks tracked</p>
 
       <ul class="bs-roadmap-mobile__list" role="list">
         <li v-for="sec in epics" :key="sec.epicId" class="bs-roadmap-mobile__item">
@@ -234,6 +268,7 @@ function toggle(epic: EpicSection) {
             <Tag v-if="idleLabels[sec.epicId]" tone="neutral" variant="outline" size="sm">{{
               idleLabels[sec.epicId]
             }}</Tag>
+            <Tag v-if="sec.live" tone="progress" size="sm">Current</Tag>
             <ProgressBarMini
               v-if="sec.tasksTotal"
               :value="sec.tasksCompleted ?? 0"
@@ -253,6 +288,8 @@ function toggle(epic: EpicSection) {
               <WaveList
                 :waves="sec.waves.filter((w) => w.kind === 'current')"
                 compact
+                :marks="marks"
+                :store-id="storeId"
                 @select="emit('select', $event)"
               />
             </div>
@@ -284,7 +321,9 @@ function toggle(epic: EpicSection) {
           <Tag v-if="idleLabels[sec.epicId]" tone="neutral" variant="outline" size="sm">{{
             idleLabels[sec.epicId]
           }}</Tag>
+          <Tag v-if="sec.live" tone="progress" size="sm">Current</Tag>
           <Tag :tone="sec.statusTone" size="sm">{{ sec.statusLabel }}</Tag>
+          <span v-if="pendingWave(sec)" class="muted small">{{ pendingWave(sec) }}</span>
           <template v-if="sec.tasksTotal === null">
             <!-- ds-allow-hardcode: placeholder width for the "N of M tasks done"
                  label while loading, not a layout/spacing token (same exception
@@ -322,6 +361,8 @@ function toggle(epic: EpicSection) {
           v-if="sec.tasksTotal && sec.tasksTotal > 0 && isOpen(sec)"
           :id="`waves-${sec.epicId}`"
           :waves="sec.waves"
+          :marks="marks"
+          :store-id="storeId"
           @select="emit('select', $event)"
         />
       </div>

@@ -16,6 +16,7 @@ import { useViewport } from '../composables/useViewport.js';
 import { pickerSelection, withIdleLabels } from '../lib/epicPicker.js';
 import {
   disclosureLabel,
+  type LiveEpics,
   laneOptions,
   type RoadmapSection,
   sectionSwimlane,
@@ -41,19 +42,29 @@ const props = defineProps<{
   showLegend?: boolean;
   /** Epic id -> "idle 18d", for the idle epics only. */
   idleLabels: Record<string, string>;
+  /** The epics a live session is on; each reads Current. */
+  live?: LiveEpics | null;
+  /** A live epic's block sits under this section: open on phone. */
+  hasLiveBlock?: boolean;
+  /** Some epic on the page is live (`pageHasLive`): only live lanes are marked, here too. */
+  pageLive?: boolean;
 }>();
 
 // selectPhase/selectEpic carry the picked id and the id of the store the
-// section reads from (undefined on a single-store payload).
+// section reads from (undefined on a single-store payload). openChange: the
+// phone <details> opened or closed; what sits under the section follows it.
 const emit = defineEmits<{
   toggle: [WindowSide];
   selectPhase: [string, string | undefined];
   selectEpic: [string, string | undefined];
+  openChange: [boolean];
 }>();
 
 const { isPhoneWidth } = useViewport();
 
-const view = computed(() => sectionSwimlane(props.section, props.expanded, new Date()));
+const view = computed(() =>
+  sectionSwimlane(props.section, props.expanded, new Date(), props.live, props.pageLive),
+);
 
 // DS4 S4 R4 — phase mode only: with an epic of this section selected, the
 // EpicBlock's back link stands in for the picker. A phase-less section's
@@ -66,7 +77,7 @@ const pickerValue = computed(
 );
 const pickerOptions = computed(() => {
   const options = withIdleLabels(
-    laneOptions(view.value.regions, view.value.currentLane),
+    laneOptions(view.value.regions, view.value.currentLanes),
     props.idleLabels,
   );
   if (pickerSelection(pickerValue.value, options) !== '') return options;
@@ -86,6 +97,10 @@ function onPick(value: string) {
   if (value === '') return;
   if (props.section.kind === 'phase') emit('selectPhase', value, props.section.store?.id);
   else emit('selectEpic', value, props.section.store?.id);
+}
+
+function onToggle(e: Event) {
+  if (e.target === e.currentTarget) emit('openChange', (e.target as HTMLDetailsElement).open);
 }
 
 /** A side's disclosure, absent when that side hides nothing (or the picker is out). */
@@ -108,7 +123,8 @@ const later = computed(() => disclosure('later'));
   <component
     :is="isPhoneWidth && showHeading ? 'details' : 'section'"
     class="bs-inbox__group rm-section"
-    :open="isPhoneWidth && showHeading ? section.running || hostsSelection : undefined"
+    :open="isPhoneWidth && showHeading ? section.running || hostsSelection || hasLiveBlock : undefined"
+    @toggle="onToggle"
   >
     <component
       :is="isPhoneWidth ? 'summary' : 'h2'"
@@ -134,7 +150,8 @@ const later = computed(() => disclosure('later'));
       v-if="!isPhoneWidth"
       :swimlane="view.swimlane"
       :regions="view.regions"
-      :current-lane="view.currentLane"
+      :current-lanes="view.currentLanes"
+      :live-epics="view.liveEpics"
       :project="showHeading ? section.title : undefined"
       :selected-phase="selectedPhase"
       :selected-epic="selectedEpic"
