@@ -1492,6 +1492,75 @@ test.describe('Roadmap: every live epic is Current and open', () => {
     await expect(
       page.locator('.bs-roadmap-mobile__row').filter({ hasText: 'Current' }),
     ).toHaveCount(1);
+    // The quiet project's phase picker marks nothing; the live one marks exactly one.
+    const optionTexts = (label: string) =>
+      page.locator(`select[aria-label="${label}"] option`).allTextContents();
+    expect(
+      (await optionTexts('project-a phase')).filter((t) => t.includes('(current)')),
+    ).toHaveLength(1);
+    expect(
+      (await optionTexts('project-b phase')).filter((t) => t.includes('(current)')),
+    ).toHaveLength(0);
+  });
+
+  test('wave task card: objective on hover only, no id chip repeating the name', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await stubLiveRoadmap(page, { liveStores: [STORE_A] });
+    const OBJECTIVE =
+      'Wire the settings integrations panel to the saved profile and cover it with tests';
+    const bare = (slug: string, title: string | null) => ({
+      ...flowNode('epic-a', slug, 'todo', 0),
+      title,
+    });
+    await page.route('**/api/flow**', (route) =>
+      route.fulfill({
+        json: {
+          nodes: [
+            bare('task-2', null),
+            bare('task-3-settings-integrations', OBJECTIVE),
+            bare('followup-48bb6826', null),
+          ],
+          edges: [],
+          waves: [
+            ['epic-a/task-2', 'epic-a/task-3-settings-integrations', 'epic-a/followup-48bb6826'],
+          ],
+          planVersions: [1],
+        },
+      }),
+    );
+    await page.goto('/work/roadmap');
+
+    const card = (name: string) => page.locator('.wave-task-card').filter({ hasText: name });
+    // A bare id and its humanized name say the same thing: one of them shows.
+    await expect(card('Task 2')).toHaveCount(1);
+    await expect(card('Task 2').locator('.bs-kanban-card__id')).toHaveCount(0);
+    // A slug id and a follow-up id keep their chip.
+    await expect(card('Settings integrations').locator('.bs-kanban-card__id')).toHaveText(
+      'task-3-settings-integrations',
+    );
+    await expect(card('Follow-up fix').locator('.bs-kanban-card__id')).toHaveCount(1);
+    // The objective is the hover text, and only a task that has one gets it.
+    await expect(card('Settings integrations')).toHaveAttribute('title', OBJECTIVE);
+    await expect(card('Task 2')).not.toHaveAttribute('title', /.+/);
+  });
+
+  test('phone 375: a project holding a live epic starts open, its epic block under it', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toBeVisible();
+    const sections = page.locator('details.rm-section');
+    await expect(sections).toHaveCount(2);
+    for (const open of await sections.evaluateAll((els) =>
+      els.map((el) => el.hasAttribute('open')),
+    ))
+      expect(open).toBe(true);
   });
 
   test('a store-b epic in the merged Epics section opens its own wave, read from store-b', async ({
