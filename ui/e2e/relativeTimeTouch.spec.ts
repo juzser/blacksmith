@@ -641,9 +641,7 @@ test.describe('Phone: three cramped rows show their time as plain text', () => {
     });
   }
 
-  test('activity: an expanded row shows a Time pair with the full time, just before Because of', async ({
-    page,
-  }) => {
+  test('activity: an expanded row shows a Time pair with the full time', async ({ page }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
     await page.goto('/activity');
     await expect(page.locator('.bs-skeleton')).toHaveCount(0);
@@ -680,8 +678,6 @@ test.describe('Phone: three cramped rows show their time as plain text', () => {
       expect(r.visible).toBe(true);
       expect(r.datetime).toBe(r.rowTs);
       expect(r.shown).toBe(absoluteOf(r.rowTs ?? ''));
-      if (r.labels.includes('Because of'))
-        expect(r.labels.at(-1) === 'Because of' && r.labels.at(-2) === 'Time').toBe(true);
     }
   });
 });

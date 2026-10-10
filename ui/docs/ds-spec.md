@@ -652,7 +652,7 @@ taking one `label` prop for both. A lint check in DS0 flags an `<IconButton>` wi
 |---|---|---|
 | Every icon-only button | its `aria-label`: "Pause live updates", "Refresh", "Switch to dark theme", "Settings", "Collapse sidebar", "Copy task id", "Copy epic id", "Column menu", "Open full page", "Close (Esc)", "Open integration PR on GitHub", "Pause" (feed) | Shell, Kanban, Roadmap, Task peek, Activity |
 | Collapsed nav links | "Home", "Work", "Activity", "Cost & quality", "Lessons" | Shell |
-| Relative times | absolute time: "30 Sep 2026, 14:07:12" | Topbar, Home, Kanban, Activity, Task detail |
+| Relative times (on phone, not the live card status, Kanban fix-row or timeline meta-line times) | absolute time: "30 Sep 2026, 14:07:12" | Topbar, Home, Kanban, Activity, Task detail |
 | Compact numbers | exact value: "8,312 tokens", "748,210 tokens (median)", "412,318 tokens" | Kanban, Cost & quality, Task detail |
 | Progress ring / mini bar | exact values: "127,402,118 of 180,000,000 tokens (71%)", "10,612,304 of 10,300,000 tokens (103%)" | Home, Cost & quality, Roadmap |
 | Time ranges | "29 Sep 2026, 14:02 to 16:12" | Task detail totals |

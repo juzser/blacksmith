@@ -851,7 +851,7 @@ test.describe('Activity', () => {
   });
 
   // ds-review.html #ap-1: on phone "Because of" is the detail's last pair.
-  test('375px: the detail lists "Because of" last', async ({ page }) => {
+  test('375px: the detail lists "Because of" last, right after "Time"', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/activity?session=sess-fixture');
     const row = page
@@ -860,8 +860,10 @@ test.describe('Activity', () => {
       .first();
     await expect(row).toBeVisible();
     await row.getByRole('button', { name: 'Show details' }).click();
-    const last = row.locator('.bs-timeline-row__detail dt').last();
-    await expect(last).toHaveText('Because of');
+    const labels = (await row.locator('.bs-timeline-row__detail dt').allTextContents()).map((l) =>
+      l.trim(),
+    );
+    expect(labels.slice(-2)).toEqual(['Time', 'Because of']);
   });
 
   // Fix round 4 item 2 (ds-review.html `.mrow.tlrow .mt`): the mock's title
