@@ -115,6 +115,22 @@ export function formatCalendarDay(day: string): string {
 }
 
 /**
+ * The dates a day axis names: the first and the last of the plotted days, or
+ * the one day once when there is only one.
+ */
+export function axisDayLabels(labels: readonly string[]): string[] {
+  const first = labels[0];
+  const last = labels[labels.length - 1];
+  if (first === undefined || last === undefined) return [];
+  return (first === last ? [first] : [first, last]).map(formatCalendarDay);
+}
+
+/** The Analytics daily chart's caption: "the last day" for one, "the last N days" for more. */
+export function dailyTokensTakeaway(groupBy: string, days: number): string {
+  return `Daily tokens by ${groupBy} over the last ${days === 1 ? 'day' : `${days} days`}.`;
+}
+
+/**
  * `[how many of this unit make the next one, the suffix it renders as]`.
  *
  * The suffix is spelled out rather than taken from a unit word's first

@@ -2169,6 +2169,14 @@ a:hover {
 .bs-bars__plot--axis {
   border-bottom: 1px solid var(--bs-border-bold);
 }
+/* A day-axis chart sets its own rhythm: dates 4px under the baseline, legend
+   8px under the dates (ds-review.html .xaxis / .legend). */
+.bs-bars--axis {
+  gap: 0;
+}
+.bs-bars--axis .bs-bars__legend {
+  margin-top: var(--bs-space-2);
+}
 .bs-bars__axis {
   display: flex;
   justify-content: space-between;

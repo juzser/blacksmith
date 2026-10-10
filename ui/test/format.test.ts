@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  axisDayLabels,
   boardTitle,
+  dailyTokensTakeaway,
   formatAbsolute,
   formatBudgetPct,
   formatCalendarDay,
@@ -568,5 +570,43 @@ describe('lib/format.ts formatCalendarDay()', () => {
   it('returns anything that is not a YYYY-MM-DD day unchanged', () => {
     expect(formatCalendarDay('Builder')).toBe('Builder');
     expect(formatCalendarDay('2026-13-01')).toBe('2026-13-01');
+  });
+});
+
+describe('lib/format.ts axisDayLabels()', () => {
+  it('has no label for no days', () => {
+    expect(axisDayLabels([])).toEqual([]);
+  });
+
+  it('names a single day once', () => {
+    expect(axisDayLabels(['2026-01-23'])).toEqual(['23 Jan']);
+  });
+
+  it('names the first and the last of two days', () => {
+    expect(axisDayLabels(['2026-01-23', '2026-01-24'])).toEqual(['23 Jan', '24 Jan']);
+  });
+
+  it('names only the first and the last of many days', () => {
+    expect(axisDayLabels(['2026-01-20', '2026-01-21', '2026-01-22', '2026-01-23'])).toEqual([
+      '20 Jan',
+      '23 Jan',
+    ]);
+  });
+
+  it('passes a label that is not a day through unchanged', () => {
+    expect(axisDayLabels(['Builder', '2026-01-23'])).toEqual(['Builder', '23 Jan']);
+  });
+});
+
+describe('lib/format.ts dailyTokensTakeaway()', () => {
+  it('reads "the last day" for one day', () => {
+    expect(dailyTokensTakeaway('role', 1)).toBe('Daily tokens by role over the last day.');
+  });
+
+  it('counts two or more days', () => {
+    expect(dailyTokensTakeaway('model tier', 2)).toBe(
+      'Daily tokens by model tier over the last 2 days.',
+    );
+    expect(dailyTokensTakeaway('role', 8)).toBe('Daily tokens by role over the last 8 days.');
   });
 });

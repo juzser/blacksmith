@@ -853,20 +853,38 @@ test.describe('a foreign store in the dashboard', () => {
           has: page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
         });
         await expect(card.locator('.bs-bars__col').first()).toBeVisible();
-        // No date label under any column is cut off.
-        const cut = await card.locator('.bs-bars__x').evaluateAll(
+        // The old per-column labels are gone under a day axis.
+        await expect(card.locator('.bs-bars__x')).toHaveCount(0);
+        // No axis label is cut off. scrollWidth and clientWidth are rounded to
+        // whole pixels, so a label clipped by a fraction of a pixel reads as
+        // not cut: compare the text's own box with the element's instead.
+        const cut = await card.locator('.bs-bars__axis > span').evaluateAll(
           (els) =>
             els.filter((el) => {
-              // scrollWidth and clientWidth are rounded to whole pixels, so a
-              // label clipped by a fraction of a pixel (the ellipsis still
-              // shows) reads as not cut: compare the text's own box with the
-              // element's instead.
               const range = document.createRange();
               range.selectNodeContents(el);
               return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
             }).length,
         );
         expect(cut).toBe(0);
+        // The two labels do not overlap and both sit inside the plot.
+        const box = async (selector: string, index = 0) => {
+          const rect = await card.locator(selector).nth(index).boundingBox();
+          if (!rect) throw new Error(`${selector} has no box`);
+          return rect;
+        };
+        const plot = await box('.bs-bars__plot');
+        const first = await box('.bs-bars__axis > span', 0);
+        const second = await box('.bs-bars__axis > span', 1);
+        expect(first.x + first.width).toBeLessThan(second.x);
+        expect(first.x).toBeGreaterThanOrEqual(plot.x - 0.5);
+        expect(second.x + second.width).toBeLessThanOrEqual(plot.x + plot.width + 0.5);
+        // The labels sit 4px under the baseline and the legend 8px under the
+        // labels (ds-review.html .xaxis / .legend).
+        const axisBox = await box('.bs-bars__axis');
+        const legend = await box('.bs-bars__legend');
+        expect(Math.abs(axisBox.y - (plot.y + plot.height) - 4)).toBeLessThanOrEqual(1);
+        expect(Math.abs(legend.y - (axisBox.y + axisBox.height) - 8)).toBeLessThanOrEqual(1);
         // The axis names the first and the last plotted day, and only those.
         const days = (
           await card.locator('table.sr-only tbody td:first-child').allTextContents()

@@ -83,7 +83,7 @@ describe('kit/BarChart.vue', () => {
     expect(CHART).toMatch(/v-if="!dayAxis"\s+class="bs-bars__scale"/);
   });
 
-  it('names a single day once on the axis', () => {
-    expect(CHART).toMatch(/first === last \? \[first\] : \[first, last\]/);
+  it('takes the axis dates from axisDayLabels', () => {
+    expect(CHART).toMatch(/axisDayLabels\(/);
   });
 });

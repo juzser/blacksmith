@@ -56,7 +56,7 @@ import {
 } from '../lib/analytics.js';
 import { type AnalyticsPeriod, type AnalyticsResult, fetchAnalytics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { pluralize } from '../lib/format.js';
+import { dailyTokensTakeaway, pluralize } from '../lib/format.js';
 import { roleLabel, tierLabel } from '../lib/roleLabels.js';
 
 const router = useRouter();
@@ -146,7 +146,7 @@ const dailyBars = computed(() => dailyStackedBars(recentDailyBuckets.value, stac
 const dailyTakeaway = computed(() =>
   dailyBars.value.length === 0
     ? 'No token usage recorded yet for this period.'
-    : `Daily tokens by ${stackBy.value === 'role' ? 'role' : 'model tier'} over the last ${dailyBars.value.length} days.`,
+    : dailyTokensTakeaway(stackBy.value === 'role' ? 'role' : 'model tier', dailyBars.value.length),
 );
 const dailyNotMeasuredCaption = computed(() =>
   notMeasuredCaption(sumUnmeasuredRuns(recentDailyBuckets.value)),

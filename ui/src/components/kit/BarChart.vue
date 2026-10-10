@@ -21,7 +21,7 @@
 // such as a chart token reference) via inline style, same as ProgressBar's
 // tone-to-colour approach.
 import { computed } from 'vue';
-import { formatCalendarDay } from '../../lib/format';
+import { axisDayLabels } from '../../lib/format';
 
 type StackedBar = { label: string; values: Record<string, number> };
 
@@ -94,13 +94,7 @@ function stackedTotal(entry: StackedBar): number {
 
 const stackedMax = computed(() => Math.max(...cappedStacked.value.map(stackedTotal), 1));
 
-// One label for a single day, not the same date twice.
-const axisDays = computed(() => {
-  const first = cappedStacked.value[0];
-  const last = cappedStacked.value[cappedStacked.value.length - 1];
-  if (!first || !last) return [];
-  return (first === last ? [first] : [first, last]).map((e) => formatCalendarDay(e.label));
-});
+const axisDays = computed(() => axisDayLabels(cappedStacked.value.map((e) => e.label)));
 
 function segmentHeight(entry: StackedBar, seriesIndex: number): string {
   const value = entry.values[props.series[seriesIndex]?.key ?? ''] ?? 0;
@@ -118,7 +112,7 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
 <template>
   <div class="bs-chart">
     <p class="bs-chart__takeaway">{{ takeaway }}</p>
-    <div v-if="stacked" class="bs-bars" role="img" :aria-label="summary">
+    <div v-if="stacked" class="bs-bars" :class="{ 'bs-bars--axis': dayAxis }" role="img" :aria-label="summary">
       <div
         class="bs-bars__plot"
         :class="{ 'bs-bars__plot--axis': dayAxis }"
