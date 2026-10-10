@@ -455,20 +455,46 @@ const hostSection = computed(() => sections.value.find(holdsSelection) ?? null);
  * (a phase-less section's rows carry no bars). */
 const legendSection = computed(() => sections.value.find((s) => s.kind === 'phase') ?? null);
 
+/** Phone: a section the user closed, keyed by section; what sits under it hides with it. */
+const closedSections = ref<Set<string>>(new Set());
+
+function setSectionOpen(section: RoadmapSection, open: boolean) {
+  const next = new Set(closedSections.value);
+  if (open) next.delete(section.key);
+  else next.add(section.key);
+  closedSections.value = next;
+}
+
 /**
  * The page's stack: every section, with the selection's EpicBlock right
  * after the section holding it (last when none does), so the detail reads
- * under the lane that was picked rather than below every project.
+ * under the lane that was picked rather than below every project. On a phone
+ * the section is a <details>: what belongs to a closed one is left out.
  */
 const stackItems = computed(() => {
-  type Item = { key: string; section: RoadmapSection | null; live?: LiveBlock };
+  type Item = {
+    key: string;
+    section: RoadmapSection | null;
+    live?: LiveBlock;
+    livePhase?: LivePhase;
+  };
   const host = hostSection.value;
   const blocks = liveBlocks.value;
   const items: Item[] = [];
   for (const section of sections.value) {
     items.push({ key: `${section.kind}:${section.key}`, section });
+    if (isPhoneWidth.value && showHeadings.value && closedSections.value.has(section.key)) continue;
     if (section === host) items.push({ key: 'selection', section: null });
+    const livePhase = livePhases.value.get(section);
+    if (livePhase) {
+      items.push({
+        key: `livephase:${livePhase.store ?? ''}:${livePhase.phase.milestoneId}`,
+        section: null,
+        livePhase,
+      });
+    }
     for (const block of blocks.filter((b) => b.section === section)) {
+      if (livePhase?.phase.epicIds.includes(block.epicId)) continue;
       items.push({ key: `live:${block.store ?? ''}:${block.epicId}`, section: null, live: block });
     }
   }
@@ -577,6 +603,39 @@ watch(liveBlocks, (blocks) => {
   }
 });
 
+/** A phase on the phone's stack for a section that does not hold the selection. */
+interface LivePhase {
+  phase: MilestoneProgress;
+  store: string | undefined;
+}
+
+/**
+ * Phone: a project whose live epic sits in a phase reads like the one holding
+ * the selection: its picker on that phase and the phase card under it, the
+ * live epic open inside, instead of a separate epic block. A live epic in no
+ * phase keeps its block. The phone shows the phase mode of one project at a
+ * time, so desktop keeps the blocks.
+ */
+const livePhases = computed(() => {
+  const found = new Map<RoadmapSection, LivePhase>();
+  if (!isPhoneWidth.value) return found;
+  for (const b of liveBlocks.value) {
+    if (b.section.kind !== 'phase' || b.section === hostSection.value || found.has(b.section))
+      continue;
+    const phase = milestonesOf(b.store).find((m) => m.epicIds.includes(b.epicId));
+    if (phase) found.set(b.section, { phase, store: b.store });
+  }
+  return found;
+});
+
+watch(livePhases, (phases) => {
+  for (const { phase, store } of phases.values()) {
+    for (const epicId of phase.epicIds) {
+      if (!epicFlows.value.has(flowKey(store, epicId))) loadEpicFlow(epicId, store);
+    }
+  }
+});
+
 /** A live block's epic-mode payload, from the current-plan flow cache. */
 function liveBlockData(b: LiveBlock) {
   return epicModeData(b.epicId, b.store, epicFlows.value.get(flowKey(b.store, b.epicId)), '');
@@ -671,12 +730,10 @@ const selectedEpicData = computed(() =>
 );
 
 /** Phase mode (S2/S3) — one section per epic, each with its own WaveList. */
-const epicSections = computed(() => {
-  const phase = selectedPhaseData.value;
-  if (!phase) return [];
+function phaseEpicSections(phase: MilestoneProgress, store: string | undefined) {
   return phase.epicIds.map((epicId) => {
-    const flow = epicFlows.value.get(flowKey(selectedStore.value, epicId));
-    const liveNow = isLive(selectedStore.value, epicId);
+    const flow = epicFlows.value.get(flowKey(store, epicId));
+    const liveNow = isLive(store, epicId);
     if (flow === undefined) {
       return {
         epicId,
@@ -714,6 +771,11 @@ const epicSections = computed(() => {
       waves: buildWaveList(flow),
     };
   });
+}
+
+const epicSections = computed(() => {
+  const phase = selectedPhaseData.value;
+  return phase ? phaseEpicSections(phase, selectedStore.value) : [];
 });
 
 // Pattern 9 (KanbanBoard.vue) — a WaveTaskCard click opens TaskPeekPanel;
@@ -777,7 +839,10 @@ async function closePeek() {
           :section="item.section"
           :show-heading="showHeadings"
           :expanded="windowExpanded(item.section)"
-          :selected-phase="holdsStore(item.section) ? selectedPhase : null"
+          :selected-phase="
+            livePhases.get(item.section)?.phase.milestoneId ??
+            (holdsStore(item.section) ? selectedPhase : null)
+          "
           :selected-epic="holdsStore(item.section) ? selectedEpic : null"
           :hosts-selection="item.section === hostSection"
           :has-live-block="liveBlocks.some((b) => b.section === item.section)"
@@ -787,8 +852,24 @@ async function closePeek() {
           :live="liveEpics"
           :page-live="pageLive"
           @toggle="(side) => item.section && toggleWindow(item.section, side)"
+          @open-change="(open) => item.section && setSectionOpen(item.section, open)"
           @select-phase="(id, store) => selectPhase(id, { store })"
           @select-epic="(id, store) => selectEpic(id, { store })"
+        />
+        <EpicBlock
+          v-else-if="item.livePhase"
+          :name="item.livePhase.phase.name"
+          :status-tone="milestoneStatusKitTone(item.livePhase.phase.status)"
+          :status-label="milestoneStatusLabel(item.livePhase.phase.status)"
+          :tasks-total="item.livePhase.phase.tasksTotal"
+          :tasks-completed="item.livePhase.phase.tasksCompleted"
+          :status-counts="item.livePhase.phase.statusCounts"
+          :epics="phaseEpicSections(item.livePhase.phase, item.livePhase.store)"
+          :idle-labels="idleLabels"
+          :marks="marks"
+          :store-id="item.livePhase.store"
+          @select="openPeek"
+          @select-epic="(id) => item.livePhase && selectEpic(id, { store: item.livePhase.store })"
         />
         <EpicBlock
           v-else-if="item.live"

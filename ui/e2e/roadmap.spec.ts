@@ -1575,6 +1575,70 @@ test.describe('Roadmap: every live epic is Current and open', () => {
       expect(open).toBe(true);
   });
 
+  test('phone 320: no compact wave row overflows its header, and its title stays whole', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 320, height: 700 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 4' })).toBeVisible();
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toBeVisible();
+    const rows = await page.locator('.wave-list--compact .wave').evaluateAll((els) =>
+      els.map((el) => {
+        const card = el.querySelector('.whead')?.getBoundingClientRect();
+        const kids = [...el.querySelectorAll('.whead *')].map((k) => k.getBoundingClientRect());
+        const title = el.querySelector<HTMLElement>('.wave__title');
+        return {
+          cardRight: card?.right ?? 0,
+          right: Math.max(...kids.map((r) => r.right)),
+          whole: title ? title.scrollWidth <= title.clientWidth : true,
+        };
+      }),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.right).toBeLessThanOrEqual(row.cardRight + 0.5);
+      expect(row.whole).toBe(true);
+    }
+  });
+
+  test('phone 375: closing a project hides its live epic, reopening shows it again', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    const waveB = page.locator('.whead').filter({ hasText: 'Wave 2 of 2' });
+    await expect(waveB).toBeVisible();
+    const head = page.locator('summary.rm-section__head').filter({ hasText: 'project-b' });
+    await head.click();
+    await expect(page.locator('details.rm-section').nth(1)).not.toHaveAttribute('open', '');
+    await expect(waveB).toHaveCount(0);
+    await expect(page.getByText('epic-b')).toHaveCount(0);
+    await head.click();
+    await expect(waveB).toBeVisible();
+    await expect(page.getByText('epic-b').first()).toBeVisible();
+  });
+
+  test('phone 375: every live project reads the same, its picker on the live epic phase', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toBeVisible();
+    for (const name of ['project-a', 'project-b']) {
+      await expect(page.locator(`select[aria-label="${name} phase"]`)).toHaveValue('phase-1');
+    }
+    await expect(page.getByRole('region', { name: 'Phase 1: goal and epics' })).toHaveCount(2);
+    await expect(page.getByRole('region', { name: 'Epic epic-b' })).toHaveCount(0);
+    await expect(page.locator('.bs-roadmap-mobile__back')).toHaveCount(0);
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toHaveCount(1);
+  });
+
   test('a store-b epic in the merged Epics section opens its own wave, read from store-b', async ({
     page,
   }) => {

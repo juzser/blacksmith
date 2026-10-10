@@ -44,18 +44,20 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
   /** The epics a live session is on; each reads Current. */
   live?: LiveEpics | null;
-  /** A live epic's block sits under this section: open on phone, so it is not left outside a closed one. */
+  /** A live epic's block sits under this section: open on phone. */
   hasLiveBlock?: boolean;
   /** Some epic on the page is live (`pageHasLive`): only live lanes are marked, here too. */
   pageLive?: boolean;
 }>();
 
 // selectPhase/selectEpic carry the picked id and the id of the store the
-// section reads from (undefined on a single-store payload).
+// section reads from (undefined on a single-store payload). openChange: the
+// phone <details> opened or closed; what sits under the section follows it.
 const emit = defineEmits<{
   toggle: [WindowSide];
   selectPhase: [string, string | undefined];
   selectEpic: [string, string | undefined];
+  openChange: [boolean];
 }>();
 
 const { isPhoneWidth } = useViewport();
@@ -97,6 +99,10 @@ function onPick(value: string) {
   else emit('selectEpic', value, props.section.store?.id);
 }
 
+function onToggle(e: Event) {
+  if (e.target === e.currentTarget) emit('openChange', (e.target as HTMLDetailsElement).open);
+}
+
 /** A side's disclosure, absent when that side hides nothing (or the picker is out). */
 function disclosure(side: WindowSide) {
   const hidden = props.section.window[side].length;
@@ -118,6 +124,7 @@ const later = computed(() => disclosure('later'));
     :is="isPhoneWidth && showHeading ? 'details' : 'section'"
     class="bs-inbox__group rm-section"
     :open="isPhoneWidth && showHeading ? section.running || hostsSelection || hasLiveBlock : undefined"
+    @toggle="onToggle"
   >
     <component
       :is="isPhoneWidth ? 'summary' : 'h2'"
