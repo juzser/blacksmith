@@ -31,11 +31,6 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
 }>();
 
-// A mark centred on a tick near the right end overhangs the track by half its
-// own width (the label is a fixed ~40px, so the narrower the track, the larger
-// that share). From this percent on the label ends at its tick instead.
-const AXIS_END_ALIGN_FROM = 90;
-
 // Least space kept between two date labels: --bs-space-2.
 const AXIS_LABEL_GAP_PX = 8;
 
@@ -44,32 +39,65 @@ const emit = defineEmits<{ selectPhase: [string]; selectEpic: [string] }>();
 const shownRegions = computed<LaneRegion[]>(
   () => props.regions ?? [{ id: null, lanes: groupLanes(props.swimlane.rows) }],
 );
-// Labels that would touch their left-hand neighbour are hidden, not squeezed;
-// a hidden label keeps its box, so measuring never depends on what is hidden.
+// Each label is centred on its tick; only where centring would push it past a
+// track edge does it start (left edge) or end (right edge) at its tick. Labels
+// that would then touch their left-hand neighbour are hidden, not squeezed; a
+// hidden label keeps its box, so measuring never depends on what is hidden.
+type MarkAlign = 'start' | 'end';
 const monthsRow = ref<HTMLElement | null>(null);
 const droppedMarks = ref<Set<number>>(new Set());
-function dropCollidingMarks(): void {
+const alignedMarks = ref<Map<number, MarkAlign>>(new Map());
+function measureMarks(): void {
+  const row = monthsRow.value;
   const dropped = new Set<number>();
-  let keptRight = Number.NEGATIVE_INFINITY;
-  const marks = monthsRow.value?.querySelectorAll('.months-mark') ?? [];
-  marks.forEach((el, i) => {
-    const box = el.getBoundingClientRect();
-    if (box.left < keptRight + AXIS_LABEL_GAP_PX) dropped.add(i);
-    else keptRight = box.right;
-  });
+  const aligned = new Map<number, MarkAlign>();
+  if (row) {
+    const trackWidth = row.getBoundingClientRect().width;
+    let keptRight = Number.NEGATIVE_INFINITY;
+    row.querySelectorAll('.months-mark').forEach((el, i) => {
+      const tick = ((props.swimlane.months[i]?.left ?? 0) / 100) * trackWidth;
+      const width = el.getBoundingClientRect().width;
+      let left = tick - width / 2;
+      if (left < 0) {
+        left = tick;
+        aligned.set(i, 'start');
+      } else if (left + width > trackWidth) {
+        left = tick - width;
+        aligned.set(i, 'end');
+      }
+      if (left < keptRight + AXIS_LABEL_GAP_PX) dropped.add(i);
+      else keptRight = left + width;
+    });
+  }
   droppedMarks.value = dropped;
+  alignedMarks.value = aligned;
 }
+// The row comes and goes with `swimlane.months`; the observer follows it.
 let resizeWatch: ResizeObserver | null = null;
+function stopWatching(): void {
+  resizeWatch?.disconnect();
+  resizeWatch = null;
+}
+watch(
+  monthsRow,
+  (row) => {
+    stopWatching();
+    if (!row) return;
+    measureMarks();
+    if (typeof ResizeObserver === 'undefined') return;
+    resizeWatch = new ResizeObserver(measureMarks);
+    resizeWatch.observe(row);
+  },
+  { flush: 'post' },
+);
 onMounted(() => {
-  dropCollidingMarks();
-  if (typeof ResizeObserver === 'undefined' || !monthsRow.value) return;
-  resizeWatch = new ResizeObserver(dropCollidingMarks);
-  resizeWatch.observe(monthsRow.value);
+  // Label widths change once the web fonts arrive, which does not resize the row.
+  void document.fonts?.ready.then(measureMarks);
 });
-onBeforeUnmount(() => resizeWatch?.disconnect());
+onBeforeUnmount(stopWatching);
 watch(
   () => props.swimlane.months,
-  () => nextTick(dropCollidingMarks),
+  () => nextTick(measureMarks),
 );
 
 const scrollLabel = computed(() =>
@@ -87,7 +115,8 @@ const scrollLabel = computed(() =>
           :key="`${m.label}:${m.left}`"
           class="months-mark"
           :class="{
-            'months-mark--end': m.left >= AXIS_END_ALIGN_FROM,
+            'months-mark--start': alignedMarks.get(i) === 'start',
+            'months-mark--end': alignedMarks.get(i) === 'end',
             'months-mark--dropped': droppedMarks.has(i),
           }"
           :style="{ left: `${m.left}%` }"

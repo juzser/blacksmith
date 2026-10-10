@@ -256,11 +256,17 @@ describe('buildMonthMarks', () => {
       end: Date.UTC(2026, 2, 10),
     };
     const marks = buildMonthMarks(bounds);
-    expect(marks.map((m) => m.label)).toEqual(['Jan', 'Feb', 'Mar']);
-    expect(marks[0]?.left).toBe(0);
+    expect(marks.map((m) => m.label)).toEqual(['Feb', 'Mar']);
+    expect(marks[0]?.left).toBeGreaterThan(0);
     for (let i = 1; i < marks.length; i++) {
       expect(marks[i]!.left).toBeGreaterThan(marks[i - 1]!.left);
     }
+  });
+
+  it('keeps the mark for a window that opens exactly on the 1st', () => {
+    const marks = buildMonthMarks({ start: Date.UTC(2026, 0, 1), end: Date.UTC(2026, 2, 10) });
+    expect(marks.map((m) => m.label)).toEqual(['Jan', 'Feb', 'Mar']);
+    expect(marks[0]?.left).toBe(0);
   });
 });
 

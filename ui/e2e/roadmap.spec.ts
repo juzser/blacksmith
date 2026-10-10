@@ -733,65 +733,6 @@ test.describe('Roadmap: label column and shared track column', () => {
 test.describe('Roadmap: status tones and legend', () => {
   const TONES = ['done', 'review', 'in-progress', 'todo'] as const;
   const LABELS = ['Done', 'In review', 'In progress', 'Todo'];
-  const counts = (c: Partial<(typeof WINDOW_ROADMAP)[number]['statusCounts']>) => ({
-    done: 0,
-    review: 0,
-    inProgress: 0,
-    todo: 0,
-    superseded: 0,
-    ...c,
-  });
-  // One project-a phase per tone. Finished phases are past (dimmed) but keep
-  // their tone; the Todo phase starts after the pinned clock (a stub bar).
-  const TONE_ROADMAP = [
-    {
-      ...WINDOW_ROADMAP[0],
-      milestoneId: 'phase-1',
-      name: 'Phase 1',
-      tasksTotal: 2,
-      tasksCompleted: 2,
-      statusCounts: counts({ done: 2 }),
-      startedAt: '2025-12-01T09:00:00.000Z',
-      finishedAt: '2025-12-20T09:00:00.000Z',
-    },
-    {
-      ...WINDOW_ROADMAP[0],
-      milestoneId: 'phase-2',
-      name: 'Phase 2',
-      sequence: 2,
-      status: 'in-progress',
-      tasksTotal: 3,
-      tasksCompleted: 1,
-      statusCounts: counts({ done: 1, review: 2 }),
-      startedAt: '2025-12-22T09:00:00.000Z',
-      finishedAt: '2026-01-05T09:00:00.000Z',
-    },
-    {
-      ...WINDOW_ROADMAP[0],
-      milestoneId: 'phase-3',
-      name: 'Phase 3',
-      sequence: 3,
-      status: 'in-progress',
-      tasksTotal: 3,
-      tasksCompleted: 1,
-      statusCounts: counts({ done: 1, inProgress: 1, todo: 1 }),
-      startedAt: '2026-01-06T09:00:00.000Z',
-      finishedAt: null,
-    },
-    {
-      ...WINDOW_ROADMAP[0],
-      milestoneId: 'phase-4',
-      name: 'Phase 4',
-      sequence: 4,
-      status: 'planned',
-      tasksTotal: 2,
-      tasksCompleted: 0,
-      statusCounts: counts({ todo: 2 }),
-      startedAt: '2026-02-01T09:00:00.000Z',
-      finishedAt: null,
-    },
-  ];
-
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(VIEWPORTS.desktop);
     await stubWindowRoadmap(page);
@@ -1844,6 +1785,65 @@ test.describe('Roadmap: every live epic is Current and open', () => {
   });
 });
 
+const counts = (c: Partial<(typeof WINDOW_ROADMAP)[number]['statusCounts']>) => ({
+  done: 0,
+  review: 0,
+  inProgress: 0,
+  todo: 0,
+  superseded: 0,
+  ...c,
+});
+// One project-a phase per tone. Finished phases are past (dimmed) but keep
+// their tone; the Todo phase starts after the pinned clock (a stub bar).
+const TONE_ROADMAP = [
+  {
+    ...WINDOW_ROADMAP[0],
+    milestoneId: 'phase-1',
+    name: 'Phase 1',
+    tasksTotal: 2,
+    tasksCompleted: 2,
+    statusCounts: counts({ done: 2 }),
+    startedAt: '2025-12-01T09:00:00.000Z',
+    finishedAt: '2025-12-20T09:00:00.000Z',
+  },
+  {
+    ...WINDOW_ROADMAP[0],
+    milestoneId: 'phase-2',
+    name: 'Phase 2',
+    sequence: 2,
+    status: 'in-progress',
+    tasksTotal: 3,
+    tasksCompleted: 1,
+    statusCounts: counts({ done: 1, review: 2 }),
+    startedAt: '2025-12-22T09:00:00.000Z',
+    finishedAt: '2026-01-05T09:00:00.000Z',
+  },
+  {
+    ...WINDOW_ROADMAP[0],
+    milestoneId: 'phase-3',
+    name: 'Phase 3',
+    sequence: 3,
+    status: 'in-progress',
+    tasksTotal: 3,
+    tasksCompleted: 1,
+    statusCounts: counts({ done: 1, inProgress: 1, todo: 1 }),
+    startedAt: '2026-01-06T09:00:00.000Z',
+    finishedAt: null,
+  },
+  {
+    ...WINDOW_ROADMAP[0],
+    milestoneId: 'phase-4',
+    name: 'Phase 4',
+    sequence: 4,
+    status: 'planned',
+    tasksTotal: 2,
+    tasksCompleted: 0,
+    statusCounts: counts({ todo: 2 }),
+    startedAt: '2026-02-01T09:00:00.000Z',
+    finishedAt: null,
+  },
+];
+
 // A window that spans days draws a date label per day. Labels never overlap or
 // touch (a gap of one --bs-space-2, 8px, at least): the ones that would are
 // dropped, and each survivor stays over its own tick.
@@ -1869,4 +1869,75 @@ test.describe('Roadmap: date labels keep apart on a multi-day window', () => {
       }
     });
   }
+});
+
+// Each shown label is centred on its tick; only at a track edge does it start
+// or end at the tick instead. Measured on every axis row on the page.
+type AxisLabel = { text: string; shown: boolean; left: number; right: number; tick: number };
+type AxisRow = { left: number; right: number; labels: AxisLabel[] };
+async function readAxisRows(page: Page): Promise<AxisRow[]> {
+  return page.locator('.months-row').evaluateAll((rows) =>
+    rows.map((row) => {
+      const r = row.getBoundingClientRect();
+      const labels = [...row.querySelectorAll<HTMLElement>('.months-mark')].map((el) => {
+        const b = el.getBoundingClientRect();
+        const pct = Number.parseFloat(el.style.left);
+        return {
+          text: el.textContent ?? '',
+          shown: getComputedStyle(el).visibility !== 'hidden',
+          left: b.left,
+          right: b.right,
+          tick: r.left + (pct / 100) * r.width,
+        };
+      });
+      return { left: r.left, right: r.right, labels };
+    }),
+  );
+}
+function expectAligned(rows: AxisRow[]): void {
+  expect(rows.length).toBeGreaterThan(0);
+  const TOL = 0.5;
+  for (const row of rows) {
+    for (const l of row.labels.filter((x) => x.shown)) {
+      const half = (l.right - l.left) / 2;
+      expect(l.left).toBeGreaterThanOrEqual(row.left - TOL);
+      expect(l.right).toBeLessThanOrEqual(row.right + TOL);
+      if (Math.abs((l.left + l.right) / 2 - l.tick) <= TOL) continue;
+      // Not centred: only because centring would cross a track edge, and then
+      // the label starts or ends exactly at its tick.
+      if (l.tick - half < row.left + TOL) expect(Math.abs(l.left - l.tick)).toBeLessThanOrEqual(TOL);
+      else {
+        expect(l.tick + half).toBeGreaterThan(row.right - TOL);
+        expect(Math.abs(l.right - l.tick)).toBeLessThanOrEqual(TOL);
+      }
+    }
+  }
+}
+
+test.describe('Roadmap: date labels sit centred on their tick', () => {
+  test('live roadmap at 1280px: every label centred, Jan 16 shown', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.months-row .months-mark').first()).toBeVisible();
+    const rows = await readAxisRows(page);
+    expectAligned(rows);
+    const shown = rows.flatMap((r) => r.labels.filter((l) => l.shown).map((l) => l.text));
+    expect(shown).toContain('Jan 16');
+  });
+
+  test('tones roadmap at 1280px: every label centred, Dec 6 shown', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await stubWindowRoadmap(page);
+    await page.route('**/api/roadmap**', (route) => route.fulfill({ json: TONE_ROADMAP }));
+    await stubActiveScope(page);
+    await page.goto('/work/roadmap?scope=all');
+    await expect(page.locator('.months-row .months-mark').first()).toBeVisible();
+    const rows = await readAxisRows(page);
+    expectAligned(rows);
+    const shown = rows.flatMap((r) => r.labels.filter((l) => l.shown).map((l) => l.text));
+    expect(shown).toContain('Dec 6');
+  });
 });
