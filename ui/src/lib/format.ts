@@ -102,6 +102,35 @@ export function formatShortDate(iso: string): string {
 }
 
 /**
+ * "23 Jan" for a `YYYY-MM-DD` calendar day. The day is read from its own
+ * digits, not through `new Date(iso)`: that parses a date-only string as UTC
+ * midnight, so west of UTC it would print the day before. Anything that is not
+ * a `YYYY-MM-DD` day comes back unchanged.
+ */
+export function formatCalendarDay(day: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  const month = match ? SHORT_MONTHS[Number(match[2]) - 1] : undefined;
+  if (!match || !month) return day;
+  return `${Number(match[3])} ${month}`;
+}
+
+/**
+ * The dates a day axis names: the first and the last of the plotted days, or
+ * the one day once when there is only one.
+ */
+export function axisDayLabels(labels: readonly string[]): string[] {
+  const first = labels[0];
+  const last = labels[labels.length - 1];
+  if (first === undefined || last === undefined) return [];
+  return (first === last ? [first] : [first, last]).map(formatCalendarDay);
+}
+
+/** The Analytics daily chart's caption: "the last day" for one, "the last N days" for more. */
+export function dailyTokensTakeaway(groupBy: string, days: number): string {
+  return `Daily tokens by ${groupBy} over the last ${days === 1 ? 'day' : `${days} days`}.`;
+}
+
+/**
  * `[how many of this unit make the next one, the suffix it renders as]`.
  *
  * The suffix is spelled out rather than taken from a unit word's first
