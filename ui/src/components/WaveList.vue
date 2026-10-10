@@ -7,14 +7,32 @@
 // mode. `compact` false must render byte-identical to before this prop
 // existed, so every new branch below only widens what already guarded
 // `wave.kind === 'past'`/`'current'`, never replaces it.
+import { type LiveMarks, orderLive } from '../lib/liveFocus.js';
 import type { WaveInfo } from '../lib/waveList.js';
 import ProgressBar from './kit/ProgressBar.vue';
 import ProgressBarMini from './kit/ProgressBarMini.vue';
 import Tag from './kit/Tag.vue';
 import WaveTaskCard from './WaveTaskCard.vue';
 
-withDefaults(defineProps<{ waves: WaveInfo[]; compact?: boolean }>(), { compact: false });
+withDefaults(
+  defineProps<{
+    waves: WaveInfo[];
+    compact?: boolean;
+    marks?: LiveMarks | null;
+    storeId?: string;
+  }>(),
+  { compact: false, marks: null, storeId: undefined },
+);
 const emit = defineEmits<{ select: [taskId: string] }>();
+
+/** Now and Next cards lead the wave, the rest keep their order. */
+function ordered(wave: WaveInfo, marks: LiveMarks | null, storeId: string | undefined) {
+  const store = storeId ? { id: storeId, label: storeId } : undefined;
+  return orderLive(
+    wave.tasks.map((task) => ({ ...task, store })),
+    marks,
+  );
+}
 
 function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
   return kind === 'past' ? 'past' : kind === 'current' ? 'cur' : 'next';
@@ -51,7 +69,14 @@ function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
           <span class="pnum bar-pct">{{ wave.pct }}%</span>
         </div>
         <div class="wave-list__cards">
-          <WaveTaskCard v-for="task in wave.tasks" :key="task.taskId" :task="task" @select="emit('select', $event)" />
+          <WaveTaskCard
+            v-for="task in ordered(wave, marks, storeId)"
+            :key="task.taskId"
+            :task="task"
+            :marks="marks"
+            :store-id="storeId"
+            @select="emit('select', $event)"
+          />
         </div>
       </template>
     </section>
