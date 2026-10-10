@@ -1843,3 +1843,30 @@ test.describe('Roadmap: every live epic is Current and open', () => {
     await shoot(page, 'work-roadmap-live-epics-phone-375-light');
   });
 });
+
+// A window that spans days draws a date label per day. Labels never overlap or
+// touch (a gap of one --bs-space-2, 8px, at least): the ones that would are
+// dropped, and each survivor stays over its own tick.
+test.describe('Roadmap: date labels keep apart on a multi-day window', () => {
+  const GAP_PX = 8;
+  for (const width of [1280, 1024, 768]) {
+    test(`at ${width}px no two visible date labels overlap or touch`, async ({ page }) => {
+      await setTheme(page, 'light');
+      await page.setViewportSize({ width, height: 900 });
+      await stubLiveRoadmap(page);
+      await page.goto('/work/roadmap');
+      const row = page.locator('.months-row').first();
+      await expect(row.locator('.months-mark').first()).toBeVisible();
+      const boxes = await row
+        .locator('.months-mark:visible')
+        .evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))
+        .then((rs) => rs.map((r) => ({ left: r.left, right: r.right })));
+      expect(boxes.length).toBeGreaterThan(1);
+      for (let i = 1; i < boxes.length; i++) {
+        const prev = boxes[i - 1];
+        const cur = boxes[i];
+        expect(cur?.left ?? 0).toBeGreaterThanOrEqual((prev?.right ?? 0) + GAP_PX - 0.5);
+      }
+    });
+  }
+});

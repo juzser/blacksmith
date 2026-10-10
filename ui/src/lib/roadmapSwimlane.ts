@@ -220,6 +220,12 @@ function buildFixedStepMarks(bounds: { start: number; end: number }, stepMs: num
     startDate.getUTCDate(),
   );
   while (cursor <= bounds.end) {
+    // The first midnight can sit before the window opens; a label clamped to
+    // the track edge would then claim a tick it is not over.
+    if (cursor < bounds.start) {
+      cursor += stepMs;
+      continue;
+    }
     marks.push({
       label: new Date(cursor).toLocaleString('en-US', {
         month: 'short',

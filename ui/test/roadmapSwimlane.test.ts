@@ -239,6 +239,16 @@ describe('buildAxisMarks (fix round 2 #1)', () => {
   });
 });
 
+describe('buildAxisMarks day ticks', () => {
+  it('draws no tick for a midnight before the window opens', () => {
+    const bounds = { start: Date.UTC(2026, 0, 3, 12), end: Date.UTC(2026, 0, 10) };
+    const marks = buildAxisMarks(bounds);
+    expect(marks[0]?.label).toBe('Jan 4');
+    expect(marks.every((m) => m.left >= 0)).toBe(true);
+    expect(marks.map((m) => m.left)).toEqual([...marks.map((m) => m.left)].sort((a, b) => a - b));
+  });
+});
+
 describe('buildMonthMarks', () => {
   it('returns one mark per calendar month boundary within bounds, left-to-right', () => {
     const bounds = {

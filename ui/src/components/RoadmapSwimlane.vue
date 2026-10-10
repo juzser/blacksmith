@@ -10,7 +10,7 @@
 // disclosure's `aria-controls` names (RoadmapProjectSection.vue); the current
 // lanes' groups read `aria-current="step"` and its head row a "Current" Tag —
 // separate from the selection's `.sel`/`aria-current="true"`.
-import { computed } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Swimlane } from '../lib/roadmapSwimlane.js';
 import { groupLanes, type LaneRegion } from '../lib/roadmapWindow.js';
 import Tag from './kit/Tag.vue';
@@ -36,11 +36,42 @@ const props = defineProps<{
 // that share). From this percent on the label ends at its tick instead.
 const AXIS_END_ALIGN_FROM = 90;
 
+// Least space kept between two date labels: --bs-space-2.
+const AXIS_LABEL_GAP_PX = 8;
+
 const emit = defineEmits<{ selectPhase: [string]; selectEpic: [string] }>();
 
 const shownRegions = computed<LaneRegion[]>(
   () => props.regions ?? [{ id: null, lanes: groupLanes(props.swimlane.rows) }],
 );
+// Labels that would touch their left-hand neighbour are hidden, not squeezed;
+// a hidden label keeps its box, so measuring never depends on what is hidden.
+const monthsRow = ref<HTMLElement | null>(null);
+const droppedMarks = ref<Set<number>>(new Set());
+function dropCollidingMarks(): void {
+  const dropped = new Set<number>();
+  let keptRight = Number.NEGATIVE_INFINITY;
+  const marks = monthsRow.value?.querySelectorAll('.months-mark') ?? [];
+  marks.forEach((el, i) => {
+    const box = el.getBoundingClientRect();
+    if (box.left < keptRight + AXIS_LABEL_GAP_PX) dropped.add(i);
+    else keptRight = box.right;
+  });
+  droppedMarks.value = dropped;
+}
+let resizeWatch: ResizeObserver | null = null;
+onMounted(() => {
+  dropCollidingMarks();
+  if (typeof ResizeObserver === 'undefined' || !monthsRow.value) return;
+  resizeWatch = new ResizeObserver(dropCollidingMarks);
+  resizeWatch.observe(monthsRow.value);
+});
+onBeforeUnmount(() => resizeWatch?.disconnect());
+watch(
+  () => props.swimlane.months,
+  () => nextTick(dropCollidingMarks),
+);
+
 const scrollLabel = computed(() =>
   props.project ? `${props.project} roadmap, scrolls sideways` : 'Roadmap, scrolls sideways',
 );
@@ -50,12 +81,15 @@ const scrollLabel = computed(() =>
   <div class="rm-scroll" tabindex="0" role="region" :aria-label="scrollLabel">
     <div v-if="swimlane.months.length > 0" class="months" aria-hidden="true">
       <span />
-      <div class="months-row">
+      <div ref="monthsRow" class="months-row">
         <span
-          v-for="m in swimlane.months"
+          v-for="(m, i) in swimlane.months"
           :key="`${m.label}:${m.left}`"
           class="months-mark"
-          :class="{ 'months-mark--end': m.left >= AXIS_END_ALIGN_FROM }"
+          :class="{
+            'months-mark--end': m.left >= AXIS_END_ALIGN_FROM,
+            'months-mark--dropped': droppedMarks.has(i),
+          }"
           :style="{ left: `${m.left}%` }"
           >{{ m.label }}</span
         >

@@ -4264,6 +4264,10 @@ h2.rm-section__head {
 .months-mark:first-child {
   transform: none;
 }
+/* A label that would touch its neighbour keeps its box and is not drawn. */
+.months-mark--dropped {
+  visibility: hidden;
+}
 /* Right-end ticks: the label ends at the tick, so it stays inside the track. */
 .months-mark--end {
   transform: translateX(-100%);
