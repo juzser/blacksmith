@@ -1547,11 +1547,9 @@ test.describe('Roadmap: every live epic is Current and open', () => {
     await expect(card('Task 2')).not.toHaveAttribute('title', /.+/);
     // The visible name and the aria-label come from the id, never the objective. The
     // card is found by its id chip, so a card named by the objective cannot satisfy it.
-    const slugCard = page
-      .locator('.wave-task-card')
-      .filter({
-        has: page.locator('.bs-kanban-card__id', { hasText: 'task-3-settings-integrations' }),
-      });
+    const slugCard = page.locator('.wave-task-card').filter({
+      has: page.locator('.bs-kanban-card__id', { hasText: 'task-3-settings-integrations' }),
+    });
     await expect(slugCard).toHaveCount(1);
     await expect(slugCard.locator('.wave-task-card__title')).toHaveText('Settings integrations');
     await expect(slugCard).toHaveAttribute(
