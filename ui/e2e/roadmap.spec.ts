@@ -1905,7 +1905,8 @@ function expectAligned(rows: AxisRow[]): void {
       if (Math.abs((l.left + l.right) / 2 - l.tick) <= TOL) continue;
       // Not centred: only because centring would cross a track edge, and then
       // the label starts or ends exactly at its tick.
-      if (l.tick - half < row.left + TOL) expect(Math.abs(l.left - l.tick)).toBeLessThanOrEqual(TOL);
+      if (l.tick - half < row.left + TOL)
+        expect(Math.abs(l.left - l.tick)).toBeLessThanOrEqual(TOL);
       else {
         expect(l.tick + half).toBeGreaterThan(row.right - TOL);
         expect(Math.abs(l.right - l.tick)).toBeLessThanOrEqual(TOL);
