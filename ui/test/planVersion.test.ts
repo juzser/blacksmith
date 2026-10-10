@@ -12,6 +12,7 @@ function node(taskId: string, planVersion: number | null): FlowNode {
     taskId,
     taskStatus: 'ready',
     title: null,
+    taskTitle: null,
     liveAgentRole: null,
     workingAgentRole: null,
     planVersion,

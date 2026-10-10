@@ -114,7 +114,10 @@ export interface EpicTokenSpend {
 export interface MilestoneTaskRef {
   taskId: string;
   taskStatus: string;
+  /** The task's objective (a paragraph): hover text only. Name the task from `taskTitle`. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   updatedAt: string;
   dependencyReady: boolean;
 }
@@ -175,6 +178,8 @@ export interface RecentDispatch {
   provider: string;
   modelTier: string;
   taskId: string | null;
+  /** The dispatched task's `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   reason: string | null;
   /** Which attempt this was — Home's derived line when `reason` is null. */
   round: number;
@@ -290,7 +295,10 @@ export interface KanbanTag {
 }
 export interface KanbanDependency {
   taskId: string;
+  /** The dependency's objective. Name it from `taskTitle`. */
   title: string | null;
+  /** The dependency's `tasks.title` column; null when unset. */
+  taskTitle: string | null;
   status: string | null;
   edgeType: string;
 }
@@ -298,7 +306,10 @@ export interface KanbanTask {
   store?: StoreRef;
   taskId: string;
   taskStatus: string;
+  /** The task's objective (a paragraph): hover text only. Name the task from `taskTitle`. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   agentRole: string | null;
   agentModelTier: string | null;
   /**
@@ -333,6 +344,8 @@ export interface KanbanTask {
   parentTaskId: string | null;
   /** That parent's objective, or null when this is no follow-up or the parent has no task row. */
   parentTitle: string | null;
+  /** That parent's `tasks.title` column, or null when unset, no follow-up, or no task row. */
+  parentTaskTitle: string | null;
 }
 export interface KanbanColumn {
   taskStatus: string;
@@ -982,7 +995,10 @@ export function fetchRoadmap(
 export interface FlowNode {
   taskId: string;
   taskStatus: string;
+  /** The task's objective (a paragraph): hover text only. Name the task from `taskTitle`. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   liveAgentRole: string | null;
   /**
    * `liveAgentRole` restricted to the 4h window — null when the only live

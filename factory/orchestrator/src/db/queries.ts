@@ -538,8 +538,10 @@ export interface EpicDates {
 export interface MilestoneTaskRef {
   taskId: string;
   taskStatus: string;
-  /** Phase 6b round 3 (operator directive 4) — tasks.objective, for the Roadmap mini-timeline's truncated-title row (falls back to taskId when null). */
+  /** tasks.objective (a paragraph, not a name). Name the task from `taskTitle`; show this only on hover. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   updatedAt: string;
   /** True when every dependency this task has (edges.dependsOn) is already terminal-complete. */
   dependencyReady: boolean;
@@ -872,6 +874,7 @@ function milestoneTaskRefs(
       taskId: t.taskId,
       taskStatus: t.taskStatus,
       title: t.objective,
+      taskTitle: t.title,
       updatedAt: t.updatedAt,
       dependencyReady: true,
     }));
@@ -893,6 +896,7 @@ function milestoneTaskRefs(
       taskId: row.taskId,
       taskStatus: row.taskStatus,
       title: row.objective,
+      taskTitle: row.title,
       updatedAt: row.updatedAt,
       dependencyReady: ready,
     }));
@@ -1147,6 +1151,8 @@ export interface RecentDispatch {
   provider: string;
   modelTier: string;
   taskId: string | null;
+  /** The dispatched task's `tasks.title` column; null when unset or no task row. Never the objective. */
+  taskTitle: string | null;
   reason: string | null;
   /** Task 3 (dispatch reason fallback): which attempt this was, for the
    * Overview card's derived line when there is no reason to show instead. */
@@ -2224,6 +2230,19 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
           .map((a) => [a.id, a.round])
       : [],
   );
+  const dispatchTaskIds = [
+    ...new Set(recentDispatchRows.flatMap((d) => (d.taskId ? [d.taskId] : []))),
+  ];
+  const titleByDispatchTask = new Map(
+    dispatchTaskIds.length > 0
+      ? db
+          .select({ taskId: tasks.taskId, title: tasks.title })
+          .from(tasks)
+          .where(inArray(tasks.taskId, dispatchTaskIds))
+          .all()
+          .map((t) => [t.taskId, t.title] as const)
+      : [],
+  );
   const recentDispatches: RecentDispatch[] = recentDispatchRows.map((d) => ({
     eventId: d.eventId,
     ts: d.ts,
@@ -2231,6 +2250,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     provider: d.provider,
     modelTier: d.modelTier,
     taskId: d.taskId,
+    taskTitle: d.taskId ? (titleByDispatchTask.get(d.taskId) ?? null) : null,
     reason: d.reason,
     round: roundByEventId.get(d.eventId) ?? 1,
   }));
@@ -3126,8 +3146,10 @@ export type KanbanAgentActivity = 'working' | 'stalled';
 export interface KanbanTask {
   taskId: string;
   taskStatus: string;
-  /** Phase 6b (closes the 6a DESIGN.md deviation) — tasks.objective, the closest field to a "title". */
+  /** tasks.objective (a paragraph, not a name). Name the task from `taskTitle`; show this only on hover. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   /** Phase 6b — the most recent dispatch_decision's agent_role for this task, or null if never dispatched. */
   agentRole: string | null;
   /** Phase 6b round 3 (operator directive 2) — same dispatch's model_tier, paired with agentRole for the "role · tier" Kanban chip. */
@@ -3169,11 +3191,16 @@ export interface KanbanTask {
   parentTaskId: string | null;
   /** That parent's objective, or null when this is no follow-up or the parent has no task row. */
   parentTitle: string | null;
+  /** That parent's `tasks.title` column, or null when unset, no follow-up, or no task row. */
+  parentTaskTitle: string | null;
 }
 
 export interface KanbanDependency {
   taskId: string;
+  /** The dependency's objective. Name it from `taskTitle`. */
   title: string | null;
+  /** The dependency's `tasks.title` column; null when unset. */
+  taskTitle: string | null;
   status: string | null;
   edgeType: string;
 }
@@ -3584,6 +3611,7 @@ export function kanban(
       taskId: t.taskId,
       taskStatus: t.taskStatus,
       title: t.objective,
+      taskTitle: t.title,
       agentRole: latestAgentRoleByTask.get(t.taskId)?.agentRole ?? null,
       agentModelTier: latestAgentRoleByTask.get(t.taskId)?.modelTier ?? null,
       agentActivity: activityByTask.get(t.taskId) ?? null,
@@ -3604,6 +3632,7 @@ export function kanban(
         return {
           taskId: e.dependsOn,
           title: dep?.objective ?? null,
+          taskTitle: dep?.title ?? null,
           status: dep?.taskStatus ?? null,
           edgeType: e.edgeType,
         };
@@ -3613,6 +3642,7 @@ export function kanban(
       requestFirstLine: quote ? firstLineOf(quote.prompt) : null,
       parentTaskId: parentByFollowUp.get(t.taskId) ?? null,
       parentTitle: taskRowByTaskId.get(parentByFollowUp.get(t.taskId) ?? '')?.objective ?? null,
+      parentTaskTitle: taskRowByTaskId.get(parentByFollowUp.get(t.taskId) ?? '')?.title ?? null,
     });
     columns.set(t.taskStatus, column);
   }
@@ -4686,7 +4716,10 @@ export function analytics(
 export interface FlowNode {
   taskId: string;
   taskStatus: string;
+  /** tasks.objective (a paragraph, not a name). Name the task from `taskTitle`; show this only on hover. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Never the objective. */
+  taskTitle: string | null;
   /** The most recent dispatch's agent role, only when the agent is currently live. */
   liveAgentRole: string | null;
   /**
@@ -4826,6 +4859,7 @@ export function flowGraph(db: SmithDb, filter: FlowFilter = {}, opts: ClockOpts 
     taskId: t.taskId,
     taskStatus: t.taskStatus,
     title: t.objective,
+    taskTitle: t.title,
     liveAgentRole: liveRoleByTask.get(t.taskId) ?? null,
     workingAgentRole: workingRoleByTask.get(t.taskId) ?? null,
     planVersion: t.planVersion,

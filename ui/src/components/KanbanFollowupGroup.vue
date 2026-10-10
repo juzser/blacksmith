@@ -18,7 +18,7 @@ import { useFittedTitle } from '../composables/useFittedTitle.js';
 import { useViewport } from '../composables/useViewport.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
-import { boardTitle } from '../lib/format.js';
+import { shortTaskName } from '../lib/format.js';
 import { agentChip, titleCase } from '../lib/kanban.js';
 import {
   groupMark,
@@ -118,7 +118,11 @@ const rows = computed(() =>
 const hiddenRows = computed(() => Math.max(0, props.members.length - ROW_CAP));
 
 function rowTitle(task: KanbanTask): string {
-  return boardTitle(task.taskId, task.title);
+  return shortTaskName(task.taskId, task.taskTitle);
+}
+// The objective is the hover text of a row's name; absent when the task has none.
+function rowObjective(task: KanbanTask): string | undefined {
+  return task.title?.trim() || undefined;
 }
 function showStatus(): boolean {
   return !props.statusInColumn;
@@ -183,10 +187,10 @@ function onRowClick(event: MouseEvent, task: KanbanTask) {
             type="button"
             class="bs-kanban-group__row-open"
             :aria-label="`${rowTitle(task)}${markLabel(rowMark(task))}, opens task detail`"
-            :title="compact ? undefined : rowTitle(task)"
+            :title="rowObjective(task)"
             @click="onRowSelect($event, task)"
           ></button>
-          <p class="bs-kanban-group__row-title">
+          <p class="bs-kanban-group__row-title" :title="rowObjective(task)">
             <span class="bs-kanban-group__row-text">{{ rowTitle(task) }}</span>
             <IconButton
               :icon="Link"

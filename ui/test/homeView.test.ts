@@ -635,12 +635,19 @@ describe('lib/homeView.ts decisionLine()', () => {
     provider: 'claude',
     modelTier: 'mid',
     taskId: 'epic-a/task-3-settings-integrations',
+    taskTitle: null,
     reason: 'first attempt',
     round: 1,
   };
 
   it('says the role and the short task name, nothing else', () => {
     expect(decisionLine(base)).toBe('Builder started on Settings integrations');
+  });
+
+  it('prefers the task title when it is short', () => {
+    expect(decisionLine({ ...base, taskTitle: 'Integrations panel' })).toBe(
+      'Builder started on Integrations panel',
+    );
   });
 
   it('adds nothing for round 1 and " · round N" from round 2', () => {
@@ -682,6 +689,7 @@ describe('lib/homeView.ts decisionTitle()', () => {
     provider: 'claude',
     modelTier: 'mid',
     taskId: 'epic-a/task-3-settings-integrations',
+    taskTitle: null,
     reason: 'first attempt',
     round: 1,
     store: { id: 'ab12cd34', label: 'project-b' },
@@ -707,6 +715,7 @@ describe('lib/homeView.ts decisionsSpanStores()', () => {
     provider: 'claude',
     modelTier: 'mid',
     taskId: null,
+    taskTitle: null,
     reason: null,
     round: 1,
     store,

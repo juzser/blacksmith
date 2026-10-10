@@ -21,6 +21,7 @@ function task(taskId: string, taskStatus: string): KanbanTask {
     taskId,
     taskStatus,
     title: taskId,
+    taskTitle: null,
     agentRole: null,
     agentModelTier: null,
     agentActivity: null,
@@ -38,6 +39,7 @@ function task(taskId: string, taskStatus: string): KanbanTask {
     requestFirstLine: null,
     parentTaskId: null,
     parentTitle: null,
+    parentTaskTitle: null,
   };
 }
 
@@ -55,6 +57,7 @@ function fix(
     updatedAt,
     parentTaskId: parent.id,
     parentTitle: parent.title,
+    parentTaskTitle: parent.title,
   };
 }
 
@@ -837,7 +840,9 @@ test.describe('Kanban', () => {
         page,
         fourColumnBoard({
           ...task(title === null ? SLUG_ID : 'epic-1/task-4', 'todo'),
-          title,
+          // No objective, so the open button's tooltip is the cut name alone.
+          title: null,
+          taskTitle: title,
         }),
       );
       await page.goto('/work/kanban');
@@ -1405,7 +1410,9 @@ test.describe('Kanban', () => {
     await expect(group.locator('.bs-kanban-group__title')).toHaveText('3 fixes · Settings layout');
     // The billing follow-up is alone, so it is an ordinary card with its own summary.
     await expect(todo.locator('.bs-kanban-card')).toHaveCount(1);
-    await expect(todo.locator('.bs-kanban-card')).toContainText(
+    await expect(todo.locator('.bs-kanban-card')).toContainText('Follow-up fix · Billing page');
+    await expect(todo.locator('.bs-kanban-card__title')).toHaveAttribute(
+      'title',
       'Fix: Show the invoice total with the currency symbol',
     );
     // No id text on any card or group.
@@ -1428,7 +1435,9 @@ test.describe('Kanban', () => {
     await expect(group).toHaveAttribute('open', '');
     const rows = group.locator('.bs-kanban-group__row');
     await expect(rows).toHaveCount(3);
-    await expect(rows.first()).toContainText(
+    await expect(rows.first()).toContainText('Follow-up fix');
+    await expect(rows.first().locator('.bs-kanban-group__row-title')).toHaveAttribute(
+      'title',
       'Fix: The settings form loses its unsaved changes when the tab is switched',
     );
     for (const row of await rows.all()) {
@@ -1694,6 +1703,7 @@ test.describe('Kanban: no interactive control inside another', () => {
         {
           taskId: 'epic-1/task-0',
           title: 'Earlier task',
+          taskTitle: 'Earlier task',
           status: 'in-progress',
           edgeType: 'blocks',
         },
@@ -1803,7 +1813,7 @@ test.describe('Kanban: no interactive control inside another', () => {
     await mockBoard(page, nestedBoard());
     await page.goto('/work/kanban');
     const card = page.locator('.bs-kanban-card').first();
-    const open = card.getByRole('button', { name: 'epic-1/task-1, opens task detail' });
+    const open = card.getByRole('button', { name: 'Task 1, opens task detail' });
     await open.focus();
     await page.keyboard.press('Tab');
     await expect(card.locator('.bs-kanban-card__title-copy button')).toBeFocused();

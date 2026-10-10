@@ -105,7 +105,9 @@ const errorBodiesRead = (page: Page, part: string) =>
     part,
   );
 
-const title = (page: Page) => page.getByRole('heading', { level: 1 });
+// The heading is the short name now; the fixture tells the two stores apart by the
+// objective, which the page shows as its description.
+const title = (page: Page) => page.locator('.bs-ph__desc');
 
 test.describe('a foreign store in the dashboard', () => {
   test.beforeAll(async () => {
@@ -517,7 +519,8 @@ test.describe('a foreign store in the dashboard', () => {
   }) => {
     // All: this is about a foreign card, and no live session drives its epic.
     await page.goto(`${origin}/work/kanban?scope=all`);
-    const card = page.getByRole('button', { name: /Foreign config loader.*opens task detail/ });
+    // The card is named by its short name; the foreign objective rides its hover title.
+    const card = page.locator(`.bs-kanban-card__open[title="${FOREIGN_TITLE_2}"]`);
     await expect(card).toBeVisible();
     await card.click();
     const peek = page.getByRole('dialog');

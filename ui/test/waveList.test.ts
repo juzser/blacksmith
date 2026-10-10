@@ -27,6 +27,7 @@ function node(
     taskId,
     taskStatus,
     title: `Title for ${taskId}`,
+    taskTitle: `Title for ${taskId}`,
     liveAgentRole: null,
     workingAgentRole,
     planVersion: 1,

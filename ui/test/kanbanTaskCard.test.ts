@@ -141,7 +141,7 @@ describe('KanbanTaskCard.vue — title-copy icon flows inline with the title tex
     expect(FIT).toMatch(/\.disconnect\(\)/);
     expect(FIT).toMatch(/TITLE_LINES\s*=\s*2/);
     expect(FIT).toMatch(/fitTitleText\(/);
-    expect(SRC).toMatch(/:title="fitted \? title : undefined"/);
+    expect(SRC).toMatch(/:title="objective \?\? \(fitted \? title : undefined\)"/);
     expect(SRC).toMatch(/aria-label="`\$\{title\}\$\{markLabel\}, opens task detail`"/);
   });
 });
@@ -197,5 +197,21 @@ describe('KanbanTaskCard.vue — Now / Next mark', () => {
   it('keeps the caption off phone cards and ellipsizes it', () => {
     expect(SRC).toMatch(/v-if="caption && !compact"/);
     expect(rule(PRIMITIVES_CSS, '.bs-kanban-card__caption')).toMatch(/text-overflow:\s*ellipsis/);
+  });
+});
+
+describe('KanbanTaskCard.vue — one short name, the objective on hover', () => {
+  it('names the card from taskTitle and the parent short name, never from the objective', () => {
+    expect(SRC).toMatch(
+      /shortTaskName\(\s*props\.task\.taskId,\s*props\.task\.taskTitle,\s*parentLabel\(props\.task\.parentTaskId, props\.task\.parentTaskTitle\),?\s*\)/,
+    );
+    expect(SRC).not.toMatch(/boardTitle/);
+  });
+
+  it('carries the objective only as the title attribute of the name element', () => {
+    expect(SRC).toMatch(
+      /const objective = computed\(\(\) => props\.task\.title\?\.trim\(\) \|\| undefined\)/,
+    );
+    expect(SRC).toMatch(/<p ref="titleEl" class="bs-kanban-card__title" :title="objective">/);
   });
 });

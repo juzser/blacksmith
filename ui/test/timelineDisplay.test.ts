@@ -1235,6 +1235,15 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     expect(metaFor(e)).toBe(label);
   });
 
+  it('names a minted follow-up id "Follow-up fix" in a meta line, never its hex', () => {
+    const e = entry({
+      eventType: 'judge-verdict',
+      taskId: 'epic-9/followup-0a1b2c3d',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Judge verdict · Follow-up fix');
+  });
+
   it('appends the task label to a feedback meta line when there is one', () => {
     const e = entry({
       eventType: 'judge-verdict',

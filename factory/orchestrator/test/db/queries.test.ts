@@ -888,6 +888,8 @@ describe('db/queries.ts', () => {
           requestFirstLine: 'Build the widget and fix the flaky import.',
           parentTaskId: null,
           parentTitle: null,
+          taskTitle: 'Widget renderer',
+          parentTaskTitle: null,
         },
       ]);
       // task-2's only finding is waived (not "open"), so no severity chip.
@@ -911,6 +913,7 @@ describe('db/queries.ts', () => {
             {
               taskId: TASK_1,
               title: 'Add the widget renderer.',
+              taskTitle: 'Widget renderer',
               status: 'completed',
               edgeType: 'artifact',
             },
@@ -920,6 +923,8 @@ describe('db/queries.ts', () => {
           requestFirstLine: 'Build the widget and fix the flaky import.',
           parentTaskId: null,
           parentTitle: null,
+          taskTitle: null,
+          parentTaskTitle: null,
         },
       ]);
       expect(byStatus.escalated).toEqual([
@@ -944,6 +949,8 @@ describe('db/queries.ts', () => {
           requestFirstLine: 'Build the widget and fix the flaky import.',
           parentTaskId: null,
           parentTitle: null,
+          taskTitle: null,
+          parentTaskTitle: null,
         },
       ]);
       // task-4's finding-4 sits at "confirmed" — open, not waived/fixed — so
@@ -972,6 +979,8 @@ describe('db/queries.ts', () => {
           requestFirstLine: 'Build the widget and fix the flaky import.',
           parentTaskId: null,
           parentTitle: null,
+          taskTitle: null,
+          parentTaskTitle: null,
         },
       ]);
     });
@@ -1072,6 +1081,30 @@ describe('db/queries.ts', () => {
         const plain = cards.get(`${epicId}/task-1-settings`);
         expect(plain?.parentTaskId).toBeNull();
         expect(plain?.parentTitle).toBeNull();
+      });
+
+      it('carries the parent short title, never the objective, and null when unset', async () => {
+        await appendFile(
+          path.join(stateDir, `${session}.jsonl`),
+          tiedLine(
+            'task-added',
+            ts,
+            {
+              task_id: `${epicId}/task-1-settings`,
+              epic_id: epicId,
+              title: 'Settings layout page',
+            },
+            session,
+          ),
+          'utf8',
+        );
+        const cards = await board();
+        const fix = cards.get(`${epicId}/followup-0a1b2c3d`);
+        expect(fix?.parentTaskTitle).toBe('Settings layout page');
+        expect(fix?.parentTitle).toBe('Settings layout');
+        expect(cards.get(`${epicId}/task-1-settings`)?.taskTitle).toBe('Settings layout page');
+        expect(cards.get(`${epicId}/followup-0a1b2c3d`)?.taskTitle).toBeNull();
+        expect(cards.get(`${epicId}/task-1-settings`)?.parentTaskTitle).toBeNull();
       });
 
       it('gives a null parentTitle when the parent has no task row', async () => {
@@ -1280,6 +1313,15 @@ describe('db/queries.ts', () => {
       expect(task1?.wave).toBe(0);
       expect(task2?.wave).toBe(1); // depends on task-1 -> one wave later
       expect(graph.waves[0]).toEqual(expect.arrayContaining([TASK_1]));
+    });
+
+    it('names a node by its title column, null when unset, and keeps the objective apart', () => {
+      const graph = flowGraph(handle.db, { epicId: EPIC_ID });
+      const task1 = graph.nodes.find((n) => n.taskId === TASK_1);
+      const task2 = graph.nodes.find((n) => n.taskId === TASK_2);
+      expect(task1?.taskTitle).toBe('Widget renderer');
+      expect(task1?.title).toBe('Add the widget renderer.');
+      expect(task2?.taskTitle).toBeNull();
     });
   });
 
@@ -2888,6 +2930,21 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     });
     expect(row).not.toHaveProperty('title');
     expect(row).not.toHaveProperty('description');
+  });
+
+  it('a dispatch carries the title column of its task, never the objective', () => {
+    handle.db
+      .update(tasks)
+      .set({ title: 'Stop the deadlock' })
+      .where(eq(tasks.taskId, TASK_1))
+      .run();
+    const dispatches = overview(handle.db).recentDispatches;
+    const mine = dispatches.filter((d) => d.taskId === TASK_1);
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine.every((d) => d.taskTitle === 'Stop the deadlock')).toBe(true);
+    expect(dispatches.filter((d) => d.taskId === TASK_2).every((d) => d.taskTitle === null)).toBe(
+      true,
+    );
   });
 
   it('taskTitle is the title column, null when unset, never the objective', () => {

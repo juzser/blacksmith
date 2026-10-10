@@ -14,7 +14,7 @@ import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 const PHONE = { width: 375, height: 812 };
 const NARROW = { width: 320, height: 812 };
 const HOME = { id: 'home', label: 'home' };
-const PARENT = 'Reconcile migration ledger with store snapshots before the cut over';
+const PARENT = 'Reconcile migration ledger with store snapshots';
 const TWO_ROLES = ['coder', 'tester'];
 const LONG_ROLES = ['security-reviewer', 'spec-reviewer'];
 const TWO_ROLES_TEXT = 'Now · Builder + Tester · stalled';
@@ -49,6 +49,8 @@ function task(
     parentTaskId: null,
     parentTitle: null,
     ...over,
+    taskTitle: over.taskTitle ?? over.title ?? `Task ${slug} of ${epic}`,
+    parentTaskTitle: over.parentTaskTitle ?? over.parentTitle ?? null,
   };
 }
 

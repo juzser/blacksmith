@@ -18,7 +18,10 @@ export type WaveKind = 'past' | 'current' | 'upcoming';
 
 export interface WaveTaskInfo {
   taskId: string;
+  /** The task's objective: hover text only. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Names the task. */
+  taskTitle: string | null;
   taskStatus: string;
   workingAgentRole: string | null;
   /** §2's "After T3 · uses its output" line, or null with no incoming edge. */
@@ -192,6 +195,7 @@ function taskInfo(node: FlowNode | undefined, taskId: string, edges: FlowEdge[])
   return {
     taskId,
     title: node?.title ?? null,
+    taskTitle: node?.taskTitle ?? null,
     taskStatus: node?.taskStatus ?? 'todo',
     workingAgentRole: node?.workingAgentRole ?? null,
     dependencyLine: dependencyLine(edges, taskId),

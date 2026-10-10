@@ -318,7 +318,7 @@ export function trackJustFinished(
  */
 export function decisionLine(d: RecentDispatch): string {
   const started = `${roleLabel(d.agentRole)} started`;
-  const line = d.taskId ? `${started} on ${shortTaskName(d.taskId)}` : started;
+  const line = d.taskId ? `${started} on ${shortTaskName(d.taskId, d.taskTitle)}` : started;
   return d.round >= 2 ? `${line} · round ${d.round}` : line;
 }
 

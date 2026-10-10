@@ -224,10 +224,10 @@ export function formatLiveStatus(
 /**
  * One-line label for a long free-text field.
  *
- * `/api/flow` nodes carry `title = tasks.objective` (db/queries.ts:1406), and
- * an objective is a paragraph, not a label: on envkit-mcp-surface's plan-v3
- * the four live objectives measure 942–1472 characters. FlowPage rendered
- * that raw, so a single node grew to swallow the canvas. summarize() takes
+ * `/api/flow` nodes carry `title = tasks.objective`, and an objective is a
+ * paragraph, not a label: a plan's live objectives can run past a thousand
+ * characters. FlowPage once rendered that raw, so a single node grew to
+ * swallow the canvas. summarize() takes
  * the first sentence when one fits and otherwise hard-caps at a word
  * boundary; callers keep the untruncated text in a `title` attribute (and in
  * the sr-only table) so nothing is actually lost.
@@ -381,25 +381,13 @@ export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): s
 }
 
 /**
- * A label short enough to sit on one dashboard row without wrapping or
+ * A name short enough to sit on one dashboard row without wrapping or
  * fighting a sibling column for space — roughly the width design-spec's
  * single-line Row/Card titles budget elsewhere (summarize()'s own
  * sentence-length cap, above, lands in the same range).
  */
 const SHORT_TASK_LABEL_MAX = 60;
 
-/**
- * "Readme merge trim" — a human label for a bare taskId, for the rows that
- * have nothing better (queries.ts's `tasks` table carries no `title`; where
- * one is available and short enough, it wins over the derived slug).
- *
- * taskId is `<epic>/task-<n>-<slug>` (or occasionally just the slug, with no
- * epic segment): this takes the last path segment, drops the leading
- * `task-<n>-` ordinal so "task-29-readme-merge-trim" reads as the work, not
- * its position in the plan, then turns the remaining dashes into spaces and
- * capitalizes the first letter. The raw id is not lost — callers keep it in
- * a `title` tooltip.
- */
 /**
  * The last `/`-separated segment of a task id — `KanbanTaskCard.vue`'s own
  * `shortId` computed, pulled out here so `WaveTaskCard.vue` (DS4 S3 fix
@@ -410,61 +398,55 @@ export function shortTaskId(taskId: string): string {
   return taskId.split('/').pop() ?? taskId;
 }
 
-export function taskLabel(taskId: string, title?: string): string {
-  const trimmedTitle = title?.trim();
-  if (trimmedTitle && trimmedTitle.length <= SHORT_TASK_LABEL_MAX) return trimmedTitle;
-  return slugLabel(taskId);
-}
-
+/**
+ * "Readme merge trim" — the plan-task slug as a label. taskId is
+ * `<epic>/task-<n>-<slug>` (or occasionally just the slug): this takes the
+ * last path segment, drops the leading `task-<n>-` ordinal so
+ * "task-29-readme-merge-trim" reads as the work, not its position in the
+ * plan, then turns the dashes into spaces and capitalizes the first letter.
+ */
 function slugLabel(taskId: string): string {
-  const lastSegment = taskId.split('/').pop() ?? taskId;
-  const slug = lastSegment.replace(/^task-\d+-/, '');
+  const slug = shortTaskId(taskId).replace(/^task-\d+-/, '');
   const spaced = slug.replace(/-/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /** A minted id: `followup-<hex>`, or any segment holding an eight-hex-digit run. */
 function isMintedId(taskId: string): boolean {
-  const last = taskId.split('/').pop() ?? taskId;
+  const last = shortTaskId(taskId);
   return last.startsWith('followup-') || /(^|[-._])[0-9a-f]{8}($|[-._])/.test(last);
 }
 
 /**
- * The text a Kanban card shows for a task: its objective whole (the card
- * fits it to two lines itself — taskLabel()'s fallback to the id slug is what
- * turned "Fix: <long summary>" into "Followup 48bb6826"), else the plan-task
- * slug without its ordinal, else "Follow-up fix" for a minted id — never the
- * hex. `parent` is the origin task's readable title, when known.
+ * The one name a task has on every surface: its plan `title` (the
+ * `tasks.title` column) when set and at most 60 characters, else the plan
+ * slug without its ordinal, else — for a minted follow-up id — "Follow-up fix
+ * · <parent's short name>", or "Follow-up fix" when no parent is known. Never
+ * the objective and never a hex id. The objective belongs on hover, in the
+ * peek and on the task page, as a description.
  */
-export function boardTitle(
+export function shortTaskName(
   taskId: string,
-  objective?: string | null,
-  parent?: string | null,
+  title?: string | null,
+  parentName?: string | null,
 ): string {
-  const trimmed = objective?.trim();
-  if (trimmed) return trimmed;
+  const trimmed = title?.trim();
+  if (trimmed && trimmed.length <= SHORT_TASK_LABEL_MAX) return trimmed;
   if (!isMintedId(taskId)) return slugLabel(taskId);
-  return parent ? `Follow-up fix · ${parent}` : 'Follow-up fix';
+  return parentName ? `Follow-up fix · ${parentName}` : 'Follow-up fix';
 }
 
 /**
- * The short name a one-line row gives a task: its `title` when set and short,
- * else the plan-task slug, else "Follow-up fix" for a minted id. Never the
- * objective (boardTitle() with none) and never the hex.
+ * The origin task's short name for a follow-up: its `title`, else its slug,
+ * else null when the parent is unknown or only a minted id is left. Never the
+ * parent's objective.
  */
-export function shortTaskName(taskId: string, title?: string | null): string {
-  const trimmed = title?.trim();
-  if (trimmed && trimmed.length <= SHORT_TASK_LABEL_MAX) return trimmed;
-  return boardTitle(taskId);
-}
-
-/** The origin task's readable title for a follow-up, or null when only a minted id is left. */
 export function parentLabel(
   parentTaskId: string | null,
-  parentTitle: string | null,
+  parentTaskTitle: string | null,
 ): string | null {
-  const trimmed = parentTitle?.trim();
-  if (trimmed) return trimmed;
+  const trimmed = parentTaskTitle?.trim();
+  if (trimmed && trimmed.length <= SHORT_TASK_LABEL_MAX) return trimmed;
   if (parentTaskId === null || isMintedId(parentTaskId)) return null;
   return slugLabel(parentTaskId);
 }

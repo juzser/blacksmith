@@ -7,7 +7,7 @@
 // scope-narrowing, flagged in the task report).
 import { computed, onMounted, ref, watch } from 'vue';
 import { fetchTaskDetail, type TaskDetail } from '../lib/api.js';
-import { taskLabel } from '../lib/format.js';
+import { shortTaskName } from '../lib/format.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
 import AgentChip from './AgentChip.vue';
 import Dialog from './kit/Dialog.vue';
@@ -48,10 +48,14 @@ const agentChipTask = computed(() => {
     updatedAt: detail.value.task.updatedAt,
   };
 });
+
+// The same short name the card carries; the objective is the description below.
+const name = computed(() => shortTaskName(props.taskId, detail.value?.task.title));
+const objective = computed(() => detail.value?.task.objective?.trim() || null);
 </script>
 
 <template>
-  <Dialog :open="true" :title="taskLabel(taskId, detail?.task.objective ?? undefined)" @close="emit('close')">
+  <Dialog :open="true" :title="name" @close="emit('close')">
     <p v-if="loadError">Could not load this task: {{ loadError }}</p>
     <template v-else-if="detail">
       <div class="bs-task-peek__meta">
@@ -60,6 +64,7 @@ const agentChipTask = computed(() => {
         </Tag>
         <AgentChip v-if="agentChipTask" :task="agentChipTask" />
       </div>
+      <p v-if="objective" class="bs-task-peek__summary">{{ objective }}</p>
       <p v-if="detail.task.summary" class="bs-task-peek__summary">{{ detail.task.summary }}</p>
       <RequestQuote :quote="detail.requestQuote" />
       <a href="#" class="bs-task-peek__full" @click.prevent="emit('openFull', taskId)">Open full page</a>

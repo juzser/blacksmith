@@ -3519,7 +3519,7 @@ summary.bs-inbox__group-head {
   padding-top: var(--bs-space-2);
 }
 /* Operator fix 2026-10-05: the dependency line can still run long even
-   after taskLabel() shortens its text — clamp to one line, full text in
+   after shortTaskName() shortens its text — clamp to one line, full text in
    the native `title` tooltip instead of wrapping the card taller. */
 .bs-kanban-card__footer-dep {
   display: block;

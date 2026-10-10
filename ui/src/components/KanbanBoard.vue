@@ -427,7 +427,7 @@ function captionFor(task: KanbanTask): string | null {
             <KanbanFollowupGroup
               v-if="item.kind === 'group'"
               :members="item.members"
-              :parent-label="parentLabel(item.parentTaskId, item.parentTitle)"
+              :parent-label="parentLabel(item.parentTaskId, item.parentTaskTitle)"
               :open="openGroups.has(item.key)"
               :status-in-column="groupBy === 'status' && !showAll"
               :compact="isPhoneWidth"
