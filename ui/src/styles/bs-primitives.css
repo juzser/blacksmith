@@ -5028,26 +5028,55 @@ h2.rm-section__head {
   flex-direction: column;
   gap: var(--bs-space-2);
 }
+/* ds-review.html `.mlist`/`.mrow`/`.mt`/`.pmini`: a bordered raised card of
+   rows, each a label that ellipsizes before its bar gives way. The unit on the
+   Not-measured row ("of runs": that share is of runs, not tokens) stays on the
+   label's one line. The number/track overrides are scoped here: the shared
+   .pmini rules above serve other pages. The row gap is the mock's `2px`
+   (row) by `--bs-space-2` (column): no spacing token equals 2px. */
 .bs-analytics-page__phone-roles {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  overflow: hidden;
 }
 .bs-analytics-page__phone-role {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--bs-space-2);
   align-items: center;
-  justify-content: space-between;
-  gap: var(--bs-space-3);
+  min-height: var(--bs-touch);
+  padding: 10px var(--bs-m-card-pad);
+  border-bottom: 1px solid var(--bs-border);
+  min-width: 0;
+}
+.bs-analytics-page__phone-role:last-child {
+  border-bottom: 0;
 }
 .bs-analytics-page__phone-role-label {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 auto;
-  font-size: var(--bs-text-sm);
+  min-width: 0;
+  font-size: var(--bs-text-base);
+  font-weight: var(--bs-font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .bs-analytics-page__phone-role-unit {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-normal);
+  /* Keeps the smaller unit from raising the label's line box. */
+  line-height: 1;
+}
+.bs-analytics-page__phone-role .ptrack {
+  background: var(--bs-surface-sunken);
+  border: 1px solid var(--bs-border);
+}
+.bs-analytics-page__phone-role .bs-pnum {
+  min-width: 4ch;
+  text-align: right;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text);
 }
 
 /* DS7 PR2 round 5 item 2: the by-role "Total tokens" chart, horizontal rows
