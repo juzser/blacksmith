@@ -3101,9 +3101,36 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
 }
 .bs-home__decision {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   color: var(--bs-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-home__decision-project {
+  /* Shrinks long before the line does (weight 100), so the task name stays. */
+  flex: 0 100 auto;
+  min-width: 4ch;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The time keeps its words on one line; the line and the label give way. */
+.bs-home__line:has(> .bs-home__decision) > :last-child {
+  flex: none;
+  white-space: nowrap;
+}
+/* On phone a decision row is 44px tall: its link is a tap target, and so is
+   the time beside it, whose hit box needs the room even with no task link. */
+@media (max-width: 640px) {
+  .bs-home__decision {
+    line-height: var(--bs-touch);
+  }
+  .bs-home__line:has(> .bs-home__decision) {
+    align-items: center;
+  }
 }
 
 /* "Live sessions" (ds-spec.md §4.1 item 1a, ds-review.html `.ls-*`): one card
