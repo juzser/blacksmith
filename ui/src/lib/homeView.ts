@@ -322,6 +322,15 @@ export function decisionLine(d: RecentDispatch): string {
   return d.round >= 2 ? `${line} · round ${d.round}` : line;
 }
 
+/**
+ * The hover text of a row: the line, plus its project when the card names
+ * projects, so a project label cut to fit is still readable in full.
+ */
+export function decisionTitle(d: RecentDispatch, nameProject: boolean): string {
+  const line = decisionLine(d);
+  return nameProject && d.store ? `${line} \u00b7 ${d.store.label}` : line;
+}
+
 /** True when the rows on screen come from more than one store. */
 export function decisionsSpanStores(rows: readonly RecentDispatch[]): boolean {
   return new Set(rows.map((r) => foreignStoreId(r) ?? '')).size > 1;

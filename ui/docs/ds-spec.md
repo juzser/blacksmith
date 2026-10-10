@@ -927,8 +927,12 @@ Sections, in order:
    the hex). From the second attempt the line ends " · round N"; a dispatch with no task
    (a wave runner) reads "Builder started". The provider, the model tier and the
    orchestrator's free-text reason are not on the line; the reason stays on Activity. When
-   the rows come from more than one store each names its project in muted text before the
-   time; with one store no project shows. A row with a task links to it, and a row from a
+   the rows come from more than one store each names its project in muted text between the
+   line and the time; with one store no project shows. The time follows the text, as it does
+   under "Just finished", and never wraps. On a narrow screen the project label gives way
+   first (down to a few characters and an ellipsis) so "<Role> started on <task>" stays
+   readable; the label's own `title` and the row's `title` ("<line> · <project>") carry the
+   full name. A row with a task links to it, and a row from a
    foreign store carries `?store=<id>`. The line is one line high and ellipsizes, with the
    full text in `title`; on phone the link is a 44px tap target and the time keeps its place.
 4. **Budget** — "127M of 180M tokens" + a `ProgressRing` "71%" not "≥127113770 tok", "296 steps did not

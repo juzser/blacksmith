@@ -15,6 +15,7 @@ import {
   cardTokensText,
   decisionLine,
   decisionsSpanStores,
+  decisionTitle,
   isBudgetOutlier,
   outlierSentence,
   type RunningCard,
@@ -670,6 +671,31 @@ describe('lib/homeView.ts decisionLine()', () => {
         expect(line.length).toBeLessThan(80);
       }
     }
+  });
+});
+
+describe('lib/homeView.ts decisionTitle()', () => {
+  const row: RecentDispatch = {
+    eventId: '1',
+    ts: '2026-09-30T10:00:00Z',
+    agentRole: 'coder',
+    provider: 'claude',
+    modelTier: 'mid',
+    taskId: 'epic-a/task-3-settings-integrations',
+    reason: 'first attempt',
+    round: 1,
+    store: { id: 'ab12cd34', label: 'project-b' },
+  };
+
+  it('adds the project after the line when the card names projects', () => {
+    expect(decisionTitle(row, true)).toBe('Builder started on Settings integrations · project-b');
+  });
+
+  it('is the bare line when no project is shown or the row has no store', () => {
+    expect(decisionTitle(row, false)).toBe('Builder started on Settings integrations');
+    expect(decisionTitle({ ...row, store: undefined }, true)).toBe(
+      'Builder started on Settings integrations',
+    );
   });
 });
 

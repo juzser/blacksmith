@@ -1904,4 +1904,136 @@ test.describe('Home: What the factory decided recently', () => {
     await page.goto('/overview');
     await expect(card(page).locator('.bs-home__decision-project')).toHaveCount(0);
   });
+
+  const LONG_LABEL = 'project-b-with-a-much-longer-name-than-fits';
+  const foreignRows = () => [
+    dispatch(5),
+    dispatch(8, {
+      eventId: 'f-3',
+      taskId: 'epic-a/task-4-settings-panels-copy-and-layout',
+      store: { id: 'ab12cd34', label: LONG_LABEL },
+    }),
+  ];
+  const measureRow = (page: Page) =>
+    card(page)
+      .locator('li')
+      .nth(1)
+      .evaluate((li) => {
+        const link = li.querySelector('.bs-home__decision') as HTMLElement;
+        const label = li.querySelector('.bs-home__decision-project') as HTMLElement;
+        const time = li.lastElementChild as HTMLElement;
+        const width = (text: string) => {
+          const probe = document.createElement('span');
+          probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+          probe.style.font = getComputedStyle(link).font;
+          probe.textContent = text;
+          document.body.appendChild(probe);
+          const w = probe.getBoundingClientRect().width;
+          probe.remove();
+          return w;
+        };
+        const box = (el: Element) => el.getBoundingClientRect();
+        const text = link.textContent?.trim() ?? '';
+        const range = document.createRange();
+        range.selectNodeContents(link);
+        return {
+          textEnd: Math.min(range.getBoundingClientRect().right, box(link).right),
+          fullLine: text,
+          linkWidth: link.clientWidth,
+          cut: link.scrollWidth > link.clientWidth,
+          prefix: width('Builder started on Settings'),
+          ellipsis: width('\u2026'),
+          labelCut: label.scrollWidth > label.clientWidth,
+          labelTitle: label.getAttribute('title'),
+          linkTitle: link.getAttribute('title'),
+          linkHeight: box(link).height,
+          timeWrap: getComputedStyle(time).whiteSpace,
+          link: { left: box(link).left, right: box(link).right },
+          label: { left: box(label).left, right: box(label).right },
+          time: { left: box(time).left, right: box(time).right },
+          gap: Number.parseFloat(getComputedStyle(li).columnGap),
+          scrollW: document.documentElement.scrollWidth,
+          clientW: document.documentElement.clientWidth,
+        };
+      });
+
+  test('1280px: the time follows the text and nothing is cut', async ({ page }) => {
+    await serve(page, foreignRows());
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    const m = await measureRow(page);
+    expect(m.cut).toBe(false);
+    expect(m.labelCut).toBe(false);
+    expect(m.label.left - m.textEnd).toBeLessThanOrEqual(m.gap + 1);
+    expect(m.time.left - m.label.right).toBeLessThanOrEqual(m.gap + 1);
+    expect(m.linkTitle).toBe(`${m.fullLine} \u00b7 ${LONG_LABEL}`);
+    const own = await card(page)
+      .locator('li')
+      .nth(0)
+      .evaluate((li) => {
+        const link = li.querySelector('.bs-home__decision') as HTMLElement;
+        const time = li.lastElementChild as HTMLElement;
+        const range = document.createRange();
+        range.selectNodeContents(link);
+        return time.getBoundingClientRect().left - range.getBoundingClientRect().right;
+      });
+    expect(own).toBeLessThanOrEqual(m.gap + 1);
+  });
+
+  for (const [label, viewport] of [
+    ['375px', PHONE],
+    ['320px', { width: 320, height: 700 }],
+  ] as const) {
+    test(`${label}: a long project label gives way to the task name`, async ({ page }) => {
+      await serve(page, foreignRows());
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      const m = await measureRow(page);
+      expect(m.fullLine).toContain('Builder started on Settings');
+      // The visible line keeps "<Role> started on <first word>" uncut.
+      if (m.cut) expect(m.linkWidth).toBeGreaterThanOrEqual(m.prefix + m.ellipsis);
+      expect(m.labelTitle).toBe(LONG_LABEL);
+      expect(m.linkTitle).toBe(`${m.fullLine} \u00b7 ${LONG_LABEL}`);
+      expect(m.linkHeight).toBeGreaterThanOrEqual(44);
+      expect(m.link.right).toBeLessThanOrEqual(m.label.left + 0.5);
+      expect(m.label.right).toBeLessThanOrEqual(m.time.left + 0.5);
+      expect(m.time.right).toBeLessThanOrEqual(viewport.width);
+      expect(m.timeWrap).toBe('nowrap');
+      expect(m.scrollW).toBeLessThanOrEqual(m.clientW);
+    });
+  }
+
+  test('375px: Just finished is rendered and untouched by the decision row rule', async ({
+    page,
+  }) => {
+    await page.route('**/api/overview*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.recentDispatches = foreignRows();
+      body.closedEpics = [
+        {
+          epicId: 'epic-just-done',
+          closedBy: 'operator',
+          machineVerdict: null,
+          machineReason: null,
+          overrideRationale: null,
+          blockers: [],
+          closedAt: minutesAgo(2),
+        },
+        ...body.closedEpics,
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const line = page.locator('.bs-home__finished .bs-home__line').first();
+    await expect(line).toBeVisible();
+    const style = await line.evaluate((el) => ({
+      align: getComputedStyle(el).alignItems,
+      height: el.getBoundingClientRect().height,
+    }));
+    expect(style.align).toBe('baseline');
+    // The decision rows are 44px tall tap rows; this one keeps its text height.
+    expect(style.height).toBeLessThan(44);
+  });
 });

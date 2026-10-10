@@ -86,7 +86,9 @@ describe('HomePage.vue', () => {
 
   it('words each decision through decisionLine and shows the full line in title', () => {
     expect(TEMPLATE).toMatch(/\{\{ decisionLine\(d\) \}\}/);
-    expect(TEMPLATE).toMatch(/:title="decisionLine\(d\)"/);
+    expect(TEMPLATE).not.toMatch(/:title="decisionLine\(d\)"/);
+    expect(TEMPLATE.match(/:title="decisionTitle\(d, decisionsNameProject\)"/g)).toHaveLength(2);
+    expect(TEMPLATE).toMatch(/class="bs-home__decision-project"\s+:title="d\.store\.label"/);
   });
 
   it('flags budget outliers with a Details link', () => {

@@ -52,6 +52,7 @@ import {
   cardShowsRing,
   cardTokensText,
   decisionLine,
+  decisionTitle,
   decisionsSpanStores,
   outlierSentence,
   runningNowCards,
@@ -440,12 +441,19 @@ function becauseOf(promptId: string) {
                 query: foreignStoreId(d) ? { store: foreignStoreId(d) } : {},
               }"
               class="bs-home__decision"
-              :title="decisionLine(d)"
+              :title="decisionTitle(d, decisionsNameProject)"
             >
               {{ decisionLine(d) }}
             </RouterLink>
-            <span v-else class="bs-home__decision" :title="decisionLine(d)">{{ decisionLine(d) }}</span>
-            <span v-if="decisionsNameProject && d.store" class="bs-home__decision-project">{{ d.store.label }}</span>
+            <span v-else class="bs-home__decision" :title="decisionTitle(d, decisionsNameProject)">{{
+              decisionLine(d)
+            }}</span>
+            <span
+              v-if="decisionsNameProject && d.store"
+              class="bs-home__decision-project"
+              :title="d.store.label"
+              >{{ d.store.label }}</span
+            >
             <RelativeTime :iso="d.ts" />
           </li>
         </ul>
