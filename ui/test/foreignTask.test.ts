@@ -48,7 +48,7 @@ describe('findGroupMember across stores', () => {
     taskId,
     store: { id: store, label: store },
     parentTaskId: 'e1/t1',
-    parentTitle: null,
+    parentTaskTitle: null,
     updatedAt: '2026-01-01T00:00:00Z',
   });
   it('matches the member of the named store only', () => {

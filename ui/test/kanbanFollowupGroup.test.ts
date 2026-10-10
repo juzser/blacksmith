@@ -100,3 +100,19 @@ describe('KanbanMarkTag.vue — a cut tag stays readable on hover', () => {
     );
   });
 });
+
+describe('fix rows — one short name, the objective on hover', () => {
+  it('names a row from taskTitle, never from the objective', () => {
+    expect(GROUP).toMatch(/shortTaskName\(task\.taskId, task\.taskTitle\)/);
+    expect(GROUP).not.toMatch(/boardTitle/);
+  });
+
+  it('carries the objective only as the title attribute of the row name', () => {
+    expect(GROUP).toMatch(/<p class="bs-kanban-group__row-title" :title="rowObjective\(task\)">/);
+    expect(GROUP).toMatch(/return task\.title\?\.trim\(\) \|\| undefined/);
+  });
+
+  it('the board names the group from the parent title, not the parent objective', () => {
+    expect(BOARD).toMatch(/parentLabel\(item\.parentTaskId, item\.parentTaskTitle\)/);
+  });
+});

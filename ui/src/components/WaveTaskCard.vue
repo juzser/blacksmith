@@ -19,8 +19,8 @@ const props = defineProps<{ task: WaveTaskInfo; marks?: LiveMarks | null; storeI
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 const shortId = computed(() => shortTaskId(props.task.taskId));
-// Never `task.title`: on a flow node that is the task's whole objective.
-const title = computed(() => shortTaskName(props.task.taskId));
+// Named from `taskTitle`, never `task.title`: on a flow node that is the task's whole objective.
+const title = computed(() => shortTaskName(props.task.taskId, props.task.taskTitle));
 // The objective is the hover text, as on the Kanban card; absent when there is none.
 const objective = computed(() => props.task.title?.trim() || undefined);
 // A bare id ("task-2") humanizes to the very name shown beside it: show one.

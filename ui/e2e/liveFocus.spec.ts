@@ -33,6 +33,8 @@ function task(epic: string, slug: string, taskStatus: string, project: string): 
     requestFirstLine: null,
     parentTaskId: null,
     parentTitle: null,
+    taskTitle: `Task ${slug} of ${epic}`,
+    parentTaskTitle: null,
   };
 }
 
@@ -195,8 +197,10 @@ test.describe('Kanban: Now and Next marks', () => {
     const fix = (slug: string, updatedAt: string): KanbanTask => ({
       ...task('epic-9', slug, 'todo', 'demo-hub'),
       title: `Fix ${slug}`,
+      taskTitle: `Fix ${slug}`,
       parentTaskId: 'epic-9/task-2',
       parentTitle: 'Task task-2',
+      parentTaskTitle: 'Task task-2',
       updatedAt,
     });
     const tasks = [

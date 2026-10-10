@@ -2,7 +2,7 @@
 // task_status against §10's 5-column board. `failed`/`superseded` are
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
 import { agentWaitingThresholdMs } from './constants.js';
-import { taskLabel } from './format.js';
+import { shortTaskName } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { foreignStoreId, type StoreRef, storeKey } from './storeKey.js';
 import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
@@ -357,14 +357,20 @@ export function groupByKanban<T extends GroupableTask>(
 
 export interface FollowupTaskLike extends KanbanTaskLike {
   parentTaskId: string | null;
-  parentTitle: string | null;
+  parentTaskTitle: string | null;
   updatedAt: string;
 }
 
 /** What a column draws: a plain card, or one stacked card for a parent's follow-ups. */
 export type ColumnItem<T extends FollowupTaskLike> =
   | { kind: 'task'; key: string; task: T }
-  | { kind: 'group'; key: string; parentTaskId: string; parentTitle: string | null; members: T[] };
+  | {
+      kind: 'group';
+      key: string;
+      parentTaskId: string;
+      parentTaskTitle: string | null;
+      members: T[];
+    };
 
 /** Fewer follow-ups than this stay plain cards: a "1 fix" stack only hides one row. */
 export const FOLLOWUP_GROUP_MIN = 2;
@@ -411,7 +417,7 @@ export function groupFollowups<T extends FollowupTaskLike>(
         kind: 'group',
         key: `${columnKey}:${parentKey(task, task.parentTaskId)}`,
         parentTaskId: task.parentTaskId,
-        parentTitle: task.parentTitle,
+        parentTaskTitle: task.parentTaskTitle,
         members,
       });
     }
@@ -490,7 +496,7 @@ export function cardChips(
 /** The bits of a KanbanDependency that dependencyChainText() actually reads. */
 export interface DependencyLike {
   taskId: string;
-  title: string | null;
+  taskTitle: string | null;
   status: string | null;
 }
 
@@ -505,10 +511,9 @@ export interface DependencyLike {
  * name and before counting the "+N more" tail. "Waits for: nothing" now
  * also covers the case where every dependency is already done.
  *
- * Operator fix 2026-10-05: the server sets `title` to the dependency task's
- * full `objective` (db/queries.ts ~:3096), which can run to a multi-sentence
- * paragraph. taskLabel() shortens it the same way the card's own title is
- * shortened, rather than this footer line printing that paragraph whole.
+ * The dependency is named by shortTaskName() from its `taskTitle`, the same
+ * name its own card carries; its objective (a paragraph) never reaches this
+ * footer line.
  */
 function waitingDependencies(dependencies: DependencyLike[]): DependencyLike[] {
   return dependencies.filter((d) => !d.status || !isDoneStatus(d.status));
@@ -523,11 +528,21 @@ export function hasWaitingDependency(dependencies: DependencyLike[]): boolean {
   return waitingDependencies(dependencies).length > 0;
 }
 
+/**
+ * The footer's hover text: the visible line plus the first waiting
+ * dependency's raw id, which names its epic. Two epics can each have a "Task 3".
+ */
+export function dependencyChainTitle(dependencies: DependencyLike[]): string {
+  const text = dependencyChainText(dependencies);
+  const first = waitingDependencies(dependencies)[0];
+  return first ? `${text} · ${first.taskId}` : text;
+}
+
 export function dependencyChainText(dependencies: DependencyLike[]): string {
   const waiting = waitingDependencies(dependencies);
   const first = waiting[0];
   if (!first) return 'Waits for: nothing';
-  const label = taskLabel(first.taskId, first.title ?? undefined);
+  const label = shortTaskName(first.taskId, first.taskTitle);
   // Plain words, not the raw task_status slug: "in-progress" -> "in progress".
   const status = first.status ? ` (${first.status.replace(/[-_]/g, ' ')})` : '';
   const rest = waiting.length - 1;

@@ -44,6 +44,7 @@ function entry(overrides: Partial<TimelineEntry>): TimelineEntry {
     actor: null,
     sessionId: 'sess-1',
     sessionTitle: 'sess-1',
+    taskTitle: null,
     ...overrides,
   };
 }
@@ -389,7 +390,25 @@ describe('lib/timelineDisplay.ts', () => {
           reasons: ['merge-threshold', 'low-confidence'],
         },
       });
-      expect(titleFor(e)).toBe('Recheck proposed: epic-9/task-3 (merge-threshold, low-confidence)');
+      expect(titleFor(e)).toBe('Recheck proposed: Task 3 (merge-threshold, low-confidence)');
+    });
+
+    it('names the recheck task by its title when the entry is that task', () => {
+      const e = entry({
+        eventType: 'recheck-proposed',
+        taskId: 'epic-9/task-3',
+        taskTitle: 'Fix the login form',
+        payload: { kind: 'recheck', taskId: 'epic-9/task-3', epicId: 'epic-9', reasons: ['x'] },
+      });
+      expect(titleFor(e)).toBe('Recheck proposed: Fix the login form (x)');
+    });
+
+    it('keeps the epic id when the recheck names no task', () => {
+      const e = entry({
+        eventType: 'recheck-proposed',
+        payload: { kind: 'recheck', epicId: 'epic-9', reasons: [] },
+      });
+      expect(titleFor(e)).toBe('Recheck proposed: epic-9');
     });
 
     it('counts the outdated packages and names the first few', () => {
@@ -613,7 +632,7 @@ describe('lib/timelineDisplay.ts', () => {
         titleFor(
           entry({ eventType: 'edge-recorded', taskId: 'e/t2', payload: { depends_on: 'e/t1' } }),
         ),
-      ).toBe('Edge: e/t2 depends on e/t1');
+      ).toBe('Edge: T2 depends on T1');
       expect(
         titleFor(
           entry({ eventType: 'wave-admitted', payload: { task_ids: ['a', 'b', 'c', 'd'] } }),
@@ -626,13 +645,59 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { task_ids: ['a'], files_changed: ['x.ts'] },
           }),
         ),
-      ).toBe('Merged a (1 file changed)');
+      ).toBe('Merged A (1 file changed)');
       expect(titleFor(entry({ eventType: 'wave-merged', payload: { task_ids: ['a'] } }))).toBe(
-        'Merged a',
+        'Merged A',
       );
       expect(titleFor(entry({ eventType: 'task-superseded', taskId: 'e/t9' }))).toBe(
-        'Task superseded: e/t9',
+        'Task superseded: T9',
       );
+    });
+
+    describe('names the task by its short name, never the raw id or the objective', () => {
+      const taskId = 'epic-a/t3-trim-readme';
+      const objective = 'A long objective paragraph that must stay out of the row title.';
+      const named = { taskId, taskTitle: 'Trim the readme' };
+
+      it('task-added', () => {
+        const e = entry({ eventType: 'task-added', ...named, payload: { objective } });
+        expect(titleFor(e)).toBe('Task added: Trim the readme');
+        expect(titleFor(entry({ eventType: 'task-added', taskId, payload: { objective } }))).toBe(
+          'Task added: T3 trim readme',
+        );
+      });
+
+      it('task-split and task-superseded', () => {
+        expect(titleFor(entry({ eventType: 'task-split', ...named }))).toBe(
+          'Task split: Trim the readme',
+        );
+        expect(titleFor(entry({ eventType: 'task-superseded', ...named }))).toBe(
+          'Task superseded: Trim the readme',
+        );
+      });
+
+      it('edge-recorded titles the task and slugs the dependency', () => {
+        const e = entry({
+          eventType: 'edge-recorded',
+          ...named,
+          payload: { depends_on: 'epic-a/t2-write-spec' },
+        });
+        expect(titleFor(e)).toBe('Edge: Trim the readme depends on T2 write spec');
+      });
+
+      it('wave-merged titles the entry task and slugs any other id', () => {
+        const e = entry({
+          eventType: 'wave-merged',
+          ...named,
+          payload: { task_ids: [taskId, 'epic-a/t2-write-spec'], files_changed: ['x.ts'] },
+        });
+        expect(titleFor(e)).toBe('Merged Trim the readme, T2 write spec (1 file changed)');
+        expect(
+          titleFor(entry({ eventType: 'wave-merged', ...named, payload: { task_ids: [] } })),
+        ).toBe('Merged Trim the readme');
+        expect(metaFor(e)).toContain('Trim the readme, T2 write spec');
+        expect(metaFor(e)).not.toContain('epic-a/');
+      });
     });
 
     /**
@@ -1050,7 +1115,7 @@ describe('lib/timelineDisplay.ts', () => {
 
 // DS6 PR3: metaFor() is now the row's per-kind meta line (ds-spec.md §4.3's
 // table), rather than a bare "<task> · <eventType>" fallback. A merge row
-// humanizes its taskId via taskLabel(); an unmapped kind (System) renders
+// is named via shortTaskName(); an unmapped kind (System) renders
 // no meta at all, per the table's own "— (no meta, no chevron)" row.
 describe('lib/timelineDisplay.ts metaFor()', () => {
   it('says "nothing to check" for a gate row whose check counted nothing, never "0 of 0"', () => {
@@ -1081,7 +1146,7 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
       taskId: 'epic-9/task-29-readme-merge-trim',
       payload: { task_ids: ['epic-9/task-29'], files_changed: ['a.ts', 'b.ts'] },
     });
-    expect(metaFor(e)).toBe('epic-9/task-29 · 2 files changed');
+    expect(metaFor(e)).toBe('Task 29 · 2 files changed');
   });
 
   it('shows a running dispatch as "Running for" rather than a token/duration total', () => {
@@ -1233,6 +1298,25 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
   ] as const)("labels a %s row's meta as %s", (eventType, label) => {
     const e = entry({ eventType, taskId: null, payload: {} });
     expect(metaFor(e)).toBe(label);
+  });
+
+  it('names a minted follow-up id "Follow-up fix" in a meta line, never its hex', () => {
+    const e = entry({
+      eventType: 'judge-verdict',
+      taskId: 'epic-9/followup-0a1b2c3d',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Judge verdict · Follow-up fix');
+  });
+
+  it('names a task by its title where the entry carries one', () => {
+    const base = { taskId: 'epic-9/task-29-readme-merge-trim', payload: {} };
+    expect(metaFor(entry({ ...base, eventType: 'judge-verdict', taskTitle: 'Trim readme' }))).toBe(
+      'Judge verdict · Trim readme',
+    );
+    expect(metaFor(entry({ ...base, eventType: 'wave-merged', taskTitle: 'Trim readme' }))).toBe(
+      'Trim readme · not measured',
+    );
   });
 
   it('appends the task label to a feedback meta line when there is one', () => {
@@ -1570,6 +1654,7 @@ describe('groupByRoleMinute', () => {
     actor: null,
     sessionId: 'sess-1',
     sessionTitle: 'sess-1',
+    taskTitle: null,
     kind: 'Dispatched',
   };
 

@@ -27,6 +27,7 @@ function node(
     taskId,
     taskStatus,
     title: `Title for ${taskId}`,
+    taskTitle: `Title for ${taskId}`,
     liveAgentRole: null,
     workingAgentRole,
     planVersion: 1,
@@ -86,7 +87,7 @@ describe('buildWaveList() (DS4 S3 §2)', () => {
     expect(waves[1]?.tasks[0]).toMatchObject({
       taskId: 't2',
       workingAgentRole: 'coder',
-      dependencyLine: 'After t1 · uses its output',
+      dependencyLine: 'After Title for t1 · uses its output',
     });
     expect(waves[0]?.tasks[0]?.dependencyLine).toBeNull();
   });
@@ -196,7 +197,26 @@ describe('dependencyLine() (DS4 S3 §2/§6)', () => {
       { task: 't3', dependsOn: 't1', edgeType: 'artifact', edgeProvenance: 'plan' },
       { task: 't3', dependsOn: 't2', edgeType: 'claim-order', edgeProvenance: 'plan' },
     ];
-    expect(dependencyLine(edges, 't3')).toBe('After t1 · uses its output +1 more');
+    expect(dependencyLine(edges, 't3')).toBe('After T1 · uses its output +1 more');
+  });
+
+  it('names the dependency by its short name, never the raw id', () => {
+    const edges: FlowEdge[] = [
+      {
+        task: 'epic-a/task-3',
+        dependsOn: 'epic-a/task-2-billing-page',
+        edgeType: 'artifact',
+        edgeProvenance: 'plan',
+      },
+    ];
+    expect(dependencyLine(edges, 'epic-a/task-3')).toBe('After Billing page · uses its output');
+    expect(
+      dependencyLine(
+        edges,
+        'epic-a/task-3',
+        new Map([['epic-a/task-2-billing-page', 'Bill screen']]),
+      ),
+    ).toBe('After Bill screen · uses its output');
   });
 });
 

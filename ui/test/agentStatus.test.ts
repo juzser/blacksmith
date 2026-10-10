@@ -163,9 +163,30 @@ describe('lastStepLabel', () => {
   });
 
   it('names the role and the task for a dispatch, with no tier/provider', () => {
-    const label = lastStepLabel('dispatch_decision', { role: 'coder', task: 'Fix the thing' });
+    const label = lastStepLabel('dispatch_decision', {
+      role: 'coder',
+      taskId: 'epic-a/task-1',
+      taskTitle: 'Fix the thing',
+    });
     expect(label).toBe('Dispatched Builder · Fix the thing');
     expect(label).not.toContain('(/)');
+  });
+
+  it('names the dispatched task by its short name: slug without a title, slug for a long title', () => {
+    expect(
+      lastStepLabel('dispatch_decision', {
+        role: 'coder',
+        taskId: 'epic-a/task-2-billing-page',
+        taskTitle: null,
+      }),
+    ).toBe('Dispatched Builder · Billing page');
+    expect(
+      lastStepLabel('dispatch_decision', {
+        role: 'coder',
+        taskId: 'epic-a/task-2-billing-page',
+        taskTitle: 'x'.repeat(200),
+      }),
+    ).toBe('Dispatched Builder · Billing page');
   });
 
   it('never prints "(/)" for a dispatch the API gave no detail for', () => {

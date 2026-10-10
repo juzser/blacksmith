@@ -3,7 +3,7 @@
 // actual outcome renders as a Lozenge (taxonomy.ts) alongside it, never via
 // the kind colour alone.
 import type { DispatchRun, TimelineEntry } from './api.js';
-import { formatCompactNumber, formatElapsed, taskLabel } from './format.js';
+import { formatCompactNumber, formatElapsed, shortTaskName } from './format.js';
 import { isPastStaleWindow } from './liveness.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
@@ -640,6 +640,15 @@ function dispatchReasonText(p: Record<string, unknown>): string | null {
   return null;
 }
 
+/** The task names a merge row lists: the entry's own task by its title, any other id by its slug. */
+function mergedNames(entry: TimelineEntry, p: Record<string, unknown>): string {
+  const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
+  if (ids.length === 0) return shortTaskName(String(entry.taskId ?? ''), entry.taskTitle);
+  return ids
+    .map((id) => shortTaskName(id, id === entry.taskId ? entry.taskTitle : null))
+    .join(', ');
+}
+
 /** One-line title per event kind — falls back to the event_type itself for kinds this dashboard doesn't special-case. */
 export function titleFor(entry: TimelineEntry): string {
   const p = entry.payload as Record<string, unknown>;
@@ -731,7 +740,7 @@ export function titleFor(entry: TimelineEntry): string {
     case 'error-logged':
       return `Error: ${String(p.error ?? '')}`;
     case 'task-added':
-      return `Task added: ${String(p.objective ?? entry.taskId ?? '')}`;
+      return `Task added: ${shortTaskName(String(entry.taskId ?? ''), entry.taskTitle)}`;
     // The seven that queries.ts's FREE_TIMELINE_EVENT_TYPES used to drop
     // before the renderer ever saw them, plus lesson-status-changed, which
     // reached the timeline and rendered as its own event_type.
@@ -804,7 +813,10 @@ export function titleFor(entry: TimelineEntry): string {
     // "recheck-proposed" with no task on it asks a question nobody can answer.
     case 'recheck-proposed': {
       const reasons = Array.isArray(p.reasons) ? p.reasons.join(', ') : '';
-      return `Recheck proposed: ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
+      const subject = p.taskId
+        ? shortTaskName(String(p.taskId), p.taskId === entry.taskId ? entry.taskTitle : null)
+        : String(p.epicId ?? '');
+      return `Recheck proposed: ${subject}${reasons ? ` (${reasons})` : ''}`;
     }
     case 'maintenance-proposed': {
       const packages = Array.isArray(p.packages) ? p.packages : [];
@@ -838,11 +850,11 @@ export function titleFor(entry: TimelineEntry): string {
     case 'plan-version-superseded':
       return `Plan v${String(p.version ?? '?')} superseded`;
     case 'task-split':
-      return `Task split: ${String(entry.taskId ?? '')}`;
+      return `Task split: ${shortTaskName(String(entry.taskId ?? ''), entry.taskTitle)}`;
     case 'task-superseded':
-      return `Task superseded: ${String(entry.taskId ?? '')}`;
+      return `Task superseded: ${shortTaskName(String(entry.taskId ?? ''), entry.taskTitle)}`;
     case 'edge-recorded':
-      return `Edge: ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
+      return `Edge: ${shortTaskName(String(entry.taskId ?? ''), entry.taskTitle)} depends on ${shortTaskName(String(p.depends_on ?? ''))}`;
     case 'wave-admitted': {
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const shown = ids.slice(0, 3).join(', ');
@@ -853,10 +865,9 @@ export function titleFor(entry: TimelineEntry): string {
       // One event per task, carrying a single-element task_ids (taskEvents.ts),
       // so the row names the task rather than counting a wave that never
       // reaches this event whole.
-      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
       const detail = files === null ? '' : ` (${files} file${files === 1 ? '' : 's'} changed)`;
-      return `Merged ${ids.join(', ') || String(entry.taskId ?? '')}${detail}`;
+      return `Merged ${mergedNames(entry, p)}${detail}`;
     }
     // The worker's own words, in the worker's own order: which criterion, what
     // it assumed, and how much of the codebase has that shape (D-123). The
@@ -991,8 +1002,7 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'merge': {
-      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
-      parts.push(ids.join(', ') || taskLabel(String(entry.taskId ?? '')));
+      parts.push(mergedNames(entry, p));
       const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
       parts.push(files === null ? NOT_MEASURED : `${files} file${files === 1 ? '' : 's'} changed`);
       break;
@@ -1016,13 +1026,15 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
     }
     case 'feedback': {
       parts.push(FEEDBACK_LABEL[entry.eventType] ?? 'Waiver');
-      if (entry.taskId) parts.push(taskLabel(entry.taskId));
+      if (entry.taskId) parts.push(shortTaskName(entry.taskId, entry.taskTitle));
       break;
     }
     case 'system':
       return '';
     default:
-      return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+      return entry.taskId
+        ? `${shortTaskName(entry.taskId, entry.taskTitle)} · ${entry.eventType}`
+        : entry.eventType;
   }
   const filtered = parts.filter((part): part is string => Boolean(part));
   return filtered.join(' · ');

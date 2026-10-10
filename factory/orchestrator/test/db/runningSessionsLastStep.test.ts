@@ -1,5 +1,5 @@
 // A session row's "last step" must name what happened. For a dispatch that is
-// the agent role and the task (title when known, id otherwise); any other last
+// the agent role and the task (its id and title, named by the UI); any other last
 // event carries neither.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -67,12 +67,14 @@ describe('runningSessions() last-step detail', () => {
   it('names the role and the task title for a dispatch', () => {
     const row = load([taskAdded('epic-a/t1', 'Fix the thing'), dispatched('epic-a/t1')]);
     expect(row?.lastStepRole).toBe('coder');
-    expect(row?.lastStepTask).toBe('Fix the thing');
+    expect(row?.lastStepTaskId).toBe('epic-a/t1');
+    expect(row?.lastStepTaskTitle).toBe('Fix the thing');
   });
 
-  it('falls back to the task id when the task has no title', () => {
+  it('sends the task id with a null title when the task has none, for the UI to name', () => {
     const row = load([taskAdded('epic-a/t1'), dispatched('epic-a/t1')]);
-    expect(row?.lastStepTask).toBe('epic-a/t1');
+    expect(row?.lastStepTaskId).toBe('epic-a/t1');
+    expect(row?.lastStepTaskTitle).toBeNull();
   });
 
   it('carries neither for a non-dispatch last event', () => {
@@ -82,7 +84,8 @@ describe('runningSessions() last-step detail', () => {
       event({ event_type: 'operator-note' }),
     ]);
     expect(row?.lastStepRole).toBeNull();
-    expect(row?.lastStepTask).toBeNull();
+    expect(row?.lastStepTaskId).toBeNull();
+    expect(row?.lastStepTaskTitle).toBeNull();
   });
 });
 

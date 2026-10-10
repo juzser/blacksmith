@@ -12,6 +12,7 @@ import {
   columnTone,
   defaultMobileColumnKey,
   dependencyChainText,
+  dependencyChainTitle,
   epicKeyForTask,
   findGroupMember,
   foldIntoColumns,
@@ -598,8 +599,8 @@ describe('lib/kanban.ts — hasWaitingDependency() (operator fix 2026-10-05: no 
   it('is false when every dependency is done', () => {
     expect(
       hasWaitingDependency([
-        { taskId: 't1', title: null, status: 'completed' },
-        { taskId: 't2', title: null, status: 'waived' },
+        { taskId: 't1', taskTitle: null, status: 'completed' },
+        { taskId: 't2', taskTitle: null, status: 'waived' },
       ]),
     ).toBe(false);
   });
@@ -607,11 +608,23 @@ describe('lib/kanban.ts — hasWaitingDependency() (operator fix 2026-10-05: no 
   it('is true when one dependency is still open, or has no status yet', () => {
     expect(
       hasWaitingDependency([
-        { taskId: 't1', title: null, status: 'completed' },
-        { taskId: 't2', title: null, status: 'in-progress' },
+        { taskId: 't1', taskTitle: null, status: 'completed' },
+        { taskId: 't2', taskTitle: null, status: 'in-progress' },
       ]),
     ).toBe(true);
-    expect(hasWaitingDependency([{ taskId: 't3', title: null, status: null }])).toBe(true);
+    expect(hasWaitingDependency([{ taskId: 't3', taskTitle: null, status: null }])).toBe(true);
+  });
+});
+
+describe('lib/kanban.ts — dependencyChainTitle() (footer hover)', () => {
+  it('adds the dependency raw id, which names its epic, after the visible text', () => {
+    const deps = [{ taskId: 'epic-a/task-3', taskTitle: null, status: 'in-progress' }];
+    expect(dependencyChainTitle(deps)).toBe('Waits for: Task 3 (in progress) · epic-a/task-3');
+    expect(dependencyChainText(deps)).toBe('Waits for: Task 3 (in progress)');
+  });
+
+  it('is the plain text when nothing is waited on', () => {
+    expect(dependencyChainTitle([])).toBe('Waits for: nothing');
   });
 });
 
@@ -622,12 +635,12 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
 
   it('names the first dependency with its status', () => {
     expect(
-      dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }]),
+      dependencyChainText([{ taskId: 't1', taskTitle: 'Add login form', status: 'in-progress' }]),
     ).toBe('Waits for: Add login form (in progress)');
   });
 
-  it('falls back to the taskId (via taskLabel()) when the dependency has no title', () => {
-    expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe(
+  it('falls back to the id slug (via shortTaskName()) when the dependency has no title', () => {
+    expect(dependencyChainText([{ taskId: 't1', taskTitle: null, status: null }])).toBe(
       'Waits for: T1',
     );
   });
@@ -635,9 +648,9 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   it('tails off with a "+N more" count past the first dependency', () => {
     expect(
       dependencyChainText([
-        { taskId: 't1', title: 'Add login form', status: 'done' },
-        { taskId: 't2', title: 'Add logout', status: 'todo' },
-        { taskId: 't3', title: 'Add session', status: 'todo' },
+        { taskId: 't1', taskTitle: 'Add login form', status: 'done' },
+        { taskId: 't2', taskTitle: 'Add logout', status: 'todo' },
+        { taskId: 't3', taskTitle: 'Add session', status: 'todo' },
       ]),
     ).toBe('Waits for: Add login form (done) +2 more');
   });
@@ -645,8 +658,8 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   it('skips a resolved (done-tone) first dependency and falls back to the next not-done one', () => {
     expect(
       dependencyChainText([
-        { taskId: 't1', title: 'Add directory search API', status: 'completed' },
-        { taskId: 't2', title: 'Add logout', status: 'todo' },
+        { taskId: 't1', taskTitle: 'Add directory search API', status: 'completed' },
+        { taskId: 't2', taskTitle: 'Add logout', status: 'todo' },
       ]),
     ).toBe('Waits for: Add logout (todo)');
   });
@@ -654,8 +667,8 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   it('reads "nothing" when every dependency is already resolved', () => {
     expect(
       dependencyChainText([
-        { taskId: 't1', title: 'Add login form', status: 'completed' },
-        { taskId: 't2', title: 'Add logout', status: 'waived' },
+        { taskId: 't1', taskTitle: 'Add login form', status: 'completed' },
+        { taskId: 't2', taskTitle: 'Add logout', status: 'waived' },
       ]),
     ).toBe('Waits for: nothing');
   });
@@ -663,26 +676,25 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   it('does not count a skipped resolved dependency toward the "+N more" tail', () => {
     expect(
       dependencyChainText([
-        { taskId: 't1', title: 'Add login form', status: 'completed' },
-        { taskId: 't2', title: 'Add logout', status: 'todo' },
-        { taskId: 't3', title: 'Add session', status: 'todo' },
+        { taskId: 't1', taskTitle: 'Add login form', status: 'completed' },
+        { taskId: 't2', taskTitle: 'Add logout', status: 'todo' },
+        { taskId: 't3', taskTitle: 'Add session', status: 'todo' },
       ]),
     ).toBe('Waits for: Add logout (todo) +1 more');
   });
 
-  it('shortens a long objective via taskLabel() instead of printing the whole paragraph', () => {
-    // The server sets a dependency's title to the dependency task's full
-    // `objective` (queries.ts ~:3096), which can run to a multi-sentence
-    // paragraph. The footer line stays one short label, same as the card's
-    // own title, with the raw objective dropped rather than printed whole.
-    const longObjective =
-      'This is a very long multi-sentence objective describing the task in ' +
-      'extensive detail, well past the point a one-line footer can carry it.';
+  it('never prints the objective: only the dependency taskTitle names it', () => {
+    // The server's `title` is the dependency task's whole objective, a
+    // paragraph. The footer line is named from `taskTitle`, so the objective
+    // never reaches it, and a minted id never prints its hex.
     expect(
       dependencyChainText([
-        { taskId: 'epic/task-3-add-login-form', title: longObjective, status: 'in-progress' },
+        { taskId: 'epic/task-3-add-login-form', taskTitle: null, status: 'in-progress' },
       ]),
     ).toBe('Waits for: Add login form (in progress)');
+    expect(
+      dependencyChainText([{ taskId: 'epic/followup-0a1b2c3d', taskTitle: null, status: 'todo' }]),
+    ).toBe('Waits for: Follow-up fix (todo)');
   });
 });
 
@@ -761,7 +773,7 @@ describe('lib/kanban.ts — groupFollowups() (one stacked card per parent, min 2
     taskId: `epic-a/${id}`,
     taskStatus,
     parentTaskId: parent === null ? null : `epic-a/${parent}`,
-    parentTitle: parent === null ? null : `Title of ${parent}`,
+    parentTaskTitle: parent === null ? null : `Title of ${parent}`,
     updatedAt,
   });
 
@@ -779,7 +791,7 @@ describe('lib/kanban.ts — groupFollowups() (one stacked card per parent, min 2
     expect(group?.kind).toBe('group');
     if (group?.kind !== 'group') throw new Error('expected a group');
     expect(group.key).toBe('Todo:epic-a/task-1');
-    expect(group.parentTitle).toBe('Title of task-1');
+    expect(group.parentTaskTitle).toBe('Title of task-1');
     expect(group.members.map((m) => m.taskId)).toEqual([
       'epic-a/followup-2',
       'epic-a/followup-3',
@@ -848,7 +860,7 @@ describe('lib/kanban.ts — findGroupMember() (which group holds a task)', () =>
     taskId: `epic-a/${id}`,
     taskStatus: 'todo',
     parentTaskId: parent === null ? null : `epic-a/${parent}`,
-    parentTitle: null,
+    parentTaskTitle: null,
     updatedAt,
   });
   const items = groupFollowups(

@@ -47,7 +47,7 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
   });
 
   // Operator fix: the crumb reads the plain taskId, but PageHeader's title
-  // is taskLabel() (the task name when there is one) — not a pure
+  // is shortTaskName() (the task name when there is one) — not a pure
   // duplicate, so this page opts out of the default sr-only title.
   it('keeps its PageHeader title visible, since it differs from the crumb', () => {
     expect(SFC).toMatch(/<PageHeader[\s\S]{0,200}title-visible/);
@@ -83,7 +83,7 @@ describe('TaskDetailPage.vue — role labels', () => {
 
 // Task 4 (humanized task label helper): a task with no objective used to
 // head the page with its raw id ("epic-9/task-29-readme-merge-trim").
-// taskLabel() humanizes it instead; PageHeader has no spare prop for a
+// shortTaskName() names it instead; PageHeader has no spare prop for a
 // tooltip (its own `title` prop IS the heading), so the raw id stays
 // reachable via the Details rail's always-visible "Task ID" field, not a
 // hover tooltip.
@@ -98,27 +98,20 @@ describe('TaskDetailPage.vue — role labels', () => {
 // component behavior in a suite that is explicitly scoped to pure-logic
 // units. So this stays a source-text assertion like its siblings above, now
 // covering the fallback path added for the long-objective case.
-describe('TaskDetailPage.vue — humanized task label', () => {
-  it('imports taskLabel and heads the page with it', () => {
+describe('TaskDetailPage.vue — one short name, the objective as description', () => {
+  it('heads the page with the short name from the title column', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/format\.js'/);
-    expect(SFC).toContain('taskLabel(detail.task.taskId, detail.task.objective)');
+    expect(SFC).toMatch(/<PageHeader\s+:title="pageName"/);
     expect(SFC).toMatch(
-      /<PageHeader\s+:title="taskLabel\(detail\.task\.taskId, detail\.task\.objective\)"/,
+      /shortTaskName\(\s*detail\.value\.task\.taskId,\s*detail\.value\.task\.title,\s*parentLabel\(/,
     );
+    expect(SFC).not.toMatch(/taskLabel/);
   });
 
-  it('passes a description to PageHeader only when the objective differs from the heading', () => {
+  it('always passes the objective to PageHeader as its description', () => {
+    expect(SFC).toMatch(/:description="objectiveDescription\(detail\.task\.objective\)"/);
     expect(SFC).toMatch(
-      /:description="objectiveDescription\(detail\.task\.taskId, detail\.task\.objective\)"/,
-    );
-    expect(SFC).toMatch(
-      /function objectiveDescription\(taskId: string, objective: string \| null\): string \| undefined \{/,
-    );
-  });
-
-  it('falls back to undefined once the trimmed objective equals the derived label', () => {
-    expect(SFC).toMatch(
-      /return trimmed === taskLabel\(taskId, objective\) \? undefined : trimmed;/,
+      /function objectiveDescription\(objective: string \| null\): string \| undefined \{\s*return objective\?\.trim\(\) \|\| undefined;/,
     );
   });
 });

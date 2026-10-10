@@ -53,3 +53,16 @@ describe('WaveTaskCard.vue — shared id class keeps its natural width', () => {
     expect(CSS).not.toMatch(/\.bs-kanban-card__row--1 \.bs-kanban-card__id \{/);
   });
 });
+
+describe('WaveTaskCard.vue — one short name, the objective on hover', () => {
+  it('names the card from taskTitle', () => {
+    expect(SRC).toMatch(/shortTaskName\(props\.task\.taskId, props\.task\.taskTitle\)/);
+  });
+
+  it('carries the objective only as the card title attribute', () => {
+    expect(SRC).toMatch(
+      /const objective = computed\(\(\) => props\.task\.title\?\.trim\(\) \|\| undefined\)/,
+    );
+    expect(SRC).toMatch(/:title="objective"/);
+  });
+});

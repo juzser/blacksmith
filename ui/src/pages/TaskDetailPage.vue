@@ -69,7 +69,7 @@ import {
   type TaskTotals,
 } from '../lib/api.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
-import { formatDurationMs, formatElapsedRange, taskLabel } from '../lib/format.js';
+import { formatDurationMs, formatElapsedRange, parentLabel, shortTaskName } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
@@ -89,6 +89,17 @@ const { show: showToast } = useToast();
 const { isPhoneWidth } = useViewport();
 
 const detail = ref<TaskDetail | null>(null);
+// One naming function: a minted follow-up reads "Follow-up fix · <parent>" here
+// as it does on its Kanban card.
+const pageName = computed(() =>
+  detail.value
+    ? shortTaskName(
+        detail.value.task.taskId,
+        detail.value.task.title,
+        parentLabel(detail.value.parentTaskId, detail.value.parentTaskTitle),
+      )
+    : '',
+);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const activeTab = ref('overview');
@@ -350,16 +361,10 @@ const agentChipTask = computed(() => {
   };
 });
 
-// Task (long objective): taskLabel() drops the objective in favor of a
-// slug once it is longer than SHORT_TASK_LABEL_MAX, and nothing else on
-// this page showed it. This surfaces the full text as PageHeader's
-// description whenever it differs from the heading — i.e. whenever
-// taskLabel() had to fall back to the derived slug — so it stays reachable
-// without duplicating a short objective that is already the heading.
-function objectiveDescription(taskId: string, objective: string | null): string | undefined {
-  const trimmed = objective?.trim();
-  if (!trimmed) return undefined;
-  return trimmed === taskLabel(taskId, objective) ? undefined : trimmed;
+// The heading is the task's short name; the objective (a paragraph) is always
+// PageHeader's description under it, and can never equal the heading.
+function objectiveDescription(objective: string | null): string | undefined {
+  return objective?.trim() || undefined;
 }
 
 // Visual-pass item 4 (§4.7): the old "Spec contract" dl card read as raw
@@ -386,8 +391,8 @@ const factsRowText = computed(() => {
 
     <template v-else-if="detail">
       <PageHeader
-        :title="taskLabel(detail.task.taskId, detail.task.objective)"
-        :description="objectiveDescription(detail.task.taskId, detail.task.objective)"
+        :title="pageName"
+        :description="objectiveDescription(detail.task.objective)"
         title-visible
       >
         <template #status>

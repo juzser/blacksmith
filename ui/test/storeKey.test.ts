@@ -20,7 +20,7 @@ describe('groupFollowups across stores', () => {
     taskId,
     store: { id: store, label: store },
     parentTaskId: parent,
-    parentTitle: null,
+    parentTaskTitle: null,
     updatedAt: '2026-01-01T00:00:00Z',
   });
   it('does not stack follow-ups of equal parent ids from different stores', () => {

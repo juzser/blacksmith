@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   axisDayLabels,
-  boardTitle,
   dailyTokensTakeaway,
   formatAbsolute,
   formatBudgetPct,
@@ -21,8 +20,8 @@ import {
   parentLabel,
   pluralize,
   shortTaskId,
+  shortTaskName,
   summarize,
-  taskLabel,
 } from '../src/lib/format.js';
 
 describe('lib/format.ts formatRelative()', () => {
@@ -251,36 +250,60 @@ describe('lib/format.ts formatCompactNumber()', () => {
   });
 });
 
-// OverviewPage's "Recent dispatch decisions" and Timeline both show a bare
-// taskId when nothing better is on hand (queries.ts's `tasks` table carries
-// no title). taskLabel() is the one place that turns
-// "epic-x/task-29-readme-merge-trim" into "Readme merge trim" so neither
+// One task is named the same short way on every surface: shortTaskName() is
+// the one place that decides it (title, else slug, else "Follow-up fix"), so no
 // page re-derives the slug rules inline (D-221).
-describe('lib/format.ts taskLabel()', () => {
-  it('derives a label from the id when no title is given', () => {
-    expect(taskLabel('epic-x/task-29-readme-merge-trim')).toBe('Readme merge trim');
+describe('lib/format.ts shortTaskName()', () => {
+  const longTitle =
+    'Rewrite the entire onboarding flow end to end including every edge case we can think of';
+  const hex = /[0-9a-f]{8}/;
+
+  it('derives a name from the plan slug when no title is given', () => {
+    expect(shortTaskName('epic-x/task-29-readme-merge-trim')).toBe('Readme merge trim');
   });
 
   it('strips a leading task-<n>- prefix even without an epic path segment', () => {
-    expect(taskLabel('task-3-fix-lint')).toBe('Fix lint');
+    expect(shortTaskName('task-3-fix-lint')).toBe('Fix lint');
   });
 
   it('prefers a short, non-empty title over the derived slug', () => {
-    expect(taskLabel('epic-x/task-29-readme-merge-trim', 'Merge trim')).toBe('Merge trim');
+    expect(shortTaskName('epic-x/task-29-readme-merge-trim', 'Merge trim')).toBe('Merge trim');
   });
 
-  it('falls back to the derived slug when the title is empty', () => {
-    expect(taskLabel('epic-x/task-29-readme-merge-trim', '')).toBe('Readme merge trim');
+  it('falls back to the derived slug when the title is empty or null', () => {
+    expect(shortTaskName('epic-x/task-29-readme-merge-trim', '')).toBe('Readme merge trim');
+    expect(shortTaskName('epic-x/task-29-readme-merge-trim', null)).toBe('Readme merge trim');
   });
 
-  it('falls back to the derived slug when the title is too long to be a label', () => {
-    const longTitle =
-      'Rewrite the entire onboarding flow end to end including every edge case we can think of';
-    expect(taskLabel('epic-x/task-29-readme-merge-trim', longTitle)).toBe('Readme merge trim');
+  it('falls back to the derived slug when the title is longer than 60 characters', () => {
+    expect(longTitle.length).toBeGreaterThan(60);
+    expect(shortTaskName('epic-x/task-29-readme-merge-trim', longTitle)).toBe('Readme merge trim');
   });
 
   it('handles an id with no task- prefix by just spacing and capitalizing it', () => {
-    expect(taskLabel('cleanup-orphan-rows')).toBe('Cleanup orphan rows');
+    expect(shortTaskName('cleanup-orphan-rows')).toBe('Cleanup orphan rows');
+  });
+
+  it('never prints the hex of a minted id', () => {
+    for (const id of [
+      'epic-a/followup-0a1b2c3d',
+      '20260918-e6492f02.security',
+      'epic-a/0a1b2c3d',
+    ]) {
+      const text = shortTaskName(id, longTitle);
+      expect(text).toBe('Follow-up fix');
+      expect(text).not.toMatch(hex);
+    }
+  });
+
+  it('names a minted follow-up by its own short title when it has one', () => {
+    expect(shortTaskName('epic-a/followup-0a1b2c3d', 'Clip the label')).toBe('Clip the label');
+  });
+
+  it('appends the parent to a generic follow-up name', () => {
+    expect(shortTaskName('epic-a/followup-0a1b2c3d', null, 'Settings layout')).toBe(
+      'Follow-up fix · Settings layout',
+    );
   });
 });
 
@@ -501,40 +524,8 @@ describe('lib/format.ts formatCompactValue()', () => {
   });
 });
 
-describe('lib/format.ts boardTitle() / parentLabel() (Kanban readable titles)', () => {
+describe('lib/format.ts parentLabel() (a follow-up names its origin)', () => {
   const long = `Fix: ${'the label is clipped on narrow screens and '.repeat(3)}done`;
-
-  it('keeps a short objective as is', () => {
-    expect(boardTitle('epic-a/task-1-settings', 'Settings layout')).toBe('Settings layout');
-  });
-
-  it('keeps a long objective whole instead of falling back to the id slug', () => {
-    expect(long.length).toBeGreaterThan(60);
-    expect(boardTitle('epic-a/followup-0a1b2c3d', long)).toBe(long);
-  });
-
-  it('humanises a plan task id without its ordinal when there is no objective', () => {
-    expect(boardTitle('epic-a/task-12-settings-layout', null)).toBe('Settings layout');
-    expect(boardTitle('epic-a/task-12-settings-layout', '  ')).toBe('Settings layout');
-  });
-
-  it('never prints the hex of a minted id', () => {
-    for (const id of [
-      'epic-a/followup-0a1b2c3d',
-      '20260918-e6492f02.security',
-      'epic-a/0a1b2c3d',
-    ]) {
-      const text = boardTitle(id, null);
-      expect(text).toBe('Follow-up fix');
-      expect(text).not.toMatch(/[0-9a-f]{8}/);
-    }
-  });
-
-  it('appends the parent to a generic follow-up title', () => {
-    expect(boardTitle('epic-a/followup-0a1b2c3d', null, 'Settings layout')).toBe(
-      'Follow-up fix · Settings layout',
-    );
-  });
 
   it('reads the parent from its title, else its plan slug, else nothing', () => {
     expect(parentLabel('epic-a/task-1-settings', 'Settings layout')).toBe('Settings layout');
@@ -543,8 +534,10 @@ describe('lib/format.ts boardTitle() / parentLabel() (Kanban readable titles)', 
     expect(parentLabel(null, null)).toBeNull();
   });
 
-  it('leaves taskLabel() as it was: a long title still falls back to the slug', () => {
-    expect(taskLabel('epic-a/followup-0a1b2c3d', long)).toBe('Followup 0a1b2c3d');
+  it('never reads a parent title longer than 60 characters', () => {
+    expect(long.length).toBeGreaterThan(60);
+    expect(parentLabel('epic-a/task-1-settings-layout', long)).toBe('Settings layout');
+    expect(parentLabel('epic-a/followup-0a1b2c3d', long)).toBeNull();
   });
 });
 

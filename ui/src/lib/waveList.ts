@@ -12,13 +12,17 @@ import type {
   StatusCounts,
 } from './api.js';
 import { edgeWords } from './edgeWords.js';
+import { shortTaskName } from './format.js';
 import { isTaskOver, type KitTone } from './taxonomy.js';
 
 export type WaveKind = 'past' | 'current' | 'upcoming';
 
 export interface WaveTaskInfo {
   taskId: string;
+  /** The task's objective: hover text only. */
   title: string | null;
+  /** The `tasks.title` column; null when unset. Names the task. */
+  taskTitle: string | null;
   taskStatus: string;
   workingAgentRole: string | null;
   /** §2's "After T3 · uses its output" line, or null with no incoming edge. */
@@ -179,22 +183,33 @@ export interface WaveInfo {
  * dependencyChainText() names one dependency and tails the rest as "+N
  * more". Null when the node has no incoming edge (no line is shown).
  */
-export function dependencyLine(edges: FlowEdge[], taskId: string): string | null {
+export function dependencyLine(
+  edges: FlowEdge[],
+  taskId: string,
+  taskTitles: ReadonlyMap<string, string | null> = new Map(),
+): string | null {
   const incoming = edges.filter((e) => e.task === taskId);
   const first = incoming[0];
   if (!first) return null;
   const rest = incoming.length - 1;
   const extra = rest > 0 ? ` +${rest} more` : '';
-  return `After ${first.dependsOn} · ${edgeWords(first.edgeType)}${extra}`;
+  const name = shortTaskName(first.dependsOn, taskTitles.get(first.dependsOn));
+  return `After ${name} · ${edgeWords(first.edgeType)}${extra}`;
 }
 
-function taskInfo(node: FlowNode | undefined, taskId: string, edges: FlowEdge[]): WaveTaskInfo {
+function taskInfo(
+  node: FlowNode | undefined,
+  taskId: string,
+  edges: FlowEdge[],
+  taskTitles: ReadonlyMap<string, string | null>,
+): WaveTaskInfo {
   return {
     taskId,
     title: node?.title ?? null,
+    taskTitle: node?.taskTitle ?? null,
     taskStatus: node?.taskStatus ?? 'todo',
     workingAgentRole: node?.workingAgentRole ?? null,
-    dependencyLine: dependencyLine(edges, taskId),
+    dependencyLine: dependencyLine(edges, taskId, taskTitles),
   };
 }
 
@@ -247,6 +262,7 @@ export function waveLabel(
  */
 export function buildWaveList(graph: Pick<FlowGraph, 'waves' | 'nodes' | 'edges'>): WaveInfo[] {
   const nodeById = new Map(graph.nodes.map((n) => [n.taskId, n]));
+  const taskTitles = new Map(graph.nodes.map((n) => [n.taskId, n.taskTitle ?? null]));
   const total = graph.waves.length;
   const isPast = graph.waves.map(
     (ids) => ids.length > 0 && ids.every((id) => isTaskOver(nodeById.get(id)?.taskStatus ?? '')),
@@ -263,7 +279,7 @@ export function buildWaveList(graph: Pick<FlowGraph, 'waves' | 'nodes' | 'edges'
       doneCount,
       taskCount: ids.length,
       pct: ids.length > 0 ? Math.round((doneCount / ids.length) * 100) : 0,
-      tasks: ids.map((id) => taskInfo(nodeById.get(id), id, graph.edges)),
+      tasks: ids.map((id) => taskInfo(nodeById.get(id), id, graph.edges, taskTitles)),
     };
   });
 }

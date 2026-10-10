@@ -18,12 +18,13 @@ import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import { useFittedTitle } from '../composables/useFittedTitle.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
-import { boardTitle, parentLabel } from '../lib/format.js';
+import { parentLabel, shortTaskName } from '../lib/format.js';
 import {
   agentChip,
   attemptLabel,
   cardChips,
   dependencyChainText,
+  dependencyChainTitle,
   hasWaitingDependency,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
@@ -55,12 +56,14 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [taskId: string, storeId?: string] }>();
 
 const title = computed(() =>
-  boardTitle(
+  shortTaskName(
     props.task.taskId,
-    props.task.title,
-    parentLabel(props.task.parentTaskId, props.task.parentTitle),
+    props.task.taskTitle,
+    parentLabel(props.task.parentTaskId, props.task.parentTaskTitle),
   ),
 );
+// The objective is the hover text of the name; absent when the task has none.
+const objective = computed(() => props.task.title?.trim() || undefined);
 // Measured two-line fit (shared with the follow-up group): see useFittedTitle.
 const titleEl = ref<HTMLElement | null>(null);
 const { fitted, titleHead, titleTail } = useFittedTitle(titleEl, title);
@@ -78,6 +81,7 @@ const markText = computed(() =>
 );
 const markLabel = computed(() => markWords(props.mark ?? null));
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
+const footerDependencyTitle = computed(() => dependencyChainTitle(props.task.dependencies));
 const hasWaiting = computed(() => hasWaitingDependency(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
@@ -121,7 +125,7 @@ function onCardClick(event: MouseEvent) {
       type="button"
       class="bs-kanban-card__open"
       :aria-label="`${title}${markLabel}, opens task detail`"
-      :title="fitted ? title : undefined"
+      :title="objective ?? (fitted ? title : undefined)"
       @click="onSelect"
     ></button>
     <div v-if="!compact && (markText || chip)" class="bs-kanban-card__row bs-kanban-card__row--1">
@@ -129,7 +133,7 @@ function onCardClick(event: MouseEvent) {
       <AgentChip v-else :task="{ ...task, updatedAt: task.updatedAt }" />
     </div>
 
-    <p ref="titleEl" class="bs-kanban-card__title">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
+    <p ref="titleEl" class="bs-kanban-card__title" :title="objective">{{ titleHead }}<span class="bs-kanban-card__title-tail">{{ titleTail }}<IconButton
         :icon="Link"
         :label="copyIdLabel"
         size="sm"
@@ -175,7 +179,7 @@ function onCardClick(event: MouseEvent) {
       <span
         v-if="hasWaiting"
         class="bs-kanban-card__footer-dep"
-        :title="footerDependency"
+        :title="footerDependencyTitle"
         >{{ footerDependency }}</span
       >
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>

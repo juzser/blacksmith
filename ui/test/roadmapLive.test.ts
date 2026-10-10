@@ -236,9 +236,9 @@ describe('WaveTaskCard name', () => {
     expect(shortTaskName('epic-a/followup-1a2b3c4d')).toBe('Follow-up fix');
   });
 
-  it('names the card from the id alone, never from the objective in title', () => {
-    expect(SRC).toMatch(/shortTaskName\(props\.task\.taskId\)/);
-    expect(SRC).not.toMatch(/shortTaskName\([^)]*title/);
+  it('names the card from taskTitle, never from the objective in title', () => {
+    expect(SRC).toMatch(/shortTaskName\(props\.task\.taskId, props\.task\.taskTitle\)/);
+    expect(SRC).not.toMatch(/shortTaskName\([^)]*task\.title/);
     expect(SRC).not.toMatch(/taskLabel/);
   });
 });
