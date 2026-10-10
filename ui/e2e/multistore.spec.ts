@@ -842,6 +842,65 @@ test.describe('a foreign store in the dashboard', () => {
       await expect(page.getByText('in another store')).toHaveCount(0);
     });
 
+    // 1280 is the desktop baseline; 901 is the narrowest width where the two
+    // chart cards still sit side by side (they stack at 900 and below).
+    for (const width of [1280, 901]) {
+      test(`the daily token chart labels its ends and cuts no date at ${width}px`, async ({
+        page,
+      }) => {
+        await setTheme(page, 'light');
+        await page.setViewportSize({ width, height: 900 });
+        await pinDays(page);
+        await page.goto(`${origin}/analytics?scope=all`);
+        const card = page.locator('.bs-card').filter({
+          has: page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+        });
+        await expect(card.locator('.bs-bars__col').first()).toBeVisible();
+        // The old per-column labels are gone under a day axis.
+        await expect(card.locator('.bs-bars__x')).toHaveCount(0);
+        // No axis label is cut off. scrollWidth and clientWidth are rounded to
+        // whole pixels, so a label clipped by a fraction of a pixel reads as
+        // not cut: compare the text's own box with the element's instead.
+        const cut = await card.locator('.bs-bars__axis > span').evaluateAll(
+          (els) =>
+            els.filter((el) => {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.01;
+            }).length,
+        );
+        expect(cut).toBe(0);
+        // The two labels do not overlap and both sit inside the plot.
+        const box = async (selector: string, index = 0) => {
+          const rect = await card.locator(selector).nth(index).boundingBox();
+          if (!rect) throw new Error(`${selector} has no box`);
+          return rect;
+        };
+        const plot = await box('.bs-bars__plot');
+        const first = await box('.bs-bars__axis > span', 0);
+        const second = await box('.bs-bars__axis > span', 1);
+        expect(first.x + first.width).toBeLessThan(second.x);
+        expect(first.x).toBeGreaterThanOrEqual(plot.x - 0.5);
+        expect(second.x + second.width).toBeLessThanOrEqual(plot.x + plot.width + 0.5);
+        // The labels sit 4px under the baseline and the legend 8px under the
+        // labels (ds-review.html .xaxis / .legend).
+        const axisBox = await box('.bs-bars__axis');
+        const legend = await box('.bs-bars__legend');
+        expect(Math.abs(axisBox.y - (plot.y + plot.height) - 4)).toBeLessThanOrEqual(1);
+        expect(Math.abs(legend.y - (axisBox.y + axisBox.height) - 8)).toBeLessThanOrEqual(1);
+        // Adjacent columns sit 4px apart (ds-review.html .vchart gap).
+        const col0 = await box('.bs-bars__col', 0);
+        const col1 = await box('.bs-bars__col', 1);
+        expect(Math.abs(col1.x - (col0.x + col0.width) - 4)).toBeLessThanOrEqual(0.5);
+        // The axis names the first and the last plotted day, and only those.
+        const days = (
+          await card.locator('table.sr-only tbody td:first-child').allTextContents()
+        ).map((d) => Number(d.slice(-2)));
+        const axis = card.locator('.bs-bars__axis > span');
+        await expect(axis).toHaveText([`${days[0]} Jan`, `${days[days.length - 1]} Jan`]);
+      });
+    }
+
     for (const [name, viewport] of [
       ['desktop-light', VIEWPORTS.desktop],
       ['phone-light', { width: 375, height: 812 }],
