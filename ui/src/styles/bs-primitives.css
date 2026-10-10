@@ -536,12 +536,6 @@ a:hover {
     flex: none;
     white-space: nowrap;
   }
-  /* No taller hit box here: the row is 65px and already holds the title
-     button's 44px box above this line, so a second 44px box would sit on
-     the title's own text. The width still reaches the floor. */
-  .bs-timeline-row__ts--meta::after {
-    height: 100%;
-  }
 }
 /* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
    on phone must match the mock's touch-sized row, not the desktop row. */
@@ -744,15 +738,18 @@ a:hover {
 }
 /* The detail's copy of the link is phone-only; the meta line's copy is
    desktop-only (ds-review.html #p-activity: on phone "because of" moves into
-   the detail, so the meta line stays one line ending in the time). */
-.bs-timeline-row__cause {
+   the detail, so the meta line stays one line ending in the time). The detail's
+   Time pair is phone-only too: desktop has the time column's tooltip. */
+.bs-timeline-row__cause,
+.bs-timeline-row__phone-only {
   display: none;
 }
 @media (max-width: 640px) {
   .bs-timeline-row__because-of--meta {
     display: none;
   }
-  .bs-timeline-row__cause {
+  .bs-timeline-row__cause,
+  .bs-timeline-row__phone-only {
     display: revert;
   }
   /* Tap target: same box trick as the Session link below. */
@@ -3221,19 +3218,10 @@ summary.bs-inbox__group-head {
   .bs-live-card .bs-card__body {
     padding: var(--bs-space-3);
   }
-  /* The status row's time keeps its text height: the head link's grown hit
-     box ends right above it and the title's starts right below, so a 44px
-     box here would sit on both. Its width still reaches the floor. A follow-up
-     fix row's time (.bs-kanban-group__row-meta) is the same: the row's copy
-     button sits right above it and the next row's open button right below. */
-  .bs-live-card__status .bs-reltime::after,
-  .bs-kanban-group__row-meta .bs-reltime::after {
-    height: 100%;
-  }
   .bs-live-card__head {
     flex-direction: column;
-    /* Wider than the usual 4px: the status row's time is a focusable
-       tooltip trigger, so the title link's grown hit box must stop above it. */
+    /* Wider than the usual 4px: the title link's grown hit box must stop
+       above the status row. */
     gap: var(--bs-space-4);
   }
   /* 44px hit boxes without growing the layout, and without two hit boxes

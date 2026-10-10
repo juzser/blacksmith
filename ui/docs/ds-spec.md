@@ -384,7 +384,7 @@ Blue means one thing: "this is the action" or "this is you". Everything else is 
 | `ProgressRing` | `value`, `max?` (default 100), `tone?` (auto when omitted), `label` (required, plain sentence, e.g. "71% of token budget used") | 20px inline SVG ring (`r=8`, `pathLength=100`, 2.5px stroke): track `--bs-border`, fill in the tone colour; the % number sits to its right at 14px/400 `--bs-text`. Inside a phone Cost & quality stat tile the number takes the tile's 18px value size (400), as in the mock. Wrapper is `role="img"` + `aria-label`=`label`; hover/focus shows a `Tooltip` with the exact values ("127,402,118 of 180,000,000 tokens (71%)"). CSS class `.pring` |
 | `ProgressBarMini` | same props as `ProgressRing` | 56×6px rounded track (`--bs-border`) with a tone fill, number to the right at 12px/400. Same a11y contract. CSS class `.pmini`, number `.pnum` |
 | `BarChart` (prop addition) | gains an optional `stacked: boolean` + `series: [{key, tone}]` pair (pattern 10, §2.4c) — same inline-SVG/`role="img"`/sr-only-`<table>` accessible contract, same `takeaway` requirement, just a second render path for a per-role/per-tier stacked daily series instead of one bar per day |
-| `RelativeTime` | `iso`, `now?` (test seam), `duration?` (reads "for 12 min" / "for 2 h" / "just now" instead, for how long something has been in its current state; `LiveSessionCard` only) | renders "5 min ago" / "2 h ago" / "3 d ago" inside a `<time datetime>`; the absolute time ("30 Sep 2026, 14:07:12") in a `Tooltip` (describe mode, the element is focusable), not a `title` attribute — the single implementation for every relative-time surface named in the brief. `plain` renders only the `<time datetime>` with the relative text, no `Tooltip`, no tab stop: used inside a control that is itself the target (a `SessionRow` button), where a second tab stop would nest |
+| `RelativeTime` | `iso`, `now?` (test seam), `duration?` (reads "for 12 min" / "for 2 h" / "just now" instead, for how long something has been in its current state; `LiveSessionCard` only) | renders "5 min ago" / "2 h ago" / "3 d ago" inside a `<time datetime>`; the absolute time ("30 Sep 2026, 14:07:12") in a `Tooltip` (describe mode, the element is focusable), not a `title` attribute — the single implementation for every relative-time surface named in the brief. `plain` renders only the `<time datetime>` with the relative text, no `Tooltip`, no tab stop: used inside a control that is itself the target (a `SessionRow` button), where a second tab stop would nest, and at ≤640px in three cramped rows where a 44px time box would sit on the buttons beside it (the timeline row's phone meta-line time, the live session card's status time, a Kanban follow-up fix row's time); desktop keeps the tooltip there |
 
 **Progress tones and placement.** Tone is computed when `tone` is omitted: for a budget
 (`max` is a budget) `< 90%` accent, `>= 90%` warning, `> 100%` danger (ring drawn full,
@@ -1115,9 +1115,12 @@ meta line reads "Caused N dispatches shown here".
 **Meta line and details** (`TimelineRow`, shared by Activity, Home and task history).
 Collapsed (default): line 1 is the kind tag and the title; line 2 is the muted meta line —
 at most 4 items joined by " · ", most useful first. On desktop the time stays in the time
-column; on phone the time is the last meta item. The role is dropped from the meta line
-when the title already names it. Expanded (chevron): a two-column `dl` (label
-`--bs-text-subtle`, value `--bs-text`, 12px desktop / 13px phone). **Only fields that exist
+column; on phone the time is the last meta item, as plain text (no tooltip, no tab stop).
+The role is dropped from the meta line when the title already names it. Expanded
+(chevron): a two-column `dl` (label `--bs-text-subtle`, value `--bs-text`, 12px desktop /
+13px phone). On phone the body carries a Time pair (the full time, "30 Sep 2026, 14:07:12")
+just before "Because of", which stays last; desktop shows the full time in the time column's
+tooltip instead, so the pair is hidden there. **Only fields that exist
 are rendered — never an empty label, never "—".** A kind with no useful stats (System:
 "Session … started") has no meta line and no chevron.
 

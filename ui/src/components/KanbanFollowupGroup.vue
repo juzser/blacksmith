@@ -15,6 +15,7 @@ import { ChevronDown, Clock, Link } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import { useFittedTitle } from '../composables/useFittedTitle.js';
+import { useViewport } from '../composables/useViewport.js';
 import type { KanbanTask } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { boardTitle } from '../lib/format.js';
@@ -94,6 +95,7 @@ const liveChipTask = computed(() => liveMembers.value[0] ?? null);
 
 const titleEl = ref<HTMLElement | null>(null);
 const { fitted, titleHead, titleTail } = useFittedTitle(titleEl, title);
+const { isPhoneWidth } = useViewport();
 
 function onToggle(event: Event) {
   if ((event.target as HTMLDetailsElement).open !== props.open) emit('toggle');
@@ -206,7 +208,7 @@ function onRowClick(event: MouseEvent, task: KanbanTask) {
             <AgentChip v-else-if="agentChip(task)?.live" :task="task" />
             <span v-else class="bs-kanban-card__meta">
               <Icon :icon="Clock" :size="14" />
-              <RelativeTime :iso="task.updatedAt" />
+              <RelativeTime :iso="task.updatedAt" :plain="isPhoneWidth" />
             </span>
           </span>
         </div>

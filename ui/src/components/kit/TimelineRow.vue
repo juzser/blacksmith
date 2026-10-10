@@ -8,12 +8,13 @@
 // state from one place.
 import { ChevronDown, ChevronRight, CircleCheck, CircleX } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { formatTime } from '../../lib/format.js';
+import { formatAbsolute, formatTime } from '../../lib/format.js';
 import { isPastStaleWindow } from '../../lib/liveness.js';
 import { foreignStoreId, storeKey } from '../../lib/storeKey.js';
 // DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
 // replaces HH:MM everywhere this row renders (Activity, task History, Home
-// compact); RelativeTime itself carries the absolute time in its tooltip.
+// compact); RelativeTime carries the absolute time in its tooltip, except in
+// the phone meta line, where the expanded detail's Time pair carries it.
 import type { KitTone } from '../../lib/taxonomy.js';
 import {
   type ActivityEntry,
@@ -187,13 +188,15 @@ function onBecauseOf() {
         <span v-if="meta || hasPromptLink" :class="{ 'bs-timeline-row__meta-main': hasPromptLink }"><template v-if="!hasPromptLink">{{ meta }}</template><span v-else-if="meta" class="bs-timeline-row__meta-text">{{ meta }}</span><span v-if="hasPromptLink" class="bs-timeline-row__because-of--meta">{{ meta ? ' · ' : '' }}because of <button type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">your prompt at {{ formatTime(ctx?.promptTs ?? '') }}</button></span></span>
         <!-- Phone (ds-spec.md §4.1 1b): the meta line ends with the time
              instead of the dedicated time column below, which hides there. -->
-        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
+        <!-- Plain: this copy only shows on phone, where a 44px tooltip box would
+             sit on the title button above it. The Time pair has the full time. -->
+        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" plain />
       </div>
       <!-- Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
            meta text still needs its time to show on phone, so it gets its own
            meta line holding only the time instead of skipping the line. -->
       <div v-else class="bs-timeline-row__meta">
-        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
+        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" plain />
       </div>
       <!-- v-show, not v-if: aria-controls above names this id unconditionally
            while collapsed, so the element it names must exist unconditionally
@@ -237,6 +240,11 @@ function onBecauseOf() {
             <RouterLink :to="sessionLink">{{ entry.sessionTitle }}</RouterLink>
           </dd>
         </template>
+        <!-- Phone only: the meta line's time is plain text there, so the full
+             time lives here, just before "Because of". Desktop has the time
+             column's tooltip. -->
+        <dt class="bs-timeline-row__phone-only">Time</dt>
+        <dd class="bs-timeline-row__phone-only"><time :datetime="entry.ts">{{ formatAbsolute(entry.ts) }}</time></dd>
         <!-- Phone only (ds-review.html #p-activity: "because of" moves into the
              detail, last as in #ap-1); on desktop the link stays in the meta line above. -->
         <template v-if="hasPromptLink">
