@@ -4756,11 +4756,14 @@ h2.rm-section__head {
    (information beats bar length). The title + done count span stays at its
    natural width; .tb-right takes the remaining space and the
    ProgressBarMini inside it is the element that actually shrinks. The %
-   and the Tag never shrink. Desktop .whead above is untouched. */
+   and the Tag never shrink. When even a zero-length bar leaves no room for
+   the % and the Tag (a nested row at 320px), .tb-right wraps whole onto a
+   second line instead of overflowing the row. Desktop .whead above is
+   untouched. */
 .wave-list--compact .whead {
   flex: 1;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 .wave-list--compact .whead > span:first-child {
   flex-shrink: 0;
@@ -4772,7 +4775,7 @@ h2.rm-section__head {
 }
 .wave-list--compact .tb-right {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: min-content;
   flex-wrap: nowrap;
 }
 /* DS4 S4 fix round 4 — the % number overlapped the Tag: .pmini's

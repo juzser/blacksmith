@@ -87,11 +87,11 @@ describe('bs-primitives.css — WaveList compact flat rows (fix round 1 #4)', ()
 });
 
 describe('bs-primitives.css — current wave row on one line (fix round 2)', () => {
-  it('keeps .whead from wrapping onto a second line in compact mode only', () => {
+  it('lets .tb-right wrap onto a second line when the row cannot hold it, in compact mode only', () => {
     const decl = rule('.wave-list--compact .whead');
     expect(decl).toMatch(/flex:\s*1/);
     expect(decl).toMatch(/min-width:\s*0/);
-    expect(decl).toMatch(/flex-wrap:\s*nowrap/);
+    expect(decl).toMatch(/flex-wrap:\s*wrap/);
   });
 
   it('leaves the unscoped .whead untouched, so desktop stays byte-identical', () => {
@@ -117,7 +117,7 @@ describe('bs-primitives.css — current wave row on one line (fix round 2)', () 
   it('lets .tb-right take the remaining space instead of staying fixed (fix round 3)', () => {
     const decl = rule('.wave-list--compact .tb-right');
     expect(decl).toMatch(/flex:\s*1\s*1\s*auto/);
-    expect(decl).toMatch(/min-width:\s*0/);
+    expect(decl).toMatch(/min-width:\s*min-content/);
     expect(decl).toMatch(/flex-wrap:\s*nowrap/);
   });
 
