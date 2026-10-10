@@ -855,6 +855,35 @@ test.describe('Home: Recent activity', () => {
     await expect(label).toHaveCSS('text-overflow', 'ellipsis');
   });
 
+  // ds-review.html:650-651: the compact feed's head does not wrap and its
+  // title is `flex: 1` with ellipsis, so on desktop a long title stays on the
+  // kind tag's line as one ellipsized line (it must not drop under the tag).
+  test('1280px: a long compact title stays on the tag line, one line with ellipsis', async ({
+    page,
+  }) => {
+    const entries = syntheticEntries(8).map((entry, i) =>
+      i === 0
+        ? { ...entry, payload: { prompt: 'A long synthetic compact title '.repeat(20) } }
+        : entry,
+    );
+    await serveTimeline(page, entries);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+
+    const row = page.locator('.bs-timeline-row--compact').first();
+    await expect(row).toBeVisible();
+    const tag = row.locator('.bs-event-kind-tag');
+    const title = row.locator('.bs-timeline-row__title');
+    const tagBox = await tag.boundingBox();
+    const titleBox = await title.boundingBox();
+    expect(titleBox?.y ?? 0).toBeLessThan((tagBox?.y ?? 0) + (tagBox?.height ?? 0));
+    expect(titleBox?.height ?? 0).toBeLessThan(
+      (await title.evaluate((el) => Number.parseFloat(getComputedStyle(el).lineHeight))) * 2,
+    );
+    await expect(title).toHaveCSS('text-overflow', 'ellipsis');
+    expect(await title.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  });
+
   // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
   // meta text (session-started has none) used to render no meta line at
   // all on phone, so it showed no time. Every visible row must show one.
