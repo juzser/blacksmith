@@ -82,6 +82,8 @@ const props = defineProps<{
   epics?: EpicSection[];
   /** Phone phase mode: only the epic rows, without the phase's name, tag and totals. */
   epicsOnly?: boolean;
+  /** With epicsOnly: the name of the phase the live epic is listed in. */
+  liveInPhase?: string;
   /** DS4 S5c §1 — phase-mode's own stacked bar, same server data. */
   statusCounts?: StatusCounts;
   // Epic mode — set instead of the phase-mode props above.
@@ -236,6 +238,9 @@ function toggle(epic: EpicSection) {
     <!-- DS4 S4 §1 — phone phase mode: a stacked list, no swimlane, no bar
          chart. Hidden entirely on desktop/tablet. -->
     <template v-if="isPhoneWidth">
+      <p v-if="epicsOnly && liveInPhase" class="card-sum muted bs-roadmap-mobile__live-in">
+        Live in {{ liveInPhase }}
+      </p>
       <div v-if="!epicsOnly" class="card-meta">
         {{ name }}
         <Tag :tone="statusTone ?? 'neutral'" size="sm">{{ statusLabel }}</Tag>

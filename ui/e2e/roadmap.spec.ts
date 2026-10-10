@@ -1345,7 +1345,12 @@ function liveSession(
 
 async function stubLiveRoadmap(
   page: Page,
-  opts: { liveStores?: Array<typeof STORE_A>; merged?: boolean; plannedPhase?: boolean } = {},
+  opts: {
+    liveStores?: Array<typeof STORE_A>;
+    merged?: boolean;
+    plannedPhase?: boolean;
+    phaseName?: string;
+  } = {},
 ): Promise<void> {
   const liveStores = opts.liveStores ?? [STORE_A, STORE_B];
   const isLive = (store: typeof STORE_A) => liveStores.some((s) => s.id === store.id);
@@ -1356,7 +1361,7 @@ async function stubLiveRoadmap(
         ? []
         : [
             liveMilestone(STORE_A, 'epic-a'),
-            liveMilestone(STORE_B, 'epic-b'),
+            { ...liveMilestone(STORE_B, 'epic-b'), name: opts.phaseName ?? 'Phase 1' },
             // A planned second phase in store-b that lists no epic.
             ...(opts.plannedPhase
               ? [
@@ -1719,6 +1724,9 @@ test.describe('Roadmap: every live epic is Current and open', () => {
     const rowB = page.locator('.bs-roadmap-mobile__row').filter({ hasText: 'epic-b' });
     await expect(rowB).toHaveCount(1);
     await expect(rowB).toContainText('Current');
+    await expect(
+      page.getByRole('region', { name: 'Live epic: goal and epics' }).locator('> :first-child'),
+    ).toHaveText('Live in Phase 1');
     await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toHaveCount(1);
     await expect(page.getByText('Wave 1 of 2')).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Epic epic-b' })).toHaveCount(0);
@@ -1738,6 +1746,63 @@ test.describe('Roadmap: every live epic is Current and open', () => {
       1,
     );
     await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toHaveCount(1);
+    await expect(page.getByText('Live in', { exact: false })).toHaveCount(0);
+  });
+
+  test('phone: the compact live epic names its phase, two lines at most', async ({ page }) => {
+    await setTheme(page, 'light');
+    await stubLiveRoadmap(page, {
+      plannedPhase: true,
+      phaseName:
+        'Phase 1 \u2014 Integrations hardening and the settings migration across every workspace surface and the audit log rewrite for every connected store',
+    });
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto('/work/roadmap');
+      await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toBeVisible();
+      await expect(page.getByText('Live in', { exact: false })).toHaveCount(0);
+      await page.locator('select[aria-label="project-b phase"]').selectOption('phase-2');
+      const block = page.getByRole('region', { name: 'Live epic: goal and epics' });
+      const label = block.locator('.bs-roadmap-mobile__live-in');
+      await expect(label).toHaveCount(1);
+      await expect(label).toContainText('Live in Phase 1');
+      await expect(page.getByRole('region', { name: 'Phase 2: goal and epics' })).toBeVisible();
+      const fit = await label.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        const lines = Math.round(
+          el.getBoundingClientRect().height / Number.parseFloat(cs.lineHeight),
+        );
+        const card = el.closest('.eblock')?.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        // Unclamped, the long name needs more than two lines, so the clamp is what cuts it.
+        const h = el as HTMLElement;
+        h.style.setProperty('-webkit-line-clamp', 'none');
+        h.style.setProperty('line-clamp', 'none');
+        const free = Math.round(
+          h.getBoundingClientRect().height / Number.parseFloat(cs.lineHeight),
+        );
+        h.style.removeProperty('-webkit-line-clamp');
+        h.style.removeProperty('line-clamp');
+        return {
+          lines,
+          clipped: free > 2,
+          inside: !!card && r.left >= card.left && r.right <= card.right,
+        };
+      });
+      expect(fit.lines).toBeLessThanOrEqual(2);
+      expect(fit.clipped).toBe(true);
+      expect(fit.inside).toBe(true);
+      await expect(label).toHaveCSS('-webkit-line-clamp', '2');
+    }
+  });
+
+  test('phone: both live, no "Live in" line', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 375, height: 812 });
+    await stubLiveRoadmap(page);
+    await page.goto('/work/roadmap');
+    await expect(page.locator('.whead').filter({ hasText: 'Wave 2 of 2' })).toBeVisible();
+    await expect(page.getByText('Live in', { exact: false })).toHaveCount(0);
   });
 
   test('a store-b epic in the merged Epics section opens its own wave, read from store-b', async ({

@@ -4627,6 +4627,16 @@ h2.rm-section__head {
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
 }
+/* The live epic's phase label: two lines, then an ellipsis (the Roadmap lane rule). */
+.bs-roadmap-mobile__live-in {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
 .bs-roadmap-mobile__list {
   list-style: none;
   margin: 0;

@@ -888,6 +888,7 @@ async function closePeek() {
           v-else-if="item.live && item.liveInPhase"
           name="Live epic"
           epics-only
+          :live-in-phase="item.liveInPhase.name"
           :epics="[phaseEpicSection(item.liveInPhase, item.live.store, item.live.epicId)]"
           :idle-labels="idleLabels"
           :marks="marks"
