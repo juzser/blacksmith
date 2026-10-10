@@ -44,6 +44,8 @@ const props = defineProps<{
   idleLabels: Record<string, string>;
   /** The epics a live session is on; each reads Current. */
   live?: LiveEpics | null;
+  /** A live epic's block sits under this section: open on phone, so it is not left outside a closed one. */
+  hasLiveBlock?: boolean;
   /** Some epic on the page is live (`pageHasLive`): only live lanes are marked, here too. */
   pageLive?: boolean;
 }>();
@@ -115,7 +117,7 @@ const later = computed(() => disclosure('later'));
   <component
     :is="isPhoneWidth && showHeading ? 'details' : 'section'"
     class="bs-inbox__group rm-section"
-    :open="isPhoneWidth && showHeading ? section.running || hostsSelection : undefined"
+    :open="isPhoneWidth && showHeading ? section.running || hostsSelection || hasLiveBlock : undefined"
   >
     <component
       :is="isPhoneWidth ? 'summary' : 'h2'"

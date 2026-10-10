@@ -780,6 +780,7 @@ async function closePeek() {
           :selected-phase="holdsStore(item.section) ? selectedPhase : null"
           :selected-epic="holdsStore(item.section) ? selectedEpic : null"
           :hosts-selection="item.section === hostSection"
+          :has-live-block="liveBlocks.some((b) => b.section === item.section)"
           :picker-label="pickerLabel(item.section)"
           :show-legend="item.section === legendSection"
           :idle-labels="idleLabels"
