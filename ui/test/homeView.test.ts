@@ -14,6 +14,8 @@ import {
   budgetView,
   cardTokensText,
   decisionLine,
+  decisionsSpanStores,
+  decisionTitle,
   isBudgetOutlier,
   outlierSentence,
   type RunningCard,
@@ -630,20 +632,103 @@ describe('lib/homeView.ts decisionLine()', () => {
     eventId: '1',
     ts: '2026-09-30T10:00:00Z',
     agentRole: 'coder',
-    provider: 'anthropic',
+    provider: 'claude',
     modelTier: 'mid',
-    taskId: 'epic/task-3-show-fee',
+    taskId: 'epic-a/task-3-settings-integrations',
     reason: 'first attempt',
-    round: 2,
+    round: 1,
   };
 
-  it('uses the recorded reason', () => {
-    expect(decisionLine(base)).toMatch(/: first attempt$/);
+  it('says the role and the short task name, nothing else', () => {
+    expect(decisionLine(base)).toBe('Builder started on Settings integrations');
   });
 
-  it('falls back to the task and round when no reason was recorded', () => {
-    expect(decisionLine({ ...base, reason: null })).toMatch(/: on Show fee, round 2$/);
-    expect(decisionLine({ ...base, reason: null, taskId: null })).toMatch(/: round 2$/);
+  it('adds nothing for round 1 and " · round N" from round 2', () => {
+    expect(decisionLine({ ...base, round: 1 })).not.toContain('round');
+    expect(decisionLine({ ...base, round: 2 })).toBe(
+      'Builder started on Settings integrations · round 2',
+    );
+  });
+
+  it('reads "<Role> started" when there is no task', () => {
+    expect(decisionLine({ ...base, taskId: null })).toBe('Builder started');
+    expect(decisionLine({ ...base, taskId: null, round: 3 })).toBe('Builder started · round 3');
+  });
+
+  it('names a minted follow-up id "Follow-up fix" and never shows its hex', () => {
+    const line = decisionLine({ ...base, taskId: 'followup-48bb6826' });
+    expect(line).toBe('Builder started on Follow-up fix');
+    expect(line).not.toContain('48bb6826');
+  });
+
+  it('never carries the reason, the provider or the model tier', () => {
+    const long = `${'internal note r4 F-12 0a1b2c3 event 4412 '.repeat(10)}`;
+    for (const provider of ['claude', 'codex', 'deepseek']) {
+      for (const modelTier of ['frontier', 'mid', 'small']) {
+        const line = decisionLine({ ...base, provider, modelTier, reason: long });
+        expect(line).not.toContain('internal note');
+        expect(line).not.toMatch(/Claude|Codex|DeepSeek|standard model|flagship model|fast model/i);
+        expect(line.length).toBeLessThan(80);
+      }
+    }
+  });
+});
+
+describe('lib/homeView.ts decisionTitle()', () => {
+  const row: RecentDispatch = {
+    eventId: '1',
+    ts: '2026-09-30T10:00:00Z',
+    agentRole: 'coder',
+    provider: 'claude',
+    modelTier: 'mid',
+    taskId: 'epic-a/task-3-settings-integrations',
+    reason: 'first attempt',
+    round: 1,
+    store: { id: 'ab12cd34', label: 'project-b' },
+  };
+
+  it('adds the project after the line when the card names projects', () => {
+    expect(decisionTitle(row, true)).toBe('Builder started on Settings integrations · project-b');
+  });
+
+  it('is the bare line when no project is shown or the row has no store', () => {
+    expect(decisionTitle(row, false)).toBe('Builder started on Settings integrations');
+    expect(decisionTitle({ ...row, store: undefined }, true)).toBe(
+      'Builder started on Settings integrations',
+    );
+  });
+});
+
+describe('lib/homeView.ts decisionsSpanStores()', () => {
+  const row = (store?: { id: string; label: string }): RecentDispatch => ({
+    eventId: '1',
+    ts: '2026-09-30T10:00:00Z',
+    agentRole: 'coder',
+    provider: 'claude',
+    modelTier: 'mid',
+    taskId: null,
+    reason: null,
+    round: 1,
+    store,
+  });
+
+  it('is false for one store, or for rows that carry no store', () => {
+    expect(decisionsSpanStores([row(), row()])).toBe(false);
+    expect(
+      decisionsSpanStores([
+        row({ id: 'store-a', label: 'project-a' }),
+        row({ id: 'store-a', label: 'project-a' }),
+      ]),
+    ).toBe(false);
+  });
+
+  it('is true once the rows come from more than one store', () => {
+    expect(
+      decisionsSpanStores([
+        row({ id: 'store-a', label: 'project-a' }),
+        row({ id: 'store-b', label: 'project-b' }),
+      ]),
+    ).toBe(true);
   });
 });
 

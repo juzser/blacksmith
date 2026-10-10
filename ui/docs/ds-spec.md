@@ -920,10 +920,21 @@ Sections, in order:
    answer is in flight; when Active hides a card it drops the one-hour change sentence, and its
    empty line reads "No epic is running on an active project."
 3. **"What the factory decided recently"** (renamed from "Recent dispatch decisions",
-   audit Overview-5) — one line per dispatch: "Checker (DeepSeek, standard model):
-   double-checking another model's review" style, from `/api/overview`'s
-   `liveAgentEntries` + a friendly-role/tier lookup table (`ui/src/lib/roleLabels.ts`, new
-   file, pure data, no API change).
+   audit Overview-5) — one plain line per dispatch and its time, newest first, eight at most:
+   "Builder started on Settings integrations". The role is the friendly name from
+   `ui/src/lib/roleLabels.ts`; the task is its short name (`shortTaskName()`: the plan-task
+   slug without its ordinal, "Follow-up fix" for a minted id, never the objective and never
+   the hex). From the second attempt the line ends " · round N"; a dispatch with no task
+   (a wave runner) reads "Builder started". The provider, the model tier and the
+   orchestrator's free-text reason are not on the line; the reason stays on Activity. When
+   the rows come from more than one store each names its project in muted text between the
+   line and the time; with one store no project shows. The time follows the text, as it does
+   under "Just finished", and never wraps. On a narrow screen the project label gives way
+   first (down to a few characters and an ellipsis) so "<Role> started on <task>" stays
+   readable; the label's own `title` and the row's `title` ("<line> · <project>") carry the
+   full name. A row with a task links to it, and a row from a
+   foreign store carries `?store=<id>`. The line is one line high and ellipsizes, with the
+   full text in `title`; on phone the link is a 44px tap target and the time keeps its place.
 4. **Budget** — "127M of 180M tokens" + a `ProgressRing` "71%" not "≥127113770 tok", "296 steps did not
    report their cost" not "296 not measured", "4 points lower than an hour ago" not "4pp"
    (audit item 4). The panel counts the epics "Running now" counts (the selected project's
