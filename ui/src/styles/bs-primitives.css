@@ -412,7 +412,7 @@ a:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: start;
-  gap: var(--bs-space-1) var(--bs-space-2);
+  gap: var(--bs-space-1) var(--bs-space-3);
   padding: var(--bs-space-3) var(--bs-space-4) var(--bs-space-3) 13px;
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
@@ -473,11 +473,18 @@ a:hover {
 }
 .bs-timeline-row__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--bs-space-2);
+  gap: var(--bs-space-1) var(--bs-space-2);
+  min-width: 0;
 }
 .bs-timeline-row__title {
-  flex: 1;
+  /* ds-review.html `.ev .ehead` wraps its items as whole units and its title
+     has no flex:1, so a title too long to sit beside the kind tag drops
+     under it and wraps there. `1 1 auto` keeps the max-content basis that
+     makes it drop, and still grows to fill its line (a link title's hit
+     area). The compact feed and phone keep `flex: 1` (rules below). */
+  flex: 1 1 auto;
   /* Operator override (2026-10-06): ds-review.html `.ev .ehead` weighs 550,
      but the operator found the Activity/Home timeline row titles too bold
      at that weight. Use the same medium weight as the Kanban card title and
@@ -541,6 +548,9 @@ a:hover {
    on phone must match the mock's touch-sized row, not the desktop row. */
 @media (max-width: 640px) {
   .bs-timeline-row {
+    /* ds-review.html `.mrow` keeps its 8px column gap; only the desktop
+       `.ev` row widens to 12px. */
+    column-gap: var(--bs-space-2);
     min-height: var(--bs-touch);
     padding: 10px var(--bs-m-card-pad);
   }
@@ -636,6 +646,7 @@ a:hover {
    ellipsis instead. */
 @media (max-width: 640px) {
   .bs-timeline-row__title {
+    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -836,6 +847,14 @@ a:hover {
    --link button becomes `inline-flex` below 640px (see the media query
    above) -- a flex container has no single text node to truncate, so that
    case truncates its inner label span instead. */
+/* ds-review.html:650-651: the compact feed's head does not wrap and its
+   title is `flex: 1` with ellipsis, so tag and title share one line. */
+.bs-timeline-row--compact .bs-timeline-row__head {
+  flex-wrap: nowrap;
+}
+.bs-timeline-row--compact .bs-timeline-row__title {
+  flex: 1;
+}
 .bs-timeline-row--compact .bs-timeline-row__title,
 .bs-timeline-row--compact .bs-timeline-row__meta > span:first-child {
   overflow: hidden;
