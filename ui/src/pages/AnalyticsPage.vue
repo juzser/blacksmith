@@ -524,10 +524,9 @@ const phoneRoleHeading = computed(() => {
               role="listitem"
               class="bs-analytics-page__phone-role"
             >
-              <span class="bs-analytics-page__phone-role-label">
-                <span>Not measured</span>
-                <span class="bs-analytics-page__phone-role-unit">of runs</span>
-              </span>
+              <span class="bs-analytics-page__phone-role-label"
+                >Not measured <span class="bs-analytics-page__phone-role-unit">of runs</span></span
+              >
               <ProgressBarMini :value="phoneNotMeasured.pct" :label="`Not measured ${phoneNotMeasuredLabel}`" />
             </div>
           </div>

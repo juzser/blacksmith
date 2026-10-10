@@ -356,6 +356,71 @@ test.describe('Analytics', () => {
   }
 });
 
+// The phone role list matches ds-review.html `.mlist`/`.mrow`/`.mt`/`.pmini`:
+// a bordered raised card, rows at least a touch target tall with a divider,
+// every label on one line, and the bar's number at least 4ch wide. The
+// "Not measured" row keeps its "of runs" unit on that same line.
+test.describe('Cost & quality phone role list', () => {
+  for (const width of [375, 390]) {
+    test(`${width}px: every role label is one line inside the list card`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await withMultiRoleFixture(page);
+      await page.goto('/analytics');
+      const list = page.locator('.bs-analytics-page__phone-roles');
+      await expect(list.locator('[role="listitem"]')).toHaveCount(4);
+      const m = await list.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        const lr = el.getBoundingClientRect();
+        const rows = [...el.querySelectorAll<HTMLElement>('[role="listitem"]')].map(
+          (row, i, all) => {
+            const label = row.querySelector<HTMLElement>(
+              '.bs-analytics-page__phone-role-label',
+            ) as HTMLElement;
+            const num = row.querySelector<HTMLElement>('.bs-pnum') as HTMLElement;
+            const rcs = getComputedStyle(row);
+            const lcs = getComputedStyle(label);
+            return {
+              text: label.textContent?.trim() ?? '',
+              labelHeight: label.getBoundingClientRect().height,
+              lineHeight: Number.parseFloat(lcs.lineHeight),
+              labelWeight: lcs.fontWeight,
+              right: row.getBoundingClientRect().right,
+              rowHeight: row.getBoundingClientRect().height,
+              padLeft: Number.parseFloat(rcs.paddingLeft),
+              border: rcs.borderBottomWidth,
+              last: i === all.length - 1,
+              numWidth: num.getBoundingClientRect().width,
+              numFont: Number.parseFloat(getComputedStyle(num).fontSize),
+            };
+          },
+        );
+        return {
+          border: cs.borderTopWidth,
+          radius: cs.borderTopLeftRadius,
+          listRight: lr.right,
+          rows,
+        };
+      });
+      expect(m.border).toBe('1px');
+      expect(m.radius).not.toBe('0px');
+      expect(m.rows.at(-1)?.text).toContain('Not measured');
+      expect(m.rows.at(-1)?.text).toContain('of runs');
+      for (const r of m.rows) {
+        expect(r.labelHeight, `${r.text} is one line`).toBeLessThan(r.lineHeight * 1.5);
+        expect(r.right, `${r.text} stays inside the list`).toBeLessThanOrEqual(m.listRight);
+        expect(r.rowHeight, `${r.text} row height`).toBeGreaterThanOrEqual(44);
+        expect(r.padLeft, `${r.text} padding`).toBe(12);
+        expect(r.border, `${r.text} divider`).toBe(r.last ? '0px' : '1px');
+        expect(r.labelWeight, `${r.text} weight`).toBe('500');
+        expect(r.numFont, `${r.text} number size`).toBe(12);
+        // min-width 4ch: four zero-widths of the 12px number, about 29px.
+        expect(r.numWidth, `${r.text} number width`).toBeGreaterThanOrEqual(26);
+      }
+      await expect(list.getByText('of runs')).toBeVisible();
+    });
+  }
+});
+
 // S9 (ds-spec.md §4.4 Scope).
 test.describe('Cost & quality follows Active/All (S9)', () => {
   const analyticsRequests = (page: Page) => {
