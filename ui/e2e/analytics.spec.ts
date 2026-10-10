@@ -409,6 +409,14 @@ test.describe('Cost & quality phone role list', () => {
         expect(r.right, `${r.text} stays inside the list`).toBeLessThanOrEqual(m.listRight);
       }
       expect(m.rows.at(-1)?.clipped, 'the unit is not ellipsized').toBe(false);
+      // The 12px unit must not raise the line box: every label is as tall as the first.
+      const firstHeight = m.rows[0]?.labelHeight ?? 0;
+      for (const r of m.rows) {
+        expect(
+          Math.abs(r.labelHeight - firstHeight),
+          `${r.text} label height ${r.labelHeight} vs ${firstHeight}`,
+        ).toBeLessThanOrEqual(0.5);
+      }
       expect(m.rows.at(-1)?.text).toContain('Not measured');
       expect(m.rows.at(-1)?.text).toContain('of runs');
       expect(m.rows.at(-1)?.text).toBe('Not measured · of runs');
