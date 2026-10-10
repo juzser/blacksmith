@@ -885,6 +885,10 @@ test.describe('a foreign store in the dashboard', () => {
         const legend = await box('.bs-bars__legend');
         expect(Math.abs(axisBox.y - (plot.y + plot.height) - 4)).toBeLessThanOrEqual(1);
         expect(Math.abs(legend.y - (axisBox.y + axisBox.height) - 8)).toBeLessThanOrEqual(1);
+        // Adjacent columns sit 4px apart (ds-review.html .vchart gap).
+        const col0 = await box('.bs-bars__col', 0);
+        const col1 = await box('.bs-bars__col', 1);
+        expect(Math.abs(col1.x - (col0.x + col0.width) - 4)).toBeLessThanOrEqual(0.5);
         // The axis names the first and the last plotted day, and only those.
         const days = (
           await card.locator('table.sr-only tbody td:first-child').allTextContents()

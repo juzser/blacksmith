@@ -2167,6 +2167,7 @@ a:hover {
 /* Opt-in (BarChart's dayAxis prop): the columns sit on a baseline and the
    dates move to one row under it (ds-review.html .vchart / .xaxis). */
 .bs-bars__plot--axis {
+  gap: var(--bs-space-1);
   border-bottom: 1px solid var(--bs-border-bold);
 }
 /* A day-axis chart sets its own rhythm: dates 4px under the baseline, legend
