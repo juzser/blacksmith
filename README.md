@@ -146,7 +146,7 @@ a chat transcript.
   [extending](docs/guide/extending.md).
 - **One integration branch per epic**, one pull request at the end, merged by
   you.
-- **A local dashboard**, eleven read-only pages over the same event log —
+- **A local dashboard**, eight pages over the same event log —
   optional, and [further down](#the-dashboard).
 
 ## Install
@@ -185,7 +185,8 @@ that root if you want one home for several projects. You now have `/bs`.
 **Both halves are required.** The package
 ([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
 deterministic `bs` CLI; the plugin is `/bs` and the fourteen agent roles it
-dispatches. `bs` alone never gives you `/bs`, because Claude Code loads
+dispatches, each named `bs-<role>` (`bs-coder`, `bs-reviewer`, and so on).
+`bs` alone never gives you `/bs`, because Claude Code loads
 skills from a project's `.claude/`, your `~/.claude/`, or a plugin — never from
 `node_modules` — and a `/bs` with no `bs` on PATH can run nothing. Take
 `latest`: `0.1.0` predates `bs init` and keeps state inside its own install
@@ -240,15 +241,20 @@ its own directory, with its own git history — and what comes out is not a
 Blacksmith dependency. No config pointing back here, no docs about the
 factory; one `Built by Blacksmith` line in its README is the whole trace.
 
-Open a Claude Code session in this clone and say **`/bs new my-app`**. If you
-would rather drive it yourself, it is three commands:
+Open a Claude Code session in the directory you ran `bs init` in, or in a
+clone, and say **`/bs new my-app`**. If you would rather drive it yourself, it
+is three commands. The path below is the copy `bs init` made; it sits under
+`$BS_HOME` instead if you set one, and is `factory/policies/stack.yml` in a
+clone:
 
 ```bash
-$EDITOR factory/policies/stack.yml   # your stack answers: language, frontend,
-                                     # database, deploy target. `none` is fine.
-bs stack check                       # which answers the templates honour,
-                                     # which they only record, which they refuse
-bs new my-app --target-dir ~/code/my-app        # add --ui for a frontend
+$EDITOR .blacksmith/factory/policies/stack.yml   # your stack answers: language,
+                                                 # frontend, database, deploy
+                                                 # target. `none` is fine.
+bs stack check                                   # which answers the templates
+                                                 # honour, which they only
+                                                 # record, which they refuse
+bs new my-app --target-dir ~/code/my-app         # add --ui for a frontend
 ```
 
 The last call scaffolds (TS strict, Biome, Vitest, CI), installs, runs the
@@ -298,7 +304,8 @@ contract each of them keeps.
 
 ### The loop
 
-Day to day, from a Claude Code session opened in this repo:
+Day to day, from a Claude Code session in any project you ran `bs init` in,
+or in a clone:
 
 | Command | What it does |
 |---|---|
@@ -317,7 +324,7 @@ Each of those is a playbook, not a script: the deterministic half is a `bs`
 command you can run yourself — `bs --help` lists all of them — and the
 judgment half is a Claude Code session the playbook dispatches. That is also
 the line between the two installs: the `bs` half travels in the package, the
-playbooks are read from a clone.
+playbooks in the plugin.
 
 → **[The operator loop](docs/guide/operator-loop.md)** — the six steps, in the
 order you meet them.<br />
@@ -366,10 +373,12 @@ a public issue.
 
 ## The dashboard
 
-Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eleven
-read-only pages to `127.0.0.1`. They are a projection of the event log —
-`bs db rebuild` reconstructs them from it, `bs stats` prints the same facts in
-a terminal, and nothing you click there dispatches an agent. It also reads
+Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eight
+pages to `127.0.0.1`. They are a projection of the event log — `bs db rebuild`
+reconstructs them from it, and `bs stats` prints the same facts in a terminal.
+Two things there write: approving, rejecting or editing a lesson candidate,
+and answering a waiver batch. Each appends an event to the log; nothing you
+click there dispatches an agent. It also reads
 the local Claude Code session registry, transcripts and prompt history (read-only;
 `--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default),
 served as `GET /api/cli-sessions` to loopback requests only. The factory runs
@@ -377,28 +386,28 @@ without ever opening the dashboard.
 
 <table>
 <tr valign="top">
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="100%" alt="Blacksmith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" /><br /><sub><b>Overview</b> — the one screen that asks something of you.</sub></td>
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for epic-9/task-3 showing a Spec contract card with case, origin, epic, plan version and claims, and an Attempts list naming each agent, provider and outcome" /><br /><sub><b>Task detail</b> — the contract, and every attempt against it.</sub></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox with All, Waivers, Escalations and Lesson candidates tabs holding one escalated task with an Open button, a Live sessions panel reading No live Blacksmith sessions, and a Recent activity list of system and finding events" /><br /><sub><b>Home</b> — the one screen that asks something of you.</sub></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/activity-desktop-dark.png" width="100%" alt="Activity page: the event log with project and session selectors and kind chips from Prompt to System, showing a coordination.deadlock error at S1-stop-the-line, a judge verdict, a lesson candidate and a cross-provider judge dispatch, grouped by session" /><br /><sub><b>Activity</b> — the append-only log itself, filtered by kind.</sub></td>
 </tr>
 <tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /><br /><sub><b>Flow</b> — waves and the dependency edges that shaped them.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns; cards carry severity chips such as S2-major and agent chips such as coder - mid" /><br /><sub><b>Kanban</b> — what is moving, and what is stuck and why.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/work-kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns over 11 tasks; cards carry role chips such as Builder - reviewing, type tags, severity chips such as S2-major, and a Waits for line naming the blocking task" /><br /><sub><b>Kanban</b> — what is moving, and what is stuck and why.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-dark.png" width="100%" alt="Roadmap page: a timeline of the demo-hub phase Phase 6b - Remaining pages with bars for epic-9, epic-10 and epic-11, and the epic-9 card at 2 of 4 tasks done, waves 1 and 2 done, wave 3 running Task 3 and wave 4 upcoming" /><br /><sub><b>Roadmap</b> — milestones as epics, and an epic as its waves.</sub></td>
 </tr>
 <tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/sessions-desktop-dark.png" width="100%" alt="Sessions page: two session cards, sess-fixture and sess-multiproject-fixture, joined by dashed edges to six live agent cards labelled coder - small, coder - mid and planner - frontier, each marked working" /><br /><sub><b>Sessions</b> — every live agent and the tier that drew it.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Analytics page with throughput, cost-per-task, same-mistake-rate and recheck-pass-rate cards, bar charts of cost by model tier and by provider, and a cross-check quorum panel" /><br /><sub><b>Analytics</b> — cost per task, per tier, per provider, and the same-mistake rate.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for Task 3 of epic-9, in progress: the request text, the files the task may change, a Details card with plan version, status and case, and an Agents card listing each agent's tier, provider and outcome" /><br /><sub><b>Task detail</b> — the contract, and every agent that worked on it.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/sessions-desktop-dark.png" width="100%" alt="Sessions page: one active session, Fix the login retry loop, with two quiet sessions behind Show all, and the selected session's Builder runs marked Working, No result after 4h, Done, Failed and Stopped" /><br /><sub><b>Sessions</b> — which agents each session ran, and how each run ended.</sub></td>
 </tr>
 <tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-desktop-dark.png" width="100%" alt="Lessons page listing lesson candidates with scope and status chips, each with approve and reject actions" /><br /><sub><b>Lessons</b> — candidates waiting on your approve or reject.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/timeline-desktop-dark.png" width="100%" alt="Timeline page: an event list filtered by Prompts, Dispatches, Gate events, Scheduler and Errors chips, showing task-added, user_prompt and session-start entries with timestamps and task ids" /><br /><sub><b>Timeline</b> — the append-only log itself, filtered.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Cost and quality page: tokens per day and in total by role, a table of tokens by role and model tier, cards for tokens per task, repeated mistakes after a lesson, fixes that held on recheck and second-opinion reviewers, and cost per task by provider" /><br /><sub><b>Cost &amp; quality</b> — tokens by role, tier and provider, and whether lessons stop repeats.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-cards-desktop-dark.png" width="100%" alt="Lessons page with Pending review, Approved, Closed and All tabs over three lesson cards, each with a scope chip, the session it was learned from, and how many repeats it has prevented" /><br /><sub><b>Lessons</b> — candidates for your review, and what each lesson prevented.</sub></td>
 </tr>
 </table>
 
-Dark and light, desktop and mobile; errors by taxonomy category, roadmap
-progress joined to real task and token counts, and per-project scoping.
+Dark and light, desktop and mobile; errors grouped by taxonomy class under
+Activity, roadmap progress joined to real task counts, and per-project scoping.
 
-→ **[The dashboard](docs/guide/dashboard.md)** — what each of the eleven pages
-shows you. It is part of the clone, not of the package.
+→ **[The dashboard](docs/guide/dashboard.md)** — what each of the eight pages
+shows you. It is part of the clone, not of the package or the plugin.
 
 ## Status
 
@@ -415,10 +424,12 @@ turn on a `cli` harness such as Codex. `bs-prompt-hook` is the lean hook
 entry that records operator prompts. `smith` and `smith-run` remain as
 deprecated aliases. `0.1.1` was the first version that ran beside
 you and knew it was a package, rather than out of the clone-shaped install
-`0.1.0` was. The package is the binaries and what they
-read. The dashboard, the docs, the test suite and `/bs` itself come from a
-clone; a plugin is what would move `/bs`, and it is
-[scoped, not cut](docs/specs/plugin-port-scope.md).
+`0.1.0` was. The package is the `bs` binaries and what they read: policies,
+schemas, migrations, scaffold templates and the agent role contracts. The
+plugin is `/bs`, the `bs-<role>` agents and the prompt-capture hook. A clone
+adds the dashboard, the docs, the test suite and this repo's own enforcement;
+[`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) is the
+record of how the port was scoped and what has shipped.
 
 The one thing to know up front: **the daemon watches, it does not drive.** It
 tells you what the factory needs — budget alarms, agents that never came back,
