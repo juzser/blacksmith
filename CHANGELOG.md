@@ -37,6 +37,41 @@ than appearing in it.
   auditable `task-reinstated` event; it refuses a task that never merged and one
   a plan really superseded with a successor.
 
+- **The dashboard after 0.5.0 (#444-#452, #456).** It runs from a clone and is
+  not in the npm package. These fixes bring it closer to the design mock
+  (`ui/docs/ds-review.html`) and the spec (`ui/docs/ds-spec.md`):
+
+  *Home.* The "Needs you" box reads every project's store. Each row says which
+  decision it waits on and why, and stays read until a new decision arrives on
+  the same task (#444). "What the factory decided recently" is one plain line
+  per row, such as "Builder started on Settings integrations"; the reason stays
+  on the Activity page (#445).
+
+  *Task names.* Every task has one short name: its title when that is short,
+  else its humanized id ("Task 4"), or "Follow-up fix · <parent task>". It is
+  used on the Kanban, the peek, the task page, the Roadmap, Home, Sessions and
+  the timelines. The objective shows on hover and when the task is opened
+  (#452).
+
+  *Roadmap.* Every epic with a live CLI session reads Current and opens on its
+  running wave, even when two run at once (#447). The date labels above the
+  track no longer overlap: each is centred on its tick, and one with no room is
+  hidden (#450).
+
+  *Charts and timelines.* "Tokens per day" names only its first and last day,
+  under a baseline, where every column used to carry a cut-off date; its
+  columns sit 3px apart, as in the mock (#449, #456). On a phone, the by-role
+  list keeps "Not measured · of runs" on one line (#446). Desktop timeline rows
+  have the mock's 12px column gap, and a long title drops under its tag (#451).
+
+  *Phone and touch.* Three cramped relative times on a phone (the timeline meta
+  line, the live session card and the Kanban follow-up fix row) are plain
+  text, and a timeline row's expanded detail gains a Time row with the full
+  time (#448). Touch keeps tooltips: a tap opens one, and the spec's "Touch and
+  tooltips" clause, which said touch devices render none, now says so (#456).
+  A "Needs you" row title on a phone is 14px, the focus ring sits 2px off the
+  control, and a number no longer wraps apart from its unit (#456).
+
 ### Removed
 
 - **Operator-private project specs and local paths.** The tracked tree no
