@@ -8,7 +8,7 @@
 *.ico binary
 *.svg text eol=lf
 
-# 106 committed screenshots under ui/e2e/__screenshots__/ are rendered by
+# The committed screenshots under ui/e2e/__screenshots__/ are rendered by
 # Playwright, not written by hand. Keeping them out of diffs and out of the
 # language stats is the difference between a readable PR and a wall of PNGs.
 ui/e2e/__screenshots__/** linguist-generated=true
