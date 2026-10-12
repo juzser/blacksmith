@@ -51,10 +51,10 @@ function mediaRule(query: string, selector: string): string {
 }
 
 describe('kit/StatTile.vue', () => {
-  it('takes a label and a value, with helper, notKnown, floor and loading optional', () => {
+  it('takes a label and a value, with helper, quiet, floor and loading optional', () => {
     const api = componentApi(SRC, FILE);
     expect([...api.props].sort()).toEqual(
-      ['floor', 'helper', 'label', 'loading', 'notKnown', 'value'].sort(),
+      ['floor', 'helper', 'label', 'loading', 'quiet', 'value'].sort(),
     );
     expect([...api.requiredProps].sort()).toEqual(['label', 'value']);
     expect(api.emits).toEqual([]);
@@ -80,8 +80,8 @@ describe('kit/StatTile.vue', () => {
     );
   });
 
-  it('reads a figure it does not know quieter than a number', () => {
-    expect(TEMPLATE).toMatch(/:class="\{ 'bs-stat__value--nd': notKnown \}"/);
+  it('reads a word in the value slot quieter than a figure', () => {
+    expect(TEMPLATE).toMatch(/:class="\{ 'bs-stat__value--nd': quiet \}"/);
     const nd = rule(CSS, '.bs-stat__value--nd');
     expect(nd).toMatch(/font-weight:\s*var\(--bs-font-weight-normal\);/);
     expect(nd).toMatch(/color:\s*var\(--bs-text-subtle\);/);

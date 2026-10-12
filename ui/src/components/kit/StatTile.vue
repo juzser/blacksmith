@@ -5,15 +5,15 @@
 // Not a link and no actions: a tile only reads out a number.
 //
 // `floor` marks a value as a lower bound: a visible "≥" that a screen reader
-// hears as "at least". `notKnown` sets a value that was not measured quieter
-// than a figure. `loading` stands a Skeleton in for the value.
+// hears as "at least". `quiet` sets a word in the value slot ("None", "Not
+// measured") quieter than a figure. `loading` stands a Skeleton in for the value.
 import Skeleton from './Skeleton.vue';
 
 defineProps<{
   label: string;
   value: string;
   helper?: string;
-  notKnown?: boolean;
+  quiet?: boolean;
   floor?: boolean;
   loading?: boolean;
 }>();
@@ -22,7 +22,7 @@ defineProps<{
 <template>
   <div class="bs-stat">
     <dt class="bs-stat__label">{{ label }}</dt>
-    <dd class="bs-stat__value" :class="{ 'bs-stat__value--nd': notKnown }">
+    <dd class="bs-stat__value" :class="{ 'bs-stat__value--nd': quiet }">
       <Skeleton v-if="loading" width="50%" height="var(--bs-leading-xl)" />
       <template v-else><template v-if="floor"><span aria-hidden="true">≥</span><span class="sr-only">at least </span></template>{{ value }}</template>
     </dd>

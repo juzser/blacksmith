@@ -62,7 +62,7 @@ describe('HomePage.vue', () => {
       ':label="f.label"',
       ':value="f.value"',
       ':helper="f.helper"',
-      ':not-known="f.notKnown"',
+      ':quiet="f.quiet"',
       ':floor="f.floor"',
     ]) {
       expect(strip).toContain(prop);

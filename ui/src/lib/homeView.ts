@@ -21,13 +21,13 @@ export interface FactTile {
   helper: string;
   /** Some of it was not measured: the tile reads "≥" before the value. */
   floor: boolean;
-  /** The scope could not be read: the value is "Not known". */
-  notKnown: boolean;
+  /** The value is a word ("Not known", "Not measured", "None"), not a figure: it reads quiet. */
+  quiet: boolean;
 }
 
 const FACTS = [
   { label: 'Active sessions', helper: 'Live sessions on a running epic' },
-  { label: 'Agents running', helper: 'Subagents and factory agents; nested ones not counted' },
+  { label: 'Agents running', helper: 'Subagents and factory agents, each counted once' },
   { label: 'Budget used', helper: 'Tokens on the epics these sessions run' },
   { label: 'Tasks done', helper: 'Plan tasks on those epics' },
 ] as const;
@@ -41,7 +41,7 @@ const FACTS = [
  */
 export function factStrip(scope: ActiveScopeResult | null, project?: string): FactTile[] {
   if (scope?.measured !== true) {
-    return FACTS.map((f) => ({ ...f, value: 'Not known', floor: false, notKnown: true }));
+    return FACTS.map((f) => ({ ...f, value: 'Not known', floor: false, quiet: true }));
   }
   const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((n, row) => n + pick(row), 0);
   let t: Pick<
@@ -86,7 +86,7 @@ export function factStrip(scope: ActiveScopeResult | null, project?: string): Fa
           : `${formatCompactNumber(t.tasksDone)}\u00a0of\u00a0${formatCompactNumber(t.tasksTotal)}`,
       floor: false,
     },
-  ].map((tile) => ({ ...tile, notKnown: false }));
+  ].map((tile) => ({ ...tile, quiet: tile.value === 'Not measured' || tile.value === 'None' }));
 }
 
 /** The one muted line under the strip, or null when there is nothing to say. */

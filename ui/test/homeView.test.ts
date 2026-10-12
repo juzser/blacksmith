@@ -881,28 +881,28 @@ describe('lib/homeView.ts factStrip()', () => {
         value: '2',
         helper: 'Live sessions on a running epic',
         floor: false,
-        notKnown: false,
+        quiet: false,
       },
       {
         label: 'Agents running',
         value: '5',
-        helper: 'Subagents and factory agents; nested ones not counted',
+        helper: 'Subagents and factory agents, each counted once',
         floor: false,
-        notKnown: false,
+        quiet: false,
       },
       {
         label: 'Budget used',
         value: '1.2M\u00a0tokens',
         helper: 'Tokens on the epics these sessions run',
         floor: false,
-        notKnown: false,
+        quiet: false,
       },
       {
         label: 'Tasks done',
         value: '13\u00a0of\u00a025',
         helper: 'Plan tasks on those epics',
         floor: false,
-        notKnown: false,
+        quiet: false,
       },
     ]);
   });
@@ -951,7 +951,28 @@ describe('lib/homeView.ts factStrip()', () => {
   it('reads tokens as Not measured when every run on the set is unmeasured, never "0 tokens"', () => {
     const scope = totals({ activeSessions: 1, tokensUnmeasured: 3 });
     const [, , budget] = factStrip(scope);
-    expect(budget).toMatchObject({ value: 'Not measured', floor: false, notKnown: false });
+    expect(budget).toMatchObject({ value: 'Not measured', floor: false, quiet: true });
+  });
+
+  it('a word in the value slot is quiet; a figure, a zero included, is not', () => {
+    const quiet = (scope: ReturnType<typeof totals>) => factStrip(scope).map((t) => t.quiet);
+    // Tasks done "None", Budget used "Not measured".
+    const words = factStrip(totals({ activeSessions: 1, tokensUnmeasured: 3 }));
+    expect(words.map((t) => [t.value, t.quiet])).toEqual([
+      ['1', false],
+      ['0', false],
+      ['Not measured', true],
+      ['None', true],
+    ]);
+    expect(factStrip(null).every((t) => t.quiet)).toBe(true);
+    // "0", "0 tokens" and "3 of 5" are figures.
+    expect(quiet(totals({ tasksDone: 3, tasksTotal: 5 }))).toEqual([false, false, false, false]);
+    expect(factStrip(totals({ tasksDone: 3, tasksTotal: 5 })).map((t) => t.value)).toEqual([
+      '0',
+      '0',
+      '0\u00a0tokens',
+      '3\u00a0of\u00a05',
+    ]);
   });
 
   it('reads 0, 0, 0 tokens and None with nothing live', () => {
@@ -973,7 +994,7 @@ describe('lib/homeView.ts factStrip()', () => {
     for (const scope of [totals({ measured: false, activeSessions: 4 }), null]) {
       const tiles = factStrip(scope);
       expect(tiles.map((t) => t.value)).toEqual(Array(4).fill('Not known'));
-      expect(tiles.every((t) => t.notKnown && !t.floor)).toBe(true);
+      expect(tiles.every((t) => t.quiet && !t.floor)).toBe(true);
       expect(tiles.map((t) => t.label)).toEqual([
         'Active sessions',
         'Agents running',
