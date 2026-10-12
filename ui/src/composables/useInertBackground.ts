@@ -1,10 +1,10 @@
-// Fix-round (uiux S3 #6): while a Dialog/AlertDialog is open, the rest of
+// Fix-round (uiux S3 #6): while a Dialog is open, the rest of
 // the app (#app — the sidebar/topbar/main landmarks; the dialog itself is
 // Teleport'd to a body-level sibling) should be `inert` so a screen reader
 // user tabbing/browsing by landmark can't reach background content behind
 // the modal. Module-level open-count (not a boolean) so two dialogs
 // momentarily open at once (shouldn't normally happen, but Task detail's
-// artifact lightbox + a future nested confirm could overlap) don't have the
+// artifact lightbox + a nested dialog could overlap) don't have the
 // first one's close() re-enable the background while the second is still open.
 let openCount = 0;
 

@@ -54,7 +54,7 @@ export function useModalFocus(
   }
 
   // `immediate: true`: a caller whose `open` is a reactive boolean toggled
-  // after mount (Dialog/AlertDialog's usual pattern) sees this run once more
+  // after mount (Dialog's usual pattern) sees this run once more
   // at setup with `open === false`, which is a no-op (nothing was acquired
   // yet to release, `triggerEl` is still null). A caller that instead mounts
   // the overlay itself already-open (TaskPeekPanel: `v-if="peekTaskId"`

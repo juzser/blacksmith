@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Dialog — WAI-ARIA Dialog pattern: focus-trapped, Esc closes, focus
-// returns to the triggering element on close (ds-spec.md §2.1). Shared base
-// for Dialog and AlertDialog (AlertDialog adds the destructive-confirm
-// semantics on top of this shell). Ported from ds/Dialog.vue: the close
+// returns to the triggering element on close (ds-spec.md §2.1). The one
+// modal shell: Task detail's lightbox, the Kanban peek panel and the Lessons
+// detail all open through it. Ported from ds/Dialog.vue: the close
 // button is now an IconButton (§2.5's icon-only rule) instead of a raw
 // button+Icon pair.
 
@@ -17,9 +17,10 @@ const props = withDefaults(
     title: string;
     size?: 'default' | 'sm';
     /**
-     * `alertdialog` for a destructive confirm (AlertDialog passes it): ARIA
-     * reserves that role for an alert that also demands a response, and
-     * assistive clients announce the two differently.
+     * `alertdialog` for a destructive confirm: ARIA reserves that role for
+     * an alert that also demands a response, and assistive clients announce
+     * the two differently. The dashboard only reads, so no page passes it
+     * today; the contract stays as it was.
      */
     role?: 'dialog' | 'alertdialog';
     /**
@@ -38,7 +39,7 @@ const descId = useId();
 const dialogEl = ref<HTMLElement | null>(null);
 // Focus trap, focus restore, Esc, and the inert background all live in
 // useModalFocus — Popover doesn't reuse it (no focus trap there), but every
-// full-modal surface (Dialog, AlertDialog, Sheet) shares this one copy.
+// full-modal surface (Dialog, Sheet) shares this one copy.
 useModalFocus(
   dialogEl,
   () => props.open,

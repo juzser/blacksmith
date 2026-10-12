@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Popover — single-step confirm (a lighter-weight alternative to
-// AlertDialog for a low-stakes decision, ds-spec.md §2.1). No focus trap:
+// Popover — a small panel anchored to its trigger (ds-spec.md §2.1): the
+// Kanban display options and card menus, the phone overflow and project
+// switcher. No focus trap:
 // unlike Dialog, this doesn't reuse useModalFocus — only Escape-to-close
 // is wired, manually, so a popover never steals focus off its trigger.
 import { onBeforeUnmount, watch } from 'vue';

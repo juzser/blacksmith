@@ -3,9 +3,9 @@
 // RequestQuote + a compact facts row + the files this task may change,
 // with branch/origin/epic behind a "Technical details" disclosure)/
 // Findings/Outputs/History (run history timeline, then the event list).
-// Waiver UI exactly per spec: Waive/Deny only on S3+confirmed+unwaived,
-// Popover confirm naming the fingerprint, Toast, race guard — unchanged
-// from the ds/ build, just re-skinned onto kit/Popover + kit/Button.
+// Findings are read-only: severity, status (a waived finding reads
+// `waived`) and summary. The dashboard only reads, so a waiver is answered
+// through `/bs waivers`, never from this page.
 //
 // Deviations from §4.7 (no backing data, rendered absent per the brief):
 // - No per-agent summary table: `agents-registry` rows (role/provider/tier/
@@ -46,7 +46,6 @@ import Dialog from '../components/kit/Dialog.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import Icon from '../components/kit/Icon.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
-import Popover from '../components/kit/Popover.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import Table from '../components/kit/Table.vue';
 import Tabs from '../components/kit/Tabs.vue';
@@ -57,10 +56,8 @@ import RequestQuote from '../components/RequestQuote.vue';
 import RunHistoryTimeline from '../components/RunHistoryTimeline.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
-import { useToast } from '../composables/useToast.js';
 import { useViewport } from '../composables/useViewport.js';
 import {
-  applyWaiverBatch,
   fetchTaskDetail,
   fetchTaskRuns,
   fetchTimelinePage,
@@ -75,17 +72,14 @@ import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
 import { findingStatusKitTone, severityKitTone, taskStatusKitTone } from '../lib/taxonomy.js';
 import { type ActivityEntry, groupByDay } from '../lib/timelineDisplay.js';
-import { isWaivable } from '../lib/waivable.js';
-import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 
 const props = defineProps<{ taskId: string; storeId?: string }>();
 // Task detail and runs read the foreign store named by `?store=`. The reads
 // below resolve ids in the served store only (history by task id, artifacts by
-// artifact id, waivers by session id), so for a foreign task they stay empty
-// or inert instead of showing another store's data.
+// artifact id), so for a foreign task they stay empty instead of showing
+// another store's data.
 const foreign = computed(() => props.storeId !== undefined);
 const { setBreadcrumb } = useBreadcrumb();
-const { show: showToast } = useToast();
 const { isPhoneWidth } = useViewport();
 
 const detail = ref<TaskDetail | null>(null);
@@ -243,8 +237,6 @@ watch(
     history.value = [];
     error.value = null;
     historyError.value = null;
-    saving.value = null;
-    openPopover.value = null;
     lightboxSrc.value = null;
     activeTab.value = 'overview';
     historyExpanded.value = loadExpanded(sessionStorage, historyStorageKey.value);
@@ -268,50 +260,6 @@ onMounted(() => {
 // The page refreshes live: a task's screenshots should appear as soon as the
 // task produces them, not only on a manual Refresh click.
 usePoll(load, 15000);
-
-// Waiver mutation race guard (ux-conventions.md §3): disable + `if (saving) return`.
-const saving = ref<string | null>(null); // fingerprint currently in flight, or null
-const openPopover = ref<string | null>(null); // fingerprint whose Popover is open
-
-// Delegated, not inlined. This used to read `S3-minor && confirmed`, which
-// is narrower than the predicate the Overview banner counts with
-// (queries.ts: S3-minor|S4-nit x raised|confirmed) and narrower than what
-// applyBatch() accepts (waivers.ts). The banner therefore counted S4-nits
-// and not-yet-confirmed S3s as "waivers pending" and then sent the operator
-// to a page with no control for them -- a number you cannot act on, which is
-// worse than no number. One predicate now, pinned by ui/test/waivable.test.ts.
-function canWaive(f: TaskDetail['findings'][number]): boolean {
-  return !foreign.value && isWaivable(f);
-}
-
-async function decide(fingerprint: string, decision: 'granted' | 'denied') {
-  if (saving.value) return;
-  if (!detail.value) return;
-  const { taskId, storeId } = props;
-  // Once the page moves to another task, the old one's answer is not ours to show.
-  const stale = () => taskId !== props.taskId || storeId !== props.storeId;
-  saving.value = fingerprint;
-  openPopover.value = null;
-  try {
-    const result = await applyWaiverBatch(detail.value.task.sessionId, [
-      {
-        fingerprint,
-        decision,
-        operatorNote: `${decision === 'granted' ? 'Waived' : 'Denied'} via Task detail`,
-      },
-    ]);
-    showToast(
-      decision === 'granted'
-        ? 'Waived 1 finding.'
-        : `Denied 1 waiver.${waiverDenialNote(result.findingIdsToCarry)}`,
-    );
-    if (!stale()) await load();
-  } catch (e) {
-    if (!stale()) error.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    if (!stale()) saving.value = null;
-  }
-}
 
 const lightboxSrc = ref<string | null>(null);
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
@@ -442,30 +390,6 @@ const factsRowText = computed(() => {
                     <div>{{ row.summary }}</div>
                     <!-- A spec finding names the criterion it is about; a diff finding renders nothing here. -->
                     <div v-if="specRefLabel(row as never)" class="bs-task-detail__spec-ref">{{ specRefLabel(row as never) }}</div>
-                    <div v-if="canWaive(row as never)" class="bs-task-detail__waive-actions">
-                      <Popover label="Waive finding" :open="openPopover === (row as never as { fingerprint: string }).fingerprint" @close="openPopover = null">
-                        <template #trigger>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
-                            @click="openPopover = (row as never as { fingerprint: string }).fingerprint"
-                          >
-                            Waive
-                          </Button>
-                        </template>
-                        <p class="bs-task-detail__popover-text">Waive finding <code>{{ (row as never as { fingerprint: string }).fingerprint }}</code>? This can't be asked again.</p>
-                        <Button variant="secondary" size="sm" @click="decide((row as never as { fingerprint: string }).fingerprint, 'granted')">Confirm</Button>
-                      </Popover>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
-                        @click="decide((row as never as { fingerprint: string }).fingerprint, 'denied')"
-                      >
-                        Deny
-                      </Button>
-                    </div>
                   </template>
                   <template v-else>{{ row[column.key] }}</template>
                 </template>

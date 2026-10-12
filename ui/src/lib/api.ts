@@ -486,43 +486,6 @@ export interface LessonsResult {
   lastCheckedAt: string | null;
 }
 
-/** lessons.ts's NoveltyMatch — the nearest statement in the corpus and its Jaccard score. */
-export interface NoveltyMatch {
-  statement: string;
-  score: number;
-  /**
-   * The bar THIS pair was judged at. Equal to `LessonNoveltyReview.threshold`
-   * unless the gate corrected it down for the length of the shorter statement
-   * (P9-35 (a)) — which it does for most real lessons, so a notice that quotes
-   * the configured threshold next to the score can read as a contradiction.
-   */
-  threshold: number;
-}
-/**
- * lessons.ts's LessonNoveltyReview: what the novelty gate saw at transition
- * time. Every lesson write route returns it (ui/server/src/app.ts's
- * `transition()`), and it is null when the lesson is only moving OUT of
- * memory — scoring text that is leaving answers no question.
- */
-export interface LessonNoveltyReview {
-  /** The text actually scored: the edit if there was one, else the current statement. */
-  statement: string;
-  edited: boolean;
-  novel: boolean;
-  polarityConflict: boolean;
-  /** The configured bar; `mostSimilar.threshold` is the one the verdict was taken at. */
-  threshold: number;
-  mostSimilar: NoveltyMatch | null;
-  mostSimilarLessonId: string | null;
-  /** True when a non-novel edit was let through by `acceptDuplicate`. */
-  overridden: boolean;
-}
-export interface LessonWriteResult {
-  lessonId: string;
-  status: string;
-  novelty: LessonNoveltyReview | null;
-}
-
 export interface ErrorGroupCount {
   /** `${errorGroup}.${errorClass}|${severity}` -- the row's whole identity.
    *  Keying an Errors row on `errorGroup` alone merges every class and
@@ -1019,63 +982,4 @@ export function fetchFlow(
   if (params.planVersion !== undefined) q.set('planVersion', String(params.planVersion));
   const qs = q.toString();
   return getJson(`/api/flow${qs ? `?${qs}` : ''}`);
-}
-
-export interface WaiverBatchDecision {
-  fingerprint: string;
-  decision: 'granted' | 'denied';
-  operatorNote: string;
-}
-
-export function applyWaiverBatch(
-  sessionId: string,
-  decisions: WaiverBatchDecision[],
-): Promise<{ applied: number; findingIdsToCarry: string[] }> {
-  return postJson('/api/waivers/apply-batch', { sessionId, decisions });
-}
-
-export function approveLesson(sessionId: string, lessonId: string): Promise<LessonWriteResult> {
-  return postJson(`/api/lessons/${encodeURIComponent(lessonId)}/approve`, { sessionId });
-}
-
-export function rejectLesson(sessionId: string, lessonId: string): Promise<LessonWriteResult> {
-  return postJson(`/api/lessons/${encodeURIComponent(lessonId)}/reject`, { sessionId });
-}
-
-/**
- * `acceptDuplicate` is the operator's override of the novelty gate on an
- * edited statement, forwarded to the route that already accepts it. Without
- * it the only remedy the server's `lessons.edit-not-novel` message offers is
- * `--accept-duplicate`, a CLI flag no one reading a Dialog can type (P9-36).
- */
-export function editLesson(
-  sessionId: string,
-  lessonId: string,
-  edits: {
-    statement?: string;
-    lessonType?: string;
-    lessonScope?: string;
-    acceptDuplicate?: boolean;
-  },
-): Promise<LessonWriteResult> {
-  return postJson(`/api/lessons/${encodeURIComponent(lessonId)}/edit`, { sessionId, ...edits });
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errBody = await res
-      .json()
-      .catch(() => ({ error: { code: 'unknown', message: res.statusText } }));
-    throw new ApiError(
-      errBody.error?.code ?? 'unknown',
-      errBody.error?.message ?? res.statusText,
-      res.status,
-    );
-  }
-  return (await res.json()) as T;
 }

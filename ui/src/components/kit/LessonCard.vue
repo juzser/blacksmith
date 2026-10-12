@@ -3,7 +3,7 @@
 // projects - learned from csb-audit-1 on 7 Sep - hasn't prevented a repeat
 // yet'." Replaces the raw lessonType/lessonScope/timesPrevented table cells
 // with the same three sentences everywhere this card is used: the list
-// (LessonsPage.vue) and the review Dialog's body (same card, read-only).
+// (LessonsPage.vue) and the read-only detail Dialog's body (same card).
 //
 // `clickable` switches the root between a `<button>` (the list, one per
 // row) and a plain `<div>` (the Dialog body) rather than two components,

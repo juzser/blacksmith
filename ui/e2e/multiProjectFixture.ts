@@ -423,14 +423,15 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
   parent = epicPlanner.event_id;
 
   // --- an S3 finding, confirmed and unwaived, on epic-9/task-3 — exercises
-  // Task detail's Waive/Deny UI and the Projects hub's pending-review count.
-  const waivableTaskId = tasks9[2]?.id;
-  if (!waivableTaskId) throw new Error('multiProjectFixture: expected tasks9[2] to exist');
+  // Task detail's read-only Findings tab and the Projects hub's
+  // pending-review count.
+  const findingTaskId = tasks9[2]?.id;
+  if (!findingTaskId) throw new Error('multiProjectFixture: expected tasks9[2] to exist');
   await raiseFinding(
     {
       finding: {
         finding_id: 'finding-demo-hub-1',
-        task_id: waivableTaskId,
+        task_id: findingTaskId,
         finding_category: 'maintainability',
         severity: 'S3-minor',
         finding_status: 'raised',
@@ -438,7 +439,7 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
         failure_scenario: { inputs: 'n/a', expected: 'shared hook', actual: 'duplicated logic' },
         found_by: 'reviewer',
       },
-      filePath: `src/${waivableTaskId.split('/')[1]}.ts`,
+      filePath: `src/${findingTaskId.split('/')[1]}.ts`,
     },
     { sessionId: MULTI_PROJECT_SESSION_ID, planVersion, causalParent: parent },
     opts,

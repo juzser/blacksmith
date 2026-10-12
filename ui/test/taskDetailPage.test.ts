@@ -202,3 +202,28 @@ describe('TaskDetailPage.vue — mobile title row wrap (audit finding 3, §3.1)'
     expect(rule).toMatch(/flex-direction:\s*column;/);
   });
 });
+
+// The dashboard only reads: an operator answers a waiver through
+// `/bs waivers`, never from this page. The findings table still shows each
+// finding's severity and status (a waived finding reads `waived`).
+describe('TaskDetailPage.vue — display-only findings', () => {
+  const TEMPLATE = SFC.slice(SFC.indexOf('<template>'));
+
+  it('has no waiver write path, popover or decision handler', () => {
+    expect(SFC).not.toMatch(/applyWaiverBatch|canWaive|decide\(|waivable|waiverDenialNote/);
+    expect(SFC).not.toMatch(/<Popover\b|import Popover/);
+  });
+
+  it('renders no Waive, Confirm or Deny button', () => {
+    expect(TEMPLATE).not.toMatch(/>\s*(Waive|Confirm|Deny)\s*</);
+    expect(TEMPLATE).not.toContain('bs-task-detail__waive-actions');
+  });
+
+  it('still shows each finding read-only: severity and status tags, then the summary', () => {
+    expect(TEMPLATE).toMatch(/column\.key === 'severity'/);
+    expect(TEMPLATE).toMatch(
+      /<Tag v-else-if="column\.key === 'findingStatus'"[^>]*>\{\{ row\.findingStatus \}\}<\/Tag>/,
+    );
+    expect(TEMPLATE).toMatch(/\{\{ row\.summary \}\}/);
+  });
+});

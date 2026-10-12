@@ -1558,11 +1558,10 @@ a:hover {
   font-weight: var(--bs-font-weight-medium);
 }
 
-/* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
+/* Input / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */
-.bs-input,
-.bs-textarea {
+.bs-input {
   width: 100%;
   padding: var(--bs-space-2) var(--bs-space-3);
   background: var(--bs-surface);
@@ -1575,7 +1574,7 @@ a:hover {
   transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
 }
 /* Select is compact on desktop (ds-review.html:288 .select) -- the shared
-   .bs-input/.bs-textarea padding made it ~38px tall next to 28-32px topbar
+   .bs-input padding made it ~38px tall next to 28-32px topbar
    buttons. min-height keeps a 24px floor; the <=640px rule below still
    raises it to --bs-touch on phone. */
 .bs-select {
@@ -1591,63 +1590,29 @@ a:hover {
   transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
   min-height: var(--bs-space-5);
 }
-.bs-input::placeholder,
-.bs-textarea::placeholder {
+.bs-input::placeholder {
   color: var(--bs-text-subtlest);
 }
 .bs-input:hover,
-.bs-textarea:hover,
 .bs-select:hover {
   border-color: var(--bs-border-bold);
 }
 .bs-input:focus-visible,
-.bs-textarea:focus-visible,
 .bs-select:focus-visible {
   border-color: var(--bs-focus-ring);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
 }
 .bs-input:disabled,
-.bs-textarea:disabled,
 .bs-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.bs-textarea {
-  resize: vertical;
-  min-height: 80px;
-}
 /* ≤640px: padding-based height on .bs-input/.bs-select settles under
-   --bs-touch (visual-qa phase B round 2) — min-height floor only, the
-   textarea's own 80px floor already clears it. */
+   --bs-touch (visual-qa phase B round 2) — min-height floor only. */
 @media (max-width: 640px) {
   .bs-input,
   .bs-select {
     min-height: var(--bs-touch);
-  }
-}
-
-/* RadioGroup (§2.1) — ported unchanged contract. */
-.bs-radiogroup {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-}
-.bs-radio {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--bs-space-2);
-  font-size: var(--bs-text-base);
-  color: var(--bs-text);
-  cursor: pointer;
-}
-/* Mobile overflow: the only live consumer is WorkPage's view switch,
-   teleported into the mobile top bar overflow, so the touch target only
-   needs widening at the mobile breakpoint. */
-@media (max-width: 640px) {
-  .bs-radio {
-    min-height: var(--bs-touch);
-    width: 100%;
-    padding: 0 var(--bs-space-2);
   }
 }
 
@@ -1701,8 +1666,7 @@ a:hover {
   }
 }
 
-/* Dialog / AlertDialog (§2.1, WAI-ARIA Dialog pattern) — AlertDialog wraps
-   Dialog and adds no CSS of its own, same as the old kit. Ported from
+/* Dialog (§2.1, WAI-ARIA Dialog pattern). Ported from
    ds-components.css's .ds-dialog* 1:1 on values (radius/shadow/z-index), the
    one deliberate addition being the bs-fade entrance (ds-dialog never had
    one; this kit's design decision extends it to dialog/popover/toast alike,
@@ -3824,14 +3788,6 @@ a:hover {
   font-family: var(--bs-font-mono);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
-}
-.bs-task-detail__waive-actions {
-  margin-top: var(--bs-space-2);
-  display: flex;
-  gap: var(--bs-space-2);
-}
-.bs-task-detail__popover-text {
-  font-size: var(--bs-text-sm);
 }
 .bs-task-detail__artifact-grid {
   display: grid;
