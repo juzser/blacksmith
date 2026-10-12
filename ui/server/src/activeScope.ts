@@ -5,7 +5,12 @@
 // Prompt-free by construction: the result is built field by field from ids,
 // project names, store ids and counts, so no session name, cwd, prompt or
 // transcript text can ride along.
-import { EPIC_IDLE_MS } from '../../../factory/orchestrator/dist/db/queries.js';
+//
+// Home's fact strip reads four totals over one set. S is the active epics
+// (`epics`); A is the live sessions linked to at least one epic in S. Agents
+// add up over A; tokens and tasks add up over S, each epic once however many
+// sessions drive it.
+import { EPIC_IDLE_MS, type StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import { type CliSessionsResponse, HOME_STORE_ID, type StoreRef } from './cliSessions.js';
 
 /** The slice of the cli-sessions read this fold uses. */
@@ -25,8 +30,12 @@ export interface ActiveScopeCli {
         /** Per member, the newest event THIS CLI session wrote into it. */
         factorySessionLastEventAt: Record<string, string>;
         workingAgents: { role: string; taskId: string | null; since: string }[];
+        /** The epic's plan-task counts; null when it has no task rows. */
+        progress: StatusCounts | null;
       }[];
     } | null;
+    /** Subagents this session has running now; null when not measured. */
+    subagentsRunning: number | null;
   }[];
 }
 
@@ -37,6 +46,8 @@ export interface ActiveScopeStore {
   activelyRunning: string[];
   /** epic id -> project, from the overview's per-project `epicsInFlight`. */
   epicProjects: Record<string, string>;
+  /** epic id -> spend, from `overview().tokensByEpic`. */
+  tokens: Record<string, { tokensSpent: number; unmeasured: number }>;
 }
 
 export interface ActiveScope {
@@ -44,10 +55,50 @@ export interface ActiveScope {
   readAt: string;
   liveSessions: number;
   unlinkedSessions: number;
-  projects: { storeId: string; project: string; liveSessions: number; agentsWorking: number }[];
-  epics: { storeId: string; epicId: string; project: string | null }[];
+  /** |A|: live sessions linked to at least one active epic. */
+  activeSessions: number;
+  /**
+   * Over A: each session's running subagents, plus each working factory
+   * agent of an active epic once. Nested subagents are not counted, so this
+   * is a floor.
+   */
+  agentsRunning: number;
+  /** Sessions in A whose subagents could not be counted. */
+  agentsUnmeasured: number;
+  /** Over the active epics, each once. */
+  tokensSpent: number;
+  /** Runs on the active epics whose tokens were not measured. */
+  tokensUnmeasured: number;
+  tasksDone: number;
+  /** done + review + inProgress + todo; superseded tasks are left out. */
+  tasksTotal: number;
+  projects: {
+    storeId: string;
+    project: string;
+    liveSessions: number;
+    agentsWorking: number;
+    /** The project's share of the totals above. */
+    activeSessions: number;
+    agentsRunning: number;
+    agentsUnmeasured: number;
+  }[];
+  epics: {
+    storeId: string;
+    epicId: string;
+    project: string | null;
+    tokensSpent: number;
+    tokensUnmeasured: number;
+    tasksDone: number;
+    tasksTotal: number;
+  }[];
   factorySessions: { storeId: string; sessionId: string }[];
 }
+
+/** What the route answers: the fold, plus stores it could not read. */
+export type ActiveScopeResponse = ActiveScope & {
+  /** Readable stores whose overview failed; the counts may be low. */
+  storesUnread: number;
+};
 
 export function computeActiveScope(
   cli: ActiveScopeCli,
@@ -60,6 +111,13 @@ export function computeActiveScope(
       readAt: nowIso,
       liveSessions: 0,
       unlinkedSessions: 0,
+      activeSessions: 0,
+      agentsRunning: 0,
+      agentsUnmeasured: 0,
+      tokensSpent: 0,
+      tokensUnmeasured: 0,
+      tasksDone: 0,
+      tasksTotal: 0,
       projects: [],
       epics: [],
       factorySessions: [],
@@ -73,10 +131,18 @@ export function computeActiveScope(
       project: string;
       sessions: Set<number>;
       agents: Set<string>;
+      /** Sessions in A with an active epic of this project. */
+      active: Set<number>;
+      /** Working factory agents of this project's active epics. */
+      activeAgents: Set<string>;
     }
   >();
   const epics = new Map<string, ActiveScope['epics'][number]>();
   const factory = new Map<string, ActiveScope['factorySessions'][number]>();
+  /** A, by session index. */
+  const active = new Set<number>();
+  /** Working factory agents of active epics, keyed with their store. */
+  const activeAgents = new Set<string>();
   let unlinked = 0;
 
   cli.sessions.forEach((s, index) => {
@@ -110,8 +176,24 @@ export function computeActiveScope(
         )
           continue;
         project = projectOf();
+        active.add(index);
         const key = `${e.store.id}\u0000${e.epicId}`;
-        if (!epics.has(key)) epics.set(key, { storeId: e.store.id, epicId: e.epicId, project });
+        const spend = st?.tokens[e.epicId];
+        const known = epics.get(key);
+        if (known === undefined) {
+          epics.set(key, {
+            storeId: e.store.id,
+            epicId: e.epicId,
+            project,
+            tokensSpent: spend?.tokensSpent ?? 0,
+            tokensUnmeasured: spend?.unmeasured ?? 0,
+            ...taskCounts(e.progress),
+          });
+        } else if (known.tasksTotal === 0 && e.progress !== null) {
+          Object.assign(known, taskCounts(e.progress));
+        }
+        for (const a of e.workingAgents)
+          activeAgents.add(`${e.store.id}\u0000${agentKey(e.epicId, a)}`);
         for (const id of pickFactorySessions(
           e.factorySessionIds,
           e.factorySessionLastEventAt,
@@ -129,32 +211,79 @@ export function computeActiveScope(
           project,
           sessions: new Set(),
           agents: new Set(),
+          active: new Set(),
+          activeAgents: new Set(),
         };
         projects.set(pkey, p);
       }
       p.sessions.add(index);
       if (e.epicId !== null) {
+        // Only an active epic reaches here with an id (the rest `continue`d).
+        p.active.add(index);
         for (const a of e.workingAgents) {
-          p.agents.add(`${e.epicId}\u0000${a.role}\u0000${a.taskId ?? ''}\u0000${a.since}`);
+          p.agents.add(agentKey(e.epicId, a));
+          p.activeAgents.add(agentKey(e.epicId, a));
         }
       }
     }
   });
+
+  const subagents = (indexes: ReadonlySet<number>) => {
+    let running = 0;
+    let unmeasured = 0;
+    for (const i of indexes) {
+      const n = cli.sessions[i]?.subagentsRunning ?? null;
+      if (n === null) unmeasured++;
+      else running += n;
+    }
+    return { running, unmeasured };
+  };
+  const all = subagents(active);
+  const epicList = [...epics.values()];
+  const sum = (pick: (e: ActiveScope['epics'][number]) => number) =>
+    epicList.reduce((n, e) => n + pick(e), 0);
 
   return {
     measured: true,
     readAt: cli.readAt,
     liveSessions: cli.sessions.length,
     unlinkedSessions: unlinked,
-    projects: [...projects.values()].map((p) => ({
-      storeId: p.storeId,
-      project: p.project,
-      liveSessions: p.sessions.size,
-      agentsWorking: p.agents.size,
-    })),
-    epics: [...epics.values()],
+    activeSessions: active.size,
+    agentsRunning: all.running + activeAgents.size,
+    agentsUnmeasured: all.unmeasured,
+    tokensSpent: sum((e) => e.tokensSpent),
+    tokensUnmeasured: sum((e) => e.tokensUnmeasured),
+    tasksDone: sum((e) => e.tasksDone),
+    tasksTotal: sum((e) => e.tasksTotal),
+    projects: [...projects.values()].map((p) => {
+      const mine = subagents(p.active);
+      return {
+        storeId: p.storeId,
+        project: p.project,
+        liveSessions: p.sessions.size,
+        agentsWorking: p.agents.size,
+        activeSessions: p.active.size,
+        agentsRunning: mine.running + p.activeAgents.size,
+        agentsUnmeasured: mine.unmeasured,
+      };
+    }),
+    epics: epicList,
     factorySessions: [...factory.values()],
   };
+}
+
+/** A working factory agent, the same one whichever session links its epic. */
+function agentKey(
+  epicId: string,
+  a: { role: string; taskId: string | null; since: string },
+): string {
+  return `${epicId}\u0000${a.role}\u0000${a.taskId ?? ''}\u0000${a.since}`;
+}
+
+/** Plan tasks done, out of all but the superseded. No rows: 0 of 0. */
+function taskCounts(c: StatusCounts | null): { tasksDone: number; tasksTotal: number } {
+  if (c === null) return { tasksDone: 0, tasksTotal: 0 };
+  return { tasksDone: c.done, tasksTotal: c.done + c.review + c.inProgress + c.todo };
 }
 
 /**

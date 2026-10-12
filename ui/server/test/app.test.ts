@@ -3,7 +3,7 @@ import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { openDb, rebuild } from '../../../factory/orchestrator/src/db/projector.js';
 import { appendEvent, readEvents, startSession } from '../../../factory/orchestrator/src/events.js';
 import {
   buildFixture,
@@ -1770,15 +1770,29 @@ describe('GET /api/cli-sessions', () => {
       expect(res.status).toBe(200);
       const body = await json<Record<string, unknown>>(res);
       expect(Object.keys(body).sort()).toEqual([
+        'activeSessions',
+        'agentsRunning',
+        'agentsUnmeasured',
         'epics',
         'factorySessions',
         'liveSessions',
         'measured',
         'projects',
         'readAt',
+        'storesUnread',
+        'tasksDone',
+        'tasksTotal',
+        'tokensSpent',
+        'tokensUnmeasured',
         'unlinkedSessions',
       ]);
-      expect(body).toMatchObject({ measured: true, liveSessions: 1, unlinkedSessions: 0 });
+      expect(body).toMatchObject({
+        measured: true,
+        liveSessions: 1,
+        unlinkedSessions: 0,
+        activeSessions: 1,
+        storesUnread: 0,
+      });
       expect(JSON.stringify(body)).not.toMatch(/"(prompt|doingNow|transcript|cwd|name)"/);
       const unmeasured = serve({});
       try {
@@ -1827,6 +1841,86 @@ describe('GET /api/cli-sessions', () => {
     }
   });
 
+  it('its tokens are overview tokensByEpic and its tasks the linked epic progress', async () => {
+    const handle = serve();
+    try {
+      const headers = { host: '127.0.0.1:4680' };
+      const overview = await json<{
+        tokensByEpic: { epicId: string; tokensSpent: number; unmeasured: number }[];
+      }>(await handle.app.request('/api/overview', { headers }));
+      const cli = await json<{
+        sessions: {
+          linked: {
+            epics: {
+              epicId: string;
+              progress: { done: number; review: number; inProgress: number; todo: number };
+            }[];
+          };
+        }[];
+      }>(await handle.app.request('/api/cli-sessions', { headers }));
+      const scope = await json<{
+        tokensSpent: number;
+        tokensUnmeasured: number;
+        tasksDone: number;
+        tasksTotal: number;
+        epics: { epicId: string; tokensSpent: number; tasksDone: number; tasksTotal: number }[];
+      }>(await handle.app.request('/api/active-scope', { headers }));
+      const spend = overview.tokensByEpic.find((t) => t.epicId === EPIC_ID);
+      const progress = cli.sessions[0]?.linked.epics.find((e) => e.epicId === EPIC_ID)?.progress;
+      expect(spend?.tokensSpent).toBeGreaterThan(0);
+      expect(progress).toBeDefined();
+      const total = (progress?.done ?? 0) + (progress?.review ?? 0);
+      const open = (progress?.inProgress ?? 0) + (progress?.todo ?? 0);
+      expect(scope).toMatchObject({
+        tokensSpent: spend?.tokensSpent,
+        tokensUnmeasured: spend?.unmeasured,
+        tasksDone: progress?.done,
+        tasksTotal: total + open,
+      });
+      expect(scope.epics.find((e) => e.epicId === EPIC_ID)).toMatchObject({
+        tokensSpent: spend?.tokensSpent,
+        tasksDone: progress?.done,
+        tasksTotal: total + open,
+      });
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('GET /api/active-scope counts a foreign store it cannot read, and still answers 200', async () => {
+    const foreignRoot = path.join(dbDir, 'project-b');
+    await buildFixture({ stateDir: path.join(foreignRoot, 'state', 'events') });
+    const handle = createApp({
+      dbPath,
+      stateDir,
+      claudeConfigDir: configDir,
+      cliIsAlive: (pid) => pid === 4242,
+      cliListWorktrees: async () => [],
+      stores: [foreignRoot],
+      storeRefreshMs: 0,
+    });
+    try {
+      const headers = { host: '127.0.0.1:4680' };
+      const first = await handle.app.request('/api/active-scope', { headers });
+      expect(await json<{ storesUnread: number }>(first)).toMatchObject({ storesUnread: 0 });
+      // Break the foreign store's cache so its overview throws.
+      const cacheDir = path.join(dbDir, 'ui-stores');
+      const cache = readdirSync(cacheDir).find((n) => n.endsWith('.db'));
+      expect(cache).toBeDefined();
+      const broken = openDb(path.join(cacheDir, cache ?? ''));
+      broken.sqlite.exec('DROP TABLE tasks');
+      broken.sqlite.close();
+      const res = await handle.app.request('/api/active-scope', { headers });
+      expect(res.status).toBe(200);
+      expect(await json<{ measured: boolean; storesUnread: number }>(res)).toMatchObject({
+        measured: true,
+        storesUnread: 1,
+      });
+    } finally {
+      closeApp(handle);
+    }
+  });
+
   it('GET /api/active-scope lists an epic with no task rows the live session dispatches into', async () => {
     const opts = { stateDir, cliSessionId: CLI_ID };
     const started = await startSession('sess-research', opts);
@@ -1867,6 +1961,10 @@ describe('GET /api/cli-sessions', () => {
         storeId: 'home',
         epicId: 'epic-b',
         project: 'project-b',
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
+        tasksDone: 0,
+        tasksTotal: 0,
       });
       expect(scope.factorySessions.map((f) => f.sessionId)).toContain('sess-research');
       expect(scope.projects.map((p) => p.project)).toContain('project-b');

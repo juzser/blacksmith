@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { openDb, rebuild } from '../../../factory/orchestrator/src/db/projector.js';
 import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
 import {
   buildFixture,
@@ -228,6 +228,24 @@ describe('multi-store dashboard reads', () => {
     );
     const issue = pulse.projectionIssues.find((i) => i.kind === 'store-unavailable');
     expect(issue?.message).toContain('project-b');
+  });
+
+  it('active-scope counts a foreign store it cannot read in storesUnread, and still answers 200', async () => {
+    const a = app();
+    expect(await get<{ storesUnread: number }>(a, '/api/active-scope')).toMatchObject({
+      storesUnread: 0,
+    });
+    // Break the foreign store's cache so its overview throws.
+    const cacheDir = path.join(path.dirname(dbPath), 'ui-stores');
+    const cache = readdirSync(cacheDir).find((n) => n.endsWith('.db'));
+    expect(cache).toBeDefined();
+    const broken = openDb(path.join(cacheDir, cache ?? ''));
+    broken.sqlite.exec('DROP TABLE tasks');
+    broken.sqlite.close();
+    const after = await get<{ measured: boolean; storesUnread: number }>(a, '/api/active-scope');
+    expect(after).toMatchObject({ measured: true, storesUnread: 1 });
+    // The other routes skip it the same way: still a 200 without it.
+    await get(a, '/api/overview');
   });
 
   it('a half-written last log line neither crashes a read nor loses the line', async () => {

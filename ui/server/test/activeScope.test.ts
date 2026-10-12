@@ -12,6 +12,7 @@ function store(over: Partial<ActiveScopeStore> & { id?: string; label?: string }
     store: { id: over.id ?? 'home', label: over.label ?? 'home' },
     activelyRunning: over.activelyRunning ?? [],
     epicProjects: over.epicProjects ?? {},
+    tokens: over.tokens ?? {},
   } satisfies ActiveScopeStore;
 }
 
@@ -24,6 +25,7 @@ function linkedEpic(over: Record<string, unknown> = {}) {
     factorySessionIds: ['f1'],
     factorySessionLastEventAt: {} as Record<string, string>,
     workingAgents: [] as { role: string; taskId: string | null; since: string }[],
+    progress: null,
     ...over,
   };
 }
@@ -32,6 +34,7 @@ function session(linked: unknown, over: Record<string, unknown> = {}) {
     cliSessionId: 'c1',
     startedAt: '2026-10-07T10:00:00.000Z',
     cwdLabel: 'project-a',
+    subagentsRunning: 0,
     linked: linked as LinkedIn,
     ...over,
   };
@@ -40,6 +43,20 @@ function cli(sessions: unknown[], state: ActiveScopeCli['state'] = 'ok'): Active
   return { state, readAt: NOW, sessions: sessions as ActiveScopeCli['sessions'] };
 }
 const fold = (c: ActiveScopeCli, stores: ActiveScopeStore[]) => computeActiveScope(c, stores, NOW);
+const NO_SPEND = { tokensSpent: 0, tokensUnmeasured: 0, tasksDone: 0, tasksTotal: 0 };
+const counts = (
+  done: number,
+  review: number,
+  inProgress: number,
+  todo: number,
+  superseded = 0,
+) => ({
+  done,
+  review,
+  inProgress,
+  todo,
+  superseded,
+});
 
 describe('computeActiveScope', () => {
   it('a live session linked to a closed epic activates nothing', () => {
@@ -90,8 +107,8 @@ describe('computeActiveScope', () => {
       ],
     );
     expect(out.epics).toEqual([
-      { storeId: 'st-b', epicId: 'epic-b', project: 'project-mapped' },
-      { storeId: 'st-b', epicId: 'epic-c', project: 'project-b' },
+      { storeId: 'st-b', epicId: 'epic-b', project: 'project-mapped', ...NO_SPEND },
+      { storeId: 'st-b', epicId: 'epic-c', project: 'project-b', ...NO_SPEND },
     ]);
     expect(out.projects.map((p) => [p.storeId, p.project]).sort()).toEqual([
       ['st-b', 'project-b'],
@@ -103,7 +120,15 @@ describe('computeActiveScope', () => {
     const out = fold(cli([session({ epics: [linkedEpic({ epicId: null })] })]), [store()]);
     expect(out.epics).toEqual([]);
     expect(out.projects).toEqual([
-      { storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 0 },
+      {
+        storeId: 'home',
+        project: 'project-a',
+        liveSessions: 1,
+        agentsWorking: 0,
+        activeSessions: 0,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+      },
     ]);
   });
 
@@ -118,6 +143,13 @@ describe('computeActiveScope', () => {
         readAt: NOW,
         liveSessions: 0,
         unlinkedSessions: 0,
+        activeSessions: 0,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
+        tasksDone: 0,
+        tasksTotal: 0,
         projects: [],
         epics: [],
         factorySessions: [],
@@ -215,9 +247,19 @@ describe('computeActiveScope', () => {
       [store({ activelyRunning: ['epic-a'] })],
     );
     expect(out.projects).toEqual([
-      { storeId: 'home', project: 'project-a', liveSessions: 2, agentsWorking: 2 },
+      {
+        storeId: 'home',
+        project: 'project-a',
+        liveSessions: 2,
+        agentsWorking: 2,
+        activeSessions: 2,
+        agentsRunning: 2,
+        agentsUnmeasured: 0,
+      },
     ]);
-    expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: 'project-a' }]);
+    expect(out.epics).toEqual([
+      { storeId: 'home', epicId: 'epic-a', project: 'project-a', ...NO_SPEND },
+    ]);
   });
 
   describe('an epic the running set does not hold (no task rows yet)', () => {
@@ -233,10 +275,20 @@ describe('computeActiveScope', () => {
 
     it('is active when this CLI session wrote into it since it started, within the idle window', () => {
       const out = fold(cli([session({ epics: [taskless()] })]), [store({ activelyRunning: [] })]);
-      expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: 'project-a' }]);
+      expect(out.epics).toEqual([
+        { storeId: 'home', epicId: 'epic-a', project: 'project-a', ...NO_SPEND },
+      ]);
       expect(out.factorySessions).toEqual([{ storeId: 'home', sessionId: 'f1' }]);
       expect(out.projects).toEqual([
-        { storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 1 },
+        {
+          storeId: 'home',
+          project: 'project-a',
+          liveSessions: 1,
+          agentsWorking: 1,
+          activeSessions: 1,
+          agentsRunning: 1,
+          agentsUnmeasured: 0,
+        },
       ]);
       expect(out.unlinkedSessions).toBe(0);
     });
@@ -297,11 +349,202 @@ describe('computeActiveScope', () => {
       const out = fold(cli([session({ epics: [taskless({ project: null })] })]), [
         store({ activelyRunning: [] }),
       ]);
-      expect(out.epics).toEqual([{ storeId: 'home', epicId: 'epic-a', project: null }]);
+      expect(out.epics).toEqual([
+        { storeId: 'home', epicId: 'epic-a', project: null, ...NO_SPEND },
+      ]);
       expect(out.factorySessions).toEqual([{ storeId: 'home', sessionId: 'f1' }]);
       expect(out.projects).toEqual([]);
       expect(out.unlinkedSessions).toBe(0);
       expect(out.liveSessions).toBe(1);
+    });
+  });
+
+  describe('the fact strip totals', () => {
+    const agent = { role: 'coder', taskId: 't1', since: '2026-10-07T11:00:00.000Z' };
+    const facts = (out: ReturnType<typeof fold>) => ({
+      activeSessions: out.activeSessions,
+      agentsRunning: out.agentsRunning,
+      agentsUnmeasured: out.agentsUnmeasured,
+      tokensSpent: out.tokensSpent,
+      tokensUnmeasured: out.tokensUnmeasured,
+      tasksDone: out.tasksDone,
+      tasksTotal: out.tasksTotal,
+    });
+
+    it('a session linked only to a closed epic is not active and adds nothing', () => {
+      const out = fold(
+        cli([
+          session(
+            {
+              epics: [
+                linkedEpic({ closed: true, workingAgents: [agent], progress: counts(1, 0, 0, 1) }),
+              ],
+            },
+            { subagentsRunning: 3 },
+          ),
+        ]),
+        [
+          store({
+            activelyRunning: ['epic-a'],
+            tokens: { 'epic-a': { tokensSpent: 9, unmeasured: 1 } },
+          }),
+        ],
+      );
+      expect(out.liveSessions).toBe(1);
+      expect(facts(out)).toEqual({
+        activeSessions: 0,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+        ...NO_SPEND,
+      });
+    });
+
+    it('two sessions on one epic count its tokens and tasks once', () => {
+      const epic = linkedEpic({ progress: counts(3, 1, 1, 5, 2) });
+      const out = fold(
+        cli([
+          session({ epics: [epic] }, { cliSessionId: 'c1' }),
+          session({ epics: [epic] }, { cliSessionId: 'c2' }),
+        ]),
+        [
+          store({
+            activelyRunning: ['epic-a'],
+            tokens: { 'epic-a': { tokensSpent: 1200, unmeasured: 2 } },
+          }),
+        ],
+      );
+      expect(facts(out)).toEqual({
+        activeSessions: 2,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+        tokensSpent: 1200,
+        tokensUnmeasured: 2,
+        tasksDone: 3,
+        tasksTotal: 10,
+      });
+      expect(out.epics).toEqual([
+        {
+          storeId: 'home',
+          epicId: 'epic-a',
+          project: 'project-a',
+          tokensSpent: 1200,
+          tokensUnmeasured: 2,
+          tasksDone: 3,
+          tasksTotal: 10,
+        },
+      ]);
+    });
+
+    it('subagents add up across sessions; a factory agent two sessions share counts once', () => {
+      const out = fold(
+        cli([
+          session(
+            { epics: [linkedEpic({ workingAgents: [agent] })] },
+            { cliSessionId: 'c1', subagentsRunning: 2 },
+          ),
+          session(
+            { epics: [linkedEpic({ workingAgents: [agent, { ...agent, taskId: 't2' }] })] },
+            { cliSessionId: 'c2', subagentsRunning: 3 },
+          ),
+          // Not on an active epic: its subagents are not this set's.
+          session(null, { cliSessionId: 'c3', subagentsRunning: 4 }),
+        ]),
+        [store({ activelyRunning: ['epic-a'] })],
+      );
+      expect(out.activeSessions).toBe(2);
+      expect(out.agentsRunning).toBe(2 + 3 + 2);
+      expect(out.agentsUnmeasured).toBe(0);
+      expect(out.projects).toMatchObject([
+        { project: 'project-a', activeSessions: 2, agentsWorking: 2, agentsRunning: 7 },
+      ]);
+    });
+
+    it('the same epic id in two stores is two epics, each with its own spend and agents', () => {
+      const other = { id: 'store-b', label: 'project-b' };
+      const out = fold(
+        cli([
+          session({
+            epics: [
+              linkedEpic({ workingAgents: [agent], progress: counts(1, 0, 0, 1) }),
+              linkedEpic({
+                store: other,
+                project: 'project-b',
+                workingAgents: [agent],
+                progress: counts(2, 0, 1, 1),
+              }),
+            ],
+          }),
+        ]),
+        [
+          store({
+            activelyRunning: ['epic-a'],
+            tokens: { 'epic-a': { tokensSpent: 100, unmeasured: 0 } },
+          }),
+          store({
+            id: 'store-b',
+            label: 'project-b',
+            activelyRunning: ['epic-a'],
+            tokens: { 'epic-a': { tokensSpent: 200, unmeasured: 1 } },
+          }),
+        ],
+      );
+      expect(out.epics.map((e) => [e.storeId, e.epicId, e.tokensSpent])).toEqual([
+        ['home', 'epic-a', 100],
+        ['store-b', 'epic-a', 200],
+      ]);
+      expect(facts(out)).toEqual({
+        activeSessions: 1,
+        agentsRunning: 2,
+        agentsUnmeasured: 0,
+        tokensSpent: 300,
+        tokensUnmeasured: 1,
+        tasksDone: 3,
+        tasksTotal: 6,
+      });
+    });
+
+    it('a null subagentsRunning raises agentsUnmeasured and adds no agents', () => {
+      const out = fold(
+        cli([
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c1', subagentsRunning: null }),
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c2', subagentsRunning: 1 }),
+        ]),
+        [store({ activelyRunning: ['epic-a'] })],
+      );
+      expect(out.agentsRunning).toBe(1);
+      expect(out.agentsUnmeasured).toBe(1);
+      expect(out.projects).toMatchObject([{ agentsRunning: 1, agentsUnmeasured: 1 }]);
+    });
+
+    it('a project row counts only the sessions on its active epics', () => {
+      const out = fold(
+        cli([
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c1', subagentsRunning: 1 }),
+          session(
+            {
+              epics: [
+                linkedEpic({ epicId: 'epic-b', project: 'project-b' }),
+                linkedEpic({ epicId: null }),
+              ],
+            },
+            { cliSessionId: 'c2', subagentsRunning: 2 },
+          ),
+        ]),
+        [store({ activelyRunning: ['epic-a', 'epic-b'] })],
+      );
+      const row = (project: string) => out.projects.find((p) => p.project === project);
+      expect(row('project-a')).toMatchObject({
+        liveSessions: 2,
+        activeSessions: 1,
+        agentsRunning: 1,
+      });
+      expect(row('project-b')).toMatchObject({
+        liveSessions: 1,
+        activeSessions: 1,
+        agentsRunning: 2,
+      });
+      expect(out.activeSessions).toBe(2);
+      expect(out.agentsRunning).toBe(3);
     });
   });
 

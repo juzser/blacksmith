@@ -54,7 +54,11 @@ import {
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
 import { compareLogOrder } from '../../../factory/orchestrator/dist/eventOrder.js';
 import { STATE_ARTIFACTS_DIR, STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
-import { type ActiveScopeStore, computeActiveScope } from './activeScope.js';
+import {
+  type ActiveScopeResponse,
+  type ActiveScopeStore,
+  computeActiveScope,
+} from './activeScope.js';
 import {
   decodeCursor,
   encodeCursor,
@@ -1084,24 +1088,35 @@ export function createApp(opts: AppOpts): AppHandle {
   // actively-running set and the epic -> project map come from overview() per
   // store (the same call /api/overview fans out), so Home's "Running now" and
   // this cannot drift. Prompt-free (ids, project names, counts only).
+  // A foreign store whose overview throws is left out (fanOut skips it) and
+  // counted in `storesUnread`, so the page can say its totals may be low.
   app.get('/api/active-scope', async (c) => {
-    const cli = await cliSessions.read(readable(c));
+    const entries = readable(c);
+    const cli = await cliSessions.read(entries);
     const nowIso = opts.nowIso ?? new Date().toISOString();
     const stores: ActiveScopeStore[] =
       cli.state === 'ok'
-        ? fanOut(readable(c), undefined, (db) => overview(db, {}, clock)).map(
-            ({ store, data }) => ({
-              store,
-              activelyRunning: data.epicsActivelyRunning,
-              epicProjects: Object.fromEntries(
-                (data.projects ?? []).flatMap((p) =>
-                  p.epicsInFlight.map((epicId) => [epicId, p.project] as const),
-                ),
+        ? fanOut(entries, undefined, (db) => overview(db, {}, clock)).map(({ store, data }) => ({
+            store,
+            activelyRunning: data.epicsActivelyRunning,
+            epicProjects: Object.fromEntries(
+              (data.projects ?? []).flatMap((p) =>
+                p.epicsInFlight.map((epicId) => [epicId, p.project] as const),
               ),
-            }),
-          )
+            ),
+            tokens: Object.fromEntries(
+              data.tokensByEpic.map((t) => [
+                t.epicId,
+                { tokensSpent: t.tokensSpent, unmeasured: t.unmeasured },
+              ]),
+            ),
+          }))
         : [];
-    return c.json(computeActiveScope(cli, stores, nowIso));
+    const body: ActiveScopeResponse = {
+      ...computeActiveScope(cli, stores, nowIso),
+      storesUnread: cli.state === 'ok' ? entries.length - stores.length : 0,
+    };
+    return c.json(body);
   });
 
   app.get('/api/projects', (c) => {
