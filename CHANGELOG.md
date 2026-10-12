@@ -96,6 +96,16 @@ than appearing in it.
 
 ### Added
 
+- **Home opens with four facts.** Under the page header, four read-only
+  tiles read Active sessions, Agents running, Budget used and Tasks done. All
+  four describe one set: the live CLI sessions linked to a running epic.
+  Budget used is the tokens spent on those epics and Tasks done reads "13 of
+  25"; each epic counts once, even when two sessions run it. Agents running
+  adds each session's working subagents to the factory agents on its epics,
+  and leaves out subagents nested inside another subagent. The strip follows
+  the project filter, reads "Not known" when session data could not be read,
+  and forms a 2×2 grid on a phone.
+
 - **0.5.0 — the CLI is `bs`, the subagents are `bs-<role>`, budgets scale
   per tier, and every operator prompt is captured.** Two hundred and one
   pull requests since 0.4.0 (#208–#440), grouped by theme rather than by
