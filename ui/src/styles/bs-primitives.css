@@ -1009,10 +1009,13 @@ a:hover {
 @media (max-width: 900px) {
   .bs-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--bs-space-2);
+    gap: var(--bs-space-4);
   }
 }
 @media (max-width: 640px) {
+  .bs-stat-grid {
+    gap: var(--bs-space-2);
+  }
   .bs-stat {
     padding: var(--bs-m-card-pad);
   }
@@ -2812,7 +2815,7 @@ a:hover {
 .bs-home__facts {
   display: flex;
   flex-direction: column;
-  gap: var(--bs-space-2);
+  gap: var(--bs-space-3);
 }
 .bs-home__cards {
   display: grid;

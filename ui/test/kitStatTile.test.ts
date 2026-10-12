@@ -102,10 +102,11 @@ describe('.bs-stat-grid and .bs-stat (bs-primitives.css)', () => {
     expect(grid).toMatch(/margin:\s*0;/);
   });
 
-  it('turns into a 2×2 grid, 8px apart, at 900px and below', () => {
+  it('turns into a 2×2 grid, still 16px apart, at 900px and below, 8px at 640px and below', () => {
     const grid = mediaRule('(max-width: 900px)', '.bs-stat-grid');
     expect(grid).toMatch(/grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
-    expect(grid).toMatch(/gap:\s*var\(--bs-space-2\);/);
+    expect(grid).toMatch(/gap:\s*var\(--bs-space-4\);/);
+    expect(mediaRule('(max-width: 640px)', '.bs-stat-grid')).toMatch(/gap:\s*var\(--bs-space-2\);/);
   });
 
   it('draws the tile from tokens: border, radius, raised surface, 16px padding', () => {
