@@ -108,7 +108,16 @@ function measureInteractiveElements(selector: string): Measurement[] {
       exempt =
         'native control this app never sizes; the browser decides its hit area (WCAG 2.2 SC 2.5.8 "User agent control" exception)';
     }
-    out.push({ name: label(el, index), width: rect.width, height: rect.height, exempt });
+    // A hit box grown by an absolutely positioned ::after (the relative-time
+    // trigger, bs-primitives.css) is the target the thumb actually gets.
+    const after = getComputedStyle(el, '::after');
+    const grown =
+      after.content !== 'none' && after.content !== 'normal' && after.position === 'absolute';
+    const width = grown ? Math.max(rect.width, Number.parseFloat(after.width) || 0) : rect.width;
+    const height = grown
+      ? Math.max(rect.height, Number.parseFloat(after.height) || 0)
+      : rect.height;
+    out.push({ name: label(el, index), width, height, exempt });
   });
   return out;
 }
