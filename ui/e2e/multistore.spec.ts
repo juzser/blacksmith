@@ -361,7 +361,9 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(page.getByText('No events recorded.')).toBeVisible();
     await page.goto(taskUrl(TASK_4, foreignId));
     await page.getByRole('tab', { name: 'Findings' }).click();
-    await expect(page.getByText('one more layer than the task needs')).toBeVisible();
+    await expect(
+      page.getByText('one more layer than the task needs', { exact: true }),
+    ).toBeVisible();
     // Every read the page makes is issued when it loads, before the Findings
     // tab above could render, so nothing is still to come.
 
@@ -375,7 +377,9 @@ test.describe('a foreign store in the dashboard', () => {
     // its own store. Neither page offers a decision: the dashboard only reads.
     await page.goto(taskUrl(TASK_4));
     await page.getByRole('tab', { name: 'Findings' }).click();
-    await expect(page.getByText('one more layer than the task needs')).toBeVisible();
+    await expect(
+      page.getByText('one more layer than the task needs', { exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: /^(Waive|Deny)$/ })).toHaveCount(0);
   });
 
