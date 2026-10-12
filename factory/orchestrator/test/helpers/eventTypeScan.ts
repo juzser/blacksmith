@@ -182,6 +182,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       'D-21 Part 4: repairObligation (findings.ts) correcting a malformed amends_task_ids entry on an amend-pending finding. Not a finding-transitioned event because a repair changes no status, so no finding_status dimension value applies to it; the payload carries its own from_obligation/to_obligation/reason rather than a taxonomy-tagged field.',
   },
   {
+    eventType: 'task-reinstated',
+    writtenBy: 'src',
+    reason:
+      'reinstateTask (reinstate.ts) putting a finished task back to completed after the log superseded it with no plan successor behind it. A repair of the log own record, like finding-obligation-repaired: it moves no taxonomy dimension, and the payload carries its own reason plus the merged and superseded event ids it corrects.',
+  },
+  {
     eventType: 'recheck-proposed',
     writtenBy: 'src',
     reason:

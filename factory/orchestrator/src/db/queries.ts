@@ -2398,6 +2398,9 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // -- hiding the repair itself from the timeline would be the same failure
   // one layer out.
   'finding-obligation-repaired',
+  // A repair of the log's own record: a finished task put back to completed.
+  // Hiding it would hide that the verdict's input was changed by hand.
+  'task-reinstated',
   // The independent finder's reconciliation. It is the one event that says a
   // second, differently-vendored eye read this diff at all, and in shadow mode
   // it is the ONLY thing the run produces -- gating nothing by definition. A

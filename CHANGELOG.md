@@ -26,6 +26,17 @@ private repository and published here as a single initial commit, so the phase
 entries below record development that predates this repo's git history rather
 than appearing in it.
 
+### Fixed
+
+- **A plan amendment no longer supersedes a finished task it did not name.**
+  The next plan version used to drop a completed task's record while keeping
+  older dead copies of its id, so ingest wrote `task-superseded` for a task that
+  had merged and the epic verdict could never close. The finished record and its
+  dead copies are now left out unless `supersede` names the task. For epics that
+  already hit it, `bs task reinstate <task-id> --reason <text>` appends an
+  auditable `task-reinstated` event; it refuses a task that never merged and one
+  a plan really superseded with a successor.
+
 ### Removed
 
 - **Operator-private project specs and local paths.** The tracked tree no

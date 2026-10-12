@@ -899,10 +899,27 @@ export function draftNextVersion(
   const newVersion = prev.version + 1;
   const supersede = readSupersedeMap(prev.epic_id, newVersion, changes.supersede);
 
+  // A finished task leaves the live backlog -- and takes every older dead
+  // copy of its id with it. Dropping only the completed record left the id
+  // behind as dead records alone (each earlier same-id supersede left one), and
+  // ingest reads an id with no live record as "superseded, nothing replaced
+  // it": the log then called a task that had merged long ago superseded, and
+  // the epic verdict, which counts a superseded row only through a successor
+  // that does not exist, could never close. A task that finished stays
+  // finished unless this amendment's `changes.supersede` names it.
+  const finished = new Set(
+    prev.tasks
+      .filter((t) => t.task_status === 'completed' && !(t.task_id in supersede))
+      .map((t) => t.task_id),
+  );
+
   const carried: TaskSpecRecord[] = [];
   for (const t of prev.tasks) {
-    if (t.task_status === 'completed' && !(t.task_id in supersede)) {
+    if (t.task_status === 'completed' && finished.has(t.task_id)) {
       continue; // done; not carried into the live backlog
+    }
+    if (t.task_status === 'superseded' && finished.has(t.task_id)) {
+      continue; // an older dead copy of an id that finished
     }
     if (t.task_id in supersede) {
       carried.push({ ...t, task_status: 'superseded', plan_version: newVersion });
