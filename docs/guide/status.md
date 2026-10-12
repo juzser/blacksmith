@@ -19,7 +19,7 @@ dashboard's Roadmap page parses.
 | 3. Loop runner + worktree engine | Plan versions, claims validation, worktree lifecycle, serial merge queue, event log | Built, merged |
 | 4. Gates | Schema check, test gate, severity policy, waiver flow (CLI) | Built, merged |
 | 5. State + analytics | SQLite projections, `bs db` / `bs stats` | Built, merged |
-| 6. UI | Overview, Timeline, Kanban, Roadmap, Flow, Lessons, Errors, Analytics | Built, merged |
+| 6. UI | Home, Activity, Kanban, Roadmap, Sessions, Cost & quality, Lessons, Task detail | Built, merged |
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
 | 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — ships `codex: enabled: auto, mode: active` and `deepseek: enabled: auto, mode: active` (deepseek promoted out of shadow 2026-09-14); a box that resolves both reaches `min_providers: 2`, a box that resolves one does not |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |

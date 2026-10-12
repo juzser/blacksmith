@@ -1,8 +1,10 @@
 # The dashboard
 
-A local, read-only view of what the factory is doing. Nothing you click here
-dispatches an agent — the dashboard is a *projection* of the append-only event
-log, and `bs db rebuild` reconstructs the whole thing from that log alone.
+A local view of what the factory is doing, over eight pages. The dashboard is a
+*projection* of the append-only event log, and `bs db rebuild` reconstructs the
+whole thing from that log alone. Its only writes are your answers: approving,
+rejecting or editing a lesson candidate, and answering a waiver batch. Each
+appends an event to the log, and nothing you click here dispatches an agent.
 
 The server also reads, read-only, the local Claude Code session registry,
 transcripts and prompt history — from `--claude-config-dir`, else `$CLAUDE_CONFIG_DIR`, else
@@ -81,8 +83,8 @@ only read, never written (a `?session` query still reads the served home alone).
 
 <table>
 <tr>
-<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox grouped by project with one action per row, Running now cards per project with agents working, epics in flight and token spend, and a list of what the factory decided recently" /></td>
-<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /></td>
+<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox with All, Waivers, Escalations and Lesson candidates tabs holding one escalated task with an Open button, a Live sessions panel reading No live Blacksmith sessions, and a Recent activity list of system and finding events" /></td>
+<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-dark.png" width="100%" alt="Roadmap page: a timeline of the demo-hub phase Phase 6b - Remaining pages with bars for epic-9, epic-10 and epic-11, and the epic-9 card at 2 of 4 tasks done, waves 1 and 2 done, wave 3 running Task 3 and wave 4 upcoming" /></td>
 </tr>
 <tr valign="top">
 <td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) — the
@@ -92,45 +94,50 @@ findings: the ones the factory will no longer act on), escalated tasks and
 lesson candidates, grouped by project, each with one action; under it, what is running per project, what the factory
 decided recently, and budget burn. Everything else is the factory reporting
 in.</td>
-<td><b>Flow</b> — the plan as waves. Waves are layers of the dependency graph;
-a wave is only admitted once its tasks' path claims are pairwise disjoint,
-which is what lets everything in a column run at the same time.</td>
+<td><b>Roadmap</b> (<code>/work/roadmap</code>) — milestone progress, parsed
+from <a href="../../factory/specs/roadmap.md"><code>factory/specs/roadmap.md</code></a>
+and joined with real task counts. Open an epic and it shows as its waves:
+which are done, which is running and on what task, which are still to come.
+A wave is only admitted once its tasks' path claims are pairwise disjoint,
+which is what lets everything in it run at the same time.</td>
 </tr>
 <tr>
-<td><img src="../../ui/e2e/__screenshots__/phase-6b/kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns; cards carry severity chips such as S2-major and agent chips such as coder - mid" /></td>
-<td><img src="../../ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for epic-9/task-3 showing a Spec contract card with case, origin, epic, plan version and claims, and an Attempts list naming each agent, provider and outcome" /></td>
+<td><img src="../../ui/e2e/__screenshots__/phase-6b/work-kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns over 11 tasks; cards carry role chips such as Builder - reviewing, type tags, severity chips such as S2-major, and a Waits for line naming the blocking task" /></td>
+<td><img src="../../ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for Task 3 of epic-9, in progress: the request text, the files the task may change, a Details card with plan version, status and case, and an Agents card listing each agent's tier, provider and outcome" /></td>
 </tr>
 <tr valign="top">
-<td><b>Kanban</b> — where every task sits, what severity it carries, and which
-model tier drew it. <code>Blocked</code> and <code>Reviewing</code> are the two
-columns that can end up waiting on you.</td>
+<td><b>Kanban</b> (<code>/work/kanban</code>) — where every task sits, what
+severity it carries, which agent holds it, and what it waits for.
+<code>Blocked</code> and <code>Reviewing</code> are the two columns that can
+end up waiting on you.</td>
 <td><b>Task detail</b> — the contract a worker was actually handed: its case,
-its plan version, and the exact paths it was allowed to touch. Under it, every
-attempt, with the provider that ran it and how it ended.</td>
+its plan version, and the exact paths it was allowed to touch. Beside it, every
+agent that worked on it, with the tier and provider that ran it and how it
+ended.</td>
 </tr>
 <tr>
-<td><img src="../../ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Analytics page with throughput, cost-per-task, same-mistake-rate and recheck-pass-rate cards, bar charts of cost by model tier and by provider, and a cross-check quorum panel" /></td>
-<td><img src="../../ui/e2e/__screenshots__/phase-6b/lessons-desktop-dark.png" width="100%" alt="Lessons page listing lesson candidates with scope and status chips, each with approve and reject actions" /></td>
+<td><img src="../../ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Cost and quality page: tokens per day and in total by role, a table of tokens by role and model tier, cards for tokens per task, repeated mistakes after a lesson, fixes that held on recheck and second-opinion reviewers, and cost per task by provider" /></td>
+<td><img src="../../ui/e2e/__screenshots__/phase-6b/lessons-cards-desktop-dark.png" width="100%" alt="Lessons page with Pending review, Approved, Closed and All tabs over three lesson cards, each with a scope chip, the session it was learned from, and how many repeats it has prevented" /></td>
 </tr>
 <tr valign="top">
-<td><b>Analytics</b> — cost per task by tier and by provider, plus the
-same-mistake rate: the number that says whether the lessons loop is teaching
-it anything. The cross-check quorum panel shows how the external judges are
-voting while they are in shadow mode.</td>
+<td><b>Cost &amp; quality</b> (<code>/analytics</code>) — tokens by role, by
+model tier and per task by provider, counted in tokens and never in dollars,
+plus the same-mistake rate: the number that says whether the lessons loop is
+teaching it anything. The second-opinion reviewers card shows how often the
+cross-provider judges agree.</td>
 <td><b>Lessons</b> — the candidates the scribe distilled from errors and
-decision checkpoints, waiting on an approve or a reject. This is the surface
-for step 6 of <a href="operator-loop.md">the operator loop</a>.</td>
+decision checkpoints, waiting on an approve or a reject, and for each approved
+lesson how many repeats it has prevented. This is the surface for step 6 of
+<a href="operator-loop.md">the operator loop</a>.</td>
 </tr>
 </table>
 
-Four more pages carry the rest:
+Two more pages carry the rest:
 
 | Page | What it is for |
 |---|---|
-| **Sessions** (`/sessions`) | Every orchestrator session, including the cross-session parent edges that let one epic span several. |
-| **Timeline** (`/timeline`) | The event log itself, grouped by dispatch — every prompt, dispatch, error and gate result, in order. |
-| **Roadmap** (`/roadmap`) | Milestone progress, parsed from [`factory/specs/roadmap.md`](../../factory/specs/roadmap.md) and joined with real task and token counts. |
-| **Errors** (`/errors`) | Errors by taxonomy category — the raw material the lessons loop distills from. |
+| **Activity** (`/activity`) | The event log itself — every prompt, dispatch, return, finding, gate result, merge and error, in order, filtered by project, session and kind. `/timeline` lands here; `/errors` opens it on errors, with the errors grouped by taxonomy class above the feed — the raw material the lessons loop distills from. |
+| **Sessions** (`/sessions`) | The history of runs, active first; pick one and it lists every agent the run dispatched and how each ended. |
 
 ## The screenshots are real
 
