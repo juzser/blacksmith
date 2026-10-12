@@ -213,7 +213,7 @@ judge_sandbox:
 
   # git subcommands that mutate a worktree, the index, refs, or config.
   # `git add`/`commit`/`checkout`/`stash`/`restore` are the five
-  # .claude/agents/reviewer.md already names in prose; the rest close the
+  # .claude/agents/bs-reviewer.md already names in prose; the rest close the
   # same door from the other side.
   git_write_subcommands:
     [add, commit, checkout, switch, restore, stash, apply, am, reset, clean, rm, mv,

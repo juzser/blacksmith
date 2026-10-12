@@ -13,7 +13,7 @@
 #                 (`command`/`args` unused); `cli` — a program `bs-run` spawns
 #                 with the rendered prompt on stdin.
 #   roles         taxonomy roles this harness serves; empty = every role that
-#                 ships a `.claude/agents/<role>.md`.
+#                 ships a `.claude/agents/bs-<role>.md`.
 #   args          argv for every turn. Placeholders, closed set:
 #                 {prompt_file} {worktree} {role} {task} {model} {schema_file}.
 #   worker_args   appended for a worker or write-scoped role (guardrails.yml
