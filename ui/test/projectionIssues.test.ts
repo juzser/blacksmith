@@ -7,7 +7,6 @@ function pulse(projectionIssues?: ProjectionIssue[]): PulseResult {
     lastEventAt: '2026-09-14T09:00:00.000Z',
     lastEventType: 'task-result-recorded',
     counts: { events: 12, errors: 0 },
-    lessonsPending: 0,
     ...(projectionIssues ? { projectionIssues } : {}),
   };
 }

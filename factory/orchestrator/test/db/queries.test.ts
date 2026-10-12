@@ -13,10 +13,8 @@ import {
   errorsPage,
   eventKind,
   flowGraph,
-  inboxRows,
   kanban,
   LESSON_BUCKET_FOR_STATUS,
-  lessonOwnerSession,
   lessonsPage,
   overview,
   pulse,
@@ -2143,8 +2141,6 @@ describe('db/queries.ts', () => {
       expect(result.lastEventAt).not.toBeNull();
       expect(result.counts.events).toBe(readEventCount(handle));
       expect(result.counts.errors).toBe(1); // the one error errorsPage() groups
-      // lesson-1 is approved and lesson-2 invalidated — nothing is waiting.
-      expect(result.lessonsPending).toBe(0);
     });
 
     it('breaks a tie on the log order, not on the order the rows come back', async () => {
@@ -2306,40 +2302,7 @@ describe('db/queries.ts', () => {
         lastEventAt: null,
         lastEventType: null,
         counts: { events: 0, errors: 0 },
-        lessonsPending: 0,
       });
-    });
-
-    it('counts a lesson still waiting on the operator', async () => {
-      const parent = await lastEventId({ stateDir });
-      await appendEvent(
-        {
-          session_id: SESSION_ID,
-          actor: 'scribe',
-          event_type: 'lesson-candidate-raised',
-          plan_version: 1,
-          causal_parent: parent,
-          payload: {
-            lesson_id: 'lesson-3',
-            lesson_type: 'rule',
-            lesson_level: 'principle',
-            lesson_status: 'candidate',
-            lesson_scope: 'stack-wide',
-            statement: 'Read the tail of check.sh, not its exit code.',
-            valid_from: '2026-08-27T00:00:00.000Z',
-            provenance_event_ids: [parent],
-          },
-        },
-        { stateDir },
-      );
-      const dbPath = path.join(dbDir, 'smith-pulse.db');
-      await rebuild(dbPath, 'all', { stateDir });
-      const fresh = openDb(dbPath);
-      try {
-        expect(pulse(fresh.db).lessonsPending).toBe(1);
-      } finally {
-        fresh.sqlite.close();
-      }
     });
   });
 
@@ -2932,14 +2895,18 @@ describe('overview() — closed epics (D-43/P9-27)', () => {
   });
 });
 
-describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
+// The operator's pending-waiver count reads one rule, needsOperatorWaiver():
+// an undecided waivable finding the factory will no longer act on. The
+// dashboard only shows the count; the decision itself goes through
+// `/bs waivers`.
+describe('alerts.pendingWaivers — which findings wait on the operator', () => {
   let stateDir: string;
   let dbDir: string;
   let handle: DbHandle;
 
   beforeEach(async () => {
-    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-events-'));
-    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-db-'));
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-pending-waivers-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-pending-waivers-db-'));
     await buildFixture({ stateDir });
     const dbPath = path.join(dbDir, 'smith.db');
     await rebuild(dbPath, 'all', { stateDir });
@@ -2952,437 +2919,148 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     await rm(dbDir, { recursive: true, force: true });
   });
 
-  it('lists the fixture escalated task (task-3) as the only row', () => {
-    const rows = inboxRows(handle.db);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
-  });
-
-  it('carries facts, not sentences: the last dispatch role and the coordination error detail', () => {
-    const [row] = inboxRows(handle.db);
-    expect(row).toMatchObject({
-      role: 'coder',
-      reason: 'worker deadlocked waiting on a claim it never held',
-      findingCount: 0,
-      findingSummaries: [],
-      statement: null,
-    });
-    expect(row).not.toHaveProperty('title');
-    expect(row).not.toHaveProperty('description');
-  });
-
-  it('a dispatch carries the title column of its task, never the objective', () => {
+  /** Park a task row at `status`, copied from a fixture row so every
+   * required column is filled; the epic is the fixture's own unless `over`
+   * names another. */
+  function seedTask(
+    taskId: string,
+    status: string,
+    over: Partial<typeof tasks.$inferInsert> = {},
+  ): void {
+    const [base] = handle.db.select().from(tasks).where(eq(tasks.taskId, TASK_1)).all();
+    if (!base) throw new Error('fixture task missing');
+    handle.db.delete(tasks).where(eq(tasks.taskId, taskId)).run();
     handle.db
-      .update(tasks)
-      .set({ title: 'Stop the deadlock' })
-      .where(eq(tasks.taskId, TASK_1))
+      .insert(tasks)
+      .values({ ...base, taskId, taskStatus: status, ...over })
       .run();
-    const dispatches = overview(handle.db).recentDispatches;
-    const mine = dispatches.filter((d) => d.taskId === TASK_1);
-    expect(mine.length).toBeGreaterThan(0);
-    expect(mine.every((d) => d.taskTitle === 'Stop the deadlock')).toBe(true);
-    expect(dispatches.filter((d) => d.taskId === TASK_2).every((d) => d.taskTitle === null)).toBe(
-      true,
-    );
-  });
+  }
 
-  it('taskTitle is the title column, null when unset, never the objective', () => {
-    expect(inboxRows(handle.db)[0]?.taskTitle).toBeNull();
+  function seedFinding(
+    id: string,
+    taskId: string,
+    over: Partial<typeof findings.$inferInsert> = {},
+  ): void {
     handle.db
-      .update(tasks)
-      .set({ title: 'Stop the deadlock' })
-      .where(eq(tasks.taskId, TASK_3))
+      .insert(findings)
+      .values({
+        findingId: id,
+        sessionId: SESSION_ID,
+        taskId,
+        epicId: EPIC_ID,
+        fingerprint: id,
+        findingCategory: 'correctness',
+        severity: 'S3-minor',
+        findingStatus: 'raised',
+        summary: 'a stray console.log',
+        foundBy: 'reviewer',
+        raisedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        ...over,
+      })
       .run();
-    expect(inboxRows(handle.db)[0]?.taskTitle).toBe('Stop the deadlock');
+  }
+
+  /** The global count and the sum of the per-project counts, which must agree. */
+  const counts = () => [
+    overview(handle.db).alerts.pendingWaivers,
+    (overview(handle.db).projects ?? []).reduce((n, p) => n + p.alerts.pendingWaivers, 0),
+  ];
+
+  it('counts a finding on a completed task', () => {
+    seedTask('epic-a/task-1', 'completed');
+    seedFinding('f-done', 'epic-a/task-1');
+    const before = counts();
+    handle.db.delete(findings).where(eq(findings.findingId, 'f-done')).run();
+    expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
   });
 
-  it('reason is null when no coordination error is projected for the task', () => {
-    handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
-    expect(inboxRows(handle.db)[0]?.reason).toBeNull();
-  });
-
-  it('createdAt is when the parking error was logged, so a later touch of the task does not re-date the decision', () => {
-    const parked = handle.db
-      .select()
-      .from(errors)
-      .where(eq(errors.errorGroup, 'coordination'))
-      .all()
-      .filter((e) => e.detail)
-      .at(-1);
-    expect(parked).toBeDefined();
-    handle.db
-      .update(tasks)
-      .set({ updatedAt: '2099-01-01T00:00:00.000Z' })
-      .where(eq(tasks.taskId, TASK_3))
-      .run();
-    expect(inboxRows(handle.db)[0]?.createdAt).toBe(parked?.ts);
-  });
-
-  it('createdAt stays the park time when a detail-less error parked the task and an S4 error touched it later', () => {
-    const parkedAt = '2026-01-01T00:00:00.000Z';
-    const laterAt = '2026-02-01T00:00:00.000Z';
-    handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
-    const base = { sessionId: SESSION_ID, taskRef: TASK_3, errorGroup: 'coordination' };
-    handle.db
-      .insert(errors)
-      .values([
-        {
-          ...base,
-          eventId: 'evt-park',
-          ts: parkedAt,
-          errorClass: 'coordination.deadlock',
-          severity: 'S1-stop-the-line',
-          detail: null,
-        },
-        {
-          ...base,
-          eventId: 'evt-later',
-          ts: laterAt,
-          errorClass: 'coordination.note',
-          severity: 'S4-nit',
-          detail: 'a later nit',
-        },
-      ])
-      .run();
-    handle.db
-      .update(tasks)
-      .set({ terminalAt: parkedAt, updatedAt: laterAt })
-      .where(eq(tasks.taskId, TASK_3))
-      .run();
-    expect(inboxRows(handle.db)[0]?.createdAt).toBe(parkedAt);
-  });
-
-  describe('createdAt and reason name the error that parked the task', () => {
-    const parkedAt = '2026-03-01T12:00:00.000Z';
-    const seedErrors = (
-      rowsIn: { id: string; ts: string; detail: string | null; severity: string }[],
-    ) => {
-      handle.db.delete(errors).where(eq(errors.errorGroup, 'coordination')).run();
-      handle.db
-        .insert(errors)
-        .values(
-          rowsIn.map((r) => ({
-            sessionId: SESSION_ID,
-            taskRef: TASK_3,
-            errorGroup: 'coordination',
-            eventId: r.id,
-            ts: r.ts,
-            errorClass: 'coordination.deadlock',
-            severity: r.severity,
-            detail: r.detail,
-          })),
-        )
-        .run();
-      handle.db
-        .update(tasks)
-        .set({ terminalAt: parkedAt, updatedAt: '2026-04-01T00:00:00.000Z' })
-        .where(eq(tasks.taskId, TASK_3))
-        .run();
-    };
-
-    it('ignores a matching error logged before the park time', () => {
-      seedErrors([
-        {
-          id: 'evt-earlier',
-          ts: '2026-03-01T11:00:00.000Z',
-          detail: 'earlier',
-          severity: 'S2-major',
-        },
-        { id: 'evt-parked', ts: parkedAt, detail: 'parked', severity: 'S1-stop-the-line' },
-      ]);
-      expect(inboxRows(handle.db)[0]).toMatchObject({ createdAt: parkedAt, reason: 'parked' });
-    });
-
-    it('keeps the parking error detail over a later detailed error', () => {
-      seedErrors([
-        { id: 'evt-parked', ts: parkedAt, detail: 'parked', severity: 'S1-stop-the-line' },
-        { id: 'evt-later', ts: '2026-03-02T00:00:00.000Z', detail: 'later', severity: 'S2-major' },
-      ]);
-      expect(inboxRows(handle.db)[0]?.reason).toBe('parked');
-    });
-
-    it('falls back to the newest later detail when the parking error has none', () => {
-      seedErrors([
-        { id: 'evt-parked', ts: parkedAt, detail: null, severity: 'S1-stop-the-line' },
-        { id: 'evt-later', ts: '2026-03-02T00:00:00.000Z', detail: 'later', severity: 'S2-major' },
-      ]);
-      expect(inboxRows(handle.db)[0]?.reason).toBe('later');
-    });
-  });
-
-  it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
-    const rows = inboxRows(handle.db);
-    expect(rows[0]?.project).toBe(DEFAULT_PROJECT);
-    const scoped = inboxRows(handle.db, { project: DEFAULT_PROJECT });
-    expect(scoped).toHaveLength(1);
-    expect(scoped[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
-  });
-
-  it('adds a per-task pending-waiver row and a pending lesson-candidate row, sorted escalation < waiver < lesson_candidate', async () => {
-    const ctx: EventContext = {
-      sessionId: SESSION_ID,
-      planVersion: 1,
-      causalParent: await lastEventId({ stateDir }),
-    };
-    const raised = await raiseFinding(
-      {
-        finding: {
-          finding_id: 'inbox-pw-1',
-          task_id: TASK_1,
-          finding_category: 'correctness',
-          severity: 'S3-minor',
-          finding_status: 'raised',
-          summary: 'a stray console.log in the widget renderer',
-          failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
-          found_by: 'reviewer',
-        },
-        filePath: 'src/widget.ts',
-      },
-      ctx,
-      { stateDir },
-    );
-    if (raised.suppressed) throw new Error('inbox-pw-1 unexpectedly suppressed');
-
-    await appendEvent(
-      {
-        session_id: SESSION_ID,
-        actor: 'scribe',
-        event_type: 'lesson-candidate-raised',
-        plan_version: 1,
-        causal_parent: await lastEventId({ stateDir }),
-        payload: {
-          lesson_id: 'inbox-lesson-1',
-          lesson_type: 'rule',
-          lesson_level: 'principle',
-          lesson_status: 'candidate',
-          lesson_scope: 'claim-path',
-          claim_path: 'src/**',
-          statement: 'Always run the linter before raising a finding.',
-          valid_from: new Date().toISOString(),
-          provenance_event_ids: ['inbox-pw-1'],
-        },
-      },
-      { stateDir },
-    );
-
-    const dbPath = path.join(dbDir, 'smith.db');
-    await rebuild(dbPath, 'all', { stateDir });
-    const fresh = openDb(dbPath);
-    try {
-      const rows = inboxRows(fresh.db);
-      expect(rows.map((r) => r.kind)).toEqual(['escalation', 'waiver', 'lesson_candidate']);
-      const waiverRow = rows.find((r) => r.kind === 'waiver');
-      expect(waiverRow).toMatchObject({
-        taskId: TASK_1,
-        project: DEFAULT_PROJECT,
-        findingCount: 1,
-        findingSummaries: ['a stray console.log in the widget renderer'],
-      });
-      const scoped = inboxRows(fresh.db, { project: DEFAULT_PROJECT });
-      expect(scoped.some((r) => r.kind === 'waiver' && r.taskId === TASK_1)).toBe(true);
-      const lessonRow = rows.find((r) => r.kind === 'lesson_candidate');
-      expect(lessonRow).toMatchObject({ taskId: null, project: null });
-      expect(lessonRow?.statement).toContain('linter');
-    } finally {
-      fresh.sqlite.close();
-    }
-  });
-
-  describe('which pending waivers reach the inbox', () => {
-    /** Park a task row at `status`, copied from a fixture row so every
-     * required column is filled; the epic is the fixture's own unless `over`
-     * names another. */
-    function seedTask(
-      taskId: string,
-      status: string,
-      over: Partial<typeof tasks.$inferInsert> = {},
-    ): void {
-      const [base] = handle.db.select().from(tasks).where(eq(tasks.taskId, TASK_1)).all();
-      if (!base) throw new Error('fixture task missing');
-      handle.db.delete(tasks).where(eq(tasks.taskId, taskId)).run();
-      handle.db
-        .insert(tasks)
-        .values({ ...base, taskId, taskStatus: status, ...over })
-        .run();
-    }
-
-    function seedFinding(
-      id: string,
-      taskId: string,
-      over: Partial<typeof findings.$inferInsert> = {},
-    ): void {
-      handle.db
-        .insert(findings)
-        .values({
-          findingId: id,
-          sessionId: SESSION_ID,
-          taskId,
-          epicId: EPIC_ID,
-          fingerprint: id,
-          findingCategory: 'correctness',
-          severity: 'S3-minor',
-          findingStatus: 'raised',
-          summary: 'a stray console.log',
-          foundBy: 'reviewer',
-          raisedAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          ...over,
-        })
-        .run();
-    }
-
-    const waiverRows = () => inboxRows(handle.db).filter((r) => r.kind === 'waiver');
-    const counts = () => [
-      overview(handle.db).alerts.pendingWaivers,
-      (overview(handle.db).projects ?? []).reduce((n, p) => n + p.alerts.pendingWaivers, 0),
-    ];
-
-    it('lists a finding on a completed task and counts it', () => {
-      seedTask('epic-a/task-1', 'completed');
-      seedFinding('f-done', 'epic-a/task-1');
-      expect(waiverRows().map((r) => r.taskId)).toContain('epic-a/task-1');
-      const before = counts();
-      handle.db.delete(findings).where(eq(findings.findingId, 'f-done')).run();
-      expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
-    });
-
-    it.each(['todo', 'in_progress', 'superseded', 'waived', 'escalated'])(
-      'leaves a finding on a %s task out of the inbox and the count',
-      (status) => {
-        const base = counts();
-        seedTask('epic-a/task-1', status);
-        seedFinding('f-open', 'epic-a/task-1');
-        expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-1')).toEqual([]);
-        expect(counts()).toEqual(base);
-        const escalation = inboxRows(handle.db).some(
-          (r) => r.kind === 'escalation' && r.taskId === 'epic-a/task-1',
-        );
-        expect(escalation).toBe(status === 'escalated');
-      },
-    );
-
-    it('lists a follow-up task finding only once the follow-up has completed', () => {
-      seedTask('epic-a/followup-1a2b3c4d', 'todo');
-      seedFinding('f-follow', 'epic-a/followup-1a2b3c4d');
-      expect(waiverRows().map((r) => r.taskId)).not.toContain('epic-a/followup-1a2b3c4d');
-      handle.db
-        .update(tasks)
-        .set({ taskStatus: 'completed' })
-        .where(eq(tasks.taskId, 'epic-a/followup-1a2b3c4d'))
-        .run();
-      expect(waiverRows().map((r) => r.taskId)).toContain('epic-a/followup-1a2b3c4d');
-    });
-
-    it('lists an epic-level finding only once its epic is closed', () => {
-      const owner = 'epic-a/integration';
-      seedFinding('f-epic', owner, { epicId: 'epic-a', findingScope: 'spec' });
+  it.each(['todo', 'in_progress', 'superseded', 'waived', 'escalated'])(
+    'leaves a finding on a %s task out of the count',
+    (status) => {
       const base = counts();
-      expect(waiverRows().map((r) => r.taskId)).not.toContain(owner);
-      handle.db
-        .insert(epics)
-        .values({
-          epicId: 'epic-a',
-          sessionId: SESSION_ID,
-          epicStatus: 'closed',
-          closedBy: 'verdict',
-          closedAt: '2026-01-02T00:00:00.000Z',
-          eventId: `${SESSION_ID}#99`,
-        })
-        .run();
-      expect(waiverRows().map((r) => r.taskId)).toContain(owner);
-      expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
-    });
-
-    it('finds the task of a bare-id finding on a task row stored qualified', () => {
-      seedTask('epic-a/task-9', 'completed');
-      seedFinding('f-bare', 'task-9', { epicId: null });
-      expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-9')).toHaveLength(1);
-      const before = counts();
-      handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
-      expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
-    });
-
-    it('lets an open task row decide a bare-id finding even when its epic is closed', () => {
-      seedTask('epic-a/task-9', 'todo');
-      handle.db
-        .insert(epics)
-        .values({
-          epicId: 'epic-a',
-          sessionId: SESSION_ID,
-          epicStatus: 'closed',
-          closedBy: 'verdict',
-          closedAt: '2026-01-02T00:00:00.000Z',
-          eventId: `${SESSION_ID}#99`,
-        })
-        .run();
-      const base = counts();
-      seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
-      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-9'))).toEqual([]);
+      seedTask('epic-a/task-1', status);
+      seedFinding('f-open', 'epic-a/task-1');
       expect(counts()).toEqual(base);
-    });
+    },
+  );
 
-    it('resolves a bare-id finding to the task row of its own epic', () => {
-      seedTask('epic-a/task-7', 'completed', { epicId: 'epic-a' });
-      seedTask('epic-b/task-7', 'todo', { epicId: 'epic-b' });
-      seedFinding('f-b7', 'task-7', { epicId: 'epic-b' });
-      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toEqual([]);
-      handle.db.delete(findings).where(eq(findings.findingId, 'f-b7')).run();
-      seedFinding('f-a7', 'task-7', { epicId: 'epic-a' });
-      expect(waiverRows().filter((r) => r.taskId?.endsWith('task-7'))).toMatchObject([
-        { taskId: 'epic-a/task-7' },
-      ]);
-    });
-
-    it('folds a qualified and a bare spelling of one task into one titled row', () => {
-      seedTask('epic-a/task-9', 'completed');
-      seedFinding('f-q', 'epic-a/task-9');
-      seedFinding('f-b', 'task-9', { epicId: null });
-      const rows = waiverRows().filter((r) => r.taskId?.endsWith('task-9'));
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({
-        id: 'waiver:epic-a/task-9',
-        taskId: 'epic-a/task-9',
-        findingCount: 2,
-      });
-    });
-
-    it('never lists a decided finding or an S1/S2 finding', () => {
-      seedTask('epic-a/task-1', 'completed');
-      seedFinding('f-decided', 'epic-a/task-1', { waiverId: 'w-1' });
-      seedFinding('f-s1', 'epic-a/task-1', { severity: 'S1-stop-the-line' });
-      seedFinding('f-s2', 'epic-a/task-1', { severity: 'S2-major' });
-      expect(waiverRows().filter((r) => r.taskId === 'epic-a/task-1')).toEqual([]);
-    });
+  it('counts a follow-up task finding only once the follow-up has completed', () => {
+    const base = counts();
+    seedTask('epic-a/followup-1a2b3c4d', 'todo');
+    seedFinding('f-follow', 'epic-a/followup-1a2b3c4d');
+    expect(counts()).toEqual(base);
+    handle.db
+      .update(tasks)
+      .set({ taskStatus: 'completed' })
+      .where(eq(tasks.taskId, 'epic-a/followup-1a2b3c4d'))
+      .run();
+    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
   });
 
-  it('reports the empty-inbox shape when nothing is pending', async () => {
-    // No escalated task, no pending waiver, no pending lesson candidate.
-    const emptyStateDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-empty-events-'));
-    const emptyDbDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-empty-db-'));
-    try {
-      await appendEvent(
-        {
-          session_id: 'sess-empty',
-          actor: 'user',
-          event_type: 'session-start',
-          plan_version: 1,
-          causal_parent: null,
-          payload: {},
-        },
-        { stateDir: emptyStateDir },
-      );
-      const dbPath = path.join(emptyDbDir, 'smith.db');
-      await rebuild(dbPath, 'all', { stateDir: emptyStateDir });
-      const empty = openDb(dbPath);
-      try {
-        expect(inboxRows(empty.db)).toEqual([]);
-      } finally {
-        empty.sqlite.close();
-      }
-    } finally {
-      await rm(emptyStateDir, { recursive: true, force: true });
-      await rm(emptyDbDir, { recursive: true, force: true });
-    }
+  it('counts an epic-level finding only once its epic is closed', () => {
+    const owner = 'epic-a/integration';
+    const base = counts();
+    seedFinding('f-epic', owner, { epicId: 'epic-a', findingScope: 'spec' });
+    expect(counts()).toEqual(base);
+    handle.db
+      .insert(epics)
+      .values({
+        epicId: 'epic-a',
+        sessionId: SESSION_ID,
+        epicStatus: 'closed',
+        closedBy: 'verdict',
+        closedAt: '2026-01-02T00:00:00.000Z',
+        eventId: `${SESSION_ID}#99`,
+      })
+      .run();
+    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
+  });
+
+  it('finds the task of a bare-id finding on a task row stored qualified', () => {
+    seedTask('epic-a/task-9', 'completed');
+    seedFinding('f-bare', 'task-9', { epicId: null });
+    const before = counts();
+    handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
+    expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
+  });
+
+  it('lets an open task row decide a bare-id finding even when its epic is closed', () => {
+    seedTask('epic-a/task-9', 'todo');
+    handle.db
+      .insert(epics)
+      .values({
+        epicId: 'epic-a',
+        sessionId: SESSION_ID,
+        epicStatus: 'closed',
+        closedBy: 'verdict',
+        closedAt: '2026-01-02T00:00:00.000Z',
+        eventId: `${SESSION_ID}#99`,
+      })
+      .run();
+    const base = counts();
+    seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
+    expect(counts()).toEqual(base);
+  });
+
+  it('resolves a bare-id finding to the task row of its own epic', () => {
+    seedTask('epic-a/task-7', 'completed', { epicId: 'epic-a' });
+    seedTask('epic-b/task-7', 'todo', { epicId: 'epic-b' });
+    const base = counts();
+    seedFinding('f-b7', 'task-7', { epicId: 'epic-b' });
+    expect(counts()).toEqual(base);
+    handle.db.delete(findings).where(eq(findings.findingId, 'f-b7')).run();
+    seedFinding('f-a7', 'task-7', { epicId: 'epic-a' });
+    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
+  });
+
+  it('never counts a decided finding or an S1/S2 finding', () => {
+    seedTask('epic-a/task-1', 'completed');
+    const base = counts();
+    seedFinding('f-decided', 'epic-a/task-1', { waiverId: 'w-1' });
+    seedFinding('f-s1', 'epic-a/task-1', { severity: 'S1-stop-the-line' });
+    seedFinding('f-s2', 'epic-a/task-1', { severity: 'S2-major' });
+    expect(counts()).toEqual(base);
   });
 });
 
@@ -3867,90 +3545,5 @@ describe('overview() — running sessions (dogfood round 2)', () => {
       (s) => s.sessionId === 'sess-title-none',
     );
     expect(other?.title).toBeNull();
-  });
-});
-
-describe('lessonOwnerSession()', () => {
-  const OTHER = 'sess-owner-later';
-  let stateDir: string;
-  let dbDir: string;
-  let handle: DbHandle;
-
-  beforeEach(async () => {
-    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-lesson-owner-events-'));
-    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-lesson-owner-db-'));
-    await buildFixture({ stateDir });
-
-    // A second session that raises a lesson (lesson-owned-2) SESSION_ID never
-    // touches, then changes that lesson's status within the same session —
-    // the projection must still resolve it to OTHER, not SESSION_ID.
-    const start = await appendEvent(
-      {
-        session_id: OTHER,
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    const raised = await appendEvent(
-      {
-        session_id: OTHER,
-        actor: 'scribe',
-        event_type: 'lesson-candidate-raised',
-        plan_version: 1,
-        causal_parent: start.event_id,
-        payload: {
-          lesson_id: 'lesson-owned-2',
-          lesson_type: 'rule',
-          lesson_level: 'principle',
-          lesson_status: 'candidate',
-          lesson_scope: 'claim-path',
-          statement: 'Owned by the second session, not the fixture one.',
-          valid_from: new Date().toISOString(),
-          provenance_event_ids: [start.event_id],
-          evidence: 'test fixture',
-        },
-      },
-      { stateDir },
-    );
-    await appendEvent(
-      {
-        session_id: OTHER,
-        actor: 'user',
-        event_type: 'lesson-status-changed',
-        plan_version: 1,
-        causal_parent: raised.event_id,
-        payload: { lesson_id: 'lesson-owned-2', to_status: 'approved' },
-      },
-      { stateDir },
-    );
-
-    const dbPath = path.join(dbDir, 'smith.db');
-    await rebuild(dbPath, 'all', { stateDir });
-    handle = openDb(dbPath);
-  });
-
-  afterEach(async () => {
-    handle.sqlite.close();
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(dbDir, { recursive: true, force: true });
-  });
-
-  it('returns the session that owns the lesson, not any other projected session', () => {
-    expect(lessonOwnerSession(handle.db, 'lesson-owned-2')).toBe(OTHER);
-    expect(lessonOwnerSession(handle.db, 'lesson-1')).toBe(SESSION_ID);
-  });
-
-  it('returns null for an unknown lesson id', () => {
-    expect(lessonOwnerSession(handle.db, 'no-such-lesson')).toBeNull();
-  });
-
-  it('still resolves to the owning session after its status changed in that same session', () => {
-    // lesson-owned-2's status moved candidate -> approved above, both events
-    // in OTHER's own log — the owner must not shift with the status.
-    expect(lessonOwnerSession(handle.db, 'lesson-owned-2')).toBe(OTHER);
   });
 });

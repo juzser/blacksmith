@@ -421,10 +421,6 @@ describe('project dimension (Phase 6b)', () => {
     expect(a.lastEventAt !== null && b.lastEventAt !== null && a.lastEventAt <= b.lastEventAt).toBe(
       true,
     );
-    // The lessons table has no project column, so this number is deliberately
-    // the same under every scope rather than silently partitioned.
-    expect(a.lessonsPending).toBe(global.lessonsPending);
-    expect(b.lessonsPending).toBe(global.lessonsPending);
   });
 
   it('scopes cost per model_tier/provider to the project (D-207)', () => {

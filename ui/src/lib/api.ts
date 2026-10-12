@@ -676,15 +676,13 @@ export function fetchOverview(session?: SessionScope, project?: string): Promise
 
 /**
  * Mirrors PulseResult in factory/orchestrator/src/db/queries.ts. `counts` are
- * monotonic — they only ever grow — which is what lets the shell subtract two
- * polls and call the difference an arrival. `lessonsPending` is a level and is
- * rendered as itself. See usePulse.ts.
+ * monotonic — they only ever grow — so two polls can be subtracted and the
+ * difference called an arrival. See usePulse.ts.
  */
 export interface PulseResult {
   lastEventAt: string | null;
   lastEventType: string | null;
   counts: { events: number; errors: number };
-  lessonsPending: number;
   /**
    * What the server's projection could not land — a session log it could not
    * read, or an event whose payload it had to hold back (D-249). Every count

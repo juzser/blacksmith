@@ -1,11 +1,9 @@
-// The app shell's own poll: "is the factory still moving, and what has
-// arrived since I looked?"
+// The app shell's own poll: "is the factory still moving?"
 //
 // Liveness used to be an Overview fact. Every page polls its own data, and on
 // the other nine a frozen server was indistinguishable from a quiet factory —
 // which is precisely the confusion lib/liveness.ts was written to end, on the
-// one page that had it. Hoisting the pill into the frame ends it everywhere,
-// and the same payload feeds the sidebar's arrival badges (lib/navBadges.ts).
+// one page that had it. Hoisting the pill into the frame ends it everywhere.
 //
 // The transport is usePoll's, whatever usePoll's is: since design-spec.md's
 // 2026-09-15 addendum to §8 that is the change stream, with this file's 5s
@@ -21,16 +19,15 @@
 // send the same nothing. So the pill keeps asking, every five seconds, and
 // `lastUpdatedAt` keeps meaning what load()'s catch says it means.
 //
-// The state is module-level on purpose: the topbar's pill and the sidebar's
-// badges are two readings of one poll, and two polls could disagree about
-// which is more recent. `usePulse` is therefore mounted exactly once, by
-// App.vue; a second call site would start a second interval.
+// The state is module-level on purpose: the topbar's pill and the shell-level
+// readers that follow `pulseTick` are readings of one poll, and two polls
+// could disagree about which is more recent. `usePulse` is therefore mounted
+// exactly once, by App.vue; a second call site would start a second interval.
 
 import type { MaybeRefOrGetter } from 'vue';
 import { computed, onMounted, ref, toValue, watch } from 'vue';
+import type { PulseResult } from '../lib/api.js';
 import { fetchPulse } from '../lib/api.js';
-import type { PulseState } from '../lib/navBadges.js';
-import { applyNav, applyPulse, EMPTY_PULSE_STATE, navBadges } from '../lib/navBadges.js';
 import { triggerGlobalRefresh, usePoll } from './usePoll.js';
 
 /** Matches Home's own interval — the shell should not read staler. */
@@ -39,15 +36,13 @@ export const PULSE_POLL_MS = 5000;
 /** Bumped after every successful poll: what shell-level readers (useActiveScope) follow. */
 export const pulseTick = ref(0);
 
-const state = ref<PulseState>(EMPTY_PULSE_STATE);
+const state = ref<PulseResult | null>(null);
 const lastUpdatedAt = ref<string | null>(null);
-/** The nav item currently on screen, which by definition has nothing unread. */
-const currentNavId = ref<string | undefined>(undefined);
 
 async function load(project: string | undefined): Promise<void> {
   try {
     const next = await fetchPulse(undefined, project);
-    state.value = applyPulse(state.value, next, project ?? '', currentNavId.value);
+    state.value = next;
     lastUpdatedAt.value = new Date().toISOString();
     pulseTick.value += 1;
   } catch {
@@ -59,8 +54,6 @@ async function load(project: string | undefined): Promise<void> {
 }
 
 export function usePulse(project: MaybeRefOrGetter<string | undefined>) {
-  const badges = computed(() => navBadges(state.value.pulse, state.value.seen));
-
   usePoll(() => load(toValue(project)), PULSE_POLL_MS, { heartbeat: true });
   // usePoll's interval does not fire until one interval has elapsed, and the
   // shell must not spend its first five seconds saying "Connecting…".
@@ -74,17 +67,9 @@ export function usePulse(project: MaybeRefOrGetter<string | undefined>) {
     },
   );
 
-  /** The operator navigated: that page's badge clears and counts again from here. */
-  function seePage(navId: string | undefined): void {
-    currentNavId.value = navId;
-    state.value = applyNav(state.value, navId);
-  }
-
   return {
-    pulse: computed(() => state.value.pulse),
+    pulse: computed(() => state.value),
     lastUpdatedAt,
-    badges,
-    seePage,
     // Not a private reload: the shell's Refresh sits above whatever page is
     // mounted, so it wakes every poller — this one included, since usePulse
     // polls through usePoll like everything else.
