@@ -200,7 +200,7 @@ const RELATIVE_VERBOSE_UNITS: Array<[number, string]> = [
 export function formatRelativeVerbose(iso: string, nowIso?: string): string {
   const parts = relativeVerboseParts(iso, nowIso);
   if (parts === null) return iso;
-  return parts === 'now' ? 'just now' : `${parts.n} ${parts.suffix} ago`;
+  return parts === 'now' ? 'just now' : `${parts.n}\u00a0${parts.suffix} ago`;
 }
 
 function relativeVerboseParts(
@@ -230,7 +230,7 @@ export function formatSinceVerbose(iso: string, nowIso?: string): string {
   const parts = relativeVerboseParts(iso, nowIso);
   if (parts === null) return '';
   if (parts === 'now' || parts.suffix === 's') return 'just now';
-  return `for ${parts.n} ${parts.suffix}`;
+  return `for ${parts.n}\u00a0${parts.suffix}`;
 }
 
 /**
@@ -390,7 +390,7 @@ export function formatCompactNumber(n: number): string {
  */
 export function formatCompactValue(value: number, unit?: 'tok'): string {
   const n = formatCompactNumber(value);
-  return unit === 'tok' ? `${n} tokens` : n;
+  return unit === 'tok' ? `${n}\u00a0tokens` : n;
 }
 
 /**
@@ -404,9 +404,9 @@ export function formatCompactValue(value: number, unit?: 'tok'): string {
  * `title` tooltip — this only decides the headline text.
  */
 export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): string {
-  if (unmeasured === 0) return `${formatCompactNumber(tokensSpent)} tok`;
+  if (unmeasured === 0) return `${formatCompactNumber(tokensSpent)}\u00a0tok`;
   if (tokensSpent === 0) return 'not measured';
-  return `≥${formatCompactNumber(tokensSpent)} tok · ${unmeasured} not measured`;
+  return `≥${formatCompactNumber(tokensSpent)}\u00a0tok · ${unmeasured} not measured`;
 }
 
 /**

@@ -180,11 +180,11 @@ describe('lib/format.ts formatDurationMs()', () => {
 // an exact figure — it must never read the same as a fully-measured total.
 describe('lib/format.ts formatMeasuredTokens()', () => {
   it('renders a compact count when every result was measured', () => {
-    expect(formatMeasuredTokens(2000, 0)).toBe('2K tok');
+    expect(formatMeasuredTokens(2000, 0)).toBe('2K\u00a0tok');
   });
 
   it('renders a floor plus the unmeasured count when spend is a mix', () => {
-    expect(formatMeasuredTokens(2000, 3)).toBe('≥2K tok · 3 not measured');
+    expect(formatMeasuredTokens(2000, 3)).toBe('≥2K\u00a0tok · 3 not measured');
   });
 
   it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
@@ -192,7 +192,7 @@ describe('lib/format.ts formatMeasuredTokens()', () => {
   });
 
   it('keeps small counts exact — no suffix below a thousand', () => {
-    expect(formatMeasuredTokens(999, 0)).toBe('999 tok');
+    expect(formatMeasuredTokens(999, 0)).toBe('999\u00a0tok');
   });
 });
 
@@ -441,16 +441,16 @@ describe('lib/format.ts formatRelativeVerbose()', () => {
   });
 
   it('renders a bare few-seconds gap as "N s ago", not "just now"', () => {
-    expect(formatRelativeVerbose('2026-08-04T11:59:52.000Z', now)).toBe('8 s ago');
+    expect(formatRelativeVerbose('2026-08-04T11:59:52.000Z', now)).toBe('8\u00a0s ago');
   });
 
   it('spells minutes as "min", not "m"', () => {
-    expect(formatRelativeVerbose('2026-08-04T11:55:00.000Z', now)).toBe('5 min ago');
+    expect(formatRelativeVerbose('2026-08-04T11:55:00.000Z', now)).toBe('5\u00a0min ago');
   });
 
   it('renders hours and days with a space before the unit', () => {
-    expect(formatRelativeVerbose('2026-08-04T10:00:00.000Z', now)).toBe('2 h ago');
-    expect(formatRelativeVerbose('2026-08-02T12:00:00.000Z', now)).toBe('2 d ago');
+    expect(formatRelativeVerbose('2026-08-04T10:00:00.000Z', now)).toBe('2\u00a0h ago');
+    expect(formatRelativeVerbose('2026-08-02T12:00:00.000Z', now)).toBe('2\u00a0d ago');
   });
 });
 
@@ -458,9 +458,9 @@ describe('lib/format.ts formatSinceVerbose()', () => {
   const now = '2026-08-04T12:00:00.000Z';
 
   it('reads a duration with the same units as formatRelativeVerbose', () => {
-    expect(formatSinceVerbose('2026-08-04T11:48:00.000Z', now)).toBe('for 12 min');
-    expect(formatSinceVerbose('2026-08-04T10:00:00.000Z', now)).toBe('for 2 h');
-    expect(formatSinceVerbose('2026-08-01T12:00:00.000Z', now)).toBe('for 3 d');
+    expect(formatSinceVerbose('2026-08-04T11:48:00.000Z', now)).toBe('for 12\u00a0min');
+    expect(formatSinceVerbose('2026-08-04T10:00:00.000Z', now)).toBe('for 2\u00a0h');
+    expect(formatSinceVerbose('2026-08-01T12:00:00.000Z', now)).toBe('for 3\u00a0d');
   });
 
   it('says "just now" under a minute and for a future time, never "for 0 min"', () => {
@@ -475,7 +475,7 @@ describe('lib/format.ts formatSinceVerbose()', () => {
 });
 
 // kit/MobileTopBar.vue's liveness dot (ds-spec.md §3.1: "the LiveIndicator
-// dot only, with aria-label 'Live — last activity 5 min ago'"). Same
+// dot only, with aria-label 'Live — last activity 5\u00a0min ago'"). Same
 // derivation LiveIndicator.vue's own template already does (statusLabel +
 // RelativeTime), factored out so the dot's aria-label cannot drift from the
 // text the full indicator shows on desktop.
@@ -492,13 +492,13 @@ describe('lib/format.ts formatLiveStatus()', () => {
 
   it('appends the last activity when present, live', () => {
     expect(formatLiveStatus(true, '2026-08-04T11:55:00.000Z', now)).toBe(
-      'Live · last activity 5 min ago',
+      'Live · last activity 5\u00a0min ago',
     );
   });
 
   it('appends the last activity when present, paused', () => {
     expect(formatLiveStatus(false, '2026-08-04T11:55:00.000Z', now)).toBe(
-      'Paused · last activity 5 min ago',
+      'Paused · last activity 5\u00a0min ago',
     );
   });
 });
@@ -516,11 +516,11 @@ describe('lib/format.ts formatCompactValue()', () => {
   });
 
   it('appends " tokens" (spelled out) when unit is "tok"', () => {
-    expect(formatCompactValue(1_200_000, 'tok')).toBe('1.2M tokens');
+    expect(formatCompactValue(1_200_000, 'tok')).toBe('1.2M\u00a0tokens');
   });
 
   it('appends the unit word to a small, unsuffixed number too', () => {
-    expect(formatCompactValue(43, 'tok')).toBe('43 tokens');
+    expect(formatCompactValue(43, 'tok')).toBe('43\u00a0tokens');
   });
 });
 
