@@ -150,13 +150,13 @@ test.describe('Lessons', () => {
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
-      test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
+      test(`empty-state screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await page.goto('/lessons');
         await expect(page.locator('h1')).toHaveText('Lessons');
         await settleForShot(page, page.getByText('Nothing to review.'));
-        await shoot(page, `lessons-${vpName}-${theme}`);
+        await shoot(page, `lessons-empty-${vpName}-${theme}`);
       });
     }
   }
