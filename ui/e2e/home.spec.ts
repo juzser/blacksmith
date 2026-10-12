@@ -432,6 +432,15 @@ test.describe('Home: Needs you inbox', () => {
     ).toBe(true);
   });
 
+  test("375px: a row title is 14px, the mock's phone row size", async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    const title = page.locator('.bs-inbox__ptitle').first();
+    await expect(title).toBeVisible();
+    expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe('14px');
+  });
+
   test('320px: row titles wrap to at most two lines and nothing scrolls sideways', async ({
     page,
   }) => {

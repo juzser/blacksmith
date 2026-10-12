@@ -496,7 +496,7 @@ if command -v pnpm >/dev/null 2>&1; then
       FAIL=1
     fi
     # The specs call page.screenshot({path}) straight into a committed
-    # directory, so a green e2e run still rewrites all 40 PNGs — and now that
+    # directory, so a green e2e run still rewrites every committed PNG — and now that
     # the gate actually runs e2e, it dirties them on every local invocation.
     # Say so. Silent churn is how a rendering diff from an unrelated branch
     # ends up committed by someone who only ran the gate. Never a failure:

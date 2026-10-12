@@ -179,6 +179,19 @@ test.describe('Analytics', () => {
     await expect(page.locator('.bs-bars__track--empty').first()).toBeVisible();
   });
 
+  // ds-review.html .vchart: gap 3px, padding 0 2px.
+  test('the day-axis chart spaces its columns like the mock', async ({ page }) => {
+    await withMultiRoleFixture(page);
+    await page.goto('/analytics');
+    const plot = page.locator('.bs-bars__plot--axis').first();
+    await expect(plot).toBeVisible();
+    const css = await plot.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { gap: s.columnGap, left: s.paddingLeft, right: s.paddingRight };
+    });
+    expect(css).toEqual({ gap: '3px', left: '2px', right: '2px' });
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {

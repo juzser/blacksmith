@@ -110,7 +110,7 @@ describe('lib/lessonLabels.ts', () => {
     it('appends "Last checked <relative time>." only when lastCheckedAt is set', () => {
       const nowIso = '2026-09-07T00:10:00.000Z';
       expect(pendingEmptyBody('2026-09-07T00:00:00.000Z', nowIso)).toBe(
-        'The factory proposes new lessons after it reviews its recent mistakes. Last checked 10 min ago.',
+        'The factory proposes new lessons after it reviews its recent mistakes. Last checked 10\u00a0min ago.',
       );
     });
   });
