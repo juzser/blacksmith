@@ -475,7 +475,7 @@ describe('lib/format.ts formatSinceVerbose()', () => {
 });
 
 // kit/MobileTopBar.vue's liveness dot (ds-spec.md §3.1: "the LiveIndicator
-// dot only, with aria-label 'Live — last activity 5\u00a0min ago'"). Same
+// dot only, with aria-label 'Live — last activity 5 min ago'"). Same
 // derivation LiveIndicator.vue's own template already does (statusLabel +
 // RelativeTime), factored out so the dot's aria-label cannot drift from the
 // text the full indicator shows on desktop.

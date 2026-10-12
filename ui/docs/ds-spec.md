@@ -784,9 +784,10 @@ opens a row, or lives in the overflow menu. The following are desktop-only:
 **Touch and tooltips:**
 - every tappable element is at least `--bs-touch` in both dimensions, including tab-bar items,
   overflow items, `<summary>` rows, tabs, and icon buttons;
-- touch devices keep tooltips: a tap opens one after the same 300ms delay as hover, and a tap
-  elsewhere closes it, so a phone user can still read the exact value behind a summary such as
-  "5 min ago"; a tooltip trigger inside a tappable card or row opens that item instead;
+- touch devices keep tooltips, so a phone user can still read the exact value behind a summary
+  such as "5 min ago". The browser reports a tap as hover: the tooltip opens after the same 300ms
+  delay and closes when that hover moves on, which in Chromium is a tap anywhere else. A tooltip
+  trigger inside a tappable card or row opens that item instead;
 - each icon-only control still carries its meaning in `aria-label` (§2.5), never in the tooltip
   alone;
 - Floating UI places tooltips on mobile as it does on desktop, and it also places the overflow
