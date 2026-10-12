@@ -292,12 +292,10 @@ test.describe('Global focus ring', () => {
     });
     await page.keyboard.press('Tab');
     await page.locator('#probe-ring').focus();
-    const ring = await page
-      .locator('#probe-ring')
-      .evaluate((el) => ({
-        width: getComputedStyle(el).outlineWidth,
-        offset: getComputedStyle(el).outlineOffset,
-      }));
+    const ring = await page.locator('#probe-ring').evaluate((el) => ({
+      width: getComputedStyle(el).outlineWidth,
+      offset: getComputedStyle(el).outlineOffset,
+    }));
     expect(ring).toEqual({ width: '2px', offset: '2px' });
   });
 });
