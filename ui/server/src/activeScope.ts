@@ -58,9 +58,10 @@ export interface ActiveScope {
   /** |A|: live sessions linked to at least one active epic. */
   activeSessions: number;
   /**
-   * Over A: each session's running subagents, plus each working factory
-   * agent of an active epic once. Nested subagents are not counted, so this
-   * is a floor.
+   * Over A, each group of sessions and the active epics they share counts
+   * the larger of its sessions' running subagents and its epics' working
+   * factory agents, so an agent seen both ways counts once. Nested
+   * subagents are not counted, so this is a floor.
    */
   agentsRunning: number;
   /** Sessions in A whose subagents could not be counted. */
@@ -133,16 +134,18 @@ export function computeActiveScope(
       agents: Set<string>;
       /** Sessions in A with an active epic of this project. */
       active: Set<number>;
-      /** Working factory agents of this project's active epics. */
-      activeAgents: Set<string>;
+      /** Each session in `active`, with this project's active epics it links. */
+      activeEpics: Map<number, Set<string>>;
     }
   >();
   const epics = new Map<string, ActiveScope['epics'][number]>();
   const factory = new Map<string, ActiveScope['factorySessions'][number]>();
   /** A, by session index. */
   const active = new Set<number>();
-  /** Working factory agents of active epics, keyed with their store. */
-  const activeAgents = new Set<string>();
+  /** Each session in A, with the active epics it links (store + epic id). */
+  const sessionEpics = new Map<number, Set<string>>();
+  /** Working factory agents of each active epic, keyed with its store. */
+  const epicAgents = new Map<string, Set<string>>();
   let unlinked = 0;
 
   cli.sessions.forEach((s, index) => {
@@ -192,8 +195,12 @@ export function computeActiveScope(
         } else if (known.tasksTotal === 0 && e.progress !== null) {
           Object.assign(known, taskCounts(e.progress));
         }
-        for (const a of e.workingAgents)
-          activeAgents.add(`${e.store.id}\u0000${agentKey(e.epicId, a)}`);
+        const mine = sessionEpics.get(index) ?? new Set<string>();
+        mine.add(key);
+        sessionEpics.set(index, mine);
+        const agents = epicAgents.get(key) ?? new Set<string>();
+        for (const a of e.workingAgents) agents.add(agentKey(e.epicId, a));
+        epicAgents.set(key, agents);
         for (const id of pickFactorySessions(
           e.factorySessionIds,
           e.factorySessionLastEventAt,
@@ -212,7 +219,7 @@ export function computeActiveScope(
           sessions: new Set(),
           agents: new Set(),
           active: new Set(),
-          activeAgents: new Set(),
+          activeEpics: new Map(),
         };
         projects.set(pkey, p);
       }
@@ -220,25 +227,15 @@ export function computeActiveScope(
       if (e.epicId !== null) {
         // Only an active epic reaches here with an id (the rest `continue`d).
         p.active.add(index);
-        for (const a of e.workingAgents) {
-          p.agents.add(agentKey(e.epicId, a));
-          p.activeAgents.add(agentKey(e.epicId, a));
-        }
+        const mine = p.activeEpics.get(index) ?? new Set<string>();
+        mine.add(`${e.store.id}\u0000${e.epicId}`);
+        p.activeEpics.set(index, mine);
+        for (const a of e.workingAgents) p.agents.add(agentKey(e.epicId, a));
       }
     }
   });
 
-  const subagents = (indexes: ReadonlySet<number>) => {
-    let running = 0;
-    let unmeasured = 0;
-    for (const i of indexes) {
-      const n = cli.sessions[i]?.subagentsRunning ?? null;
-      if (n === null) unmeasured++;
-      else running += n;
-    }
-    return { running, unmeasured };
-  };
-  const all = subagents(active);
+  const all = countAgents(cli, sessionEpics, epicAgents);
   const epicList = [...epics.values()];
   const sum = (pick: (e: ActiveScope['epics'][number]) => number) =>
     epicList.reduce((n, e) => n + pick(e), 0);
@@ -249,27 +246,79 @@ export function computeActiveScope(
     liveSessions: cli.sessions.length,
     unlinkedSessions: unlinked,
     activeSessions: active.size,
-    agentsRunning: all.running + activeAgents.size,
+    agentsRunning: all.running,
     agentsUnmeasured: all.unmeasured,
     tokensSpent: sum((e) => e.tokensSpent),
     tokensUnmeasured: sum((e) => e.tokensUnmeasured),
     tasksDone: sum((e) => e.tasksDone),
     tasksTotal: sum((e) => e.tasksTotal),
     projects: [...projects.values()].map((p) => {
-      const mine = subagents(p.active);
+      const mine = countAgents(cli, p.activeEpics, epicAgents);
       return {
         storeId: p.storeId,
         project: p.project,
         liveSessions: p.sessions.size,
         agentsWorking: p.agents.size,
         activeSessions: p.active.size,
-        agentsRunning: mine.running + p.activeAgents.size,
+        agentsRunning: mine.running,
         agentsUnmeasured: mine.unmeasured,
       };
     }),
     epics: epicList,
     factorySessions: [...factory.values()],
   };
+}
+
+/**
+ * Agents running over the given sessions, each with the active epics it
+ * links. Sessions that share an epic form one group (a session on two epics
+ * joins them). A group counts max(its sessions' running subagents, its epics'
+ * working factory agents): the factory's agents are dispatched as subagents
+ * of the session running the epic, so the two counts overlap by an unknown
+ * amount and the larger is the floor that never counts one agent twice. A
+ * session whose subagents could not be counted adds to `unmeasured`.
+ */
+function countAgents(
+  cli: ActiveScopeCli,
+  sessions: ReadonlyMap<number, ReadonlySet<string>>,
+  epicAgents: ReadonlyMap<string, ReadonlySet<string>>,
+): { running: number; unmeasured: number } {
+  // Union-find over session indexes, joined through shared epic keys.
+  const parent = new Map<number, number>();
+  const find = (i: number): number => {
+    let r = i;
+    while (parent.get(r) !== r) r = parent.get(r) as number;
+    parent.set(i, r);
+    return r;
+  };
+  const firstOfEpic = new Map<string, number>();
+  for (const [i, epicKeys] of sessions) {
+    if (!parent.has(i)) parent.set(i, i);
+    for (const k of epicKeys) {
+      const first = firstOfEpic.get(k);
+      if (first === undefined) firstOfEpic.set(k, i);
+      else parent.set(find(i), find(first));
+    }
+  }
+  const subs = new Map<number, number>();
+  const agents = new Map<number, Set<string>>();
+  let unmeasured = 0;
+  for (const i of sessions.keys()) {
+    const n = cli.sessions[i]?.subagentsRunning ?? null;
+    const root = find(i);
+    if (n === null) unmeasured++;
+    else subs.set(root, (subs.get(root) ?? 0) + n);
+    if (!subs.has(root)) subs.set(root, 0);
+  }
+  for (const [k, i] of firstOfEpic) {
+    const root = find(i);
+    const set = agents.get(root) ?? new Set<string>();
+    for (const a of epicAgents.get(k) ?? []) set.add(`${k}\u0000${a}`);
+    agents.set(root, set);
+  }
+  let running = 0;
+  for (const [root, n] of subs) running += Math.max(n, agents.get(root)?.size ?? 0);
+  return { running, unmeasured };
 }
 
 /** A working factory agent, the same one whichever session links its epic. */

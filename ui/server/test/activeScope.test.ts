@@ -435,7 +435,7 @@ describe('computeActiveScope', () => {
       ]);
     });
 
-    it('subagents add up across sessions; a factory agent two sessions share counts once', () => {
+    it('two sessions on one epic are one group: the larger of their subagents and the factory agents', () => {
       const out = fold(
         cli([
           session(
@@ -452,11 +452,88 @@ describe('computeActiveScope', () => {
         [store({ activelyRunning: ['epic-a'] })],
       );
       expect(out.activeSessions).toBe(2);
-      expect(out.agentsRunning).toBe(2 + 3 + 2);
+      expect(out.agentsRunning).toBe(5);
       expect(out.agentsUnmeasured).toBe(0);
       expect(out.projects).toMatchObject([
-        { project: 'project-a', activeSessions: 2, agentsWorking: 2, agentsRunning: 7 },
+        { project: 'project-a', activeSessions: 2, agentsWorking: 2, agentsRunning: 5 },
       ]);
+    });
+
+    describe('agents are counted once per group of sessions and epics', () => {
+      const w = (taskId: string) => ({ role: 'coder', taskId, since: '2026-10-07T11:00:00.000Z' });
+      const run = (sessions: unknown[]) =>
+        fold(cli(sessions), [store({ activelyRunning: ['epic-a', 'epic-b'] })]);
+
+      it('one open Agent call and one working coder on its epic is 1', () => {
+        const out = run([
+          session({ epics: [linkedEpic({ workingAgents: [w('t1')] })] }, { subagentsRunning: 1 }),
+        ]);
+        expect(out.agentsRunning).toBe(1);
+        expect(out.projects).toMatchObject([{ agentsRunning: 1 }]);
+      });
+
+      it('a wave-runner Agent call with three working coders is 3', () => {
+        const out = run([
+          session(
+            { epics: [linkedEpic({ workingAgents: [w('t1'), w('t2'), w('t3')] })] },
+            { subagentsRunning: 1 },
+          ),
+        ]);
+        expect(out.agentsRunning).toBe(3);
+        expect(out.projects).toMatchObject([{ agentsRunning: 3 }]);
+      });
+
+      it('two plain Agent calls and no factory agents is 2', () => {
+        const out = run([session({ epics: [linkedEpic()] }, { subagentsRunning: 2 })]);
+        expect(out.agentsRunning).toBe(2);
+        expect(out.projects).toMatchObject([{ agentsRunning: 2 }]);
+      });
+
+      it('two sessions on two unrelated epics are two groups, summed', () => {
+        const out = run([
+          session(
+            { epics: [linkedEpic({ workingAgents: [w('t1')] })] },
+            { cliSessionId: 'c1', subagentsRunning: 1 },
+          ),
+          session(
+            { epics: [linkedEpic({ epicId: 'epic-b', project: 'project-b' })] },
+            { cliSessionId: 'c2', subagentsRunning: 2 },
+          ),
+        ]);
+        expect(out.agentsRunning).toBe(1 + 2);
+      });
+
+      it('a session on two epics joins them into one group', () => {
+        const out = run([
+          session(
+            {
+              epics: [
+                linkedEpic({ workingAgents: [w('t1')] }),
+                linkedEpic({ epicId: 'epic-b', workingAgents: [w('t2')] }),
+              ],
+            },
+            { cliSessionId: 'c1', subagentsRunning: 1 },
+          ),
+          session(
+            { epics: [linkedEpic({ epicId: 'epic-b' })] },
+            { cliSessionId: 'c2', subagentsRunning: 1 },
+          ),
+        ]);
+        // One group: max(1 + 1 subagents, 2 factory agents).
+        expect(out.agentsRunning).toBe(2);
+      });
+
+      it('a null subagentsRunning is unmeasured and the factory count still counts', () => {
+        const out = run([
+          session(
+            { epics: [linkedEpic({ workingAgents: [w('t1'), w('t2')] })] },
+            { subagentsRunning: null },
+          ),
+        ]);
+        expect(out.agentsUnmeasured).toBe(1);
+        expect(out.agentsRunning).toBe(2);
+        expect(out.projects).toMatchObject([{ agentsRunning: 2, agentsUnmeasured: 1 }]);
+      });
     });
 
     it('the same epic id in two stores is two epics, each with its own spend and agents', () => {
