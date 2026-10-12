@@ -960,6 +960,81 @@ a:hover {
   }
 }
 
+/* StatTile (ds-spec.md §4.1 item 1) — the mock's .stats/.stat on desktop and
+   .mstats/.mstat on phone, lifted from the Analytics phone tile. The grid is
+   the <dl>; each tile a dt label, a dd value and a dd helper. */
+.bs-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--bs-space-4);
+  margin: 0;
+}
+.bs-stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  padding: var(--bs-space-4);
+}
+.bs-stat__label {
+  font-size: var(--bs-text-sm);
+  line-height: var(--bs-leading-sm);
+  color: var(--bs-text);
+}
+.bs-stat__value {
+  margin: var(--bs-space-2) 0;
+  font-size: var(--bs-text-xl);
+  line-height: var(--bs-leading-xl);
+  font-weight: var(--bs-font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  /* A large figure ("1,234,567 tokens") breaks rather than push the grid wide. */
+  overflow-wrap: anywhere;
+  color: var(--bs-text);
+}
+/* The mock's .mstat .v.nd: a value that was not measured reads quieter than a figure. */
+.bs-stat__value--nd {
+  font-size: var(--bs-text-sm);
+  line-height: var(--bs-leading-sm);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtle);
+}
+.bs-stat__helper {
+  margin: 0;
+  font-size: var(--bs-text-xs);
+  line-height: var(--bs-leading-xs);
+  color: var(--bs-text-subtle);
+}
+@media (max-width: 900px) {
+  .bs-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--bs-space-2);
+  }
+}
+@media (max-width: 640px) {
+  .bs-stat {
+    padding: var(--bs-m-card-pad);
+  }
+  .bs-stat__label {
+    font-size: var(--bs-text-xs);
+    line-height: var(--bs-leading-xs);
+    color: var(--bs-text-subtle);
+  }
+  .bs-stat__value {
+    margin: var(--bs-space-1) 0 0;
+    font-size: var(--bs-text-lg);
+    line-height: var(--bs-leading-lg);
+  }
+  .bs-stat__value--nd {
+    font-size: var(--bs-text-sm);
+    line-height: var(--bs-leading-sm);
+  }
+  .bs-stat__helper {
+    display: none;
+  }
+}
+
 /* Breadcrumb — direct port of the old kit's .ds-crumbs, bs-* names only. */
 .bs-crumbs {
   display: flex;

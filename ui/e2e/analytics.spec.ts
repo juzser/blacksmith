@@ -583,7 +583,17 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
     await stubActiveScope(page, [], {
       liveSessions: 1,
       unlinkedSessions: 1,
-      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      projects: [
+        {
+          storeId: 'store-b',
+          project: 'project-b',
+          liveSessions: 1,
+          agentsWorking: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     });
     await page.goto('/analytics');
     await expect(page.getByText('1 live session, none on an epic')).toBeVisible();
@@ -616,6 +626,14 @@ test.describe('Cost & quality follows Active/All (S9)', () => {
           readAt: '2026-10-07T12:00:00.000Z',
           liveSessions: 1,
           unlinkedSessions: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+          storesUnread: 0,
           projects: [],
           epics: [],
           factorySessions: homeSessions('sess-fixture'),

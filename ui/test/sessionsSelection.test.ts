@@ -66,6 +66,14 @@ const live = (over: Partial<ActiveScopeResult> = {}): ActiveScopeResult => ({
   readAt: '2026-10-07T12:00:00.000Z',
   liveSessions: 1,
   unlinkedSessions: 0,
+  activeSessions: 0,
+  agentsRunning: 0,
+  agentsUnmeasured: 0,
+  tokensSpent: 0,
+  tokensUnmeasured: 0,
+  tasksDone: 0,
+  tasksTotal: 0,
+  storesUnread: 0,
   projects: [],
   epics: [],
   factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
@@ -94,6 +102,9 @@ describe('otherStoreProjects', () => {
     project,
     liveSessions: 1,
     agentsWorking: 0,
+    activeSessions: 0,
+    agentsRunning: 0,
+    agentsUnmeasured: 0,
   });
 
   it('names the active projects that live outside the home store, once each', () => {

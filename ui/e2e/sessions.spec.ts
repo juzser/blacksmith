@@ -151,6 +151,14 @@ async function stubActiveScope(
     readAt: FIXTURE_NOW_ISO,
     liveSessions: activeIds.length,
     unlinkedSessions: 0,
+    activeSessions: 0,
+    agentsRunning: 0,
+    agentsUnmeasured: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
+    storesUnread: 0,
     projects: [],
     epics: [],
     factorySessions: activeIds.map((sessionId) => ({ storeId: 'home', sessionId })),
@@ -530,7 +538,17 @@ test.describe('Sessions', () => {
   test('an active project in another store gets no line: every store is read', async ({ page }) => {
     await serveScope(page);
     await stubActiveScope(page, ['sc-active'], {
-      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      projects: [
+        {
+          storeId: 'store-b',
+          project: 'project-b',
+          liveSessions: 1,
+          agentsWorking: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     });
     await page.goto('/sessions');
     await expect(titles(page)).toHaveText(['Active in proj-a']);
@@ -543,7 +561,17 @@ test.describe('Sessions', () => {
       await serveScope(page);
       await stubActiveScope(page, [], {
         liveSessions: 0,
-        projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+        projects: [
+          {
+            storeId: 'store-b',
+            project: 'project-b',
+            liveSessions: 1,
+            agentsWorking: 0,
+            activeSessions: 0,
+            agentsRunning: 0,
+            agentsUnmeasured: 0,
+          },
+        ],
       });
       await page.setViewportSize(VIEWPORTS.mobile);
       await page.goto('/sessions');
@@ -635,6 +663,14 @@ test.describe('Sessions', () => {
           readAt: FIXTURE_NOW_ISO,
           liveSessions: 1,
           unlinkedSessions: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+          storesUnread: 0,
           projects: [],
           epics: [],
           factorySessions: quiet ? [] : [{ storeId: 'home', sessionId: 'sc-active' }],

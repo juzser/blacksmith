@@ -529,9 +529,33 @@ describe('filterActiveSections', () => {
     readAt: '2026-01-15T00:00:00.000Z',
     liveSessions: 2,
     unlinkedSessions: 0,
+    activeSessions: 0,
+    agentsRunning: 0,
+    agentsUnmeasured: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
+    storesUnread: 0,
     projects: [
-      { storeId: 'home', project: 'project-b', liveSessions: 1, agentsWorking: 0 },
-      { storeId: 'other', project: 'project-c', liveSessions: 1, agentsWorking: 0 },
+      {
+        storeId: 'home',
+        project: 'project-b',
+        liveSessions: 1,
+        agentsWorking: 0,
+        activeSessions: 0,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+      },
+      {
+        storeId: 'other',
+        project: 'project-c',
+        liveSessions: 1,
+        agentsWorking: 0,
+        activeSessions: 0,
+        agentsRunning: 0,
+        agentsUnmeasured: 0,
+      },
     ],
     epics: [],
     factorySessions: [],
@@ -568,7 +592,19 @@ describe('filterActiveSections', () => {
   it('counts the phase-less "Epics" section active when one of its epics is', () => {
     const fallback = buildRoadmapSections([], ['epic-x', 'epic-y'], [], undefined, null);
     expect(filterActiveSections(fallback, scope())).toEqual([]);
-    const withEpic = scope({ epics: [{ storeId: 'home', epicId: 'epic-y', project: null }] });
+    const withEpic = scope({
+      epics: [
+        {
+          storeId: 'home',
+          epicId: 'epic-y',
+          project: null,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+        },
+      ],
+    });
     expect(filterActiveSections(fallback, withEpic)).toEqual(fallback);
   });
 
@@ -591,7 +627,17 @@ describe('filterActiveSections', () => {
       milestone({ project: 'project-a', store: { id, label: id }, milestoneId: `${id}-1` });
     const twins = buildRoadmapSections([twin('store-a'), twin('store-b')], [], [], undefined, null);
     const live = scope({
-      projects: [{ storeId: 'store-b', project: 'project-a', liveSessions: 1, agentsWorking: 0 }],
+      projects: [
+        {
+          storeId: 'store-b',
+          project: 'project-a',
+          liveSessions: 1,
+          agentsWorking: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     });
     expect(filterActiveSections(twins, live).map((s) => s.store?.id)).toEqual(['store-b']);
   });
@@ -613,7 +659,17 @@ describe('filterActiveSections', () => {
     ).filter((s) => s.project === 'project-a');
     const live = scope({
       projects: [],
-      epics: [{ storeId: 'store-b', epicId: 'epic-a', project: null }],
+      epics: [
+        {
+          storeId: 'store-b',
+          epicId: 'epic-a',
+          project: null,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+        },
+      ],
     });
     expect(filterActiveSections(twins, live).map((s) => s.store?.id)).toEqual(['store-b']);
   });
@@ -628,7 +684,17 @@ describe('filterActiveSections', () => {
     );
     expect(filterActiveSections(bare, scope())).toHaveLength(1);
     const elsewhere = scope({
-      projects: [{ storeId: 'other', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      projects: [
+        {
+          storeId: 'other',
+          project: 'project-b',
+          liveSessions: 1,
+          agentsWorking: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     });
     expect(filterActiveSections(bare, elsewhere)).toEqual([]);
   });

@@ -876,8 +876,41 @@ export interface ActiveScopeResult {
   readAt: string;
   liveSessions: number;
   unlinkedSessions: number;
-  projects: { storeId: string; project: string; liveSessions: number; agentsWorking: number }[];
-  epics: { storeId: string; epicId: string; project: string | null }[];
+  /**
+   * Home's fact strip. S is `epics` (the active epics); A is the live
+   * sessions linked to at least one of them. This is |A|.
+   */
+  activeSessions: number;
+  /** Over A: running subagents, plus each working factory agent once. A floor. */
+  agentsRunning: number;
+  /** Sessions in A whose subagents could not be counted. */
+  agentsUnmeasured: number;
+  /** Over S, each epic once. */
+  tokensSpent: number;
+  tokensUnmeasured: number;
+  tasksDone: number;
+  /** done + review + inProgress + todo; superseded tasks are left out. */
+  tasksTotal: number;
+  /** Stores whose overview could not be read; the counts may be low. */
+  storesUnread: number;
+  projects: {
+    storeId: string;
+    project: string;
+    liveSessions: number;
+    agentsWorking: number;
+    activeSessions: number;
+    agentsRunning: number;
+    agentsUnmeasured: number;
+  }[];
+  epics: {
+    storeId: string;
+    epicId: string;
+    project: string | null;
+    tokensSpent: number;
+    tokensUnmeasured: number;
+    tasksDone: number;
+    tasksTotal: number;
+  }[];
   factorySessions: { storeId: string; sessionId: string }[];
 }
 

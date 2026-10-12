@@ -16,6 +16,8 @@ import {
   decisionLine,
   decisionsSpanStores,
   decisionTitle,
+  factStrip,
+  factStripNote,
   isBudgetOutlier,
   outlierSentence,
   type RunningCard,
@@ -319,7 +321,21 @@ describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
       readAt: '2026-10-07T10:00:00Z',
       liveSessions: projects.length,
       unlinkedSessions: 0,
-      projects: projects.map((p) => ({ ...p, liveSessions: 1 })),
+      activeSessions: 0,
+      agentsRunning: 0,
+      agentsUnmeasured: 0,
+      tokensSpent: 0,
+      tokensUnmeasured: 0,
+      tasksDone: 0,
+      tasksTotal: 0,
+      storesUnread: 0,
+      projects: projects.map((p) => ({
+        ...p,
+        liveSessions: 1,
+        activeSessions: 1,
+        agentsRunning: p.agentsWorking,
+        agentsUnmeasured: 0,
+      })),
       epics: [],
       factorySessions: [],
       ...over,
@@ -499,7 +515,25 @@ describe('lib/homeView.ts budgetPanel()', () => {
       readAt: '',
       liveSessions: 1,
       unlinkedSessions: 0,
-      projects: [{ storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 1 }],
+      activeSessions: 0,
+      agentsRunning: 0,
+      agentsUnmeasured: 0,
+      tokensSpent: 0,
+      tokensUnmeasured: 0,
+      tasksDone: 0,
+      tasksTotal: 0,
+      storesUnread: 0,
+      projects: [
+        {
+          storeId: 'home',
+          project: 'project-a',
+          liveSessions: 1,
+          agentsWorking: 1,
+          activeSessions: 1,
+          agentsRunning: 1,
+          agentsUnmeasured: 0,
+        },
+      ],
       epics: [],
       factorySessions: [],
     };
@@ -782,5 +816,189 @@ describe('lib/homeView.ts cardTokensText()', () => {
     expect(cardTokensText({ spent: 0, budget: null, unmeasured: 0, outliers: [] })).toBe(
       'No budget set',
     );
+  });
+});
+
+describe('lib/homeView.ts factStrip()', () => {
+  type Project = ActiveScopeResult['projects'][number];
+  type Epic = ActiveScopeResult['epics'][number];
+  const totals = (over: Partial<ActiveScopeResult> = {}): ActiveScopeResult => ({
+    measured: true,
+    readAt: '2026-10-07T10:00:00Z',
+    liveSessions: 0,
+    unlinkedSessions: 0,
+    activeSessions: 0,
+    agentsRunning: 0,
+    agentsUnmeasured: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
+    storesUnread: 0,
+    projects: [],
+    epics: [],
+    factorySessions: [],
+    ...over,
+  });
+  const project = (storeId: string, name: string, over: Partial<Project> = {}): Project => ({
+    storeId,
+    project: name,
+    liveSessions: 1,
+    agentsWorking: 0,
+    activeSessions: 1,
+    agentsRunning: 0,
+    agentsUnmeasured: 0,
+    ...over,
+  });
+  const epicOf = (storeId: string, epicId: string, name: string | null, over: Partial<Epic>) => ({
+    storeId,
+    epicId,
+    project: name,
+    tokensSpent: 0,
+    tokensUnmeasured: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
+    ...over,
+  });
+  const values = (scope: ActiveScopeResult | null, name?: string) =>
+    factStrip(scope, name).map((t) => t.value);
+  const floors = (scope: ActiveScopeResult | null, name?: string) =>
+    factStrip(scope, name).map((t) => t.floor);
+
+  it('reads the four facts over the whole set, with their labels and helpers', () => {
+    const tiles = factStrip(
+      totals({
+        activeSessions: 2,
+        agentsRunning: 5,
+        tokensSpent: 1_200_000,
+        tasksDone: 13,
+        tasksTotal: 25,
+      }),
+    );
+    expect(tiles).toEqual([
+      {
+        label: 'Active sessions',
+        value: '2',
+        helper: 'Live sessions on a running epic',
+        floor: false,
+        notKnown: false,
+      },
+      {
+        label: 'Agents running',
+        value: '5',
+        helper: 'Subagents and factory agents; nested ones not counted',
+        floor: false,
+        notKnown: false,
+      },
+      {
+        label: 'Budget used',
+        value: '1.2M\u00a0tokens',
+        helper: 'Tokens on the epics these sessions run',
+        floor: false,
+        notKnown: false,
+      },
+      {
+        label: 'Tasks done',
+        value: '13\u00a0of\u00a025',
+        helper: 'Plan tasks on those epics',
+        floor: false,
+        notKnown: false,
+      },
+    ]);
+  });
+
+  it('under ?project= sums that name across stores, and reads only its epics', () => {
+    const scope = totals({
+      activeSessions: 9,
+      agentsRunning: 99,
+      tokensSpent: 9_000_000,
+      tasksDone: 50,
+      tasksTotal: 60,
+      projects: [
+        project('home', 'project-a', { activeSessions: 1, agentsRunning: 2 }),
+        project('store-b', 'project-a', { activeSessions: 1, agentsRunning: 1 }),
+        project('home', 'project-b', { activeSessions: 3, agentsRunning: 9 }),
+      ],
+      epics: [
+        epicOf('home', 'epic-a', 'project-a', { tokensSpent: 1000, tasksDone: 2, tasksTotal: 4 }),
+        epicOf('store-b', 'epic-a', 'project-a', { tokensSpent: 500, tasksDone: 1, tasksTotal: 3 }),
+        epicOf('home', 'epic-b', 'project-b', { tokensSpent: 8_000_000, tasksDone: 9 }),
+        epicOf('home', 'epic-c', null, { tokensSpent: 7, tasksDone: 1, tasksTotal: 1 }),
+      ],
+    });
+    expect(values(scope, 'project-a')).toEqual(['2', '3', '1.5K\u00a0tokens', '3\u00a0of\u00a07']);
+    expect(values(scope, 'project-z')).toEqual(['0', '0', '0\u00a0tokens', 'None']);
+  });
+
+  it('marks agents and tokens as a floor when some were not measured, the number alone', () => {
+    const scope = totals({
+      activeSessions: 1,
+      agentsRunning: 2,
+      agentsUnmeasured: 1,
+      tokensSpent: 4_000,
+      tokensUnmeasured: 2,
+    });
+    expect(floors(scope)).toEqual([false, true, true, false]);
+    expect(values(scope)).toEqual(['1', '2', '4K\u00a0tokens', 'None']);
+    const filtered = totals({
+      projects: [project('home', 'project-a', { agentsUnmeasured: 1 })],
+      epics: [epicOf('home', 'epic-a', 'project-a', { tokensSpent: 10, tokensUnmeasured: 1 })],
+    });
+    expect(floors(filtered, 'project-a')).toEqual([false, true, true, false]);
+    expect(floors(filtered)).toEqual([false, false, false, false]);
+  });
+
+  it('reads tokens as Not measured when every run on the set is unmeasured, never "0 tokens"', () => {
+    const scope = totals({ activeSessions: 1, tokensUnmeasured: 3 });
+    const [, , budget] = factStrip(scope);
+    expect(budget).toMatchObject({ value: 'Not measured', floor: false, notKnown: false });
+  });
+
+  it('reads 0, 0, 0 tokens and None with nothing live', () => {
+    expect(values(totals())).toEqual(['0', '0', '0\u00a0tokens', 'None']);
+    expect(floors(totals())).toEqual([false, false, false, false]);
+  });
+
+  it('joins a number to its unit or "of" with a no-break space, so it never wraps there', () => {
+    const [, , budget, tasks] = values(
+      totals({ tokensSpent: 1_200_000, tasksDone: 1, tasksTotal: 2 }),
+    );
+    expect(budget).not.toMatch(/ /);
+    expect(tasks).not.toMatch(/ /);
+    expect(budget).toBe('1.2M\u00a0tokens');
+    expect(tasks).toBe('1\u00a0of\u00a02');
+  });
+
+  it('reads Not known on every tile for an unmeasured or missing scope', () => {
+    for (const scope of [totals({ measured: false, activeSessions: 4 }), null]) {
+      const tiles = factStrip(scope);
+      expect(tiles.map((t) => t.value)).toEqual(Array(4).fill('Not known'));
+      expect(tiles.every((t) => t.notKnown && !t.floor)).toBe(true);
+      expect(tiles.map((t) => t.label)).toEqual([
+        'Active sessions',
+        'Agents running',
+        'Budget used',
+        'Tasks done',
+      ]);
+    }
+  });
+});
+
+describe('lib/homeView.ts factStripNote()', () => {
+  const scope = (measured: boolean, storesUnread: number) =>
+    ({ measured, storesUnread }) as ActiveScopeResult;
+
+  it('is quiet while loading and when every store was read', () => {
+    expect(factStripNote(null)).toBeNull();
+    expect(factStripNote(scope(true, 0))).toBeNull();
+  });
+
+  it('says the session data could not be read when the scope is unmeasured', () => {
+    expect(factStripNote(scope(false, 0))).toBe('Session data could not be read.');
+  });
+
+  it('counts the stores it could not read, singular and plural', () => {
+    expect(factStripNote(scope(true, 1))).toBe('1 store could not be read; counts may be low.');
+    expect(factStripNote(scope(true, 3))).toBe('3 stores could not be read; counts may be low.');
   });
 });

@@ -14,8 +14,36 @@ const scope: ActiveScopeResult = {
   readAt: '2026-10-07T12:00:00.000Z',
   liveSessions: 2,
   unlinkedSessions: 0,
-  projects: [{ storeId: 'home', project: 'project-a', liveSessions: 1, agentsWorking: 0 }],
-  epics: [{ storeId: 'home', epicId: 'epic-a', project: 'project-a' }],
+  activeSessions: 0,
+  agentsRunning: 0,
+  agentsUnmeasured: 0,
+  tokensSpent: 0,
+  tokensUnmeasured: 0,
+  tasksDone: 0,
+  tasksTotal: 0,
+  storesUnread: 0,
+  projects: [
+    {
+      storeId: 'home',
+      project: 'project-a',
+      liveSessions: 1,
+      agentsWorking: 0,
+      activeSessions: 0,
+      agentsRunning: 0,
+      agentsUnmeasured: 0,
+    },
+  ],
+  epics: [
+    {
+      storeId: 'home',
+      epicId: 'epic-a',
+      project: 'project-a',
+      tokensSpent: 0,
+      tokensUnmeasured: 0,
+      tasksDone: 0,
+      tasksTotal: 0,
+    },
+  ],
   factorySessions: [{ storeId: 'st-b', sessionId: 'f1' }],
 };
 const home = { store: { id: 'home', label: 'home' } };
@@ -44,7 +72,17 @@ describe('active-scope predicates', () => {
   it('isActiveProjectName matches a project by name in any store, for the merged ?project= view', () => {
     const elsewhere: ActiveScopeResult = {
       ...scope,
-      projects: [{ storeId: 'st-b', project: 'project-a', liveSessions: 1, agentsWorking: 1 }],
+      projects: [
+        {
+          storeId: 'st-b',
+          project: 'project-a',
+          liveSessions: 1,
+          agentsWorking: 1,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     };
     expect(isActiveProject(elsewhere, {}, 'project-a')).toBe(false);
     expect(isActiveProjectName(elsewhere, 'project-a')).toBe(true);
