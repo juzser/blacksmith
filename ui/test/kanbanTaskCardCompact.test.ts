@@ -1,6 +1,6 @@
 // KanbanTaskCard.vue compact mode (ds-spec.md §3.1 Work/Kanban row: "one
 // column of compact cards (title, tag, meta)"). Source-text scrape, same
-// style as needsYouInbox.test.ts: no DOM harness in this config.
+// style as homePage.test.ts: no DOM harness in this config.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

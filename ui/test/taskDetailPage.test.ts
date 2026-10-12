@@ -167,10 +167,10 @@ describe('TaskDetailPage.vue — DS visual pass restructure (items 2-4)', () => 
   // no triangle: `display: flex` on a <summary> drops the browser's native
   // ::marker (it only renders for the default `list-item` display), so a
   // closed disclosure read as inert text with no affordance that it opens.
-  // NeedsYouInbox.vue's own summary.bs-inbox__group-head rule already hit
-  // this and documents the fix in its own comment ("flex drops the
-  // disclosure marker") — this rule must follow the same `list-item` +
-  // line-height shape, not flex + align-items, to keep the marker visible.
+  // The Roadmap's summary.rm-section__head rule already hit this and
+  // documents the fix in its own comment ("flex drops the disclosure
+  // marker") — this rule must follow the same `list-item` + line-height
+  // shape, not flex + align-items, to keep the marker visible.
   it('keeps the native disclosure marker on the Technical details summary (list-item, not flex)', () => {
     const rule = PRIMITIVES_CSS.match(/\.bs-task-detail__tech-details summary \{([^}]*)\}/)?.[1];
     expect(rule).toBeTruthy();

@@ -77,9 +77,9 @@ describe('kit/Button.vue', () => {
   });
 });
 
-// Visual-pass follow-up: the mobile home screenshot showed the "Decide"
-// button underlined like a plain link. Button.vue's root element is
-// `role`-agnostic — NeedsYouInbox.vue puts `.bs-btn.bs-btn--primary` on a
+// Visual-pass follow-up: a mobile home screenshot showed a button-styled
+// link underlined like a plain link. Button.vue's root element is
+// `role`-agnostic — NotFoundPage.vue puts `.bs-btn.bs-btn--secondary` on a
 // RouterLink, which renders as a real `<a>` — so a `.bs-btn` that sets no
 // text-decoration falls through to the browser's default anchor underline.
 // `.bs-btn--link` (a sibling modifier, untouched here) intentionally adds

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// UI spec Part 2 — one project's slice of the Roadmap: an h2 head (the
-// NeedsYouInbox group-head look, one level up) with the muted done count, the
+// UI spec Part 2 — one project's slice of the Roadmap: an h2 head (a small
+// subtle label, `.rm-section__head`) with the muted done count, the
 // windowed swimlane (1 lane before the current one, the current one, 2 after)
 // and the "Show N earlier/later lanes" disclosures. The window and the
 // current-lane rule are roadmapWindow.ts; the expand state is the page's
@@ -122,14 +122,14 @@ const later = computed(() => disclosure('later'));
 <template>
   <component
     :is="isPhoneWidth && showHeading ? 'details' : 'section'"
-    class="bs-inbox__group rm-section"
+    class="rm-section"
     :open="isPhoneWidth && showHeading ? section.running || hostsSelection || hasLiveBlock : undefined"
     @toggle="onToggle"
   >
     <component
       :is="isPhoneWidth ? 'summary' : 'h2'"
       v-if="showHeading"
-      class="bs-inbox__group-head rm-section__head"
+      class="rm-section__head"
     >
       {{ section.title }}
       <span v-if="section.countLabel" class="rm-section__count">{{ section.countLabel }}</span>

@@ -486,27 +486,6 @@ export interface LessonsResult {
   lastCheckedAt: string | null;
 }
 
-/** ds-spec.md §4.1 NeedsYouInbox row: mirrors queries.ts's InboxRow. */
-export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
-export interface InboxRow {
-  id: string;
-  kind: InboxKind;
-  project: string | null;
-  taskId: string | null;
-  createdAt: string;
-  taskTitle: string | null;
-  role: string | null;
-  reason: string | null;
-  findingCount: number;
-  findingSummaries: string[];
-  statement: string | null;
-  /** Which store the row came from; absent from an API that predates multi-store reads. */
-  store?: StoreRef;
-}
-export interface InboxResult {
-  rows: InboxRow[];
-}
-
 /** lessons.ts's NoveltyMatch — the nearest statement in the corpus and its Jaccard score. */
 export interface NoveltyMatch {
   statement: string;
@@ -945,13 +924,6 @@ export function fetchActiveScope(): Promise<ActiveScopeResult> {
 
 export function fetchCliSessions(): Promise<LiveSessionsResult> {
   return getJson('/api/cli-sessions');
-}
-
-export function fetchInbox(session?: SessionScope): Promise<InboxResult> {
-  const q = new URLSearchParams();
-  applySessionScope(q, session);
-  const qs = q.toString();
-  return getJson(`/api/inbox${qs ? `?${qs}` : ''}`);
 }
 
 export function fetchErrors(
