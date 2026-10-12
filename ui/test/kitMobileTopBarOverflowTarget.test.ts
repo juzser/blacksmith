@@ -1,7 +1,7 @@
 // MobileTopBar.vue — a Teleport target for page-specific overflow controls
 // (ds-spec.md §3.1 Work/Kanban row: "display options ... move into the
 // MobileTopBar overflow menu"). Same Teleport mechanism already used by
-// kit/Dialog.vue/Sheet.vue/Toast.vue, not a new composable — MobileTopBar
+// kit/Dialog.vue/Sheet.vue, not a new composable — MobileTopBar
 // stays prop-only and has no page-specific knowledge of its own.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

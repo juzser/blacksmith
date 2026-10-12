@@ -17,20 +17,13 @@ const props = withDefaults(
     title: string;
     size?: 'default' | 'sm';
     /**
-     * `alertdialog` for a destructive confirm: ARIA reserves that role for
-     * an alert that also demands a response, and assistive clients announce
-     * the two differently. The dashboard only reads, so no page passes it
-     * today; the contract stays as it was.
-     */
-    role?: 'dialog' | 'alertdialog';
-    /**
      * The consequence sentence. Owned here rather than left to the caller's
      * slot markup because it has to be the dialog's `aria-describedby`
      * target, and only this component can generate that id.
      */
     description?: string;
   }>(),
-  { size: 'default', role: 'dialog' },
+  { size: 'default' },
 );
 const emit = defineEmits<{ close: [] }>();
 
@@ -55,7 +48,7 @@ useModalFocus(
         class="bs-dialog"
         :class="{ 'bs-dialog--sm': size === 'sm' }"
         tabindex="-1"
-        :role="role"
+        role="dialog"
         aria-modal="true"
         :aria-label="title"
         :aria-describedby="description ? descId : undefined"

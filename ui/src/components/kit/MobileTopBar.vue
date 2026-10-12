@@ -221,7 +221,7 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
         <Separator />
         <!-- ds-spec.md §3.1 Work/Kanban row: page-specific overflow controls
              (e.g. Kanban's display options) teleport in here, same Teleport
-             mechanism kit/Dialog.vue/Sheet.vue/Toast.vue already use. Kept
+             mechanism kit/Dialog.vue/Sheet.vue already use. Kept
              prop-free: MobileTopBar stays generic shell chrome. -->
         <div id="bs-mtopbar-overflow-extra" class="bs-mtopbar__overflow-extra"></div>
       </div>

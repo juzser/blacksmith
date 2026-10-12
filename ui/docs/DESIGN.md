@@ -96,15 +96,15 @@ additive and inert until a page-wiring PR imports it.
 
 | Primitive | Notes |
 |---|---|
-| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon`; a `RouterLink` may wear the raw `.bs-btn` classes directly (NotFoundPage's "Go to Home", Home's section links) — see Known deviations |
+| Button | `variant: primary\|secondary\|ghost\|link`, `size: sm\|md`, optional leading `icon`; a `RouterLink` may wear the raw `.bs-btn` classes directly (NotFoundPage's "Go to Home", Home's section links) — see Known deviations |
 | Icon | rebuilt on `@lucide/vue` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
-| IconButton | `label` required (no default — a missing one is a type error); additive `tone: default\|inverse` for controls on an inverted surface (Toast's dismiss button); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
+| IconButton | `label` required (no default — a missing one is a type error); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
 | Tooltip | rebuilt on `@floating-ui/dom`; `mode: describe\|label`; hover after 300ms, focus immediately, Escape dismisses |
 | Tag | Lozenge's renamed successor (see "Status → Tag mapping"); `tone` covers the 7 status tones plus `neutral`; `variant: subtle\|bold\|outline` — `bold` reuses the tone's own text/subtle token pair as a solid fill (no third "-bold" token tier exists in `bs-tokens.css`) rather than inventing one, see Known deviations |
 | Chip | `variant: assignee\|identity`, `color?: 1-6` indexes `--bs-chart-N` for the identity dot/border |
 | Card | `padding: sm\|md\|lg`, `interactive?` |
 | Input / Select | unchanged contract from the old kit, restyled. `Textarea` and `RadioGroup` are not in the kit: the lesson edit form was their only user, and it went when the dashboard became display-only (2026-10-12) |
-| Dialog / Popover / Toast | unchanged behaviour (focus trap, Esc, `role="status"`/`aria-live`), restyled. No `AlertDialog`: its only user was the Lessons Reject confirm, and the dashboard now changes nothing, so it confirms nothing |
+| Dialog / Popover | unchanged behaviour (focus trap, Esc), restyled; `Dialog` is always `role="dialog"`. No `AlertDialog`: its only user was the Lessons Reject confirm, and the dashboard now changes nothing, so it confirms nothing. No `Toast` either: nothing produced one once the dashboard became display-only |
 | Tabs | unchanged (roving-tabindex, WAI-ARIA Tabs pattern); `:focus-visible` now uses the kit's shared box-shadow ring, not the old outline-based one — no `--bs-focus-width` token exists here, see Known deviations |
 | Table | adds a `compact` density prop, absorbing the old kit's `Row`/`RowList` (see Known deviations) |
 | Skeleton | `shape: line\|block\|circle`, `width?`, `height?` |
@@ -288,10 +288,6 @@ None of these composables changed for DS0 — the kit swap is presentational.
   tone's own `-text` colour as a solid background with the `-subtle` tint
   (already a pale version of the same hue) as foreground — monochromatic,
   no new hex measured.
-- **IconButton's `tone: 'default'|'inverse'` is additive**, not in the
-  spec's props table — needed for `IconButton`s sitting on a deliberately
-  inverted surface (`Toast`'s dismiss button: `background: var(--bs-text)`)
-  where the default tone's colour would render as a dim grey icon.
 - **ProgressRing/ProgressBarMini's `kind`/`detail` are additive.** `kind:
   budget|ratio` (default `ratio`) selects which auto-tone threshold rule
   applies when `tone` is omitted — a budget can exceed 100% (a real,

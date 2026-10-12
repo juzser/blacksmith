@@ -10,9 +10,9 @@ import { getCurrentScope, onScopeDispose, ref } from 'vue';
 
 const HOVER_DELAY_MS = 300;
 
-// "Only one open at a time" (§2.5) — a module-level singleton, the same
-// shape useToast.ts uses for its one-region-per-app queue. Holds the hide()
-// of whichever tooltip is currently open, so a second one showing closes it.
+// "Only one open at a time" (§2.5) — a module-level singleton, one per app.
+// Holds the hide() of whichever tooltip is currently open, so a second one
+// showing closes it.
 let activeHide: (() => void) | null = null;
 
 export function useTooltip() {

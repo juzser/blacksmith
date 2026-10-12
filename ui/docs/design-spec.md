@@ -418,7 +418,7 @@ Surfaces: `Card`, `StatCard`, `RowList`/`Row`, `Table`.
 Layouts: `PageHeader`, `SectionHeading`, `Toolbar`, `FilterChips`, `MetricGrid`, `CardGrid`, `DefinitionList`, `Timeline`, `Highlight`, `EmptyState`.
 Navigation: `AppShell`, `SidebarNav`, `Tabs`, `Breadcrumb`.
 Overlays: `Dialog`, `Popover`, `Tooltip`. (No `AlertDialog`: the dashboard confirms nothing, because it changes nothing.)
-Feedback: `Banner`, `Toast`.
+Feedback: `Banner`. (No `Toast`: the primitive is gone, because nothing in a display-only dashboard produces one.)
 Charts: `Sparkline`, `LineChart`, `BarChart` (vendor `DonutChart` too — closed inventory, cheap to keep available even though v1 has no use for it).
 Illustration: `Illustration` (one use — Overview's first-run empty state, `coffee`).
 
@@ -443,7 +443,7 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 - Exactly one `<h1>` per route = the `PageHeader` title (WCAG 2.4.6/1.3.1) — Task detail's title is the task name, not "Task detail".
 - Focus ring: `:focus-visible` only, the `--ds-focus-width` (3px) token, never `outline: none` without it.
 - Icon-only controls (theme toggle, Timeline chevrons, DropdownMenu triggers if ever added): `aria-label` + `Tooltip`, ≥24×24px target (WCAG 2.5.8).
-- Live/status regions: load-failure `Banner`s are `role="status" aria-live="polite"` (persistent, not urgent enough for `assertive`); `Toast` container `aria-live="polite"`. Poll-driven count changes (e.g. Toolbar's "N tasks") are debounced to at most one announcement per 10s, not announced on every 5s tick — avoids screen-reader spam from background refresh (WCAG 4.1.3 without over-announcing).
+- Live/status regions: load-failure `Banner`s are `role="status" aria-live="polite"` (persistent, not urgent enough for `assertive`). Poll-driven count changes (e.g. Toolbar's "N tasks") are debounced to at most one announcement per 10s, not announced on every 5s tick — avoids screen-reader spam from background refresh (WCAG 4.1.3 without over-announcing).
 - `prefers-reduced-motion`: skeleton pulse and any poll-triggered highlight fall back to opacity-only, no travel; honored, never removes the focus indicator itself.
 
 **Per-page notes:**
@@ -730,7 +730,9 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
    - **No toast on an event, a trigger or a dispatch.** `useToast` meant
      exactly one thing — *your* action landed — and was used only by Task
      detail's waive/deny and Lessons' approve/reject, both removed when the
-     dashboard became display-only (§5.0a). A toast the operator did not
+     dashboard became display-only (§5.0a). The `Toast` primitive, `useToast`
+     and IconButton's `inverse` tone (which only its dismiss button used)
+     went with them. A toast the operator did not
      cause would have overloaded that. Three further objections are
      properties of this transport, not matters of taste: the data arrives by
      poll (§8), so a toast fired off a diff reports when the *poll* noticed,

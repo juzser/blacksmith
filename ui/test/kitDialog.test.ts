@@ -13,18 +13,16 @@ const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'componen
 const DIALOG = readFileSync(join(KIT, 'Dialog.vue'), 'utf8');
 
 describe('kit/Dialog.vue', () => {
-  it('declares open/title/size/role/description props with the right defaults', () => {
+  it('declares open/title/size/description props with the right defaults', () => {
     expect(DIALOG).toMatch(/open:\s*boolean;/);
     expect(DIALOG).toMatch(/title:\s*string;/);
     expect(DIALOG).toMatch(/size\?:\s*'default'\s*\|\s*'sm';/);
-    expect(DIALOG).toMatch(/role\?:\s*'dialog'\s*\|\s*'alertdialog';/);
     expect(DIALOG).toMatch(/description\?:\s*string;/);
     const match = DIALOG.match(
       /withDefaults\(\s*defineProps<\{[\s\S]*?\}>\(\),\s*\{([\s\S]*?)\}\s*,?\s*\)/,
     );
     expect(match).not.toBeNull();
     expect(match?.[1]).toMatch(/size:\s*'default'/);
-    expect(match?.[1]).toMatch(/role:\s*'dialog'/);
   });
 
   it('emits close and delegates focus-trap/Esc/inert-background to useModalFocus', () => {
@@ -35,7 +33,7 @@ describe('kit/Dialog.vue', () => {
 
   it('renders via Teleport with the WAI-ARIA dialog role/aria-modal/aria-label/aria-describedby wiring', () => {
     expect(DIALOG).toMatch(/<Teleport to="body">/);
-    expect(DIALOG).toMatch(/:role="role"/);
+    expect(DIALOG).toMatch(/role="dialog"/);
     expect(DIALOG).toMatch(/aria-modal="true"/);
     expect(DIALOG).toMatch(/:aria-label="title"/);
     expect(DIALOG).toMatch(/:aria-describedby="description \? descId : undefined"/);

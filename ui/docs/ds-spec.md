@@ -113,7 +113,7 @@ over — every value below was picked and contrast-checked fresh for this file).
 | `--bs-surface` | `#ffffff` | page background |
 | `--bs-surface-sunken` | `#f7f7f8` | canvas / timeline track / code blocks |
 | `--bs-surface-raised` | `#ffffff` | card background (differentiated from page by border+shadow, not fill) |
-| `--bs-surface-overlay` | `#ffffff` | dialog / popover / toast |
+| `--bs-surface-overlay` | `#ffffff` | dialog / popover |
 | `--bs-border` | `#e4e4e7` | hairline default |
 | `--bs-border-bold` | `#a1a1aa` | hairline on hover/focus-adjacent, table dividers under a header; outline of the selected chip / current wave |
 | `--bs-surface-selected` | `#f4f4f5` | neutral selection fill: active nav item, selected filter chip, selected segment, selected roadmap row |
@@ -363,14 +363,14 @@ Blue means one thing: "this is the action" or "this is you". Everything else is 
 
 | Component | Props / variants | States |
 |---|---|---|
-| `Button` | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, `icon?` | default, hover, pressed, disabled, loading (spinner replaces label, width locked) |
+| `Button` | `variant: primary\|secondary\|ghost\|link`, `size: sm\|md`, `icon?` | default, hover, pressed, disabled, loading (spinner replaces label, width locked) |
 | `IconButton` | `icon` (a Lucide component), `label` (required; becomes both `aria-label` and the tooltip text, §2.5), `size: sm (22px, no border) \| md (28px)`, `disabled?` (renders `aria-disabled="true"` so the tooltip still shows on focus) | same as Button; icon colour `--bs-text-subtle`, `--bs-text` on hover |
 | `Icon` | `icon` (a Lucide component), `size: 14\|16\|20` (default 16), `label?` | decorative by default (`aria-hidden="true"`, `focusable="false"`); with `label` it renders `role="img"` + `aria-label`. Stroke 1.75 at 14/16, 1.5 at 20; colour is `currentColor`, so it inherits from the text it sits in. Full rules §2.5 |
 | `Tag` | `tone: done\|review\|progress\|todo\|blocked\|danger\|warning\|neutral`, `size: sm\|md` (both 20px tall, matching ds-review.html's one `.tag` box: 12px text, 16px line, `2px 8px` padding; `size` only picks the padding; the one exception is the Kanban column count, ds-review.html's `.pill` at :429, which stays 16px via `.bs-kanban-col__count`) | static (no interactive state; this is the redesign's "pastel status tag") |
 | `Chip` | `variant: assignee\|identity`, `color?` (identity tone index 1-6), `avatarInitial?` | default, hover (assignee chip is a link to a role/agent) |
 | `Card` | `padding: sm\|md\|lg`, `interactive?` (adds hover elevation + cursor) | default, hover (only if `interactive`), focus-visible |
 | `Input` / `Select` | unchanged contract from the old kit (native-element wrappers); ported, re-styled to new tokens. `Textarea` and `RadioGroup` are not in the kit: only the lesson edit form used them, and the dashboard only reads | unchanged |
-| `Dialog` / `Popover` / `Toast` | ported unchanged in behaviour (focus trap, Esc, `role="status"`/`aria-live`), re-styled. No `AlertDialog`: the dashboard asks the operator to confirm nothing, because it changes nothing | unchanged |
+| `Dialog` / `Popover` | ported unchanged in behaviour (focus trap, Esc), re-styled; `Dialog` is always `role="dialog"`. No `AlertDialog` and no `Toast`: the dashboard asks the operator to confirm nothing and tells them nothing happened, because it changes nothing | unchanged |
 | `Tooltip` | rebuilt on `@floating-ui/dom`; `text`, `placement?` (default `top`), `mode: describe\|label` | hidden, shown (hover after 300ms, focus immediately), dismissed (Esc). Full contract §2.5 |
 | `Tabs` | ported unchanged (roving-tabindex) | unchanged |
 | `Table` | ported, re-styled; adds a `compact` density prop for the Activity page's dense event rows | unchanged |
@@ -460,7 +460,7 @@ stacked `ProgressBar` + the % number).
 | Table | Lessons, TaskDetail, Errors | `Table` (ported) |
 | Tabs | TaskDetail | `Tabs` (ported) |
 | Textarea | Lessons | dropped: only the lesson edit form used it, and lessons are edited with `/bs lessons` |
-| Toast | none currently (mounted once in App.vue) | `Toast` (ported) |
+| Toast | none | dropped: nothing produced a toast once the dashboard became display-only |
 | Tooltip | none currently | `Tooltip` (rebuilt on `@floating-ui/dom`, §2.5) |
 | TwoColumn | Analytics, Overview, TaskDetail | `TwoColumn` (ported) |
 | — (no old equivalent) | Flow's DOM task node, IdentityChip | see `TaskCard`, `IdentityChip` above |

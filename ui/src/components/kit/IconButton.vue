@@ -17,14 +17,6 @@ const props = withDefaults(
     size?: 'sm' | 'md';
     disabled?: boolean;
     /**
-     * 'inverse' is for an IconButton sitting on a deliberately inverted
-     * surface (Toast's dismiss button: background: var(--bs-text); color:
-     * var(--bs-surface)) — the default tone's colour/hover assume a normal
-     * surface and would render as a dim grey icon on a dark background.
-     * Defaults to 'default', today's only behaviour.
-     */
-    tone?: 'default' | 'inverse';
-    /**
      * DS4 S1 round 6: the phone overflow's "..." trigger needs
      * aria-haspopup="menu" + aria-expanded (WAI-ARIA APG menu pattern). Both
      * optional — every other IconButton call site is a plain button with
@@ -48,7 +40,7 @@ const props = withDefaults(
      */
     ariaControls?: string;
   }>(),
-  { size: 'md', tone: 'default', ariaExpanded: undefined, ariaControls: undefined },
+  { size: 'md', ariaExpanded: undefined, ariaControls: undefined },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
@@ -64,7 +56,7 @@ function onClick(event: MouseEvent) {
     <button
       type="button"
       class="bs-iconbtn"
-      :class="[`bs-iconbtn--${size}`, { 'bs-iconbtn--inverse': tone === 'inverse' }]"
+      :class="`bs-iconbtn--${size}`"
       :aria-label="label"
       :aria-disabled="disabled ? 'true' : undefined"
       :aria-haspopup="ariaHaspopup"

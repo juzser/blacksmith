@@ -51,8 +51,8 @@ a:hover {
    (Tooltip.vue sets top/left inline per computePosition()'s result), so
    this file only carries its look, never its placement. z-index 60 matches
    the old kit's documented scale (ds-components.css: "topbar 10 < popover
-   45 < sheet 40/50 < dialog 55/56 < toast 70") — above a dialog, below a
-   toast — which this PR does not redefine, only continues. */
+   45 < sheet 40/50 < dialog 55/56") — above a dialog — which this PR does
+   not redefine, only continues. */
 .bs-tooltip-trigger {
   display: inline-flex;
 }
@@ -159,20 +159,6 @@ a:hover {
     min-height: var(--bs-touch);
   }
 }
-/* inverse (Batch C, Toast's dismiss button) — mirrors the old kit's
-   .ds-toast__dismiss:hover rule verbatim (ds-components.css): colour rides
-   currentColor so it inherits whatever the inverted surface set (Toast sets
-   color: var(--bs-surface)), and hover is a currentColor-mix tint rather
-   than the default tone's --bs-surface-sunken (which assumes a normal,
-   non-inverted background). */
-.bs-iconbtn--inverse {
-  color: currentColor;
-}
-.bs-iconbtn--inverse:hover {
-  color: currentColor;
-  background: color-mix(in srgb, currentColor 15%, transparent);
-}
-
 /* CompactNumber (§2.1) — no bespoke type scale of its own (it inherits
    whatever surrounding context it sits in, same as the design page's plain
    .num spans); the one thing worth a shared rule is tabular-nums, so a
@@ -190,12 +176,7 @@ a:hover {
   }
 }
 
-/* Button (§2.1) — variant/size/icon/loading. `danger` is tinted, not a solid
-   fill: the old kit's `.ds-btn--destructive` (ds-components.css) reads
-   color-mix(...--ds-danger-bold 10%...) + --ds-danger-text, and this file has
-   no "-bold"-style solid-danger token to fill with instead, so the new kit
-   keeps the same tinted convention on its own --bs-tone-danger-text/-subtle
-   pair rather than inventing one. `primary` is the one variant allowed to
+/* Button (§2.1) — variant/size/icon/loading. `primary` is the one variant allowed to
    spend the accent colour on its own fill (§1, "Where accent stays: the
    primary button..."). Height/radius steps (32/28px, 4px radius step) are
    not spec'd numbers (§2.1 gives Button no pixel values, unlike IconButton
@@ -263,13 +244,6 @@ a:hover {
 }
 .bs-btn--ghost:hover {
   background: var(--bs-surface-sunken);
-}
-.bs-btn--danger {
-  background: var(--bs-tone-danger-subtle);
-  color: var(--bs-tone-danger-text);
-}
-.bs-btn--danger:hover {
-  background: color-mix(in srgb, var(--bs-tone-danger-subtle) 60%, var(--bs-tone-danger-text) 12%);
 }
 .bs-btn--link {
   background: transparent;
@@ -1670,8 +1644,7 @@ a:hover {
 /* Dialog (§2.1, WAI-ARIA Dialog pattern). Ported from
    ds-components.css's .ds-dialog* 1:1 on values (radius/shadow/z-index), the
    one deliberate addition being the bs-fade entrance (ds-dialog never had
-   one; this kit's design decision extends it to dialog/popover/toast alike,
-   not just toast). */
+   one; this kit's design decision extends it to dialog and popover alike). */
 .bs-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -1728,7 +1701,7 @@ a:hover {
 /* Popover (§2.1, light-weight anchored panel) — ported from .ds-popover*
    1:1 on values; z-index 45 matches this file's own documented scale
    (Tooltip's header comment above: "topbar 10 < popover 45 < sheet 40/50 <
-   dialog 55/56 < toast 70"). */
+   dialog 55/56"). */
 .bs-popover {
   position: relative;
   display: inline-block;
@@ -1748,41 +1721,6 @@ a:hover {
   flex-direction: column;
   gap: var(--bs-space-2);
   animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
-}
-
-/* Toast (§2.1) — deliberately inverted surface: background/color swap so a
-   toast reads as "inverse of the current theme" regardless of light/dark
-   (ported from ds-components.css's own bug-fix comment on .ds-toast: an
-   earlier version referenced --ds-inverse-surface/--ds-inverse-text, tokens
-   that were never declared anywhere and always silently fell back to
-   --ds-text/--ds-surface — this bs- version uses --bs-text/--bs-surface
-   directly, no phantom inverse tokens to begin with). IconButton's dismiss
-   button needs tone="inverse" here (see IconButton.vue) because its default
-   colour/hover assume a normal, non-inverted surface. */
-.bs-toast-region {
-  position: fixed;
-  bottom: var(--bs-space-4);
-  right: var(--bs-space-4);
-  z-index: 70;
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-}
-.bs-toast {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-3);
-  min-width: 240px;
-  padding: var(--bs-space-3) var(--bs-space-3) var(--bs-space-3) var(--bs-space-4);
-  background: var(--bs-text);
-  color: var(--bs-surface);
-  border-radius: var(--bs-radius-sm);
-  box-shadow: var(--bs-shadow-lg);
-  font-size: var(--bs-text-sm);
-  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
-}
-.bs-toast > span {
-  flex: 1;
 }
 
 /* Tabs (§2.1, WAI-ARIA Tabs pattern, roving tabindex). Ported from
