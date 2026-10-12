@@ -278,3 +278,26 @@ test.describe('Unknown URL', () => {
     });
   }
 });
+
+test.describe('Global focus ring', () => {
+  // ds-review.html :focus-visible and the kit primitives use a 2px offset.
+  test('sits 2px off a keyboard-focused control', async ({ page }) => {
+    await page.goto('/timeline');
+    // A bare button carries no class, so only the global rule styles it.
+    await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.id = 'probe-ring';
+      b.textContent = 'probe';
+      document.body.append(b);
+    });
+    await page.keyboard.press('Tab');
+    await page.locator('#probe-ring').focus();
+    const ring = await page
+      .locator('#probe-ring')
+      .evaluate((el) => ({
+        width: getComputedStyle(el).outlineWidth,
+        offset: getComputedStyle(el).outlineOffset,
+      }));
+    expect(ring).toEqual({ width: '2px', offset: '2px' });
+  });
+});
