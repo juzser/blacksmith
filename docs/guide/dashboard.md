@@ -13,7 +13,7 @@ loopback requests only.
 
 ## Other projects' stores
 
-Home and Kanban also show every project that has a live Claude Code CLI session,
+The pages also show every project that has a live Claude Code CLI session,
 not only the clone the dashboard was started in. For each live session's working
 directory the server takes the git toplevel and treats it as a store when
 `<top>/.blacksmith/state/events` (a `BS_HOME` layout) or `<top>/state/events` (a
@@ -26,7 +26,8 @@ dashboard-owned cache, `state/ui-stores/<storeId>.db` under the served clone;
 nothing is created or written in the foreign project. A store that disappears is
 dropped from the views and shows up as a `store-unavailable` issue on the pulse.
 Rows from it carry `store: {id, label}` (the label is the project's directory
-name). Only `/api/overview`, `/api/kanban` and `/api/projects` span stores for now.
+name). Every page reads every store except Lessons, which reads only the served
+clone; a task page reads the one store its task lives in.
 
 **Project filter.** In a foreign store a row with no project, or with the factory
 default, reads as the store's label; a row with any other explicit project reads as
