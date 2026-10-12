@@ -30,9 +30,8 @@ Everything here was run, not recalled.
   and `agents/` under it are the same files this clone dogfoods, not an
   export of them. The repo is its own marketplace
   (`.claude-plugin/marketplace.json`, `source: "./.claude"` for the plugin
-  itself), which
-  is a shape the official marketplace already uses for most of its own
-  plugins. PP-4's fork was "which copy is canonical"; the answer is that
+  itself), which is a shape the official marketplace already uses for most
+  of its own plugins. PP-4's fork was "which copy is canonical"; the answer is that
   there is no second copy, and `test/pluginManifest.test.ts` is what keeps it
   that way. The same marketplace now lists two optional mods, `bs-mod` and
   `pr-mod`, each from its own directory under `mods/`; they are not copies

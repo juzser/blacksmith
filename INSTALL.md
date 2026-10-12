@@ -508,23 +508,19 @@ single question.
 | Deployed where? | `hosting` | `unspecified` | free text |
 
 Write the answers into `stack.yml` — change the values in place, leave the
-comments — then read them back and price them. Which file, and which command,
-depends on how you installed:
+comments — then read them back and price them. In an install the file is
+`.blacksmith/factory/policies/stack.yml` (under `$BS_HOME` if you set one),
+the copy `bs init` made; in a clone it is
+[`factory/policies/stack.yml`](factory/policies/stack.yml).
 
-| | The file | The command |
-| --- | --- | --- |
-| In an install | `.blacksmith/factory/policies/stack.yml` (under `$BS_HOME` if you set one) | `bs` |
-| In a clone | [`factory/policies/stack.yml`](factory/policies/stack.yml) | `node factory/orchestrator/dist/cli.js` |
-
-`bs init` made the install's copy. Run both commands from the project, with
-the command from the table:
+In an install, from the project:
 
 ```bash
 bs stack show
 bs stack check
 ```
 
-In a clone, that is:
+In a clone, from its root:
 
 ```bash
 node factory/orchestrator/dist/cli.js stack show

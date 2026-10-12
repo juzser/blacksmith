@@ -46,8 +46,9 @@ before there is anything to plan an epic against.
 ```bash
 # 1. Say what you build with. Answers, not code -- language, frontend,
 #    design system, database, deploy target. `none` wherever you have no
-#    opinion yet; the defaults assume least.
-$EDITOR factory/policies/stack.yml
+#    opinion yet; the defaults assume least. In a clone the file is
+#    factory/policies/stack.yml; under $BS_HOME if you set one.
+$EDITOR .blacksmith/factory/policies/stack.yml
 bs stack check             # which answers the templates honour,
                            # which are only recorded, which make `new` refuse
 
