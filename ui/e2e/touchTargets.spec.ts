@@ -24,7 +24,7 @@ const PAGES: Record<string, string> = {
 };
 
 const INTERACTIVE_SELECTOR =
-  'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="link"], input, select';
+  'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="link"], input, select, [tabindex]:not([tabindex="-1"])';
 
 interface Measurement {
   name: string;
@@ -96,7 +96,9 @@ function measureInteractiveElements(selector: string): Measurement[] {
     // the only path to it, and 2.5.8 is a pointer-input criterion. This is a
     // visibility check, not a named exemption: anything genuinely off-screen
     // is excluded the same way, by position, not by name.
-    if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) {
+    // A control below the first screen is still one a thumb reaches by
+    // scrolling, so only off-canvas above or beside the page is skipped.
+    if (rect.bottom <= 0 || rect.right <= 0 || rect.left >= innerWidth) {
       return;
     }
     let exempt: string | null = null;
@@ -147,6 +149,35 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
       }
     });
   }
+});
+
+// The sweep must see a control the generic selector used to miss: a bare
+// tabindex tab stop (a Tooltip trigger wrapping plain text) and anything below
+// the first screen.
+test.describe('The sweep reaches tab stops and controls below the fold', () => {
+  test('an undersized tabindex span and a button 3000px down are both measured', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/overview');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    await page.evaluate(() => {
+      const span = document.createElement('span');
+      span.tabIndex = 0;
+      span.textContent = 'probe-tabstop';
+      document.body.prepend(span);
+      const spacer = document.createElement('div');
+      spacer.style.height = '3000px';
+      const far = document.createElement('button');
+      far.textContent = 'probe-far';
+      document.body.append(spacer, far);
+    });
+    const names = (await page.evaluate(measureInteractiveElements, INTERACTIVE_SELECTOR)).map(
+      (m) => m.name,
+    );
+    expect(names).toContain('probe-tabstop');
+    expect(names).toContain('probe-far');
+  });
 });
 
 // PR #280 nit: .bs-select's padding-driven height (~38px) stood taller than
