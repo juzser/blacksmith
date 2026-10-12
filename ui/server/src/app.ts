@@ -1,13 +1,8 @@
 // Hono app: read endpoints wrap db/queries.ts's page queries 1:1 (architecture
-// §10); write endpoints wrap ONLY waivers.ts's applyBatch() and lessons.ts's
-// transitionLesson(). No other writes exist.
-//
-// P9-36: the three lesson-review routes used to hand-write their events with
-// plain appendEvent(), which made the UI a third door into memory past both
-// the legal-transition check (P9-1) and the novelty gate (P9-34) — the CLI
-// refused what the Approve button did anyway. They now call the same
-// transitionLesson() the CLI calls, against the session that OWNS the lesson
-// rather than whichever one the request body named.
+// §10). There are no write endpoints: the dashboard only reads, and every
+// operator decision (a waiver, a lesson review) goes through the CLI
+// (`/bs waivers`, `/bs lessons`). readOnlyGuard() answers 405 to any `/api`
+// method that is not GET or HEAD.
 //
 // Imports factory/orchestrator's BUILT `dist/` output, not its `src/` —
 // several orchestrator modules (taxonomy.ts, schemas.ts) resolve policy/
@@ -43,9 +38,7 @@ import {
   EVENT_KINDS,
   errorsPage,
   flowGraph,
-  inboxRows,
   kanban,
-  lessonOwnerSession,
   lessonsPage,
   overview,
   projectedLineage,
@@ -60,21 +53,7 @@ import {
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
 import { compareLogOrder } from '../../../factory/orchestrator/dist/eventOrder.js';
-import type { EventOpts } from '../../../factory/orchestrator/dist/events.js';
-import { requireSession } from '../../../factory/orchestrator/dist/events.js';
-import type { EventContext } from '../../../factory/orchestrator/dist/findings.js';
-import type {
-  LessonEdit,
-  LessonTransitionExtra,
-} from '../../../factory/orchestrator/dist/lessons.js';
-import { transitionLesson } from '../../../factory/orchestrator/dist/lessons.js';
-import type { LogCache } from '../../../factory/orchestrator/dist/logCache.js';
-import { createLogCache } from '../../../factory/orchestrator/dist/logCache.js';
 import { STATE_ARTIFACTS_DIR, STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
-import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
-import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
-import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
-import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 import { type ActiveScopeStore, computeActiveScope } from './activeScope.js';
 import {
   decodeCursor,
@@ -87,15 +66,8 @@ import {
 import { mergeAnalytics } from './analyticsFanout.js';
 import type { CliConfigSource } from './cliSessions.js';
 import { createCliSessionsReader, liveSessionCwds } from './cliSessions.js';
-import {
-  fanOut,
-  mergeInbox,
-  mergeKanban,
-  mergeOverview,
-  mergeRoadmap,
-  relabelProject,
-} from './fanout.js';
-import { loopbackGuard, writeGuard } from './middleware.js';
+import { fanOut, mergeKanban, mergeOverview, mergeRoadmap, relabelProject } from './fanout.js';
+import { loopbackGuard, readOnlyGuard } from './middleware.js';
 import { REPO_ROOT } from './paths.js';
 import type { StoreEntry, StoreRef } from './stores.js';
 import { createStoreRegistry } from './stores.js';
@@ -155,20 +127,6 @@ export interface AppOpts {
   onArtifactResolved?: () => Promise<void>;
   /** Root of the built Vue app (ui/dist) to static-serve; omitted in tests (API-only). */
   uiDistDir?: string;
-  /**
-   * Injected only by tests that need a specific novelty bar. Production omits
-   * it and createApp() reads factory/policies/scheduler.yml — see the
-   * lessonsPolicy comment in createApp().
-   */
-  schedulerPolicy?: SchedulerPolicy;
-  /**
-   * Injected only by tests that need to observe or share the last-event-id
-   * cache resolveContext()/lessonContext() consult. Production omits it and
-   * createApp() builds its own with createLogCache() over the same
-   * EventOpts, so this field changes nothing about what either helper
-   * returns — only how many times the log behind it gets re-read.
-   */
-  logCache?: LogCache;
   /**
    * A fixed clock for screenshot harnesses, never for operators. Production
    * omits it and every request reads the wall clock, so "working" (a
@@ -284,31 +242,12 @@ function dbOptsFrom(opts: AppOpts): DbOpts {
   };
 }
 
-function errorStatus(code: string): 400 | 404 | 409 | 500 {
-  if (
-    code.endsWith('.missing-flag') ||
-    code.endsWith('.unknown-fingerprint') ||
-    code.endsWith('.non-waivable-severity') ||
-    code.endsWith('.invalid-lesson-tag') ||
-    code.endsWith('.bad-request') ||
-    // Fix-round (code review #12): the lesson-edit route's lessonType/
-    // lessonScope validation (events.ts's validatePayloadDimensions(),
-    // reached via appendEvent()) was falling through to 500 — a malformed
-    // request body, not a server fault.
-    code.endsWith('.invalid-payload-dimensions') ||
-    // P9-36: what transitionLesson() refuses about the request itself.
-    code.endsWith('.illegal-transition') ||
-    code.endsWith('.empty-statement') ||
-    code.endsWith('.session-mismatch') ||
-    code.endsWith('.unknown-cursor')
-  ) {
-    return 400;
-  }
-  if (code.endsWith('.not-found') || code.endsWith('.unknown-lesson')) return 404;
-  // 409, not 400: the request is well-formed and the caller may retry it
-  // after something outside the request changes — restore the archived log,
-  // or decide the duplicate is wanted and re-send with acceptDuplicate.
-  if (code.endsWith('.edit-not-novel') || code.endsWith('.unknown-session')) return 409;
+function errorStatus(code: string): 400 | 404 | 500 {
+  // A malformed query or cursor is the caller's fault; a missing session,
+  // store or task is a 404. The server has no write path, so these are the
+  // only refusals a read raises.
+  if (code.endsWith('.bad-request') || code.endsWith('.unknown-cursor')) return 400;
+  if (code.endsWith('.not-found')) return 404;
   return 500;
 }
 
@@ -324,45 +263,7 @@ function errorBody(err: unknown): { error: { code: string; message: string; deta
   };
 }
 
-/** Every write endpoint's shared envelope: who's writing, and where in the causal chain. */
-interface WriteEnvelope {
-  sessionId?: string;
-  planVersion?: number;
-  causalParent?: string | null;
-  actor?: string;
-}
-
-/** The three lesson-review routes' envelope. `sessionId` is optional — see lessonContext(). */
-interface LessonWriteBody extends WriteEnvelope {
-  statement?: string;
-  lessonType?: string;
-  lessonScope?: string;
-  /** Operator rationale, recorded on the status-change payload. */
-  note?: string;
-  /** Keep a statement the novelty gate scored as a duplicate, on the record (P9-34). */
-  acceptDuplicate?: boolean;
-}
-
 class BadRequestError extends SmithError {}
-
-/**
- * The session that OWNS this lesson — the one whose log the transition has to
- * fold and append to. Doubles as the 3 lesson write routes' existence check,
- * mirroring the /api/tasks/:taskId 404 pattern.
- *
- * P9-36: this is the whole reason the routes could not simply be pointed at
- * transitionLesson(). The lessons projection spans every session, but a
- * transition is a fold over ONE log; taking the session from the request body
- * (as these routes did) meant folding a log that may not contain the lesson at
- * all, and `lessons.unknown-lesson` on a lesson that plainly exists.
- */
-function lessonSession(db: SmithDb, lessonId: string): string {
-  const sessionId = lessonOwnerSession(db, lessonId);
-  if (sessionId === null) {
-    throw new SmithError('lessons.not-found', `No lesson "${lessonId}".`, { lessonId });
-  }
-  return sessionId;
-}
 
 /**
  * The read path's freshness gate — operator report, dogfood round 2: "the
@@ -371,7 +272,7 @@ function lessonSession(db: SmithDb, lessonId: string): string {
  * The DB is a projection; `state/events/<session>.jsonl` is the record. Every
  * read route here queries the single connection createApp() opens, and until
  * now nothing on the read path ever re-projected — applyDb() was called only
- * by the two WRITE routes. So the dashboard served whatever the last `smith db
+ * by the write routes the server had then. So the dashboard served whatever the last `smith db
  * apply` had left behind, and since the projector writes `in-progress` only
  * from a `dispatch_decision`, and the orchestrator appends those to the LOG,
  * every dispatch after that point was invisible. Polling did not help: it
@@ -574,78 +475,6 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   };
 }
 
-function requireSessionId(body: WriteEnvelope): string {
-  if (!body.sessionId) {
-    throw new BadRequestError('write.bad-request', 'Request body must include "sessionId".');
-  }
-  return body.sessionId;
-}
-
-/**
- * Resolves an explicit causalParent, or falls back to the session's current
- * last event id, read through `logCache` rather than a fresh `readEvents`.
- *
- * The cache is asked about ONE log and NOT the lineage read D-119 put on
- * every deciding fold: a non-`session-start` event's causal_parent must live
- * in its own session's log (validateCausalParent), so a lineage-wide "last
- * event" would hand back an ancestor's id whenever the parent session's clock
- * ran ahead, and every write from this route would be refused as
- * `events.cross-session-parent-not-root`. This is asking "what do I chain
- * onto here", which is a question about one log.
- */
-async function resolveContext(
-  body: WriteEnvelope,
-  eventOpts: EventOpts,
-  logCache: LogCache,
-): Promise<EventContext> {
-  const sessionId = requireSessionId(body);
-  let causalParent = body.causalParent;
-  if (causalParent === undefined) {
-    causalParent = await logCache.lastEventId(sessionId, eventOpts);
-  }
-  return {
-    sessionId,
-    planVersion: body.planVersion ?? 1,
-    causalParent,
-    actor: body.actor,
-  };
-}
-
-/**
- * resolveContext()'s counterpart for the lesson routes: the session comes from
- * the lesson, not from the caller (P9-36).
- *
- * A `sessionId` in the body is now optional, and when present it is checked
- * rather than used — the shipped client sends the lesson's own session
- * (ui/src/pages/LessonsPage.vue), so a disagreement means the caller believes
- * something false about where this lesson lives, and answering it by quietly
- * writing to the right log would hide that. `requireSession` runs before the
- * fold so an archived log says exactly that, naming the path it expected,
- * instead of readEvents' empty-log-shaped `lessons.unknown-lesson` (P9-28).
- */
-async function lessonContext(
-  db: SmithDb,
-  lessonId: string,
-  body: WriteEnvelope,
-  eventOpts: EventOpts,
-  logCache: LogCache,
-): Promise<EventContext> {
-  const sessionId = lessonSession(db, lessonId);
-  if (body.sessionId && body.sessionId !== sessionId) {
-    throw new BadRequestError(
-      'lessons.session-mismatch',
-      `Lesson "${lessonId}" belongs to session "${sessionId}", not "${body.sessionId}".`,
-      { lessonId, sessionId, requestedSessionId: body.sessionId },
-    );
-  }
-  requireSession(sessionId, eventOpts);
-  let causalParent = body.causalParent;
-  if (causalParent === undefined) {
-    causalParent = await logCache.lastEventId(sessionId, eventOpts);
-  }
-  return { sessionId, planVersion: body.planVersion ?? 1, causalParent, actor: body.actor };
-}
-
 /**
  * `planVersion` off the query string, or undefined when the caller did not
  * ask about a version at all.
@@ -686,19 +515,6 @@ function parsePlanVersion(raw: string | undefined): number | undefined {
 export function createApp(opts: AppOpts): AppHandle {
   const handle = openDb(opts.dbPath);
   const dbOpts = dbOptsFrom(opts);
-  const eventOpts: EventOpts = opts.stateDir ? { stateDir: opts.stateDir } : {};
-  const logCache = opts.logCache ?? createLogCache();
-  // D-159 again, at the door P9-36 opened. cli.ts fixed the CLI's paths into
-  // the novelty gate to read factory/policies/scheduler.yml; this one still
-  // fell through to lessons.ts's own constants, so Approve and Edit scored
-  // duplicates against a bar the operator's policy file could not move. The
-  // two agree today only because the shipped numbers equal the defaults.
-  //
-  // Read once at startup, not per request: a malformed file is a loud
-  // `scheduler.invalid-policy` when the server boots, not a 500 the first
-  // operator to click Approve discovers. Unguarded for the same reason
-  // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
-  const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
   const artifactsDir = opts.artifactsDir ?? STATE_ARTIFACTS_DIR;
   const maxArtifactBytes = opts.maxArtifactBytes ?? MAX_ARTIFACT_BYTES;
   // Spread into every clock-dependent query rather than resolved to a
@@ -879,6 +695,11 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(body, status);
   });
 
+  // The dashboard only reads: any `/api` method other than GET or HEAD is a
+  // 405, ahead of every route and of the refresh, so a refused request costs
+  // no fold and no route below can grow a write by accident.
+  app.use('/api/*', readOnlyGuard());
+
   app.get('/api/health', (c) => c.json({ ok: true }));
 
   // Fold any newly-appended events into the projection before ANY api route
@@ -919,11 +740,6 @@ export function createApp(opts: AppOpts): AppHandle {
     await stores.refresh();
     await next();
   });
-
-  // One guard, mounted once on the method, ahead of every POST under
-  // /api/* -- including one added later. No individual write route below
-  // restates any of writeGuard()'s rules.
-  app.on('POST', '/api/*', writeGuard());
 
   /**
    * The change stream: "these sessions' logs advanced, and to how many
@@ -1362,18 +1178,6 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));
 
-  app.get('/api/inbox', (c) => {
-    const project = c.req.query('project');
-    const scope = sessionScope(c);
-    return c.json({
-      rows: mergeInbox(
-        fanOut(readable(c), project, (db, p) =>
-          inboxRows(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }),
-        ),
-      ),
-    });
-  });
-
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');
     if (allStoresScope(c, (m) => new BadRequestError('scope.bad-request', m))) {
@@ -1480,87 +1284,6 @@ export function createApp(opts: AppOpts): AppHandle {
           roadmapPage(db, { ...sessionScope(c), ...(p ? { project: p } : {}) }),
         ),
       ),
-    );
-  });
-
-  // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----
-  // writeGuard() is mounted once, above, on every POST under /api/* — a
-  // request that did not originate from the dashboard itself (foreign
-  // Origin, rebound Host, cross-site fetch, or a non-JSON body) never
-  // reaches these handlers, and none of them restates the check.
-  app.post('/api/waivers/apply-batch', async (c) => {
-    const body = await c.req.json<WriteEnvelope & { decisions?: WaiverBatchDecision[] }>();
-    const decisions = body.decisions ?? [];
-    if (decisions.length === 0) {
-      throw new BadRequestError(
-        'waivers.bad-request',
-        'Request body must include a non-empty "decisions" array.',
-      );
-    }
-    const ctx = await resolveContext(body, eventOpts, logCache);
-    const results = await applyBatch(decisions, ctx, eventOpts);
-    await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
-    // #221 review finding: findingIdsToCarry (every finding a denial in this
-    // batch left open, with no further move of its own) was computed by
-    // applyBatch() and then dropped on the floor here — the one caller who
-    // could read it back never got it. Forwarded the same way `applied` is.
-    return c.json({ applied: results.events.length, findingIdsToCarry: results.findingIdsToCarry });
-  });
-
-  /** The one write path all three lesson routes share (P9-36). */
-  async function transition(
-    lessonId: string,
-    toStatus: string,
-    body: LessonWriteBody,
-    extra: LessonTransitionExtra,
-  ): Promise<{ lessonId: string; status: string; novelty: unknown }> {
-    const ctx = await lessonContext(handle.db, lessonId, body, eventOpts, logCache);
-    const result = await transitionLesson(lessonId, toStatus, ctx, eventOpts, {
-      ...extra,
-      ...(body.note ? { note: body.note } : {}),
-      // Last, as cli.ts spreads noveltyOptsFromFlags() last: one place
-      // answers "what threshold is in effect" and no route can take the
-      // gate's shape from the request body.
-      noveltyThreshold: lessonsPolicy.noveltyJaccardThreshold,
-      shingleSize: lessonsPolicy.shingleSize,
-      noveltyLengthAware: lessonsPolicy.noveltyLengthAware,
-    });
-    await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
-    return { lessonId, status: result.lessonStatus, novelty: result.novelty };
-  }
-
-  app.post('/api/lessons/:lessonId/approve', async (c) => {
-    const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId') as string, 'approved', body, {}));
-  });
-
-  app.post('/api/lessons/:lessonId/reject', async (c) => {
-    const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId') as string, 'invalidated', body, {}));
-  });
-
-  app.post('/api/lessons/:lessonId/edit', async (c) => {
-    const lessonId = c.req.param('lessonId') as string;
-    const body = await c.req.json<LessonWriteBody>();
-    if (!body.statement && !body.lessonType && !body.lessonScope) {
-      throw new BadRequestError(
-        'lessons.bad-request',
-        'Edit requires at least one of "statement", "lessonType", "lessonScope".',
-      );
-    }
-    const edit: LessonEdit = {
-      ...(body.statement ? { statement: body.statement } : {}),
-      ...(body.lessonType ? { lessonType: body.lessonType } : {}),
-      ...(body.lessonScope ? { lessonScope: body.lessonScope } : {}),
-    };
-    // acceptDuplicate has to be forwarded, not defaulted on: it is the
-    // operator's decision to keep a statement the novelty gate scored as a
-    // duplicate, and transitionLesson records it on the event (P9-34).
-    return c.json(
-      await transition(lessonId, 'approved', body, {
-        edit,
-        ...(body.acceptDuplicate ? { acceptDuplicate: true } : {}),
-      }),
     );
   });
 

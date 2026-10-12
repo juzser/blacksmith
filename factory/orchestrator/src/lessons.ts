@@ -1814,7 +1814,7 @@ export const LEGAL_LESSON_TRANSITIONS: Readonly<Record<string, readonly string[]
   invalidated: [],
 });
 
-/** The `lesson-edited` payload, as the UI's Edit action writes it — only the fields actually changed. */
+/** The `lesson-edited` payload, as `bs lessons approve --statement …` writes it — only the fields actually changed. */
 export interface LessonEdit {
   statement?: string;
   lessonType?: string;

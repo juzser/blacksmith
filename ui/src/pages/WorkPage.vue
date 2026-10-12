@@ -57,10 +57,9 @@ function onPickView(value: string) {
          (it watches route.fullPath), not this component's.
 
          DS4 S1 round 6 (S3 a11y finding): `role="menuitemradio"` buttons,
-         not kit's RadioGroup component — a radiogroup of native radio
-         inputs is not a valid child of the overflow's `role="menu"`, and
-         RadioGroup keeps its unchanged contract for its other caller
-         (LessonsPage). tabindex is "-1" by default; MobileTopBar owns the
+         not a radiogroup of native radio inputs, which is not a valid
+         child of the overflow's `role="menu"`. tabindex is "-1" by
+         default; MobileTopBar owns the
          roving tabindex across the whole menu.
 
          `v-if="isPhoneWidth"`: the target only exists inside MobileTopBar,

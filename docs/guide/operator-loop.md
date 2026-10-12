@@ -198,9 +198,9 @@ answers what any of it would say, without running the command.
 ## 6. Teach it — `/bs lessons`
 
 Errors and decision checkpoints become lesson candidates. Approve, edit or
-reject them — in the UI's Lessons page or with
-`bs lessons approve|reject` — then `bs lessons compile` writes the
-approved ones into
+reject them with `/bs lessons` (`bs lessons approve|reject`; an edit rides on
+the approval) — the dashboard's Lessons page shows them but decides nothing —
+then `bs lessons compile` writes the approved ones into
 [`factory/policies/lessons.md`](../../factory/policies/lessons.md), from where
 they are injected into the matching agent's next dispatch.
 

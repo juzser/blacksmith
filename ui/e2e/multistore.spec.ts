@@ -192,7 +192,8 @@ test.describe('a foreign store in the dashboard', () => {
           );
         }
       }
-      // A waivable finding on task-4, so a store-blind page would offer Waive.
+      // A finding on task-4 in each store, so both Findings tabs have a row
+      // to read, and a store-blind page would show the wrong store's.
       const events = await readEvents('sess-fixture', opts);
       const last = events[events.length - 1];
       await raiseFinding(
@@ -360,9 +361,9 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(page.getByText('No events recorded.')).toBeVisible();
     await page.goto(taskUrl(TASK_4, foreignId));
     await page.getByRole('tab', { name: 'Findings' }).click();
-    await expect(page.getByText('one more layer than the task needs')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Waive' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(
+      page.getByText('one more layer than the task needs', { exact: true }),
+    ).toBeVisible();
     // Every read the page makes is issued when it loads, before the Findings
     // tab above could render, so nothing is still to come.
 
@@ -370,12 +371,16 @@ test.describe('a foreign store in the dashboard', () => {
     expect(taskReads.length).toBeGreaterThan(0);
     for (const read of taskReads) expect(read).toContain(`store=${foreignId}`);
     // Reads keyed by the served store's own ids are not made for a foreign task.
-    expect(requests.filter((p) => /^\/api\/(timeline|artifacts|waivers)/.test(p))).toEqual([]);
+    expect(requests.filter((p) => /^\/api\/(timeline|artifacts)/.test(p))).toEqual([]);
 
-    // The same task id in the served store is a different task, with Waive.
+    // The same task id in the served store is a different task, read from
+    // its own store. Neither page offers a decision: the dashboard only reads.
     await page.goto(taskUrl(TASK_4));
     await page.getByRole('tab', { name: 'Findings' }).click();
-    await expect(page.getByRole('button', { name: 'Waive' })).toBeVisible();
+    await expect(
+      page.getByText('one more layer than the task needs', { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /^(Waive|Deny)$/ })).toHaveCount(0);
   });
 
   test('R1: the Roadmap shows a foreign epic with its tasks and waves, and its milestone', async ({
@@ -530,19 +535,6 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(title(page)).toHaveText(FOREIGN_TITLE_2);
   });
 
-  test('N1: Home lists the foreign escalation under its project and opens it in its store', async ({
-    page,
-  }) => {
-    await page.goto(`${origin}/overview`);
-    const inbox = page.locator('section.bs-inbox');
-    const group = inbox.locator('.bs-inbox__group', { hasText: 'project-b' });
-    const row = group.locator('.bs-inbox__row[data-kind="escalation"]');
-    await expect(row.locator('.bs-inbox__title')).toHaveText('Decide on an escalated task');
-    await expect(row.locator('.bs-inbox__desc')).toContainText('stopped on Task 3');
-    await row.getByRole('link', { name: /^Open/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/tasks/epic-1%2Ftask-3\\?store=${foreignId}$`));
-  });
-
   test('B3: changing task or store on the open page loads the new one at once, once', async ({
     page,
   }) => {
@@ -614,38 +606,7 @@ test.describe('a foreign store in the dashboard', () => {
     await expect(page.locator('.timeline-feed').first()).toBeVisible();
   });
 
-  test('A2: a waiver answer for the old task writes no error on the new one', async ({ page }) => {
-    let release = () => {};
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    let held = false;
-    await page.route('**/api/waivers/apply-batch', async (route) => {
-      held = true;
-      await gate;
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: { code: 'boom', message: 'boom-decide' } }),
-      });
-    });
-    await recordBodies(page);
-    await page.goto(taskUrl(TASK_4));
-    await page.getByRole('tab', { name: 'Findings' }).click();
-    await page.getByRole('button', { name: 'Deny' }).click();
-    await expect.poll(() => held).toBe(true);
-    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_2)}`);
-    await expect(title(page)).toHaveText(HOME_TITLE_2);
-    release();
-    await expect.poll(() => errorBodiesRead(page, '/api/waivers/')).toBe(1);
-    await expect(page.getByText('boom-decide')).toHaveCount(0);
-    // The waiver is still there to act on, its controls not left disabled.
-    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}`);
-    await page.getByRole('tab', { name: 'Findings' }).click();
-    await expect(page.getByRole('button', { name: 'Deny' })).toBeEnabled();
-  });
-
-  test('B5: a lightbox and a popover do not outlive the task they belong to', async ({ page }) => {
+  test('B5: a lightbox does not outlive the task it belongs to', async ({ page }) => {
     await page.goto(taskUrl(TASK_4));
     await page.getByRole('tab', { name: 'Outputs' }).click();
     await page.getByRole('button', { name: 'screenshot' }).click();
@@ -653,14 +614,6 @@ test.describe('a foreign store in the dashboard', () => {
     await pushRoute(page, `/tasks/${encodeURIComponent(TASK_2)}?store=${foreignId}`);
     await expect(title(page)).toHaveText(FOREIGN_TITLE_2);
     await expect(page.getByRole('dialog', { name: 'Artifact preview' })).toHaveCount(0);
-
-    await page.goto(taskUrl(TASK_4));
-    await page.getByRole('tab', { name: 'Findings' }).click();
-    await page.getByRole('button', { name: 'Waive' }).click();
-    await expect(page.getByRole('dialog', { name: 'Waive finding' })).toBeVisible();
-    await pushRoute(page, `/tasks/${encodeURIComponent(TASK_4)}?store=${foreignId}`);
-    await expect(page.getByRole('dialog', { name: 'Waive finding' })).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Waive' })).toHaveCount(0);
   });
 
   test.describe('Activity reads every store', () => {

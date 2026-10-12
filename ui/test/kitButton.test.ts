@@ -1,5 +1,5 @@
 // Button's contract (ds-spec.md §2.1): `variant: primary|secondary|ghost|
-// danger|link`, `size: sm|md`, `icon?`, states "default, hover, pressed,
+// link`, `size: sm|md`, `icon?`, states "default, hover, pressed,
 // disabled, loading (spinner replaces label, width locked)". Same static
 // source-text style as kitIconButton.test.ts: ui/vitest.config.ts is
 // DOM-free by design, and DS0 adds no call site for Button (§5, "no page
@@ -23,11 +23,11 @@ const TOKENS_CSS = readFileSync(
 );
 
 describe('kit/Button.vue', () => {
-  it('declares the five variants from §2.1, nothing else', () => {
+  it('declares the four variants from §2.1, nothing else', () => {
     const match = BUTTON.match(/variant\?:\s*'([^']+)'(?:\s*\|\s*'([^']+)')*/);
     expect(match).not.toBeNull();
     expect(BUTTON).toMatch(
-      /variant\?:\s*'primary'\s*\|\s*'secondary'\s*\|\s*'ghost'\s*\|\s*'danger'\s*\|\s*'link';/,
+      /variant\?:\s*'primary'\s*\|\s*'secondary'\s*\|\s*'ghost'\s*\|\s*'link';/,
     );
   });
 
@@ -77,9 +77,9 @@ describe('kit/Button.vue', () => {
   });
 });
 
-// Visual-pass follow-up: the mobile home screenshot showed the "Decide"
-// button underlined like a plain link. Button.vue's root element is
-// `role`-agnostic — NeedsYouInbox.vue puts `.bs-btn.bs-btn--primary` on a
+// Visual-pass follow-up: a mobile home screenshot showed a button-styled
+// link underlined like a plain link. Button.vue's root element is
+// `role`-agnostic — NotFoundPage.vue puts `.bs-btn.bs-btn--secondary` on a
 // RouterLink, which renders as a real `<a>` — so a `.bs-btn` that sets no
 // text-decoration falls through to the browser's default anchor underline.
 // `.bs-btn--link` (a sibling modifier, untouched here) intentionally adds

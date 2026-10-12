@@ -821,7 +821,8 @@ Dimension rules:
    Jaccard similarity (threshold in `factory/policies/scheduler.yml`'s
    `lessons:` block, default 0.8) — SAGE's "uncertain → one LLM merge step"
    middle tier is a documented future upgrade, not built yet.
-4. **The operator reviews lessons in the UI** (approve / edit / reject).
+4. **The operator reviews lessons** with `/bs lessons` (approve / edit /
+   reject); the dashboard shows them but only reads.
    Nothing self-modifies without approval — unreviewed self-written memory
    is not just noise but an **attack surface** (memory poisoning, §17); the
    approval gate is the safety boundary.

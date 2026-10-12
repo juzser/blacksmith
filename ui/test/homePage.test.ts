@@ -13,9 +13,21 @@ const SRC = readFileSync(
 const TEMPLATE = SRC.slice(SRC.indexOf('<template>'));
 
 describe('HomePage.vue', () => {
-  it('lays out the §4.1 sections in order, inbox first', () => {
+  it('is display-only: no Needs-you region above the sections, nothing to act on', () => {
+    expect(SRC).not.toMatch(/NeedsYouInbox|fetchInbox|InboxRow|loadInbox/);
+    expect(TEMPLATE).not.toMatch(/needs you/i);
+    // Nothing sits between the page header and the Live sessions section.
+    const header = TEMPLATE.indexOf('<PageHeader');
+    const firstSection = TEMPLATE.indexOf('<section', header);
+    expect(TEMPLATE.slice(firstSection)).toMatch(
+      /^<section[^>]*aria-labelledby="live-sessions-heading"/,
+    );
+    const between = TEMPLATE.slice(header, firstSection).replace(/<!--[\s\S]*?-->/g, '');
+    expect(between.match(/</g)).toHaveLength(1);
+  });
+
+  it('lays out the §4.1 sections in order, live sessions first', () => {
     const order = [
-      '<NeedsYouInbox',
       '>Live sessions</h2>',
       '>Recent activity</h2>',
       '>Running now</h2>',
@@ -26,14 +38,14 @@ describe('HomePage.vue', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it('renders Recent activity directly under the inbox (DS6 PR4, §4.1 point 1b)', () => {
+  it('renders Recent activity directly under Live sessions (DS6 PR4, §4.1 point 1b)', () => {
     expect(SRC).toMatch(/fetchTimelinePage\(\{[\s\S]*?limit: RECENT_ACTIVITY_SHOWN/);
     expect(TEMPLATE).toMatch(/<TimelineRow[\s\S]*?variant="compact"/);
     expect(TEMPLATE).not.toContain('Expand all');
     expect(TEMPLATE).toMatch(/<RouterLink to="\/activity"[^>]*>View all activity<\/RouterLink>/);
   });
 
-  it('lists live CLI sessions under the inbox from one poll, with every state (§4.1 item 1a)', () => {
+  it('lists live CLI sessions at the top from one poll, with every state (§4.1 item 1a)', () => {
     expect(SRC).toMatch(/fetchCliSessions\(\)/);
     expect(SRC.match(/fetchCliSessions/g)?.length).toBe(2);
     expect(TEMPLATE).toMatch(/<RouterLink to="\/sessions"[^>]*>All sessions<\/RouterLink>/);
@@ -51,13 +63,10 @@ describe('HomePage.vue', () => {
 
   it('reuses the existing endpoints with the page scope', () => {
     expect(SRC).toMatch(/fetchOverview\(sessionScope\.value, project\.value\)/);
-    expect(SRC).toMatch(/fetchInbox\(sessionScope\.value\)/);
-    expect(SRC).toMatch(/<NeedsYouInbox :rows="inbox" :failed="inboxFailed" :project="project"/);
   });
 
   it('clears each error on success, not on attempt (D-226)', () => {
     expect(SRC).toMatch(/overview\.value = o;[\s\S]*?overviewFailed\.value = false;/);
-    expect(SRC).toMatch(/inbox\.value = \(await fetchInbox[\s\S]*?inboxFailed\.value = false;/);
   });
 
   it('shows the §3 error banner with a retry', () => {

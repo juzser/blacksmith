@@ -12,8 +12,7 @@ const props = withDefaults(
 
 // bs-tokens.css has no third "-bold"-fill tier (the old kit's Lozenge read a
 // --ds-<tone>-bold background plus --ds-text-on-bold/-ds-warning-on-bold
-// foreground pair, neither of which this palette carries — see
-// bs-primitives.css's .bs-btn--danger comment for the same gap on Button).
+// foreground pair, neither of which this palette carries).
 // `bold` reuses the same two tokens as `subtle`/`outline` in a third
 // geometric role instead: solid fill using the tone's own -text colour as
 // background, with the -subtle tint (already a pale version of that same

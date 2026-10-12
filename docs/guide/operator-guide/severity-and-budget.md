@@ -31,7 +31,8 @@ bs waivers apply decisions.json --session <session-id> --plan-version 1 --causal
 event only when its actor is a person, so that the factory's own traffic under
 those same types stays out; `planSignOffCheckpoint` asks the same of `plan-version-created`
 before a plan sign-off becomes a lesson checkpoint. Three spellings count as a
-person — `operator`, `user` (what the UI writes when no actor is passed) and
+person — `operator`, `user` (the default when a decision verb is given no
+`--actor`) and
 `operator-skill` (what the operator console passes). Anything else — `system`,
 or an agent role such as `planner` or `scribe` — records the decision durably
 but keeps it off the lens. The list lives in

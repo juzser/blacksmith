@@ -1581,8 +1581,8 @@ function inFlightEpics(
  * epics with a task in a truly open status, not merely one the projector
  * still calls non-terminal. An epic whose only open task is `escalated` or
  * `failed` stays in `inFlightEpics()` (it is still pickable on Kanban/Flow —
- * see that function's doc), but it has nothing running and belongs in the
- * inbox, not on the "Running now" card (ds-spec.md §4.1, DS2 review F1).
+ * see that function's doc), but it has nothing running and counts as an
+ * escalation, not on the "Running now" card (ds-spec.md §4.1, DS2 review F1).
  */
 function activeEpics(
   taskRows: readonly { epicId: string | null; taskStatus: string }[],
@@ -1717,8 +1717,8 @@ function idleEpics(
  * imported from the modules that own them — the severities from waivers.ts,
  * the statuses from findings.ts, where they are read off LEGAL_TRANSITIONS —
  * rather than spelled out here. `bs waivers pending` lists every such finding:
- * what *could* be waived. The operator's inbox and pending-waiver count are
- * narrower, see needsOperatorWaiver() below.
+ * what *could* be waived. The operator's pending-waiver count is narrower,
+ * see needsOperatorWaiver() below.
  */
 function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): boolean {
   return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
@@ -1748,10 +1748,11 @@ function taskResolver<T extends { taskId: string; epicId: string | null }>(
  * operator can: its task shipped, or it is epic-level (no task row, such as
  * `<epic>/integration`) and its epic is closed. A task still open is in the
  * factory's own fix loop (a follow-up task exists to fix its finding), a
- * superseded task's findings are moot, and an escalated task has its own inbox
- * row. No shared status set names "shipped" alone — TERMINAL_OK_TASK_STATUSES
- * also holds `waived`, which is decided — so `completed` is spelled out. The
- * inbox and both pendingWaivers counts read this one rule, so they agree.
+ * superseded task's findings are moot, and an escalated task is counted under
+ * `alerts.escalations`. No shared status set names "shipped" alone —
+ * TERMINAL_OK_TASK_STATUSES also holds `waived`, which is decided — so
+ * `completed` is spelled out. Both pendingWaivers counts read this one rule,
+ * so they agree.
  */
 function needsOperatorWaiver(
   f: {
@@ -1768,180 +1769,6 @@ function needsOperatorWaiver(
   const t = resolveTask(f.taskId, f.epicId);
   if (t) return t.taskStatus === 'completed';
   return f.epicId !== null && closedEpicIds.has(f.epicId);
-}
-
-// ---------------------------------------------------------------------------
-// inboxRows() — ds-spec.md §4.1 NeedsYouInbox. Three kinds today: pending
-// waivers, escalations, and lesson candidates awaiting review. Stop points
-// have no projected row yet (no writer exists) and are deliberately left
-// out — see the DS2 brief's return for the follow-up note.
-// ---------------------------------------------------------------------------
-
-export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
-
-/** What a row says, as facts: the client composes the sentences (it owns the
- *  role labels and the short task name rule). */
-export interface InboxRow {
-  id: string;
-  kind: InboxKind;
-  /** Null for rows with no project affiliation (lesson candidates today) —
-   *  the client's last, catch-all "All projects" group. */
-  project: string | null;
-  taskId: string | null;
-  createdAt: string;
-  /** The task's `title` column; null when unset. Never the objective. */
-  taskTitle: string | null;
-  /** Escalation: the role of the task's last dispatch. */
-  role: string | null;
-  /** Escalation: the latest coordination error's detail for the task, if any. */
-  reason: string | null;
-  /** Waiver: how many findings await the decision, and the first few summaries. */
-  findingCount: number;
-  findingSummaries: string[];
-  /** Lesson candidate: the proposed rule. */
-  statement: string | null;
-}
-
-const INBOX_SUMMARY_CAP = 3;
-
-const INBOX_KIND_RANK: Record<InboxKind, number> = {
-  escalation: 0,
-  waiver: 1,
-  lesson_candidate: 2,
-};
-
-const noFacts = () => ({
-  taskTitle: null,
-  role: null,
-  reason: null,
-  findingCount: 0,
-  findingSummaries: [] as string[],
-  statement: null,
-});
-
-export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
-  const taskRows = allTasksForScope(db, scope);
-  const resolveTask = taskResolver(taskRows);
-  const rows: InboxRow[] = [];
-
-  // Escalations: task rows the projector parked at `escalated`
-  // (db/projector.ts's error-logged handling, `coordination.*` errors).
-  // Dispatches for every escalated task are fetched in one query, not one
-  // per task, and grouped by taskId below.
-  const escalatedTaskIds = taskRows
-    .filter((t) => t.taskStatus === 'escalated')
-    .map((t) => t.taskId);
-  const lastDispatchByTask = new Map<string, typeof dispatches.$inferSelect>();
-  if (escalatedTaskIds.length > 0) {
-    const dispatchRows = inLogOrder(
-      db.select().from(dispatches).where(inArray(dispatches.taskId, escalatedTaskIds)).all(),
-    );
-    for (const d of dispatchRows) {
-      if (d.taskId) lastDispatchByTask.set(d.taskId, d);
-    }
-  }
-  // The date is `terminalAt`, written once by the error that parked the task.
-  // The reason is that error's detail, else the newest detail logged since;
-  // errors before the park time (a same-named id of another epic) are ignored.
-  const terminalAtByTask = new Map(taskRows.map((t) => [t.taskId, t.terminalAt]));
-  const reasonByTask = new Map<string, { at: string; detail: string }>();
-  if (escalatedTaskIds.length > 0) {
-    const parked = inLogOrder(
-      db.select().from(errors).where(eq(errors.errorGroup, 'coordination')).all(),
-    ).filter((e) => !/^S[34]-/.test(e.severity));
-    for (const e of parked) {
-      if (!e.detail) continue;
-      for (const ref of (e.taskRef ?? '').split(',')) {
-        const id = escalatedTaskIds.find((tid) => taskIdsMatch(tid, ref.trim()));
-        if (!id) continue;
-        const parkedAt = terminalAtByTask.get(id);
-        if (parkedAt && e.ts < parkedAt) continue;
-        const have = reasonByTask.get(id);
-        if (have && parkedAt && have.at === parkedAt && e.ts !== parkedAt) continue;
-        reasonByTask.set(id, { at: e.ts, detail: e.detail });
-      }
-    }
-  }
-  for (const t of taskRows) {
-    if (t.taskStatus !== 'escalated') continue;
-    rows.push({
-      ...noFacts(),
-      id: `escalation:${t.taskId}`,
-      kind: 'escalation',
-      taskTitle: t.title,
-      role: lastDispatchByTask.get(t.taskId)?.agentRole ?? null,
-      reason: reasonByTask.get(t.taskId)?.detail ?? null,
-      project: projectOf(t.project),
-      taskId: t.taskId,
-      createdAt: t.terminalAt ?? t.updatedAt,
-    });
-  }
-
-  // Pending waivers: findings `needsOperatorWaiver()` covers (shipped work
-  // nothing else will touch), grouped one row per task (the operator waives a
-  // task's batch, not one finding at a time — /bs waivers's own unit).
-  const closedEpicIds = new Set(closedEpicsForScope(db, scope).map((e) => e.epicId));
-  const pendingFindings = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, resolveTask, closedEpicIds),
-  );
-  const pendingByTask = new Map<
-    string,
-    { t: ReturnType<typeof resolveTask>; findingRows: (typeof pendingFindings)[number][] }
-  >();
-  for (const f of pendingFindings) {
-    const t = resolveTask(f.taskId, f.epicId);
-    const key = t?.taskId ?? f.taskId;
-    const group = pendingByTask.get(key) ?? { t, findingRows: [] };
-    group.findingRows.push(f);
-    pendingByTask.set(key, group);
-  }
-  for (const [taskId, { t, findingRows }] of pendingByTask) {
-    const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
-    rows.push({
-      ...noFacts(),
-      id: `waiver:${taskId}`,
-      kind: 'waiver',
-      taskTitle: t?.title ?? null,
-      findingCount: findingRows.length,
-      findingSummaries: inLogOrder(
-        findingRows.map((f) => ({ ts: f.raisedAt, eventId: f.findingId, summary: f.summary })),
-      )
-        .slice(0, INBOX_SUMMARY_CAP)
-        .map((f) => f.summary),
-      project: projectOf(latest.project ?? t?.project ?? null),
-      taskId,
-      createdAt: latest.raisedAt,
-    });
-  }
-
-  // Lesson candidates: what /api/lessons already buckets as 'pending'. No
-  // project column on lessons — always the client's "All projects" group.
-  if (scope.project === undefined) {
-    const sessionCond = scopedToSessions(lessons.sessionId, scope);
-    const lessonRows = sessionCond
-      ? db.select().from(lessons).where(sessionCond).all()
-      : db.select().from(lessons).all();
-    for (const l of lessonRows) {
-      if (LESSON_BUCKET_FOR_STATUS[l.lessonStatus] !== 'pending') continue;
-      rows.push({
-        ...noFacts(),
-        id: `lesson_candidate:${l.lessonId}`,
-        kind: 'lesson_candidate',
-        statement: l.statement,
-        project: null,
-        taskId: null,
-        createdAt: l.validFrom,
-      });
-    }
-  }
-
-  return rows.sort((a, b) => {
-    const rank = INBOX_KIND_RANK[a.kind] - INBOX_KIND_RANK[b.kind];
-    if (rank !== 0) return rank;
-    const created = a.createdAt.localeCompare(b.createdAt);
-    if (created !== 0) return created;
-    return a.id.localeCompare(b.id);
-  });
 }
 
 /**
@@ -4225,22 +4052,6 @@ export const LESSON_BUCKET_FOR_STATUS: Record<string, 'pending' | 'approved' | '
   invalidated: 'closed',
 };
 
-/**
- * The owning-session lookup behind the dashboard's three lesson write routes
- * (ui/server's `lessonSession()`) — the session whose log a lesson's
- * transition has to fold and append to, not whichever session a request body
- * names. Returns `null` rather than throwing when no such lesson is
- * projected; the caller decides what a missing lesson means.
- */
-export function lessonOwnerSession(db: SmithDb, lessonId: string): string | null {
-  const row = db
-    .select({ sessionId: lessons.sessionId })
-    .from(lessons)
-    .where(eq(lessons.lessonId, lessonId))
-    .get();
-  return row ? row.sessionId : null;
-}
-
 /** The latest `lessons-pass-completed` event's ts, scoped the same way as the rest of the page. */
 function lastLessonsPassAt(db: SmithDb, scope: Scope): string | null {
   const eventCond = eq(eventsRaw.eventType, LESSONS_PASS_COMPLETED_EVENT_TYPE);
@@ -5110,14 +4921,14 @@ export function providerAgreement(
 // ---------------------------------------------------------------------------
 
 /**
- * The counters the app shell watches for movement.
+ * Counters a reader can watch for movement.
  *
- * Only monotonic quantities belong here. A nav badge reading "3 new" is a
- * claim that three things *arrived*, and a difference between two polls only
- * means that if the underlying number can never fall — subtract a *level*
- * (open tasks, pending lessons) and the operator clearing one produces a
- * negative "arrival" count. Both fields below are counts of rows projected
- * from an append-only log, so a poll-over-poll delta is always an arrival.
+ * Only monotonic quantities belong here. "3 new" is a claim that three things
+ * *arrived*, and a difference between two polls only means that if the
+ * underlying number can never fall — subtract a *level* (open tasks, pending
+ * lessons) and clearing one produces a negative "arrival" count. Both fields
+ * below are counts of rows projected from an append-only log, so a
+ * poll-over-poll delta is always an arrival.
  */
 export interface PulseCounts {
   /** Every projected event — the universe the Timeline page lists. */
@@ -5132,14 +4943,6 @@ export interface PulseResult {
   /** That event's type — the last thing the factory actually did. */
   lastEventType: string | null;
   counts: PulseCounts;
-  /**
-   * Lessons still waiting on an operator decision. A *level*, not a counter:
-   * it falls when the operator approves one, so the shell renders the number
-   * itself rather than a delta (see PulseCounts). Never project-scoped — the
-   * `lessons` table carries no project column (schema.ts), and filtering it
-   * here would be a claim the projection cannot back.
-   */
-  lessonsPending: number;
 }
 
 /**
@@ -5180,12 +4983,6 @@ export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
     ? db.select(errorCols).from(errors).where(errorSessionCond).all()
     : db.select(errorCols).from(errors).all();
 
-  const lessonCols = { lessonStatus: lessons.lessonStatus };
-  const lessonSessionCond = scopedToSessions(lessons.sessionId, scope);
-  const lessonRows = lessonSessionCond
-    ? db.select(lessonCols).from(lessons).where(lessonSessionCond).all()
-    : db.select(lessonCols).from(lessons).all();
-
   // Max over `ts`, not "the last row": rows land in the order the projector
   // folded them, and a rebuild folds one session to completion before it
   // starts the next — so the final row is the newest event of the last
@@ -5203,10 +5000,6 @@ export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
       events: events.length,
       errors: filterByProject(allErrors, scope).length,
     },
-    // An unrecognised status is not pending — same reading as lessonsPage(),
-    // which buckets it as `closed`.
-    lessonsPending: lessonRows.filter((r) => LESSON_BUCKET_FOR_STATUS[r.lessonStatus] === 'pending')
-      .length,
   };
 }
 

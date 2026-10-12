@@ -1,7 +1,7 @@
 // Human copy for one LessonCard (DS8 PR2, ds-spec.md §4.5). Kept out of the
-// .vue for the reason lib/lessonActions.ts spells out: ui/tsconfig.json
-// doesn't type-check .vue files and this repo has no component-test harness,
-// so logic asserted from an SFC is logic nothing can test.
+// .vue because ui/tsconfig.json doesn't type-check .vue files and this repo
+// has no component-test harness, so logic asserted from an SFC is logic
+// nothing can test.
 import { formatRelativeVerbose, formatShortDate } from './format.js';
 
 /**

@@ -7,16 +7,16 @@ const seenInFlight = new Set<string>();
 
 <script setup lang="ts">
 // Home (ds-spec.md §4.1): replaces Overview and Projects. Sections, in
-// order: what needs you, Running now (with Just finished), "Recent
-// activity" (point 1b, DS6 PR4), what the factory decided recently, Budget.
-// Numbers and sentences come from lib/homeView.ts; this file only lays
-// them out.
+// order: Live sessions (item 1a), "Recent activity" (point 1b, DS6 PR4),
+// Running now (with Just finished), what the factory decided recently,
+// Budget. The page only reads: a decision is made in the CLI
+// (`/bs waivers`, `/bs lessons`), never here. Numbers and sentences come
+// from lib/homeView.ts; this file only lays them out.
 import { Activity, MonitorPlay } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import ActivityScopeToggle from '../components/ActivityScopeToggle.vue';
 import LiveSessionCard from '../components/LiveSessionCard.vue';
-import NeedsYouInbox from '../components/NeedsYouInbox.vue';
 import Banner from '../components/kit/Banner.vue';
 import Card from '../components/kit/Card.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
@@ -36,10 +36,8 @@ import {
   type ActivityEntry,
   type ClosedEpic,
   fetchCliSessions,
-  fetchInbox,
   fetchOverview,
   fetchTimelinePage,
-  type InboxRow,
   type OverviewResult,
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
@@ -88,8 +86,6 @@ const liveScope = computed(() => activeScope.value ?? (activeScopeSettled.value 
 
 const overview = ref<OverviewResult | null>(null);
 const overviewFailed = ref(false);
-const inbox = ref<InboxRow[] | null>(null);
-const inboxFailed = ref(false);
 const justFinished = ref<ClosedEpic[]>([]);
 const recentActivity = ref<ActivityEntry[] | null>(null);
 const recentActivityFailed = ref(false);
@@ -112,15 +108,6 @@ async function loadOverview() {
     overviewFailed.value = false;
   } catch {
     overviewFailed.value = true;
-  }
-}
-
-async function loadInbox() {
-  try {
-    inbox.value = (await fetchInbox(sessionScope.value)).rows;
-    inboxFailed.value = false;
-  } catch {
-    inboxFailed.value = true;
   }
 }
 
@@ -148,14 +135,13 @@ async function loadLive() {
 }
 
 async function load() {
-  await Promise.all([loadOverview(), loadInbox(), loadRecentActivity(), loadLive()]);
+  await Promise.all([loadOverview(), loadRecentActivity(), loadLive()]);
 }
 
 onMounted(load);
 
 watch([project, sessionKey], () => {
   overview.value = null;
-  inbox.value = null;
   recentActivity.value = null;
   load();
 });
@@ -262,11 +248,9 @@ function becauseOf(promptId: string) {
 
 <template>
   <div class="bs-home">
-    <PageHeader title="Home" description="What needs you, what is running, and what it costs." />
+    <PageHeader title="Home" description="What is running, what just happened, and what it costs." />
 
-    <NeedsYouInbox :rows="inbox" :failed="inboxFailed" :project="project" @retry="loadInbox" />
-
-    <!-- ds-spec.md §4.1 item 1a: directly under the inbox, one card per live,
+    <!-- ds-spec.md §4.1 item 1a: first under the header, one card per live,
          in-scope CLI session (GET /api/cli-sessions). -->
     <section class="bs-home__section" aria-labelledby="live-sessions-heading">
       <div class="bs-home__section-head">
@@ -300,7 +284,7 @@ function becauseOf(promptId: string) {
       </ul>
     </section>
 
-    <!-- ds-spec.md §4.1 point 1b: directly under the inbox, 8 newest TimelineRows
+    <!-- ds-spec.md §4.1 point 1b: directly under Live sessions, 8 newest TimelineRows
          (compact), no Expand-all, no filters, link to Activity. -->
     <section class="bs-home__section" aria-labelledby="recent-activity-heading">
       <div class="bs-home__section-head">

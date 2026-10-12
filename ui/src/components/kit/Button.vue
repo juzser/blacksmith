@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// ds-spec.md §2.1: variant primary|secondary|ghost|danger|link, size sm|md,
+// ds-spec.md §2.1: variant primary|secondary|ghost|link, size sm|md,
 // icon?, states "default, hover, pressed, disabled, loading (spinner
 // replaces label, width locked)". Width stays locked with no JS measurement:
 // the label span is always rendered (never v-if'd away), only visually
@@ -15,7 +15,7 @@ import Icon from './Icon.vue';
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'link';
+    variant?: 'primary' | 'secondary' | 'ghost' | 'link';
     size?: 'sm' | 'md';
     icon?: Component;
     disabled?: boolean;

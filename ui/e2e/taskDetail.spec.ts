@@ -5,7 +5,7 @@ import { dropRoutes, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers
 // Route proxies that call route.fetch() must not outlive their test.
 test.afterEach(async ({ page }) => dropRoutes(page));
 
-const DEMO_HUB_WAIVABLE_TASK = 'epic-9/task-3'; // multiProjectFixture.ts's confirmed S3 finding
+const DEMO_HUB_FINDING_TASK = 'epic-9/task-3'; // multiProjectFixture.ts's confirmed S3 finding
 // epic-9/task-1: dispatched then completed (task-result-recorded, run_status
 // done) — the smallest fixture task with more than one run-history row.
 const DEMO_HUB_COMPLETED_TASK = 'epic-9/task-1';
@@ -15,7 +15,7 @@ const DEMO_HUB_UNDISPATCHED_TASK = 'epic-9/task-4';
 
 test.describe('Task detail', () => {
   test('renders tabs and a11y basics', async ({ page }) => {
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
     await expect(page.getByRole('tablist', { name: 'Task detail sections' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
@@ -37,7 +37,7 @@ test.describe('Task detail', () => {
   // task-3 gets the long, task-specific prompt (multiProjectFixture.ts),
   // long enough to overflow the 3-line clamp.
   test('RequestQuote: a long quote shows "Show more" and expands on click', async ({ page }) => {
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     const quote = page.locator('.bs-request-quote');
     const toggle = quote.locator('.bs-request-quote__toggle');
     await expect(toggle).toHaveText('Show more');
@@ -50,7 +50,7 @@ test.describe('Task detail', () => {
   // DS4 S5c fix round 1, fix 1 — both controls clear 44px on phone.
   test('RequestQuote touch targets clear 44px at 375px on Task Detail', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     const quote = page.locator('.bs-request-quote');
     for (const locator of [
       quote.locator('.bs-request-quote__toggle'),
@@ -87,7 +87,7 @@ test.describe('Task detail', () => {
   test('375px: no tab makes the content column wider than the viewport', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const rights: Record<string, number> = {};
-    for (const task of [DEMO_HUB_COMPLETED_TASK, DEMO_HUB_WAIVABLE_TASK]) {
+    for (const task of [DEMO_HUB_COMPLETED_TASK, DEMO_HUB_FINDING_TASK]) {
       await page.goto(`/tasks/${encodeURIComponent(task)}`);
       for (const name of ['What was asked', 'Findings', 'Outputs', 'History']) {
         await page.getByRole('tab', { name }).click();
@@ -184,7 +184,7 @@ test.describe('Task detail', () => {
       .getByRole('tablist', { name: 'Task detail sections' })
       .evaluate((el) => el.getBoundingClientRect().bottom);
     expect(strip).toBeLessThan(0);
-    await navigateInApp(page, `/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await navigateInApp(page, `/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -406,18 +406,20 @@ test.describe('Task detail', () => {
     expect(isTransparent || Number.parseFloat(borderLeft.width) === 0).toBe(true);
   });
 
-  test('Findings tab shows the Waive Popover confirm naming the fingerprint', async ({ page }) => {
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+  // The dashboard only reads: a confirmed finding still shows its severity,
+  // status and summary, but a waiver is answered through `/bs waivers`, so
+  // the tab offers nothing to press.
+  test('Findings tab shows each finding read-only, with no Waive or Deny', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     await page.getByRole('tab', { name: 'Findings' }).click();
-    await page.getByRole('button', { name: 'Waive' }).click();
-    await expect(page.getByText(/Waive finding/)).toBeVisible();
-    await expect(page.locator('code')).toBeVisible();
-
-    // `role="dialog"` requires an accessible name -- it is what a screen
-    // reader announces on entry, and how the operator knows which of the
-    // page's overlays they are standing in. This one declared the role and
-    // supplied no name at all, so it announced as a bare "dialog" (D-239).
-    await expect(page.getByRole('dialog', { name: 'Waive finding' })).toBeVisible();
+    const panel = page.getByRole('tabpanel');
+    await expect(
+      panel.getByText('search debounce duplicated instead of extracted into a hook'),
+    ).toBeVisible();
+    await expect(panel.getByText('S3-minor', { exact: true })).toBeVisible();
+    await expect(panel.getByText('confirmed', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^(Waive|Deny|Confirm)$/ })).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   // The History tab fetches on its own, separately from the task itself, so
@@ -429,7 +431,7 @@ test.describe('Task detail', () => {
     page,
   }) => {
     await page.route('**/api/timeline*', (route) => route.abort('failed'));
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
 
     await expect(page.getByText('No events recorded for this task.')).toHaveCount(0);
@@ -451,10 +453,10 @@ test.describe('Task detail', () => {
   // panel's own, separately-tested error handling.
   test('names the task in the breadcrumb even when the task fetch fails', async ({ page }) => {
     await page.route('**/api/tasks/*', (route) => route.abort('failed'));
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
 
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-    await expect(page.locator('.bs-crumbs__current')).toHaveText(DEMO_HUB_WAIVABLE_TASK);
+    await expect(page.locator('.bs-crumbs__current')).toHaveText(DEMO_HUB_FINDING_TASK);
   });
 
   // Every event in this tab was fetched with `{ task: <this task> }`, and
@@ -464,7 +466,7 @@ test.describe('Task detail', () => {
   // on: a duplicated navigation vue-router discards. The affordance promised a
   // jump it could never make (D-231).
   test('History rows offer no link back to the task already on screen', async ({ page }) => {
-    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
 
     await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
@@ -537,7 +539,7 @@ test.describe('Task detail', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+        await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_FINDING_TASK)}`);
         await settleForShot(page, page.getByRole('tablist', { name: 'Task detail sections' }));
         await shoot(page, `task-detail-${vpName}-${theme}`);
       });

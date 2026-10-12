@@ -1,5 +1,5 @@
 // KanbanBoard.vue mobile column switcher (ds-spec.md §3.1 Work/Kanban row).
-// Source-text scrape, same style as needsYouInbox.test.ts: no DOM harness in
+// Source-text scrape, same style as homePage.test.ts: no DOM harness in
 // this config — interactive behaviour (tab switching, counts) is covered by
 // lib/kanban.ts's defaultMobileColumnKey() unit tests and by the e2e spec.
 import { readFileSync } from 'node:fs';

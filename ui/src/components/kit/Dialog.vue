@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Dialog — WAI-ARIA Dialog pattern: focus-trapped, Esc closes, focus
-// returns to the triggering element on close (ds-spec.md §2.1). Shared base
-// for Dialog and AlertDialog (AlertDialog adds the destructive-confirm
-// semantics on top of this shell). Ported from ds/Dialog.vue: the close
+// returns to the triggering element on close (ds-spec.md §2.1). The one
+// modal shell: Task detail's lightbox, the Kanban peek panel and the Lessons
+// detail all open through it. Ported from ds/Dialog.vue: the close
 // button is now an IconButton (§2.5's icon-only rule) instead of a raw
 // button+Icon pair.
 
@@ -17,19 +17,13 @@ const props = withDefaults(
     title: string;
     size?: 'default' | 'sm';
     /**
-     * `alertdialog` for a destructive confirm (AlertDialog passes it): ARIA
-     * reserves that role for an alert that also demands a response, and
-     * assistive clients announce the two differently.
-     */
-    role?: 'dialog' | 'alertdialog';
-    /**
      * The consequence sentence. Owned here rather than left to the caller's
      * slot markup because it has to be the dialog's `aria-describedby`
      * target, and only this component can generate that id.
      */
     description?: string;
   }>(),
-  { size: 'default', role: 'dialog' },
+  { size: 'default' },
 );
 const emit = defineEmits<{ close: [] }>();
 
@@ -38,7 +32,7 @@ const descId = useId();
 const dialogEl = ref<HTMLElement | null>(null);
 // Focus trap, focus restore, Esc, and the inert background all live in
 // useModalFocus — Popover doesn't reuse it (no focus trap there), but every
-// full-modal surface (Dialog, AlertDialog, Sheet) shares this one copy.
+// full-modal surface (Dialog, Sheet) shares this one copy.
 useModalFocus(
   dialogEl,
   () => props.open,
@@ -54,7 +48,7 @@ useModalFocus(
         class="bs-dialog"
         :class="{ 'bs-dialog--sm': size === 'sm' }"
         tabindex="-1"
-        :role="role"
+        role="dialog"
         aria-modal="true"
         :aria-label="title"
         :aria-describedby="description ? descId : undefined"

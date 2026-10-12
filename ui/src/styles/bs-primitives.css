@@ -51,8 +51,8 @@ a:hover {
    (Tooltip.vue sets top/left inline per computePosition()'s result), so
    this file only carries its look, never its placement. z-index 60 matches
    the old kit's documented scale (ds-components.css: "topbar 10 < popover
-   45 < sheet 40/50 < dialog 55/56 < toast 70") — above a dialog, below a
-   toast — which this PR does not redefine, only continues. */
+   45 < sheet 40/50 < dialog 55/56") — above a dialog — which this PR does
+   not redefine, only continues. */
 .bs-tooltip-trigger {
   display: inline-flex;
 }
@@ -159,20 +159,6 @@ a:hover {
     min-height: var(--bs-touch);
   }
 }
-/* inverse (Batch C, Toast's dismiss button) — mirrors the old kit's
-   .ds-toast__dismiss:hover rule verbatim (ds-components.css): colour rides
-   currentColor so it inherits whatever the inverted surface set (Toast sets
-   color: var(--bs-surface)), and hover is a currentColor-mix tint rather
-   than the default tone's --bs-surface-sunken (which assumes a normal,
-   non-inverted background). */
-.bs-iconbtn--inverse {
-  color: currentColor;
-}
-.bs-iconbtn--inverse:hover {
-  color: currentColor;
-  background: color-mix(in srgb, currentColor 15%, transparent);
-}
-
 /* CompactNumber (§2.1) — no bespoke type scale of its own (it inherits
    whatever surrounding context it sits in, same as the design page's plain
    .num spans); the one thing worth a shared rule is tabular-nums, so a
@@ -190,12 +176,7 @@ a:hover {
   }
 }
 
-/* Button (§2.1) — variant/size/icon/loading. `danger` is tinted, not a solid
-   fill: the old kit's `.ds-btn--destructive` (ds-components.css) reads
-   color-mix(...--ds-danger-bold 10%...) + --ds-danger-text, and this file has
-   no "-bold"-style solid-danger token to fill with instead, so the new kit
-   keeps the same tinted convention on its own --bs-tone-danger-text/-subtle
-   pair rather than inventing one. `primary` is the one variant allowed to
+/* Button (§2.1) — variant/size/icon/loading. `primary` is the one variant allowed to
    spend the accent colour on its own fill (§1, "Where accent stays: the
    primary button..."). Height/radius steps (32/28px, 4px radius step) are
    not spec'd numbers (§2.1 gives Button no pixel values, unlike IconButton
@@ -219,7 +200,7 @@ a:hover {
   cursor: pointer;
   user-select: none;
   outline: none;
-  /* A RouterLink can wear .bs-btn (NeedsYouInbox.vue's "Decide" action),
+  /* A RouterLink can wear .bs-btn (NotFoundPage.vue's "Go to Home"),
      which renders as a real <a> — without this, the browser's default
      anchor underline shows through in every state. .bs-btn--link is the
      one modifier that wants an underline back; it re-adds its own on
@@ -264,13 +245,6 @@ a:hover {
 .bs-btn--ghost:hover {
   background: var(--bs-surface-sunken);
 }
-.bs-btn--danger {
-  background: var(--bs-tone-danger-subtle);
-  color: var(--bs-tone-danger-text);
-}
-.bs-btn--danger:hover {
-  background: color-mix(in srgb, var(--bs-tone-danger-subtle) 60%, var(--bs-tone-danger-text) 12%);
-}
 .bs-btn--link {
   background: transparent;
   /* ds-spec.md §1.1 line 126: accent is not for links; line 131 gives links
@@ -303,18 +277,6 @@ a:hover {
   .bs-btn--md {
     min-height: var(--bs-touch);
   }
-}
-/* §3.1: the one on-phone primary action (Home's inbox "Decide") needs a
-   44px tap target and the full row width; additive modifiers, combined with
-   an existing color variant (e.g. bs-btn--primary) rather than a new size
-   step in the sm/md scale above. */
-.bs-btn--touch {
-  height: var(--bs-touch);
-  padding: 0 var(--bs-space-4);
-  font-size: var(--bs-text-sm);
-}
-.bs-btn--block {
-  width: 100%;
 }
 .bs-btn__spinner {
   position: absolute;
@@ -380,8 +342,9 @@ a:hover {
      mock's one tag box, 20px tall -- so sm now matches md's height. The two
      classes stay (no call-site churn); `size` still picks the padding. The
      operator's 2026-10-02 fix was about padding: 4px (--bs-space-1) read as
-     no padding at all on Home's "Escalation"/"Waiver" tags, and
-     --bs-space-2 (8px) clears a 6px floor. */
+     no padding at all (seen on the "Escalation"/"Waiver" tags of Home's
+     since-removed Needs you box), and --bs-space-2 (8px) clears a 6px
+     floor. */
   height: 20px;
   padding: 0 var(--bs-space-2);
 }
@@ -1570,11 +1533,10 @@ a:hover {
   font-weight: var(--bs-font-weight-medium);
 }
 
-/* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
+/* Input / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */
-.bs-input,
-.bs-textarea {
+.bs-input {
   width: 100%;
   padding: var(--bs-space-2) var(--bs-space-3);
   background: var(--bs-surface);
@@ -1587,7 +1549,7 @@ a:hover {
   transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
 }
 /* Select is compact on desktop (ds-review.html:288 .select) -- the shared
-   .bs-input/.bs-textarea padding made it ~38px tall next to 28-32px topbar
+   .bs-input padding made it ~38px tall next to 28-32px topbar
    buttons. min-height keeps a 24px floor; the <=640px rule below still
    raises it to --bs-touch on phone. */
 .bs-select {
@@ -1603,63 +1565,29 @@ a:hover {
   transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
   min-height: var(--bs-space-5);
 }
-.bs-input::placeholder,
-.bs-textarea::placeholder {
+.bs-input::placeholder {
   color: var(--bs-text-subtlest);
 }
 .bs-input:hover,
-.bs-textarea:hover,
 .bs-select:hover {
   border-color: var(--bs-border-bold);
 }
 .bs-input:focus-visible,
-.bs-textarea:focus-visible,
 .bs-select:focus-visible {
   border-color: var(--bs-focus-ring);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
 }
 .bs-input:disabled,
-.bs-textarea:disabled,
 .bs-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.bs-textarea {
-  resize: vertical;
-  min-height: 80px;
-}
 /* ≤640px: padding-based height on .bs-input/.bs-select settles under
-   --bs-touch (visual-qa phase B round 2) — min-height floor only, the
-   textarea's own 80px floor already clears it. */
+   --bs-touch (visual-qa phase B round 2) — min-height floor only. */
 @media (max-width: 640px) {
   .bs-input,
   .bs-select {
     min-height: var(--bs-touch);
-  }
-}
-
-/* RadioGroup (§2.1) — ported unchanged contract. */
-.bs-radiogroup {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-}
-.bs-radio {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--bs-space-2);
-  font-size: var(--bs-text-base);
-  color: var(--bs-text);
-  cursor: pointer;
-}
-/* Mobile overflow: the only live consumer is WorkPage's view switch,
-   teleported into the mobile top bar overflow, so the touch target only
-   needs widening at the mobile breakpoint. */
-@media (max-width: 640px) {
-  .bs-radio {
-    min-height: var(--bs-touch);
-    width: 100%;
-    padding: 0 var(--bs-space-2);
   }
 }
 
@@ -1713,12 +1641,10 @@ a:hover {
   }
 }
 
-/* Dialog / AlertDialog (§2.1, WAI-ARIA Dialog pattern) — AlertDialog wraps
-   Dialog and adds no CSS of its own, same as the old kit. Ported from
+/* Dialog (§2.1, WAI-ARIA Dialog pattern). Ported from
    ds-components.css's .ds-dialog* 1:1 on values (radius/shadow/z-index), the
    one deliberate addition being the bs-fade entrance (ds-dialog never had
-   one; this kit's design decision extends it to dialog/popover/toast alike,
-   not just toast). */
+   one; this kit's design decision extends it to dialog and popover alike). */
 .bs-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -1775,7 +1701,7 @@ a:hover {
 /* Popover (§2.1, light-weight anchored panel) — ported from .ds-popover*
    1:1 on values; z-index 45 matches this file's own documented scale
    (Tooltip's header comment above: "topbar 10 < popover 45 < sheet 40/50 <
-   dialog 55/56 < toast 70"). */
+   dialog 55/56"). */
 .bs-popover {
   position: relative;
   display: inline-block;
@@ -1795,41 +1721,6 @@ a:hover {
   flex-direction: column;
   gap: var(--bs-space-2);
   animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
-}
-
-/* Toast (§2.1) — deliberately inverted surface: background/color swap so a
-   toast reads as "inverse of the current theme" regardless of light/dark
-   (ported from ds-components.css's own bug-fix comment on .ds-toast: an
-   earlier version referenced --ds-inverse-surface/--ds-inverse-text, tokens
-   that were never declared anywhere and always silently fell back to
-   --ds-text/--ds-surface — this bs- version uses --bs-text/--bs-surface
-   directly, no phantom inverse tokens to begin with). IconButton's dismiss
-   button needs tone="inverse" here (see IconButton.vue) because its default
-   colour/hover assume a normal, non-inverted surface. */
-.bs-toast-region {
-  position: fixed;
-  bottom: var(--bs-space-4);
-  right: var(--bs-space-4);
-  z-index: 70;
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-}
-.bs-toast {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-3);
-  min-width: 240px;
-  padding: var(--bs-space-3) var(--bs-space-3) var(--bs-space-3) var(--bs-space-4);
-  background: var(--bs-text);
-  color: var(--bs-surface);
-  border-radius: var(--bs-radius-sm);
-  box-shadow: var(--bs-shadow-lg);
-  font-size: var(--bs-text-sm);
-  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
-}
-.bs-toast > span {
-  flex: 1;
 }
 
 /* Tabs (§2.1, WAI-ARIA Tabs pattern, roving tabindex). Ported from
@@ -2818,240 +2709,6 @@ a:hover {
   margin: 0;
 }
 
-/* NeedsYouInbox (ds-spec.md §2.2): group header "name · count" 12px/500
-   subtle; row = tag, two-line text column, meta, action. On phone the
-   groups are <details> with a 44px summary (§3.1). */
-.bs-inbox {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-3);
-}
-.bs-inbox__loading {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-}
-.bs-inbox__filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--bs-space-1);
-}
-.bs-inbox__none {
-  font-size: var(--bs-text-sm);
-  color: var(--bs-text-subtle);
-  margin: 0;
-}
-.bs-inbox__group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-1);
-}
-.bs-inbox__group-head {
-  font-size: var(--bs-text-xs);
-  font-weight: var(--bs-font-weight-medium);
-  color: var(--bs-text-subtle);
-  margin: 0;
-}
-/* list-item, not flex: flex drops the disclosure marker, and a closed group
-   must still read as openable. One line, so line-height gives the 44px.
-   RoadmapProjectSection reuses this summary, so it keeps this rule as is. */
-summary.bs-inbox__group-head {
-  display: list-item;
-  line-height: var(--bs-touch);
-  cursor: pointer;
-}
-/* Phone (ds-review.html .mgroup): inside Home's Needs-you box only, the
-   <details> is the card, the summary a 44px sunken bar with the count and a
-   chevron that turns when open, the rows sit inside with no chrome of their
-   own. Desktop keeps its plain h3 + list. */
-.bs-inbox details.bs-inbox__group {
-  display: block;
-  border: 1px solid var(--bs-border);
-  border-radius: var(--bs-radius-md);
-  background: var(--bs-surface-raised);
-  overflow: hidden;
-}
-/* .bs-inbox already gaps its children by --bs-space-3; the mock wants 8px. */
-.bs-inbox details.bs-inbox__group + details.bs-inbox__group {
-  margin-top: calc(var(--bs-space-2) - var(--bs-space-3));
-}
-.bs-inbox summary.bs-inbox__group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-2);
-  min-height: var(--bs-touch);
-  padding: 0 var(--bs-m-card-pad);
-  background: var(--bs-surface-sunken);
-  font-size: 13px;
-  font-weight: var(--bs-font-weight-semibold);
-  color: var(--bs-text);
-  line-height: inherit;
-  list-style: none;
-  cursor: pointer;
-}
-.bs-inbox summary.bs-inbox__group-head::-webkit-details-marker {
-  display: none;
-}
-.bs-inbox details.bs-inbox__group[open] > summary.bs-inbox__group-head {
-  border-bottom: 1px solid var(--bs-border);
-}
-.bs-inbox__gcount {
-  font-weight: 400;
-  color: var(--bs-text-subtle);
-  font-variant-numeric: tabular-nums;
-}
-.bs-inbox__chev {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--bs-text-subtle);
-  transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
-}
-.bs-inbox details.bs-inbox__group[open] > summary > .bs-inbox__chev {
-  transform: rotate(180deg);
-}
-/* Phone heading (mock .ph-h): the words left, the total on the right edge. */
-.bs-inbox__heading--count {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--bs-space-2);
-}
-/* Phone heading total (mock .ph-h .cnt). */
-.bs-inbox__count {
-  font-weight: 400;
-  color: var(--bs-text-subtle);
-  font-variant-numeric: tabular-nums;
-}
-/* Read state (pattern 12): the dot is desktop-only markup; both title kinds
-   go 600 while the row is unread. */
-.bs-inbox__udot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--bs-radius-full);
-  flex: none;
-  background: transparent;
-}
-.bs-inbox__row--unread .bs-inbox__udot {
-  background: var(--bs-accent);
-}
-.bs-inbox__row--unread .bs-inbox__title,
-.bs-inbox__row--unread .bs-inbox__ptitle {
-  font-weight: var(--bs-font-weight-semibold);
-}
-.bs-inbox__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--bs-border);
-  border-radius: var(--bs-radius-md);
-  background: var(--bs-surface);
-}
-.bs-inbox details.bs-inbox__group > .bs-inbox__list {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-.bs-inbox__row {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-3);
-  padding: var(--bs-space-3) var(--bs-space-4);
-}
-.bs-inbox__row + .bs-inbox__row {
-  border-top: 1px solid var(--bs-border);
-}
-/* The decide row wraps so its full-width button (.bs-inbox__decide) drops to
-   its own line below the tag/text/meta, instead of squeezing into the
-   existing single line. */
-.bs-inbox__row--decide {
-  flex-wrap: wrap;
-}
-.bs-inbox__decide {
-  flex: 1 1 100%;
-}
-.bs-inbox__text {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-}
-.bs-inbox__title {
-  font-size: var(--bs-text-sm);
-  font-weight: var(--bs-font-weight-medium);
-  color: var(--bs-text);
-  margin: 0;
-}
-.bs-inbox__desc {
-  display: block;
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bs-inbox__text .bs-tooltip-trigger {
-  display: block;
-  min-width: 0;
-}
-.bs-inbox__meta {
-  flex-shrink: 0;
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtle);
-}
-/* Phone rows (ds-review.html .mrow/.mt/.mm): a title that wraps to two lines
-   then ellipsizes, the tag at the right, a faint one-line time line below.
-   Only the phone markup uses these classes, so desktop is untouched. */
-.bs-inbox__prow,
-.bs-inbox__rowlink {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px var(--bs-space-2);
-  align-items: center;
-  min-width: 0;
-}
-.bs-inbox__prow {
-  flex: 1 1 100%;
-}
-.bs-inbox__rowlink {
-  flex: 1;
-  min-height: var(--bs-touch);
-  padding: 10px var(--bs-m-card-pad);
-  color: var(--bs-text);
-  text-decoration: none;
-  border-radius: var(--bs-radius-md);
-}
-.bs-inbox__rowlink:hover {
-  background: var(--bs-surface-selected);
-}
-.bs-inbox__rowlink:focus-visible {
-  outline: 2px solid var(--bs-focus-ring);
-  outline-offset: -2px;
-}
-.bs-inbox__row--link {
-  padding: 0;
-}
-.bs-inbox__ptitle {
-  min-width: 0;
-  font-size: var(--bs-text-base);
-  font-weight: var(--bs-font-weight-medium);
-  color: var(--bs-text);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
-}
-.bs-inbox__pmeta {
-  grid-column: 1 / -1;
-  min-width: 0;
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtlest);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* HomePage (ds-spec.md §4.1): stacked sections, project cards in a wrap
    grid, one-line rows for Just finished and the decision list. The BS kit
    has no page container yet, so Home carries the §1 spacing table itself:
@@ -4029,12 +3686,12 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtlest);
 }
 /* Visual-pass items 2-3: branch/origin/epic, raw data an operator only
-   needs occasionally, collapsed the same way NeedsYouInbox folds its
-   mobile groups — a native <details>/<summary>, no bespoke disclosure
+   needs occasionally, collapsed the same way the Roadmap folds its
+   phone sections — a native <details>/<summary>, no bespoke disclosure
    component. list-item, not flex: flex drops the browser's native
    disclosure marker (it only renders for the default list-item display),
    leaving a closed row with no visible sign it opens -- the same pitfall
-   the summary.bs-inbox__group-head rule above avoids. line-height
+   the summary.rm-section__head rule below avoids. line-height
    gives the --bs-touch tap target instead of min-height + flex centering. */
 .bs-task-detail__tech-details summary {
   cursor: pointer;
@@ -4070,14 +3727,6 @@ summary.bs-inbox__group-head {
   font-family: var(--bs-font-mono);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
-}
-.bs-task-detail__waive-actions {
-  margin-top: var(--bs-space-2);
-  display: flex;
-  gap: var(--bs-space-2);
-}
-.bs-task-detail__popover-text {
-  font-size: var(--bs-text-sm);
 }
 .bs-task-detail__artifact-grid {
   display: grid;
@@ -4217,11 +3866,27 @@ summary.bs-inbox__group-head {
   margin: var(--bs-space-4) 0;
 }
 
-/* UI spec Part 2 — one section per project (RoadmapProjectSection.vue). The
-   head reuses NeedsYouInbox's `.bs-inbox__group-head` one level up (an h2,
-   or the phone's 44px <summary>), the done count muted after the name. */
+/* UI spec Part 2 — one section per project (RoadmapProjectSection.vue): a
+   column, its head a 12px/500 subtle label (an h2, or the phone's 44px
+   <summary>), the done count muted after the name. */
 .rm-section {
+  display: flex;
+  flex-direction: column;
   gap: var(--bs-space-2);
+}
+.rm-section__head {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  margin: 0;
+}
+/* list-item, not flex: flex drops the disclosure marker, and a closed
+   section must still read as openable. One line, so line-height gives the
+   44px. */
+summary.rm-section__head {
+  display: list-item;
+  line-height: var(--bs-touch);
+  cursor: pointer;
 }
 h2.rm-section__head {
   display: flex;
@@ -4628,9 +4293,8 @@ h2.rm-section__head {
   }
 }
 
-/* DS4 S4 — phone-only phase-mode list (EpicBlock.vue, modelled on
-   NeedsYouInbox's .bs-inbox__row pattern) and the epic-mode back link above
-   the header. */
+/* DS4 S4 — phone-only phase-mode list (EpicBlock.vue: one tappable row per
+   epic) and the epic-mode back link above the header. */
 .bs-roadmap-mobile__phase-select {
   width: 100%;
 }

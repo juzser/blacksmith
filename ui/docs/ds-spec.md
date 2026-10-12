@@ -113,7 +113,7 @@ over — every value below was picked and contrast-checked fresh for this file).
 | `--bs-surface` | `#ffffff` | page background |
 | `--bs-surface-sunken` | `#f7f7f8` | canvas / timeline track / code blocks |
 | `--bs-surface-raised` | `#ffffff` | card background (differentiated from page by border+shadow, not fill) |
-| `--bs-surface-overlay` | `#ffffff` | dialog / popover / toast |
+| `--bs-surface-overlay` | `#ffffff` | dialog / popover |
 | `--bs-border` | `#e4e4e7` | hairline default |
 | `--bs-border-bold` | `#a1a1aa` | hairline on hover/focus-adjacent, table dividers under a header; outline of the selected chip / current wave |
 | `--bs-surface-selected` | `#f4f4f5` | neutral selection fill: active nav item, selected filter chip, selected segment, selected roadmap row |
@@ -247,14 +247,14 @@ disabled-control text under WCAG 1.4.3 and is never used for anything else.
 | `--bs-text-2xl` | 24px / 32px | rare — big stat numbers only |
 | `--bs-font-weight-normal` / `-medium` / `-semibold` | 400 / 500 / 600 | 600 is for the one title of a block (below); 500 for table headers, tags, the active nav label and selected chip; 400 for everything else |
 
-**Text hierarchy.** Every block (card, inbox row, wave header, table row, stat tile) uses
+**Text hierarchy.** Every block (card, list row, wave header, table row, stat tile) uses
 the same four levels. The levels differ by colour and size first, weight second.
 
 | Level | Colour | Size | Weight | Example |
 |---|---|---|---|---|
-| Title | `--bs-text` | 14–16px (`base`/`md`), 20px for the one hero title of a card | 550–600 | "Approve waiver for 2 minor findings" |
+| Title | `--bs-text` | 14–16px (`base`/`md`), 20px for the one hero title of a card | 550–600 | "Add the checkout flow" |
 | Body | `--bs-text` | 14px | 400 | the sentence on an Activity row |
-| Description | `--bs-text-subtle` | 1px smaller than the title it sits under (13px under 14px) | 400 | "Checkout flow · review found 2 style issues; merge is waiting on you" |
+| Description | `--bs-text-subtle` | 1px smaller than the title it sits under (13px under 14px) | 400 | "Checkout flow · the reviewer found 2 style issues" |
 | Meta | `--bs-text-subtlest` | 12px | 500 (400 inside a sentence) | "2 h ago", "shop-api", "Wave 3 of 4" counts |
 
 **One bold per block.** A block has at most one element at 600: its title. Everything
@@ -263,9 +263,8 @@ else in it is 400 or 500. To make something stand out without bold, use colour
 and percentages are 400 (a 22px stat value may stay 600 because its label is 400 and
 nothing else in the tile is bold); wave headers bold only "Wave 3 of 4" and render
 "· 3/5 done" at 400 in `--bs-text-subtle`; table headers, tags, pills, the active nav item
-and the selected chip are 500, never 600; an unread inbox title is 600 and a read one is
-500, so unread is the only thing in the row that is bold. Inline `<b>` inside a
-description is not used.
+and the selected chip are 500, never 600. Inline `<b>` inside a description is not
+used.
 
 System font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif`),
 one mono stack for ids/paths in "Details" affordances (`ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`).
@@ -287,7 +286,7 @@ the tokens, not ad-hoc pixels.
 | Card padding | 16px (`-4`); 20px for a page-level block such as `EpicBlock` |
 | Gap between stacked cards | 12px (`-3`) |
 | Gap between columns / side-by-side cards | 24px (`-5`) |
-| List / inbox / event row padding | 12px 16px (`-3` `-4`) |
+| List / event row padding | 12px 16px (`-3` `-4`) |
 | Gap between rows inside a list | 12px, or a hairline with the row padding doing the spacing |
 | Stat tiles gap | 16px (`-4`) |
 | Table cell padding | 10px 12px |
@@ -364,14 +363,14 @@ Blue means one thing: "this is the action" or "this is you". Everything else is 
 
 | Component | Props / variants | States |
 |---|---|---|
-| `Button` | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, `icon?` | default, hover, pressed, disabled, loading (spinner replaces label, width locked) |
+| `Button` | `variant: primary\|secondary\|ghost\|link`, `size: sm\|md`, `icon?` | default, hover, pressed, disabled, loading (spinner replaces label, width locked) |
 | `IconButton` | `icon` (a Lucide component), `label` (required; becomes both `aria-label` and the tooltip text, §2.5), `size: sm (22px, no border) \| md (28px)`, `disabled?` (renders `aria-disabled="true"` so the tooltip still shows on focus) | same as Button; icon colour `--bs-text-subtle`, `--bs-text` on hover |
 | `Icon` | `icon` (a Lucide component), `size: 14\|16\|20` (default 16), `label?` | decorative by default (`aria-hidden="true"`, `focusable="false"`); with `label` it renders `role="img"` + `aria-label`. Stroke 1.75 at 14/16, 1.5 at 20; colour is `currentColor`, so it inherits from the text it sits in. Full rules §2.5 |
 | `Tag` | `tone: done\|review\|progress\|todo\|blocked\|danger\|warning\|neutral`, `size: sm\|md` (both 20px tall, matching ds-review.html's one `.tag` box: 12px text, 16px line, `2px 8px` padding; `size` only picks the padding; the one exception is the Kanban column count, ds-review.html's `.pill` at :429, which stays 16px via `.bs-kanban-col__count`) | static (no interactive state; this is the redesign's "pastel status tag") |
 | `Chip` | `variant: assignee\|identity`, `color?` (identity tone index 1-6), `avatarInitial?` | default, hover (assignee chip is a link to a role/agent) |
 | `Card` | `padding: sm\|md\|lg`, `interactive?` (adds hover elevation + cursor) | default, hover (only if `interactive`), focus-visible |
-| `Input` / `Textarea` / `Select` / `RadioGroup` | unchanged contract from the old kit (native-element wrappers); ported, re-styled to new tokens | unchanged |
-| `Dialog` / `AlertDialog` / `Popover` / `Toast` | ported unchanged in behaviour (focus trap, Esc, `role="status"`/`aria-live`), re-styled | unchanged |
+| `Input` / `Select` | unchanged contract from the old kit (native-element wrappers); ported, re-styled to new tokens. `Textarea` and `RadioGroup` are not in the kit: only the lesson edit form used them, and the dashboard only reads | unchanged |
+| `Dialog` / `Popover` | ported unchanged in behaviour (focus trap, Esc), re-styled; `Dialog` is always `role="dialog"`. No `AlertDialog` and no `Toast`: the dashboard asks the operator to confirm nothing and tells them nothing happened, because it changes nothing | unchanged |
 | `Tooltip` | rebuilt on `@floating-ui/dom`; `text`, `placement?` (default `top`), `mode: describe\|label` | hidden, shown (hover after 300ms, focus immediately), dismissed (Esc). Full contract §2.5 |
 | `Tabs` | ported unchanged (roving-tabindex) | unchanged |
 | `Table` | ported, re-styled; adds a `compact` density prop for the Activity page's dense event rows | unchanged |
@@ -423,7 +422,7 @@ stacked `ProgressBar` + the % number).
 | `ProjectSwitcher` | Topbar project select; unchanged contract, restyled |
 | `SidebarNav` | 6 items: Home (`House`), Work (`Kanban`), Activity (`Activity`), Sessions (`History`), Cost & quality (`Coins`), Lessons (`Lightbulb`), each a 16px icon + label; `aria-current="page"` on the active one. A sm `IconButton` `PanelLeftClose` "Collapse sidebar" in the header. Collapsed rail: icon only, each link keeps its name as `aria-label` and shows it in a label-mode `Tooltip` placed right. Ported contract (collapsed rail + Sheet off-canvas below 768px), content changed per §3. |
 | `LiveSessionCard` | Home "Live sessions" card (§4.1 item 1a), composed of `Card` + `Tag` + `RelativeTime` with no new tokens: title line (weight 500, `<project> · <epic id> · wave N`, opens the epic on Kanban) with a status `Tag` and "for N min"; a muted "Now" label per working agent (humanized role + task title link, 2 lines then "+ N more"); a "Next" line. Deviation: no kit component covers a live-CLI card, so the pattern table gains this row; the pre-code spec linked the title to Roadmap, shipped as Kanban because Roadmap does not read other projects' stores yet. Own idea; no old-kit equivalent. |
-| `NeedsYouInbox` | One filterable list on Home combining pending waivers (only findings on completed tasks or closed epics, the ones the factory will no longer act on), escalations, stop points and lesson candidates into a single row shape (`kind`, `title`, `description`, `project`, `RelativeTime`, action). Row anatomy: unread dot, then a two-line text column (short `title` naming the decision; below it one `description` line in `--bs-text-subtle` 12px saying why the factory stopped and what happens when you act, ellipsis-truncated, full text in a describe-mode `Tooltip`), then the meta column (project/task, time; hidden below 480px), then the action. Filter chips: All / Waivers / Escalations / Stop points / Lesson candidates. **Grouped by project**: one group header per project, name + count ("shop-api · 2", 12px/500 `--bs-text-subtle`); the group holding the most urgent item comes first (escalation > waiver > stop point > lesson candidate, then oldest); projects with nothing pending are not shown; items with no project (lesson candidates that apply to all projects) go in a last group "All projects". When the topbar `ProjectSwitcher` has a project selected, only that project's group is shown, header kept; "All projects" is hidden then. Title weight: 600 unread, 500 read (§1.4). Own idea, grounded in the same "what needs a person" job the old "Needs you" rail already did — widened from a rail to the page-first list per pattern 1 below (deviation flagged in §4.1). |
+| (no `NeedsYouInbox`) | Home has no list of decisions. The dashboard only reads: a pending waiver, an escalation, a stop point or a lesson candidate is decided in the CLI (`/bs waivers`, `/bs lessons`), and the dashboard server answers 405 to any `/api` request that is not GET or HEAD. What stays is state, not a control: a `LiveSessionCard` whose CLI waits on the operator reads "Waiting on you" on its Next line (§4.1 item 1a). Operator decision, 2026-10-12. |
 | `AgentChip` | Small chip showing a task's current role + activity state (working / reviewing / **waiting** / idle), reusing `--bs-tone-*` for the state dot. Used on `TaskCard` and the task-detail header (pattern 3 below). Not a port — no old-kit equivalent (deviation flagged in §2.4). |
 | `RunHistoryTimeline` | Small vertical timeline on the task-detail page: one entry per dispatch attempt, judge round, or result, each a `TimelineRow` (`rail` variant) with a humanized label, `RelativeTime`, outcome `Tag`, meta line and chevron. Rail dot + tag only, no leading icon; geometry in §1.5. Own idea (pattern 2 below); no old-kit equivalent. |
 | `TaskPeekPanel` | Slide-over quick-look panel (`Dialog`-family: modal from 641px to 1023px and not offered at ≤640px (§3.1), non-modal anchored panel >=1024px) opened by clicking a `TaskCard` on Kanban or inside Work -> Roadmap's `EpicBlock`. Shows the same header facts as task detail (the short name as its title, the objective as its description, status, `AgentChip`, `RequestQuote` incl. the "Epic started from" fallback, summary) plus a "Open full page" link. Own idea (pattern 4 below); no old-kit equivalent. |
@@ -432,7 +431,7 @@ stacked `ProgressBar` + the % number).
 
 | Old (`ui/src/components/ds/`) | Pages importing it (grep) | New component / disposition |
 |---|---|---|
-| AlertDialog | LessonsPage | `AlertDialog` (ported) |
+| AlertDialog | LessonsPage | dropped: it confirmed a lesson decision, and lessons are decided with `/bs lessons` |
 | Banner | Roadmap, Projects, Sessions, Analytics, Lessons, TaskDetail, Errors, Overview, Flow, Kanban, Timeline (11) | `Banner` (ported); Overview/Activity's projection banner gets the friendly copy in audit item 1 |
 | BarChart | Analytics, Errors | `BarChart` (ported, gains `takeaway` requirement) |
 | Breadcrumb | none currently | `Breadcrumb` (ported, now used — App shell §3) |
@@ -448,7 +447,7 @@ stacked `ProgressBar` + the % number).
 | MetricGrid | Analytics, Overview | `MetricGrid` (ported); Analytics' usage shrinks to ~4 metrics (§4) |
 | PageHeader | 11 pages | `PageHeader` (ported) |
 | Popover | TaskDetail | `Popover` (ported) |
-| RadioGroup | Lessons | `RadioGroup` (ported) |
+| RadioGroup | Lessons | dropped: only the lesson edit form used it, and lessons are edited with `/bs lessons` |
 | Row / RowList | Analytics, Errors, TaskDetail, Overview (+ RowList: 6) | `Table` in `compact` density (folded in — two components doing one job) |
 | SectionHeading | none (unused, per DESIGN.md) | dropped, not ported |
 | Select | Kanban, Flow | `Select` (ported); Flow's plan-version picker moves into `EpicBlock` on Work -> Roadmap (§4.2) |
@@ -460,8 +459,8 @@ stacked `ProgressBar` + the % number).
 | StatCard | Analytics, Overview | `StatCard` (ported); Overview's stat-card links go to their matching page instead of all `/flow` (audit item 8) |
 | Table | Lessons, TaskDetail, Errors | `Table` (ported) |
 | Tabs | TaskDetail | `Tabs` (ported) |
-| Textarea | Lessons | `Textarea` (ported) |
-| Toast | none currently (mounted once in App.vue) | `Toast` (ported) |
+| Textarea | Lessons | dropped: only the lesson edit form used it, and lessons are edited with `/bs lessons` |
+| Toast | none | dropped: nothing produced a toast once the dashboard became display-only |
 | Tooltip | none currently | `Tooltip` (rebuilt on `@floating-ui/dom`, §2.5) |
 | TwoColumn | Analytics, Overview, TaskDetail | `TwoColumn` (ported) |
 | — (no old equivalent) | Flow's DOM task node, IdentityChip | see `TaskCard`, `IdentityChip` above |
@@ -478,10 +477,11 @@ below is Blacksmith's own. What is borrowed is the idea/shape of five interactio
 here as explicit deviations because they have no old-kit precedent, exactly as this
 role's grounding rule requires:
 
-1. **A single "needs a person" list, not a rail** (`NeedsYouInbox`, §4.1) — the old kit's
-   "Needs you" rail already existed; the deviation is widening it to the page's first,
-   full section and merging four existing categories (waivers/escalations/stop
-   points/lesson candidates) into one filterable list instead of four separate widgets.
+1. **A single "needs a person" list, not a rail** (`NeedsYouInbox`, §4.1) — **withdrawn
+   2026-10-12.** It widened the old "Needs you" rail into Home's first section and merged
+   waivers, escalations, stop points and lesson candidates into one list with an action
+   per row. The operator then made the dashboard display-only: those decisions go through
+   the CLI (`/bs waivers`, `/bs lessons`), so Home lists none of them and offers no action.
 2. **A per-task run history timeline** (`RunHistoryTimeline`, §4.7) — no old page shows
    dispatch attempts/judge rounds as a timeline; today this data is only visible by
    reading raw event rows on the merged Activity feed filtered by hand.
@@ -535,7 +535,7 @@ All four keep the same tokens/contrast/motion rules as the rest of this spec and
 from data the Kanban page already fetches (`/api/kanban`'s existing per-task fields) plus
 one client-only preference store — no new endpoint, event type, or writer.
 
-### 2.4c Third fold: cost, run history, inbox and agent-status ideas (also operator-approved)
+### 2.4c Third fold: cost, run history and agent-status ideas (also operator-approved)
 
 Same source and same constraints as the first two folds — idea only (no code, component
 names, copy or token value from that project is reused), no new event type or writer, AA
@@ -564,11 +564,10 @@ that.
     each entry itself gains a per-run token count and duration, and a per-agent summary
     table (one row per role: runs, tokens, time) sits below the timeline. Same
     "not measured" fallback per cell as pattern 10, for the same reason.
-12. **`NeedsYouInbox` read/unread state** (§4.1) — the inbox pattern 1 already added has
-    no concept of "already looked at this one"; every row reads identically on every
-    visit. A per-viewer unread dot + heavier title weight, `localStorage`-backed
-    (try/catch, default "all unseen"), and hover-parity row actions on `:focus-within`
-    close both gaps without a server-side read-state table or an archive feature.
+12. **`NeedsYouInbox` read/unread state** (§4.1) — **withdrawn with pattern 1,
+    2026-10-12.** It gave each inbox row a per-viewer unread dot and a heavier title.
+    With no decision list on a display-only dashboard there is nothing to mark read;
+    the CLI (`/bs waivers`, `/bs lessons`) lists what still waits on a decision.
 13. **Two-axis agent status: presence and workload** (§4.6) — today's Sessions page
     conflates "an agent is dispatched" with "an agent is working productively"; a queued
     task looks identical to one that is actually stuck. `AgentStatusBadge` (§2.2) grounds
@@ -656,7 +655,7 @@ taking one `label` prop for both. A lint check in DS0 flags an `<IconButton>` wi
 | Compact numbers | exact value: "8,312 tokens", "748,210 tokens (median)", "412,318 tokens" | Kanban, Cost & quality, Task detail |
 | Progress ring / mini bar | exact values: "127,402,118 of 180,000,000 tokens (71%)", "10,612,304 of 10,300,000 tokens (103%)" | Home, Cost & quality, Roadmap |
 | Time ranges | "29 Sep 2026, 14:02 to 16:12" | Task detail totals |
-| Truncated titles / descriptions | the full text | Home inbox, Kanban card |
+| Truncated titles / descriptions | the full text | Kanban card |
 | Linked-request icon | the prompt's first line, verbatim, with `lang` | Kanban, Task peek |
 | Friendly role label | the raw role: "Role: coder" | Kanban, Activity |
 | Agent "waiting" chip | "No output for 14 min. A nudge may help." | Kanban |
@@ -720,8 +719,8 @@ object, not an array` text — this is audit item 1, and it is a client-copy cha
 
 ### 3.1 Mobile (≤640px)
 
-On a phone the dashboard is for **viewing**: see what needs you, see what is running, open a
-task and read it. Configuration, bulk actions, charts, and multi-column layouts are desktop-only.
+On a phone the dashboard is for **viewing**, as it is everywhere: see what is running and
+which session is waiting on you, open a task and read it. Configuration, bulk actions, charts, and multi-column layouts are desktop-only.
 Every rule below applies at `max-width: 640px` (`--bs-bp-mobile`). Between 641px and 767px, the
 desktop shell with the off-canvas sidebar `Sheet` from §3 still applies.
 
@@ -772,14 +771,12 @@ The overflow menu holds the per-page secondary controls:
 
 Refresh is dropped on mobile, because live updates already cover it.
 
-**Actions.** Each screen has at most one primary action. The only one is Home's "Decide" on the
-most urgent Needs-you item, and it is full width and 44px tall. Everything else is navigation, which
-opens a row, or lives in the overflow menu. The following are desktop-only:
+**Actions.** No screen has a primary action: the dashboard only reads, on a phone as on a
+desktop, and decisions go through the CLI (`/bs waivers`, `/bs lessons`). Everything is
+navigation, which opens a row, or lives in the overflow menu. The following are desktop-only:
 - the Kanban card menu, copy id, and quick look (`TaskPeekPanel`); tapping a card opens the task
   page directly;
-- activity filter chips beyond the tab row;
-- approve/reject on waivers, which opens the waiver page instead;
-- lesson editing.
+- activity filter chips beyond the tab row.
 
 **Touch and tooltips:**
 - every tappable element is at least `--bs-touch` in both dimensions, including tab-bar items,
@@ -803,7 +800,7 @@ opens a row, or lives in the overflow menu. The following are desktop-only:
 - the whole row is the tap target.
 
 **Collapse, don't cram:**
-- groups (Needs-you per project, Roadmap waves, a task's per-role table) are `<details>` with a
+- groups (Roadmap waves, a task's per-role table) are `<details>` with a
   44px `<summary>`;
 - the most urgent group is open and the rest are closed;
 - long text (the task's request quote) clamps to 3 lines, with "Show more" below it.
@@ -817,13 +814,13 @@ fallbacks. The phone frames below are the intended layout.
 | Screen | Shown | Merged | Hidden (desktop-only) | Actions |
 |---|---|---|---|---|
 | Shell | Top bar (title, project, Live dot, More); bottom tab bar | Pause, theme, settings, and desktop view go into the overflow menu | Sidebar, breadcrumb, refresh, clocks | Navigation only |
-| Home | 3-up summary (Agents, project budget ring, factory ring); Needs you grouped by project; 4 recent activity rows plus "View all" | Needs-you groups collapse, with the most urgent open; activity is cut to 4 rows | Activity filter chips, project cards grid, cost chart | **Decide** (the only primary), on the top Needs-you item |
+| Home | 3-up summary (Agents, project budget ring, factory ring); live session cards with their Now and Next lines ("Waiting on you" when the CLI waits on the operator); 4 recent activity rows plus "View all" | Activity is cut to 4 rows | Activity filter chips, project cards grid, cost chart | Navigation only |
 | Work (Kanban) | Column switcher as a tab row with counts; one column of compact cards (title, tag, meta) | 5 columns become 1 column chosen by tab | Display options and view switch go into overflow; card menu, copy id, quick look | Tap a card to open the task |
 | Work (Roadmap) | Project sections as `<details>` (the one holding the selection and any running or live one open; closing one hides everything under it, its phase card and live epic included), each with a windowed phase picker whose 44px disclosure rows widen it and whose current lane ends " (current)". A project the selection is not in shows the phase holding its live epic, and that card has the live epic open. A phase the user picks in a project with a live epic sticks. The live epic then stays under the phase card as a compact block that opens with a muted "Live in <phase name>" line (two lines at most): its name, Current and its running wave, with no back link, plan picker or full wave list; "13 of 25" plus ring; epic list with mini bars | Waves in a collapsed group | Swimlane, per-wave task lanes, session picker | Tap an epic to open it |
 | Task | Title, status tag, meta; request quote clamped to 3 lines; 3-up stats (tokens, agent time, elapsed); tabs Asked / Findings / Outputs / History; one-line timeline rows | Per-role token table in "More: tokens by role" | Side panel, raw payloads, copy buttons | "Show more" on the quote |
 | Activity | Filter as a tab row; one-line event rows with "because of" as meta; "Load older" | Kind filters become tabs; pause goes into overflow | Filter chips, row hover highlight, session picker | "Load older" (secondary) |
 | Cost | 7/30/90-day tabs; 2-up stat tiles (tokens per task, second-opinion ring, and 2 "Not enough data yet"); tokens by role as a list with mini bars | Charts become a single role list | Token-trend chart, provider table | Navigation only |
-| Lessons | Tabs Pending / Approved / Closed / All; one-line lesson rows | None | Editing, bulk approve | Tap a row to open the lesson |
+| Lessons | Tabs Pending / Approved / Closed / All; one-line lesson rows | None | None: no screen approves, rejects or edits a lesson (`/bs lessons` does) | Tap a row to open the lesson |
 
 ---
 
@@ -836,43 +833,15 @@ an invented mock.
 ### 4.1 Home (was Overview + Projects, merged per IA)
 
 Sections, in order:
-1. **`NeedsYouInbox`** (pattern 1, deviation §2.4) — shown first, above "Running now".
-   One filterable list merging four existing categories that today live as separate,
-   easy-to-miss widgets: pending waivers, escalations, stop points and lesson candidates
-   awaiting review. Filter chips: All / Waivers / Escalations / Stop points / Lesson
-   candidates. Each row: unread dot, `kind` tag, a short title naming the decision
-   ("Approve waiver for 2 minor findings"), one description line under it saying why the
-   factory stopped and what acting does ("Checkout flow · review found 2 style issues;
-   merge is waiting on you"), project, `RelativeTime`, one action (Review / Approve /
-   Open). Description sources: waiver = task title + the findings' summary text + "merge
-   is waiting on you"; escalation = role + task id + escalation reason + "the task stays
-   blocked until you choose"; lesson candidate = the proposed rule text. Any of these the
-   inbox query does not already join is **needs data** (a read on projected rows, no
-   writer); a row whose description is missing renders the title alone, never a
-   placeholder. Source queries — all read-only, all against data already
-   projected, no new event type or writer. Orchestrator-verified sources (2026-09-30):
-   pending waivers = findings passing `awaitsWaiverDecision()` with `waiverId === null`
-   (queries.ts ~1058/1086, the same rule behind today's `alerts.pendingWaivers`);
-   escalations = task rows with `taskStatus === 'escalated'` (queries.ts ~1084; there is
-   no escalations table); lesson candidates = whatever `/api/lessons` already lists as
-   awaiting review. **Stop points have no projected row today** — the DS2 coder must
-   find where a pending hard stop is recorded before listing it; if nothing projects it,
-   ship the inbox with three kinds and file the fourth as a follow-up rather than adding
-   a writer. These four are merged behind
-   one new read endpoint, `GET /api/inbox`, so Home issues a single request instead of
-   four (name it exactly this in the DS2 PR). Empty state: "Nothing needs you right now."
-   — replaces the old "Needs you" rail's identical-intent but narrower copy (audit item
-   Overview-9), now covering all four categories instead of just reviews/waivers/
-   escalations.
-   **Grouped by project** (operator request): the list is split into one group per
-   project with a header "shop-api · 2"; the most urgent group first, empty projects
-   hidden, project-less items (lesson candidates) in a last "All projects" group; with a
-   project selected in the topbar only that group shows. Rules in §2.2 `NeedsYouInbox`.
-   **Needs new data:** each `GET /api/inbox` row must carry `project` (waivers and
-   escalations can take it from the task's project key; lesson candidates have no project
-   column today, so they return `project: null` and land in "All projects"), plus the
-   sort key (`kind` + `createdAt`) so the server returns groups in urgency order.
-1a. **"Live sessions"** - directly under the inbox, above "Recent activity". One card
+1. **No "Needs you" box** (operator decision, 2026-10-12). The dashboard only reads, so
+   Home opens with no list of decisions and no action to take. Pending waivers,
+   escalations, stop points and lesson candidates are decided in the CLI: `/bs waivers`
+   for findings, `/bs lessons` for lessons. The DS2 `NeedsYouInbox` (pattern 1) and its
+   `GET /api/inbox` read are gone, and the dashboard server answers 405 to any `/api`
+   request that is not GET or HEAD. What a person still sees is state: a live session
+   whose CLI waits on the operator reads "Waiting on you" on its card's Next line (item
+   1a). The top of the page has no replacement for now; the page starts at item 1a.
+1a. **"Live sessions"** - first on the page, above "Recent activity". One card
    per live, in-scope CLI session from `GET /api/cli-sessions`, titled
    `<project> · <epic id> · wave N` (the title opens the epic's Kanban board), with a status
    tag, a Now line per working agent (role + task title, max 2 then "+ N more"), and a Next
@@ -880,7 +849,7 @@ Sections, in order:
    back to the working-folder label and session name. Empty state: "No live Blacksmith
    sessions" with "N other sessions hidden" when sessions were filtered out; when the CLI session registry does not exist on the machine it shows the same title with the body "Session tracking is not set up on this machine." and no count. Needs new data:
    a `focus` object on each card (`project`, `epicId`, `wave`, `now`, `next`).
-1b. **"Recent activity"** — directly under the inbox: the 8 newest `TimelineRow`s in
+1b. **"Recent activity"** — directly under "Live sessions": the 8 newest `TimelineRow`s in
    the `compact` variant — the **same component as Activity**, so the same `EventKindTag`,
    colour, meta line, per-row chevron and per-kind expanded body (§4.3 "Meta line and
    details"), no leading icon. Rows start collapsed. Differences from Activity: no "Expand
@@ -950,9 +919,8 @@ Sections, in order:
 
 Data/API note: "Just finished" needs the `inFlightEpics()` staleness rule fixed
 server-side (queries.ts:1078, audit item 2) — a pure data fix, not new fields, since
-`closedEpics` is already returned and simply never rendered. `NeedsYouInbox` needs the new
-`GET /api/inbox` read endpoint noted above (a merge of four existing queries, no schema
-change).
+`closedEpics` is already returned and simply never rendered. Home makes no write and has
+no inbox read: every section above is a GET on data the projection already holds.
 
 ### 4.2 Work — Kanban / Roadmap, one page with a two-way view switcher
 
@@ -1313,6 +1281,11 @@ new lessons after it reviews its recent mistakes (runs automatically). Last chec
 "Applies to all projects - learned from csb-audit-1 on 7 Sep - hasn't prevented a repeat
 yet" replacing the raw `rule`/`principle`/`provenanceEventIds` JSON dump.
 
+The page only reads. A row opens the lesson's detail in a `Dialog` with no footer action:
+the rule, its scope, where it was learned and how often it prevented a repeat. A pending
+lesson sits under the "Pending review" tab, which names its status and asks for nothing.
+Approving, rejecting or editing a lesson is `/bs lessons`, in the CLI.
+
 ### 4.6 Sessions (history list, reachable from Home/Activity, not in the nav)
 
 Live CLI sessions are shown on Home (§4.1 item 1a), not on this page.
@@ -1435,13 +1408,12 @@ topbar (`LiveIndicator`, `ProjectSwitcher`, `Breadcrumb`), loading/empty/error p
 unchanged. Pure UI; the "1 live indicator" merge needs no new field (both old signals are
 already in `/api/pulse` and `/api/overview`).
 
-**DS2 — Home.** Merge Overview + Projects (§4.1), **plus pattern 1, `NeedsYouInbox`**
-shown first. Needs the `inFlightEpics()` staleness fix (queries.ts:1078, a data/query
-change, not a new field), the friendly role/tier label table (pure client data,
-`ui/src/lib/roleLabels.ts`), and the new merged read endpoint `GET /api/inbox` (four
-existing queries — waivers/escalations/stop-points/lesson-candidates — behind one
-response shape, no new event type or writer), with a `description` line per row (needs
-data where the query does not already join the source text, §4.1). Also the compact
+**DS2 — Home.** Merge Overview + Projects (§4.1). Needs the `inFlightEpics()` staleness
+fix (queries.ts:1078, a data/query change, not a new field) and the friendly role/tier
+label table (pure client data, `ui/src/lib/roleLabels.ts`). DS2 also shipped pattern 1,
+`NeedsYouInbox`, behind `GET /api/inbox`; both were removed on 2026-10-12, when the
+dashboard became display-only and decisions moved to `/bs waivers` and `/bs lessons`
+(§4.1 item 1). Also the compact
 "Recent activity" block (8 `TimelineRow`s, `compact`), which lands with DS6's
 `EventKindTag`/`limit` — ship DS2 without it if DS6 has not merged, and add it in DS6.
 

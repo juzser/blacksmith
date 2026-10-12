@@ -80,32 +80,31 @@ test.describe('Lessons', () => {
     await expect(page.getByRole('tabpanel').getByText(/loop bound/)).toBeVisible();
   });
 
-  // The fixture's only lesson is already `approved`, and architecture §9.4
-  // lets an approved lesson move only to superseded or invalidated. So the
-  // Dialog must not offer Approve or Edit here — pressing either could do
-  // nothing but return `lessons.illegal-transition` into a red Banner
-  // (P9-36). Reject stays: invalidated is a legal move.
-  test('row click opens the review Dialog, offering only the legal actions', async ({ page }) => {
+  // The dashboard only reads: a lesson is approved, rejected or edited
+  // through `/bs lessons`. A pending lesson -- the one that used to offer all
+  // three -- opens the same card in a Dialog, with nothing to press or type.
+  test('row click opens the read-only detail, with no approve, reject or edit control', async ({
+    page,
+  }) => {
+    await serveLessonsWithCards(page);
     await page.goto('/lessons');
-    await page.getByRole('tab', { name: /^All/ }).click();
     await page
       .getByRole('tabpanel')
-      .getByText(/loop bound/)
+      .getByText(/Run the full test suite/)
       .click();
-    const dialog = page.getByRole('dialog', { name: 'Review lesson' });
+    const dialog = page.getByRole('dialog', { name: 'Lesson' });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
-    await expect(dialog.getByRole('button', { name: 'Edit' })).toHaveCount(0);
-    // And it says why, rather than leaving a footer that looks half-rendered.
-    await expect(dialog.getByText(/nothing left to approve/)).toBeVisible();
+    await expect(dialog.getByText(/Run the full test suite/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /approve|reject|edit/i })).toHaveCount(0);
+    await expect(dialog.getByRole('textbox')).toHaveCount(0);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
   });
 
   /**
-   * D-220. The fixture's second lesson is `invalidated` — the status this
-   * page's own Reject button writes. It used to be in neither bucket the API
-   * returned, so rejecting a lesson made the row disappear from every filter
-   * the page had, "All" included.
+   * D-220. The fixture's second lesson is `invalidated` — the status a
+   * `/bs lessons` reject writes. It used to be in neither bucket the API
+   * returned, so a rejected lesson disappeared from every filter the page
+   * had, "All" included.
    */
   test('shows a rejected lesson under Closed and under All', async ({ page }) => {
     await page.goto('/lessons');
@@ -119,11 +118,6 @@ test.describe('Lessons', () => {
     await page.getByRole('tab', { name: /^All/ }).click();
     await expect(panel.getByText(/no network access/)).toBeVisible();
     await expect(panel.getByText(/loop bound/)).toBeVisible();
-
-    // And it says why the footer has no buttons, rather than looking broken.
-    await panel.getByText(/no network access/).click();
-    const dialog = page.getByRole('dialog', { name: 'Review lesson' });
-    await expect(dialog.getByText(/terminal status/)).toBeVisible();
   });
 
   // The fixture seeds no pending-status lesson and no lessons-pass-completed
@@ -212,7 +206,7 @@ test.describe('Lessons', () => {
         .getByRole('tabpanel')
         .getByText(/Run the full test suite/)
         .click();
-      const dialog = page.getByRole('dialog', { name: 'Review lesson' });
+      const dialog = page.getByRole('dialog', { name: 'Lesson' });
       await settleForShot(page, dialog);
       await shoot(page, `lessons-dialog-desktop-${theme}`);
     });
@@ -275,7 +269,7 @@ test.describe('Lessons', () => {
       .getByRole('tabpanel')
       .getByText(/Run the full test suite/)
       .click();
-    const dialog = page.getByRole('dialog', { name: 'Review lesson' });
+    const dialog = page.getByRole('dialog', { name: 'Lesson' });
     await settleForShot(page, dialog);
     await shoot(page, 'lessons-dialog-mobile-light');
   });

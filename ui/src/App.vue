@@ -12,7 +12,6 @@ import ProjectSwitcher from './components/kit/ProjectSwitcher.vue';
 import Select from './components/kit/Select.vue';
 import Sheet from './components/kit/Sheet.vue';
 import SidebarNav from './components/kit/SidebarNav.vue';
-import Toast from './components/kit/Toast.vue';
 import { useNow } from './composables/useNow.js';
 import { getIsLive, setLive } from './composables/usePoll.js';
 import { useProjectContext } from './composables/useProjectContext.js';
@@ -267,6 +266,5 @@ const projection = computed(() => projectionNotice(pulse.value));
       </div>
       <MobileTabBar v-if="isPhoneWidth" :items="NAV_ITEMS" :active-id="activeId" @select="selectNav" />
     </div>
-    <Toast />
   </div>
 </template>

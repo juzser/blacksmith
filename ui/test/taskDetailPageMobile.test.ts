@@ -1,6 +1,6 @@
 // TaskDetailPage.vue mobile Refresh drop (ds-spec.md §3.1 Task row: Refresh
 // is dropped on mobile so the H1 gets full width). Source-text scrape, same
-// style as needsYouInbox.test.ts.
+// style as homePage.test.ts.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
