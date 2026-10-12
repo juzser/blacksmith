@@ -507,9 +507,20 @@ single question.
 | CI on? | `ci` | `github-actions` | `github-actions` · `gitlab-ci` · `circleci` · `none` |
 | Deployed where? | `hosting` | `unspecified` | free text |
 
-Write the answers into [`factory/policies/stack.yml`](factory/policies/stack.yml)
-— change the values in place, leave the comments — then read them back and
-price them:
+Write the answers into `stack.yml` — change the values in place, leave the
+comments — then read them back and price them. In an install the file is
+`.blacksmith/factory/policies/stack.yml` (under `$BS_HOME` if you set one),
+the copy `bs init` made; in a clone it is
+[`factory/policies/stack.yml`](factory/policies/stack.yml).
+
+In an install, from the project:
+
+```bash
+bs stack show
+bs stack check
+```
+
+In a clone, from its root:
 
 ```bash
 node factory/orchestrator/dist/cli.js stack show

@@ -29,7 +29,7 @@ reads the finding.
 | [`phase-10-scope.md`](phase-10-scope.md) | 31 kB | Phase 10 |
 | [`audit-command-scope.md`](audit-command-scope.md) | 22 kB | the `audit` verb — a whole-project audit as a command, not a conversation |
 | [`continuous-loop-scope.md`](continuous-loop-scope.md) | 19 kB | the continuous loop — the factory running epic after epic without an operator turn between them |
-| [`plugin-port-scope.md`](plugin-port-scope.md) | 21 kB | the plugin port (status: planned) |
+| [`plugin-port-scope.md`](plugin-port-scope.md) | 21 kB | the plugin port (status: partly shipped) |
 
 A scope is not a contract: once its work has shipped, the architecture and
 the guides say what exists, and the scope says only what was intended.

@@ -98,10 +98,12 @@ The factory does not build inside itself. Everything from §1 on assumes a
 history and its own gates. This is the one-time step that creates it.
 
 Your stack answers come first, because `bs new` reads them rather than
-asking:
+asking. They live in `.blacksmith/factory/policies/stack.yml`, the copy
+`bs init` made (under `$BS_HOME` if you set one; `factory/policies/stack.yml`
+in a clone):
 
 ```bash
-bs stack show       # what factory/policies/stack.yml currently answers
+bs stack show       # what stack.yml currently answers
 bs stack check      # which of those answers the shipped templates honour
 ```
 

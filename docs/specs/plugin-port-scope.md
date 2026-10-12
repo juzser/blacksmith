@@ -1,7 +1,7 @@
 # Plugin port — scope
 
 - **Milestone id:** `plugin-port`
-- **Status:** `partly shipped`. Three of the five forks have since been
+- **Status:** `partly shipped`. Four of the five forks have since been
   answered by shipping, not by an epic — see "What has since shipped" below.
   The rest of this document is the 2026-09-07 scope, left as written: it is
   the measurement that the answers were chosen against, and editing it to
@@ -9,10 +9,11 @@
 
 ## What has since shipped
 
-Added 2026-09-16. Everything here was run, not recalled.
+Added 2026-09-16; versions and counts brought up to `0.5.0` on 2026-10-12.
+Everything here was run, not recalled.
 
 - **The package (fork 1, answered).** `@juzser/blacksmith` is published, at
-  `0.1.1` on `latest`. The scoped name was taken because the bare one was
+  `0.5.0` on `latest`. The scoped name was taken because the bare one was
   not available; `package.json`'s `name` moved with it, so the two names PP-3
   complained about are one name now.
 - **PP-1 and PP-2, answered in code.** `paths.ts` splits the one anchor into
@@ -28,11 +29,13 @@ Added 2026-09-16. Everything here was run, not recalled.
   `.claude/` **itself** — `.claude/.claude-plugin/plugin.json` — so `skills/`
   and `agents/` under it are the same files this clone dogfoods, not an
   export of them. The repo is its own marketplace
-  (`.claude-plugin/marketplace.json`, one entry, `source: "./.claude"`), which
-  is a shape the official marketplace already uses for most of its own
-  plugins. PP-4's fork was "which copy is canonical"; the answer is that
+  (`.claude-plugin/marketplace.json`, `source: "./.claude"` for the plugin
+  itself), which is a shape the official marketplace already uses for most
+  of its own plugins. PP-4's fork was "which copy is canonical"; the answer is that
   there is no second copy, and `test/pluginManifest.test.ts` is what keeps it
-  that way. Not in the repository, at least: installing the plugin *into* a
+  that way. The same marketplace now lists two optional mods, `bs-mod` and
+  `pr-mod`, each from its own directory under `mods/`; they are not copies
+  either. Not in the repository, at least: installing the plugin *into* a
   clone does make one on that machine, a pinned checkout of `main` in the
   plugin cache alongside the working tree, which is why README and INSTALL
   now tell a clone to keep one or the other.
