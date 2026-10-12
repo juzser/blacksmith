@@ -9,7 +9,6 @@ import {
   analytics,
   artifactById,
   createQuoteMemo,
-  DEFAULT_PROJECT,
   errorsPage,
   eventKind,
   flowGraph,
@@ -25,7 +24,7 @@ import {
   taskRuns,
   timeline,
 } from '../../src/db/queries.js';
-import { epics, errors, eventsRaw, findings, tasks } from '../../src/db/schema.js';
+import { epics, eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
