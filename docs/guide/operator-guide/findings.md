@@ -130,6 +130,30 @@ replacement or added task whose id another task of the plan still holds
 live — is refused with `plan.duplicate-live-task`; the id of a live task only
 the event log added is not checked yet.
 
+A task that already finished stays finished. The new version carries no record
+of a `completed` task, nor of any older dead copy of its id, unless the
+`supersede` map names it; an amendment that names only other tasks therefore
+leaves it alone, and ingest writes no `task-superseded` for it. Naming it with a
+replacement of a different id is still a real supersede: the task flips to
+`superseded` and the epic verdict waits on the replacement.
+
+An epic cut before that fix may already hold a finished task the log marks
+`superseded` with nothing behind it, which keeps the verdict from closing. The
+repair is derived from the log and recorded as one `task-reinstated` event:
+
+```bash
+bs task reinstate epic-1/task-3 \
+  --reason "an amendment dropped the finished record; no plan replaced the task" \
+  --session <session-id> --plan-version <n> --causal-parent <event-id> --actor <name>
+```
+
+It refuses a blank `--reason` (`task.reinstate-reason-required`), a task the
+log does not know (`task.reinstate-unknown-task`), one that is not superseded
+(`task.reinstate-not-superseded`), one with no `wave-merged` on the log
+(`task.reinstate-never-merged`), and one a plan amendment really superseded
+with a successor (`task.reinstate-has-successor`). A later real supersede of the
+task still wins over the reinstatement.
+
 The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
 

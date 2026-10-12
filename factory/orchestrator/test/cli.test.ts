@@ -740,6 +740,66 @@ describe('cli.ts (built binary)', () => {
     // built the same way the D-136 fixture above is, so this exercises the
     // real dispatch (namespace/action, flag parsing) rather than the library
     // function directly.
+    describe('task reinstate', () => {
+      it('puts a merged, superseded task back to completed and refuses a never-merged one', () => {
+        const sessionId = `cli-reinstate-${Date.now()}`;
+        const eventsDir = path.join(scratchDir, 'events-reinstate');
+        const append = (event: Record<string, unknown>): string => {
+          const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+          expect(run.status, run.stdout).toBe(0);
+          return JSON.parse(run.stdout).event_id as string;
+        };
+        const root = append({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        });
+        for (const id of ['epic-1/task-1', 'epic-1/task-2']) {
+          append({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-added',
+            task_id: id,
+            plan_version: 1,
+            causal_parent: root,
+            payload: { epic_id: 'epic-1', task_id: id, task_status: 'todo' },
+          });
+        }
+        append({
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'wave-merged',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: root,
+          payload: { task_ids: ['epic-1/task-1'] },
+        });
+        for (const id of ['epic-1/task-1', 'epic-1/task-2']) {
+          append({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-superseded',
+            task_id: id,
+            plan_version: 1,
+            causal_parent: root,
+            payload: { epic_id: 'epic-1', task_id: id },
+          });
+        }
+        const flags = ['--session', sessionId, '--causal-parent', root, '--state-dir', eventsDir];
+
+        const ok = runCli(['task', 'reinstate', 'epic-1/task-1', '--reason', 'dropped', ...flags]);
+        expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+        expect(JSON.parse(ok.stdout)).toMatchObject({ taskId: 'epic-1/task-1' });
+
+        const refused = runCli(['task', 'reinstate', 'epic-1/task-2', '--reason', 'x', ...flags]);
+        expect(refused.status).not.toBe(0);
+        expect(refused.stdout + refused.stderr).toContain('task.reinstate-never-merged');
+      });
+    });
+
     describe('findings repair-obligation (D-21 Part 4)', () => {
       function appendVia(eventsDir: string) {
         return (event: Record<string, unknown>): string => {

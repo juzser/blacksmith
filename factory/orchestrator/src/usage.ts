@@ -735,6 +735,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Correct a malformed amends_task_ids entry on an amend-pending finding (D-21 Part 4). Repairs corruption only -- never renegotiates a well-formed obligation.',
   },
   {
+    command: 'task reinstate',
+    positionals: '<task-id>',
+    flags: `--reason <text> ${EVENTS_DIR}`,
+    summary:
+      'Put a finished task back to completed when the log superseded it and no plan amendment replaced it. Refuses a task that never merged, one that is not superseded, and one a plan supersedes with a successor.',
+  },
+  {
     command: 'waivers pending',
     positionals: '<epic>',
     flags: '--session <id> [--state-dir <dir>]',

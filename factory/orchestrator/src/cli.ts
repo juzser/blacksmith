@@ -4595,6 +4595,26 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // The way back for a task the log superseded although no amendment replaced
+  // it (an amendment that did not name it used to leave that behind). Derived
+  // from the log, never a hand edit: reinstate.ts refuses a task that never
+  // merged or one a plan really supersedes.
+  if (namespace === 'task' && action === 'reinstate') {
+    const [taskId] = requirePositionals(positional, usageFor('task reinstate')) as [string];
+    const ctx = eventContextFromFlags(flags);
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(ctx.sessionId, eventOpts);
+    const { reinstateTask } = await import('./reinstate.js');
+    const event = await reinstateTask(
+      taskId,
+      { reason: requireFlag(flags, 'reason') },
+      ctx,
+      eventOpts,
+    );
+    printJson({ taskId, event_id: event.event_id });
+    return 0;
+  }
+
   if (namespace === 'waivers' && action === 'pending') {
     const [epic] = requirePositionals(positional, usageFor('waivers pending')) as [string];
     const sessionId = requireFlag(flags, 'session');

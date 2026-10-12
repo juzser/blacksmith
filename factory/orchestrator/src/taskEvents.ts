@@ -149,6 +149,14 @@ async function idsAlreadyEmitted(
   const ids = new Set<string>();
   for (const { record } of events) {
     if (record.event_type === eventType && record.task_id) ids.add(record.task_id);
+    // A reinstatement undoes the supersede on the log, so a later real one is new.
+    if (
+      eventType === 'task-superseded' &&
+      record.event_type === 'task-reinstated' &&
+      record.task_id
+    ) {
+      ids.delete(record.task_id);
+    }
   }
   return ids;
 }
