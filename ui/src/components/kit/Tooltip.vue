@@ -75,8 +75,19 @@ async function updatePosition() {
 // for "this focus should show a focus ring"; programmatic .focus() calls
 // don't match it, which is exactly the distinction this needs.
 function onFocusIn(event: FocusEvent) {
+  if (!canHover()) return;
   const target = event.target as HTMLElement | null;
   if (target?.matches?.(':focus-visible')) showNow();
+}
+
+// ds-spec.md §3.1: tooltips are not rendered on touch devices (`hover: none`),
+// so the trigger stays but nothing opens and Floating UI is never set up.
+function canHover(): boolean {
+  return !window.matchMedia('(hover: none)').matches;
+}
+
+function onMouseEnter() {
+  if (canHover()) scheduleShow();
 }
 
 // Esc "dismisses it without moving focus" (§2.5) even when the tooltip was
@@ -138,7 +149,7 @@ onBeforeUnmount(() => {
     v-bind="$attrs"
     class="bs-tooltip-trigger"
     :tabindex="wrapperTabindex"
-    @mouseenter="scheduleShow"
+    @mouseenter="onMouseEnter"
     @mouseleave="hide"
     @focusin="onFocusIn"
     @focusout="hide"

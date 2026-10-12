@@ -712,3 +712,36 @@ test.describe('Desktop: the relative times keep their tooltip, and the detail ha
     ).toHaveCount(0);
   });
 });
+
+// ds-spec.md §3.1: tooltips are not rendered on touch devices (hover: none).
+// The trigger stays; the bubble never opens, by hover or by focus.
+test.describe('Tooltips on a no-hover device', () => {
+  const trigger = (page: Page) => page.locator(TIME).first();
+
+  test('a pointer device still opens the bubble on hover', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/timeline');
+    await trigger(page).hover();
+    await expect(page.locator('.bs-tooltip-bubble')).toBeVisible();
+  });
+
+  test.describe('touch', () => {
+    test.use({ hasTouch: true });
+
+    test('the trigger renders but hover and focus open no bubble', async ({ page }) => {
+      await page.setViewportSize(VIEWPORTS.desktop);
+      await page.goto('/timeline');
+      expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+      await expect(trigger(page)).toBeVisible();
+      await trigger(page).hover();
+      await page.waitForTimeout(500);
+      await expect(page.locator('.bs-tooltip-bubble')).toHaveCount(0);
+      await page.keyboard.press('Tab');
+      await trigger(page).focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(100);
+      await expect(page.locator('.bs-tooltip-bubble')).toHaveCount(0);
+    });
+  });
+});
