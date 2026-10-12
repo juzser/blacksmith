@@ -26,6 +26,9 @@ const activeProject = (project: string, agentsWorking = 1) => ({
   project,
   liveSessions: 1,
   agentsWorking,
+  activeSessions: 0,
+  agentsRunning: 0,
+  agentsUnmeasured: 0,
 });
 test.beforeEach(async ({ page }) => {
   await stubActiveScope(page, [], {
@@ -52,9 +55,10 @@ test.describe('Home', () => {
     );
   });
 
-  test('lays out the sections in order, live sessions first', async ({ page }) => {
+  test('lays out the sections in order, the fact strip first', async ({ page }) => {
     await page.goto('/overview');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText([
+      'Right now',
       'Live sessions',
       'Recent activity',
       'Running now',
@@ -284,6 +288,231 @@ test.describe('Home', () => {
   });
 });
 
+// The fact strip (ds-spec.md §4.1 item 1): four read-only tiles over one set,
+// the live CLI sessions on running epics. The server counts them
+// (ui/server/test/activeScope.test.ts); this suite proves what reaches the
+// screen. The fixture is two live sessions on one epic, so its tokens and
+// tasks count once, and one store that could not be read.
+test.describe('Home: fact strip', () => {
+  const strip = (page: Page) => page.locator('section[aria-labelledby="home-facts-h"]');
+  const values = (page: Page) => strip(page).locator('.bs-stat__value');
+  const unread = '1 store could not be read; counts may be low.';
+  const twoOnOneEpic = {
+    liveSessions: 2,
+    activeSessions: 2,
+    agentsRunning: 5,
+    tokensSpent: 1_200_000,
+    tasksDone: 13,
+    tasksTotal: 25,
+    storesUnread: 1,
+    projects: [
+      { ...activeProject('blacksmith', 2), liveSessions: 2, activeSessions: 2, agentsRunning: 5 },
+    ],
+    epics: [
+      {
+        storeId: 'home',
+        epicId: 'epic-a',
+        project: 'blacksmith',
+        tokensSpent: 1_200_000,
+        tokensUnmeasured: 0,
+        tasksDone: 13,
+        tasksTotal: 25,
+      },
+    ],
+  };
+
+  // One live session on an epic with no plan tasks and no measured tokens.
+  const quietScope = {
+    ...twoOnOneEpic,
+    liveSessions: 1,
+    activeSessions: 1,
+    agentsRunning: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 2,
+    tasksDone: 0,
+    tasksTotal: 0,
+    epics: twoOnOneEpic.epics.map((e) => ({
+      ...e,
+      tokensSpent: 0,
+      tokensUnmeasured: 2,
+      tasksDone: 0,
+      tasksTotal: 0,
+    })),
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await stubActiveScope(page, [], twoOnOneEpic);
+  });
+
+  test('reads the four facts under the header, and one line for the unread store', async ({
+    page,
+  }) => {
+    await page.goto('/overview');
+    await expect(page.locator('.bs-ph__desc')).toHaveText('What is running and what it costs.');
+    await expect(strip(page).getByRole('heading', { level: 2, name: 'Right now' })).toBeAttached();
+    await expect(strip(page).locator('dt')).toHaveText([
+      'Active sessions',
+      'Agents running',
+      'Budget used',
+      'Tasks done',
+    ]);
+    await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
+    await expect(strip(page).locator('.bs-stat__helper')).toHaveText([
+      'Live sessions on a running epic',
+      'Subagents and factory agents, each counted once',
+      'Tokens on the epics these sessions run',
+      'Plan tasks on those epics',
+    ]);
+    await expect(strip(page).getByText(unread)).toBeVisible();
+    await expect(strip(page)).not.toHaveAttribute('aria-busy', 'true');
+  });
+
+  test('tiles are not links: nothing in the strip takes focus or a click', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(values(page)).toHaveCount(4);
+    await expect(strip(page).locator('a, button, [tabindex], [role="button"]')).toHaveCount(0);
+  });
+
+  test('a floor reads "≥" on screen and "at least" to a screen reader', async ({ page }) => {
+    await stubActiveScope(page, [], { ...twoOnOneEpic, agentsUnmeasured: 1 });
+    await page.goto('/overview');
+    const agents = values(page).nth(1);
+    await expect(agents.locator('span[aria-hidden="true"]')).toHaveText('≥');
+    await expect(agents.locator('.sr-only')).toHaveText('at least');
+    await expect(agents).toContainText('5');
+    await expect(values(page).first().locator('span[aria-hidden="true"]')).toHaveCount(0);
+  });
+
+  test('holds a skeleton in every tile, marked busy, until the first answer', async ({ page }) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/active-scope*', async (route) => {
+      await held;
+      await route.fulfill({ json: activeScopeBody([], twoOnOneEpic) });
+    });
+    await page.goto('/overview');
+    await expect(strip(page)).toHaveAttribute('aria-busy', 'true');
+    await expect(strip(page).locator('.bs-stat__value .bs-skeleton')).toHaveCount(4);
+    await expect(strip(page).getByText(unread)).toHaveCount(0);
+    release();
+    await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
+    await expect(strip(page)).not.toHaveAttribute('aria-busy', 'true');
+  });
+
+  test('an unmeasured answer and a failed read each say "Not known" with one footnote', async ({
+    page,
+  }) => {
+    await stubActiveScope(page, [], { measured: false });
+    await page.goto('/overview');
+    await expect(values(page)).toHaveText(['Not known', 'Not known', 'Not known', 'Not known']);
+    await expect(strip(page).getByText('Session data could not be read.')).toBeVisible();
+    await expect(strip(page).getByText(unread)).toHaveCount(0);
+
+    await page.route('**/api/active-scope*', (route) => route.fulfill({ status: 500, json: {} }));
+    await page.reload();
+    await expect(values(page)).toHaveText(['Not known', 'Not known', 'Not known', 'Not known']);
+    await expect(strip(page).getByText('Session data could not be read.')).toHaveCount(1);
+  });
+
+  test('follows the project filter: a project with no active epic reads zero', async ({ page }) => {
+    await page.goto('/p/blacksmith/overview');
+    await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
+    await page.goto('/p/demo-hub/overview');
+    await expect(values(page)).toHaveText(['0', '0', '0 tokens', 'None']);
+  });
+
+  test('desktop lays the four tiles across in one row', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    await expect(values(page)).toHaveCount(4);
+    const tops = await strip(page)
+      .locator('.bs-stat')
+      .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+  });
+
+  test('375px: a 2×2 grid, no helper, and no sideways scroll', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+    await expect(values(page)).toHaveCount(4);
+    const boxes = await strip(page)
+      .locator('.bs-stat')
+      .evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { top: Math.round(r.top), left: Math.round(r.left), right: r.right };
+        }),
+      );
+    const [a, b, c, d] = boxes;
+    if (!a || !b || !c || !d) throw new Error(`expected 4 tiles, got ${boxes.length}`);
+    expect(a.top).toBe(b.top);
+    expect(c.top).toBe(d.top);
+    expect(c.top).toBeGreaterThan(a.top);
+    expect(a.left).toBe(c.left);
+    expect(b.left).toBe(d.left);
+    for (const box of boxes) expect(box.right).toBeLessThanOrEqual(PHONE.width);
+    await expect(strip(page).locator('.bs-stat__helper').first()).toBeHidden();
+    const scroll = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+    }));
+    expect(scroll.scrollW).toBeLessThanOrEqual(scroll.clientW);
+  });
+
+  test('a word in the value slot is quiet; a figure, a zero included, is not', async ({ page }) => {
+    await stubActiveScope(page, [], quietScope);
+    await page.goto('/overview');
+    await expect(values(page)).toHaveText(['1', '0', 'Not measured', 'None']);
+    await expect(values(page).nth(0)).not.toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(1)).not.toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(2)).toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(3)).toHaveClass(/bs-stat__value--nd/);
+    const weight = (i: number) =>
+      values(page)
+        .nth(i)
+        .evaluate((el) => Number(getComputedStyle(el).fontWeight));
+    expect(await weight(2)).toBeLessThan(await weight(1));
+  });
+
+  // Real figures with a floor ("≥") for the screens; the quiet words get their own shot.
+  const floors = { ...twoOnOneEpic, agentsUnmeasured: 1, tokensUnmeasured: 1 };
+  for (const [vpName, theme] of [
+    ['desktop', 'light'],
+    ['desktop', 'dark'],
+    ['mobile', 'light'],
+    ['mobile', 'dark'],
+  ] as const) {
+    test(`screenshot fact strip ${vpName}/${theme}`, async ({ page }) => {
+      await stubActiveScope(page, [], floors);
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS[vpName]);
+      await page.goto('/overview');
+      await settleForShot(page, strip(page).getByText(unread));
+      await shootElement(strip(page), `home-facts-${vpName}-${theme}`);
+    });
+  }
+
+  test('screenshot fact strip quiet words desktop/light', async ({ page }) => {
+    await stubActiveScope(page, [], quietScope);
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    await settleForShot(page, strip(page).getByText(unread));
+    await shootElement(strip(page), 'home-facts-quiet-desktop-light');
+  });
+
+  test('screenshot fact strip 800px wide, a 2×2 grid, light', async ({ page }) => {
+    await stubActiveScope(page, [], floors);
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 800, height: 900 });
+    await page.goto('/overview');
+    await settleForShot(page, strip(page).getByText(unread));
+    await shootElement(strip(page), 'home-facts-tablet-light');
+  });
+});
+
 // Recent activity (ds-spec.md §4.1 point 1b): the 8 newest compact
 // TimelineRows, directly under Live sessions, "View all activity" to /activity,
 // 4 rows on phone (the rest stay in the DOM, hidden by CSS per §4.1: "the
@@ -401,6 +630,9 @@ test.describe('Home: Recent activity', () => {
       }
       const link = page.locator('.bs-home__recent-activity .bs-timeline-row__because-of:visible');
       await expect(link).toHaveCount(1);
+      // elementFromPoint only sees the viewport, and on phone the fact strip
+      // pushes the expanded row below the fold: bring it into view first.
+      await link.scrollIntoViewIfNeeded();
       const m = await link.evaluate((el) => {
         const meta = (el.closest('.bs-timeline-row__meta') ??
           el.closest('.bs-timeline-row')) as HTMLElement;
@@ -1209,6 +1441,14 @@ test.describe('Home: Running now follows Active/All (S8)', () => {
           readAt: FIXTURE_NOW_ISO,
           liveSessions: 1,
           unlinkedSessions: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+          storesUnread: 0,
           projects: [activeProject('blacksmith')],
           epics: [],
           factorySessions: [],

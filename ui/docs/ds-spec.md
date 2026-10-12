@@ -814,7 +814,7 @@ fallbacks. The phone frames below are the intended layout.
 | Screen | Shown | Merged | Hidden (desktop-only) | Actions |
 |---|---|---|---|---|
 | Shell | Top bar (title, project, Live dot, More); bottom tab bar | Pause, theme, settings, and desktop view go into the overflow menu | Sidebar, breadcrumb, refresh, clocks | Navigation only |
-| Home | 3-up summary (Agents, project budget ring, factory ring); live session cards with their Now and Next lines ("Waiting on you" when the CLI waits on the operator); 4 recent activity rows plus "View all" | Activity is cut to 4 rows | Activity filter chips, project cards grid, cost chart | Navigation only |
+| Home | 2×2 fact strip (Active sessions, Agents running, Budget used, Tasks done); live session cards with their Now and Next lines ("Waiting on you" when the CLI waits on the operator); 4 recent activity rows plus "View all" | Activity is cut to 4 rows | Activity filter chips, project cards grid, cost chart | Navigation only |
 | Work (Kanban) | Column switcher as a tab row with counts; one column of compact cards (title, tag, meta) | 5 columns become 1 column chosen by tab | Display options and view switch go into overflow; card menu, copy id, quick look | Tap a card to open the task |
 | Work (Roadmap) | Project sections as `<details>` (the one holding the selection and any running or live one open; closing one hides everything under it, its phase card and live epic included), each with a windowed phase picker whose 44px disclosure rows widen it and whose current lane ends " (current)". A project the selection is not in shows the phase holding its live epic, and that card has the live epic open. A phase the user picks in a project with a live epic sticks. The live epic then stays under the phase card as a compact block that opens with a muted "Live in <phase name>" line (two lines at most): its name, Current and its running wave, with no back link, plan picker or full wave list; "13 of 25" plus ring; epic list with mini bars | Waves in a collapsed group | Swimlane, per-wave task lanes, session picker | Tap an epic to open it |
 | Task | Title, status tag, meta; request quote clamped to 3 lines; 3-up stats (tokens, agent time, elapsed); tabs Asked / Findings / Outputs / History; one-line timeline rows | Per-role token table in "More: tokens by role" | Side panel, raw payloads, copy buttons | "Show more" on the quote |
@@ -832,16 +832,18 @@ an invented mock.
 
 ### 4.1 Home (was Overview + Projects, merged per IA)
 
+**No "Needs you" box** (operator decision, 2026-10-12). The dashboard only reads, so
+Home has no list of decisions and no action to take. Pending waivers, escalations, stop
+points and lesson candidates are decided in the CLI: `/bs waivers` for findings, `/bs
+lessons` for lessons. The DS2 `NeedsYouInbox` (pattern 1) and its `GET /api/inbox` read
+are gone, and the dashboard server answers 405 to any `/api` request that is not GET or
+HEAD. What a person still sees is state: a live session whose CLI waits on the operator
+reads "Waiting on you" on its card's Next line (item 1a). The top of the page is the fact
+strip (item 1), which reads figures and offers nothing to decide.
+
 Sections, in order:
-1. **No "Needs you" box** (operator decision, 2026-10-12). The dashboard only reads, so
-   Home opens with no list of decisions and no action to take. Pending waivers,
-   escalations, stop points and lesson candidates are decided in the CLI: `/bs waivers`
-   for findings, `/bs lessons` for lessons. The DS2 `NeedsYouInbox` (pattern 1) and its
-   `GET /api/inbox` read are gone, and the dashboard server answers 405 to any `/api`
-   request that is not GET or HEAD. What a person still sees is state: a live session
-   whose CLI waits on the operator reads "Waiting on you" on its card's Next line (item
-   1a). The top of the page has no replacement for now; the page starts at item 1a.
-1a. **"Live sessions"** - first on the page, above "Recent activity". One card
+1. **Fact strip.** Four read-only tiles under the page header: Active sessions, Agents running, Budget used, Tasks done. All four describe one set: live CLI sessions linked to an open epic that is running or that the session wrote to since it started (`/api/active-scope`). Budget used and Tasks done count each epic once, even when two sessions run it. Budget used is tokens spent, with no percentage. It can differ from the Budget panel, which counts every running budgeted epic on an active project. Tasks done reads "N of M" and leaves out superseded tasks. The strip follows the project filter. Desktop shows four tiles across; at 900px and below they form a 2×2 grid. Tiles use the kit StatTile and are not links. Agents running counts the larger of a session group's open Agent calls and the factory agents on its epics, so an agent seen both as a session's subagent and as a factory agent counts once; subagents nested inside another subagent are not seen. A value that is a floor starts with "≥". A word in the value slot ("Not known", "Not measured", "None") reads quiet and a figure, "0" included, stays bold. An unread store adds one muted line under the strip.
+1a. **"Live sessions"** - directly under the fact strip, above "Recent activity". One card
    per live, in-scope CLI session from `GET /api/cli-sessions`, titled
    `<project> · <epic id> · wave N` (the title opens the epic's Kanban board), with a status
    tag, a Now line per working agent (role + task title, max 2 then "+ N more"), and a Next
@@ -1413,7 +1415,7 @@ fix (queries.ts:1078, a data/query change, not a new field) and the friendly rol
 label table (pure client data, `ui/src/lib/roleLabels.ts`). DS2 also shipped pattern 1,
 `NeedsYouInbox`, behind `GET /api/inbox`; both were removed on 2026-10-12, when the
 dashboard became display-only and decisions moved to `/bs waivers` and `/bs lessons`
-(§4.1 item 1). Also the compact
+(§4.1, the note above the sections). Also the compact
 "Recent activity" block (8 `TimelineRow`s, `compact`), which lands with DS6's
 `EventKindTag`/`limit` — ship DS2 without it if DS6 has not merged, and add it in DS6.
 

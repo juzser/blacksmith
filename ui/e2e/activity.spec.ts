@@ -1268,7 +1268,17 @@ test.describe('Activity follows Active/All (S9)', () => {
     await stubActiveScope(page, [], {
       liveSessions: 2,
       unlinkedSessions: 2,
-      projects: [{ storeId: 'store-b', project: 'project-b', liveSessions: 1, agentsWorking: 0 }],
+      projects: [
+        {
+          storeId: 'store-b',
+          project: 'project-b',
+          liveSessions: 1,
+          agentsWorking: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+        },
+      ],
     });
     const urls = requests(page);
     await page.goto('/activity');
@@ -1322,6 +1332,14 @@ test.describe('Activity follows Active/All (S9)', () => {
           readAt: '2026-10-07T12:00:00.000Z',
           liveSessions: 1,
           unlinkedSessions: 0,
+          activeSessions: 0,
+          agentsRunning: 0,
+          agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
+          tasksDone: 0,
+          tasksTotal: 0,
+          storesUnread: 0,
           projects: [],
           epics: [],
           factorySessions: homeSessions('sess-fixture'),

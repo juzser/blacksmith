@@ -479,6 +479,83 @@ describe('cliSessions reader', () => {
         await transcript(root, SID_A, tail());
         expect(must((await read()).sessions[0]).status).toBe('waiting_operator');
       });
+
+      describe('subagentsRunning', () => {
+        const running = async () => must((await read()).sessions[0]).subagentsRunning;
+        const launch = [user('go'), asst(toolUse('Agent', 'tu-ag1')), launchRec('ag1')];
+
+        it('counts an async Agent launch as 1 and its completion as 0', async () => {
+          await session(128, { status: 'idle' });
+          await transcript(root, SID_A, jsonl([...launch, asst(text('Launched.'))]));
+          expect(await running()).toBe(1);
+          await transcript(
+            root,
+            SID_A,
+            jsonl([...launch, notifyRec('ag1', 'completed'), asst(text('Done.'))]),
+          );
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count a launch made before the registry startedAt', async () => {
+          await session(129, { status: 'idle' });
+          await transcript(
+            root,
+            SID_A,
+            jsonl([user('go'), launchRec('ag1', '2026-10-06T09:00:00.000Z'), asst(text('Wait.'))]),
+          );
+          expect(await running()).toBe(0);
+        });
+
+        it('counts an open foreground Agent or Task call as 1 and its tool_result as 0', async () => {
+          await session(130);
+          await transcript(root, SID_A, jsonl([user('go'), asst(toolUse('Agent', 'fg1'))]));
+          expect(await running()).toBe(1);
+          await transcript(
+            root,
+            SID_A,
+            jsonl([user('go'), asst(toolUse('Agent', 'fg1')), asst(toolUse('Task', 'fg2'))]),
+          );
+          expect(await running()).toBe(2);
+          await transcript(
+            root,
+            SID_A,
+            jsonl([user('go'), asst(toolUse('Agent', 'fg1')), toolResult('fg1')]),
+          );
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count an open foreground call made before the registry startedAt', async () => {
+          await session(131);
+          await transcript(
+            root,
+            SID_A,
+            jsonl([
+              user('go'),
+              { ...asst(toolUse('Agent', 'fg1')), timestamp: '2026-10-06T09:00:00.000Z' },
+            ]),
+          );
+          expect(await running()).toBe(0);
+        });
+
+        it('leaves out tool calls that are not subagents and nested subagents', async () => {
+          await session(132);
+          await transcript(
+            root,
+            SID_A,
+            jsonl([
+              user('go'),
+              asst(toolUse('Bash', 'b1')),
+              { ...asst(toolUse('Agent', 'nested')), isSidechain: true },
+            ]),
+          );
+          expect(await running()).toBe(0);
+        });
+
+        it('is null when the transcript could not be read', async () => {
+          await session(133);
+          expect(await running()).toBeNull();
+        });
+      });
     });
 
     it('keeps text of exactly 280 code points and marks a 281-point text as cut', async () => {

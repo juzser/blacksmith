@@ -182,6 +182,13 @@ export interface CliSessionCard {
   next: string | null;
   focus: CliSessionFocus | null;
   transcript: 'ok' | 'missing' | 'tail-empty' | 'unreadable';
+  /**
+   * Main-thread subagents running now: background launches not reported
+   * ended plus foreground Agent/Task calls with no result, both from after
+   * `startedAt`. A floor: nested subagents and launches outside the
+   * transcript tail are not seen. Null when the transcript could not be read.
+   */
+  subagentsRunning: number | null;
   linked: { epics: LinkedEpic[] } | null;
   parseIssues: string[];
 }
@@ -430,7 +437,15 @@ interface Analysis {
    * seen, so the count is a floor. Shells and monitors are not tracked.
    */
   pendingAgents: Map<string, number | null>;
+  /**
+   * Foreground Agent/Task calls in the main thread with no tool_result yet,
+   * by tool_use id, with the call timestamp (ms, null when unreadable).
+   */
+  openAgentCalls: Map<string, number | null>;
 }
+
+/** The tool names a main-thread subagent call goes by. */
+const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
 
 const NOTIFICATION_END = /<status>\s*(?:completed|failed|killed|stopped)\s*<\/status>/;
 
@@ -477,12 +492,20 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     lastTool: null,
     bsMention: mentionsBs(entries),
     pendingAgents: new Map(),
+    openAgentCalls: new Map(),
   };
   for (const e of entries) {
     if (e.isSidechain === true) continue;
     // A subagent's end notification counts even on a record flagged meta.
     const ended = e.type === 'user' ? endedAgentId(e) : null;
     if (ended !== null) a.pendingAgents.delete(ended);
+    if (e.type === 'user' && a.openAgentCalls.size > 0) {
+      for (const b of blocksOf(e)) {
+        if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+          a.openAgentCalls.delete(b.tool_use_id);
+        }
+      }
+    }
     if (e.isMeta === true || e.isCompactSummary === true) continue;
     if (e.type === 'user') {
       const blocks = blocksOf(e);
@@ -525,6 +548,10 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
           a.last = 'assistant_tool';
           a.lastTool = clean(b.name);
           if (b.name === 'AskUserQuestion' && typeof b.id === 'string') a.pendingAsk = b.id;
+          if (SUBAGENT_TOOLS.has(b.name) && typeof b.id === 'string') {
+            const ts = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : Number.NaN;
+            a.openAgentCalls.set(b.id, Number.isNaN(ts) ? null : ts);
+          }
         }
       }
     }
@@ -934,6 +961,30 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     }
   }
 
+  /**
+   * Whether a subagent started at `ts` (ms, null when unreadable) belongs to
+   * this process: a launch from before the registry's `startedAt` belongs to a
+   * process that is gone.
+   */
+  function sinceStart(e: RegistryEntry, ts: number | null): boolean {
+    const startedMs = e.startedAt === null ? Number.NaN : Date.parse(e.startedAt);
+    return ts === null || Number.isNaN(startedMs) || ts >= startedMs;
+  }
+
+  /**
+   * Background subagents still pending plus foreground subagent calls still
+   * open, in the main thread only (a subagent's own subagents are not seen),
+   * so the count is a floor. Null when the transcript could not be read.
+   */
+  function subagentsRunningOf(e: RegistryEntry, t: TranscriptRead): number | null {
+    const a = t.analysis;
+    if (a === null) return null;
+    let n = 0;
+    for (const ts of a.pendingAgents.values()) if (sinceStart(e, ts)) n += 1;
+    for (const ts of a.openAgentCalls.values()) if (sinceStart(e, ts)) n += 1;
+    return n;
+  }
+
   function statusOf(e: RegistryEntry, t: TranscriptRead): CliSessionStatus {
     const a = t.analysis;
     if (e.status === 'waiting_operator') {
@@ -945,10 +996,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     // The turn ended while its own background subagents still run: the
     // session wakes when they report, so it is not waiting for the operator.
     // A launch from before this process started belongs to a process that is gone.
-    const startedMs = e.startedAt === null ? Number.NaN : Date.parse(e.startedAt);
-    for (const ts of a.pendingAgents.values()) {
-      if (ts === null || Number.isNaN(startedMs) || ts >= startedMs) return 'working';
-    }
+    for (const ts of a.pendingAgents.values()) if (sinceStart(e, ts)) return 'working';
     if (a.last === 'assistant_text') return 'waiting_operator';
     return 'idle';
   }
@@ -1642,6 +1690,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         next: a?.next ?? null,
         focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
+        subagentsRunning: subagentsRunningOf(e, t),
         linked,
         parseIssues: e.parseIssues,
       });

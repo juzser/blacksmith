@@ -1,4 +1,4 @@
-// HomePage's pure half (ds-spec.md §4.1 points 2-4): the "Running now"
+// HomePage's pure half (ds-spec.md §4.1): the fact strip, the "Running now"
 // cards, the "Just finished" rule, the decision lines and the Budget
 // numbers, kept out of the .vue file so the DOM-free unit suite covers them.
 import { isActiveProject, isActiveProjectName } from './activeScope.js';
@@ -10,9 +10,94 @@ import type {
   OverviewResult,
   RecentDispatch,
 } from './api.js';
-import { formatCompactNumber, pluralize, shortTaskName } from './format.js';
+import { formatCompactNumber, formatCompactValue, pluralize, shortTaskName } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { foreignStoreId, HOME_STORE_ID, type StoreRef } from './storeKey.js';
+
+/** One tile of Home's fact strip, its value already formatted. */
+export interface FactTile {
+  label: string;
+  value: string;
+  helper: string;
+  /** Some of it was not measured: the tile reads "≥" before the value. */
+  floor: boolean;
+  /** The value is a word ("Not known", "Not measured", "None"), not a figure: it reads quiet. */
+  quiet: boolean;
+}
+
+const FACTS = [
+  { label: 'Active sessions', helper: 'Live sessions on a running epic' },
+  { label: 'Agents running', helper: 'Subagents and factory agents, each counted once' },
+  { label: 'Budget used', helper: 'Tokens on the epics these sessions run' },
+  { label: 'Tasks done', helper: 'Plan tasks on those epics' },
+] as const;
+
+/**
+ * Home's four facts (§4.1 item 1), all over one set: the live sessions on an
+ * active epic, and those epics. A null or unmeasured scope reads "Not known".
+ * Under `?project=` the totals are that name's rows in every store, the way
+ * Running now matches; a session driving the name's epics in two stores is
+ * then counted in each.
+ */
+export function factStrip(scope: ActiveScopeResult | null, project?: string): FactTile[] {
+  if (scope?.measured !== true) {
+    return FACTS.map((f) => ({ ...f, value: 'Not known', floor: false, quiet: true }));
+  }
+  const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((n, row) => n + pick(row), 0);
+  let t: Pick<
+    ActiveScopeResult,
+    | 'activeSessions'
+    | 'agentsRunning'
+    | 'agentsUnmeasured'
+    | 'tokensSpent'
+    | 'tokensUnmeasured'
+    | 'tasksDone'
+    | 'tasksTotal'
+  > = scope;
+  if (project !== undefined) {
+    const rows = scope.projects.filter((p) => p.project === project);
+    const epics = scope.epics.filter((e) => e.project === project);
+    t = {
+      activeSessions: sum(rows, (p) => p.activeSessions),
+      agentsRunning: sum(rows, (p) => p.agentsRunning),
+      agentsUnmeasured: sum(rows, (p) => p.agentsUnmeasured),
+      tokensSpent: sum(epics, (e) => e.tokensSpent),
+      tokensUnmeasured: sum(epics, (e) => e.tokensUnmeasured),
+      tasksDone: sum(epics, (e) => e.tasksDone),
+      tasksTotal: sum(epics, (e) => e.tasksTotal),
+    };
+  }
+  // Every run unmeasured is "nobody counted", not "spent nothing".
+  const noTokens = t.tokensSpent === 0 && t.tokensUnmeasured > 0;
+  const [sessions, agents, budget, tasks] = FACTS;
+  return [
+    { ...sessions, value: formatCompactNumber(t.activeSessions), floor: false },
+    { ...agents, value: formatCompactNumber(t.agentsRunning), floor: t.agentsUnmeasured > 0 },
+    {
+      ...budget,
+      value: noTokens ? 'Not measured' : formatCompactValue(t.tokensSpent, 'tok'),
+      floor: !noTokens && t.tokensUnmeasured > 0,
+    },
+    {
+      ...tasks,
+      value:
+        t.tasksTotal === 0
+          ? 'None'
+          : `${formatCompactNumber(t.tasksDone)}\u00a0of\u00a0${formatCompactNumber(t.tasksTotal)}`,
+      floor: false,
+    },
+  ].map((tile) => ({ ...tile, quiet: tile.value === 'Not measured' || tile.value === 'None' }));
+}
+
+/** The one muted line under the strip, or null when there is nothing to say. */
+export function factStripNote(scope: ActiveScopeResult | null): string | null {
+  if (scope === null) return null;
+  if (!scope.measured) return 'Session data could not be read.';
+  if (scope.storesUnread > 0) {
+    return `${pluralize(scope.storesUnread, 'store')} could not be read; counts may be low.`;
+  }
+  return null;
+}
 
 export interface TokenTotals {
   spent: number;

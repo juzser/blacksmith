@@ -86,15 +86,18 @@ only read, never written (a `?session` query still reads the served home alone).
 
 <table>
 <tr>
-<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Live sessions panel reading No live Blacksmith sessions, then a Recent activity list of system, finding and error events" /></td>
+<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a strip of four facts, Active sessions, Agents running, Budget used and Tasks done, reading 0, 0, 0 tokens and None, then a Live sessions panel reading No live Blacksmith sessions and a Recent activity list of system, finding and error events" /></td>
 <td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-dark.png" width="100%" alt="Roadmap page: a timeline of the demo-hub phase Phase 6b - Remaining pages with bars for epic-9, epic-10 and epic-11, and the epic-9 card at 2 of 4 tasks done, waves 1 and 2 done, wave 3 running Task 3 and wave 4 upcoming" /></td>
 </tr>
 <tr valign="top">
 <td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) —
-what is running, what just happened, and what it costs. Live sessions come
-first, each with its <b>Now</b> and <b>Next</b> lines (a session stopped on
-you reads "Waiting on you"); under them, recent activity, what is running per
-project, what the factory decided recently, and budget burn. Like every page,
+what is running and what it costs. Four facts open the page: how many
+sessions are live on a running epic, how many agents are running, the tokens
+spent on those epics, and the plan tasks done out of all. A word such as
+"None" or "Not measured" reads quiet, a figure bold. Live sessions come next,
+each with its <b>Now</b> and <b>Next</b> lines (a session stopped on you reads
+"Waiting on you"); under them, recent activity, what is running per project,
+what the factory decided recently, and budget burn. Like every page,
 it only reports: you answer a waiver with <code>/bs waivers</code> and a
 lesson candidate with <code>/bs lessons</code>.</td>
 <td><b>Roadmap</b> (<code>/work/roadmap</code>) — milestone progress, parsed

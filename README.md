@@ -388,7 +388,7 @@ without ever opening the dashboard.
 
 <table>
 <tr valign="top">
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Live sessions panel reading No live Blacksmith sessions, then a Recent activity list of system, finding and error events" /><br /><sub><b>Home</b> — what is running, what just happened, and what it costs.</sub></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a strip of four facts, Active sessions, Agents running, Budget used and Tasks done, reading 0, 0, 0 tokens and None, then a Live sessions panel reading No live Blacksmith sessions and a Recent activity list of system, finding and error events" /><br /><sub><b>Home</b> — what is running and what it costs.</sub></td>
 <td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/activity-desktop-dark.png" width="100%" alt="Activity page: the event log with project and session selectors and kind chips from Prompt to System, showing a coordination.deadlock error at S1-stop-the-line, a judge verdict, a lesson candidate and a cross-provider judge dispatch, grouped by session" /><br /><sub><b>Activity</b> — the append-only log itself, filtered by kind.</sub></td>
 </tr>
 <tr valign="top">
