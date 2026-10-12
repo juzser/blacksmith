@@ -15,8 +15,8 @@
 // and not a fact about the code:
 //
 // - 'user' — what waivers.ts, lessons.ts and prompts.ts default to when no
-//   actor is supplied, which is how every decision made through the UI is
-//   attributed (ui/server never passes one).
+//   actor is supplied: a CLI decision verb run without `--actor`, and every
+//   decision the dashboard took before it became read-only (older logs).
 // - 'operator' — what docs/guide/operator-guide/*.md and .claude/skills/bs/
 //   SKILL.md hand the operator, in every `--actor` example they carry (three
 //   today), including the `smith waivers apply` line in

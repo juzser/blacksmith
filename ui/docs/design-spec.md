@@ -168,14 +168,11 @@ Errors "By group" `BarChart` is at the 8-series cap per `charts.md` ("Cap at 8 s
 
 ### 5.1 Overview — `/` — Template 5A
 
-**Purpose:** at-a-glance state of the factory — what's running, on which model, on whose budget, and what needs the operator.
+**Purpose:** at-a-glance state of the factory — what's running, on which model, and on whose budget. The page only reads (§5.0a below): it shows state and links to detail pages, and asks the operator to decide nothing.
 
 ```
 PageHeader:  [h1 "Overview"]
 [page-level error line, if the whole overview failed to load]
-Highlight (conditional — only if escalations/waivers pending):
-  tint="amber" eyebrow="Needs you" title="3 waivers pending, 1 task escalated"
-  action=<Button variant="inverse" size="sm">Review in Kanban</Button>
 MetricGrid (cols=4, own zone):
   [Active agents] [Budget used] [Epics in flight] [Alerts]
 Body (flex gap-6 lg:flex-row):
@@ -185,7 +182,6 @@ Body (flex gap-6 lg:flex-row):
     Card "Milestone progress" [PROVISIONAL — see §5.4 gap note]
   Rail (w-rail, own zone):
     Rail Card "Epics in flight"     — compact rows, epic/plan_version/status cluster
-    Rail Card "Pending your review" — waiver batches + lesson candidates, ghost "Review" buttons
 ```
 
 **StatCards** (all four parts mandatory per `layouts-dashboard.md`: icon chip, label, value, delta — sparkline optional):
@@ -201,7 +197,9 @@ Body (flex gap-6 lg:flex-row):
 
 **States:** stat row, main body, and rail are three independent remote-data zones per `layouts-dashboard.md`'s MUST rules — each renders its own skeleton/Banner+Retry/empty, none is implied by a sibling resolving. First-ever-run empty (zero events ever logged) is the app's one designated first-impression empty state: `EmptyState illustration="coffee"` — "Nothing running yet. Start the factory with a plan and this page fills in." Every other empty branch on this page (e.g. "no dispatches yet today") uses the plain icon, no illustration, per the illustration ration.
 
-**Interactions:** Highlight action and rail "Review" buttons route to `/kanban` filtered to attention-needing tasks (waivers/escalations don't have their own page — the actual waiver approve/deny UI lives on Task detail, §5.5). Poll every 5s (see §7).
+**Interactions:** navigation only — rows link to their detail pages. Poll every 5s (see §7).
+
+**§5.0a The dashboard only reads (operator decision, 2026-10-12).** An earlier draft of this page put a "Needs you" Highlight and a "Pending your review" rail card here, with buttons that routed to the waiver and lesson controls. Those controls are gone from every page: the operator decides waivers with `/bs waivers` and lessons with `/bs lessons`, so a decision has one door instead of two that can drift. The server answers `405` to any request that is not a GET or HEAD. The Alerts stat card above still counts pending waivers, as a number to read, not a button. A live session that is waiting on the operator still says "Waiting on you" on its Now/Next line: that is the state of a running process, not a control.
 
 ---
 
@@ -281,7 +279,7 @@ Board (full-bleed, opts out of max-w-content, horizontal scroll):
 
 **States:** whole-board skeleton (3 skeleton lanes × 5 skeleton columns × 2–3 skeleton cards) / Banner+Retry replacing the board / `EmptyState` "No tasks match these filters." + "Clear filters".
 
-**Interactions:** filters only; no context menu, no per-card actions (read-only, confirmed by the constraint that waiver/lesson actions are the app's only writes).
+**Interactions:** filters only; no context menu, no per-card actions (read-only, like every page — the dashboard makes no write at all, §5.0a).
 
 ---
 
@@ -303,7 +301,7 @@ Table (bordered): Milestone | Status | Plan version | Progress | Tasks | Started
 
 ### 5.5 Task detail — `/tasks/:taskId` — Template 2
 
-**Purpose:** everything about one task — contract, agents, history, findings — and the only place waiver decisions happen.
+**Purpose:** everything about one task — contract, agents, history, findings. It shows each finding and whether it was waived; the waiver decision itself is made with `/bs waivers` (§5.0a).
 
 ```
 PageHeader: [h1 task title]  [status: task_status Lozenge]      [Button "View branch" ↗]
@@ -316,10 +314,8 @@ Body (flex gap-6):
       Card "Attempts"       — RowList: agent, model/provider, start/end, run_status
     Findings tab:
       Table: Category | Severity (Lozenge) | Status (Lozenge) | Summary | Fingerprint
-        row expands (Disclosure) → full description +
-        [only when severity=S3 AND finding_status=confirmed AND unwaived]
-        Button "Waive" (outline) · Button "Deny" (secondary)
-          → Popover "Waive finding <fingerprint>? This can't be asked again." [Confirm]
+        row expands (Disclosure) → full description, and the waiver state
+        (waived / denied / none) as text — no button
     Artifacts tab:
       Rail-width image tile grid (custom, §6) — click → Dialog lightbox
       RowList: branch/PR links (Button variant="link", external icon)
@@ -332,17 +328,17 @@ Body (flex gap-6):
 
 **Fields (§7):** `tasks` row (claims, case, origin, task_status, epic, plan_version), `dispatches` (attempts), `edges` (dependencies), `reviews` (findings: finding_category, severity, finding_status), `waivers` (fingerprint, granted/denied), `artifacts` (screenshots, branch/PR links).
 
-**Waiver UI — the judgment call, stated explicitly:** a waiver is a policy decision, not data loss, so it does **not** get the full `AlertDialog` ceremony reserved for destructive/irreversible actions — but because "the same finding is never asked twice" (§8), a bare inline button felt too light for a decision with no UI undo. Resolution: single-step `Popover` confirm naming the exact fingerprint, then a `Toast` ("Waived 1 finding.") since the mutation keeps the user on the page. **Lesson reject** (§5.6), by contrast, does use `AlertDialog` — it discards a candidate with no natural undo path and there's direct precedent in the kit (`AlertDialog.prompt.md`'s "Reject N captures?").
+**Waivers are decided in the CLI, not here:** this page used to carry Waive/Deny buttons behind a `Popover` confirm, and Lessons a Reject `AlertDialog`. Both went on 2026-10-12 when the dashboard became display-only (§5.0a). A waiver is a policy decision that "is never asked twice" (§8), and `/bs waivers` already walks the operator through each one with its evidence; a second door in the dashboard could only drift from it. The Findings tab keeps the facts a decision needs — severity, status, fingerprint and the waiver state — so the operator can read a finding here and decide it in the CLI.
 
 **States:** Attempts/Findings/Artifacts/History are independent zones — a Findings-load failure must not blank Overview or vice versa.
 
-**Interactions:** mutation race guard on Waive/Deny per `ux-conventions.md` §3 — disable the row's buttons AND guard `if (saving) return`; error clears on next successful attempt (Banner adjacent to the row, not a page-level Banner).
+**Interactions:** tabs and row disclosure only; no mutation, so no race guard.
 
 ---
 
 ### 5.6 Lessons — `/lessons` — Template 1
 
-**Purpose:** review lesson candidates before they rewrite agent prompts.
+**Purpose:** read the lessons the factory has learned, and the candidates that wait for review before they rewrite agent prompts. The review itself — approve, edit, reject — is `/bs lessons` (§5.0a).
 
 ```
 PageHeader: [h1 "Lessons"]
@@ -353,10 +349,10 @@ Status toggle: Button "Pending review (N)" (secondary when active) |
 Toolbar: [Search] [Select: lesson_type] [Select: lesson_scope]        count
 Table: Type (outline) | Scope (outline) | Summary/evidence excerpt |
        Status (Lozenge) | Times prevented (Approved view only, tabular-nums)
-  row click → Dialog "Review lesson"
+  row click → Dialog "Lesson" (read-only detail, no footer action)
 ```
 
-**Review Dialog:** full text (read-only, or `Textarea` when "Edit" is active), evidence links (provenance event IDs → deep-link into Timeline at that event), `lesson_scope` display, `lesson_type` as a `RadioGroup` (3 options — fits "small exclusive enum 2–4" exactly) shown only in Edit mode. Buttons: **Approve** (primary) · **Edit** (outline, toggles editable fields; the edit is folded into a single "Save & approve" commit, matching the taxonomy's lack of a distinct "edited" status between `pending-approval` and `approved` — flagged as a modeling decision, not a taxonomy fact) · **Reject** (destructive outline) → `AlertDialog` "Reject this lesson? This candidate won't be compiled into agent prompts." confirm label "Reject".
+**Lesson Dialog:** full text, read-only; evidence links (provenance event IDs → deep-link into Timeline at that event); `lesson_scope`, `lesson_type` and `lesson_status` as text. No button: a candidate waiting on review shows its status, and the operator approves, edits or rejects it with `/bs lessons`. An earlier draft had Approve / Edit (a `Textarea` and a `RadioGroup`) / Reject (an `AlertDialog`) here; they went with the rest of the dashboard's writes on 2026-10-12 (§5.0a).
 
 **Fields (§7/§8):** `lessons` (lesson_type, lesson_level=`principle` always, lesson_status, lesson_scope, provenance_event_ids, "times prevented" counter — mentioned explicitly in §10).
 
@@ -417,11 +413,11 @@ Body:
 ### 6.1 Used, from the closed 48-primitive set
 
 Core: `Button`, `Icon`, `Lozenge`, `Skeleton`, `Separator`.
-Forms: `Field`, `Input`, `Select`, `RadioGroup`, `Textarea`.
+Forms: `Field`, `Input`, `Select`. (`RadioGroup` and `Textarea` served only the lesson edit form, removed 2026-10-12.)
 Surfaces: `Card`, `StatCard`, `RowList`/`Row`, `Table`.
 Layouts: `PageHeader`, `SectionHeading`, `Toolbar`, `FilterChips`, `MetricGrid`, `CardGrid`, `DefinitionList`, `Timeline`, `Highlight`, `EmptyState`.
 Navigation: `AppShell`, `SidebarNav`, `Tabs`, `Breadcrumb`.
-Overlays: `Dialog`, `AlertDialog`, `Popover`, `Tooltip`.
+Overlays: `Dialog`, `Popover`, `Tooltip`. (No `AlertDialog`: the dashboard confirms nothing, because it changes nothing.)
 Feedback: `Banner`, `Toast`.
 Charts: `Sparkline`, `LineChart`, `BarChart` (vendor `DonutChart` too — closed inventory, cheap to keep available even though v1 has no use for it).
 Illustration: `Illustration` (one use — Overview's first-run empty state, `coffee`).
@@ -458,8 +454,8 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 | Timeline | Toolbar controls → FilterChips → event rows in ts order; each chevron reachable, Enter/Space toggles | Disclosure pattern (§5.2); `aria-expanded`/`aria-controls` on every chevron |
 | Kanban | Toolbar → lane 1 (Todo top-to-bottom, then In progress, …) → lane 2, … | Each lane a `<section aria-label="<milestone> lane">`; each column an `<h3>` + `role="list"`; each card `role="listitem"` wrapping a real focusable element with `aria-label="<title>, <status>, opens task detail"` |
 | Roadmap | Toolbar → table rows | Standard `Table` grid semantics (`<th scope="col">`) |
-| Task detail | Header actions → Tabs (roving tabindex, Left/Right per `aria-patterns.md` #12) → active panel content → rail | `Tabs`/`tabpanel` roles exactly per the pattern; Waive/Deny buttons disabled during their own mutation (WCAG 3.2.2 — no unexpected context change without warning) |
-| Lessons | Status toggle buttons → Toolbar → table rows → Dialog (focus-trapped, returns focus to the triggering row on close) | `AlertDialog` for Reject per pattern #5: focus to first control on open, trap, Esc closes, return focus to trigger |
+| Task detail | Header actions → Tabs (roving tabindex, Left/Right per `aria-patterns.md` #12) → active panel content → rail | `Tabs`/`tabpanel` roles exactly per the pattern; the Findings row disclosure follows §5.2's pattern |
+| Lessons | Status toggle buttons → Toolbar → table rows → Dialog (focus-trapped, returns focus to the triggering row on close) | The read-only lesson `Dialog`: focus to its first control on open, trap, Esc closes, return focus to the row |
 | Errors | Toolbar → 4 cards in DOM order → table rows → detail Dialog | Chart `role="img"` + `aria-label` summary + `sr-only` data table (§4) |
 | Analytics | Stat row → main charts → rail | Same chart a11y requirement as Errors |
 
@@ -473,13 +469,13 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 
 - **No auth.** Local-first, single operator, no login page, no Template 4 usage. Cloudflare Access is future work per §10/§14 — out of this spec entirely.
 - **No WebSockets — poll, stated per surface:**
-  - **The app shell** (`/api/pulse`, added by §A.6): poll every **5s** on every page. This is the only poll that is not a page's own — it carries the freshness indicator and the nav arrival badges, both of which have to be true on pages that do not poll at all.
+  - **The app shell** (`/api/pulse`, added by §A.6): poll every **5s** on every page. This is the only poll that is not a page's own — it carries the freshness indicator, which has to be true on pages that do not poll at all.
   - **Overview** (stat row + live-agents feed): poll every **5s** — this is explicitly the "what's running right now" page (§7 of the architecture doc), the one place sub-10s freshness matters.
   - **Timeline, Kanban, Flow**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness. Flow's poll retains view state across a tick — `retainFlowView()` (`ui/src/lib/flowView.ts`) keeps an expanded wave or edge-type filter that still exists in the freshly fetched graph, instead of resetting either on every success (D-243).
   - **Projects**: poll every **15s**, same as Timeline/Kanban/Flow, paused with the tab — this hub has no Toolbar of its own, so the topbar's shared Refresh (below) is its only manual control (D-243).
-  - **Task detail, Lessons, Errors, Analytics**: **manual refresh only**, no auto-poll — these are pages the operator is actively reading/deciding on; a table or findings list re-sorting under their cursor mid-read is a worse UX than a slightly stale view with an explicit Refresh button.
+  - **Task detail, Lessons, Errors, Analytics**: **manual refresh only**, no auto-poll — these are pages the operator is actively reading; a table or findings list re-sorting under their cursor mid-read is a worse UX than a slightly stale view with an explicit Refresh button.
   - **Why poll, not WebSockets:** the projections are read-only SQLite queries behind a small local API with no auth; a single local operator doesn't need sub-second push. §10's own "Cloudflare later" plan is explicitly a data-layer port (SQLite → D1) "not a rewrite" — plain HTTP polling carries over unchanged, while a WebSocket layer would need Durable Objects at the eventual Workers port, extra migration surface with no demonstrated UX need at v1.
-  - **Mutation-race interaction with polling:** no optimistic UI anywhere — Waive/Deny/Approve/Edit/Reject disable their control and guard `if (saving) return` (per `ux-conventions.md` §3) until the server responds; the next poll tick (or the mutation's own response) is what updates the UI. This avoids a poll racing an in-flight write.
+  - **No mutation to race with polling:** the dashboard makes no write (§5.0a), so a poll can never race an in-flight write. Decisions are made in the CLI; the next poll tick shows their effect.
 
 ---
 
@@ -489,7 +485,7 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 - **Tokens copy:** `ui/src/styles/ds-tokens.css` (suggested path), version 3.0.0, copied at implementation time.
 - **UI language:** English — pending explicit operator confirmation (§7).
 - **Date format:** `DD/MM/YYYY` display default unless the operator overrides.
-- **Delete semantics:** N/A — no delete anywhere in this app (writes are limited to waiver/lesson decisions, none of which delete data).
+- **Delete semantics:** N/A — the app makes no write of any kind; waiver and lesson decisions go through `/bs waivers` and `/bs lessons`.
 - **Primitive inventory:** the §6.1 list, seeded from this spec.
 - **Charts/illustrations:** `LineChart`/`BarChart`/`Sparkline` (+ `DonutChart` vendored unused); one Open Doodle, `coffee`, for Overview's first-run empty state only.
 - **Status → Lozenge mapping:** §3 of this spec, copied verbatim into the template's mapping table.
@@ -605,8 +601,10 @@ records what shipped)
    less signal there than status does).
 3. "Pending your review" chips coloured by evaluative tone: waiver =
    `warning`, escalation = `danger`, lesson candidate = `discovery` — each
-   a real Lozenge (not identity colour), wrapped in a ghost button that
-   routes to Kanban/Lessons.
+   a real Lozenge (not identity colour). They shipped wrapped in a ghost
+   button that routed to Kanban/Lessons; since 2026-10-12 the dashboard
+   only reads (§5.0a), and the operator works through those items with
+   `/bs waivers` and `/bs lessons`.
 4. Roadmap milestone mini-timeline: `db/queries.ts`'s
    `milestoneTaskRefs()` — up to 3 most-recently-completed tasks (success-
    tone dot + relative timestamp, `formatRelative()`) and up to 3 next
@@ -729,18 +727,19 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
    instead keeps the feeling of a running system on a surface the operator
    can come back to.
 
-   - **No toast on an event, a trigger or a dispatch.** `useToast` already
-     means exactly one thing — *your* action landed — and it is used only by
-     Task detail's waive/deny and Lessons' approve/reject. A toast the
-     operator did not cause would overload that. Three further objections are
+   - **No toast on an event, a trigger or a dispatch.** `useToast` meant
+     exactly one thing — *your* action landed — and was used only by Task
+     detail's waive/deny and Lessons' approve/reject, both removed when the
+     dashboard became display-only (§5.0a). A toast the operator did not
+     cause would have overloaded that. Three further objections are
      properties of this transport, not matters of taste: the data arrives by
      poll (§8), so a toast fired off a diff reports when the *poll* noticed,
      not when the thing happened; a wave that lands ten events between two
      ticks either storms the corner or lies about the count; and `usePoll`
      pauses while the tab is hidden, which makes a toast lossy for something
-     the event log records durably. The argument is kept in
-     `ui/src/lib/navBadges.ts` rather than only here, next to the code that
-     would have to be undone to reverse it.
+     the event log records durably. The argument used to sit in
+     `ui/src/lib/navBadges.ts` too; that file went with the badges (below),
+     so this is now its only copy.
    - **The freshness indicator moved into the topbar.** `LiveStatus` was
      Overview-only (§A.4 round 7). Every page polls, and on the other nine a
      frozen server was indistinguishable from a quiet factory — the exact
@@ -753,7 +752,11 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      reports `Live` indefinitely over a factory that has emitted nothing since
      Tuesday. Both are shown because neither implies the other. Hidden below
      768px, where the topbar has no room.
-   - **Arrival badges on the nav rail.** Timeline and Errors badge *arrivals*
+   - **Arrival badges on the nav rail** (retired: the BS kit's `SidebarNav`
+     renders no badge, and the Lessons level badge — a count of lessons
+     waiting on the operator — went on 2026-10-12 with the rest of the
+     calls to act, §5.0a; `/bs lessons` lists what waits). As shipped,
+     Timeline and Errors badged *arrivals*
      — the difference between the current poll and the counter as of the last
      time the operator opened that page. Only monotonic counters qualify:
      subtract a level and the operator clearing one item produces a negative
@@ -877,9 +880,9 @@ One endpoint, `GET /api/stream`, and nothing else on the wire.
   and Analytics do not subscribe. §8's reasoning for those — the operator is
   reading a fixed thing and a surprise re-render loses their place — is not a
   transport argument and is untouched by having a transport.
-- **No optimistic UI, still.** §8's mutation-race rule is unchanged: a
-  mutation disables its control and waits for the server. The stream is
-  another thing that can prompt a refetch; it is not a second writer.
+- **No optimistic UI, still.** There is nothing to be optimistic about:
+  since 2026-10-12 the dashboard makes no write (§5.0a). The stream is
+  another thing that can prompt a refetch; it is not a writer.
 - **No auth, still.** The stream is bound to 127.0.0.1 with everything else.
   An end-user-facing deployment needs auth for every route, and `/api/stream`
   is not a special case of that — it is the same open question §8 defers to
@@ -887,8 +890,10 @@ One endpoint, `GET /api/stream`, and nothing else on the wire.
 
 ### A.4 What this does not do
 
-It does not make the dashboard interactive. Every write surface §8 knew about
-is still the same four POST routes, and starting an epic, dispatching, or
-answering an escalation still requires the CLI. A faster read of a read-only
+It does not make the dashboard interactive. When this shipped, the only
+writes were four POST routes (waiver batch, lesson approve/reject/edit);
+since 2026-10-12 there are none, and the server answers `405` to any write
+(§5.0a). Deciding a waiver or a lesson, starting an epic, dispatching, or
+answering an escalation all go through the CLI. A faster read of a read-only
 page is a smaller change than it looks; it is a prerequisite for an
 end-user-facing UI, not the thing itself.

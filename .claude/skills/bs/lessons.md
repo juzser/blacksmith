@@ -34,13 +34,11 @@ none of it is restated here.
      score with the bar the block reports, not the configured threshold;
      they differ whenever the correction applied. An
      approval that lands non-novel text exits 1 *with the transition
-     applied*: surface it, do not retry it. The UI's Edit action runs the
-     same gate since P9-36 — but it has no `--accept-duplicate` control, so
-     a duplicate the operator decides to keep has to come back to the CLI.
+     applied*: surface it, do not retry it. This verb is the only way to
+     edit a lesson: the dashboard only reads (2026-10-12).
    - **Reject**: `bs lessons reject <lesson-id> …` — transitions to
-     `invalidated`, the same status the UI's reject action uses
-     (`ui/server/src/app.ts`'s `/reject` route); there is no separate
-     operator-rejection status in taxonomy.yml's `lesson_status`.
+     `invalidated`; there is no separate operator-rejection status in
+     taxonomy.yml's `lesson_status`.
    - `invalidated`, `novelty-rejected` and `superseded` are **terminal**
      (`LEGAL_LESSON_TRANSITIONS`, `lessons.ts`). Reviving a rejected lesson
      means raising it again with its own provenance — the command refuses

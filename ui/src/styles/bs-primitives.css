@@ -368,8 +368,9 @@ a:hover {
      mock's one tag box, 20px tall -- so sm now matches md's height. The two
      classes stay (no call-site churn); `size` still picks the padding. The
      operator's 2026-10-02 fix was about padding: 4px (--bs-space-1) read as
-     no padding at all on Home's "Escalation"/"Waiver" tags, and
-     --bs-space-2 (8px) clears a 6px floor. */
+     no padding at all (seen on the "Escalation"/"Waiver" tags of Home's
+     since-removed Needs you box), and --bs-space-2 (8px) clears a 6px
+     floor. */
   height: 20px;
   padding: 0 var(--bs-space-2);
 }

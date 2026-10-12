@@ -2,9 +2,11 @@
 
 A local view of what the factory is doing, over eight pages. The dashboard is a
 *projection* of the append-only event log, and `bs db rebuild` reconstructs the
-whole thing from that log alone. Its only writes are your answers: approving,
-rejecting or editing a lesson candidate, and answering a waiver batch. Each
-appends an event to the log, and nothing you click here dispatches an agent.
+whole thing from that log alone. It only reads: you watch the factory here,
+and nothing you click writes an event or dispatches an agent. The server
+answers `405` to any `/api` request that is not a read. Your decisions go
+through the CLI: waive or deny findings with `/bs waivers`, and approve, edit
+or reject lesson candidates with `/bs lessons`.
 
 The server also reads, read-only, the local Claude Code session registry,
 transcripts and prompt history — from `--claude-config-dir`, else `$CLAUDE_CONFIG_DIR`, else
@@ -49,8 +51,8 @@ touched.
 page read `GET /api/tasks/:taskId?store=<storeId>` (and `/runs`); an unknown store
 is a 404, never the served store. The task page keeps the store in its URL
 (`/tasks/<id>?store=<storeId>`), so a reload stays on it. History, artifacts and
-waivers resolve in the served store only, so a foreign task shows their empty state
-and offers no Waive or Deny.
+waivers resolve in the served store only, so a foreign task shows their empty
+state.
 
 ```bash
 pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
@@ -84,17 +86,17 @@ only read, never written (a `?session` query still reads the served home alone).
 
 <table>
 <tr>
-<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox with All, Waivers, Escalations and Lesson candidates tabs holding one escalated task with an Open button, a Live sessions panel reading No live Blacksmith sessions, and a Recent activity list of system and finding events" /></td>
+<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Live sessions panel reading No live Blacksmith sessions, then a Recent activity list of system, finding and error events" /></td>
 <td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-dark.png" width="100%" alt="Roadmap page: a timeline of the demo-hub phase Phase 6b - Remaining pages with bars for epic-9, epic-10 and epic-11, and the epic-9 card at 2 of 4 tasks done, waves 1 and 2 done, wave 3 running Task 3 and wave 4 upcoming" /></td>
 </tr>
 <tr valign="top">
-<td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) — the
-one screen that asks something of you. The <code>Needs you</code> inbox lists
-the waivers on finished work (completed tasks, or closed epics for epic-level
-findings: the ones the factory will no longer act on), escalated tasks and
-lesson candidates, grouped by project, each with one action; under it, what is running per project, what the factory
-decided recently, and budget burn. Everything else is the factory reporting
-in.</td>
+<td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) —
+what is running, what just happened, and what it costs. Live sessions come
+first, each with its <b>Now</b> and <b>Next</b> lines (a session stopped on
+you reads "Waiting on you"); under them, recent activity, what is running per
+project, what the factory decided recently, and budget burn. Like every page,
+it only reports: you answer a waiver with <code>/bs waivers</code> and a
+lesson candidate with <code>/bs lessons</code>.</td>
 <td><b>Roadmap</b> (<code>/work/roadmap</code>) — milestone progress, parsed
 from <a href="../../factory/specs/roadmap.md"><code>factory/specs/roadmap.md</code></a>
 and joined with real task counts. Open an epic and it shows as its waves:
@@ -127,8 +129,9 @@ plus the same-mistake rate: the number that says whether the lessons loop is
 teaching it anything. The second-opinion reviewers card shows how often the
 cross-provider judges agree.</td>
 <td><b>Lessons</b> — the candidates the scribe distilled from errors and
-decision checkpoints, waiting on an approve or a reject, and for each approved
-lesson how many repeats it has prevented. This is the surface for step 6 of
+decision checkpoints, still pending review, and for each approved lesson how
+many repeats it has prevented. A row opens the lesson's read-only detail; you
+approve, edit or reject a candidate with <code>/bs lessons</code>, step 6 of
 <a href="operator-loop.md">the operator loop</a>.</td>
 </tr>
 </table>

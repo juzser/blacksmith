@@ -26,6 +26,18 @@ private repository and published here as a single initial commit, so the phase
 entries below record development that predates this repo's git history rather
 than appearing in it.
 
+### Changed
+
+- **The dashboard only reads.** `bs ui` is for watching the factory; every
+  decision now goes through the CLI. Removed from the dashboard: Home's "Needs
+  you" box, the Waive and Deny buttons on a task's findings, and the approve,
+  edit and reject controls on the Lessons page. Findings and lessons still
+  show, read-only, and a live session still reads "Waiting on you" when it
+  stops on you. Waive or deny a finding with `/bs waivers`; approve, edit or
+  reject a lesson with `/bs lessons`. The dashboard server has no write route
+  left: it answers `405` to any `/api` request that is not `GET` or `HEAD`,
+  and `GET /api/inbox` is gone.
+
 ### Fixed
 
 - **A plan amendment no longer supersedes a finished task it did not name.**

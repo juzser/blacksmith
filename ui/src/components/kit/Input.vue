@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// Input (ds-spec.md §2.1 line 372: "Input / Textarea / Select / RadioGroup
-// | unchanged contract from the old kit (native-element wrappers); ported,
-// re-styled to new tokens"). The old kit has no Input.vue to port, so it is
+// Input (ds-spec.md §2.1 line 372: "Input / Select | unchanged contract
+// from the old kit (native-element wrappers); ported, re-styled to new
+// tokens"). The old kit has no Input.vue to port, so it is
 // a plain native-element wrapper: a single controlled DOM element,
 // modelValue + ariaLabel, update:modelValue on input, plus <input>'s own
 // `type` and `placeholder`.

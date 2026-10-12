@@ -3454,8 +3454,8 @@ describe('cli.ts (built binary)', () => {
     const candidates = JSON.parse(candidatesResult.stdout);
     expect(candidates.map((c: { lessonId: string }) => c.lessonId)).toEqual([lessonId]);
 
-    // Approve it with the operator's own verb (P9-1) — the same mechanism
-    // the UI's approve route uses, minus the hand-assembled envelope.
+    // Approve it with the operator's own verb (P9-1) — the one door for a
+    // lesson decision now that the dashboard only reads.
     const approveResult = runCli([
       'lessons',
       'approve',

@@ -74,9 +74,10 @@ this file is prescribed to the projects Blacksmith builds.
   English"). Confirm explicitly before Phase 6b if this assumption is wrong.
 - **Date format:** `DD/MM/YYYY` display default (`ui/src/lib/format.ts`),
   per design-spec.md §9 — not yet operator-confirmed either.
-- **Delete semantics:** N/A — no delete anywhere in this app. Writes are
-  limited to waiver apply-batch and lesson approve/edit/reject; none delete
-  data.
+- **Delete semantics:** N/A — the app makes no write at all (operator
+  decision, 2026-10-12: the dashboard is for watching). Waiver and lesson
+  decisions go through `/bs waivers` and `/bs lessons`; the server answers
+  `405` to any `/api` request that is not a GET or HEAD.
 - **Responsive floor:** 390px (repo-specific override of the 1024px
   default), per design-spec.md §2 — the off-canvas Sheet sidebar activates
   below 768px, `Toolbar` filters wrap below 640px, and no page tested at
@@ -95,15 +96,15 @@ additive and inert until a page-wiring PR imports it.
 
 | Primitive | Notes |
 |---|---|
-| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon`; raw `.bs-btn--touch`/`.bs-btn--block` CSS modifiers (44px height, full width) exist for call sites that build a `.bs-btn` directly rather than through this component — see Known deviations |
+| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon`; a `RouterLink` may wear the raw `.bs-btn` classes directly (NotFoundPage's "Go to Home", Home's section links) — see Known deviations |
 | Icon | rebuilt on `@lucide/vue` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
 | IconButton | `label` required (no default — a missing one is a type error); additive `tone: default\|inverse` for controls on an inverted surface (Toast's dismiss button); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
 | Tooltip | rebuilt on `@floating-ui/dom`; `mode: describe\|label`; hover after 300ms, focus immediately, Escape dismisses |
 | Tag | Lozenge's renamed successor (see "Status → Tag mapping"); `tone` covers the 7 status tones plus `neutral`; `variant: subtle\|bold\|outline` — `bold` reuses the tone's own text/subtle token pair as a solid fill (no third "-bold" token tier exists in `bs-tokens.css`) rather than inventing one, see Known deviations |
 | Chip | `variant: assignee\|identity`, `color?: 1-6` indexes `--bs-chart-N` for the identity dot/border |
 | Card | `padding: sm\|md\|lg`, `interactive?` |
-| Input / Textarea / Select / RadioGroup | unchanged contract from the old kit, restyled |
-| Dialog / AlertDialog / Popover / Toast | unchanged behaviour (focus trap, Esc, `role="status"`/`aria-live`), restyled |
+| Input / Select | unchanged contract from the old kit, restyled. `Textarea` and `RadioGroup` are not in the kit: the lesson edit form was their only user, and it went when the dashboard became display-only (2026-10-12) |
+| Dialog / Popover / Toast | unchanged behaviour (focus trap, Esc, `role="status"`/`aria-live`), restyled. No `AlertDialog`: its only user was the Lessons Reject confirm, and the dashboard now changes nothing, so it confirms nothing |
 | Tabs | unchanged (roving-tabindex, WAI-ARIA Tabs pattern); `:focus-visible` now uses the kit's shared box-shadow ring, not the old outline-based one — no `--bs-focus-width` token exists here, see Known deviations |
 | Table | adds a `compact` density prop, absorbing the old kit's `Row`/`RowList` (see Known deviations) |
 | Skeleton | `shape: line\|block\|circle`, `width?`, `height?` |
@@ -227,10 +228,11 @@ Work → Kanban and the task-detail route are rebuilt on the BS kit (ds-spec.md
   router and cannot know what the page under it fetches, so it bumps a
   signal every mounted poller watches.
 - **Pulse composable:** `ui/src/composables/usePulse.ts` — the shell's own
-  poll, feeding the topbar freshness indicator and the nav arrival badges.
-  Its pure half is `ui/src/lib/navBadges.ts`, which is where the
-  badge-not-toast argument is recorded and is the only half under test
-  (`ui/vitest.config.ts` covers `lib/`, not `composables/`).
+  poll, feeding the topbar freshness indicator. The nav badges it once fed
+  are gone: the kit's `SidebarNav` never rendered them, and the Lessons
+  pending badge was a call to act, removed with the rest on 2026-10-12
+  (`/bs lessons` lists what waits). The badge-not-toast argument is kept in
+  design-spec.md §A.6 (directive 9).
 - **Viewport composable:** `ui/src/composables/useViewport.ts` — drives
   sidebar collapse (<1024px) and the mobile Sheet (<768px).
 
@@ -259,19 +261,15 @@ None of these composables changed for DS0 — the kit swap is presentational.
   with no accessible name; `opacity: 0` keeps the label announced (paired
   with `aria-busy="true"`) while staying visually invisible and keeping its
   layout box, so the width-lock trick is unaffected.
-- **Button's `.bs-btn--touch`/`.bs-btn--block` are additive CSS modifiers,
-  not a `size`/`block` prop on the component.** §3.1's only on-phone
-  primary action (Home's inbox "Decide") needs a 44px tap target and the
-  full row width; `Button.vue`'s `size` prop only has `sm|md` (28px/32px),
-  and `NeedsYouInbox.vue` already builds its row actions as raw `.bs-btn`
-  classes on a `RouterLink` rather than through `Button.vue` (it needs an
-  anchor, not a `<button>`). `.bs-btn--touch` (44px height) and
-  `.bs-btn--block` (100% width) sit in `bs-primitives.css` beside the
-  `sm`/`md` steps and combine with an existing colour variant
-  (`.bs-btn--primary`) rather than adding a third size to the component's
-  prop type. Because an anchor can wear `.bs-btn` this way, the base rule
-  also resets `text-decoration: none` so a `RouterLink` styled as a button
-  never renders with the browser's default link underline.
+- **A `RouterLink` can wear `.bs-btn` directly, not through `Button.vue`.**
+  A navigation control needs an anchor, not a `<button>`, so NotFoundPage's
+  "Go to Home" and Home's section links put the raw `.bs-btn` classes on a
+  `RouterLink`. The base rule resets `text-decoration: none` so such a link
+  never renders with the browser's default underline. The `.bs-btn--touch`
+  and `.bs-btn--block` modifiers that once sat beside the `sm`/`md` steps
+  served one control — Home's on-phone inbox "Decide" — and went with it on
+  2026-10-12, when the dashboard became display-only; no screen has an
+  on-phone primary action now.
 - **Tag's `info` tone has no dedicated hex.** `IconButton`/`Banner`'s
   `tone: info|warning|danger` needs an `info` colour, but the redesign
   spec's 7-tone table (`done/review/progress/todo/blocked/danger/warning`)
@@ -395,10 +393,14 @@ None of these composables changed for DS0 — the kit swap is presentational.
   deferred to DS6.** It needs the plain-language event lines DS6 builds for
   Activity; DS2 ships Home without the section rather than with raw event
   names. Deferred, not dropped.
-- **Home's inbox is not the full §2.2 pattern yet.** It shows three kinds
-  (waivers, escalations, lesson candidates); stop points, the unread dot and
-  read-state weight (pattern 12) have no server source yet. Row titles are
-  the server's task text, not a per-kind sentence.
+- **Home has no inbox: the dashboard only reads (operator decision,
+  2026-10-12).** ds-spec.md §2.2's Needs-you inbox shipped in DS2 and was
+  removed: waivers, escalations and lesson candidates are decided with
+  `/bs waivers` and `/bs lessons`, so a decision has one door. `GET
+  /api/inbox` and every write route went with it; the server answers `405`
+  to any `/api` request that is not a GET or HEAD. A live session that
+  waits on the operator still reads "Waiting on you" on its card's Next
+  line. The top of Home has no replacement yet.
 - **Home's "Just finished" is per tab, not per operator session.** It lists
   closed epics this tab saw in flight since it loaded, plus (F3 review
   fix) anything closed in the last 24h regardless of session state, so a
@@ -420,7 +422,8 @@ None of these composables changed for DS0 — the kit swap is presentational.
   `epicsInFlight` narrowed to epics with a task in a truly open status
   (`db/queries.ts`'s `activeEpics()`, the complement of
   `TERMINAL_TASK_STATUSES`). Home's "Running now" reads the narrower field;
-  the escalated-only epic still surfaces under Needs you.
+  the escalated-only epic still surfaces on Kanban and Flow, and the operator
+  handles it from the CLI.
 - **TaskPeekPanel is a modal `Dialog`, not the ds-spec's ≥1024px non-modal
   anchored panel.** ds-spec.md §4.2's peek is specified as an anchored,
   non-modal side panel on wide viewports (focus and the rest of the page
@@ -487,9 +490,8 @@ None of these composables changed for DS0 — the kit swap is presentational.
   plan version) now render as a single "Type: … · Plan revision N" line
   (`factsRowText`, each clause independently optional — no "-" placeholder
   for an absent one); `claims` moved to its own named list; branch, origin
-  and epic moved into a native `<details>`/`<summary>` disclosure, the same
-  pattern `NeedsYouInbox.vue` already uses for its mobile group folding,
-  rather than a bespoke disclosure component. `.bs-task-detail__grid`/
+  and epic moved into a native `<details>`/`<summary>` disclosure rather than
+  a bespoke disclosure component. `.bs-task-detail__grid`/
   `.bs-task-detail__card`/`.bs-task-detail__card--wide` (the two-card grid
   layout these replaced) were deleted as dead CSS, not left unused.
 

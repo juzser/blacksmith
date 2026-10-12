@@ -78,7 +78,8 @@ instead. An edit outside a claim fails the gate rather than reaching the queue.
 Schema check → tests → coverage evidence → a fresh-context reviewer that never
 sees the coder's session → an adversarial verifier whose only job is to refute
 the reviewer. S1 stops the line, S2 bounces back to the same branch, S3 batches
-into one waiver question per epic. Only S3 and S4 are ever waivable.
+into one waiver question per epic, answered with `/bs waivers`. Only S3 and S4
+are ever waivable.
 
 </td>
 <td>
@@ -102,9 +103,9 @@ of them gating anything — and is promoted only once you have read the numbers.
 **It learns from its own errors**
 
 Errors are classified against a taxonomy, and a scribe distills them into
-lesson candidates you approve or reject. Approved lessons splice into later
-prompts — and the same-mistake rate tells you whether that is actually
-working. A loop you can audit, not a memory you have to trust.
+lesson candidates you approve or reject with `/bs lessons`. Approved lessons
+splice into later prompts — and the same-mistake rate tells you whether that
+is actually working. A loop you can audit, not a memory you have to trust.
 
 </td>
 <td>
@@ -376,9 +377,10 @@ a public issue.
 Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eight
 pages to `127.0.0.1`. They are a projection of the event log — `bs db rebuild`
 reconstructs them from it, and `bs stats` prints the same facts in a terminal.
-Two things there write: approving, rejecting or editing a lesson candidate,
-and answering a waiver batch. Each appends an event to the log; nothing you
-click there dispatches an agent. It also reads
+The dashboard only reads: you watch the factory there, and nothing you click
+writes an event or dispatches an agent. Its server answers `405` to anything
+but a read. Decisions go through the CLI: waivers with `/bs waivers`, lesson
+candidates with `/bs lessons`. It also reads
 the local Claude Code session registry, transcripts and prompt history (read-only;
 `--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default),
 served as `GET /api/cli-sessions` to loopback requests only. The factory runs
@@ -386,7 +388,7 @@ without ever opening the dashboard.
 
 <table>
 <tr valign="top">
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox with All, Waivers, Escalations and Lesson candidates tabs holding one escalated task with an Open button, a Live sessions panel reading No live Blacksmith sessions, and a Recent activity list of system and finding events" /><br /><sub><b>Home</b> — the one screen that asks something of you.</sub></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Live sessions panel reading No live Blacksmith sessions, then a Recent activity list of system, finding and error events" /><br /><sub><b>Home</b> — what is running, what just happened, and what it costs.</sub></td>
 <td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/activity-desktop-dark.png" width="100%" alt="Activity page: the event log with project and session selectors and kind chips from Prompt to System, showing a coordination.deadlock error at S1-stop-the-line, a judge verdict, a lesson candidate and a cross-provider judge dispatch, grouped by session" /><br /><sub><b>Activity</b> — the append-only log itself, filtered by kind.</sub></td>
 </tr>
 <tr valign="top">
@@ -399,7 +401,7 @@ without ever opening the dashboard.
 </tr>
 <tr valign="top">
 <td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Cost and quality page: tokens per day and in total by role, a table of tokens by role and model tier, cards for tokens per task, repeated mistakes after a lesson, fixes that held on recheck and second-opinion reviewers, and cost per task by provider" /><br /><sub><b>Cost &amp; quality</b> — tokens by role, tier and provider, and whether lessons stop repeats.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-cards-desktop-dark.png" width="100%" alt="Lessons page with Pending review, Approved, Closed and All tabs over three lesson cards, each with a scope chip, the session it was learned from, and how many repeats it has prevented" /><br /><sub><b>Lessons</b> — candidates for your review, and what each lesson prevented.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-cards-desktop-dark.png" width="100%" alt="Lessons page with Pending review, Approved, Closed and All tabs over three lesson cards, each with a scope chip, the session it was learned from, and how many repeats it has prevented" /><br /><sub><b>Lessons</b> — what the factory learned, and what each lesson prevented.</sub></td>
 </tr>
 </table>
 

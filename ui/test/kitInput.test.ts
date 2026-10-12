@@ -1,8 +1,8 @@
-// Input's contract (ds-spec.md §2.1 line 372: "Input / Textarea / Select /
-// RadioGroup | unchanged contract from the old kit (native-element
-// wrappers)"). The old kit has no Input.vue to port from, so it is a plain
-// native-element wrapper (modelValue + ariaLabel, update:modelValue on
-// input) plus <input>'s own type/placeholder.
+// Input's contract (ds-spec.md §2.1 line 372: "Input / Select | unchanged
+// contract from the old kit (native-element wrappers)"). The old kit has no
+// Input.vue to port from, so it is a plain native-element wrapper
+// (modelValue + ariaLabel, update:modelValue on input) plus <input>'s own
+// type/placeholder.
 // Same static source-text style as kitTag.test.ts.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
