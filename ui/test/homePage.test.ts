@@ -16,18 +16,28 @@ describe('HomePage.vue', () => {
   it('is display-only: no Needs-you region above the sections, nothing to act on', () => {
     expect(SRC).not.toMatch(/NeedsYouInbox|fetchInbox|InboxRow|loadInbox/);
     expect(TEMPLATE).not.toMatch(/needs you/i);
-    // Nothing sits between the page header and the Live sessions section.
+    // Only the fact strip sits between the page header and Live sessions.
     const header = TEMPLATE.indexOf('<PageHeader');
     const firstSection = TEMPLATE.indexOf('<section', header);
-    expect(TEMPLATE.slice(firstSection)).toMatch(
-      /^<section[^>]*aria-labelledby="live-sessions-heading"/,
-    );
+    expect(TEMPLATE.slice(firstSection)).toMatch(/^<section[^>]*aria-labelledby="home-facts-h"/);
     const between = TEMPLATE.slice(header, firstSection).replace(/<!--[\s\S]*?-->/g, '');
     expect(between.match(/</g)).toHaveLength(1);
+    const afterFacts = TEMPLATE.indexOf('</section>', firstSection) + '</section>'.length;
+    const next = TEMPLATE.indexOf('<section', afterFacts);
+    expect(TEMPLATE.slice(next)).toMatch(/^<section[^>]*aria-labelledby="live-sessions-heading"/);
+    const gap = TEMPLATE.slice(afterFacts, next).replace(/<!--[\s\S]*?-->/g, '');
+    expect(gap.trim()).toBe('');
   });
 
-  it('lays out the §4.1 sections in order, live sessions first', () => {
+  it('says in its header what the page holds now', () => {
+    expect(TEMPLATE).toMatch(
+      /<PageHeader title="Home" description="What is running and what it costs\." \/>/,
+    );
+  });
+
+  it('lays out the §4.1 sections in order, the fact strip first', () => {
     const order = [
+      '>Right now</h2>',
       '>Live sessions</h2>',
       '>Recent activity</h2>',
       '>Running now</h2>',
@@ -36,6 +46,49 @@ describe('HomePage.vue', () => {
     ].map((marker) => TEMPLATE.indexOf(marker));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('opens with four read-only fact tiles over the active scope (§4.1 item 1)', () => {
+    expect(SRC).toMatch(/import StatTile from '\.\.\/components\/kit\/StatTile\.vue';/);
+    expect(SRC).toMatch(/factStrip\(liveScope\.value, project\.value\)/);
+    expect(SRC).toMatch(/factStripNote\(liveScope\.value\)/);
+    const strip = TEMPLATE.slice(
+      TEMPLATE.indexOf('aria-labelledby="home-facts-h"'),
+      TEMPLATE.indexOf('</section>', TEMPLATE.indexOf('aria-labelledby="home-facts-h"')),
+    );
+    expect(strip).toMatch(/<h2 id="home-facts-h" class="sr-only">Right now<\/h2>/);
+    expect(strip).toMatch(/<dl class="bs-stat-grid">\s*<StatTile\s+v-for="f in facts"/);
+    for (const prop of [
+      ':label="f.label"',
+      ':value="f.value"',
+      ':helper="f.helper"',
+      ':not-known="f.notKnown"',
+      ':floor="f.floor"',
+    ]) {
+      expect(strip).toContain(prop);
+    }
+    // Tiles are not links: nothing in the strip can be clicked.
+    expect(strip).not.toMatch(/RouterLink|<a\b|<button|@click/);
+  });
+
+  it('holds a skeleton in each tile and marks the strip busy while the first answer loads', () => {
+    expect(TEMPLATE).toMatch(
+      /aria-labelledby="home-facts-h"\s+:aria-busy="liveScope === null \? 'true' : undefined"/,
+    );
+    expect(TEMPLATE).toMatch(/<StatTile[^>]*:loading="liveScope === null"/);
+  });
+
+  it('reads Not known with one footnote on error, and counts unread stores under the strip', () => {
+    // factStrip() turns a failed or unmeasured scope into "Not known" tiles,
+    // and the page keeps the last good answer (useActiveScope); the note is
+    // factStripNote()'s one muted line, on error or for an unread store.
+    expect(SRC).toMatch(
+      /activeScope\.value \?\? \(activeScopeSettled\.value \? UNMEASURED : null\)/,
+    );
+    expect(TEMPLATE).toMatch(
+      /<p v-if="factsNote" class="bs-home__quiet">\{\{ factsNote \}\}<\/p>\s*<\/section>/,
+    );
+    expect(TEMPLATE).not.toMatch(/aria-live/);
   });
 
   it('renders Recent activity directly under Live sessions (DS6 PR4, §4.1 point 1b)', () => {

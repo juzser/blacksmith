@@ -7,9 +7,9 @@ const seenInFlight = new Set<string>();
 
 <script setup lang="ts">
 // Home (ds-spec.md §4.1): replaces Overview and Projects. Sections, in
-// order: Live sessions (item 1a), "Recent activity" (point 1b, DS6 PR4),
-// Running now (with Just finished), what the factory decided recently,
-// Budget. The page only reads: a decision is made in the CLI
+// order: the fact strip (item 1), Live sessions (item 1a), "Recent
+// activity" (point 1b, DS6 PR4), Running now (with Just finished), what the
+// factory decided recently, Budget. The page only reads: a decision is made in the CLI
 // (`/bs waivers`, `/bs lessons`), never here. Numbers and sentences come
 // from lib/homeView.ts; this file only lays them out.
 import { Activity, MonitorPlay } from '@lucide/vue';
@@ -24,6 +24,7 @@ import PageHeader from '../components/kit/PageHeader.vue';
 import ProgressRing from '../components/kit/ProgressRing.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
+import StatTile from '../components/kit/StatTile.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
 import { useActiveScope } from '../composables/useActiveScope.js';
 import { useActivityScope } from '../composables/useActivityScope.js';
@@ -52,6 +53,8 @@ import {
   decisionLine,
   decisionTitle,
   decisionsSpanStores,
+  factStrip,
+  factStripNote,
   outlierSentence,
   runningNowCards,
   trackJustFinished,
@@ -91,6 +94,10 @@ const UNMEASURED: ActiveScopeResult = {
   factorySessions: [],
 };
 const liveScope = computed(() => activeScope.value ?? (activeScopeSettled.value ? UNMEASURED : null));
+// The fact strip (§4.1 item 1) reads the same answer. A failed poll keeps the
+// last good one (useActiveScope); with none yet it reads "Not known".
+const facts = computed(() => factStrip(liveScope.value, project.value));
+const factsNote = computed(() => factStripNote(liveScope.value));
 
 const overview = ref<OverviewResult | null>(null);
 const overviewFailed = ref(false);
@@ -256,7 +263,30 @@ function becauseOf(promptId: string) {
 
 <template>
   <div class="bs-home">
-    <PageHeader title="Home" description="What is running, what just happened, and what it costs." />
+    <PageHeader title="Home" description="What is running and what it costs." />
+
+    <!-- ds-spec.md §4.1 item 1: four read-only facts over the live sessions on
+         running epics (GET /api/active-scope). Tiles, not links. -->
+    <section
+      class="bs-home__facts"
+      aria-labelledby="home-facts-h"
+      :aria-busy="liveScope === null ? 'true' : undefined"
+    >
+      <h2 id="home-facts-h" class="sr-only">Right now</h2>
+      <dl class="bs-stat-grid">
+        <StatTile
+          v-for="f in facts"
+          :key="f.label"
+          :label="f.label"
+          :value="f.value"
+          :helper="f.helper"
+          :not-known="f.notKnown"
+          :floor="f.floor"
+          :loading="liveScope === null"
+        />
+      </dl>
+      <p v-if="factsNote" class="bs-home__quiet">{{ factsNote }}</p>
+    </section>
 
     <!-- ds-spec.md §4.1 item 1a: first under the header, one card per live,
          in-scope CLI session (GET /api/cli-sessions). -->

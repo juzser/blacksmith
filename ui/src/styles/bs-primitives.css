@@ -2808,6 +2808,12 @@ a:hover {
   flex-direction: column;
   gap: var(--bs-space-3);
 }
+/* The fact strip (§4.1 item 1): the StatTile grid, then at most one muted line. */
+.bs-home__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
 .bs-home__cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
