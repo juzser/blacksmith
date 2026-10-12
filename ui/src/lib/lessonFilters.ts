@@ -2,9 +2,9 @@
 //
 // Here rather than in LessonsPage.vue because ui/tsconfig.json doesn't
 // type-check .vue files and this repo has no component-test harness, so
-// logic asserted from an SFC is logic nothing can test. What "All" means is exactly that kind of judgement — it used to
-// mean pending + approved, which left a just-rejected lesson in no filter at
-// all (D-220).
+// logic asserted from an SFC is logic nothing can test. What "All" means is
+// exactly that kind of judgement — it used to mean pending + approved, which
+// left a just-rejected lesson in no filter at all (D-220).
 import type { LessonRecord, LessonsResult } from './api.js';
 
 /** Every filter the page offers, in the order it renders them. */
