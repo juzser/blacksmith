@@ -682,6 +682,37 @@ test.describe('Phone: three cramped rows show their time as plain text', () => {
   });
 });
 
+// ds-spec.md §3.1: a touch device keeps its tooltips. With no hover, a tap is
+// how a phone user reads the full time behind "5 min ago". The selected
+// session's "started <time>" stands alone; a Kanban card's time does not, as
+// a tap there opens the task. Everything here is a tap: a mouse click leaves
+// Chrome's pointer on the clicked row, and the hover check it runs when the
+// bubble appears then reads as the pointer leaving the time.
+test.describe('Phone: a tap on a relative time shows the full time', () => {
+  test.use({ hasTouch: true });
+
+  test('sessions: a tap on the started time opens its tooltip until a tap elsewhere', async ({
+    page,
+  }) => {
+    await prepare(page, 'sessions');
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions');
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+    await page.locator('.bs-sessionrow').first().tap();
+    const trigger = page.locator(`${ROSTER_TIME}:visible`);
+    await expect(trigger).toHaveCount(1);
+    const iso = await trigger.locator('time').getAttribute('datetime');
+    await trigger.tap();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toHaveText(absoluteOf(iso ?? ''));
+    await page.waitForTimeout(500);
+    await expect(tooltip).toBeVisible();
+    await page.locator(DETAIL).tap({ position: { x: 4, y: 4 } });
+    await expect(tooltip).toHaveCount(0);
+  });
+});
+
 test.describe('Desktop: the relative times keep their tooltip, and the detail has no Time pair', () => {
   const DESKTOP_TIMES = [
     ['timeline end-column', '/activity', '.bs-timeline-row__ts'],
