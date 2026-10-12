@@ -321,6 +321,25 @@ test.describe('Home: fact strip', () => {
     ],
   };
 
+  // One live session on an epic with no plan tasks and no measured tokens.
+  const quietScope = {
+    ...twoOnOneEpic,
+    liveSessions: 1,
+    activeSessions: 1,
+    agentsRunning: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 2,
+    tasksDone: 0,
+    tasksTotal: 0,
+    epics: twoOnOneEpic.epics.map((e) => ({
+      ...e,
+      tokensSpent: 0,
+      tokensUnmeasured: 2,
+      tasksDone: 0,
+      tasksTotal: 0,
+    })),
+  };
+
   test.beforeEach(async ({ page }) => {
     await stubActiveScope(page, [], twoOnOneEpic);
   });
@@ -340,7 +359,7 @@ test.describe('Home: fact strip', () => {
     await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
     await expect(strip(page).locator('.bs-stat__helper')).toHaveText([
       'Live sessions on a running epic',
-      'Subagents and factory agents; nested ones not counted',
+      'Subagents and factory agents, each counted once',
       'Tokens on the epics these sessions run',
       'Plan tasks on those epics',
     ]);
@@ -442,11 +461,31 @@ test.describe('Home: fact strip', () => {
     expect(scroll.scrollW).toBeLessThanOrEqual(scroll.clientW);
   });
 
+  test('a word in the value slot is quiet; a figure, a zero included, is not', async ({ page }) => {
+    await stubActiveScope(page, [], quietScope);
+    await page.goto('/overview');
+    await expect(values(page)).toHaveText(['1', '0', 'Not measured', 'None']);
+    await expect(values(page).nth(0)).not.toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(1)).not.toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(2)).toHaveClass(/bs-stat__value--nd/);
+    await expect(values(page).nth(3)).toHaveClass(/bs-stat__value--nd/);
+    const weight = (i: number) =>
+      values(page)
+        .nth(i)
+        .evaluate((el) => Number(getComputedStyle(el).fontWeight));
+    expect(await weight(2)).toBeLessThan(await weight(1));
+  });
+
+  // Real figures with a floor ("≥") for the screens; the quiet words get their own shot.
+  const floors = { ...twoOnOneEpic, agentsUnmeasured: 1, tokensUnmeasured: 1 };
   for (const [vpName, theme] of [
     ['desktop', 'light'],
+    ['desktop', 'dark'],
+    ['mobile', 'light'],
     ['mobile', 'dark'],
   ] as const) {
     test(`screenshot fact strip ${vpName}/${theme}`, async ({ page }) => {
+      await stubActiveScope(page, [], floors);
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS[vpName]);
       await page.goto('/overview');
@@ -454,6 +493,24 @@ test.describe('Home: fact strip', () => {
       await shootElement(strip(page), `home-facts-${vpName}-${theme}`);
     });
   }
+
+  test('screenshot fact strip quiet words desktop/light', async ({ page }) => {
+    await stubActiveScope(page, [], quietScope);
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+    await settleForShot(page, strip(page).getByText(unread));
+    await shootElement(strip(page), 'home-facts-quiet-desktop-light');
+  });
+
+  test('screenshot fact strip 800px wide, a 2×2 grid, light', async ({ page }) => {
+    await stubActiveScope(page, [], floors);
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 800, height: 900 });
+    await page.goto('/overview');
+    await settleForShot(page, strip(page).getByText(unread));
+    await shootElement(strip(page), 'home-facts-tablet-light');
+  });
 });
 
 // Recent activity (ds-spec.md §4.1 point 1b): the 8 newest compact
