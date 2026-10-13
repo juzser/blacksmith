@@ -99,8 +99,9 @@ than appearing in it.
 - **Home opens with four facts.** Under the page header, four read-only
   tiles read Active sessions, Agents running, Budget used and Tasks done. All
   four describe one set: the live CLI sessions linked to a running epic.
-  Budget used is the tokens spent on those epics and Tasks done reads "13 of
-  25"; each epic counts once, even when two sessions run it. Agents running
+  Budget used is the tokens those sessions and their subagents used, read
+  from the session transcripts with cache reads left out, and Tasks done reads
+  "13 of 25"; each epic counts once, even when two sessions run it. Agents running
   counts a session's subagents and the factory agents on its epics once
   each, and leaves out subagents nested inside another subagent. The strip follows
   the project filter, reads "Not known" when session data could not be read,

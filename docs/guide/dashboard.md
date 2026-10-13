@@ -93,7 +93,7 @@ only read, never written (a `?session` query still reads the served home alone).
 <td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) —
 what is running and what it costs. Four facts open the page: how many
 sessions are live on a running epic, how many agents are running, the tokens
-spent on those epics, and the plan tasks done out of all. A word such as
+those sessions used (cache reads left out), and the plan tasks done out of all. A word such as
 "None" or "Not measured" reads quiet, a figure bold. Live sessions come next,
 each with its <b>Now</b> and <b>Next</b> lines (a session stopped on you reads
 "Waiting on you"); under them, recent activity, what is running per project,
