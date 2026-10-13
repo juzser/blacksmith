@@ -4,7 +4,21 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, isNotNull, lte, max, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  lt,
+  lte,
+  max,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -2587,10 +2601,22 @@ function causalChain(
  * out, which is the honest answer for a legacy row that recorded neither.
  */
 function epicOfEntry(entry: TimelineEntry): string | null {
-  const fromTaskId = entry.taskId === null ? null : epicOfTaskId(entry.taskId);
+  return epicOf(entry.taskId, entry.payload.epic_id);
+}
+
+/** `epicOfEntry` over the two columns it reads, so a row that was never parsed can answer it too. */
+function epicOf(taskId: string | null, payloadEpic: unknown): string | null {
+  const fromTaskId = taskId === null ? null : epicOfTaskId(taskId);
   if (fromTaskId !== null) return fromTaskId;
-  const fromPayload = entry.payload.epic_id;
-  return typeof fromPayload === 'string' ? fromPayload : null;
+  return typeof payloadEpic === 'string' ? payloadEpic : null;
+}
+
+/** What `promptInEpic` needs to know of one row: its epic reference and the prompt it names. */
+interface EpicFact {
+  sessionId: string;
+  isPrompt: boolean;
+  own: string | null;
+  parent: unknown;
 }
 
 /**
@@ -2606,26 +2632,36 @@ function epicOfEntry(entry: TimelineEntry): string | null {
  * epic-less entries, with both. The `prompts-<uuid>` home log has no entries
  * of its own. Every other epic-less entry is dropped.
  */
-function promptInEpic(
-  entries: readonly TimelineEntry[],
-  epicId: string,
-): (e: TimelineEntry) => boolean {
+function epicMatcher(facts: Iterable<EpicFact>, epicId: string): (e: TimelineEntry) => boolean {
   const sessions = new Set<string>();
-  for (const e of entries) {
-    if (e.eventType !== 'user_prompt' && epicOfEntry(e) === epicId) sessions.add(e.sessionId);
+  for (const f of facts) {
+    if (!f.isPrompt && f.own === epicId) sessions.add(f.sessionId);
   }
   const named = new Set<string>();
-  for (const e of entries) {
-    const own = epicOfEntry(e);
-    if (own !== null ? own !== epicId : !sessions.has(e.sessionId)) continue;
-    const parent = e.payload.parent_prompt_id;
-    if (typeof parent === 'string') named.add(parent);
+  for (const f of facts) {
+    if (f.own !== null ? f.own !== epicId : !sessions.has(f.sessionId)) continue;
+    if (typeof f.parent === 'string') named.add(f.parent);
   }
   return (e) => {
     const own = epicOfEntry(e);
     if (own !== null) return own === epicId;
     return e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId));
   };
+}
+
+function promptInEpic(
+  entries: readonly TimelineEntry[],
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  return epicMatcher(
+    entries.map((e) => ({
+      sessionId: e.sessionId,
+      isPrompt: e.eventType === 'user_prompt',
+      own: epicOfEntry(e),
+      parent: e.payload.parent_prompt_id,
+    })),
+    epicId,
+  );
 }
 
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
@@ -2649,11 +2685,11 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     return chain;
   }
 
+  if (filter.limit !== undefined && filter.limit >= 1)
+    return timelinePage(db, filter, filter.limit);
+
   const eventTypes = filter.eventTypes ?? timelineEventTypes();
-  const conditions = [inArray(eventsRaw.eventType, eventTypes)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
-  if (sessionCond) conditions.push(sessionCond);
-  if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
+  const conditions = scopeConditions(filter, eventTypes);
 
   const rows = inLogOrder(
     db
@@ -2684,9 +2720,33 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   // free (one query already brought them all into memory); a fallback cache
   // handles the rare ancestor outside that set (e.g. a cross-session hop).
   const rowByEventId = new Map(rows.map((row) => [row.eventId, row]));
+  return finishPage(db, page, rowByEventId);
+}
+
+/** The SQL conditions every timeline read shares: event types, session scope, task id. */
+function scopeConditions(filter: TimelineFilter, eventTypes: string[]): SQL[] {
+  const conditions = [inArray(eventsRaw.eventType, eventTypes)];
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
+  if (sessionCond) conditions.push(sessionCond);
+  if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
+  return conditions;
+}
+
+/** `scopedToSessions` for a row already in memory (a decision's parent, fetched by id). */
+function inSessionScope(sessionId: string, scope: Scope): boolean {
+  if (scope.sessionIds !== undefined) return scope.sessionIds.includes(sessionId);
+  return scope.sessionId === undefined || scope.sessionId === sessionId;
+}
+
+/** Fills `nearestPromptId` and the per-row joins on a finished page. `knownRows` answers the causal walk before any lookup by id. */
+function finishPage(
+  db: SmithDb,
+  page: TimelineEntry[],
+  knownRows: ReadonlyMap<string, EventsRawRow>,
+): TimelineEntry[] {
   const ancestorCache = new Map<string, EventsRawRow | null>();
   const getRow = (eventId: string): EventsRawRow | null =>
-    rowByEventId.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
+    knownRows.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
   const promptMemo = new Map<string, string | null>();
   for (const entry of page) {
     entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
@@ -2696,6 +2756,159 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   joinSessionTitles(db, page);
   joinTaskTitles(db, page);
   return page;
+}
+
+/**
+ * The epic filter's two sets for a paged call, from one SQL pass over the same
+ * scoped rows the load-all path would have parsed: each row's task id column
+ * plus `epic_id` and `parent_prompt_id` read out of the payload by SQLite.
+ * Nothing is parsed in JS. Only a JSON string counts, as `epicOfEntry` and
+ * `promptInEpic` require `typeof === 'string'`.
+ */
+function pagedEpicMatcher(
+  db: SmithDb,
+  filter: TimelineFilter,
+  eventTypes: string[],
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  const textAt = (path: string) =>
+    sql<
+      string | null
+    >`case when json_type(${eventsRaw.payload}, ${path}) = 'text' then json_extract(${eventsRaw.payload}, ${path}) end`;
+  const rows = filterByProject(
+    db
+      .select({
+        sessionId: eventsRaw.sessionId,
+        taskId: eventsRaw.taskId,
+        project: eventsRaw.project,
+        eventType: eventsRaw.eventType,
+        epic: textAt('$.epic_id'),
+        parent: textAt('$.parent_prompt_id'),
+      })
+      .from(eventsRaw)
+      .where(and(...scopeConditions(filter, eventTypes)))
+      .all(),
+    filter,
+  );
+  return epicMatcher(
+    rows.map((r) => ({
+      sessionId: r.sessionId,
+      isPrompt: r.eventType === 'user_prompt',
+      own: epicOf(r.taskId, r.epic),
+      parent: r.parent,
+    })),
+    epicId,
+  );
+}
+
+/**
+ * The paged read: keyset windows over `events_raw` instead of the whole table.
+ *
+ * A before call reads `ORDER BY ts DESC` from the cursor's ts, an after call
+ * `ORDER BY ts ASC`. The SQL cursor bound is inclusive and the exact cursor
+ * test is the same `compareLogOrder` the load-all path uses, so the rows that
+ * tie with the cursor reach JS and are split there. A window that hits its LIMIT
+ * also reads the rest of its last ts's tie group before ordering, and the next
+ * window starts strictly beyond that ts, so SQLite's physical order of tied
+ * rows never decides which of them a page holds. Rows are parsed only after
+ * the raw-column filters, in order, and only until the page is full.
+ */
+function timelinePage(db: SmithDb, filter: TimelineFilter, limit: number): TimelineEntry[] {
+  const newestFirst = filter.after === undefined;
+  const before = filter.before === undefined ? undefined : resolveCursor(db, filter.before);
+  const after = filter.after === undefined ? undefined : resolveCursor(db, filter.after);
+
+  const eventTypes = filter.eventTypes ?? timelineEventTypes();
+  // eventKind ignores its payload, so a kind is a set of event types.
+  const kinds = filter.kinds?.length ? new Set(filter.kinds) : undefined;
+  const pageTypes = kinds ? eventTypes.filter((t) => kinds.has(eventKind(t, {}))) : eventTypes;
+  const base = scopeConditions(filter, pageTypes);
+  if (pageTypes.length === 0) return [];
+  if (before) base.push(lte(eventsRaw.ts, before.ts));
+  if (after) base.push(gte(eventsRaw.ts, after.ts));
+
+  const inEpic = filter.epicId
+    ? pagedEpicMatcher(db, filter, eventTypes, filter.epicId)
+    : undefined;
+  const pageTypeSet = new Set(pageTypes);
+  const seenRows = new Map<string, EventsRawRow>();
+  const parentCache = new Map<string, EventsRawRow | null>();
+  const getRow = (eventId: string): EventsRawRow | null =>
+    seenRows.get(eventId) ?? fetchEventRow(db, eventId, parentCache);
+  const project = scopeProject(filter);
+
+  // A dispatch's parent is looked up by id and must pass the same filters the
+  // load-all path applied before its lens ran.
+  const decisionMemo = new Map<string, boolean>();
+  const isDecisionId = (id: unknown): boolean => {
+    if (typeof id !== 'string') return false;
+    const known = decisionMemo.get(id);
+    if (known !== undefined) return known;
+    const row = getRow(id);
+    let answer = false;
+    if (
+      row &&
+      pageTypeSet.has(row.eventType) &&
+      inSessionScope(row.sessionId, filter) &&
+      (!filter.taskId || row.taskId === filter.taskId) &&
+      (project === undefined || projectOf(row.project) === project)
+    ) {
+      const entry = toEntry(row, null);
+      answer = (!inEpic || inEpic(entry)) && isDecisionEntry(entry);
+    }
+    decisionMemo.set(id, answer);
+    return answer;
+  };
+  const passesLens = (e: TimelineEntry): boolean => {
+    if (isDecisionEntry(e)) return true;
+    if (e.eventType !== 'dispatch_decision') return false;
+    return isDecisionId(e.payload.parent_prompt_id) || isDecisionId(e.causalParent);
+  };
+
+  const kept: TimelineEntry[] = [];
+  let lastTs: string | undefined;
+  while (kept.length < limit) {
+    const conditions = [...base];
+    if (lastTs !== undefined) {
+      conditions.push(newestFirst ? lt(eventsRaw.ts, lastTs) : gt(eventsRaw.ts, lastTs));
+    }
+    const rows = db
+      .select()
+      .from(eventsRaw)
+      .where(and(...conditions))
+      .orderBy(newestFirst ? desc(eventsRaw.ts) : asc(eventsRaw.ts))
+      .limit(limit + 1)
+      .all();
+    const full = rows.length > limit;
+    if (full) {
+      // Complete the tie group of the window's last row before ordering it.
+      const tieTs = (rows[rows.length - 1] as EventsRawRow).ts;
+      const have = new Set(rows.map((r) => r.eventId));
+      const rest = db
+        .select()
+        .from(eventsRaw)
+        .where(and(...conditions, eq(eventsRaw.ts, tieTs)))
+        .all();
+      for (const r of rest) if (!have.has(r.eventId)) rows.push(r);
+      lastTs = tieTs;
+    }
+    for (const r of rows) seenRows.set(r.eventId, r);
+
+    let window = filterByProject(rows, filter);
+    if (before) window = window.filter((r) => compareLogOrder(r, before) < 0);
+    if (after) window = window.filter((r) => compareLogOrder(r, after) > 0);
+    window = inLogOrder(window);
+    if (newestFirst) window.reverse();
+    for (const row of window) {
+      if (kept.length >= limit) break;
+      const entry = toEntry(row, null);
+      if (inEpic && !inEpic(entry)) continue;
+      if (filter.decisionsOnly && !passesLens(entry)) continue;
+      kept.push(entry);
+    }
+    if (!full) break;
+  }
+  return finishPage(db, newestFirst ? kept : kept.reverse(), seenRows);
 }
 
 /** Fills `taskTitle` on every entry in `page`: one lookup for the page's task ids. */
