@@ -430,8 +430,8 @@ above, `event_type` is a free string in event.schema.json, not a closed
 §8 vocabulary value.
 
 Phase 6a addition (same free-string precedent): `lesson-edited`, written
-immediately before a `lesson-status-changed` to `approved` (§10's Lessons page —
-"the edit is folded into a single 'Save & approve' commit"). Payload carries
+immediately before a `lesson-status-changed` to `approved` (an approval with
+an edit goes through the `/bs lessons` verbs, not the dashboard). Payload carries
 only the fields the operator changed (`lesson_id` plus any of
 `statement`/`lesson_type`/`lesson_scope`); `db/projector.ts`'s `foldLessons()`
 merges them onto the existing candidate row. Both events come from
