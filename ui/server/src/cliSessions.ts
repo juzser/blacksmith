@@ -556,6 +556,8 @@ interface SubTail extends EndMarks {
   promptAt: number | null;
   /** The earliest dated record in the tail; null if none is dated. */
   tailFrom: number | null;
+  /** The latest dated assistant record in the tail; null if none is dated. */
+  assistantAt: number | null;
 }
 
 /**
@@ -582,6 +584,7 @@ function analyseSub(entries: Record<string, unknown>[]): SubTail {
   let lastKey: unknown = null;
   let promptAt: number | null = null;
   let tailFrom: number | null = null;
+  let assistantAt: number | null = null;
   for (const e of entries) {
     const at = recordTime(e);
     if (Number.isFinite(at) && (tailFrom === null || at < tailFrom)) tailFrom = at;
@@ -592,6 +595,7 @@ function analyseSub(entries: Record<string, unknown>[]): SubTail {
       continue;
     }
     if (e.type !== 'assistant') continue;
+    if (Number.isFinite(at) && (assistantAt === null || at > assistantAt)) assistantAt = at;
     const id = (e.message as { id?: unknown } | undefined)?.id;
     const key = typeof id === 'string' && id !== '' ? id : {};
     const blocks = blocksOf(e);
@@ -606,6 +610,7 @@ function analyseSub(entries: Record<string, unknown>[]): SubTail {
     textOnly: last !== null && calls.length === 0,
     promptAt,
     tailFrom,
+    assistantAt,
   };
 }
 
@@ -1440,7 +1445,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
    * ended by its parent (a notification, or the result of the call that
    * launched it) with no write since, and either wrote within the stale
    * window or has a running child. A subagent its parent reported killed or
-   * stopped ends its children too. Plus main-thread launches that have no transcript there
+   * stopped ends its descendants too, save one started or prompted after the
+   * kill. Plus main-thread launches that have no transcript there
    * yet. `main` is the session's transcript as findTranscript resolved it.
    * Null when the transcript could not be read.
    */
@@ -1502,49 +1508,50 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     const marksOf = (parent: string | null) =>
       parent === null ? a.ends : (infos.get(parent)?.tail ?? null);
     /**
-     * A mark holds only while the subagent's file was not written after it
-     * (plus a little slack for late trailing writes): a subagent resumed after
-     * it ended writes to the same file again.
+     * A mark holds unless the file's mtime is past the mark plus the slack, and then either a
+     * prompt follows the mark, or the tail is cut after the mark and holds assistant work after it.
      */
     const holds = (markedAt: number | undefined, id: string): boolean => {
       if (markedAt === undefined) return false;
       const info = infos.get(id);
       if (info === undefined || info.mtimeMs <= markedAt + END_MARK_SLACK_MS) return true;
-      // A late write alone is not a resume: the tail must show a new prompt
-      // after the mark, or no longer reach back to it (the prompt may be cut off).
-      const { promptAt, tailFrom } = info.tail;
+      // A late write alone is not a resume: a killed subagent still writes tool
+      // results and the interrupt marker, but no assistant record.
+      const { promptAt, tailFrom, assistantAt } = info.tail;
       const prompted = promptAt !== null && promptAt > markedAt;
-      const cutOff = tailFrom !== null && tailFrom > markedAt;
+      const cutOff =
+        tailFrom !== null &&
+        tailFrom > markedAt &&
+        assistantAt !== null &&
+        assistantAt > markedAt + END_MARK_SLACK_MS;
       return !(prompted || cutOff);
     };
-    const spreadMemo = new Map<string, boolean>();
     /**
-     * Killed or stopped by a notification from its parent, or under a parent
-     * that was: a killed subagent's children go with it. A subagent that
-     * completed or failed may leave background children running.
+     * Killed or stopped by a notification, itself or any ancestor: a kill ends
+     * the whole subtree. Each kill is checked against this subagent's own file,
+     * so a child started or prompted after it survives, and one killed with its
+     * parent stays ended when that parent is woken. A subagent that completed
+     * or failed may leave background children running.
      */
     const killedEnded = (id: string): boolean => {
-      const cached = spreadMemo.get(id);
-      if (cached !== undefined) return cached;
-      spreadMemo.set(id, false); // a cycle in the parent links ends nothing
-      const parent = infos.get(id)?.meta?.parentId ?? null;
-      const result =
-        holds(marksOf(parent)?.killedAt.get(id), id) ||
-        (parent !== null && infos.has(parent) && killedEnded(parent));
-      spreadMemo.set(id, result);
-      return result;
+      const seen = new Set<string>(); // a cycle in the parent links ends nothing more
+      let cur: string | null = id;
+      while (cur !== null && infos.has(cur) && !seen.has(cur)) {
+        seen.add(cur);
+        const parent: string | null = infos.get(cur)?.meta?.parentId ?? null;
+        if (holds(marksOf(parent)?.killedAt.get(cur), id)) return true;
+        cur = parent;
+      }
+      return false;
     };
     /**
-     * Reported ended by a notification from its parent, or under a parent that
-     * was killed. A parent's own hand-back or call result does not reach its
-     * children.
+     * Reported ended by a notification from its parent, or under an ancestor
+     * that was killed. A parent's own hand-back or call result does not reach
+     * its children.
      */
     const notifiedEnded = (id: string): boolean => {
       const parent = infos.get(id)?.meta?.parentId ?? null;
-      return (
-        holds(marksOf(parent)?.endedAt.get(id), id) ||
-        (parent !== null && infos.has(parent) && killedEnded(parent))
-      );
+      return holds(marksOf(parent)?.endedAt.get(id), id) || killedEnded(id);
     };
     const now = clock();
     const memo = new Map<string, boolean>();

@@ -954,8 +954,75 @@ describe('cliSessions reader', () => {
           it('does not end a child for a parent resumed after it was killed', async () => {
             await start([user('go'), launchRec('ag1'), endAt('ag1', 'killed', T('11:50'))]);
             await sub('ag1', [...working(), stamped(user('again'), T('11:52'))]);
-            await sub('ag2', working(), child);
+            // Spawned by the resumed run: its first prompt follows the wake.
+            await sub('ag2', working(T('11:53')), child);
             expect(await running()).toBe(2);
+          });
+        });
+
+        describe('children killed with a parent that is woken later', () => {
+          const child = { parentAgentId: 'ag1', spawnDepth: 2 };
+          const grandchild = { parentAgentId: 'ag2', spawnDepth: 3 };
+          const at = (hms: string) => Date.parse(`2026-10-06T${hms}.000Z`);
+          const runningAt = async (clock: number) =>
+            must((await read({ clock: () => clock })).sessions[0]).subagentsRunning;
+          const killed = () => [
+            user('go'),
+            launchRec('ag1'),
+            { ...notifyRec('ag1', 'killed', true), timestamp: T('11:50') },
+          ];
+          /** ag1's run, woken by a new prompt two minutes after the kill. */
+          const woken = () => [...working(), stamped(user('again'), T('11:52'))];
+          /** A run whose last write came just before the kill. */
+          const quiet = () => [...working(), stamped(toolResult('b1'), '2026-10-06T11:49:58.000Z')];
+
+          it('keeps a child that last wrote before the kill ended', async () => {
+            await start(killed());
+            await sub('ag1', woken(), {}, at('11:54:00'));
+            await sub('ag2', quiet(), child, at('11:49:58'));
+            expect(await runningAt(at('11:55:00'))).toBe(1);
+          });
+
+          it('counts a child the woken parent spawned after the wake', async () => {
+            await start(killed());
+            await sub('ag1', woken(), {}, at('11:54:00'));
+            await sub('ag2', quiet(), child, at('11:49:58'));
+            await sub('ag3', working(T('11:53')), child, at('11:54:30'));
+            expect(await runningAt(at('11:55:00'))).toBe(2);
+          });
+
+          /** The middle subagent's run, its file's mtime, and the count expected. */
+          const parents: [string, unknown[], number, number][] = [
+            ['stayed quiet since before the kill', quiet(), at('11:49:58'), 1],
+            [
+              'was woken after it too',
+              [...quiet(), stamped(user('go on'), T('11:53'))],
+              at('11:54:00'),
+              2,
+            ],
+          ];
+
+          it.each(parents)(
+            'keeps a grandchild that last wrote before the kill ended when its parent %s',
+            async (_, parentRun, parentMtime, n) => {
+              await start(killed());
+              await sub('ag1', woken(), {}, at('11:54:00'));
+              await sub('ag2', parentRun, child, parentMtime);
+              await sub('ag3', quiet(), grandchild, at('11:49:58'));
+              expect(await runningAt(at('11:55:00'))).toBe(n);
+            },
+          );
+
+          it('ends the whole subtree for a kill with no time, however fresh', async () => {
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'killed', true), timestamp: undefined },
+            ]);
+            await sub('ag1', woken(), {}, at('11:54:00'));
+            await sub('ag2', working(T('11:53')), child, at('11:54:00'));
+            await sub('ag3', working(T('11:53')), grandchild, at('11:54:00'));
+            expect(await runningAt(at('11:55:00'))).toBe(0);
           });
         });
 
@@ -1014,17 +1081,60 @@ describe('cliSessions reader', () => {
           it.each(ends)('counts it after %s once a new prompt follows', async (_, main) => {
             await start(main());
             await sub('ag1', [...working(), prompt()], {}, lateMtime);
-            await sub('ag2', working(), child);
+            // Spawned by the resumed run: its first prompt follows the wake.
+            await sub('ag2', working(T('11:58')), child);
             expect(await running()).toBe(2);
           });
 
-          it('counts it when the tail no longer reaches back to the mark', async () => {
+          /** A record big enough that 80 of them overflow the 256 KiB tail window. */
+          const bulky = 'x'.repeat(4096);
+          const bigResult = (id: string) => ({
+            type: 'user',
+            message: {
+              role: 'user',
+              content: [{ type: 'tool_result', tool_use_id: id, content: bulky }],
+            },
+          });
+
+          it('does not count a killed subagent, or its child, for a late flood with no prompt', async () => {
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'killed', true), timestamp: T('11:50') },
+            ]);
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                ...Array.from({ length: 80 }, (_, i) => stamped(bigResult(`b${i}`), T('11:51'))),
+                stamped(user('[Request interrupted by user]'), T('11:51')),
+              ],
+              {},
+              lateMtime,
+            );
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(0);
+          });
+
+          it('counts a completed subagent woken by a prompt the tail no longer reaches', async () => {
             await start([
               user('go'),
               launchRec('ag1'),
               { ...notifyRec('ag1', 'completed', true), timestamp: T('11:50') },
             ]);
-            await sub('ag1', working(T('11:57')), {}, lateMtime);
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                stamped(user('again'), T('11:51')),
+                ...Array.from({ length: 40 }, (_, i) => [
+                  stamped(asst(toolUse('Bash', `c${i}`, { command: bulky })), T('11:52')),
+                  stamped(bigResult(`c${i}`), T('11:52')),
+                ]).flat(),
+              ],
+              {},
+              lateMtime,
+            );
             expect(await running()).toBe(1);
           });
         });
