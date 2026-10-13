@@ -353,6 +353,8 @@ function specsToIngest(plan: PlanFile): TaskSpecRecord[] {
  * Ids the log has reinstated (a `task-reinstated` after their last
  * `task-superseded`) that no amendment maps to a successor — the exact shape
  * `reinstateTask` repairs, which ingest must not supersede a second time.
+ * A `task-reinstated` that follows no supersede corrects nothing, as in the
+ * projector, and successor keys match the way `reinstateTask` matches them.
  */
 async function reinstatedWithoutSuccessor(
   epicId: string,
@@ -360,17 +362,24 @@ async function reinstatedWithoutSuccessor(
   opts: EventOpts,
 ): Promise<Set<string>> {
   const events = await readLineageEvents(ctx.sessionId, opts);
+  const dead = new Set<string>();
   const reinstated = new Set<string>();
   for (const { record } of events) {
     if (!record.task_id) continue;
-    if (record.event_type === 'task-reinstated') reinstated.add(record.task_id);
-    else if (record.event_type === 'task-superseded') reinstated.delete(record.task_id);
+    if (record.event_type === 'task-superseded') {
+      dead.add(record.task_id);
+      reinstated.delete(record.task_id);
+    } else if (record.event_type === 'task-reinstated' && dead.delete(record.task_id)) {
+      reinstated.add(record.task_id);
+    }
   }
   if (reinstated.size === 0) return reinstated;
   // Dynamic: spec.ts imports this module, so a static import would be a cycle.
   const { taskSuccessors } = await import('./spec.js');
-  const successors = taskSuccessors(events, epicId);
-  for (const id of [...reinstated]) if (successors.has(id)) reinstated.delete(id);
+  const replaced = [...taskSuccessors(events, epicId).keys()];
+  for (const id of [...reinstated]) {
+    if (replaced.some((from) => taskIdsMatch(from, id))) reinstated.delete(id);
+  }
   return reinstated;
 }
 
@@ -392,7 +401,7 @@ async function pendingIngest(
 ): Promise<PendingIngest[]> {
   const added = await addedPlanVersions(ctx, opts);
   const superseded = await idsAlreadyEmitted('task-superseded', ctx, opts);
-  const owed = await reinstatedWithoutSuccessor(plan.epic_id, ctx, opts);
+  const keepReinstated = await reinstatedWithoutSuccessor(plan.epic_id, ctx, opts);
   const pending: PendingIngest[] = [];
 
   // The ids the plan marks as superseded-and-replaced: a dead record beside a
@@ -430,7 +439,11 @@ async function pendingIngest(
     // #457. A reinstated task stays reinstated unless the log maps it to a
     // successor: the plan that caused the bad supersede still holds it as dead
     // copies only, and owing the supersede again would undo the repair.
-    if (task.task_status === 'superseded' && !superseded.has(taskId) && !owed.has(taskId)) {
+    if (
+      task.task_status === 'superseded' &&
+      !superseded.has(taskId) &&
+      !keepReinstated.has(taskId)
+    ) {
       pending.push({ task, eventType: 'task-superseded' });
     }
   }
