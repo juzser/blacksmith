@@ -7,6 +7,7 @@ import {
   type StoredEvent,
 } from './events.js';
 import type { EventContext } from './findings.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
 import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { honouredReinstatements } from './taskLifecycle.js';
@@ -294,7 +295,7 @@ export async function readAddedTasks(
   ctx: Pick<TaskEventContext, 'sessionId'>,
   opts: EventOpts = {},
 ): Promise<AddedTask[]> {
-  const events = await readLineageEvents(ctx.sessionId, opts);
+  const events = await readLineage(ctx.sessionId, opts);
   const byId = new Map<string, AddedTask>();
   for (const { record } of events) {
     if (record.event_type !== 'task-added' || !record.task_id) continue;
@@ -787,7 +788,7 @@ export async function emitFollowUpTask(
   ctx: TaskEventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent | null> {
-  const lineage = await readLineageEvents(ctx.sessionId, opts);
+  const lineage = await readLineage(ctx.sessionId, opts);
   if (
     lineage.some(
       ({ record }) => record.event_type === 'task-added' && record.task_id === input.taskId,
@@ -804,7 +805,7 @@ export async function emitFollowUpTask(
   // than picking one.
   const project = ctx.project ?? fromTaskProject(lineage, input.fromTaskId);
 
-  return appendEvent(
+  return appendTracked(
     envelope(
       project === undefined ? ctx : { ...ctx, project },
       'task-added',

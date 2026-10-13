@@ -11,7 +11,7 @@ import { type CommitCertificate, certifyCommit } from './commit.js';
 import { type CoverageEvidence, collectCoverageEvidence } from './coverage.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { DiffstatError, measureDiff } from './diffstat.js';
-import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
+import type { EventOpts, StoredEvent } from './events.js';
 import {
   type Finding,
   findingScope,
@@ -22,6 +22,7 @@ import {
 } from './findings.js';
 import { runGit } from './git.js';
 import { type JudgeTurn, outstandingJudges, readJudgeTurns } from './judges.js';
+import { appendTracked, beginLineageRun, endLineageRun, readLineage } from './lineageSnapshot.js';
 import type { JudgeBudget } from './providers/types.js';
 import {
   enabledExternalProviders,
@@ -310,7 +311,7 @@ async function emit(
   ctx: GateContext,
   opts: EventOpts,
 ): Promise<StoredEvent> {
-  return appendEvent(
+  return appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
@@ -384,7 +385,7 @@ async function recordResult(
   opts: EventOpts,
 ): Promise<{ eventId: string; deduped: boolean }> {
   const hash = resultHash(result);
-  const events = await readLineageEvents(ctx.sessionId, opts);
+  const events = await readLineage(ctx.sessionId, opts);
   for (const { event_id, record } of events) {
     if (record.event_type !== TASK_RESULT_EVENT_TYPE) continue;
     // Matched, not compared: the same task reaches the log under both
@@ -1170,6 +1171,21 @@ export async function runGate(
   input: GateInput,
   ctx: GateContext,
   opts: EventOpts = {},
+): Promise<GateOutcome> {
+  // The lineage is read and folded once per run: every stage below reads this
+  // run's snapshot, which closes with the run.
+  beginLineageRun(opts);
+  try {
+    return await runGateStages(input, ctx, opts);
+  } finally {
+    endLineageRun(opts);
+  }
+}
+
+async function runGateStages(
+  input: GateInput,
+  ctx: GateContext,
+  opts: EventOpts,
 ): Promise<GateOutcome> {
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
 
