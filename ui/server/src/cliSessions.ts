@@ -12,6 +12,11 @@
 //   read only in bounded slices (tail 256 KB, one retry at 1 MB, head 64 KB,
 //   never a whole-file read) behind a (path, size, mtime) cache, so an
 //   unchanged session costs one stat. Nothing from a transcript is logged.
+// - the same transcript in full plus `<transcript without .jsonl>/subagents/agent-*.jsonl`
+//   (never the `.meta.json` siblings), scanned once for the tokens of each
+//   assistant response (cache reads left out) in 8 MB chunks, then only from
+//   the end of the last complete line when the file grows. Lines without the
+//   bytes `"usage"` are skipped undecoded; only the sum is kept.
 // - `<configDir>/history.jsonl`, the CLI's prompt history, for the operator's
 //   last prompt per session once it scrolled out of the transcript tail. Tail
 //   1 MB through the same bounded read, same cache; only `display` and
@@ -189,6 +194,13 @@ export interface CliSessionCard {
    * transcript tail are not seen. Null when the transcript could not be read.
    */
   subagentsRunning: number | null;
+  /**
+   * Tokens the whole transcript and its subagents used: input, cache creation
+   * and output, each response once; cache reads are left out. `complete` is
+   * false when a subagent file could not be read (the rest still counts).
+   * Null when the main transcript is missing or unreadable.
+   */
+  tokens: { used: number; complete: boolean } | null;
   linked: { epics: LinkedEpic[] } | null;
   parseIssues: string[];
 }
@@ -233,6 +245,11 @@ const TAIL_BYTES = 256 * 1024;
 const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
 const HISTORY_BYTES = 1024 * 1024;
+const TOKEN_CHUNK_BYTES = 8 * 1024 * 1024;
+/** A single transcript line longer than this is not read: the file counts as unreadable. */
+const TOKEN_LINE_MAX = 256 * 1024 * 1024;
+const SUBAGENT_FILE = /^agent-[A-Za-z0-9_-]+\.jsonl$/;
+const USAGE_BYTES = Buffer.from('"usage"');
 const TEXT_MAX = 280;
 const FOCUS_TITLE_MAX = 90;
 const VERSION_MAX = 32;
@@ -776,6 +793,13 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     string,
     { size: number; mtimeMs: number; read: TranscriptRead }
   >();
+  /** Per transcript file: what the token scan has consumed up to `offset` (end of the last whole line). */
+  const tokenCache = new Map<
+    string,
+    { size: number; mtimeMs: number; offset: number; total: number; seen: Set<string> }
+  >();
+  /** Session id -> the transcript files its token count was made of. */
+  const tokenFiles = new Map<string, string[]>();
   /** Session id -> until when a full search for its transcript is not repeated. */
   const missUntil = new Map<string, number>();
   let worktrees: { at: number; dirs: string[] } | null = null;
@@ -918,9 +942,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const [id, pid] of pidFileOf) {
       if (!live.has(id) && !unparsedPids.has(pid)) pidFileOf.delete(id);
     }
-    for (const m of [sticky, transcriptPaths, missUntil, lastPrompt]) {
+    for (const m of [sticky, transcriptPaths, missUntil, lastPrompt, tokenFiles]) {
       for (const id of m.keys()) if (!pidFileOf.has(id)) m.delete(id);
     }
+    const counted = new Set([...tokenFiles.values()].flat());
+    for (const file of tokenCache.keys()) if (!counted.has(file)) tokenCache.delete(file);
     const files = new Set(transcriptPaths.values());
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
   }
@@ -959,6 +985,114 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     } catch {
       return { state: 'unreadable', analysis: null, headBs: false };
     }
+  }
+
+  /** Adds the tokens of every complete line in `buf[0, end)` that carries usage. */
+  function addUsage(buf: Buffer, end: number, into: { total: number; seen: Set<string> }): void {
+    let from = 0;
+    while (from < end) {
+      const hit = buf.indexOf(USAGE_BYTES, from);
+      if (hit === -1 || hit >= end) return;
+      const lineStart = buf.lastIndexOf(10, hit) + 1;
+      let lineEnd = buf.indexOf(10, hit);
+      if (lineEnd === -1 || lineEnd > end) lineEnd = end;
+      from = lineEnd + 1;
+      let j: unknown;
+      try {
+        j = JSON.parse(buf.toString('utf8', lineStart, lineEnd));
+      } catch {
+        continue;
+      }
+      if (typeof j !== 'object' || j === null) continue;
+      const rec = j as { type?: unknown; requestId?: unknown; message?: unknown };
+      if (rec.type !== 'assistant') continue;
+      const msg = rec.message as { id?: unknown; usage?: unknown } | null | undefined;
+      const u = msg?.usage as Record<string, unknown> | null | undefined;
+      if (typeof msg !== 'object' || msg === null || typeof u !== 'object' || u === null) continue;
+      if (typeof msg.id === 'string') {
+        const key = `${msg.id}\u0000${typeof rec.requestId === 'string' ? rec.requestId : ''}`;
+        if (into.seen.has(key)) continue;
+        into.seen.add(key);
+      }
+      for (const k of ['input_tokens', 'cache_creation_input_tokens', 'output_tokens']) {
+        const n = u[k];
+        if (typeof n === 'number' && Number.isFinite(n)) into.total += n;
+      }
+    }
+  }
+
+  /** The tokens of one transcript file, scanning only what is new. Throws when it cannot be read. */
+  async function scanTokens(file: string): Promise<number> {
+    const st = await fs.stat(file);
+    let c = tokenCache.get(file);
+    if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) return c.total;
+    // A file smaller than what was consumed was replaced: start over.
+    if (!c || st.size < c.offset) {
+      c = { size: 0, mtimeMs: 0, offset: 0, total: 0, seen: new Set() };
+      tokenCache.set(file, c);
+    }
+    if (!(await fs.lstat(file)).isFile()) throw new Error('not a regular file');
+    const fh = await fs.open(file);
+    try {
+      let chunk = TOKEN_CHUNK_BYTES;
+      while (c.offset < st.size) {
+        const len = Math.min(chunk, st.size - c.offset);
+        const buf = Buffer.alloc(len);
+        const { bytesRead } = await fh.read(buf, 0, len, c.offset);
+        const last = buf.subarray(0, bytesRead).lastIndexOf(10);
+        if (last === -1) {
+          // No whole line yet: a file that ends in a partial line waits for it;
+          // a line longer than the chunk is read again with a larger one.
+          if (c.offset + bytesRead >= st.size) break;
+          if (chunk >= TOKEN_LINE_MAX) throw new Error('line too long');
+          chunk *= 2;
+          continue;
+        }
+        addUsage(buf, last, c);
+        c.offset += last + 1;
+      }
+    } catch (err) {
+      tokenCache.delete(file);
+      throw err;
+    } finally {
+      await fh.close();
+    }
+    c.size = st.size;
+    c.mtimeMs = st.mtimeMs;
+    return c.total;
+  }
+
+  async function tokensOf(configDir: string, e: RegistryEntry): Promise<CliSessionCard['tokens']> {
+    const main = await findTranscript(configDir, e);
+    if (main === null) return null;
+    let used: number;
+    try {
+      used = await scanTokens(main);
+    } catch {
+      tokenFiles.delete(e.cliSessionId);
+      return null;
+    }
+    const files = [main];
+    let complete = true;
+    const dir = path.join(main.replace(/\.jsonl$/, ''), 'subagents');
+    let names: string[] = [];
+    try {
+      names = await fs.readdir(dir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') complete = false;
+    }
+    for (const name of names.filter((n) => SUBAGENT_FILE.test(n))) {
+      const f = path.join(dir, name);
+      files.push(f);
+      try {
+        used += await scanTokens(f);
+      } catch {
+        complete = false;
+      }
+    }
+    tokenFiles.set(e.cliSessionId, files);
+    return { used, complete };
   }
 
   /**
@@ -1691,6 +1825,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
         subagentsRunning: subagentsRunningOf(e, t),
+        tokens: await tokensOf(deps.configDir, e),
         linked,
         parseIssues: e.parseIssues,
       });
