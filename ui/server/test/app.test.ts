@@ -1841,7 +1841,7 @@ describe('GET /api/cli-sessions', () => {
     }
   });
 
-  it('its tokens are overview tokensByEpic and its tasks the linked epic progress', async () => {
+  it('its tokens are the larger of overview tokensByEpic and the transcripts, its tasks the linked epic progress', async () => {
     const handle = serve();
     try {
       const headers = { host: '127.0.0.1:4680' };
@@ -1872,8 +1872,9 @@ describe('GET /api/cli-sessions', () => {
       const total = (progress?.done ?? 0) + (progress?.review ?? 0);
       const open = (progress?.inProgress ?? 0) + (progress?.todo ?? 0);
       expect(scope).toMatchObject({
+        // The session here has no transcript, so the factory figure is the larger.
         tokensSpent: spend?.tokensSpent,
-        tokensUnmeasured: spend?.unmeasured,
+        tokensUnmeasured: 1,
         tasksDone: progress?.done,
         tasksTotal: total + open,
       });
