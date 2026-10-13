@@ -62,7 +62,6 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     epicsIdle: [],
     closedEpics: [],
     tokensByEpic: [],
-    alerts: { escalations: 0, pendingWaivers: 0 },
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
@@ -132,7 +131,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: 10_300_000,
           unmeasured: 0,
           tokensByEpic: [epic('shop-1', 5_000_000, 10_300_000), epic('shop-old', 5_600_000, null)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           project: 'idle',
@@ -145,7 +143,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: null,
           unmeasured: 0,
           tokensByEpic: [],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           // F1: an epic whose only open task is escalated stays in
@@ -161,7 +158,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: null,
           unmeasured: 0,
           tokensByEpic: [],
-          alerts: { escalations: 1, pendingWaivers: 0 },
         },
       ],
     });
@@ -204,7 +200,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
       tokensBudget: null,
       unmeasured: 0,
       tokensByEpic: [],
-      alerts: { escalations: 0, pendingWaivers: 0 },
       ...over,
     };
   }
@@ -309,7 +304,6 @@ describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
       tokensBudget: null,
       unmeasured: 0,
       tokensByEpic: epics.map((e) => epic(e, 10, 100)),
-      alerts: { escalations: 0, pendingWaivers: 0 },
     };
   }
   function scope(
@@ -495,7 +489,6 @@ describe('lib/homeView.ts budgetPanel()', () => {
           tokensBudget: 100,
           unmeasured: 0,
           tokensByEpic: [epic('epic-a', 10, 100)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           project: 'project-b',
@@ -508,7 +501,6 @@ describe('lib/homeView.ts budgetPanel()', () => {
           tokensBudget: 200,
           unmeasured: 0,
           tokensByEpic: [epic('epic-b', 20, 200)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
       ],
     });

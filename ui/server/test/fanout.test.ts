@@ -20,7 +20,6 @@ const part = (id: string, over: Record<string, unknown>) => ({
     epicsIdle: [],
     closedEpics: [],
     tokensByEpic: [],
-    alerts: { escalations: 0, pendingWaivers: 0 },
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
@@ -31,6 +30,11 @@ const part = (id: string, over: Record<string, unknown>) => ({
 });
 
 describe('mergeOverview order', () => {
+  it('carries no alerts key', () => {
+    const merged = mergeOverview([part('a-store', {}), part('b-store', {})]);
+    expect('alerts' in merged).toBe(false);
+  });
+
   it('sorts live agent entries newest dispatch first, store id breaking a tie', () => {
     const entry = (id: string, dispatchedAt: string) => ({ id, dispatchedAt });
     const merged = mergeOverview([

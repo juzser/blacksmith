@@ -37,7 +37,6 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
     epicsIdle: [],
     closedEpics,
     tokensByEpic: [],
-    alerts: { escalations: 0, pendingWaivers: 0 },
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
