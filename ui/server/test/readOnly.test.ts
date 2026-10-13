@@ -103,6 +103,51 @@ describe('ui/server is read-only', () => {
     });
   });
 
+  describe('the request checks cover the whole /api prefix', () => {
+    const readPaths = (handle: AppHandle): string[] => {
+      const paths = handle.app.routes
+        .filter((r) => r.method === 'GET' && r.path.startsWith('/api/') && !r.path.includes('*'))
+        .map((r) => r.path.replace(/:[^/]+/g, 'epic-a'));
+      return [...new Set(paths)];
+    };
+
+    it('every GET route under /api refuses a non-loopback request host', async () => {
+      await withApp(async (handle) => {
+        const paths = readPaths(handle);
+        expect(paths).toEqual(
+          expect.arrayContaining(['/api/timeline', '/api/stream', '/api/health']),
+        );
+        const unguarded: string[] = [];
+        for (const p of paths) {
+          const res = await handle.app.request(p, { headers: { host: 'other.example' } });
+          await res.body?.cancel();
+          if (res.status !== 403) unguarded.push(`${p} -> ${res.status}`);
+        }
+        expect(unguarded).toEqual([]);
+      });
+    });
+
+    it('a refused route answers with the forbidden-host error code', async () => {
+      await withApp(async (handle) => {
+        for (const p of ['/api/timeline', '/api/stream', '/api/health']) {
+          const res = await handle.app.request(p, { headers: { host: 'other.example' } });
+          expect(res.status).toBe(403);
+          expect(await res.json()).toMatchObject({ error: { code: 'ui.forbidden-host' } });
+        }
+      });
+    });
+
+    it('a loopback request host still reaches /api/health and /api/timeline', async () => {
+      await withApp(async (handle) => {
+        for (const p of ['/api/health', '/api/timeline']) {
+          const res = await handle.app.request(p, { headers: { host: '127.0.0.1:4680' } });
+          await res.body?.cancel();
+          expect(res.status).not.toBe(403);
+        }
+      });
+    });
+  });
+
   describe('loopbackGuard on a read route', () => {
     const allowed = ['127.0.0.1:4680', 'localhost:5173', '[::1]:4680', '[::1]'];
     const refused = [
