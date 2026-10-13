@@ -5268,6 +5268,37 @@ describe('cli.ts (built binary)', () => {
         ).toHaveLength(1);
       });
 
+      // A merged task an amendment superseded and `task reinstate` repaired
+      // still sits in the plan as dead copies only. That must not leave the
+      // plan "not ingested" for every other task.
+      it('admits a live task of a plan whose reinstated task survives only as dead copies', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
+        append(sessionId, eventsDir, {
+          event_type: 'wave-merged',
+          task_id: 'epic-1/task-1',
+          payload: { epic_id: 'epic-1', task_ids: ['epic-1/task-1'] },
+        });
+        for (const event_type of ['task-superseded', 'task-reinstated']) {
+          append(sessionId, eventsDir, {
+            event_type,
+            task_id: 'epic-1/task-1',
+            payload: { epic_id: 'epic-1' },
+          });
+        }
+        const deadPlan = {
+          ...PLAN,
+          tasks: PLAN.tasks.map((t) =>
+            t.task_id === 'epic-1/task-1' ? { ...t, task_status: 'superseded' } : t,
+          ),
+        };
+        await writeFile(planPath, JSON.stringify(deadPlan));
+
+        const result = check(planPath, sessionId, eventsDir, 'task-2');
+        expect(result.status, result.stdout).toBe(0);
+        expect(JSON.parse(result.stdout).valid).toBe(true);
+      });
+
       it('admits live tasks once the plan is ingested', async () => {
         const { sessionId, eventsDir, planPath } = await session();
         ingest(planPath, sessionId, eventsDir);

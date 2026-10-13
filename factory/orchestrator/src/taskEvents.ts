@@ -349,6 +349,31 @@ function specsToIngest(plan: PlanFile): TaskSpecRecord[] {
   return specs;
 }
 
+/**
+ * Ids the log has reinstated (a `task-reinstated` after their last
+ * `task-superseded`) that no amendment maps to a successor — the exact shape
+ * `reinstateTask` repairs, which ingest must not supersede a second time.
+ */
+async function reinstatedWithoutSuccessor(
+  epicId: string,
+  ctx: Pick<TaskEventContext, 'sessionId'>,
+  opts: EventOpts,
+): Promise<Set<string>> {
+  const events = await readLineageEvents(ctx.sessionId, opts);
+  const reinstated = new Set<string>();
+  for (const { record } of events) {
+    if (!record.task_id) continue;
+    if (record.event_type === 'task-reinstated') reinstated.add(record.task_id);
+    else if (record.event_type === 'task-superseded') reinstated.delete(record.task_id);
+  }
+  if (reinstated.size === 0) return reinstated;
+  // Dynamic: spec.ts imports this module, so a static import would be a cycle.
+  const { taskSuccessors } = await import('./spec.js');
+  const successors = taskSuccessors(events, epicId);
+  for (const id of [...reinstated]) if (successors.has(id)) reinstated.delete(id);
+  return reinstated;
+}
+
 /** One event `emitTasksAdded` owes the log for a plan, before it is written. */
 interface PendingIngest {
   task: TaskSpecRecord;
@@ -367,6 +392,7 @@ async function pendingIngest(
 ): Promise<PendingIngest[]> {
   const added = await addedPlanVersions(ctx, opts);
   const superseded = await idsAlreadyEmitted('task-superseded', ctx, opts);
+  const owed = await reinstatedWithoutSuccessor(plan.epic_id, ctx, opts);
   const pending: PendingIngest[] = [];
 
   // The ids the plan marks as superseded-and-replaced: a dead record beside a
@@ -401,7 +427,10 @@ async function pendingIngest(
       typeof liveVersion === 'number' &&
       liveVersion > recorded;
     if (recorded === undefined || amended) pending.push({ task, eventType: 'task-added' });
-    if (task.task_status === 'superseded' && !superseded.has(taskId)) {
+    // #457. A reinstated task stays reinstated unless the log maps it to a
+    // successor: the plan that caused the bad supersede still holds it as dead
+    // copies only, and owing the supersede again would undo the repair.
+    if (task.task_status === 'superseded' && !superseded.has(taskId) && !owed.has(taskId)) {
       pending.push({ task, eventType: 'task-superseded' });
     }
   }

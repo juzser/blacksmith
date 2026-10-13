@@ -152,7 +152,8 @@ log does not know (`task.reinstate-unknown-task`), one that is not superseded
 (`task.reinstate-not-superseded`), one with no `wave-merged` on the log
 (`task.reinstate-never-merged`), and one a plan amendment really superseded
 with a successor (`task.reinstate-has-successor`). A later real supersede of the
-task still wins over the reinstatement.
+task still wins over the reinstatement; a plan that merely still holds the
+task as dead copies, with no successor, does not re-supersede it.
 
 The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
