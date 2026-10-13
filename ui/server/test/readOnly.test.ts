@@ -127,6 +127,16 @@ describe('ui/server is read-only', () => {
       });
     });
 
+    it('a refused route answers with the forbidden-host error code', async () => {
+      await withApp(async (handle) => {
+        for (const p of ['/api/timeline', '/api/stream', '/api/health']) {
+          const res = await handle.app.request(p, { headers: { host: 'other.example' } });
+          expect(res.status).toBe(403);
+          expect(await res.json()).toMatchObject({ error: { code: 'ui.forbidden-host' } });
+        }
+      });
+    });
+
     it('a loopback request host still reaches /api/health and /api/timeline', async () => {
       await withApp(async (handle) => {
         for (const p of ['/api/health', '/api/timeline']) {
