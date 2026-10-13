@@ -1022,6 +1022,8 @@ test.describe('Roadmap: Active scope (S7)', () => {
             activeSessions: 0,
             agentsRunning: 0,
             agentsUnmeasured: 0,
+            tokensSpent: 0,
+            tokensUnmeasured: 0,
           })),
           epics: [],
           factorySessions: [{ storeId: 'home', sessionId: 'session-a' }],
@@ -1380,6 +1382,8 @@ async function stubLiveRoadmap(
         activeSessions: 0,
         agentsRunning: 0,
         agentsUnmeasured: 0,
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
       })),
       epics: liveStores.map((s) => ({
         storeId: s.id,

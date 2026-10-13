@@ -1277,6 +1277,8 @@ test.describe('Activity follows Active/All (S9)', () => {
           activeSessions: 0,
           agentsRunning: 0,
           agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
         },
       ],
     });
