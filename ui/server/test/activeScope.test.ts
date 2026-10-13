@@ -722,6 +722,31 @@ describe('computeActiveScope', () => {
     });
   });
 
+  describe('an active epic whose store gave no overview this poll', () => {
+    const written = linkedEpic({
+      store: { id: 'store-a', label: 'store-a' },
+      factorySessionLastEventAt: { f1: '2026-10-07T11:00:00.000Z' },
+    });
+
+    it('counts as unmeasured spend, not as a measured zero', () => {
+      const out = fold(cli([session({ epics: [written] })]), []);
+      expect(out.epics).toHaveLength(1);
+      expect(out.epics[0]?.tokensUnmeasured).toBeGreaterThanOrEqual(1);
+      expect(out.tokensSpent).toBe(0);
+      expect(out.tokensUnmeasured).toBeGreaterThanOrEqual(1);
+      expect(out.projects[0]?.tokensUnmeasured).toBeGreaterThanOrEqual(1);
+    });
+
+    it('a store that was read with no entry for the epic stays a measured zero', () => {
+      const out = fold(cli([session({ epics: [written] })]), [
+        store({ id: 'store-a', label: 'store-a', activelyRunning: ['epic-a'] }),
+      ]);
+      expect(out.tokensSpent).toBe(0);
+      expect(out.tokensUnmeasured).toBe(0);
+      expect(out.epics[0]?.tokensUnmeasured).toBe(0);
+    });
+  });
+
   it('the body carries no prompt, doingNow, transcript, cwd or name keys at any depth', () => {
     const out = fold(
       cli([

@@ -200,7 +200,8 @@ export function computeActiveScope(
             epicId: e.epicId,
             project,
             tokensSpent: spend?.tokensSpent ?? 0,
-            tokensUnmeasured: spend?.unmeasured ?? 0,
+            // No overview this poll (store skipped or unreadable): spend unknown.
+            tokensUnmeasured: st === undefined ? 1 : (spend?.unmeasured ?? 0),
             ...taskCounts(e.progress),
           });
         } else if (known.tasksTotal === 0 && e.progress !== null) {
@@ -247,7 +248,8 @@ export function computeActiveScope(
   });
 
   const epicSpend = new Map([...epics].map(([k, e]) => [k, e.tokensSpent]));
-  const all = foldGroups(cli, sessionEpics, epicAgents, epicSpend);
+  const unread = new Set([...epics].filter(([, e]) => !byStore.has(e.storeId)).map(([k]) => k));
+  const all = foldGroups(cli, sessionEpics, epicAgents, epicSpend, unread);
   const epicList = [...epics.values()];
   const sum = (pick: (e: ActiveScope['epics'][number]) => number) =>
     epicList.reduce((n, e) => n + pick(e), 0);
@@ -265,7 +267,7 @@ export function computeActiveScope(
     tasksDone: sum((e) => e.tasksDone),
     tasksTotal: sum((e) => e.tasksTotal),
     projects: [...projects.values()].map((p) => {
-      const mine = foldGroups(cli, p.activeEpics, epicAgents, epicSpend);
+      const mine = foldGroups(cli, p.activeEpics, epicAgents, epicSpend, unread);
       return {
         storeId: p.storeId,
         project: p.project,
@@ -297,13 +299,15 @@ export function computeActiveScope(
  * (the factory's agents are subagents of the session, so their tokens are
  * already inside its transcripts). A session counts once however many epics
  * it links; one whose tokens are missing or incomplete adds to
- * `tokensUnmeasured` and its known part still counts.
+ * `tokensUnmeasured` and its known part still counts. An epic in `unread`
+ * (its store gave no overview) adds one too, once, however many sessions link it.
  */
 function foldGroups(
   cli: ActiveScopeCli,
   sessions: ReadonlyMap<number, ReadonlySet<string>>,
   epicAgents: ReadonlyMap<string, ReadonlySet<string>>,
   epicSpend: ReadonlyMap<string, number>,
+  unread: ReadonlySet<string>,
 ): { running: number; unmeasured: number; tokens: number; tokensUnmeasured: number } {
   // Union-find over session indexes, joined through shared epic keys.
   const parent = new Map<number, number>();
@@ -339,6 +343,7 @@ function foldGroups(
     if (!subs.has(root)) subs.set(root, 0);
   }
   for (const [k, i] of firstOfEpic) {
+    if (unread.has(k)) tokensUnmeasured++;
     const root = find(i);
     const set = agents.get(root) ?? new Set<string>();
     for (const a of epicAgents.get(k) ?? []) set.add(`${k}\u0000${a}`);
