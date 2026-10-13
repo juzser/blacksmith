@@ -1116,6 +1116,30 @@ describe('cliSessions reader', () => {
             expect(await running()).toBe(0);
           });
 
+          it('does not count a killed subagent, or its child, for a late flood past the 1 MiB retry', async () => {
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'killed', true), timestamp: T('11:50') },
+            ]);
+            // Both the 256 KiB tail and the 1 MiB retry start after the kill, with no
+            // prompt and no assistant record in them: a tail cut after the mark still holds it.
+            const flood = [
+              ...Array.from({ length: 300 }, (_, i) => stamped(bigResult(`b${i}`), T('11:51'))),
+              stamped(user('[Request interrupted by user]'), T('11:51')),
+            ];
+            expect(Buffer.byteLength(jsonl(flood))).toBeGreaterThan(1024 * 1024);
+            await sub('ag1', [...working(), ...flood], {}, lateMtime);
+            const file = path.join(
+              mainFile.replace(/\.jsonl$/, ''),
+              'subagents',
+              'agent-ag1.jsonl',
+            );
+            expect((await stat(file)).size).toBeGreaterThan(1024 * 1024);
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(0);
+          });
+
           it('counts a completed subagent woken by a prompt the tail no longer reaches', async () => {
             await start([
               user('go'),
