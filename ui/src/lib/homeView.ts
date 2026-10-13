@@ -27,8 +27,8 @@ export interface FactTile {
 
 const FACTS = [
   { label: 'Active sessions', helper: 'Live sessions on a running epic' },
-  { label: 'Agents running', helper: 'Subagents and factory agents, each counted once' },
-  { label: 'Budget used', helper: 'Tokens on the epics these sessions run' },
+  { label: 'Agents running', helper: 'Subagents and factory agents; nested ones not counted' },
+  { label: 'Budget used', helper: 'Tokens these sessions used, cache reads left out' },
   { label: 'Tasks done', helper: 'Plan tasks on those epics' },
 ] as const;
 
@@ -61,13 +61,13 @@ export function factStrip(scope: ActiveScopeResult | null, project?: string): Fa
       activeSessions: sum(rows, (p) => p.activeSessions),
       agentsRunning: sum(rows, (p) => p.agentsRunning),
       agentsUnmeasured: sum(rows, (p) => p.agentsUnmeasured),
-      tokensSpent: sum(epics, (e) => e.tokensSpent),
-      tokensUnmeasured: sum(epics, (e) => e.tokensUnmeasured),
+      tokensSpent: sum(rows, (p) => p.tokensSpent),
+      tokensUnmeasured: sum(rows, (p) => p.tokensUnmeasured),
       tasksDone: sum(epics, (e) => e.tasksDone),
       tasksTotal: sum(epics, (e) => e.tasksTotal),
     };
   }
-  // Every run unmeasured is "nobody counted", not "spent nothing".
+  // No token counted from sessions that could not be read is "nobody counted", not "spent nothing".
   const noTokens = t.tokensSpent === 0 && t.tokensUnmeasured > 0;
   const [sessions, agents, budget, tasks] = FACTS;
   return [

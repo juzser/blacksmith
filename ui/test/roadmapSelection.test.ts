@@ -160,6 +160,8 @@ describe('defaultSelection', () => {
             activeSessions: 0,
             agentsRunning: 0,
             agentsUnmeasured: 0,
+            tokensSpent: 0,
+            tokensUnmeasured: 0,
           },
         ],
         epics: [],

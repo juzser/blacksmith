@@ -335,6 +335,8 @@ describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
         activeSessions: 1,
         agentsRunning: p.agentsWorking,
         agentsUnmeasured: 0,
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
       })),
       epics: [],
       factorySessions: [],
@@ -532,6 +534,8 @@ describe('lib/homeView.ts budgetPanel()', () => {
           activeSessions: 1,
           agentsRunning: 1,
           agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
         },
       ],
       epics: [],
@@ -848,6 +852,8 @@ describe('lib/homeView.ts factStrip()', () => {
     activeSessions: 1,
     agentsRunning: 0,
     agentsUnmeasured: 0,
+    tokensSpent: 0,
+    tokensUnmeasured: 0,
     ...over,
   });
   const epicOf = (storeId: string, epicId: string, name: string | null, over: Partial<Epic>) => ({
@@ -886,14 +892,14 @@ describe('lib/homeView.ts factStrip()', () => {
       {
         label: 'Agents running',
         value: '5',
-        helper: 'Subagents and factory agents, each counted once',
+        helper: 'Subagents and factory agents; nested ones not counted',
         floor: false,
         quiet: false,
       },
       {
         label: 'Budget used',
         value: '1.2M\u00a0tokens',
-        helper: 'Tokens on the epics these sessions run',
+        helper: 'Tokens these sessions used, cache reads left out',
         floor: false,
         quiet: false,
       },
@@ -907,7 +913,7 @@ describe('lib/homeView.ts factStrip()', () => {
     ]);
   });
 
-  it('under ?project= sums that name across stores, and reads only its epics', () => {
+  it('under ?project= sums that name across stores, and reads only its rows', () => {
     const scope = totals({
       activeSessions: 9,
       agentsRunning: 99,
@@ -915,13 +921,18 @@ describe('lib/homeView.ts factStrip()', () => {
       tasksDone: 50,
       tasksTotal: 60,
       projects: [
-        project('home', 'project-a', { activeSessions: 1, agentsRunning: 2 }),
-        project('store-b', 'project-a', { activeSessions: 1, agentsRunning: 1 }),
-        project('home', 'project-b', { activeSessions: 3, agentsRunning: 9 }),
+        project('home', 'project-a', { activeSessions: 1, agentsRunning: 2, tokensSpent: 1000 }),
+        project('store-b', 'project-a', { activeSessions: 1, agentsRunning: 1, tokensSpent: 500 }),
+        project('home', 'project-b', {
+          activeSessions: 3,
+          agentsRunning: 9,
+          tokensSpent: 8_000_000,
+        }),
       ],
       epics: [
-        epicOf('home', 'epic-a', 'project-a', { tokensSpent: 1000, tasksDone: 2, tasksTotal: 4 }),
-        epicOf('store-b', 'epic-a', 'project-a', { tokensSpent: 500, tasksDone: 1, tasksTotal: 3 }),
+        // The epics' own spend is not what the filtered tile reads.
+        epicOf('home', 'epic-a', 'project-a', { tokensSpent: 77, tasksDone: 2, tasksTotal: 4 }),
+        epicOf('store-b', 'epic-a', 'project-a', { tokensSpent: 77, tasksDone: 1, tasksTotal: 3 }),
         epicOf('home', 'epic-b', 'project-b', { tokensSpent: 8_000_000, tasksDone: 9 }),
         epicOf('home', 'epic-c', null, { tokensSpent: 7, tasksDone: 1, tasksTotal: 1 }),
       ],
@@ -941,8 +952,9 @@ describe('lib/homeView.ts factStrip()', () => {
     expect(floors(scope)).toEqual([false, true, true, false]);
     expect(values(scope)).toEqual(['1', '2', '4K\u00a0tokens', 'None']);
     const filtered = totals({
-      projects: [project('home', 'project-a', { agentsUnmeasured: 1 })],
-      epics: [epicOf('home', 'epic-a', 'project-a', { tokensSpent: 10, tokensUnmeasured: 1 })],
+      projects: [
+        project('home', 'project-a', { agentsUnmeasured: 1, tokensSpent: 10, tokensUnmeasured: 1 }),
+      ],
     });
     expect(floors(filtered, 'project-a')).toEqual([false, true, true, false]);
     expect(floors(filtered)).toEqual([false, false, false, false]);
@@ -952,6 +964,13 @@ describe('lib/homeView.ts factStrip()', () => {
     const scope = totals({ activeSessions: 1, tokensUnmeasured: 3 });
     const [, , budget] = factStrip(scope);
     expect(budget).toMatchObject({ value: 'Not measured', floor: false, quiet: true });
+  });
+
+  it('under ?project= reads Not measured from the rows when nothing was counted', () => {
+    const scope = totals({
+      projects: [project('home', 'project-a', { tokensSpent: 0, tokensUnmeasured: 2 })],
+    });
+    expect(factStrip(scope, 'project-a')[2]).toMatchObject({ value: 'Not measured', quiet: true });
   });
 
   it('a word in the value slot is quiet; a figure, a zero included, is not', () => {

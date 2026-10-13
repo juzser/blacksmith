@@ -29,6 +29,8 @@ const activeProject = (project: string, agentsWorking = 1) => ({
   activeSessions: 0,
   agentsRunning: 0,
   agentsUnmeasured: 0,
+  tokensSpent: 0,
+  tokensUnmeasured: 0,
 });
 test.beforeEach(async ({ page }) => {
   await stubActiveScope(page, [], {
@@ -306,7 +308,13 @@ test.describe('Home: fact strip', () => {
     tasksTotal: 25,
     storesUnread: 1,
     projects: [
-      { ...activeProject('blacksmith', 2), liveSessions: 2, activeSessions: 2, agentsRunning: 5 },
+      {
+        ...activeProject('blacksmith', 2),
+        liveSessions: 2,
+        activeSessions: 2,
+        agentsRunning: 5,
+        tokensSpent: 1_200_000,
+      },
     ],
     epics: [
       {
@@ -359,8 +367,8 @@ test.describe('Home: fact strip', () => {
     await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
     await expect(strip(page).locator('.bs-stat__helper')).toHaveText([
       'Live sessions on a running epic',
-      'Subagents and factory agents, each counted once',
-      'Tokens on the epics these sessions run',
+      'Subagents and factory agents; nested ones not counted',
+      'Tokens these sessions used, cache reads left out',
       'Plan tasks on those epics',
     ]);
     await expect(strip(page).getByText(unread)).toBeVisible();
@@ -381,6 +389,24 @@ test.describe('Home: fact strip', () => {
     await expect(agents.locator('.sr-only')).toHaveText('at least');
     await expect(agents).toContainText('5');
     await expect(values(page).first().locator('span[aria-hidden="true"]')).toHaveCount(0);
+  });
+
+  test('Budget used shows the transcript figure, and a floor when a session is incomplete', async ({
+    page,
+  }) => {
+    await page.goto('/overview');
+    const budget = values(page).nth(2);
+    await expect(budget).toContainText('1.2M tokens');
+    await expect(budget.locator('span[aria-hidden="true"]')).toHaveCount(0);
+    await stubActiveScope(page, [], {
+      ...twoOnOneEpic,
+      tokensSpent: 3_400_000,
+      tokensUnmeasured: 1,
+    });
+    await page.goto('/overview');
+    await expect(budget.locator('span[aria-hidden="true"]')).toHaveText('≥');
+    await expect(budget.locator('.sr-only')).toHaveText('at least');
+    await expect(budget).toContainText('3.4M tokens');
   });
 
   test('holds a skeleton in every tile, marked busy, until the first answer', async ({ page }) => {

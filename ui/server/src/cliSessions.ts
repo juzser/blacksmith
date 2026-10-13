@@ -12,6 +12,11 @@
 //   read only in bounded slices (tail 256 KB, one retry at 1 MB, head 64 KB,
 //   never a whole-file read) behind a (path, size, mtime) cache, so an
 //   unchanged session costs one stat. Nothing from a transcript is logged.
+// - the same transcript in full plus `<transcript without .jsonl>/subagents/agent-*.jsonl`
+//   (never the `.meta.json` siblings), scanned once for the tokens of each
+//   assistant response (cache reads left out) in 8 MB chunks, then only from
+//   the end of the last complete line when the file grows. Lines without the
+//   bytes `"usage"` are skipped undecoded; only the sum is kept.
 // - `<configDir>/history.jsonl`, the CLI's prompt history, for the operator's
 //   last prompt per session once it scrolled out of the transcript tail. Tail
 //   1 MB through the same bounded read, same cache; only `display` and
@@ -56,7 +61,7 @@ import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
   readdir(p: string): Promise<string[]>;
-  stat(p: string): Promise<{ size: number; mtimeMs: number }>;
+  stat(p: string): Promise<{ size: number; mtimeMs: number; ino?: number }>;
   /** Does not follow a symlink: only a regular file is ever opened. */
   lstat(p: string): Promise<{ isFile(): boolean }>;
   open(p: string): Promise<Pick<FileHandle, 'read' | 'close'>>;
@@ -189,6 +194,13 @@ export interface CliSessionCard {
    * transcript tail are not seen. Null when the transcript could not be read.
    */
   subagentsRunning: number | null;
+  /**
+   * Tokens the whole transcript and its subagents used: input, cache creation
+   * and output, each response once; cache reads are left out. `complete` is
+   * false when a subagent file could not be read (the rest still counts).
+   * Null when the main transcript is missing or unreadable.
+   */
+  tokens: { used: number; complete: boolean } | null;
   linked: { epics: LinkedEpic[] } | null;
   parseIssues: string[];
 }
@@ -220,6 +232,10 @@ export interface CliSessionsDeps {
   listWorktrees?: () => Promise<string[]>;
   /** Response cache window, 1 s by default. */
   cacheMs?: number;
+  /** Read size of the token scan; 8 MB by default. */
+  tokenChunkBytes?: number;
+  /** A transcript line longer than this is skipped, not counted; 32 MB by default. */
+  tokenLineMax?: number;
   /** How long a transcript that was not found anywhere is not searched for again; 30 s by default. */
   missTtlMs?: number;
   /** Milliseconds clock for the miss cache; Date.now by default. */
@@ -233,6 +249,21 @@ const TAIL_BYTES = 256 * 1024;
 const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
 const HISTORY_BYTES = 1024 * 1024;
+const TOKEN_CHUNK_BYTES = 8 * 1024 * 1024;
+/**
+ * A transcript line longer than this is skipped and the count marked incomplete.
+ * A line with usage holds one content block of one response, which the model's
+ * output limit keeps far below this.
+ */
+const TOKEN_LINE_MAX = 32 * 1024 * 1024;
+
+interface TokenCount {
+  total: number;
+  /** A line over the cap was skipped. */
+  incomplete: boolean;
+}
+const SUBAGENT_FILE = /^agent-[A-Za-z0-9_-]+\.jsonl$/;
+const USAGE_BYTES = Buffer.from('"usage"');
 const TEXT_MAX = 280;
 const FOCUS_TITLE_MAX = 90;
 const VERSION_MAX = 32;
@@ -766,6 +797,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   const isAlive = deps.isAlive ?? defaultIsAlive;
   const procStartOf = deps.procStartOf ?? defaultProcStartOf;
   const cacheMs = deps.cacheMs ?? 1000;
+  const chunkBytes = deps.tokenChunkBytes ?? TOKEN_CHUNK_BYTES;
+  const lineMax = deps.tokenLineMax ?? TOKEN_LINE_MAX;
   const missTtlMs = deps.missTtlMs ?? 30_000;
   const clock = deps.clock ?? Date.now;
   const listWorktrees = deps.listWorktrees ?? (() => gitWorktrees(deps.roots[0] ?? '.'));
@@ -776,6 +809,24 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     string,
     { size: number; mtimeMs: number; read: TranscriptRead }
   >();
+  /** Per transcript file: what the token scan has consumed up to `offset` (end of the last whole line). */
+  const tokenCache = new Map<
+    string,
+    {
+      size: number;
+      mtimeMs: number;
+      ino: number | undefined;
+      offset: number;
+      total: number;
+      seen: Set<string>;
+      /** `offset` sits inside a line over the cap, whose end has not been seen yet. */
+      skipping: boolean;
+      /** A line was skipped since the last scan from 0: the total is a floor. */
+      incomplete: boolean;
+    }
+  >();
+  /** Session id -> the transcript files its token count was made of. */
+  const tokenFiles = new Map<string, string[]>();
   /** Session id -> until when a full search for its transcript is not repeated. */
   const missUntil = new Map<string, number>();
   let worktrees: { at: number; dirs: string[] } | null = null;
@@ -918,10 +969,20 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const [id, pid] of pidFileOf) {
       if (!live.has(id) && !unparsedPids.has(pid)) pidFileOf.delete(id);
     }
-    for (const m of [sticky, transcriptPaths, missUntil, lastPrompt]) {
+    for (const m of [sticky, transcriptPaths, missUntil, lastPrompt, tokenFiles]) {
       for (const id of m.keys()) if (!pidFileOf.has(id)) m.delete(id);
     }
-    const files = new Set(transcriptPaths.values());
+    // A live session's files keep their count even while its first count is
+    // still running (tokenFiles is only written when a count finishes).
+    const mains = [...transcriptPaths.values()];
+    const subDirs = mains.map((m) => path.join(m.replace(/\.jsonl$/, ''), 'subagents') + path.sep);
+    const counted = new Set([...tokenFiles.values()].flat());
+    for (const file of tokenCache.keys()) {
+      const live =
+        counted.has(file) || mains.includes(file) || subDirs.some((d) => file.startsWith(d));
+      if (!live) tokenCache.delete(file);
+    }
+    const files = new Set(mains);
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
   }
 
@@ -959,6 +1020,170 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     } catch {
       return { state: 'unreadable', analysis: null, headBs: false };
     }
+  }
+
+  /** Adds the tokens of every complete line in `buf[0, end)` that carries usage. */
+  function addUsage(buf: Buffer, end: number, into: { total: number; seen: Set<string> }): void {
+    let from = 0;
+    while (from < end) {
+      const hit = buf.indexOf(USAGE_BYTES, from);
+      if (hit === -1 || hit >= end) return;
+      const lineStart = buf.lastIndexOf(10, hit) + 1;
+      let lineEnd = buf.indexOf(10, hit);
+      if (lineEnd === -1 || lineEnd > end) lineEnd = end;
+      from = lineEnd + 1;
+      let j: unknown;
+      try {
+        j = JSON.parse(buf.toString('utf8', lineStart, lineEnd));
+      } catch {
+        continue;
+      }
+      if (typeof j !== 'object' || j === null) continue;
+      const rec = j as { type?: unknown; requestId?: unknown; message?: unknown };
+      if (rec.type !== 'assistant') continue;
+      const msg = rec.message as { id?: unknown; usage?: unknown } | null | undefined;
+      const u = msg?.usage as Record<string, unknown> | null | undefined;
+      if (typeof msg !== 'object' || msg === null || typeof u !== 'object' || u === null) continue;
+      if (typeof msg.id === 'string') {
+        const key = `${msg.id}\u0000${typeof rec.requestId === 'string' ? rec.requestId : ''}`;
+        if (into.seen.has(key)) continue;
+        into.seen.add(key);
+      }
+      for (const k of ['input_tokens', 'cache_creation_input_tokens', 'output_tokens']) {
+        const n = u[k];
+        if (typeof n === 'number' && Number.isFinite(n)) into.total += n;
+      }
+    }
+  }
+
+  /** One scan per file at a time: a caller that arrives while it runs awaits that same scan. */
+  const tokenScans = new Map<string, Promise<TokenCount>>();
+  function scanTokens(file: string): Promise<TokenCount> {
+    const running = tokenScans.get(file);
+    if (running !== undefined) return running;
+    const scan = scanTokensOnce(file).finally(() => {
+      if (tokenScans.get(file) === scan) tokenScans.delete(file);
+    });
+    tokenScans.set(file, scan);
+    return scan;
+  }
+
+  /**
+   * The tokens of one transcript file, scanning only what is new. Works on local
+   * values and commits them when it finishes, so a failure leaves the cache as
+   * it was. Throws when the file cannot be read.
+   */
+  async function scanTokensOnce(file: string): Promise<TokenCount> {
+    const st = await fs.stat(file);
+    let c = tokenCache.get(file);
+    if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) {
+      return { total: c.total, incomplete: c.incomplete };
+    }
+    // A smaller file, or another inode, is a replaced file: start over.
+    if (
+      c &&
+      (st.size < c.offset || (c.ino !== undefined && st.ino !== undefined && c.ino !== st.ino))
+    ) {
+      c = undefined;
+    }
+    if (!(await fs.lstat(file)).isFile()) throw new Error('not a regular file');
+    const fh = await fs.open(file);
+    try {
+      // The byte before the offset must still end a line, else the file was rewritten in place.
+      if (c && c.offset > 0 && !c.skipping) {
+        const one = Buffer.alloc(1);
+        const { bytesRead } = await fh.read(one, 0, 1, c.offset - 1);
+        if (bytesRead !== 1 || one[0] !== 10) c = undefined;
+      }
+      let offset = c?.offset ?? 0;
+      let skipping = c?.skipping ?? false;
+      let incomplete = c?.incomplete ?? false;
+      const acc = { total: c?.total ?? 0, seen: new Set(c?.seen) };
+      let chunk = chunkBytes;
+      while (offset < st.size) {
+        const len = Math.min(chunk, st.size - offset);
+        const buf = Buffer.alloc(len);
+        const { bytesRead } = await fh.read(buf, 0, len, offset);
+        if (bytesRead === 0) break;
+        const view = buf.subarray(0, bytesRead);
+        if (skipping) {
+          // Inside a line over the cap: look for its end without keeping the bytes.
+          const nl = view.indexOf(10);
+          if (nl === -1) offset += bytesRead;
+          else {
+            offset += nl + 1;
+            skipping = false;
+          }
+          continue;
+        }
+        const last = view.lastIndexOf(10);
+        if (last === -1) {
+          // No whole line yet: a file that ends in a partial line waits for it;
+          // a line longer than the chunk is read again with a larger one,
+          // and one over the cap is skipped.
+          if (offset + bytesRead >= st.size) break;
+          if (chunk >= lineMax) {
+            skipping = true;
+            incomplete = true;
+            chunk = chunkBytes;
+            offset += bytesRead;
+          } else chunk = Math.min(chunk * 2, lineMax);
+          continue;
+        }
+        addUsage(buf, last, acc);
+        offset += last + 1;
+      }
+      tokenCache.set(file, {
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        ino: st.ino,
+        offset,
+        total: acc.total,
+        seen: acc.seen,
+        skipping,
+        incomplete,
+      });
+      return { total: acc.total, incomplete };
+    } finally {
+      await fh.close();
+    }
+  }
+
+  async function tokensOf(configDir: string, e: RegistryEntry): Promise<CliSessionCard['tokens']> {
+    const main = await findTranscript(configDir, e);
+    if (main === null) return null;
+    let used: number;
+    let complete = true;
+    try {
+      const m = await scanTokens(main);
+      used = m.total;
+      if (m.incomplete) complete = false;
+    } catch {
+      tokenFiles.delete(e.cliSessionId);
+      return null;
+    }
+    const files = [main];
+    const dir = path.join(main.replace(/\.jsonl$/, ''), 'subagents');
+    let names: string[] = [];
+    try {
+      names = await fs.readdir(dir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') complete = false;
+    }
+    for (const name of names.filter((n) => SUBAGENT_FILE.test(n))) {
+      const f = path.join(dir, name);
+      files.push(f);
+      try {
+        const sub = await scanTokens(f);
+        used += sub.total;
+        if (sub.incomplete) complete = false;
+      } catch {
+        complete = false;
+      }
+    }
+    tokenFiles.set(e.cliSessionId, files);
+    return { used, complete };
   }
 
   /**
@@ -1691,6 +1916,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
         subagentsRunning: subagentsRunningOf(e, t),
+        tokens: await tokensOf(deps.configDir, e),
         linked,
         parseIssues: e.parseIssues,
       });

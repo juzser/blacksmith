@@ -2692,6 +2692,365 @@ describe('cliSessions reader', () => {
     });
   });
 
+  describe('token count', () => {
+    const usage = (input: number, create: number, output: number, cacheRead = 0) => ({
+      input_tokens: input,
+      cache_creation_input_tokens: create,
+      cache_read_input_tokens: cacheRead,
+      output_tokens: output,
+    });
+    /** One content block of a response; the CLI writes one line per block. */
+    const respLine = (id: string | null, u: unknown, block: unknown = text('x')) => ({
+      type: 'assistant',
+      requestId: id === null ? undefined : `req-${id}`,
+      message: { id: id ?? undefined, role: 'assistant', content: [block], usage: u },
+    });
+    const subDir = (file: string) => path.join(file.replace(/\.jsonl$/, ''), 'subagents');
+    async function subagent(file: string, name: string, content: string): Promise<string> {
+      await mkdir(subDir(file), { recursive: true });
+      const f = path.join(subDir(file), name);
+      await writeFile(f, content);
+      return f;
+    }
+    /** A seam that logs every open and every read position, for the files it is given. */
+    function logging() {
+      const opened: string[] = [];
+      const reads: { file: string; pos: number; len: number }[] = [];
+      const stats: string[] = [];
+      const fs: CliFs = {
+        readdir,
+        stat: async (p) => {
+          stats.push(p);
+          return stat(p);
+        },
+        lstat,
+        open: async (p) => {
+          opened.push(p);
+          const fh = await open(p, 'r');
+          return {
+            read: ((buf: Buffer, off: number, len: number, pos: number) => {
+              reads.push({ file: p, pos, len });
+              return fh.read(buf, off, len, pos);
+            }) as typeof fh.read,
+            close: () => fh.close(),
+          };
+        },
+        realpath,
+      };
+      return { fs, opened, reads, stats };
+    }
+    const tokensOf = async (over: Parameters<typeof reader>[0] = {}) =>
+      must((await read(over)).sessions[0]).tokens;
+
+    it('counts a response written over three lines once and leaves cache reads out', async () => {
+      await session(300);
+      const u = usage(10, 20, 30, 1_000_000);
+      await transcript(
+        root,
+        SID_A,
+        jsonl([
+          user('go'),
+          respLine('m1', u, { type: 'thinking', thinking: 't' }),
+          respLine('m1', u, text('hi')),
+          respLine('m1', u, toolUse('Bash', 't1')),
+          respLine('m2', usage(1, 2, 3)),
+        ]),
+      );
+      expect(await tokensOf()).toEqual({ used: 60 + 6, complete: true });
+    });
+
+    it('counts a line without a message id once, as itself', async () => {
+      await session(301);
+      const u = usage(1, 1, 1);
+      await transcript(root, SID_A, jsonl([respLine(null, u), respLine(null, u)]));
+      expect(await tokensOf()).toEqual({ used: 6, complete: true });
+    });
+
+    it('treats a missing usage field as 0', async () => {
+      await session(302);
+      await transcript(root, SID_A, jsonl([respLine('m1', { output_tokens: 5 })]));
+      expect(await tokensOf()).toEqual({ used: 5, complete: true });
+    });
+
+    it('sums subagent files and opens neither a meta file nor a stray name', async () => {
+      await session(303);
+      const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      await subagent(main, 'agent-a1.jsonl', jsonl([respLine('s1', usage(10, 0, 10))]));
+      await subagent(main, 'agent-b_2.jsonl', jsonl([respLine('s1', usage(100, 0, 100))]));
+      const meta = await subagent(main, 'agent-a1.meta.json', JSON.stringify(usage(9, 9, 9)));
+      const stray = await subagent(main, 'notes.jsonl', jsonl([respLine('x', usage(9, 9, 9))]));
+      const spy = logging();
+      expect(await tokensOf({ fs: spy.fs })).toEqual({ used: 2 + 20 + 200, complete: true });
+      expect(spy.opened).not.toContain(meta);
+      expect(spy.opened).not.toContain(stray);
+      expect(spy.stats).not.toContain(meta);
+    });
+
+    it('is complete without a subagents directory and incomplete with an unreadable file', async () => {
+      await session(304);
+      const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      expect(await tokensOf()).toEqual({ used: 2, complete: true });
+      await subagent(main, 'agent-ok.jsonl', jsonl([respLine('s1', usage(10, 0, 10))]));
+      await mkdir(path.join(subDir(main), 'agent-dir.jsonl'));
+      expect(await tokensOf()).toEqual({ used: 22, complete: false });
+    });
+
+    it('reads only the appended bytes and updates the total', async () => {
+      await session(305);
+      // Over the tail window, so the tail and head reads are told apart from a full scan.
+      const pad = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(300_000) } });
+      const first = `${pad}\n${jsonl([respLine('m1', usage(1, 0, 1))])}`;
+      const file = await transcript(root, SID_A, first);
+      const spy = logging();
+      const r = reader({ fs: spy.fs });
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+      spy.reads.length = 0;
+      await writeFile(file, first + jsonl([respLine('m2', usage(5, 0, 5))]));
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(12);
+      const mine = spy.reads.filter((x) => x.file === file);
+      expect(mine.map((x) => x.pos)).toContain(Buffer.byteLength(first));
+      expect(mine.some((x) => x.pos === 0 && x.len > 64 * 1024)).toBe(false);
+    });
+
+    it('costs a stat and no read when nothing changed', async () => {
+      await session(306);
+      const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      const sub = await subagent(main, 'agent-a.jsonl', jsonl([respLine('s1', usage(1, 0, 1))]));
+      const spy = logging();
+      const r = reader({ fs: spy.fs });
+      await r.read();
+      const before = spy.opened.filter((p) => p === main || p === sub).length;
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(4);
+      expect(spy.opened.filter((p) => p === main || p === sub).length).toBe(before);
+    });
+
+    it('counts a trailing partial line only once it is complete', async () => {
+      await session(307);
+      const line = JSON.stringify(respLine('m2', usage(5, 0, 5)));
+      const first = jsonl([respLine('m1', usage(1, 0, 1))]);
+      const file = await transcript(root, SID_A, first + line.slice(0, 40));
+      const r = reader();
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+      await writeFile(file, `${first}${line.slice(0, 40)}`);
+      await writeFile(file, `${first}${line}\n`);
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(12);
+    });
+
+    it('counts a line that crosses a chunk boundary once', async () => {
+      await session(308);
+      const pad = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(1_000_000) } });
+      const lines: string[] = [];
+      // About 12 MB of lines with no usage, then usage lines, so one of them straddles 8 MB.
+      for (let i = 0; i < 12; i++) lines.push(pad);
+      lines.splice(7, 0, JSON.stringify(respLine('m1', usage(1, 0, 1))));
+      lines.push(JSON.stringify(respLine('m2', usage(2, 0, 2))));
+      await transcript(root, SID_A, `${lines.join('\n')}\n`);
+      expect(await tokensOf()).toEqual({ used: 2 + 4, complete: true });
+    });
+
+    it('rescans from 0 when the file shrank', async () => {
+      await session(309);
+      const big = jsonl([respLine('m1', usage(50, 0, 50)), respLine('m2', usage(50, 0, 50))]);
+      const file = await transcript(root, SID_A, big);
+      const r = reader();
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(200);
+      await writeFile(file, jsonl([respLine('m9', usage(1, 0, 1))]));
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+    });
+
+    it('gives null when the main transcript is missing or unreadable', async () => {
+      await session(310);
+      expect(must((await read()).sessions[0]).tokens).toBeNull();
+      const file = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      const failing: CliFs = {
+        readdir,
+        stat,
+        lstat,
+        open: async (p) => {
+          if (p === file) throw new Error('EACCES');
+          return open(p, 'r');
+        },
+        realpath,
+      };
+      expect(await tokensOf({ fs: failing })).toBeNull();
+    });
+
+    it('forgets the counts of a session that left', async () => {
+      await session(311);
+      const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      const spy = logging();
+      const r = reader({ fs: spy.fs });
+      await r.read();
+      await rm(path.join(config, 'sessions', '311.json'));
+      await r.read();
+      spy.opened.length = 0;
+      await session(311);
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+      expect(spy.opened).toContain(main);
+    });
+
+    it('scans a file once when two counts of it overlap', async () => {
+      await session(312);
+      const u = usage(1, 0, 1);
+      const file = await transcript(
+        root,
+        SID_A,
+        // Over the tail window, so the scan's read is told apart from the tail read.
+        `${JSON.stringify(user('x'.repeat(700_000)))}\n${jsonl([respLine(null, u), respLine(null, u), respLine('m1', usage(5, 0, 5))])}`,
+      );
+      const size = (await stat(file)).size;
+      const spy = logging();
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held: CliFs = {
+        ...spy.fs,
+        open: async (p) => {
+          const fh = await spy.fs.open(p);
+          return {
+            read: (async (...args: Parameters<typeof fh.read>) => {
+              await gate;
+              return (fh.read as (...a: unknown[]) => Promise<unknown>)(...args);
+            }) as typeof fh.read,
+            close: () => fh.close(),
+          };
+        },
+      };
+      const r = reader({ fs: held });
+      const a = r.read();
+      const b = r.read();
+      // Both are inside the scan before the first read is let through.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      const [ra, rb] = await Promise.all([a, b]);
+      expect(must(ra.sessions[0]).tokens).toEqual({ used: 4 + 10, complete: true });
+      expect(must(rb.sessions[0]).tokens).toEqual({ used: 4 + 10, complete: true });
+      expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 14, complete: true });
+      // One read of the whole file, from 0: the bytes were read once, not twice.
+      expect(
+        spy.reads.filter((x) => x.file === file && x.pos === 0 && x.len === size),
+      ).toHaveLength(1);
+    });
+
+    it('keeps the cache of a file counted while the session first count is still running', async () => {
+      await session(315);
+      const u = usage(1, 0, 1);
+      const file = await transcript(
+        root,
+        SID_A,
+        // Over the tail window, so the scan's read is told apart from the tail read.
+        `${JSON.stringify(user('x'.repeat(700_000)))}\n${jsonl([respLine('m1', usage(5, 0, 5))])}`,
+      );
+      const size = (await stat(file)).size;
+      const sub = await subagent(file, 'agent-a1.jsonl', jsonl([respLine('s1', u)]));
+      const spy = logging();
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held: CliFs = {
+        ...spy.fs,
+        open: async (p) => {
+          const fh = await spy.fs.open(p);
+          if (p !== sub) return fh;
+          return {
+            read: (async (...args: Parameters<typeof fh.read>) => {
+              await gate;
+              return (fh.read as (...a: unknown[]) => Promise<unknown>)(...args);
+            }) as typeof fh.read,
+            close: () => fh.close(),
+          };
+        },
+      };
+      const r = reader({ fs: held, cacheMs: 0 });
+      const a = r.read();
+      // The main file is counted and the subagent read is held: the count spans the next poll.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const b = r.read();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      const [ra, rb] = await Promise.all([a, b]);
+      expect(must(ra.sessions[0]).tokens).toEqual({ used: 10 + 2, complete: true });
+      expect(must(rb.sessions[0]).tokens).toEqual({ used: 10 + 2, complete: true });
+      expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 12, complete: true });
+      expect(
+        spy.reads.filter((x) => x.file === file && x.pos === 0 && x.len === size),
+      ).toHaveLength(1);
+    });
+
+    describe('a line over the cap', () => {
+      const small = { tokenChunkBytes: 256, tokenLineMax: 256 };
+      const huge = (n = 400_000) =>
+        JSON.stringify({ type: 'user', message: { content: 'x'.repeat(n) } });
+      const line = (id: string, n: number) => JSON.stringify(respLine(id, usage(n, 0, n)));
+
+      it('is skipped, the lines around it count and the count is marked incomplete', async () => {
+        await session(313);
+        await transcript(root, SID_A, `${line('m1', 1)}\n${huge()}\n${line('m2', 2)}\n`);
+        const spy = logging();
+        const r = reader({ fs: spy.fs, ...small });
+        expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 2 + 4, complete: false });
+        // The tail read of the transcript is 256 KB; the scan itself never reads more than a chunk.
+        expect(Math.max(...spy.reads.map((x) => x.len))).toBeLessThanOrEqual(256 * 1024);
+        expect(spy.reads.filter((x) => x.len === 256).length).toBeGreaterThan(1000);
+        const scanReads = () => spy.reads.filter((x) => x.len <= 256).length;
+        const before = scanReads();
+        expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 6, complete: false });
+        expect(scanReads()).toBe(before);
+      });
+
+      it('resumes the newline search when the line is still being written', async () => {
+        await session(314);
+        const first = `${line('m1', 1)}\n`;
+        const file = await transcript(root, SID_A, first + huge().slice(0, 1000));
+        const r = reader(small);
+        expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 2, complete: false });
+        // The rest of the line looks like usage lines: parsing from the middle would count them.
+        const rest = `${line('m9', 100).repeat(1)}`;
+        await writeFile(file, `${first}${huge().slice(0, 1000)}${rest}\n${line('m2', 2)}\n`);
+        expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 2 + 4, complete: false });
+      });
+
+      it('marks a subagent file incomplete and leaves the other counts alone', async () => {
+        await session(315);
+        const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+        await subagent(main, 'agent-a.jsonl', `${line('s1', 1)}\n${huge()}\n${line('s2', 2)}\n`);
+        await subagent(main, 'agent-b.jsonl', `${line('s3', 3)}\n`);
+        expect(await tokensOf(small)).toEqual({ used: 2 + 2 + 4 + 6, complete: false });
+      });
+    });
+
+    it('rescans a file replaced by one of the same size and another inode', async () => {
+      await session(316);
+      const file = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      let inode = 1;
+      const moving: CliFs = {
+        ...logging().fs,
+        stat: async (p) => ({ ...(await stat(p)), ino: inode }),
+      };
+      const r = reader({ fs: moving });
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+      const before = (await readFile(file, 'utf8')).length;
+      inode = 2;
+      await writeFile(file, jsonl([respLine('m1', usage(7, 0, 7))]));
+      expect((await readFile(file, 'utf8')).length).toBe(before);
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(14);
+    });
+
+    it('rescans a file rewritten in place when the byte before the offset is no longer a newline', async () => {
+      await session(317);
+      const file = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
+      const r = reader();
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(2);
+      await writeFile(
+        file,
+        jsonl([respLine('m55555', usage(4, 0, 4)), respLine('m6', usage(5, 0, 5))]),
+      );
+      expect(must((await r.read()).sessions[0]).tokens?.used).toBe(8 + 10);
+    });
+  });
+
   it('never logs transcript text', async () => {
     await session(150, { status: 'idle' });
     await transcript(root, SID_A, jsonl([user('private prompt'), asst(text('private answer'))]));

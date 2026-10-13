@@ -1041,10 +1041,10 @@ a.mrow:hover { background: var(--bs-surface-selected); }
   <dl class="mock stats facts" aria-label="Right now">
     <div class="card stat"><dt class="k">Active sessions</dt><dd class="v">2</dd><dd class="w">Live sessions on a running epic</dd></div>
     <div class="card stat"><dt class="k">Agents running</dt><dd class="v">5</dd><dd class="w">Subagents and factory agents; nested ones not counted</dd></div>
-    <div class="card stat"><dt class="k">Budget used</dt><dd class="v">1.2M&nbsp;tokens</dd><dd class="w">Tokens on the epics these sessions run</dd></div>
+    <div class="card stat"><dt class="k">Budget used</dt><dd class="v">1.2M&nbsp;tokens</dd><dd class="w">Tokens these sessions used, cache reads left out</dd></div>
     <div class="card stat"><dt class="k">Tasks done</dt><dd class="v">13&nbsp;of&nbsp;25</dd><dd class="w">Plan tasks on those epics</dd></div>
   </dl>
-  <p class="small muted">Fact strip: four read-only tiles under the page header, whose description reads &ldquo;What is running and what it costs.&rdquo; All four count the live CLI sessions linked to a running epic. Budget used and Tasks done count each epic once, even when two sessions run it; Budget used is tokens, with no percentage. A floor starts with &ldquo;&ge;&rdquo;, a value the server could not measure reads &ldquo;Not known&rdquo;, and a store that could not be read adds one muted line under the strip. Tiles are not links. At 900px and below the four tiles form a 2&times;2 grid.</p>
+  <p class="small muted">Fact strip: four read-only tiles under the page header, whose description reads &ldquo;What is running and what it costs.&rdquo; All four count the live CLI sessions linked to a running epic. Tasks done counts each epic once, even when two sessions run it; Budget used is the tokens the sessions&rsquo; transcripts record, cache reads left out, with no percentage. A floor starts with &ldquo;&ge;&rdquo;, a value the server could not measure reads &ldquo;Not known&rdquo;, and a store that could not be read adds one muted line under the strip. Tiles are not links. At 900px and below the four tiles form a 2&times;2 grid.</p>
   <span class="mock-label">Illustrative example</span>
   <div class="mock">
     <div class="feedbar"><b id="ls-h">Live sessions</b><a href="#p-sessions">All sessions</a></div>

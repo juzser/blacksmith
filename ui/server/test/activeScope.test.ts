@@ -35,6 +35,7 @@ function session(linked: unknown, over: Record<string, unknown> = {}) {
     startedAt: '2026-10-07T10:00:00.000Z',
     cwdLabel: 'project-a',
     subagentsRunning: 0,
+    tokens: { used: 0, complete: true },
     linked: linked as LinkedIn,
     ...over,
   };
@@ -128,6 +129,8 @@ describe('computeActiveScope', () => {
         activeSessions: 0,
         agentsRunning: 0,
         agentsUnmeasured: 0,
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
       },
     ]);
   });
@@ -255,6 +258,8 @@ describe('computeActiveScope', () => {
         activeSessions: 2,
         agentsRunning: 2,
         agentsUnmeasured: 0,
+        tokensSpent: 0,
+        tokensUnmeasured: 0,
       },
     ]);
     expect(out.epics).toEqual([
@@ -288,6 +293,8 @@ describe('computeActiveScope', () => {
           activeSessions: 1,
           agentsRunning: 1,
           agentsUnmeasured: 0,
+          tokensSpent: 0,
+          tokensUnmeasured: 0,
         },
       ]);
       expect(out.unlinkedSessions).toBe(0);
@@ -418,7 +425,7 @@ describe('computeActiveScope', () => {
         agentsRunning: 0,
         agentsUnmeasured: 0,
         tokensSpent: 1200,
-        tokensUnmeasured: 2,
+        tokensUnmeasured: 0,
         tasksDone: 3,
         tasksTotal: 10,
       });
@@ -574,7 +581,7 @@ describe('computeActiveScope', () => {
         agentsRunning: 2,
         agentsUnmeasured: 0,
         tokensSpent: 300,
-        tokensUnmeasured: 1,
+        tokensUnmeasured: 0,
         tasksDone: 3,
         tasksTotal: 6,
       });
@@ -622,6 +629,96 @@ describe('computeActiveScope', () => {
       });
       expect(out.activeSessions).toBe(2);
       expect(out.agentsRunning).toBe(3);
+    });
+  });
+
+  describe('budget used: transcript tokens', () => {
+    const tok = (used: number, complete = true) => ({ tokens: { used, complete } });
+    const two = [store({ activelyRunning: ['epic-a', 'epic-b'] })];
+    const epicB = linkedEpic({ epicId: 'epic-b', project: 'project-b' });
+    const row = (out: ReturnType<typeof fold>, project: string) =>
+      out.projects.find((p) => p.project === project);
+
+    it('two sessions on one epic sum their transcript tokens', () => {
+      const epic = linkedEpic();
+      const out = fold(
+        cli([
+          session({ epics: [epic] }, { cliSessionId: 'c1', ...tok(100) }),
+          session({ epics: [epic] }, { cliSessionId: 'c2', ...tok(250) }),
+        ]),
+        [store({ activelyRunning: ['epic-a'] })],
+      );
+      expect(out.tokensSpent).toBe(350);
+      expect(out.tokensUnmeasured).toBe(0);
+      expect(row(out, 'project-a')).toMatchObject({ tokensSpent: 350, tokensUnmeasured: 0 });
+    });
+
+    it('a session on two epics counts once', () => {
+      const out = fold(cli([session({ epics: [linkedEpic(), epicB] }, tok(500))]), two);
+      expect(out.tokensSpent).toBe(500);
+    });
+
+    it('a null or incomplete session adds to tokensUnmeasured and its known part still counts', () => {
+      const out = fold(
+        cli([
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c1', ...tok(70, false) }),
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c2', tokens: null }),
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c3', ...tok(30) }),
+        ]),
+        [store({ activelyRunning: ['epic-a'] })],
+      );
+      expect(out.tokensSpent).toBe(100);
+      expect(out.tokensUnmeasured).toBe(2);
+      expect(row(out, 'project-a')).toMatchObject({ tokensSpent: 100, tokensUnmeasured: 2 });
+    });
+
+    it('the factory figure wins when it is larger than the transcripts', () => {
+      const out = fold(cli([session({ epics: [linkedEpic()] }, tok(100))]), [
+        store({
+          activelyRunning: ['epic-a'],
+          tokens: { 'epic-a': { tokensSpent: 900, unmeasured: 0 } },
+        }),
+      ]);
+      expect(out.tokensSpent).toBe(900);
+      expect(row(out, 'project-a')?.tokensSpent).toBe(900);
+      expect(out.epics[0]).toMatchObject({ tokensSpent: 900 });
+    });
+
+    it('the transcripts win when they are larger than the factory figure', () => {
+      const out = fold(cli([session({ epics: [linkedEpic()] }, tok(1000))]), [
+        store({
+          activelyRunning: ['epic-a'],
+          tokens: { 'epic-a': { tokensSpent: 900, unmeasured: 1 } },
+        }),
+      ]);
+      expect(out.tokensSpent).toBe(1000);
+      expect(out.epics[0]).toMatchObject({ tokensSpent: 900, tokensUnmeasured: 1 });
+    });
+
+    it('two unrelated groups are summed, each project row over its own sessions', () => {
+      const out = fold(
+        cli([
+          session({ epics: [linkedEpic()] }, { cliSessionId: 'c1', ...tok(100) }),
+          session({ epics: [epicB] }, { cliSessionId: 'c2', ...tok(40, false) }),
+        ]),
+        [
+          store({
+            activelyRunning: ['epic-a', 'epic-b'],
+            tokens: { 'epic-b': { tokensSpent: 10, unmeasured: 0 } },
+          }),
+        ],
+      );
+      expect(out.tokensSpent).toBe(140);
+      expect(out.tokensUnmeasured).toBe(1);
+      expect(row(out, 'project-a')).toMatchObject({ tokensSpent: 100, tokensUnmeasured: 0 });
+      expect(row(out, 'project-b')).toMatchObject({ tokensSpent: 40, tokensUnmeasured: 1 });
+    });
+
+    it('a project row groups only its own epics: a session shared with another project counts in both rows', () => {
+      const out = fold(cli([session({ epics: [linkedEpic(), epicB] }, tok(500))]), two);
+      expect(row(out, 'project-a')?.tokensSpent).toBe(500);
+      expect(row(out, 'project-b')?.tokensSpent).toBe(500);
+      expect(out.tokensSpent).toBe(500);
     });
   });
 

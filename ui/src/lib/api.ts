@@ -885,8 +885,13 @@ export interface ActiveScopeResult {
   agentsRunning: number;
   /** Sessions in A whose subagents could not be counted. */
   agentsUnmeasured: number;
-  /** Over S, each epic once. */
+  /**
+   * Over A: the transcript tokens of the sessions (cache reads left out), or
+   * the factory-measured spend on their epics when that is larger, per group
+   * of sessions and epics they share.
+   */
   tokensSpent: number;
+  /** Sessions in A whose transcript tokens are missing or incomplete. */
   tokensUnmeasured: number;
   tasksDone: number;
   /** done + review + inProgress + todo; superseded tasks are left out. */
@@ -901,7 +906,10 @@ export interface ActiveScopeResult {
     activeSessions: number;
     agentsRunning: number;
     agentsUnmeasured: number;
+    tokensSpent: number;
+    tokensUnmeasured: number;
   }[];
+  /** The factory's own per-epic figures; the project filter does not read them for tokens. */
   epics: {
     storeId: string;
     epicId: string;
