@@ -13,6 +13,7 @@ import {
   emitTaskSuperseded,
   emitTasksAdded,
   emitWaveMerged,
+  planIngestGaps,
   type TaskEventContext,
 } from '../src/taskEvents.js';
 
@@ -223,8 +224,116 @@ describe('a completed task stays completed across an amendment that does not sup
       await hit();
       await reinstateTask(A, { reason: 'dropped by mistake' }, ctx, opts());
       const v2 = draftNextVersion(markCompleted(plan1(), A), { supersede: { [A]: spec(A2) } });
+      // The amendment records its successors before the new version is ingested.
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'system',
+          event_type: PLAN_AMENDED_EVENT,
+          task_id: `${EPIC}/plan-v2`,
+          plan_version: 2,
+          causal_parent: ctx.causalParent,
+          payload: {
+            epic_id: EPIC,
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale: 'replace A',
+            successors: { [A]: A2 },
+          },
+        },
+        opts(),
+      );
       await emitTasksAdded(v2, { ...ctx, planVersion: 2 }, opts());
       expect((await statuses()).get(A)).toBe('superseded');
+    });
+
+    // The plan that carried the bad supersede still holds the id as dead
+    // copies only, so ingest must not owe the supersede a second time.
+    describe('ingest after a reinstatement', () => {
+      const deadA = (): PlanFile => ({
+        ...plan1(),
+        tasks: [spec(A, { task_status: 'superseded' }), spec(B)],
+      });
+
+      const bothDead = (): PlanFile => ({
+        ...plan1(),
+        tasks: [spec(A, { task_status: 'superseded' }), spec(B, { task_status: 'superseded' })],
+      });
+
+      async function reinstated(): Promise<void> {
+        await hit();
+        await reinstateTask(A, { reason: 'dropped by mistake' }, ctx, opts());
+      }
+
+      /** A v2 amendment recording `successors`, the way amendPlan writes it. */
+      async function amendWith(successors: Record<string, string>): Promise<void> {
+        await appendEvent(
+          {
+            session_id: sessionId,
+            actor: 'system',
+            event_type: PLAN_AMENDED_EVENT,
+            task_id: `${EPIC}/plan-v2`,
+            plan_version: 2,
+            causal_parent: ctx.causalParent,
+            payload: {
+              epic_id: EPIC,
+              version: 2,
+              previous_version: 1,
+              amends: [],
+              rationale: 'replace A',
+              successors,
+            },
+          },
+          opts(),
+        );
+      }
+
+      const owed = async (plan: PlanFile): Promise<string[]> =>
+        (await planIngestGaps(plan, ctx, opts())).map((g) => `${g.taskId}:${g.eventType}`);
+
+      it('owes nothing for an id whose plan records are all dead and has no successor', async () => {
+        await reinstated();
+        expect(await planIngestGaps(deadA(), ctx, opts())).toEqual([]);
+        const before = (await readEvents(sessionId, opts())).length;
+        await emitTasksAdded(deadA(), ctx, opts());
+        expect((await readEvents(sessionId, opts())).length).toBe(before);
+        expect((await statuses()).get(A)).toBe('completed');
+      });
+
+      it('owes task-superseded again once a later amendment names a successor', async () => {
+        await reinstated();
+        await amendWith({ [A]: A2 });
+        expect(await owed(deadA())).toEqual([`${A}:task-superseded`]);
+      });
+
+      it('matches a successor recorded under the bare id, as reinstate does', async () => {
+        await reinstated();
+        await amendWith({ 'task-a': A2 });
+        expect(await owed(deadA())).toEqual([`${A}:task-superseded`]);
+      });
+
+      it('still owes the supersede for a dead id beside a reinstated one', async () => {
+        await reinstated();
+        expect(await owed(bothDead())).toEqual([`${B}:task-superseded`]);
+      });
+
+      it('ignores a task-reinstated that follows no supersede', async () => {
+        await emitTasksAdded(plan1(), ctx, opts());
+        await appendEvent(
+          {
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-reinstated',
+            task_id: B,
+            plan_version: 1,
+            causal_parent: ctx.causalParent,
+            payload: { epic_id: EPIC },
+          },
+          opts(),
+        );
+        expect(await owed(bothDead())).toEqual([`${A}:task-superseded`, `${B}:task-superseded`]);
+      });
     });
 
     it('refuses a task that never merged', async () => {

@@ -49,6 +49,12 @@ than appearing in it.
   auditable `task-reinstated` event; it refuses a task that never merged and one
   a plan really superseded with a successor.
 
+- **A reinstated task is no longer superseded again by ingest.** A plan that
+  still held the reinstated task only as dead copies made `plan ingest` owe a
+  second `task-superseded`, and `wave check --session` refused every task on that
+  plan with `cli.plan-not-ingested`. Ingest now owes it only when an amendment
+  maps the task to a successor.
+
 - **The dashboard after 0.5.0 (#444-#452, #456).** It runs from a clone and is
   not in the npm package. These fixes bring it closer to the design mock
   (`ui/docs/ds-review.html`) and the spec (`ui/docs/ds-spec.md`):
