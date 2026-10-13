@@ -27,7 +27,7 @@ export interface FactTile {
 
 const FACTS = [
   { label: 'Active sessions', helper: 'Live sessions on a running epic' },
-  { label: 'Agents running', helper: 'Subagents and factory agents; nested ones not counted' },
+  { label: 'Agents running', helper: 'Agents and subagents of every live session, at any depth' },
   { label: 'Budget used', helper: 'Tokens these sessions used, cache reads left out' },
   { label: 'Tasks done', helper: 'Plan tasks on those epics' },
 ] as const;

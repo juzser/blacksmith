@@ -188,10 +188,11 @@ export interface CliSessionCard {
   focus: CliSessionFocus | null;
   transcript: 'ok' | 'missing' | 'tail-empty' | 'unreadable';
   /**
-   * Main-thread subagents running now: background launches not reported
-   * ended plus foreground Agent/Task calls with no result, both from after
-   * `startedAt`. A floor: nested subagents and launches outside the
-   * transcript tail are not seen. Null when the transcript could not be read.
+   * Subagents running now at every depth, from this process (after
+   * `startedAt`): the transcripts in the session's `subagents/` folder that
+   * have not handed back, were not reported ended by their parent and are not
+   * stale, plus main-thread launches whose transcript does not exist yet.
+   * Null when the transcript could not be read.
    */
   subagentsRunning: number | null;
   /**
@@ -464,8 +465,9 @@ interface Analysis {
   /**
    * Background subagents launched in the main thread and not yet reported
    * ended, by agent id, with the launch timestamp (ms, null when unreadable).
-   * Only what the transcript tail shows: a launch outside the tail is not
-   * seen, so the count is a floor. Shells and monitors are not tracked.
+   * Only what the transcript tail shows. The `subagents/` folder is the count's
+   * source; these only cover a launch whose transcript is not there yet.
+   * Shells and monitors are not tracked.
    */
   pendingAgents: Map<string, number | null>;
   /**
@@ -473,7 +475,63 @@ interface Analysis {
    * by tool_use id, with the call timestamp (ms, null when unreadable).
    */
   openAgentCalls: Map<string, number | null>;
+  /** What the tail says ended: a subagent's notification, a tool call's result. */
+  ends: EndMarks;
 }
+
+/** Subagent ends a transcript tail reports, for the subagents it started. */
+interface EndMarks {
+  /** Agent ids a task-notification reported completed, failed, killed or stopped. */
+  endedIds: Set<string>;
+  /** Ids of the tool calls that got a tool_result back. */
+  resultIds: Set<string>;
+}
+
+function endMarks(entries: Record<string, unknown>[]): EndMarks {
+  const marks: EndMarks = { endedIds: new Set(), resultIds: new Set() };
+  for (const e of entries) {
+    if (e.type !== 'user') continue;
+    const ended = endedAgentId(e);
+    if (ended !== null) marks.endedIds.add(ended);
+    const blocks = blocksOf(e);
+    // A background launch's result comes back at once; it does not end the agent.
+    if (launchedAgentId(e, blocks) !== null) continue;
+    for (const b of blocks) {
+      if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+        marks.resultIds.add(b.tool_use_id);
+      }
+    }
+  }
+  return marks;
+}
+
+/** A subagent's own transcript tail: whether it handed back, and what it ended in turn. */
+interface SubTail extends EndMarks {
+  handedBack: boolean;
+}
+
+/**
+ * A subagent has handed back when its last assistant record calls
+ * SubagentHandback, or (the older shape) calls no tool at all.
+ */
+function analyseSub(entries: Record<string, unknown>[]): SubTail {
+  let last: Block[] | null = null;
+  for (const e of entries) {
+    if (e.type !== 'assistant') continue;
+    const blocks = blocksOf(e);
+    if (blocks.some((b) => b.type === 'text' || b.type === 'tool_use')) last = blocks;
+  }
+  const handedBack =
+    last !== null &&
+    (last.some((b) => b.type === 'tool_use' && b.name === 'SubagentHandback') ||
+      !last.some((b) => b.type === 'tool_use'));
+  return { ...endMarks(entries), handedBack };
+}
+
+/** A subagent that wrote nothing for this long, with no running child, is taken as gone. */
+const SUBAGENT_STALE_MS = 15 * 60 * 1000;
+/** Most a subagent's `.meta.json` is read for. */
+const SUBAGENT_META_BYTES = 64 * 1024;
 
 /** The tool names a main-thread subagent call goes by. */
 const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
@@ -524,6 +582,7 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     bsMention: mentionsBs(entries),
     pendingAgents: new Map(),
     openAgentCalls: new Map(),
+    ends: endMarks(entries),
   };
   for (const e of entries) {
     if (e.isSidechain === true) continue;
@@ -825,6 +884,17 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       incomplete: boolean;
     }
   >();
+  /** Per subagent transcript: what its bounded tail and its meta say, by size + mtime. */
+  const subCache = new Map<
+    string,
+    {
+      size: number;
+      mtimeMs: number;
+      firstTs: number | null;
+      tail: SubTail;
+      meta: { toolUseId: string | null; parentId: string | null } | null;
+    }
+  >();
   /** Session id -> the transcript files its token count was made of. */
   const tokenFiles = new Map<string, string[]>();
   /** Session id -> until when a full search for its transcript is not repeated. */
@@ -981,6 +1051,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       const live =
         counted.has(file) || mains.includes(file) || subDirs.some((d) => file.startsWith(d));
       if (!live) tokenCache.delete(file);
+    }
+    for (const file of subCache.keys()) {
+      if (!subDirs.some((d) => file.startsWith(d))) subCache.delete(file);
     }
     const files = new Set(mains);
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
@@ -1196,17 +1269,140 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return ts === null || Number.isNaN(startedMs) || ts >= startedMs;
   }
 
+  /** The parent link and the launching tool call of one subagent, from its `.meta.json`. */
+  async function readSubMeta(
+    file: string,
+  ): Promise<{ toolUseId: string | null; parentId: string | null } | null> {
+    try {
+      const buf = await readSlice(
+        fs,
+        file.replace(/\.jsonl$/, '.meta.json'),
+        0,
+        SUBAGENT_META_BYTES,
+      );
+      const j: unknown = JSON.parse(buf.toString('utf8'));
+      if (j === null || typeof j !== 'object') return null;
+      const m = j as Record<string, unknown>;
+      const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : null);
+      return { toolUseId: str(m.toolUseId), parentId: str(m.parentAgentId) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The first record's timestamp of a transcript (ms), null when it has none yet. */
+  async function firstTimestamp(file: string, size: number): Promise<number | null> {
+    const head = (await readSlice(fs, file, 0, Math.min(HEAD_BYTES, size))).toString('utf8');
+    const nl = head.indexOf('\n');
+    if (nl === -1 && size > HEAD_BYTES) return null;
+    const first = parseLines(nl === -1 ? head : head.slice(0, nl))[0];
+    const ts = typeof first?.timestamp === 'string' ? Date.parse(first.timestamp) : Number.NaN;
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  /** A subagent transcript's cached read, refreshed when its size or mtime moved. */
+  async function readSubagent(file: string, size: number, mtimeMs: number) {
+    const hit = subCache.get(file);
+    if (hit && hit.size === size && hit.mtimeMs === mtimeMs) {
+      if (hit.meta === null) hit.meta = await readSubMeta(file);
+      return hit;
+    }
+    const pos = Math.max(0, size - TAIL_BYTES);
+    let body = (await readSlice(fs, file, pos, Math.min(TAIL_BYTES, size))).toString('utf8');
+    if (pos > 0) body = body.slice(body.indexOf('\n') + 1);
+    const entry = {
+      size,
+      mtimeMs,
+      firstTs: hit?.firstTs ?? (size === 0 ? null : await firstTimestamp(file, size)),
+      tail: analyseSub(parseLines(body)),
+      meta: hit?.meta ?? (await readSubMeta(file)),
+    };
+    subCache.set(file, entry);
+    return entry;
+  }
+
   /**
-   * Background subagents still pending plus foreground subagent calls still
-   * open, in the main thread only (a subagent's own subagents are not seen),
-   * so the count is a floor. Null when the transcript could not be read.
+   * The subagents of one session running now, at every depth, from its
+   * `subagents/` folder (one flat folder for all depths). A subagent counts
+   * when it started in this process, has not handed back, was not reported
+   * ended by its parent (a notification, or the result of the call that
+   * launched it), and either wrote within the stale window or has a running
+   * child. Plus main-thread launches that have no transcript there yet.
+   * Null when the transcript could not be read.
    */
-  function subagentsRunningOf(e: RegistryEntry, t: TranscriptRead): number | null {
+  async function subagentsRunningOf(
+    configDir: string,
+    e: RegistryEntry,
+    t: TranscriptRead,
+  ): Promise<number | null> {
     const a = t.analysis;
     if (a === null) return null;
+    const main = await findTranscript(configDir, e);
+    const dir = main === null ? null : path.join(main.replace(/\.jsonl$/, ''), 'subagents');
+    let names: string[] = [];
+    if (dir !== null) {
+      try {
+        names = (await fs.readdir(dir)).filter((n) => SUBAGENT_FILE.test(n));
+      } catch {
+        names = [];
+      }
+    }
+    const startedMs = e.startedAt === null ? Number.NaN : Date.parse(e.startedAt);
+    const known = new Set<string>();
+    const launching = new Set<string>();
+    const infos = new Map<
+      string,
+      {
+        mtimeMs: number;
+        tail: SubTail;
+        meta: { toolUseId: string | null; parentId: string | null } | null;
+      }
+    >();
+    for (const name of names) {
+      const id = name.slice('agent-'.length, -'.jsonl'.length);
+      const file = path.join(dir as string, name);
+      try {
+        const st = await fs.stat(file);
+        known.add(id);
+        // Not written since this process started: it belongs to one that is gone.
+        if (!Number.isNaN(startedMs) && st.mtimeMs < startedMs) continue;
+        const sub = await readSubagent(file, st.size, st.mtimeMs);
+        if (!sinceStart(e, sub.firstTs ?? st.mtimeMs)) continue;
+        infos.set(id, { mtimeMs: st.mtimeMs, tail: sub.tail, meta: sub.meta });
+        if (sub.meta?.toolUseId) launching.add(sub.meta.toolUseId);
+      } catch {
+        known.delete(id);
+      }
+    }
+    const children = new Map<string, string[]>();
+    for (const [id, info] of infos) {
+      const parent = info.meta?.parentId;
+      if (parent) children.set(parent, [...(children.get(parent) ?? []), id]);
+    }
+    const now = clock();
+    const memo = new Map<string, boolean>();
+    const live = (id: string): boolean => {
+      const cached = memo.get(id);
+      if (cached !== undefined) return cached;
+      memo.set(id, false); // a cycle in the parent links counts nothing
+      const info = infos.get(id);
+      if (info === undefined) return false;
+      const parent = info.meta?.parentId ?? null;
+      const marks = parent === null ? a.ends : (infos.get(parent)?.tail ?? null);
+      const ended =
+        info.tail.handedBack ||
+        marks?.endedIds.has(id) === true ||
+        (info.meta?.toolUseId != null && marks?.resultIds.has(info.meta.toolUseId) === true);
+      const result =
+        !ended && (now - info.mtimeMs <= SUBAGENT_STALE_MS || (children.get(id) ?? []).some(live));
+      memo.set(id, result);
+      return result;
+    };
     let n = 0;
-    for (const ts of a.pendingAgents.values()) if (sinceStart(e, ts)) n += 1;
-    for (const ts of a.openAgentCalls.values()) if (sinceStart(e, ts)) n += 1;
+    for (const id of infos.keys()) if (live(id)) n += 1;
+    // A launch whose transcript is not on disk yet is seen only in the main tail.
+    for (const [id, ts] of a.pendingAgents) if (!known.has(id) && sinceStart(e, ts)) n += 1;
+    for (const [id, ts] of a.openAgentCalls) if (!launching.has(id) && sinceStart(e, ts)) n += 1;
     return n;
   }
 
@@ -1915,7 +2111,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         next: a?.next ?? null,
         focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
-        subagentsRunning: subagentsRunningOf(e, t),
+        subagentsRunning: await subagentsRunningOf(deps.configDir, e, t),
         tokens: await tokensOf(deps.configDir, e),
         linked,
         parseIssues: e.parseIssues,

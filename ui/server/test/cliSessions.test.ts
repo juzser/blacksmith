@@ -11,6 +11,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -554,6 +555,136 @@ describe('cliSessions reader', () => {
         it('is null when the transcript could not be read', async () => {
           await session(133);
           expect(await running()).toBeNull();
+        });
+      });
+
+      describe('subagents on disk, at every depth', () => {
+        const T = (hhmm: string) => `2026-10-06T${hhmm}:00.000Z`;
+        const CLOCK = Date.parse(NOW);
+        const MIN = 60_000;
+        const running = async () =>
+          must((await read({ clock: () => CLOCK })).sessions[0]).subagentsRunning;
+        const stamped = (rec: Record<string, unknown>, ts = T('11:30')) => ({
+          ...rec,
+          isSidechain: true,
+          timestamp: ts,
+        });
+        const working = (ts = T('11:30')) => [
+          stamped(user('do it'), ts),
+          stamped(asst(toolUse('Bash', 'b1')), ts),
+        ];
+        const handback = (ts = T('11:40')) => [
+          stamped(asst(toolUse('SubagentHandback', 'h1')), ts),
+          stamped(toolResult('h1'), ts),
+        ];
+        let mainFile: string;
+        async function start(records: unknown[] = [user('go'), asst(text('Waiting.'))]) {
+          await session(150, { status: 'idle' });
+          mainFile = await transcript(root, SID_A, jsonl(records));
+        }
+        async function sub(
+          id: string,
+          records: unknown[],
+          meta: Record<string, unknown> = {},
+          mtime = CLOCK - MIN,
+        ) {
+          const dir = path.join(mainFile.replace(/\.jsonl$/, ''), 'subagents');
+          await mkdir(dir, { recursive: true });
+          const f = path.join(dir, `agent-${id}.jsonl`);
+          await writeFile(f, jsonl(records));
+          await utimes(f, mtime / 1000, mtime / 1000);
+          await writeFile(
+            path.join(dir, `agent-${id}.meta.json`),
+            JSON.stringify({ agentType: 'coder', toolUseId: `tu-${id}`, spawnDepth: 1, ...meta }),
+          );
+        }
+
+        it('counts a depth-1 subagent whose launch is older than the main tail window', async () => {
+          const pad = Array.from({ length: 400 }, () => asst(text('x'.repeat(1000))));
+          await start([user('go'), launchRec('ag1'), ...pad, asst(text('Waiting.'))]);
+          await sub('ag1', working());
+          expect(await running()).toBe(1);
+        });
+
+        it('counts a depth-2 subagent under a running depth-1 parent', async () => {
+          await start();
+          await sub('ag1', working());
+          await sub('ag2', working(), { parentAgentId: 'ag1', spawnDepth: 2 });
+          expect(await running()).toBe(2);
+        });
+
+        it('does not count a subagent that handed back', async () => {
+          await start();
+          await sub('ag1', [...working(), ...handback()]);
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count a subagent whose last assistant record has no tool call', async () => {
+          await start();
+          await sub('ag1', [...working(), stamped(asst(text('All done.')), T('11:40'))]);
+          expect(await running()).toBe(0);
+        });
+
+        it('keeps counting a subagent that is between tool calls', async () => {
+          await start();
+          await sub('ag1', [...working(), stamped(toolResult('b1'))]);
+          expect(await running()).toBe(1);
+        });
+
+        it('does not count a depth-1 subagent a main-thread notification ended', async () => {
+          await start([user('go'), launchRec('ag1'), notifyRec('ag1', 'killed', true)]);
+          await sub('ag1', working());
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count a depth-1 call whose tool_result came back', async () => {
+          await start([user('go'), asst(toolUse('Agent', 'tu-ag1')), toolResult('tu-ag1')]);
+          await sub('ag1', working());
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count a depth-2 subagent its parent was notified ended', async () => {
+          await start();
+          await sub('ag1', [...working(), stamped(notifyRec('ag2', 'killed', true), T('11:35'))]);
+          await sub('ag2', working(), { parentAgentId: 'ag1', spawnDepth: 2 });
+          expect(await running()).toBe(1);
+        });
+
+        it('does not count a quiet subagent with no running child', async () => {
+          await start();
+          await sub('ag1', working(), {}, CLOCK - 16 * MIN);
+          expect(await running()).toBe(0);
+        });
+
+        it('counts a quiet parent that waits on a running child', async () => {
+          await start();
+          await sub('ag1', working(), {}, CLOCK - 40 * MIN);
+          await sub('ag2', working(), { parentAgentId: 'ag1', spawnDepth: 2 });
+          expect(await running()).toBe(2);
+        });
+
+        it('does not count a subagent that started before the registry startedAt', async () => {
+          await start();
+          await sub('ag1', working(T('09:00')));
+          expect(await running()).toBe(0);
+        });
+
+        it('does not count a subagent file last written before the registry startedAt', async () => {
+          await start();
+          await sub('ag1', working(T('11:30')), {}, Date.parse(T('09:30')));
+          expect(await running()).toBe(0);
+        });
+
+        it('counts a launch seen in both the main tail and the folder once', async () => {
+          await start([user('go'), asst(toolUse('Agent', 'tu-ag1')), launchRec('ag1')]);
+          await sub('ag1', working());
+          expect(await running()).toBe(1);
+        });
+
+        it('still counts a main-tail launch whose subagent file does not exist yet', async () => {
+          await start([user('go'), asst(toolUse('Agent', 'tu-ag1')), launchRec('ag1')]);
+          await sub('ag2', working());
+          expect(await running()).toBe(2);
         });
       });
     });
@@ -2777,13 +2908,12 @@ describe('cliSessions reader', () => {
       const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
       await subagent(main, 'agent-a1.jsonl', jsonl([respLine('s1', usage(10, 0, 10))]));
       await subagent(main, 'agent-b_2.jsonl', jsonl([respLine('s1', usage(100, 0, 100))]));
-      const meta = await subagent(main, 'agent-a1.meta.json', JSON.stringify(usage(9, 9, 9)));
+      await subagent(main, 'agent-a1.meta.json', JSON.stringify(usage(9, 9, 9)));
       const stray = await subagent(main, 'notes.jsonl', jsonl([respLine('x', usage(9, 9, 9))]));
       const spy = logging();
       expect(await tokensOf({ fs: spy.fs })).toEqual({ used: 2 + 20 + 200, complete: true });
-      expect(spy.opened).not.toContain(meta);
       expect(spy.opened).not.toContain(stray);
-      expect(spy.stats).not.toContain(meta);
+      expect(spy.stats).not.toContain(stray);
     });
 
     it('is complete without a subagents directory and incomplete with an unreadable file', async () => {

@@ -6,10 +6,12 @@
 // project names, store ids and counts, so no session name, cwd, prompt or
 // transcript text can ride along.
 //
-// Home's fact strip reads four totals over one set. S is the active epics
-// (`epics`); A is the live sessions linked to at least one epic in S. Agents
-// and tokens add up over A, group by group (see `foldGroups`); tasks add up
-// over S, each epic once however many sessions drive it.
+// Home's fact strip reads four totals. S is the active epics (`epics`); A is
+// the live sessions linked to at least one epic in S. Agents add up over every
+// live session (each one's main agent plus its running subagents at any
+// depth), with a floor per group of A for the factory agents the transcripts
+// cannot see; tokens add up over A, group by group (see `foldGroups`); tasks
+// add up over S, each epic once however many sessions drive it.
 import { EPIC_IDLE_MS, type StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import { type CliSessionsResponse, HOME_STORE_ID, type StoreRef } from './cliSessions.js';
 
@@ -34,7 +36,7 @@ export interface ActiveScopeCli {
         progress: StatusCounts | null;
       }[];
     } | null;
-    /** Subagents this session has running now; null when not measured. */
+    /** Subagents this session has running now at any depth; null when not measured. */
     subagentsRunning: number | null;
     /** Transcript tokens (cache reads left out); null when unreadable, incomplete when a subagent file was. */
     tokens: { used: number; complete: boolean } | null;
@@ -60,13 +62,13 @@ export interface ActiveScope {
   /** |A|: live sessions linked to at least one active epic. */
   activeSessions: number;
   /**
-   * Over A, each group of sessions and the active epics they share counts
-   * the larger of its sessions' running subagents and its epics' working
-   * factory agents, so an agent seen both ways counts once. Nested
-   * subagents are not counted, so this is a floor.
+   * Over every live session: its main agent plus its running subagents at
+   * any depth. Each group of sessions in A and the active epics they share
+   * is lifted to its epics' working factory agents when its subagents number
+   * fewer, so an agent seen both ways counts once.
    */
   agentsRunning: number;
-  /** Sessions in A whose subagents could not be counted. */
+  /** Live sessions whose subagents could not be counted (their main agent still counts). */
   agentsUnmeasured: number;
   /**
    * Over A, each group of sessions and the active epics they share counts
@@ -248,6 +250,10 @@ export function computeActiveScope(
 
   const epicSpend = new Map([...epics].map(([k, e]) => [k, e.tokensSpent]));
   const all = foldGroups(cli, sessionEpics, epicAgents, epicSpend);
+  const allAgents = countAgents(
+    cli,
+    cli.sessions.map((_, i) => i),
+  );
   const epicList = [...epics.values()];
   const sum = (pick: (e: ActiveScope['epics'][number]) => number) =>
     epicList.reduce((n, e) => n + pick(e), 0);
@@ -258,22 +264,23 @@ export function computeActiveScope(
     liveSessions: cli.sessions.length,
     unlinkedSessions: unlinked,
     activeSessions: active.size,
-    agentsRunning: all.running,
-    agentsUnmeasured: all.unmeasured,
+    agentsRunning: allAgents.running + all.shortfall,
+    agentsUnmeasured: allAgents.unmeasured,
     tokensSpent: all.tokens,
     tokensUnmeasured: all.tokensUnmeasured,
     tasksDone: sum((e) => e.tasksDone),
     tasksTotal: sum((e) => e.tasksTotal),
     projects: [...projects.values()].map((p) => {
       const mine = foldGroups(cli, p.activeEpics, epicAgents, epicSpend);
+      const own = countAgents(cli, p.sessions);
       return {
         storeId: p.storeId,
         project: p.project,
         liveSessions: p.sessions.size,
         agentsWorking: p.agents.size,
         activeSessions: p.active.size,
-        agentsRunning: mine.running,
-        agentsUnmeasured: mine.unmeasured,
+        agentsRunning: own.running + mine.shortfall,
+        agentsUnmeasured: own.unmeasured,
         tokensSpent: mine.tokens,
         tokensUnmeasured: mine.tokensUnmeasured,
       };
@@ -284,13 +291,33 @@ export function computeActiveScope(
 }
 
 /**
- * Agents running over the given sessions, each with the active epics it
- * links. Sessions that share an epic form one group (a session on two epics
- * joins them). A group counts max(its sessions' running subagents, its epics'
- * working factory agents): the factory's agents are dispatched as subagents
- * of the session running the epic, so the two counts overlap by an unknown
- * amount and the larger is the floor that never counts one agent twice. A
- * session whose subagents could not be counted adds to `unmeasured`.
+ * Agents running over the given sessions: each one's main agent plus its
+ * running subagents at any depth. A session whose subagents could not be
+ * counted still counts its main agent and adds to `unmeasured`.
+ */
+function countAgents(
+  cli: ActiveScopeCli,
+  indexes: Iterable<number>,
+): { running: number; unmeasured: number } {
+  let running = 0;
+  let unmeasured = 0;
+  for (const i of indexes) {
+    const n = cli.sessions[i]?.subagentsRunning ?? null;
+    running += 1 + (n ?? 0);
+    if (n === null) unmeasured++;
+  }
+  return { running, unmeasured };
+}
+
+/**
+ * The factory-agent floor and the tokens over the given sessions, each with
+ * the active epics it links. Sessions that share an epic form one group (a
+ * session on two epics joins them). A group's subagents are never fewer than
+ * its epics' working factory agents: the factory's agents are dispatched as
+ * subagents of the session running the epic, but the transcripts may not show
+ * them, so `shortfall` is how far the factory agents exceed the group's
+ * counted subagents (0 when they do not), added once to the sessions' own
+ * count so an agent seen both ways is never counted twice.
  *
  * Tokens fold over the same groups: a group counts max(its sessions' known
  * transcript tokens, its epics' factory-measured spend), for the same reason
@@ -304,7 +331,7 @@ function foldGroups(
   sessions: ReadonlyMap<number, ReadonlySet<string>>,
   epicAgents: ReadonlyMap<string, ReadonlySet<string>>,
   epicSpend: ReadonlyMap<string, number>,
-): { running: number; unmeasured: number; tokens: number; tokensUnmeasured: number } {
+): { shortfall: number; tokens: number; tokensUnmeasured: number } {
   // Union-find over session indexes, joined through shared epic keys.
   const parent = new Map<number, number>();
   const find = (i: number): number => {
@@ -326,7 +353,6 @@ function foldGroups(
   const agents = new Map<number, Set<string>>();
   const sessionTokens = new Map<number, number>();
   const factoryTokens = new Map<number, number>();
-  let unmeasured = 0;
   let tokensUnmeasured = 0;
   for (const i of sessions.keys()) {
     const n = cli.sessions[i]?.subagentsRunning ?? null;
@@ -334,8 +360,7 @@ function foldGroups(
     const t = cli.sessions[i]?.tokens ?? null;
     if (t === null || !t.complete) tokensUnmeasured++;
     sessionTokens.set(root, (sessionTokens.get(root) ?? 0) + (t?.used ?? 0));
-    if (n === null) unmeasured++;
-    else subs.set(root, (subs.get(root) ?? 0) + n);
+    if (n !== null) subs.set(root, (subs.get(root) ?? 0) + n);
     if (!subs.has(root)) subs.set(root, 0);
   }
   for (const [k, i] of firstOfEpic) {
@@ -345,11 +370,11 @@ function foldGroups(
     agents.set(root, set);
     factoryTokens.set(root, (factoryTokens.get(root) ?? 0) + (epicSpend.get(k) ?? 0));
   }
-  let running = 0;
-  for (const [root, n] of subs) running += Math.max(n, agents.get(root)?.size ?? 0);
+  let shortfall = 0;
+  for (const [root, n] of subs) shortfall += Math.max(0, (agents.get(root)?.size ?? 0) - n);
   let tokens = 0;
   for (const [root, n] of sessionTokens) tokens += Math.max(n, factoryTokens.get(root) ?? 0);
-  return { running, unmeasured, tokens, tokensUnmeasured };
+  return { shortfall, tokens, tokensUnmeasured };
 }
 
 /** A working factory agent, the same one whichever session links its epic. */
