@@ -4705,8 +4705,8 @@ async function main(): Promise<number> {
   }
 
   // `approve` and `reject` are the same verb with the destination fixed
-  // (P9-1): reject maps to `invalidated`, the status ui/server's reject route
-  // already writes. Both refuse a transition LEGAL_LESSON_TRANSITIONS does
+  // (P9-1): reject maps to `invalidated`, the status the lesson
+  // reject path writes. Both refuse a transition LEGAL_LESSON_TRANSITIONS does
   // not allow rather than letting a hand-typed envelope poison the memory.
   //
   // P9-34/P9-35: an approval also carries the novelty review — `--statement`
