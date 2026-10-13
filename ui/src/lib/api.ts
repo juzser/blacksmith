@@ -881,9 +881,12 @@ export interface ActiveScopeResult {
    * sessions linked to at least one of them. This is |A|.
    */
   activeSessions: number;
-  /** Over A: running subagents, plus each working factory agent once. A floor. */
+  /**
+   * Over every live session: its main agent plus its running subagents at any
+   * depth; a group's working factory agents lift its subagent part when fewer.
+   */
   agentsRunning: number;
-  /** Sessions in A whose subagents could not be counted. */
+  /** Live sessions whose subagents could not be counted (their main agent still counts). */
   agentsUnmeasured: number;
   /**
    * Over A: the transcript tokens of the sessions (cache reads left out), or
