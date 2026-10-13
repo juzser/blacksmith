@@ -892,7 +892,7 @@ describe('lib/homeView.ts factStrip()', () => {
       {
         label: 'Agents running',
         value: '5',
-        helper: 'Subagents and factory agents, each counted once',
+        helper: 'Subagents and factory agents; nested ones not counted',
         floor: false,
         quiet: false,
       },

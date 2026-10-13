@@ -367,7 +367,7 @@ test.describe('Home: fact strip', () => {
     await expect(values(page)).toHaveText(['2', '5', '1.2M tokens', '13 of 25']);
     await expect(strip(page).locator('.bs-stat__helper')).toHaveText([
       'Live sessions on a running epic',
-      'Subagents and factory agents, each counted once',
+      'Subagents and factory agents; nested ones not counted',
       'Tokens these sessions used, cache reads left out',
       'Plan tasks on those epics',
     ]);
