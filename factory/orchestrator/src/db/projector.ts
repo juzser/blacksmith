@@ -72,6 +72,7 @@ import {
   qualifyTaskId,
   taskIdsMatch,
 } from '../taskId.js';
+import { honouredReinstatements } from '../taskLifecycle.js';
 import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { LEGACY_BRANCH_PREFIX, RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
 import * as schema from './schema.js';
@@ -819,9 +820,6 @@ export function foldTasks(
     return row;
   }
 
-  // Tasks a `wave-merged` named so far, for `task-reinstated`'s precondition.
-  const merged = new Set<string>();
-
   for (const { record } of events) {
     // Resolved once, above the switch, for the same reason `touch()` is the
     // one place a row is born: a hand-written event names its task in the
@@ -930,7 +928,6 @@ export function foldTasks(
           // First terminal transition wins — see schema.ts's terminalAt comment.
           if (row.terminalAt === null) row.terminalAt = record.ts;
           row.taskStatus = 'completed';
-          merged.add(row.taskId);
         }
         break;
       }
@@ -943,14 +940,17 @@ export function foldTasks(
       }
       case 'task-reinstated': {
         // The corrective for a `task-superseded` no amendment backed: a task
-        // that finished stays finished unless a plan supersedes it. Applies
-        // only to a row that is superseded NOW and whose merge the log holds,
-        // so a hand-appended event cannot complete a task that never merged;
-        // a later `task-superseded` still wins (last event in the log).
-        // `reinstate.ts` refuses the same cases at the verb.
+        // that finished stays finished unless a plan supersedes it. Whether
+        // the log honours it is taskLifecycle.ts's one rule, shared with
+        // ingest and `reinstate.ts`; a later `task-superseded` still wins
+        // (last event in the log).
         if (!eventTask) break;
         const row = touch(eventTask, record.ts, record.session_id);
-        if (row.taskStatus === 'superseded' && merged.has(row.taskId)) {
+        const epicId = row.epicId ?? epicOfTaskId(row.taskId) ?? '';
+        if (
+          row.taskStatus === 'superseded' &&
+          honouredReinstatements(events, epicId).has(row.taskId)
+        ) {
           row.taskStatus = 'completed';
         }
         break;

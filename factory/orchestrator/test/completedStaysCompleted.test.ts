@@ -301,16 +301,18 @@ describe('a completed task stays completed across an amendment that does not sup
         expect((await statuses()).get(A)).toBe('completed');
       });
 
-      it('owes task-superseded again once a later amendment names a successor', async () => {
+      it('owes nothing once a later amendment names a successor: the supersede stands', async () => {
         await reinstated();
         await amendWith({ [A]: A2 });
-        expect(await owed(deadA())).toEqual([`${A}:task-superseded`]);
+        expect(await owed(deadA())).toEqual([]);
+        expect((await statuses()).get(A)).toBe('superseded');
       });
 
       it('matches a successor recorded under the bare id, as reinstate does', async () => {
         await reinstated();
         await amendWith({ 'task-a': A2 });
-        expect(await owed(deadA())).toEqual([`${A}:task-superseded`]);
+        expect(await owed(deadA())).toEqual([]);
+        expect((await statuses()).get(A)).toBe('superseded');
       });
 
       it('still owes the supersede for a dead id beside a reinstated one', async () => {

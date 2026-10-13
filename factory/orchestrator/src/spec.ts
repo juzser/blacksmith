@@ -41,6 +41,7 @@ import {
   validatePlan,
 } from './plan.js';
 import { readAddedTasks, supersededStubFromLog } from './taskEvents.js';
+import { taskSuccessorsOf } from './taskLifecycle.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -164,33 +165,7 @@ export function taskSuccessors(
   events: readonly StoredEvent[],
   epicId: string,
 ): Map<string, string> {
-  const successors = new Map<string, string>();
-  for (const event of events) {
-    if (event.record.event_type !== PLAN_AMENDED_EVENT) continue;
-    const payload = event.record.payload as Record<string, unknown>;
-    if (payload.epic_id !== epicId) continue;
-    const entries = payload.successors;
-    if (entries !== undefined) {
-      if (entries === null || typeof entries !== 'object') continue;
-      for (const [oldId, newId] of Object.entries(entries as Record<string, unknown>)) {
-        if (typeof newId === 'string') successors.set(oldId, newId);
-      }
-      continue;
-    }
-    // Legacy fallback (no `successors` key at all) — see doc comment above.
-    const diff = payload.diff;
-    if (diff === null || typeof diff !== 'object') continue;
-    const supersededIds = (diff as Record<string, unknown>).superseded;
-    const addedIds = (diff as Record<string, unknown>).added;
-    if (!Array.isArray(supersededIds) || !Array.isArray(addedIds)) continue;
-    if (supersededIds.length !== 1 || addedIds.length !== 1) continue;
-    const [oldId] = supersededIds;
-    const [newId] = addedIds;
-    if (typeof oldId === 'string' && typeof newId === 'string' && oldId !== newId) {
-      successors.set(oldId, newId);
-    }
-  }
-  return successors;
+  return taskSuccessorsOf(events, epicId);
 }
 
 /**
