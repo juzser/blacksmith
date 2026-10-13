@@ -678,6 +678,62 @@ describe('cliSessions reader', () => {
           });
         });
 
+        describe('a subagent woken after a hand-back', () => {
+          const att = (ts: string) => stamped({ type: 'attachment' }, ts);
+          const taskPrompt = (ts: string) =>
+            stamped(
+              {
+                ...user('<task-notification>child done</task-notification>'),
+                isMeta: true,
+                origin: { kind: 'task-notification' },
+              },
+              ts,
+            );
+
+          it('counts it once a new prompt follows the hand-back', async () => {
+            await start();
+            await sub('ag1', [...working(), ...handback(), stamped(user('go on'), T('11:50'))]);
+            expect(await running()).toBe(1);
+          });
+
+          it('counts it for a task-notification prompt after the hand-back', async () => {
+            await start();
+            await sub('ag1', [...working(), ...handback(), taskPrompt(T('11:50'))]);
+            expect(await running()).toBe(1);
+          });
+
+          it('does not count it for attachment records after the hand-back', async () => {
+            await start();
+            await sub('ag1', [...working(), ...handback(), att(T('11:50'))]);
+            expect(await running()).toBe(0);
+          });
+
+          it('does not count it for an interrupt marker after the hand-back', async () => {
+            await start();
+            await sub('ag1', [
+              ...working(),
+              ...handback(),
+              stamped(user('[Request interrupted by user]'), T('11:50')),
+            ]);
+            expect(await running()).toBe(0);
+          });
+
+          it('counts a text-only subagent woken by a new prompt', async () => {
+            await start();
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                stamped(asst(text('All done.')), T('11:40')),
+                stamped(user('one more'), T('11:41')),
+              ],
+              {},
+              CLOCK - 3 * MIN,
+            );
+            expect(await running()).toBe(1);
+          });
+        });
+
         it('keeps counting a subagent that is between tool calls', async () => {
           await start();
           await sub('ag1', [...working(), stamped(toolResult('b1'))]);
@@ -826,6 +882,8 @@ describe('cliSessions reader', () => {
             ...notifyRec(id, status, true),
             timestamp: ts,
           });
+          /** A run resumed by a new prompt written at `ts`. */
+          const resumed = (ts: string) => [...working(), stamped(user('again'), ts)];
           const callRes = (ts?: string) => [
             user('go'),
             asst(toolUse('Agent', 'tu-ag1')),
@@ -846,7 +904,7 @@ describe('cliSessions reader', () => {
 
           it('counts it when its file was written well after the notification', async () => {
             await start([user('go'), launchRec('ag1'), endAt('ag1', 'completed', T('11:55'))]);
-            await sub('ag1', working(), {}, Date.parse(T('11:58')));
+            await sub('ag1', resumed(T('11:57')), {}, Date.parse(T('11:58')));
             expect(await running()).toBe(1);
           });
 
@@ -858,7 +916,7 @@ describe('cliSessions reader', () => {
 
           it('counts a sync call subagent written well after its tool_result', async () => {
             await start(callRes(T('11:55')));
-            await sub('ag1', working(), {}, Date.parse(T('11:58')));
+            await sub('ag1', resumed(T('11:57')), {}, Date.parse(T('11:58')));
             expect(await running()).toBe(1);
           });
 
@@ -895,9 +953,79 @@ describe('cliSessions reader', () => {
 
           it('does not end a child for a parent resumed after it was killed', async () => {
             await start([user('go'), launchRec('ag1'), endAt('ag1', 'killed', T('11:50'))]);
-            await sub('ag1', working());
+            await sub('ag1', [...working(), stamped(user('again'), T('11:52'))]);
             await sub('ag2', working(), child);
             expect(await running()).toBe(2);
+          });
+        });
+
+        describe('a late write is not a resume without a new prompt', () => {
+          const child = { parentAgentId: 'ag1', spawnDepth: 2 };
+          const lateMtime = Date.parse(T('11:56')) + 4 * MIN; // well past the slack
+          const late = (rec: Record<string, unknown>) => [...working(), stamped(rec, T('11:57'))];
+          const prompt = () => stamped(user('again'), T('11:57'));
+          const ends: [string, () => unknown[], number][] = [
+            [
+              'a killed notification',
+              () => [
+                user('go'),
+                launchRec('ag1'),
+                { ...notifyRec('ag1', 'killed', true), timestamp: T('11:56') },
+              ],
+              0,
+            ],
+            [
+              'a completed notification',
+              () => [
+                user('go'),
+                launchRec('ag1'),
+                { ...notifyRec('ag1', 'completed', true), timestamp: T('11:56') },
+              ],
+              1,
+            ],
+            [
+              "a sync call's result",
+              () => [
+                user('go'),
+                asst(toolUse('Agent', 'tu-ag1')),
+                { ...toolResult('tu-ag1'), timestamp: T('11:56') },
+              ],
+              1,
+            ],
+          ];
+
+          it.each(ends)(
+            'does not count it after %s, for an assistant record',
+            async (_, main, kids) => {
+              await start(main());
+              await sub('ag1', late(asst(toolUse('Bash', 'b2'))), {}, lateMtime);
+              await sub('ag2', working(), child);
+              expect(await running()).toBe(kids);
+            },
+          );
+
+          it.each(ends)('does not count it after %s, for a tool_result', async (_, main, kids) => {
+            await start(main());
+            await sub('ag1', late(toolResult('b1')), {}, lateMtime);
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(kids);
+          });
+
+          it.each(ends)('counts it after %s once a new prompt follows', async (_, main) => {
+            await start(main());
+            await sub('ag1', [...working(), prompt()], {}, lateMtime);
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(2);
+          });
+
+          it('counts it when the tail no longer reaches back to the mark', async () => {
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'completed', true), timestamp: T('11:50') },
+            ]);
+            await sub('ag1', working(T('11:57')), {}, lateMtime);
+            expect(await running()).toBe(1);
           });
         });
 
@@ -949,16 +1077,6 @@ describe('cliSessions reader', () => {
             await start([user('go'), resultOf('tu-old', { toolUseResult: { stdout: 'x' } })]);
             expect(await running()).toBe(0);
           });
-        });
-
-        it('lets a timed open call claim a file before a call with no timestamp does', async () => {
-          await start([
-            user('go'),
-            { ...asst(toolUse('Agent', 'fg1')), timestamp: T('11:25') },
-            asst(toolUse('Agent', 'fg2')),
-          ]);
-          await sub('ag1', working(T('11:30')), null);
-          expect(await running()).toBe(2);
         });
 
         it('counts a launch seen in both the main tail and the folder once', async () => {

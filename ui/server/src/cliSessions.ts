@@ -552,6 +552,23 @@ interface SubTail extends EndMarks {
    * hand-back shape, or a message whose tool call is not written yet.
    */
   textOnly: boolean;
+  /** When the latest new prompt (a message that woke it) was written; null if none is dated. */
+  promptAt: number | null;
+  /** The earliest dated record in the tail; null if none is dated. */
+  tailFrom: number | null;
+}
+
+/**
+ * A user record that starts a run: string content, or blocks with no
+ * `tool_result`. The CLI's interrupt marker is not one.
+ */
+function isNewPrompt(e: Record<string, unknown>): boolean {
+  if (e.type !== 'user') return false;
+  const blocks = blocksOf(e);
+  if (blocks.length === 0 || blocks.some((b) => b.type === 'tool_result')) return false;
+  return !blocks.some(
+    (b) => typeof b.text === 'string' && b.text.startsWith('[Request interrupted'),
+  );
 }
 
 /**
@@ -563,7 +580,17 @@ interface SubTail extends EndMarks {
 function analyseSub(entries: Record<string, unknown>[]): SubTail {
   const messages = new Map<unknown, Block[]>();
   let lastKey: unknown = null;
+  let promptAt: number | null = null;
+  let tailFrom: number | null = null;
   for (const e of entries) {
+    const at = recordTime(e);
+    if (Number.isFinite(at) && (tailFrom === null || at < tailFrom)) tailFrom = at;
+    if (isNewPrompt(e)) {
+      // A prompt after the last message starts a new run: the old ending is stale.
+      lastKey = null;
+      if (Number.isFinite(at) && (promptAt === null || at > promptAt)) promptAt = at;
+      continue;
+    }
     if (e.type !== 'assistant') continue;
     const id = (e.message as { id?: unknown } | undefined)?.id;
     const key = typeof id === 'string' && id !== '' ? id : {};
@@ -577,6 +604,8 @@ function analyseSub(entries: Record<string, unknown>[]): SubTail {
     ...endMarks(entries),
     handedBack: calls.some((b) => b.name === 'SubagentHandback'),
     textOnly: last !== null && calls.length === 0,
+    promptAt,
+    tailFrom,
   };
 }
 
@@ -1477,9 +1506,17 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
      * (plus a little slack for late trailing writes): a subagent resumed after
      * it ended writes to the same file again.
      */
-    const holds = (markedAt: number | undefined, id: string): boolean =>
-      markedAt !== undefined &&
-      (infos.get(id)?.mtimeMs ?? Number.POSITIVE_INFINITY) <= markedAt + END_MARK_SLACK_MS;
+    const holds = (markedAt: number | undefined, id: string): boolean => {
+      if (markedAt === undefined) return false;
+      const info = infos.get(id);
+      if (info === undefined || info.mtimeMs <= markedAt + END_MARK_SLACK_MS) return true;
+      // A late write alone is not a resume: the tail must show a new prompt
+      // after the mark, or no longer reach back to it (the prompt may be cut off).
+      const { promptAt, tailFrom } = info.tail;
+      const prompted = promptAt !== null && promptAt > markedAt;
+      const cutOff = tailFrom !== null && tailFrom > markedAt;
+      return !(prompted || cutOff);
+    };
     const spreadMemo = new Map<string, boolean>();
     /**
      * Killed or stopped by a notification from its parent, or under a parent
@@ -1548,8 +1585,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     const open = [...a.openAgentCalls].filter(
       ([id, ts]) => !launching.has(id) && sinceStart(e, ts),
     );
-    // Timed calls pair first, in time order; a call with no time then takes
-    // whatever file is left, so it never takes one a timed call needed.
+    // Timed calls pair first, in time order; calls with no time take what is left.
     const timed = open.flatMap(([, ts]) => (ts === null ? [] : [ts])).sort((x, y) => x - y);
     for (const ts of timed) {
       const i = unclaimed.findIndex((first) => first >= ts);
