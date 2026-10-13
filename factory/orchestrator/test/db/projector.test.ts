@@ -4,7 +4,7 @@ import path from 'node:path';
 import { getTableColumns, is } from 'drizzle-orm';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { apply, foldTasks, openDb, rebuild } from '../../src/db/projector.js';
+import { apply, foldTasks, openDb, openProjection, rebuild } from '../../src/db/projector.js';
 import { kanban, lessonsPage } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
 import { appendEvent, readEvents, type StoredEvent } from '../../src/events.js';
@@ -62,6 +62,39 @@ describe('db/projector.ts', () => {
   afterEach(async () => {
     await rm(stateDir, { recursive: true, force: true });
     await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('one batch through openProjection() projects the same tables as apply() per session', async () => {
+    await appendEvent(
+      {
+        session_id: 'sess-second',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const sessionIds = [SESSION_ID, 'sess-second'];
+    const perSession = path.join(dbDir, 'per-session.db');
+    const batched = path.join(dbDir, 'batched.db');
+    for (const id of sessionIds) await apply(perSession, id, { stateDir });
+    const projection = openProjection(batched, { stateDir });
+    try {
+      await projection.applySessions(sessionIds);
+    } finally {
+      projection.close();
+    }
+    const read = (dbPath: string) => {
+      const handle = openDb(dbPath);
+      try {
+        return allRows(handle.db);
+      } finally {
+        handle.sqlite.close();
+      }
+    };
+    expect(read(batched)).toEqual(read(perSession));
   });
 
   it('round-trips every table from the synthesized event log', async () => {
