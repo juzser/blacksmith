@@ -747,13 +747,13 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      frozen server was indistinguishable from a quiet factory — the exact
      confusion Overview had already fixed for itself. It now sits in the
      shell, fed by the shell's own 5s poll.
-   - **Two clocks, not one.** Beside it, `last event <age> ago`.
-     `livenessLabel()` answers "is my screen current"; `lastEventLabel()`
-     answers "is the factory moving". They come apart in precisely the case
-     the indicator exists for: a healthy server polled every five seconds
-     reports `Live` indefinitely over a factory that has emitted nothing since
-     Tuesday. Both are shown because neither implies the other. Hidden below
-     768px, where the topbar has no room.
+   - **Two clocks, not one.** Beside it, `last event <age> ago`. The first
+     answers "is my screen current"; the second answers "is the factory
+     moving". They come apart in precisely the case the indicator exists for:
+     a healthy server polled every five seconds reports `Live` indefinitely
+     over a factory that has emitted nothing since Tuesday. Both are shown
+     because neither implies the other. Hidden below 768px, where the topbar
+     has no room.
    - **Arrival badges on the nav rail** (retired: the BS kit's `SidebarNav`
      renders no badge, and the Lessons level badge — a count of lessons
      waiting on the operator — went on 2026-10-12 with the rest of the
