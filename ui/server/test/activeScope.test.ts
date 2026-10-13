@@ -737,6 +737,29 @@ describe('computeActiveScope', () => {
       expect(out.projects[0]?.tokensUnmeasured).toBeGreaterThanOrEqual(1);
     });
 
+    it('counts once however many sessions link it, and leaves a read store measured', () => {
+      const other = linkedEpic({
+        store: { id: 'store-b', label: 'store-b' },
+        epicId: 'epic-b',
+        project: 'project-b',
+        factorySessionLastEventAt: { f1: '2026-10-07T11:00:00.000Z' },
+      });
+      const out = fold(
+        cli([
+          session({ epics: [written] }),
+          session({ epics: [written, other] }, { cliSessionId: 'c2' }),
+        ]),
+        [store({ id: 'store-b', label: 'store-b', activelyRunning: ['epic-b'] })],
+      );
+      expect(out.tokensUnmeasured).toBe(1);
+      const byEpic = Object.fromEntries(out.epics.map((e) => [e.epicId, e.tokensUnmeasured]));
+      expect(byEpic).toEqual({ 'epic-a': 1, 'epic-b': 0 });
+      const byProject = Object.fromEntries(
+        out.projects.map((p) => [p.project, p.tokensUnmeasured]),
+      );
+      expect(byProject).toEqual({ 'project-a': 1, 'project-b': 0 });
+    });
+
     it('a store that was read with no entry for the epic stays a measured zero', () => {
       const out = fold(cli([session({ epics: [written] })]), [
         store({ id: 'store-a', label: 'store-a', activelyRunning: ['epic-a'] }),
