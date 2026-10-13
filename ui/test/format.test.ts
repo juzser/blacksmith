@@ -3,7 +3,6 @@ import {
   axisDayLabels,
   dailyTokensTakeaway,
   formatAbsolute,
-  formatBudgetPct,
   formatCalendarDay,
   formatCompactNumber,
   formatCompactValue,
@@ -11,8 +10,6 @@ import {
   formatElapsed,
   formatElapsedRange,
   formatLiveStatus,
-  formatMeasuredTokens,
-  formatRelative,
   formatRelativeVerbose,
   formatShortDate,
   formatShortDateTime,
@@ -21,46 +18,7 @@ import {
   pluralize,
   shortTaskId,
   shortTaskName,
-  summarize,
 } from '../src/lib/format.js';
-
-describe('lib/format.ts formatRelative()', () => {
-  const now = '2026-08-04T12:00:00.000Z';
-
-  it('renders "just now" for sub-5-second gaps', () => {
-    expect(formatRelative('2026-08-04T11:59:58.000Z', now)).toBe('just now');
-  });
-
-  it('renders minutes/hours/days ago', () => {
-    expect(formatRelative('2026-08-04T11:55:00.000Z', now)).toBe('5m ago');
-    expect(formatRelative('2026-08-04T10:00:00.000Z', now)).toBe('2h ago');
-    expect(formatRelative('2026-08-02T12:00:00.000Z', now)).toBe('2d ago');
-  });
-
-  // The suffix used to be the unit word's first letter, so "minute" and
-  // "month" both rendered "m". A Roadmap row last touched three months ago
-  // read "3m ago" -- the same string a row touched three minutes ago gets,
-  // and the mini-timeline is exactly where the two need telling apart.
-  it('does not spell months the way it spells minutes', () => {
-    expect(formatRelative('2026-05-04T12:00:00.000Z', now)).toBe('3mo ago');
-    // 181 days is 5.95 average-months, so it floors to five -- and used to
-    // render the very string the assertion below produces from 5 minutes.
-    expect(formatRelative('2026-02-04T12:00:00.000Z', now)).toBe('5mo ago');
-    expect(formatRelative('2026-08-04T11:55:00.000Z', now)).toBe('5m ago');
-  });
-
-  it('renders weeks and years', () => {
-    expect(formatRelative('2026-07-21T12:00:00.000Z', now)).toBe('2w ago');
-    expect(formatRelative('2023-08-04T12:00:00.000Z', now)).toBe('3y ago');
-  });
-
-  // 4.348 weeks/month put twelve months at 365.2 days, so a gap of exactly a
-  // year fell one hundredth of a month short of the year bucket and came out
-  // as the largest month value there is.
-  it('calls a year a year, not the largest month it can count to', () => {
-    expect(formatRelative('2025-08-04T12:00:00.000Z', now)).toBe('1y ago');
-  });
-});
 
 describe('lib/format.ts pluralize()', () => {
   it('uses the singular form for exactly 1', () => {
@@ -77,47 +35,6 @@ describe('lib/format.ts pluralize()', () => {
   it('accepts an explicit irregular plural', () => {
     expect(pluralize(2, 'child', 'children')).toBe('2 children');
     expect(pluralize(1, 'child', 'children')).toBe('1 child');
-  });
-});
-
-// Operator directive (Phase 6b round 6): "on Flow, a block is far too long and
-// has far too much text -- a short summary is enough". A flow node renders
-// tasks.objective, measured at 942–1472 chars on envkit-mcp-surface's
-// plan-v3 — summarize() is what turns that into the node's one-line label.
-describe('lib/format.ts summarize()', () => {
-  it('returns the first sentence when it fits', () => {
-    expect(summarize('Ship env_lint end to end. Then a second sentence follows.', 90)).toBe(
-      'Ship env_lint end to end.',
-    );
-  });
-
-  it('keeps a whole short string that ends in a period', () => {
-    expect(summarize('Build src/mcp/paths.ts and cover it.', 90)).toBe(
-      'Build src/mcp/paths.ts and cover it.',
-    );
-  });
-
-  it('does not treat a filename dot as a sentence boundary', () => {
-    expect(summarize('Edit src/mcp/redact.ts now', 90)).toBe('Edit src/mcp/redact.ts now');
-  });
-
-  it('hard-caps a long first sentence at a word boundary with an ellipsis', () => {
-    const long =
-      'Close the one hole in redact that this epic is guaranteed to walk into: redactText recognises credential shapes but has no rule for env files';
-    const out = summarize(long, 90);
-    expect(out.length).toBeLessThanOrEqual(91);
-    expect(out.endsWith('…')).toBe(true);
-    expect(out).not.toMatch(/\s…$/);
-    expect(long.startsWith(out.slice(0, -1))).toBe(true);
-  });
-
-  it('collapses newlines and runs of whitespace', () => {
-    expect(summarize('Ship  env_lint\n\n  end to end.', 90)).toBe('Ship env_lint end to end.');
-  });
-
-  it('returns an empty string for empty or whitespace-only input', () => {
-    expect(summarize('', 90)).toBe('');
-    expect(summarize('   \n ', 90)).toBe('');
   });
 });
 
@@ -172,27 +89,6 @@ describe('lib/format.ts formatDurationMs()', () => {
 
   it('clamps a negative duration to 0s', () => {
     expect(formatDurationMs(-500)).toBe('0s');
-  });
-});
-
-// Issue #220 follow-up: {measured:false} is now a valid token_usage, so a
-// spend total that includes one or more unmeasured results is a floor, not
-// an exact figure — it must never read the same as a fully-measured total.
-describe('lib/format.ts formatMeasuredTokens()', () => {
-  it('renders a compact count when every result was measured', () => {
-    expect(formatMeasuredTokens(2000, 0)).toBe('2K\u00a0tok');
-  });
-
-  it('renders a floor plus the unmeasured count when spend is a mix', () => {
-    expect(formatMeasuredTokens(2000, 3)).toBe('≥2K\u00a0tok · 3 not measured');
-  });
-
-  it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
-    expect(formatMeasuredTokens(0, 3)).toBe('not measured');
-  });
-
-  it('keeps small counts exact — no suffix below a thousand', () => {
-    expect(formatMeasuredTokens(999, 0)).toBe('999\u00a0tok');
   });
 });
 
@@ -323,43 +219,12 @@ describe('lib/format.ts shortTaskId()', () => {
   });
 });
 
-// Issue #220 follow-up: ProjectsPage's budget-used stat divided tokensSpent
-// by tokensBudget inline and rendered a bare "N%" — once `tokensSpent` can be
-// a floor (one or more results carry `token_usage: { measured: false }`),
-// that percentage reads as exact when it is really a lower bound, and a
-// project whose results are all unmeasured rendered "0%" -- a fabricated
-// zero rather than "we don't know".
-describe('lib/format.ts formatBudgetPct()', () => {
-  it('renders a dash when the project has no budget', () => {
-    expect(formatBudgetPct(0, null, 0)).toBe('-');
-    expect(formatBudgetPct(500, 0, 0)).toBe('-');
-  });
-
-  it('renders a plain percentage when every result was measured', () => {
-    expect(formatBudgetPct(500, 1000, 0)).toBe('50%');
-  });
-
-  it('rounds to the nearest whole percent', () => {
-    expect(formatBudgetPct(333, 1000, 0)).toBe('33%');
-  });
-
-  it('renders a floor once one or more results are unmeasured', () => {
-    expect(formatBudgetPct(500, 1000, 2)).toBe('≥50%');
-  });
-
-  it('renders "not measured" rather than a fabricated "0%" when nothing was measured', () => {
-    expect(formatBudgetPct(0, 1000, 3)).toBe('not measured');
-  });
-});
-
 // kit/RelativeTime.vue's tooltip text (ds-spec.md §2.1: "the absolute time
-// ('30 Sep 2026, 14:07:12') in a Tooltip"). Distinct from formatDateTime()
-// above (design-spec.md §9's numeric DD/MM/YYYY, no seconds) — that shape
-// stays put for pages that already render it.
+// ('30 Sep 2026, 14:07:12') in a Tooltip").
 describe('lib/format.ts formatAbsolute()', () => {
   // Timezone-naive (no "Z"/offset) ISO literals: per the JS Date spec these
   // parse as local time, same as the .getHours()-style local getters
-  // formatAbsolute() itself (and formatDate()/formatTime() above) use — so
+  // formatAbsolute() itself (and formatTime()) use — so
   // the expected string is stable under any TZ the test runner happens to
   // sit in, unlike a "Z" literal compared against a local-time render.
   it("renders the spec's exact example shape: day, short month, year, comma, HH:MM:SS", () => {
@@ -377,8 +242,7 @@ describe('lib/format.ts formatAbsolute()', () => {
 
 // RequestQuote.vue's timestamp (ds-review.html ~1239, ~1300: "12 Sep, 09:14" —
 // short month, comma, zero-padded 24h HH:MM, no year). Scoped to
-// RequestQuote only (DS4 S5c fix round 1, fix 4) — formatDateTime() keeps
-// its numeric DD/MM/YYYY shape for the pages that already render it.
+// RequestQuote only (DS4 S5c fix round 1, fix 4).
 // DS6 PR4b Elapsed tooltip (TaskDetailPage totals bar): "29 Sep 2026, 14:02 to
 // 16:12" -- the started day/date once, the ended time alone (same day in
 // every call site this feeds, since a run never spans midnight today).
@@ -412,7 +276,7 @@ describe('lib/format.ts formatShortDateTime()', () => {
 
 // LessonCard's "learned from <session> on <date>" (ds-review.html ~1510:
 // "7 Sep" -- day + short month, no year, no leading zero). Scoped to
-// LessonCard only; formatDate() keeps its DD/MM/YYYY shape for other pages.
+// LessonCard only.
 describe('lib/format.ts formatShortDate()', () => {
   it('renders day (no leading zero) and short month, no year', () => {
     expect(formatShortDate('2026-09-07T00:00:00.000Z')).toBe('7 Sep');
@@ -429,10 +293,8 @@ describe('lib/format.ts formatShortDate()', () => {
 
 // kit/RelativeTime.vue's visible text (ds-spec.md §2.1: renders "5 min ago" /
 // "2 h ago" / "3 d ago"; ds-review.html's rendered .tip-trigger text matches
-// exactly, e.g. "5 min ago", "2 h ago", "8 s ago"). Same tiering as
-// formatRelative() above, but spaced, and "min" spelled out rather than "m" —
-// formatRelative() itself is left alone since Roadmap's mini-timeline and
-// Timeline rows already render its "5m ago" shape and are outside DS0 (§5).
+// exactly, e.g. "5 min ago", "2 h ago", "8 s ago"). Spaced, and "min"
+// spelled out.
 describe('lib/format.ts formatRelativeVerbose()', () => {
   const now = '2026-08-04T12:00:00.000Z';
 
@@ -506,9 +368,7 @@ describe('lib/format.ts formatLiveStatus()', () => {
 // kit/CompactNumber.vue (ds-spec.md §2.1: `value`, `unit?: "tok"` renders
 // "1.2M tokens", "127K", "43"). The "tok" prop value is the enum literal
 // (matches the spec's own type spelling); the word it renders is spelled out
-// in full ("tokens"), which is a deliberate difference from
-// formatMeasuredTokens() above — a narrower, already-shipped budget-caption
-// formatter whose "tok" abbreviation stays put for its own call sites.
+// in full ("tokens").
 describe('lib/format.ts formatCompactValue()', () => {
   it('renders the bare compact number when no unit is given', () => {
     expect(formatCompactValue(127_000)).toBe('127K');

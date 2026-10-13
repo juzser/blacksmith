@@ -23,7 +23,6 @@ import {
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
   type KanbanColumnName,
-  subStatusSummary,
   visibleTaskCount,
 } from '../src/lib/kanban.js';
 import { TASK_STATUS_OUTCOME } from '../src/lib/taxonomy.js';
@@ -86,25 +85,6 @@ describe('lib/kanban.ts — §5.3 status-column folding', () => {
     expect(columns.map((c) => c.name)).toEqual([...KANBAN_COLUMNS, 'Failed', 'Superseded']);
     expect(columns.find((c) => c.name === 'Failed')?.tasks).toHaveLength(1);
     expect(columns.find((c) => c.name === 'Superseded')?.tasks).toHaveLength(1);
-  });
-});
-
-describe('lib/kanban.ts subStatusSummary() (operator directive 1)', () => {
-  it('returns null when a folded column has only one raw status', () => {
-    const tasks = [
-      { taskId: 't1', taskStatus: 'reviewing' },
-      { taskId: 't2', taskStatus: 'reviewing' },
-    ];
-    expect(subStatusSummary(tasks)).toBeNull();
-  });
-
-  it('summarizes mixed raw statuses, alphabetical, with counts', () => {
-    const tasks = [
-      { taskId: 't1', taskStatus: 'reviewing' },
-      { taskId: 't2', taskStatus: 'merging' },
-      { taskId: 't3', taskStatus: 'reviewing' },
-    ];
-    expect(subStatusSummary(tasks)).toBe('Merging 1 · Reviewing 2');
   });
 });
 

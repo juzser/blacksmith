@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 // Modules whose exports must each have a consumer. A plain array so a later
 // task can extend it.
-export const GUARDED_MODULES = ['liveness', 'format', 'kanban'];
+const GUARDED_MODULES = ['liveness', 'format', 'kanban'];
 
 const SRC = join(__dirname, '..', 'src');
 
@@ -22,7 +22,8 @@ function sourceFiles(dir: string): string[] {
 
 function exportNames(code: string): string[] {
   const names: string[] = [];
-  const re = /^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
+  const re =
+    /^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
   for (let m = re.exec(code); m !== null; m = re.exec(code)) names.push(m[1] as string);
   return names;
 }
@@ -33,7 +34,10 @@ function count(code: string, name: string): number {
 }
 
 function deadExports(modules: readonly string[]): string[] {
-  const files = sourceFiles(SRC).map((path) => ({ path, code: stripComments(readFileSync(path, 'utf8')) }));
+  const files = sourceFiles(SRC).map((path) => ({
+    path,
+    code: stripComments(readFileSync(path, 'utf8')),
+  }));
   const dead: string[] = [];
   for (const name of modules) {
     const own = join(SRC, 'lib', `${name}.ts`);
