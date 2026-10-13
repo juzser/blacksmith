@@ -61,7 +61,7 @@ import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
 
 export interface CliFs {
   readdir(p: string): Promise<string[]>;
-  stat(p: string): Promise<{ size: number; mtimeMs: number }>;
+  stat(p: string): Promise<{ size: number; mtimeMs: number; ino?: number }>;
   /** Does not follow a symlink: only a regular file is ever opened. */
   lstat(p: string): Promise<{ isFile(): boolean }>;
   open(p: string): Promise<Pick<FileHandle, 'read' | 'close'>>;
@@ -232,6 +232,10 @@ export interface CliSessionsDeps {
   listWorktrees?: () => Promise<string[]>;
   /** Response cache window, 1 s by default. */
   cacheMs?: number;
+  /** Read size of the token scan; 8 MB by default. */
+  tokenChunkBytes?: number;
+  /** A transcript line longer than this is skipped, not counted; 32 MB by default. */
+  tokenLineMax?: number;
   /** How long a transcript that was not found anywhere is not searched for again; 30 s by default. */
   missTtlMs?: number;
   /** Milliseconds clock for the miss cache; Date.now by default. */
@@ -246,8 +250,18 @@ const TAIL_RETRY_BYTES = 1024 * 1024;
 const HEAD_BYTES = 64 * 1024;
 const HISTORY_BYTES = 1024 * 1024;
 const TOKEN_CHUNK_BYTES = 8 * 1024 * 1024;
-/** A single transcript line longer than this is not read: the file counts as unreadable. */
-const TOKEN_LINE_MAX = 256 * 1024 * 1024;
+/**
+ * A transcript line longer than this is skipped and the count marked incomplete.
+ * A line with usage holds one content block of one response, which the model's
+ * output limit keeps far below this.
+ */
+const TOKEN_LINE_MAX = 32 * 1024 * 1024;
+
+interface TokenCount {
+  total: number;
+  /** A line over the cap was skipped. */
+  incomplete: boolean;
+}
 const SUBAGENT_FILE = /^agent-[A-Za-z0-9_-]+\.jsonl$/;
 const USAGE_BYTES = Buffer.from('"usage"');
 const TEXT_MAX = 280;
@@ -783,6 +797,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   const isAlive = deps.isAlive ?? defaultIsAlive;
   const procStartOf = deps.procStartOf ?? defaultProcStartOf;
   const cacheMs = deps.cacheMs ?? 1000;
+  const chunkBytes = deps.tokenChunkBytes ?? TOKEN_CHUNK_BYTES;
+  const lineMax = deps.tokenLineMax ?? TOKEN_LINE_MAX;
   const missTtlMs = deps.missTtlMs ?? 30_000;
   const clock = deps.clock ?? Date.now;
   const listWorktrees = deps.listWorktrees ?? (() => gitWorktrees(deps.roots[0] ?? '.'));
@@ -796,7 +812,18 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
   /** Per transcript file: what the token scan has consumed up to `offset` (end of the last whole line). */
   const tokenCache = new Map<
     string,
-    { size: number; mtimeMs: number; offset: number; total: number; seen: Set<string> }
+    {
+      size: number;
+      mtimeMs: number;
+      ino: number | undefined;
+      offset: number;
+      total: number;
+      seen: Set<string>;
+      /** `offset` sits inside a line over the cap, whose end has not been seen yet. */
+      skipping: boolean;
+      /** A line was skipped since the last scan from 0: the total is a floor. */
+      incomplete: boolean;
+    }
   >();
   /** Session id -> the transcript files its token count was made of. */
   const tokenFiles = new Map<string, string[]>();
@@ -1021,59 +1048,113 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     }
   }
 
-  /** The tokens of one transcript file, scanning only what is new. Throws when it cannot be read. */
-  async function scanTokens(file: string): Promise<number> {
+  /** One scan per file at a time: a caller that arrives while it runs awaits that same scan. */
+  const tokenScans = new Map<string, Promise<TokenCount>>();
+  function scanTokens(file: string): Promise<TokenCount> {
+    const running = tokenScans.get(file);
+    if (running !== undefined) return running;
+    const scan = scanTokensOnce(file).finally(() => {
+      if (tokenScans.get(file) === scan) tokenScans.delete(file);
+    });
+    tokenScans.set(file, scan);
+    return scan;
+  }
+
+  /**
+   * The tokens of one transcript file, scanning only what is new. Works on local
+   * values and commits them when it finishes, so a failure leaves the cache as
+   * it was. Throws when the file cannot be read.
+   */
+  async function scanTokensOnce(file: string): Promise<TokenCount> {
     const st = await fs.stat(file);
     let c = tokenCache.get(file);
-    if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) return c.total;
-    // A file smaller than what was consumed was replaced: start over.
-    if (!c || st.size < c.offset) {
-      c = { size: 0, mtimeMs: 0, offset: 0, total: 0, seen: new Set() };
-      tokenCache.set(file, c);
+    if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) {
+      return { total: c.total, incomplete: c.incomplete };
+    }
+    // A smaller file, or another inode, is a replaced file: start over.
+    if (
+      c &&
+      (st.size < c.offset || (c.ino !== undefined && st.ino !== undefined && c.ino !== st.ino))
+    ) {
+      c = undefined;
     }
     if (!(await fs.lstat(file)).isFile()) throw new Error('not a regular file');
     const fh = await fs.open(file);
     try {
-      let chunk = TOKEN_CHUNK_BYTES;
-      while (c.offset < st.size) {
-        const len = Math.min(chunk, st.size - c.offset);
+      // The byte before the offset must still end a line, else the file was rewritten in place.
+      if (c && c.offset > 0 && !c.skipping) {
+        const one = Buffer.alloc(1);
+        const { bytesRead } = await fh.read(one, 0, 1, c.offset - 1);
+        if (bytesRead !== 1 || one[0] !== 10) c = undefined;
+      }
+      let offset = c?.offset ?? 0;
+      let skipping = c?.skipping ?? false;
+      let incomplete = c?.incomplete ?? false;
+      const acc = { total: c?.total ?? 0, seen: new Set(c?.seen) };
+      let chunk = chunkBytes;
+      while (offset < st.size) {
+        const len = Math.min(chunk, st.size - offset);
         const buf = Buffer.alloc(len);
-        const { bytesRead } = await fh.read(buf, 0, len, c.offset);
-        const last = buf.subarray(0, bytesRead).lastIndexOf(10);
-        if (last === -1) {
-          // No whole line yet: a file that ends in a partial line waits for it;
-          // a line longer than the chunk is read again with a larger one.
-          if (c.offset + bytesRead >= st.size) break;
-          if (chunk >= TOKEN_LINE_MAX) throw new Error('line too long');
-          chunk *= 2;
+        const { bytesRead } = await fh.read(buf, 0, len, offset);
+        if (bytesRead === 0) break;
+        const view = buf.subarray(0, bytesRead);
+        if (skipping) {
+          // Inside a line over the cap: look for its end without keeping the bytes.
+          const nl = view.indexOf(10);
+          if (nl === -1) offset += bytesRead;
+          else {
+            offset += nl + 1;
+            skipping = false;
+          }
           continue;
         }
-        addUsage(buf, last, c);
-        c.offset += last + 1;
+        const last = view.lastIndexOf(10);
+        if (last === -1) {
+          // No whole line yet: a file that ends in a partial line waits for it;
+          // a line longer than the chunk is read again with a larger one,
+          // and one over the cap is skipped.
+          if (offset + bytesRead >= st.size) break;
+          if (chunk >= lineMax) {
+            skipping = true;
+            incomplete = true;
+            chunk = chunkBytes;
+            offset += bytesRead;
+          } else chunk = Math.min(chunk * 2, lineMax);
+          continue;
+        }
+        addUsage(buf, last, acc);
+        offset += last + 1;
       }
-    } catch (err) {
-      tokenCache.delete(file);
-      throw err;
+      tokenCache.set(file, {
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        ino: st.ino,
+        offset,
+        total: acc.total,
+        seen: acc.seen,
+        skipping,
+        incomplete,
+      });
+      return { total: acc.total, incomplete };
     } finally {
       await fh.close();
     }
-    c.size = st.size;
-    c.mtimeMs = st.mtimeMs;
-    return c.total;
   }
 
   async function tokensOf(configDir: string, e: RegistryEntry): Promise<CliSessionCard['tokens']> {
     const main = await findTranscript(configDir, e);
     if (main === null) return null;
     let used: number;
+    let complete = true;
     try {
-      used = await scanTokens(main);
+      const m = await scanTokens(main);
+      used = m.total;
+      if (m.incomplete) complete = false;
     } catch {
       tokenFiles.delete(e.cliSessionId);
       return null;
     }
     const files = [main];
-    let complete = true;
     const dir = path.join(main.replace(/\.jsonl$/, ''), 'subagents');
     let names: string[] = [];
     try {
@@ -1086,7 +1167,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       const f = path.join(dir, name);
       files.push(f);
       try {
-        used += await scanTokens(f);
+        const sub = await scanTokens(f);
+        used += sub.total;
+        if (sub.incomplete) complete = false;
       } catch {
         complete = false;
       }
