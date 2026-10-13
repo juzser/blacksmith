@@ -2,7 +2,8 @@
 // §10). There are no write endpoints: the dashboard only reads, and every
 // operator decision (a waiver, a lesson review) goes through the CLI
 // (`/bs waivers`, `/bs lessons`). readOnlyGuard() answers 405 to any `/api`
-// method that is not GET or HEAD.
+// method that is not GET or HEAD, and loopbackGuard() answers 403 to any `/api`
+// request whose host is not a loopback address.
 //
 // Imports factory/orchestrator's BUILT `dist/` output, not its `src/` —
 // several orchestrator modules (taxonomy.ts, schemas.ts) resolve policy/
@@ -704,25 +705,17 @@ export function createApp(opts: AppOpts): AppHandle {
   // no fold and no route below can grow a write by accident.
   app.use('/api/*', readOnlyGuard());
 
+  // Every `/api` route answers loopback requests only: one mount covers the
+  // whole prefix, including routes added later, ahead of the refresh so a
+  // refused request costs no fold.
+  app.use('/api/*', loopbackGuard());
+
   app.get('/api/health', (c) => c.json({ ok: true }));
 
   // Fold any newly-appended events into the projection before ANY api route
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
   const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
-  // Local-only, like /api/cli-sessions: these routes carry operator prompt text
-  // or other projects' data. The guard sits ahead of the refresh, so a refused
-  // request costs no fold.
-  for (const route of [
-    '/api/cli-sessions',
-    '/api/active-scope',
-    '/api/overview',
-    '/api/kanban',
-    '/api/projects',
-    '/api/tasks/*',
-  ]) {
-    app.use(route, loopbackGuard());
-  }
   // Every other live project's store: discovered from the CLI sessions'
   // working directories and read-only (see stores.ts).
   const homeStore: StoreEntry = { id: 'home', label: 'home', handle, refresher, home: true };
