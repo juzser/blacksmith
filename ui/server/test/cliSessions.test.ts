@@ -582,10 +582,16 @@ describe('cliSessions reader', () => {
           await session(150, { status: 'idle' });
           mainFile = await transcript(root, SID_A, jsonl(records));
         }
+        /** One content block of an assistant message; the CLI writes one record per block. */
+        const block = (messageId: string, b: unknown) => ({
+          type: 'assistant',
+          message: { id: messageId, role: 'assistant', content: [b] },
+        });
+        /** A subagent transcript, plus its meta unless `meta` is null. */
         async function sub(
           id: string,
           records: unknown[],
-          meta: Record<string, unknown> = {},
+          meta: Record<string, unknown> | null = {},
           mtime = CLOCK - MIN,
         ) {
           const dir = path.join(mainFile.replace(/\.jsonl$/, ''), 'subagents');
@@ -593,6 +599,7 @@ describe('cliSessions reader', () => {
           const f = path.join(dir, `agent-${id}.jsonl`);
           await writeFile(f, jsonl(records));
           await utimes(f, mtime / 1000, mtime / 1000);
+          if (meta === null) return;
           await writeFile(
             path.join(dir, `agent-${id}.meta.json`),
             JSON.stringify({ agentType: 'coder', toolUseId: `tu-${id}`, spawnDepth: 1, ...meta }),
@@ -619,10 +626,56 @@ describe('cliSessions reader', () => {
           expect(await running()).toBe(0);
         });
 
-        it('does not count a subagent whose last assistant record has no tool call', async () => {
-          await start();
-          await sub('ag1', [...working(), stamped(asst(text('All done.')), T('11:40'))]);
-          expect(await running()).toBe(0);
+        describe('a last message that calls no tool', () => {
+          const textOnly = () => [...working(), stamped(asst(text('All done.')), T('11:40'))];
+
+          it('keeps counting it while the file was written within the grace', async () => {
+            await start();
+            await sub('ag1', textOnly(), {}, CLOCK - MIN);
+            expect(await running()).toBe(1);
+          });
+
+          it('takes it as handed back once the file is quiet past the grace', async () => {
+            await start();
+            await sub('ag1', textOnly(), {}, CLOCK - 3 * MIN);
+            expect(await running()).toBe(0);
+          });
+
+          it('takes a SubagentHandback as handed back at once, however fresh', async () => {
+            await start();
+            await sub('ag1', [...working(), ...handback()], {}, CLOCK);
+            expect(await running()).toBe(0);
+          });
+
+          it('judges a message by all its records: text then tool_use is running', async () => {
+            await start();
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                stamped(block('m2', text('Now the edit.')), T('11:40')),
+                stamped(block('m2', toolUse('Edit', 'e1')), T('11:40')),
+              ],
+              {},
+              CLOCK - 3 * MIN,
+            );
+            expect(await running()).toBe(1);
+          });
+
+          it('judges a message by all its records, not by its last text record', async () => {
+            await start();
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                stamped(block('m2', toolUse('Edit', 'e1')), T('11:40')),
+                stamped(block('m2', text('Editing.')), T('11:40')),
+              ],
+              {},
+              CLOCK - 3 * MIN,
+            );
+            expect(await running()).toBe(1);
+          });
         });
 
         it('keeps counting a subagent that is between tool calls', async () => {
@@ -641,6 +694,91 @@ describe('cliSessions reader', () => {
           await start([user('go'), asst(toolUse('Agent', 'tu-ag1')), toolResult('tu-ag1')]);
           await sub('ag1', working());
           expect(await running()).toBe(0);
+        });
+
+        describe('a parent its own parent was notified ended', () => {
+          const child = { parentAgentId: 'ag1', spawnDepth: 2 };
+          const grandchild = { parentAgentId: 'ag2', spawnDepth: 3 };
+
+          it('ends its children and their children too', async () => {
+            await start([user('go'), launchRec('ag1'), notifyRec('ag1', 'killed', true)]);
+            await sub('ag1', working());
+            await sub('ag2', working(), child);
+            await sub('ag3', working(), grandchild);
+            expect(await running()).toBe(0);
+          });
+
+          it('leaves the same children counted while that parent runs', async () => {
+            await start([user('go'), launchRec('ag1')]);
+            await sub('ag1', working());
+            await sub('ag2', working(), child);
+            await sub('ag3', working(), grandchild);
+            expect(await running()).toBe(3);
+          });
+
+          it("does not end a child for its parent's own hand-back", async () => {
+            await start();
+            await sub('ag1', [...working(), ...handback()]);
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(1);
+          });
+
+          it("does not end a child for the result of its parent's call", async () => {
+            await start([user('go'), asst(toolUse('Agent', 'tu-ag1')), toolResult('tu-ag1')]);
+            await sub('ag1', working());
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(1);
+          });
+
+          it('counts subagents whose parent links form a cycle, and stops', async () => {
+            await start();
+            await sub('ag1', working(), { parentAgentId: 'ag2' });
+            await sub('ag2', working(), { parentAgentId: 'ag1' });
+            expect(await running()).toBe(2);
+          });
+        });
+
+        it.each([
+          ['a status but no isAsync', { status: 'async_launched', agentId: 'ag1' }],
+          ['neither field, with the launch text', { description: 'research' }],
+        ])('keeps counting a background launch whose result object has %s', async (_, result) => {
+          await start([
+            user('go'),
+            asst(toolUse('Agent', 'tu-ag1')),
+            { ...launchRec('ag1'), toolUseResult: result },
+          ]);
+          await sub('ag1', working());
+          expect(await running()).toBe(1);
+        });
+
+        describe('a synchronous call whose subagent has no usable meta', () => {
+          const call = (ts = T('11:25')) => [
+            user('go'),
+            { ...asst(toolUse('Agent', 'fg1')), timestamp: ts },
+          ];
+
+          it('counts the call and its subagent file once when the meta is missing', async () => {
+            await start(call());
+            await sub('ag1', working(), null);
+            expect(await running()).toBe(1);
+          });
+
+          it('counts them once when the meta has no toolUseId', async () => {
+            await start(call());
+            await sub('ag1', working(), { toolUseId: undefined });
+            expect(await running()).toBe(1);
+          });
+
+          it('still counts an open call whose subagent file does not exist yet', async () => {
+            await start(call());
+            expect(await running()).toBe(1);
+          });
+
+          it('does not take a subagent that started before the call for it', async () => {
+            await start(call(T('11:35')));
+            await sub('ag1', working(T('11:30')), null);
+            expect(await running()).toBe(2);
+          });
         });
 
         it('does not count a depth-2 subagent its parent was notified ended', async () => {
@@ -2903,12 +3041,13 @@ describe('cliSessions reader', () => {
       expect(await tokensOf()).toEqual({ used: 5, complete: true });
     });
 
-    it('sums subagent files and opens neither a meta file nor a stray name', async () => {
+    it("sums subagent files, never a meta file's tokens or a stray name", async () => {
       await session(303);
       const main = await transcript(root, SID_A, jsonl([respLine('m1', usage(1, 0, 1))]));
       await subagent(main, 'agent-a1.jsonl', jsonl([respLine('s1', usage(10, 0, 10))]));
       await subagent(main, 'agent-b_2.jsonl', jsonl([respLine('s1', usage(100, 0, 100))]));
-      await subagent(main, 'agent-a1.meta.json', JSON.stringify(usage(9, 9, 9)));
+      // Shaped like a usage line, so a scan of the meta file would add 27.
+      await subagent(main, 'agent-a1.meta.json', jsonl([respLine('meta1', usage(9, 9, 9))]));
       const stray = await subagent(main, 'notes.jsonl', jsonl([respLine('x', usage(9, 9, 9))]));
       const spy = logging();
       expect(await tokensOf({ fs: spy.fs })).toEqual({ used: 2 + 20 + 200, complete: true });

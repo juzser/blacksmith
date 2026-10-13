@@ -505,31 +505,51 @@ function endMarks(entries: Record<string, unknown>[]): EndMarks {
   return marks;
 }
 
-/** A subagent's own transcript tail: whether it handed back, and what it ended in turn. */
+/** A subagent's own transcript tail: how its last message ends, and what it ended in turn. */
 interface SubTail extends EndMarks {
+  /** Its last assistant message calls SubagentHandback. */
   handedBack: boolean;
+  /**
+   * Its last assistant message says something and calls no tool: the older
+   * hand-back shape, or a message whose tool call is not written yet.
+   */
+  textOnly: boolean;
 }
 
 /**
- * A subagent has handed back when its last assistant record calls
- * SubagentHandback, or (the older shape) calls no tool at all.
+ * How a subagent's last assistant message ends. The CLI writes one record per
+ * content block, so the blocks of one message (one `message.id`) are judged
+ * together: a `text` record does not stand for a message whose `tool_use`
+ * record is already written.
  */
 function analyseSub(entries: Record<string, unknown>[]): SubTail {
-  let last: Block[] | null = null;
+  const messages = new Map<unknown, Block[]>();
+  let lastKey: unknown = null;
   for (const e of entries) {
     if (e.type !== 'assistant') continue;
+    const id = (e.message as { id?: unknown } | undefined)?.id;
+    const key = typeof id === 'string' && id !== '' ? id : {};
     const blocks = blocksOf(e);
-    if (blocks.some((b) => b.type === 'text' || b.type === 'tool_use')) last = blocks;
+    messages.set(key, [...(messages.get(key) ?? []), ...blocks]);
+    if (blocks.some((b) => b.type === 'text' || b.type === 'tool_use')) lastKey = key;
   }
-  const handedBack =
-    last !== null &&
-    (last.some((b) => b.type === 'tool_use' && b.name === 'SubagentHandback') ||
-      !last.some((b) => b.type === 'tool_use'));
-  return { ...endMarks(entries), handedBack };
+  const last = lastKey === null ? null : (messages.get(lastKey) ?? null);
+  const calls = last?.filter((b) => b.type === 'tool_use') ?? [];
+  return {
+    ...endMarks(entries),
+    handedBack: calls.some((b) => b.name === 'SubagentHandback'),
+    textOnly: last !== null && calls.length === 0,
+  };
 }
 
 /** A subagent that wrote nothing for this long, with no running child, is taken as gone. */
 const SUBAGENT_STALE_MS = 15 * 60 * 1000;
+/**
+ * A subagent whose last message calls no tool is taken as handed back only
+ * once its file has been quiet this long: until then the message's tool call
+ * may still be streaming in.
+ */
+const SUBAGENT_HANDBACK_GRACE_MS = 2 * 60 * 1000;
 /** Most a subagent's `.meta.json` is read for. */
 const SUBAGENT_META_BYTES = 64 * 1024;
 
@@ -543,9 +563,10 @@ function launchedAgentId(e: Record<string, unknown>, blocks: Block[]): string | 
   const r = e.toolUseResult;
   if (r !== null && typeof r === 'object') {
     const t = r as Record<string, unknown>;
-    if (t.isAsync === true && typeof t.agentId === 'string' && t.agentId !== '') return t.agentId;
-    return null;
+    const launched = t.isAsync === true || t.status === 'async_launched';
+    if (launched && typeof t.agentId === 'string' && t.agentId !== '') return t.agentId;
   }
+  // An object of another shape falls through to the launch text.
   for (const b of blocks) {
     if (b.type !== 'tool_result') continue;
     const body = typeof b.content === 'string' ? b.content : '';
@@ -1059,8 +1080,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
   }
 
-  async function readTranscript(configDir: string, e: RegistryEntry): Promise<TranscriptRead> {
-    const file = await findTranscript(configDir, e);
+  /** The read of a session's main transcript, `file` as findTranscript resolved it. */
+  async function readTranscript(file: string | null): Promise<TranscriptRead> {
     if (file === null) return { state: 'missing', analysis: null, headBs: false };
     try {
       const st = await fs.stat(file);
@@ -1222,8 +1243,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     }
   }
 
-  async function tokensOf(configDir: string, e: RegistryEntry): Promise<CliSessionCard['tokens']> {
-    const main = await findTranscript(configDir, e);
+  /** Tokens of a session, `main` its transcript as findTranscript resolved it. */
+  async function tokensOf(
+    main: string | null,
+    e: RegistryEntry,
+  ): Promise<CliSessionCard['tokens']> {
     if (main === null) return null;
     let used: number;
     let complete = true;
@@ -1327,17 +1351,18 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
    * when it started in this process, has not handed back, was not reported
    * ended by its parent (a notification, or the result of the call that
    * launched it), and either wrote within the stale window or has a running
-   * child. Plus main-thread launches that have no transcript there yet.
+   * child. A subagent ended by a notification from its parent ends its
+   * children too. Plus main-thread launches that have no transcript there
+   * yet. `main` is the session's transcript as findTranscript resolved it.
    * Null when the transcript could not be read.
    */
   async function subagentsRunningOf(
-    configDir: string,
+    main: string | null,
     e: RegistryEntry,
     t: TranscriptRead,
   ): Promise<number | null> {
     const a = t.analysis;
     if (a === null) return null;
-    const main = await findTranscript(configDir, e);
     const dir = main === null ? null : path.join(main.replace(/\.jsonl$/, ''), 'subagents');
     let names: string[] = [];
     if (dir !== null) {
@@ -1354,6 +1379,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       string,
       {
         mtimeMs: number;
+        firstTs: number;
         tail: SubTail;
         meta: { toolUseId: string | null; parentId: string | null } | null;
       }
@@ -1368,7 +1394,12 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         if (!Number.isNaN(startedMs) && st.mtimeMs < startedMs) continue;
         const sub = await readSubagent(file, st.size, st.mtimeMs);
         if (!sinceStart(e, sub.firstTs ?? st.mtimeMs)) continue;
-        infos.set(id, { mtimeMs: st.mtimeMs, tail: sub.tail, meta: sub.meta });
+        infos.set(id, {
+          mtimeMs: st.mtimeMs,
+          firstTs: sub.firstTs ?? st.mtimeMs,
+          tail: sub.tail,
+          meta: sub.meta,
+        });
         if (sub.meta?.toolUseId) launching.add(sub.meta.toolUseId);
       } catch {
         known.delete(id);
@@ -1379,6 +1410,26 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       const parent = info.meta?.parentId;
       if (parent) children.set(parent, [...(children.get(parent) ?? []), id]);
     }
+    /** The tail that reports on a subagent's end: its parent's, or the main one. */
+    const marksOf = (parent: string | null) =>
+      parent === null ? a.ends : (infos.get(parent)?.tail ?? null);
+    const notifiedMemo = new Map<string, boolean>();
+    /**
+     * Reported ended by a notification from its parent, or under a parent that
+     * was: a killed subagent's children go with it. A parent's own hand-back
+     * or call result does not reach its children.
+     */
+    const notifiedEnded = (id: string): boolean => {
+      const cached = notifiedMemo.get(id);
+      if (cached !== undefined) return cached;
+      notifiedMemo.set(id, false); // a cycle in the parent links ends nothing
+      const parent = infos.get(id)?.meta?.parentId ?? null;
+      const result =
+        marksOf(parent)?.endedIds.has(id) === true ||
+        (parent !== null && infos.has(parent) && notifiedEnded(parent));
+      notifiedMemo.set(id, result);
+      return result;
+    };
     const now = clock();
     const memo = new Map<string, boolean>();
     const live = (id: string): boolean => {
@@ -1387,11 +1438,11 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       memo.set(id, false); // a cycle in the parent links counts nothing
       const info = infos.get(id);
       if (info === undefined) return false;
-      const parent = info.meta?.parentId ?? null;
-      const marks = parent === null ? a.ends : (infos.get(parent)?.tail ?? null);
+      const marks = marksOf(info.meta?.parentId ?? null);
       const ended =
         info.tail.handedBack ||
-        marks?.endedIds.has(id) === true ||
+        (info.tail.textOnly && now - info.mtimeMs > SUBAGENT_HANDBACK_GRACE_MS) ||
+        notifiedEnded(id) ||
         (info.meta?.toolUseId != null && marks?.resultIds.has(info.meta.toolUseId) === true);
       const result =
         !ended && (now - info.mtimeMs <= SUBAGENT_STALE_MS || (children.get(id) ?? []).some(live));
@@ -1402,7 +1453,28 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const id of infos.keys()) if (live(id)) n += 1;
     // A launch whose transcript is not on disk yet is seen only in the main tail.
     for (const [id, ts] of a.pendingAgents) if (!known.has(id) && sinceStart(e, ts)) n += 1;
-    for (const [id, ts] of a.openAgentCalls) if (!launching.has(id) && sinceStart(e, ts)) n += 1;
+    // An open call whose subagent has no usable meta is matched to the first
+    // depth-1 file with no toolUseId that started at or after it: that file is
+    // already counted (or ended) above. Only the calls left over count.
+    const unclaimed = [...infos]
+      .filter(
+        ([id, info]) =>
+          !info.meta?.toolUseId &&
+          !info.meta?.parentId &&
+          !a.pendingAgents.has(id) &&
+          !a.ends.endedIds.has(id),
+      )
+      .map(([, info]) => info.firstTs)
+      .sort((x, y) => x - y);
+    const calls = [...a.openAgentCalls]
+      .filter(([id, ts]) => !launching.has(id) && sinceStart(e, ts))
+      .map(([, ts]) => ts ?? Number.NEGATIVE_INFINITY)
+      .sort((x, y) => x - y);
+    for (const ts of calls) {
+      const i = unclaimed.findIndex((first) => first >= ts);
+      if (i === -1) n += 1;
+      else unclaimed.splice(i, 1);
+    }
     return n;
   }
 
@@ -2053,7 +2125,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const e of entries) {
       const cwd = await real(e.cwd);
       const hit = within(cwd, roots);
-      const t = await readTranscript(deps.configDir, e);
+      const main = await findTranscript(deps.configDir, e);
+      const t = await readTranscript(main);
       const stamped = factoryBy.has(e.cliSessionId);
       let by: CliSessionCard['inScopeBy'] | null = hit ? 'cwd' : stamped ? 'stamped' : null;
       if (by === null && (t.analysis?.bsMention || t.headBs)) by = 'heuristic';
@@ -2111,8 +2184,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         next: a?.next ?? null,
         focus: focusOf(epics, status, e.status === 'waiting_operator'),
         transcript: t.state,
-        subagentsRunning: await subagentsRunningOf(deps.configDir, e, t),
-        tokens: await tokensOf(deps.configDir, e),
+        subagentsRunning: await subagentsRunningOf(main, e, t),
+        tokens: await tokensOf(main, e),
         linked,
         parseIssues: e.parseIssues,
       });
