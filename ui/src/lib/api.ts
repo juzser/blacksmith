@@ -209,7 +209,6 @@ export interface ProjectOverviewSummary {
   unmeasured: number;
   /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {
   store?: StoreRef;
@@ -246,7 +245,6 @@ export interface OverviewResult {
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
   milestoneProgress: MilestoneProgress[];
   recentDispatches: RecentDispatch[];
   liveAgentCountDelta5m: number;

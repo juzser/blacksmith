@@ -25,7 +25,7 @@ import { isAuditAxisRowId } from '../audit.js';
 import { readTokenUsage } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
-import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
+import { OPEN_FINDING_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { JUDGE_ROLES } from '../judgeRoles.js';
 import { FACTORY_PROJECT_NAME, normalizeProjectName } from '../projectName.js';
@@ -38,7 +38,6 @@ import {
   TERMINAL_TASK_STATUSES,
 } from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
-import { WAIVABLE_SEVERITIES } from '../waivers.js';
 import { type SmithDb, unanimousEpicProjects } from './projector.js';
 import {
   agents,
@@ -590,7 +589,6 @@ export interface ProjectOverviewSummary {
   unmeasured: number;
   /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
 }
 
 export interface OverviewResult {
@@ -627,7 +625,6 @@ export interface OverviewResult {
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
   milestoneProgress: MilestoneProgress[];
   /** Phase 6b (closes the 6a DESIGN.md deviation): the 10 most recent dispatch_decisions, newest first. */
   recentDispatches: RecentDispatch[];
@@ -1162,14 +1159,6 @@ export interface RecentDispatch {
 }
 
 const RECENT_DISPATCHES_LIMIT = 10;
-
-function allFindingsForScope(db: SmithDb, scope: Scope): (typeof findings.$inferSelect)[] {
-  const sessionCond = scopedToSessions(findings.sessionId, scope);
-  const rows = sessionCond
-    ? db.select().from(findings).where(sessionCond).all()
-    : db.select().from(findings).all();
-  return filterByProject(rows, scope);
-}
 
 function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSelect)[] {
   // agents has no project column of its own (schema.ts) — scope it by
@@ -1713,65 +1702,6 @@ function idleEpics(
 }
 
 /**
- * A finding the waiver machinery would actually act on. Both rosters are
- * imported from the modules that own them — the severities from waivers.ts,
- * the statuses from findings.ts, where they are read off LEGAL_TRANSITIONS —
- * rather than spelled out here. `bs waivers pending` lists every such finding:
- * what *could* be waived. The operator's pending-waiver count is narrower,
- * see needsOperatorWaiver() below.
- */
-function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): boolean {
-  return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
-}
-
-/**
- * The task row a finding's task id names: exact key first, then taskIdsMatch,
- * the way projectResolver (projector.ts) does it. The log spells one task both
- * bare ("task-1") and qualified ("epic-a/task-1"), and findings keep whichever
- * spelling they were raised with. A bare id matches the same-named task of
- * every epic, so the finding's own epic, when it names one, picks among them.
- */
-function taskResolver<T extends { taskId: string; epicId: string | null }>(
-  taskRows: readonly T[],
-): (taskId: string, epicId: string | null) => T | undefined {
-  const exact = new Map(taskRows.map((t) => [t.taskId, t]));
-  return (taskId, epicId) => {
-    const hit = exact.get(taskId);
-    if (hit) return hit;
-    const matches = taskRows.filter((t) => taskIdsMatch(taskId, t.taskId));
-    return matches.find((t) => epicId !== null && t.epicId === epicId) ?? matches[0];
-  };
-}
-
-/**
- * An undecided waivable finding the factory will no longer act on, so only the
- * operator can: its task shipped, or it is epic-level (no task row, such as
- * `<epic>/integration`) and its epic is closed. A task still open is in the
- * factory's own fix loop (a follow-up task exists to fix its finding), a
- * superseded task's findings are moot, and an escalated task is counted under
- * `alerts.escalations`. No shared status set names "shipped" alone —
- * TERMINAL_OK_TASK_STATUSES also holds `waived`, which is decided — so
- * `completed` is spelled out. Both pendingWaivers counts read this one rule,
- * so they agree.
- */
-function needsOperatorWaiver(
-  f: {
-    severity: string;
-    findingStatus: string;
-    waiverId: string | null;
-    taskId: string;
-    epicId: string | null;
-  },
-  resolveTask: (taskId: string, epicId: string | null) => { taskStatus: string } | undefined,
-  closedEpicIds: ReadonlySet<string>,
-): boolean {
-  if (!awaitsWaiverDecision(f) || f.waiverId !== null) return false;
-  const t = resolveTask(f.taskId, f.epicId);
-  if (t) return t.taskStatus === 'completed';
-  return f.epicId !== null && closedEpicIds.has(f.epicId);
-}
-
-/**
  * One project's overview slice, computed by the same logic overview() itself
  * uses (no drift). `nowIso` is the caller's single instant, not a fresh
  * read: overview() hands every per-project summary the same "now" it used
@@ -1798,12 +1728,6 @@ function projectSummary(
   const tokensBudget =
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
   const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
-  const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-  const closedEpicIds = new Set(closedEpicsHere.map((e) => e.epicId));
-  const resolveTask = taskResolver(taskRows);
-  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, resolveTask, closedEpicIds),
-  ).length;
 
   return {
     project,
@@ -1816,7 +1740,6 @@ function projectSummary(
     tokensBudget,
     unmeasured,
     tokensByEpic: epicTokenSpends(tokenMaps),
-    alerts: { escalations, pendingWaivers },
   };
 }
 
@@ -2021,14 +1944,6 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
 
-  const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-
-  const closedEpicIds = new Set(closedEpics.map((e) => e.epicId));
-  const resolveTask = taskResolver(taskRows);
-  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, resolveTask, closedEpicIds),
-  ).length;
-
   const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
   const dispatchRows = dispatchSessionCond
     ? db.select().from(dispatches).where(dispatchSessionCond).all()
@@ -2165,7 +2080,6 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     epicsIdle,
     closedEpics,
     tokensByEpic,
-    alerts: { escalations, pendingWaivers },
     milestoneProgress: milestoneProgressRows(db, scope),
     recentDispatches,
     liveAgentCountDelta5m,
