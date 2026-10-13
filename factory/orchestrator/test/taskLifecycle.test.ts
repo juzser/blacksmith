@@ -3,11 +3,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { foldTasks } from '../src/db/projector.js';
-import { appendEvent, readEvents } from '../src/events.js';
+import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
 
 import { reinstateTask } from '../src/reinstate.js';
 import { PLAN_AMENDED_EVENT } from '../src/spec.js';
 import { reinstatedWithoutSuccessor, type TaskEventContext } from '../src/taskEvents.js';
+import {
+  honouredReinstatements,
+  reinstatementBlocker,
+  taskSuccessorsOf,
+} from '../src/taskLifecycle.js';
 
 const EPIC = 'epic-a';
 const T = 'epic-a/task-1';
@@ -122,4 +127,87 @@ describe('one predicate decides a reinstatement', () => {
       });
     });
   }
+});
+
+describe('honouredReinstatements and reinstatementBlocker on synthetic logs', () => {
+  const ev = (
+    event_type: string,
+    task_id?: string,
+    payload: Record<string, unknown> = {},
+  ): StoredEvent => ({
+    event_id: `sess-x#${event_type}`,
+    record: {
+      session_id: 'sess-x',
+      actor: 'system',
+      event_type,
+      task_id,
+      plan_version: 1,
+      causal_parent: null,
+      payload,
+    } as unknown as StoredEvent['record'],
+  });
+  const merged = (ids: string[]) => ev('wave-merged', undefined, { epic_id: EPIC, task_ids: ids });
+  const amended = (payload: Record<string, unknown>) =>
+    ev(PLAN_AMENDED_EVENT, `${EPIC}/plan-v2`, { epic_id: EPIC, ...payload });
+
+  it('honours a merged, superseded, reinstated task with no successor', () => {
+    const log = [merged([T]), ev('task-superseded', T), ev('task-reinstated', T)];
+    expect([...honouredReinstatements(log, EPIC)]).toEqual([T]);
+  });
+
+  it('ignores a reinstatement that follows no supersede', () => {
+    const log = [merged([T]), ev('task-reinstated', T)];
+    expect(honouredReinstatements(log, EPIC).size).toBe(0);
+  });
+
+  it('drops a reinstatement when the task is superseded again afterwards', () => {
+    const log = [
+      merged([T]),
+      ev('task-superseded', T),
+      ev('task-reinstated', T),
+      ev('task-superseded', T),
+    ];
+    expect(honouredReinstatements(log, EPIC).size).toBe(0);
+  });
+
+  it('matches a wave-merged by envelope task id as well as by payload task_ids', () => {
+    const log = [ev('wave-merged', T), ev('task-superseded', T), ev('task-reinstated', T)];
+    expect(honouredReinstatements(log, EPIC).has(T)).toBe(true);
+  });
+
+  it('matches a successor recorded under the bare id', () => {
+    const log = [
+      merged([T]),
+      ev('task-superseded', T),
+      amended({ successors: { 'task-1': T2 } }),
+      ev('task-reinstated', T),
+    ];
+    expect(honouredReinstatements(log, EPIC).size).toBe(0);
+    expect(reinstatementBlocker(log, T, EPIC)).toEqual({
+      code: 'has-successor',
+      successor: T2,
+    });
+  });
+
+  it('reads the legacy one-for-one diff as a successor, and ignores a many-to-one diff', () => {
+    const legacy = amended({ diff: { superseded: [T], added: [T2] } });
+    expect(taskSuccessorsOf([legacy], EPIC).get(T)).toBe(T2);
+    const wide = amended({ diff: { superseded: [T, 'epic-a/task-3'], added: [T2] } });
+    expect(taskSuccessorsOf([wide], EPIC).size).toBe(0);
+  });
+
+  it('ignores an amendment of another epic and a malformed successors value', () => {
+    const other = ev(PLAN_AMENDED_EVENT, 'epic-b/plan-v2', {
+      epic_id: 'epic-b',
+      successors: { [T]: T2 },
+    });
+    expect(taskSuccessorsOf([other], EPIC).size).toBe(0);
+    expect(taskSuccessorsOf([amended({ successors: null })], EPIC).size).toBe(0);
+    expect(taskSuccessorsOf([amended({ successors: { [T]: 7 } })], EPIC).size).toBe(0);
+  });
+
+  it('reports never-merged before has-successor', () => {
+    const log = [amended({ successors: { [T]: T2 } })];
+    expect(reinstatementBlocker(log, T, EPIC)).toEqual({ code: 'never-merged' });
+  });
 });
