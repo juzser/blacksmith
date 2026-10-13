@@ -16,6 +16,7 @@ import {
   decisionLine,
   decisionsSpanStores,
   decisionTitle,
+  FACT_STRIP_COPY,
   factStrip,
   factStripNote,
   isBudgetOutlier,
@@ -989,6 +990,28 @@ describe('lib/homeView.ts factStrip()', () => {
   it('reads 0, 0, 0 tokens and None with nothing live', () => {
     expect(values(totals())).toEqual(['0', '0', '0\u00a0tokens', 'None']);
     expect(floors(totals())).toEqual([false, false, false, false]);
+  });
+
+  it('keeps a tile quiet when its copy changes, because the state is unchanged', () => {
+    const scope = totals({ activeSessions: 1, tokensUnmeasured: 3 });
+    const tiles = factStrip(scope, undefined, { notMeasured: 'Unknown', none: 'No tasks' });
+    expect(tiles[2]).toMatchObject({ value: 'Unknown', quiet: true });
+    expect(tiles[3]).toMatchObject({ value: 'No tasks', quiet: true });
+    const unknown = factStrip(null, undefined, { notKnown: 'Unknown' });
+    expect(unknown).toHaveLength(4);
+    expect(unknown.map((t) => [t.value, t.quiet])).toEqual(Array(4).fill(['Unknown', true]));
+  });
+
+  it('default copy equals no copy argument for null, unmeasured, zero-task and populated scopes', () => {
+    const scopes = [
+      null,
+      totals({ measured: false }),
+      totals({ activeSessions: 1, tokensUnmeasured: 3 }),
+      totals({ activeSessions: 2, tokensSpent: 5_000, tasksDone: 1, tasksTotal: 4 }),
+    ];
+    for (const scope of scopes) {
+      expect(factStrip(scope)).toEqual(factStrip(scope, undefined, FACT_STRIP_COPY));
+    }
   });
 
   it('joins a number to its unit or "of" with a no-break space, so it never wraps there', () => {
