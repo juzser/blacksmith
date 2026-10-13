@@ -14,6 +14,7 @@ import {
   draftNextVersion,
   latestPlanVersion,
   livePlanTasks,
+  markFinishedFromLog,
   type PlanChanges,
   type PlanDiff,
   type PlanFile,
@@ -22,6 +23,7 @@ import {
 } from './plan.js';
 import { type CompiledSchemaSet, compileSchemas, validateRecord } from './schemas.js';
 import { amendPlan, resolveSupersedeKeys } from './spec.js';
+import { finishedInLog } from './taskLifecycle.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 /**
@@ -286,7 +288,8 @@ export async function proposeSpecChange(
     ctx,
     opts,
   );
-  const draft = draftNextVersion(plan, changes, loggedStubs);
+  const finished = finishedInLog(await readLineageEvents(ctx.sessionId, opts), plan.epic_id);
+  const draft = draftNextVersion(markFinishedFromLog(plan, finished), changes, loggedStubs);
   const validation = validatePlan(draft, { ...opts, previous: plan });
   if (!validation.valid) {
     throw new SpecChangeError(

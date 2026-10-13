@@ -13,7 +13,7 @@ import {
   type ValidationIssue,
   validateRecord,
 } from './schemas.js';
-import { epicOfTaskId } from './taskId.js';
+import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import {
   loadTaxonomy,
   type Taxonomy,
@@ -800,6 +800,27 @@ function readAddedList(epicId: string, version: number, added: unknown): TaskSpe
     }
   });
   return added as TaskSpecRecord[];
+}
+
+/**
+ * A copy of `plan` whose non-dead records for the ids in `finished` read
+ * `completed`, so `draftNextVersion` drops them as finished whatever the plan
+ * file still says. `finished` comes from the log (`finishedInLog`); ids match
+ * bare or qualified. Pure: `plan` is not touched.
+ */
+export function markFinishedFromLog(plan: PlanFile, finished: ReadonlySet<string>): PlanFile {
+  if (finished.size === 0) return plan;
+  const ids = [...finished];
+  return {
+    ...plan,
+    tasks: plan.tasks.map((t) =>
+      t.task_status !== 'superseded' &&
+      t.task_status !== 'completed' &&
+      ids.some((id) => taskIdsMatch(id, t.task_id))
+        ? { ...t, task_status: 'completed' }
+        : t,
+    ),
+  };
 }
 
 /**
