@@ -972,9 +972,17 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     for (const m of [sticky, transcriptPaths, missUntil, lastPrompt, tokenFiles]) {
       for (const id of m.keys()) if (!pidFileOf.has(id)) m.delete(id);
     }
+    // A live session's files keep their count even while its first count is
+    // still running (tokenFiles is only written when a count finishes).
+    const mains = [...transcriptPaths.values()];
+    const subDirs = mains.map((m) => path.join(m.replace(/\.jsonl$/, ''), 'subagents') + path.sep);
     const counted = new Set([...tokenFiles.values()].flat());
-    for (const file of tokenCache.keys()) if (!counted.has(file)) tokenCache.delete(file);
-    const files = new Set(transcriptPaths.values());
+    for (const file of tokenCache.keys()) {
+      const live =
+        counted.has(file) || mains.includes(file) || subDirs.some((d) => file.startsWith(d));
+      if (!live) tokenCache.delete(file);
+    }
+    const files = new Set(mains);
     for (const file of transcriptCache.keys()) if (!files.has(file)) transcriptCache.delete(file);
   }
 

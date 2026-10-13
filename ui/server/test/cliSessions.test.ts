@@ -2933,6 +2933,52 @@ describe('cliSessions reader', () => {
       ).toHaveLength(1);
     });
 
+    it('keeps the cache of a file counted while the session first count is still running', async () => {
+      await session(315);
+      const u = usage(1, 0, 1);
+      const file = await transcript(
+        root,
+        SID_A,
+        // Over the tail window, so the scan's read is told apart from the tail read.
+        `${JSON.stringify(user('x'.repeat(700_000)))}\n${jsonl([respLine('m1', usage(5, 0, 5))])}`,
+      );
+      const size = (await stat(file)).size;
+      const sub = await subagent(file, 'agent-a1.jsonl', jsonl([respLine('s1', u)]));
+      const spy = logging();
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held: CliFs = {
+        ...spy.fs,
+        open: async (p) => {
+          const fh = await spy.fs.open(p);
+          if (p !== sub) return fh;
+          return {
+            read: (async (...args: Parameters<typeof fh.read>) => {
+              await gate;
+              return (fh.read as (...a: unknown[]) => Promise<unknown>)(...args);
+            }) as typeof fh.read,
+            close: () => fh.close(),
+          };
+        },
+      };
+      const r = reader({ fs: held, cacheMs: 0 });
+      const a = r.read();
+      // The main file is counted and the subagent read is held: the count spans the next poll.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const b = r.read();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      const [ra, rb] = await Promise.all([a, b]);
+      expect(must(ra.sessions[0]).tokens).toEqual({ used: 10 + 2, complete: true });
+      expect(must(rb.sessions[0]).tokens).toEqual({ used: 10 + 2, complete: true });
+      expect(must((await r.read()).sessions[0]).tokens).toEqual({ used: 12, complete: true });
+      expect(
+        spy.reads.filter((x) => x.file === file && x.pos === 0 && x.len === size),
+      ).toHaveLength(1);
+    });
+
     describe('a line over the cap', () => {
       const small = { tokenChunkBytes: 256, tokenLineMax: 256 };
       const huge = (n = 400_000) =>
