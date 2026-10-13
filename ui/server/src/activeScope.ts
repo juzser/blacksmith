@@ -8,8 +8,8 @@
 //
 // Home's fact strip reads four totals over one set. S is the active epics
 // (`epics`); A is the live sessions linked to at least one epic in S. Agents
-// add up over A; tokens and tasks add up over S, each epic once however many
-// sessions drive it.
+// and tokens add up over A, group by group (see `foldGroups`); tasks add up
+// over S, each epic once however many sessions drive it.
 import { EPIC_IDLE_MS, type StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import { type CliSessionsResponse, HOME_STORE_ID, type StoreRef } from './cliSessions.js';
 
@@ -36,6 +36,8 @@ export interface ActiveScopeCli {
     } | null;
     /** Subagents this session has running now; null when not measured. */
     subagentsRunning: number | null;
+    /** Transcript tokens (cache reads left out); null when unreadable, incomplete when a subagent file was. */
+    tokens: { used: number; complete: boolean } | null;
   }[];
 }
 
@@ -66,9 +68,15 @@ export interface ActiveScope {
   agentsRunning: number;
   /** Sessions in A whose subagents could not be counted. */
   agentsUnmeasured: number;
-  /** Over the active epics, each once. */
+  /**
+   * Over A, each group of sessions and the active epics they share counts
+   * the larger of its sessions' transcript tokens (cache reads left out, each
+   * session once) and its epics' factory-measured spend. The factory's agents
+   * run inside the session that drives the epic, so the two overlap and the
+   * larger is the floor that never counts one token twice.
+   */
   tokensSpent: number;
-  /** Runs on the active epics whose tokens were not measured. */
+  /** Sessions in A whose transcript tokens are missing or incomplete. */
   tokensUnmeasured: number;
   tasksDone: number;
   /** done + review + inProgress + todo; superseded tasks are left out. */
@@ -82,7 +90,10 @@ export interface ActiveScope {
     activeSessions: number;
     agentsRunning: number;
     agentsUnmeasured: number;
+    tokensSpent: number;
+    tokensUnmeasured: number;
   }[];
+  /** The factory's own per-epic figures: the fold's second tokens input, not its answer. */
   epics: {
     storeId: string;
     epicId: string;
@@ -235,7 +246,8 @@ export function computeActiveScope(
     }
   });
 
-  const all = countAgents(cli, sessionEpics, epicAgents);
+  const epicSpend = new Map([...epics].map(([k, e]) => [k, e.tokensSpent]));
+  const all = foldGroups(cli, sessionEpics, epicAgents, epicSpend);
   const epicList = [...epics.values()];
   const sum = (pick: (e: ActiveScope['epics'][number]) => number) =>
     epicList.reduce((n, e) => n + pick(e), 0);
@@ -248,12 +260,12 @@ export function computeActiveScope(
     activeSessions: active.size,
     agentsRunning: all.running,
     agentsUnmeasured: all.unmeasured,
-    tokensSpent: sum((e) => e.tokensSpent),
-    tokensUnmeasured: sum((e) => e.tokensUnmeasured),
+    tokensSpent: all.tokens,
+    tokensUnmeasured: all.tokensUnmeasured,
     tasksDone: sum((e) => e.tasksDone),
     tasksTotal: sum((e) => e.tasksTotal),
     projects: [...projects.values()].map((p) => {
-      const mine = countAgents(cli, p.activeEpics, epicAgents);
+      const mine = foldGroups(cli, p.activeEpics, epicAgents, epicSpend);
       return {
         storeId: p.storeId,
         project: p.project,
@@ -262,6 +274,8 @@ export function computeActiveScope(
         activeSessions: p.active.size,
         agentsRunning: mine.running,
         agentsUnmeasured: mine.unmeasured,
+        tokensSpent: mine.tokens,
+        tokensUnmeasured: mine.tokensUnmeasured,
       };
     }),
     epics: epicList,
@@ -277,12 +291,20 @@ export function computeActiveScope(
  * of the session running the epic, so the two counts overlap by an unknown
  * amount and the larger is the floor that never counts one agent twice. A
  * session whose subagents could not be counted adds to `unmeasured`.
+ *
+ * Tokens fold over the same groups: a group counts max(its sessions' known
+ * transcript tokens, its epics' factory-measured spend), for the same reason
+ * (the factory's agents are subagents of the session, so their tokens are
+ * already inside its transcripts). A session counts once however many epics
+ * it links; one whose tokens are missing or incomplete adds to
+ * `tokensUnmeasured` and its known part still counts.
  */
-function countAgents(
+function foldGroups(
   cli: ActiveScopeCli,
   sessions: ReadonlyMap<number, ReadonlySet<string>>,
   epicAgents: ReadonlyMap<string, ReadonlySet<string>>,
-): { running: number; unmeasured: number } {
+  epicSpend: ReadonlyMap<string, number>,
+): { running: number; unmeasured: number; tokens: number; tokensUnmeasured: number } {
   // Union-find over session indexes, joined through shared epic keys.
   const parent = new Map<number, number>();
   const find = (i: number): number => {
@@ -302,10 +324,16 @@ function countAgents(
   }
   const subs = new Map<number, number>();
   const agents = new Map<number, Set<string>>();
+  const sessionTokens = new Map<number, number>();
+  const factoryTokens = new Map<number, number>();
   let unmeasured = 0;
+  let tokensUnmeasured = 0;
   for (const i of sessions.keys()) {
     const n = cli.sessions[i]?.subagentsRunning ?? null;
     const root = find(i);
+    const t = cli.sessions[i]?.tokens ?? null;
+    if (t === null || !t.complete) tokensUnmeasured++;
+    sessionTokens.set(root, (sessionTokens.get(root) ?? 0) + (t?.used ?? 0));
     if (n === null) unmeasured++;
     else subs.set(root, (subs.get(root) ?? 0) + n);
     if (!subs.has(root)) subs.set(root, 0);
@@ -315,10 +343,13 @@ function countAgents(
     const set = agents.get(root) ?? new Set<string>();
     for (const a of epicAgents.get(k) ?? []) set.add(`${k}\u0000${a}`);
     agents.set(root, set);
+    factoryTokens.set(root, (factoryTokens.get(root) ?? 0) + (epicSpend.get(k) ?? 0));
   }
   let running = 0;
   for (const [root, n] of subs) running += Math.max(n, agents.get(root)?.size ?? 0);
-  return { running, unmeasured };
+  let tokens = 0;
+  for (const [root, n] of sessionTokens) tokens += Math.max(n, factoryTokens.get(root) ?? 0);
+  return { running, unmeasured, tokens, tokensUnmeasured };
 }
 
 /** A working factory agent, the same one whichever session links its epic. */
