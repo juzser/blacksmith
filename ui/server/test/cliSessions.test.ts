@@ -685,7 +685,11 @@ describe('cliSessions reader', () => {
         });
 
         it('does not count a depth-1 subagent a main-thread notification ended', async () => {
-          await start([user('go'), launchRec('ag1'), notifyRec('ag1', 'killed', true)]);
+          await start([
+            user('go'),
+            launchRec('ag1'),
+            { ...notifyRec('ag1', 'killed', true), timestamp: T('11:59') },
+          ]);
           await sub('ag1', working());
           expect(await running()).toBe(0);
         });
@@ -701,7 +705,11 @@ describe('cliSessions reader', () => {
           const grandchild = { parentAgentId: 'ag2', spawnDepth: 3 };
 
           it('ends its children and their children too', async () => {
-            await start([user('go'), launchRec('ag1'), notifyRec('ag1', 'killed', true)]);
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'killed', true), timestamp: T('11:59') },
+            ]);
             await sub('ag1', working());
             await sub('ag2', working(), child);
             await sub('ag3', working(), grandchild);
@@ -783,7 +791,7 @@ describe('cliSessions reader', () => {
 
         it('does not count a depth-2 subagent its parent was notified ended', async () => {
           await start();
-          await sub('ag1', [...working(), stamped(notifyRec('ag2', 'killed', true), T('11:35'))]);
+          await sub('ag1', [...working(), stamped(notifyRec('ag2', 'killed', true), T('11:59'))]);
           await sub('ag2', working(), { parentAgentId: 'ag1', spawnDepth: 2 });
           expect(await running()).toBe(1);
         });
@@ -811,6 +819,146 @@ describe('cliSessions reader', () => {
           await start();
           await sub('ag1', working(T('11:30')), {}, Date.parse(T('09:30')));
           expect(await running()).toBe(0);
+        });
+
+        describe('a subagent resumed after its parent marked it ended', () => {
+          const endAt = (id: string, status: string, ts: string) => ({
+            ...notifyRec(id, status, true),
+            timestamp: ts,
+          });
+          const callRes = (ts?: string) => [
+            user('go'),
+            asst(toolUse('Agent', 'tu-ag1')),
+            { ...toolResult('tu-ag1'), ...(ts === undefined ? {} : { timestamp: ts }) },
+          ];
+
+          it('does not count it while its file was not written after the notification', async () => {
+            await start([user('go'), launchRec('ag1'), endAt('ag1', 'completed', T('11:55'))]);
+            await sub('ag1', working(), {}, Date.parse(T('11:55')));
+            expect(await running()).toBe(0);
+          });
+
+          it('allows a late trailing write within the slack', async () => {
+            await start([user('go'), launchRec('ag1'), endAt('ag1', 'completed', T('11:55'))]);
+            await sub('ag1', working(), {}, Date.parse(T('11:55')) + 5_000);
+            expect(await running()).toBe(0);
+          });
+
+          it('counts it when its file was written well after the notification', async () => {
+            await start([user('go'), launchRec('ag1'), endAt('ag1', 'completed', T('11:55'))]);
+            await sub('ag1', working(), {}, Date.parse(T('11:58')));
+            expect(await running()).toBe(1);
+          });
+
+          it('does not count a sync call finished at or after its last write', async () => {
+            await start(callRes(T('11:55')));
+            await sub('ag1', working(), {}, Date.parse(T('11:55')));
+            expect(await running()).toBe(0);
+          });
+
+          it('counts a sync call subagent written well after its tool_result', async () => {
+            await start(callRes(T('11:55')));
+            await sub('ag1', working(), {}, Date.parse(T('11:58')));
+            expect(await running()).toBe(1);
+          });
+
+          it('takes a tool_result with no timestamp as ended', async () => {
+            await start(callRes());
+            await sub('ag1', working());
+            expect(await running()).toBe(0);
+          });
+        });
+
+        describe('children of a parent that finished', () => {
+          const endAt = (id: string, status: string, ts: string) => ({
+            ...notifyRec(id, status, true),
+            timestamp: ts,
+          });
+          const child = { parentAgentId: 'ag1', spawnDepth: 2 };
+
+          it.each(['completed', 'failed'])(
+            'keeps a child counted when the parent %s',
+            async (s) => {
+              await start([user('go'), launchRec('ag1'), endAt('ag1', s, T('11:59'))]);
+              await sub('ag1', working());
+              await sub('ag2', working(), child);
+              expect(await running()).toBe(1);
+            },
+          );
+
+          it.each(['killed', 'stopped'])('ends a child when the parent was %s', async (s) => {
+            await start([user('go'), launchRec('ag1'), endAt('ag1', s, T('11:59'))]);
+            await sub('ag1', working());
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(0);
+          });
+
+          it('does not end a child for a parent resumed after it was killed', async () => {
+            await start([user('go'), launchRec('ag1'), endAt('ag1', 'killed', T('11:50'))]);
+            await sub('ag1', working());
+            await sub('ag2', working(), child);
+            expect(await running()).toBe(2);
+          });
+        });
+
+        describe('a launch text on a result that is not a subagent launch', () => {
+          const launchText = 'Async agent launched successfully.\nagentId: ghost';
+          const resultOf = (id: string, extra: Record<string, unknown>) => ({
+            type: 'user',
+            timestamp: T('11:30'),
+            message: {
+              role: 'user',
+              content: [{ type: 'tool_result', tool_use_id: id, content: launchText }],
+            },
+            ...extra,
+          });
+
+          it('is not a launch on a Bash result with a Bash-shaped object', async () => {
+            await start([
+              user('go'),
+              asst(toolUse('Bash', 'b1')),
+              resultOf('b1', { toolUseResult: { stdout: 'x', stderr: '' } }),
+              asst(text('Waiting.')),
+            ]);
+            expect(await running()).toBe(0);
+            expect(must((await read({ clock: () => CLOCK })).sessions[0]).status).not.toBe(
+              'working',
+            );
+          });
+
+          it('is not a launch on a Bash result with no object either', async () => {
+            await start([user('go'), asst(toolUse('Bash', 'b1')), resultOf('b1', {})]);
+            expect(await running()).toBe(0);
+          });
+
+          it('is still a launch on an Agent result of an unexpected object shape', async () => {
+            await start([
+              user('go'),
+              asst(toolUse('Agent', 'tu-g')),
+              resultOf('tu-g', { toolUseResult: { description: 'research' } }),
+            ]);
+            expect(await running()).toBe(1);
+          });
+
+          it('is a launch when its call is out of the tail and the result has no object', async () => {
+            await start([user('go'), resultOf('tu-old', {})]);
+            expect(await running()).toBe(1);
+          });
+
+          it('is not a launch when its call is out of the tail and the object is another shape', async () => {
+            await start([user('go'), resultOf('tu-old', { toolUseResult: { stdout: 'x' } })]);
+            expect(await running()).toBe(0);
+          });
+        });
+
+        it('lets a timed open call claim a file before a call with no timestamp does', async () => {
+          await start([
+            user('go'),
+            { ...asst(toolUse('Agent', 'fg1')), timestamp: T('11:25') },
+            asst(toolUse('Agent', 'fg2')),
+          ]);
+          await sub('ag1', working(T('11:30')), null);
+          expect(await running()).toBe(2);
         });
 
         it('counts a launch seen in both the main tail and the folder once', async () => {

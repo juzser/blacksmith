@@ -481,24 +481,62 @@ interface Analysis {
 
 /** Subagent ends a transcript tail reports, for the subagents it started. */
 interface EndMarks {
-  /** Agent ids a task-notification reported completed, failed, killed or stopped. */
-  endedIds: Set<string>;
-  /** Ids of the tool calls that got a tool_result back. */
-  resultIds: Set<string>;
+  /**
+   * Agent id to when (ms) a task-notification last reported it completed,
+   * failed, killed or stopped. Infinity when the record has no usable time.
+   */
+  endedAt: Map<string, number>;
+  /** Like `endedAt`, for the notifications that say killed or stopped only. */
+  killedAt: Map<string, number>;
+  /** Tool call id to when (ms) its tool_result came back; Infinity when unreadable. */
+  resultAt: Map<string, number>;
 }
 
-function endMarks(entries: Record<string, unknown>[]): EndMarks {
-  const marks: EndMarks = { endedIds: new Set(), resultIds: new Set() };
+/** When a record was written (ms); Infinity when unreadable, so its mark always holds. */
+function recordTime(e: Record<string, unknown>): number {
+  const ts = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : Number.NaN;
+  return Number.isNaN(ts) ? Number.POSITIVE_INFINITY : ts;
+}
+
+/** Keeps the latest time per key. */
+function latest(m: Map<string, number>, key: string, at: number): void {
+  const had = m.get(key);
+  if (had === undefined || at > had) m.set(key, at);
+}
+
+/** Tool call id to whether the call is an Agent/Task call, for every call in a tail. */
+function callKinds(entries: Record<string, unknown>[]): Map<string, boolean> {
+  const kinds = new Map<string, boolean>();
+  for (const e of entries) {
+    if (e.type !== 'assistant') continue;
+    for (const b of blocksOf(e)) {
+      if (b.type === 'tool_use' && typeof b.id === 'string') {
+        kinds.set(b.id, typeof b.name === 'string' && SUBAGENT_TOOLS.has(b.name));
+      }
+    }
+  }
+  return kinds;
+}
+
+function endMarks(
+  entries: Record<string, unknown>[],
+  calls: Map<string, boolean> = callKinds(entries),
+): EndMarks {
+  const marks: EndMarks = { endedAt: new Map(), killedAt: new Map(), resultAt: new Map() };
   for (const e of entries) {
     if (e.type !== 'user') continue;
+    const at = recordTime(e);
     const ended = endedAgentId(e);
-    if (ended !== null) marks.endedIds.add(ended);
+    if (ended !== null) {
+      latest(marks.endedAt, ended.id, at);
+      if (ended.spreads) latest(marks.killedAt, ended.id, at);
+    }
     const blocks = blocksOf(e);
     // A background launch's result comes back at once; it does not end the agent.
-    if (launchedAgentId(e, blocks) !== null) continue;
+    if (launchedAgentId(e, blocks, calls) !== null) continue;
     for (const b of blocks) {
       if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-        marks.resultIds.add(b.tool_use_id);
+        latest(marks.resultAt, b.tool_use_id, at);
       }
     }
   }
@@ -550,6 +588,11 @@ const SUBAGENT_STALE_MS = 15 * 60 * 1000;
  * may still be streaming in.
  */
 const SUBAGENT_HANDBACK_GRACE_MS = 2 * 60 * 1000;
+/**
+ * How long after its parent marked it ended (a notification, a call's result)
+ * a subagent may still write before it counts as resumed.
+ */
+const END_MARK_SLACK_MS = 10 * 1000;
 /** Most a subagent's `.meta.json` is read for. */
 const SUBAGENT_META_BYTES = 64 * 1024;
 
@@ -559,16 +602,25 @@ const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
 const NOTIFICATION_END = /<status>\s*(?:completed|failed|killed|stopped)\s*<\/status>/;
 
 /** The agent id of an async subagent launch record, else null. */
-function launchedAgentId(e: Record<string, unknown>, blocks: Block[]): string | null {
+function launchedAgentId(
+  e: Record<string, unknown>,
+  blocks: Block[],
+  calls: Map<string, boolean>,
+): string | null {
   const r = e.toolUseResult;
   if (r !== null && typeof r === 'object') {
     const t = r as Record<string, unknown>;
     const launched = t.isAsync === true || t.status === 'async_launched';
     if (launched && typeof t.agentId === 'string' && t.agentId !== '') return t.agentId;
   }
-  // An object of another shape falls through to the launch text.
+  // An object of another shape falls through to the launch text, but only on
+  // the result of an Agent/Task call. With the call out of the tail window, the
+  // text counts only when the result carries no object that says otherwise.
+  const hasObject = r !== null && typeof r === 'object';
   for (const b of blocks) {
     if (b.type !== 'tool_result') continue;
+    const kind = typeof b.tool_use_id === 'string' ? calls.get(b.tool_use_id) : undefined;
+    if (kind === undefined ? hasObject : !kind) continue;
     const body = typeof b.content === 'string' ? b.content : '';
     if (!body.startsWith('Async agent launched successfully.')) continue;
     const m = /^agentId: (\S+)/m.exec(body);
@@ -577,8 +629,12 @@ function launchedAgentId(e: Record<string, unknown>, blocks: Block[]): string | 
   return null;
 }
 
-/** The task id of a notification that reports a subagent finished, else null. */
-function endedAgentId(e: Record<string, unknown>): string | null {
+/**
+ * The task id of a notification that reports a subagent finished, else null.
+ * `spreads` is set for killed or stopped, which end the subagent's children
+ * too; a subagent that completed or failed may leave background children.
+ */
+function endedAgentId(e: Record<string, unknown>): { id: string; spreads: boolean } | null {
   const origin = e.origin as { kind?: unknown } | undefined;
   if (origin?.kind !== 'task-notification') return null;
   const raw = blocksOf(e)
@@ -588,10 +644,13 @@ function endedAgentId(e: Record<string, unknown>): string | null {
   if (!raw.trimStart().startsWith('<task-notification>') || !NOTIFICATION_END.test(raw)) {
     return null;
   }
-  return /<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(raw)?.[1] ?? null;
+  const id = /<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(raw)?.[1];
+  if (id === undefined) return null;
+  return { id, spreads: /<status>\s*(?:killed|stopped)\s*<\/status>/.test(raw) };
 }
 
 function analyse(entries: Record<string, unknown>[]): Analysis {
+  const calls = callKinds(entries);
   const a: Analysis = {
     meaningful: false,
     last: null,
@@ -603,13 +662,13 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     bsMention: mentionsBs(entries),
     pendingAgents: new Map(),
     openAgentCalls: new Map(),
-    ends: endMarks(entries),
+    ends: endMarks(entries, calls),
   };
   for (const e of entries) {
     if (e.isSidechain === true) continue;
     // A subagent's end notification counts even on a record flagged meta.
     const ended = e.type === 'user' ? endedAgentId(e) : null;
-    if (ended !== null) a.pendingAgents.delete(ended);
+    if (ended !== null) a.pendingAgents.delete(ended.id);
     if (e.type === 'user' && a.openAgentCalls.size > 0) {
       for (const b of blocksOf(e)) {
         if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
@@ -620,7 +679,7 @@ function analyse(entries: Record<string, unknown>[]): Analysis {
     if (e.isMeta === true || e.isCompactSummary === true) continue;
     if (e.type === 'user') {
       const blocks = blocksOf(e);
-      const launched = launchedAgentId(e, blocks);
+      const launched = launchedAgentId(e, blocks, calls);
       if (launched !== null) {
         const ts = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : Number.NaN;
         a.pendingAgents.set(launched, Number.isNaN(ts) ? null : ts);
@@ -1350,9 +1409,9 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
    * `subagents/` folder (one flat folder for all depths). A subagent counts
    * when it started in this process, has not handed back, was not reported
    * ended by its parent (a notification, or the result of the call that
-   * launched it), and either wrote within the stale window or has a running
-   * child. A subagent ended by a notification from its parent ends its
-   * children too. Plus main-thread launches that have no transcript there
+   * launched it) with no write since, and either wrote within the stale
+   * window or has a running child. A subagent its parent reported killed or
+   * stopped ends its children too. Plus main-thread launches that have no transcript there
    * yet. `main` is the session's transcript as findTranscript resolved it.
    * Null when the transcript could not be read.
    */
@@ -1413,22 +1472,42 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     /** The tail that reports on a subagent's end: its parent's, or the main one. */
     const marksOf = (parent: string | null) =>
       parent === null ? a.ends : (infos.get(parent)?.tail ?? null);
-    const notifiedMemo = new Map<string, boolean>();
     /**
-     * Reported ended by a notification from its parent, or under a parent that
-     * was: a killed subagent's children go with it. A parent's own hand-back
-     * or call result does not reach its children.
+     * A mark holds only while the subagent's file was not written after it
+     * (plus a little slack for late trailing writes): a subagent resumed after
+     * it ended writes to the same file again.
      */
-    const notifiedEnded = (id: string): boolean => {
-      const cached = notifiedMemo.get(id);
+    const holds = (markedAt: number | undefined, id: string): boolean =>
+      markedAt !== undefined &&
+      (infos.get(id)?.mtimeMs ?? Number.POSITIVE_INFINITY) <= markedAt + END_MARK_SLACK_MS;
+    const spreadMemo = new Map<string, boolean>();
+    /**
+     * Killed or stopped by a notification from its parent, or under a parent
+     * that was: a killed subagent's children go with it. A subagent that
+     * completed or failed may leave background children running.
+     */
+    const killedEnded = (id: string): boolean => {
+      const cached = spreadMemo.get(id);
       if (cached !== undefined) return cached;
-      notifiedMemo.set(id, false); // a cycle in the parent links ends nothing
+      spreadMemo.set(id, false); // a cycle in the parent links ends nothing
       const parent = infos.get(id)?.meta?.parentId ?? null;
       const result =
-        marksOf(parent)?.endedIds.has(id) === true ||
-        (parent !== null && infos.has(parent) && notifiedEnded(parent));
-      notifiedMemo.set(id, result);
+        holds(marksOf(parent)?.killedAt.get(id), id) ||
+        (parent !== null && infos.has(parent) && killedEnded(parent));
+      spreadMemo.set(id, result);
       return result;
+    };
+    /**
+     * Reported ended by a notification from its parent, or under a parent that
+     * was killed. A parent's own hand-back or call result does not reach its
+     * children.
+     */
+    const notifiedEnded = (id: string): boolean => {
+      const parent = infos.get(id)?.meta?.parentId ?? null;
+      return (
+        holds(marksOf(parent)?.endedAt.get(id), id) ||
+        (parent !== null && infos.has(parent) && killedEnded(parent))
+      );
     };
     const now = clock();
     const memo = new Map<string, boolean>();
@@ -1443,7 +1522,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         info.tail.handedBack ||
         (info.tail.textOnly && now - info.mtimeMs > SUBAGENT_HANDBACK_GRACE_MS) ||
         notifiedEnded(id) ||
-        (info.meta?.toolUseId != null && marks?.resultIds.has(info.meta.toolUseId) === true);
+        (info.meta?.toolUseId != null && holds(marks?.resultAt.get(info.meta.toolUseId), id));
       const result =
         !ended && (now - info.mtimeMs <= SUBAGENT_STALE_MS || (children.get(id) ?? []).some(live));
       memo.set(id, result);
@@ -1462,18 +1541,25 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           !info.meta?.toolUseId &&
           !info.meta?.parentId &&
           !a.pendingAgents.has(id) &&
-          !a.ends.endedIds.has(id),
+          !a.ends.endedAt.has(id),
       )
       .map(([, info]) => info.firstTs)
       .sort((x, y) => x - y);
-    const calls = [...a.openAgentCalls]
-      .filter(([id, ts]) => !launching.has(id) && sinceStart(e, ts))
-      .map(([, ts]) => ts ?? Number.NEGATIVE_INFINITY)
-      .sort((x, y) => x - y);
-    for (const ts of calls) {
+    const open = [...a.openAgentCalls].filter(
+      ([id, ts]) => !launching.has(id) && sinceStart(e, ts),
+    );
+    // Timed calls pair first, in time order; a call with no time then takes
+    // whatever file is left, so it never takes one a timed call needed.
+    const timed = open.flatMap(([, ts]) => (ts === null ? [] : [ts])).sort((x, y) => x - y);
+    for (const ts of timed) {
       const i = unclaimed.findIndex((first) => first >= ts);
       if (i === -1) n += 1;
       else unclaimed.splice(i, 1);
+    }
+    for (const [, ts] of open) {
+      if (ts !== null) continue;
+      if (unclaimed.length === 0) n += 1;
+      else unclaimed.shift();
     }
     return n;
   }
