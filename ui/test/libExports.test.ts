@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -37,14 +38,14 @@ function count(code: string, name: string): number {
   return (code.match(new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`, 'g')) ?? []).length;
 }
 
-function deadExports(modules: readonly string[]): string[] {
-  const files = sourceFiles(SRC).map((path) => ({
+function deadExports(modules: readonly string[], src: string = SRC): string[] {
+  const files = sourceFiles(src).map((path) => ({
     path,
     code: stripComments(readFileSync(path, 'utf8')),
   }));
   const dead: string[] = [];
   for (const name of modules) {
-    const own = join(SRC, 'lib', `${name}.ts`);
+    const own = join(src, 'lib', `${name}.ts`);
     const ownCode = files.find((f) => f.path === own)?.code ?? '';
     for (const exported of exportNames(ownCode)) {
       const usedElsewhere = files.some((f) => f.path !== own && count(f.code, exported) > 0);
@@ -60,5 +61,50 @@ function deadExports(modules: readonly string[]): string[] {
 describe('ui/src/lib exports', () => {
   it('has no export that nothing uses', () => {
     expect(deadExports(GUARDED_MODULES)).toEqual([]);
+  });
+});
+
+describe('the exports guard itself', () => {
+  function fixture(files: Record<string, string>): string {
+    const root = mkdtempSync(join(tmpdir(), 'lib-exports-'));
+    mkdirSync(join(root, 'lib'));
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(root, name), body);
+    return root;
+  }
+
+  it('reports an export that nothing references', () => {
+    const root = fixture({ 'lib/mod-a.ts': 'export function unusedHelper() { return 1; }\n' });
+    expect(deadExports(['mod-a'], root)).toEqual(['mod-a.unusedHelper']);
+  });
+
+  it('keeps an export used by another file', () => {
+    const root = fixture({
+      'lib/mod-a.ts': 'export const usedElsewhere = 1;\n',
+      'view.ts': "import { usedElsewhere } from './lib/mod-a';\nconsole.log(usedElsewhere);\n",
+    });
+    expect(deadExports(['mod-a'], root)).toEqual([]);
+  });
+
+  it('keeps an export its own module uses', () => {
+    const root = fixture({
+      'lib/mod-a.ts': 'export const base = 1;\nconst twice = base * 2;\nconsole.log(twice);\n',
+    });
+    expect(deadExports(['mod-a'], root)).toEqual([]);
+  });
+
+  it('does not count a mention in a comment as a use', () => {
+    const root = fixture({
+      'lib/mod-a.ts': '// commentOnly is documented here\nexport const commentOnly = 1;\n',
+      'view.ts': '/* commentOnly */\n// commentOnly\n',
+    });
+    expect(deadExports(['mod-a'], root)).toEqual(['mod-a.commentOnly']);
+  });
+
+  it('does not treat a longer name as a use of a shorter one', () => {
+    const root = fixture({
+      'lib/mod-a.ts': 'export const label = 1;\n',
+      'view.ts': 'const labelCount = 2;\nconsole.log(labelCount);\n',
+    });
+    expect(deadExports(['mod-a'], root)).toEqual(['mod-a.label']);
   });
 });
