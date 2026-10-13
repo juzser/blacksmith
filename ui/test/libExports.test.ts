@@ -6,6 +6,10 @@ import { describe, expect, it } from 'vitest';
 // task can extend it.
 const GUARDED_MODULES = ['liveness', 'format', 'kanban'];
 
+// Each entry is a documented test-fixture bound that is deliberately exported
+// for a test, so it needs no src consumer.
+const TEST_ONLY_EXPORTS = ['liveness.SESSION_ACTIVE_WITHIN_MS'];
+
 const SRC = join(__dirname, '..', 'src');
 
 function stripComments(source: string): string {
@@ -46,6 +50,7 @@ function deadExports(modules: readonly string[]): string[] {
       const usedElsewhere = files.some((f) => f.path !== own && count(f.code, exported) > 0);
       // One occurrence is the declaration itself.
       const usedInside = count(ownCode, exported) > 1;
+      if (TEST_ONLY_EXPORTS.includes(`${name}.${exported}`)) continue;
       if (!usedElsewhere && !usedInside) dead.push(`${name}.${exported}`);
     }
   }
