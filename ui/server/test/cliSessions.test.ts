@@ -1137,6 +1137,32 @@ describe('cliSessions reader', () => {
             );
             expect(await running()).toBe(1);
           });
+
+          it('counts a woken subagent whose tail holds only a big batch of tool results', async () => {
+            await start([
+              user('go'),
+              launchRec('ag1'),
+              { ...notifyRec('ag1', 'completed', true), timestamp: T('11:50') },
+            ]);
+            const calls = Array.from({ length: 80 }, (_, i) => `d${i}`);
+            const results = calls.map((id) => stamped(bigResult(id), T('11:52')));
+            // More than the 256 KiB tail window, less than the 1 MiB retry.
+            const bytes = Buffer.byteLength(jsonl(results));
+            expect(bytes).toBeGreaterThan(256 * 1024);
+            expect(bytes).toBeLessThan(1024 * 1024);
+            await sub(
+              'ag1',
+              [
+                ...working(),
+                stamped(user('again'), T('11:51')),
+                stamped(asst(...calls.map((id) => toolUse('Bash', id))), T('11:51')),
+                ...results,
+              ],
+              {},
+              lateMtime,
+            );
+            expect(await running()).toBe(1);
+          });
         });
 
         describe('a launch text on a result that is not a subagent launch', () => {

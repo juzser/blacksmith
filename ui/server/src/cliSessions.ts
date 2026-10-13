@@ -1417,6 +1417,15 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     return Number.isNaN(ts) ? null : ts;
   }
 
+  /** The last `window` bytes of a subagent transcript, and where they start. */
+  async function subTailOf(file: string, size: number, window: number) {
+    const pos = Math.max(0, size - window);
+    let body = (await readSlice(fs, file, pos, Math.min(window, size))).toString('utf8');
+    // A slice that starts mid-file starts mid-line: that line is dropped.
+    if (pos > 0) body = body.slice(body.indexOf('\n') + 1);
+    return { pos, tail: analyseSub(parseLines(body)) };
+  }
+
   /** A subagent transcript's cached read, refreshed when its size or mtime moved. */
   async function readSubagent(file: string, size: number, mtimeMs: number) {
     const hit = subCache.get(file);
@@ -1424,14 +1433,18 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       if (hit.meta === null) hit.meta = await readSubMeta(file);
       return hit;
     }
-    const pos = Math.max(0, size - TAIL_BYTES);
-    let body = (await readSlice(fs, file, pos, Math.min(TAIL_BYTES, size))).toString('utf8');
-    if (pos > 0) body = body.slice(body.indexOf('\n') + 1);
+    const first = await subTailOf(file, size, TAIL_BYTES);
+    // A tail of tool results alone may hide the prompt that woke it: look further back once.
+    // If 1 MiB still holds no prompt and no assistant record, that tail stands: a mark holds.
+    const tail =
+      first.pos > 0 && first.tail.promptAt === null && first.tail.assistantAt === null
+        ? (await subTailOf(file, size, TAIL_RETRY_BYTES)).tail
+        : first.tail;
     const entry = {
       size,
       mtimeMs,
       firstTs: hit?.firstTs ?? (size === 0 ? null : await firstTimestamp(file, size)),
-      tail: analyseSub(parseLines(body)),
+      tail,
       meta: hit?.meta ?? (await readSubMeta(file)),
     };
     subCache.set(file, entry);
