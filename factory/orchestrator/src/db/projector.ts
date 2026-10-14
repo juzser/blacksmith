@@ -75,6 +75,12 @@ import {
 import { honouredReinstatements } from '../taskLifecycle.js';
 import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { LEGACY_BRANCH_PREFIX, RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
+import {
+  feedbackFoldReads,
+  findingsFoldReads,
+  lessonsFoldReads,
+  tasksFoldReads,
+} from './foldPredicates.js';
 import * as schema from './schema.js';
 
 // No ProjectorError: the projector never throws. A record it cannot fold in
@@ -2152,7 +2158,7 @@ export async function rebuild(
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
-    const skippedFindings = runGlobalFolds(handle, merged, opts);
+    const skippedFindings = runGlobalFolds(handle, () => merged, opts);
     return {
       sessionsProcessed: sessionIds.length,
       eventsApplied,
@@ -2192,22 +2198,79 @@ export interface Projection {
   close(): void;
 }
 
-/** Runs every global fold over the merged events, once each. */
+const ALL_FOLDS: ReadonlySet<GlobalFoldName> = new Set([
+  'tasks',
+  'findings',
+  'lessons',
+  'feedback',
+]);
+
+const FOLD_READS: Record<GlobalFoldName, (record: EventRecord) => boolean> = {
+  tasks: tasksFoldReads,
+  findings: findingsFoldReads,
+  lessons: lessonsFoldReads,
+  feedback: feedbackFoldReads,
+};
+
+/**
+ * Runs the named global folds over the merged events, once each. A fold left
+ * out keeps the rows its last run wrote; `priorSkippedFindings` stands in for
+ * the findings report it would have produced. `merged` is only called when a
+ * fold runs.
+ */
 function runGlobalFolds(
   handle: DbHandle,
-  merged: StoredEvent[],
+  merged: () => StoredEvent[],
   opts: ProjectionOpts,
+  which: ReadonlySet<GlobalFoldName> = ALL_FOLDS,
+  priorSkippedFindings: SkippedFindingRecord[] = [],
 ): SkippedFindingRecord[] {
-  projectTasks(handle, merged, opts);
-  opts.onFold?.('tasks');
-  const skippedFindings = projectFindings(handle, merged, opts);
-  opts.onFold?.('findings');
-  projectLessons(handle, merged);
-  opts.onFold?.('lessons');
-  projectOperatorFeedback(handle, merged);
-  opts.onFold?.('feedback');
+  let skippedFindings = priorSkippedFindings;
+  if (which.size > 0) {
+    const events = merged();
+    if (which.has('tasks')) {
+      projectTasks(handle, events, opts);
+      opts.onFold?.('tasks');
+    }
+    if (which.has('findings')) {
+      skippedFindings = projectFindings(handle, events, opts);
+      opts.onFold?.('findings');
+    }
+    if (which.has('lessons')) {
+      projectLessons(handle, events);
+      opts.onFold?.('lessons');
+    }
+    if (which.has('feedback')) {
+      projectOperatorFeedback(handle, events);
+      opts.onFold?.('feedback');
+    }
+  }
   projectMilestones(handle, opts);
   return skippedFindings;
+}
+
+/**
+ * The epics back-fill of projectTasks(), for a batch that re-projected a
+ * session and skipped the tasks fold. projectSession() rewrote that session's
+ * epics rows with its per-session project fallback, which is NULL for a
+ * continuation closing an epic it never planned. The tasks table holds what
+ * the skipped fold last wrote, so it answers what a re-run would. Reads no
+ * log; never overwrites a stamped project.
+ */
+function backfillEpicProjects(handle: DbHandle): void {
+  handle.db.transaction((txDb) => {
+    const rows = txDb
+      .select({ epicId: schema.tasks.epicId, project: schema.tasks.project })
+      .from(schema.tasks)
+      .all();
+    for (const [epicId, project] of unanimousEpicProjects(rows)) {
+      txDb
+        .update(schema.epics)
+        .set({ project })
+        .where(and(eq(schema.epics.epicId, epicId), isNull(schema.epics.project)))
+        .run();
+    }
+  });
 }
 
 interface CachedLog {
@@ -2234,6 +2297,10 @@ export function openProjection(
   const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
   let cache = new Map<string, CachedLog>();
   let closed = false;
+  // Whether the last batch left every table as a full run would, and what its
+  // findings fold reported: the two things a skipped fold stands on.
+  let settled = false;
+  let lastSkippedFindings: SkippedFindingRecord[] = [];
 
   return {
     async applySessions(sessionIds) {
@@ -2243,6 +2310,10 @@ export function openProjection(
       const errors = new Map<string, unknown>();
       const unreadable: UnreadableSessionRecord[] = [];
       const nextCache = new Map<string, CachedLog>();
+      // Folds that must run: those whose predicate accepts a new event. Every
+      // fold runs when the batch cannot say what is new.
+      let runAll = !settled;
+      const needed = new Set<GlobalFoldName>();
       for (const sessionId of all) {
         try {
           const file = path.join(stateDir, `${sessionId}.jsonl`);
@@ -2253,6 +2324,17 @@ export function openProjection(
             events = hit.events;
           } else {
             events = await readEvents(sessionId, { stateDir });
+          }
+          const prior = cache.get(sessionId)?.events ?? [];
+          if (events !== prior) {
+            const kept = events.length >= prior.length;
+            if (!kept || prior.some((e, i) => e.event_id !== (events[i] as StoredEvent).event_id)) {
+              runAll = true;
+            } else {
+              for (const { record } of events.slice(prior.length)) {
+                for (const name of ALL_FOLDS) if (FOLD_READS[name](record)) needed.add(name);
+              }
+            }
           }
           if (st) nextCache.set(sessionId, { size: st.size, mtimeMs: st.mtimeMs, events });
           logs.push({ sessionId, events });
@@ -2266,11 +2348,14 @@ export function openProjection(
           }
         }
       }
+      for (const sessionId of cache.keys()) if (!nextCache.has(sessionId)) runAll = true;
       cache = nextCache;
+      settled = false;
       logs.sort(compareSessionLogs);
 
       const byId = new Map(logs.map((l) => [l.sessionId, l.events]));
       const sessions: SessionApplyResult[] = [];
+      let reprojected = 0;
       for (const sessionId of sessionIds) {
         if (errors.has(sessionId)) {
           sessions.push({ sessionId, error: errors.get(sessionId) });
@@ -2280,11 +2365,22 @@ export function openProjection(
         try {
           const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
           sessions.push({ sessionId, eventsApplied: events.length, skippedArtifacts });
+          reprojected += 1;
         } catch (error) {
           sessions.push({ sessionId, error });
         }
       }
-      const skippedFindings = runGlobalFolds(handle, mergeSessionLogs(logs), opts);
+      const which = runAll ? ALL_FOLDS : needed;
+      const skippedFindings = runGlobalFolds(
+        handle,
+        () => mergeSessionLogs(logs),
+        opts,
+        which,
+        lastSkippedFindings,
+      );
+      if (reprojected > 0 && !which.has('tasks')) backfillEpicProjects(handle);
+      lastSkippedFindings = skippedFindings;
+      settled = errors.size === 0 && unreadable.length === 0 && reprojected === sessionIds.length;
       return { sessions, skippedFindings, unreadableSessions: unreadable };
     },
     close() {
