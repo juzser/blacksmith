@@ -13,6 +13,7 @@ import {
 } from './events.js';
 import type { FindingEvidence } from './findings.js';
 import { JUDGE_TURN_ROLES } from './judgeRoles.js';
+import { readLineage } from './lineageSnapshot.js';
 import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
@@ -382,7 +383,7 @@ export async function readJudgeTurns(
   ctx: Pick<EventContext, 'sessionId'>,
   opts: EventOpts = {},
 ): Promise<JudgeTurn[]> {
-  return foldJudgeTurns(await readLineageEvents(ctx.sessionId, opts), taskId);
+  return foldJudgeTurns(await readLineage(ctx.sessionId, opts), taskId);
 }
 
 async function emit(

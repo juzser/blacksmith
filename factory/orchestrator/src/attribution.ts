@@ -5,7 +5,7 @@ import {
   resolveFindingOwner,
 } from './claims.js';
 import { foldTasks } from './db/projector.js';
-import { appendEvent, type EventOpts, readLineageEvents } from './events.js';
+import type { EventOpts } from './events.js';
 import {
   computeFingerprint,
   type EventContext,
@@ -13,6 +13,7 @@ import {
   type RaiseFindingInput,
   reattributeFinding,
 } from './findings.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 import { emitFollowUpTask, followUpTaskId, type TaskEventContext } from './taskEvents.js';
 import { requireEpicOfTaskId } from './taskId.js';
 
@@ -168,10 +169,7 @@ export async function routeFindings(
   // reassigned to a task that is already done rather than gated.
   const statuses = needsTaskStatuses(items, ownership, defaultTaskId)
     ? new Map(
-        foldTasks(await readLineageEvents(ctx.sessionId, opts)).map((t) => [
-          t.taskId,
-          t.taskStatus,
-        ]),
+        foldTasks(await readLineage(ctx.sessionId, opts)).map((t) => [t.taskId, t.taskStatus]),
       )
     : undefined;
 
@@ -249,7 +247,7 @@ export async function recordReattribution(
     );
   }
 
-  await appendEvent(
+  await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',

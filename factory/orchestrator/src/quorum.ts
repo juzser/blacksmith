@@ -18,8 +18,9 @@
 import { type CrosscheckPolicy, loadCrosscheckPolicy, providerModel } from './crosscheck.js';
 import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts, readLineageEvents } from './events.js';
+import type { EventOpts } from './events.js';
 import type { EventContext } from './findings.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeKind, JudgeRequest, JudgeResult } from './providers/types.js';
 
@@ -312,10 +313,10 @@ export async function recordJudgeRun(
   // shape as judges.ts's recordJudgeDispatch -- see delegatedActor there).
   const actor =
     ctx.actor ??
-    sessionOwnerRole(await readLineageEvents(ctx.sessionId, opts), ctx.sessionId) ??
+    sessionOwnerRole(await readLineage(ctx.sessionId, opts), ctx.sessionId) ??
     undefined;
 
-  const dispatch = await appendEvent(
+  const dispatch = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: actor ?? 'system',
@@ -345,7 +346,7 @@ export async function recordJudgeRun(
   // gates on `schema_failure` first for exactly that reason.
   const agreementWithNative = ok ? verdict?.verdict === input.native.verdict : null;
 
-  const verdictEvent = await appendEvent(
+  const verdictEvent = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',

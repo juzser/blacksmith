@@ -3,6 +3,7 @@ import path from 'node:path';
 import { claimCoversPath } from './claims.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 import { describeType } from './plan.js';
 import {
   type CompiledSchemaSet,
@@ -794,7 +795,7 @@ export async function raiseFinding(
   const suppressible = WAIVABLE_SEVERITIES.includes(finding.severity);
   const waived = suppressible && (await isWaived(fingerprint, { sessionId: ctx.sessionId }, opts));
   if (waived) {
-    await appendEvent(
+    await appendTracked(
       {
         session_id: ctx.sessionId,
         actor: ctx.actor ?? finding.found_by,
@@ -809,7 +810,7 @@ export async function raiseFinding(
     return { suppressed: true, fingerprint, taskId: finding.task_id };
   }
 
-  const stored = await appendEvent(
+  const stored = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? finding.found_by,
@@ -1204,7 +1205,7 @@ export async function transition(
   // epic is otherwise not FOUND from the second, and this function's own
   // "unknown finding" error would be the answer to a finding that plainly
   // exists.
-  const events = await readLineageEvents(ctx.sessionId, opts);
+  const events = await readLineage(ctx.sessionId, opts);
   let current: Finding | undefined;
   /**
    * The status the waiver closed over, from the grant's own from_status
@@ -1360,7 +1361,7 @@ export async function transition(
   if (extra.amendsSatisfiedBy !== undefined)
     payload.amends_satisfied_by = extra.amendsSatisfiedBy.map((row) => ({ ...row }));
 
-  const stored = await appendEvent(
+  const stored = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
