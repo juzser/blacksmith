@@ -55,8 +55,8 @@ export interface LiveAgentEntry {
   /**
    * The epic this agent works on. An epic-level dispatch — planner,
    * spec-reviewer, scribe, epic-close judge — names one and holds no task,
-   * which is half the live fleet in a real run (D-234). Read it through
-   * lib/agentScope.ts, never bare.
+   * which is half the live fleet in a real run (D-234). It can be null, so
+   * never render it bare.
    */
   epicId: string | null;
   dispatchedAt: string;

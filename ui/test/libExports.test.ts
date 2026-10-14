@@ -5,7 +5,14 @@ import { describe, expect, it } from 'vitest';
 
 // Modules whose exports must each have a consumer. A plain array so a later
 // task can extend it.
-const GUARDED_MODULES = ['liveness', 'format', 'kanban'];
+const GUARDED_MODULES = [
+  'liveness',
+  'format',
+  'kanban',
+  'agentScope',
+  'taxonomy',
+  'timelineDisplay',
+];
 
 // Each entry is a documented test-fixture bound that is deliberately exported
 // for a test, so it needs no src consumer.
