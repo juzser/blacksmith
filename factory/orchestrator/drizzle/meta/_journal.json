@@ -127,6 +127,13 @@
       "when": 1791262161043,
       "tag": "0017_events_raw_cli_session_id",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1791976726697,
+      "tag": "0018_events_raw_scope_ts_idx",
+      "breakpoints": true
     }
   ]
 }
