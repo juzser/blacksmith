@@ -1287,8 +1287,7 @@ describe('lib/timelineDisplay.ts groupByDay()', () => {
 
 // DS6 PR3 scope item 3: Activity's flat feed folds consecutive same-role
 // dispatch rows landing in the same minute into one summary row, rather than
-// the causal-tree fold above (groupDispatches), which this flat feed does not
-// build. "wave" is not a field the paged timeline carries (api.ts's
+// building a causal tree. "wave" is not a field the paged timeline carries (api.ts's
 // TimelineEntry/ActivityEntry has no wave/epic-wave id), so the fold keys on
 // role + minute only — flagged as a deviation from the brief's "Builder ×4 in
 // wave 3" wording in the PR3 return report.

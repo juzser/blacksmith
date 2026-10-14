@@ -791,18 +791,16 @@ function dayLabel(day: Date, nowIso: string): string {
  * happens to run on the day it was written.
  *
  * The caller supplies items already in display order; this only partitions
- * them by local calendar day, it does not re-sort — `buildCausalTree` and
- * `RunHistoryTimeline`'s own list are both newest-first already, and grouping
- * is the wrong place to second-guess that.
+ * them by local calendar day, it does not re-sort — `RunHistoryTimeline`'s
+ * own list is newest-first already, and grouping is the wrong place to
+ * second-guess that.
  */
-/** Minimum run length worth folding on the flat Activity feed — same
- * threshold as DISPATCH_GROUP_MIN, kept as its own constant because this is
- * a different fold (role + minute, not causal siblings). */
+/** Minimum run length worth folding on the flat Activity feed (role + minute). */
 const ROLE_MINUTE_GROUP_MIN = 3;
 
 /** A run of same-role Dispatched rows landing in the same minute, folded into
  * one summary ("Builder ×4" — round/total tokens/longest duration are read
- * off `group.members` by the caller, same as `groupDispatches`'s groups).
+ * off `group.members` by the caller).
  * Deviation from the brief's "in wave N" wording: a paged `ActivityEntry`
  * carries no wave id (api.ts's TimelineEntry/TimelinePage shape), so the fold
  * keys on role + minute only — see PR3's return report. */
