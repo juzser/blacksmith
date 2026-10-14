@@ -24,8 +24,13 @@ import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { resolveArtifactPath } from '../../../factory/orchestrator/dist/artifacts.js';
-import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
-import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
+import type {
+  DbHandle,
+  DbOpts,
+  Projection,
+  SmithDb,
+} from '../../../factory/orchestrator/dist/db/projector.js';
+import { openDb, openProjection } from '../../../factory/orchestrator/dist/db/projector.js';
 import type {
   AnalyticsPeriod,
   AnalyticsResult,
@@ -346,82 +351,107 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   let inFlight: Promise<void> | null = null;
   let generation = 0;
 
+  // One handle for the life of this refresher, on its own database path: the
+  // log cache inside it is what lets a scan read each log once.
+  const projection = openProjection(dbPath, dbOpts);
+  let stopped = false;
+  let closed = false;
+
+  function closeProjection(): void {
+    if (closed) return;
+    closed = true;
+    projection.close();
+  }
+
   async function scan(): Promise<void> {
     const advances: SessionAdvance[] = [];
-    if (!existsSync(eventsDir)) return;
+    if (stopped || !existsSync(eventsDir)) return;
+    const changed = new Map<string, string>();
     for (const entry of readdirSync(eventsDir)) {
       if (!entry.endsWith('.jsonl')) continue;
       const sessionId = entry.slice(0, -'.jsonl'.length);
-      let fingerprint: string;
       try {
         const stats = statSync(path.join(eventsDir, entry));
-        fingerprint = `${stats.size}:${stats.mtimeMs}`;
+        const fingerprint = `${stats.size}:${stats.mtimeMs}`;
+        if (projected.get(sessionId) !== fingerprint) changed.set(sessionId, fingerprint);
       } catch {
-        continue; // Deleted between readdir and stat; nothing to project.
+        // Deleted between readdir and stat; nothing to project.
       }
-      if (projected.get(sessionId) === fingerprint) continue;
-      try {
-        const { eventsApplied, skippedFindings, skippedArtifacts } = await applyDb(
-          dbPath,
-          sessionId,
-          dbOpts,
-        );
-        projected.set(sessionId, fingerprint);
-        generation += 1;
-        advances.push({ session: sessionId, events: eventsApplied });
-        const landed: ProjectionIssue[] = skippedArtifacts.map((skipped) => ({
-          sessionId,
-          kind: 'artifacts-skipped',
-          eventId: skipped.event_id,
-          message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
-        }));
-        if (landed.length > 0) issues.set(sessionId, landed);
-        else issues.delete(sessionId);
-        for (const issue of landed) {
-          if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
-          namedArtifacts.add(issue.eventId);
-          process.stderr.write(`bs ui: ${issue.message}\n`);
-        }
-        // D-141 turned "a finding that cannot fill a notNull column" from a
-        // crash into a returned report, on the rule that a loud undercount
-        // beats a crash and both beat a quiet one. That made the catch below
-        // unreachable for this class and left the report unread: this is the
-        // only caller an operator running the dashboard ever goes through, so
-        // the undercount was quiet exactly where it had to be loud (D-248).
-        for (const skipped of skippedFindings) {
-          // `finding_id` is optional on the record for the honest reason that
-          // a payload short of its required fields can be short of that one
-          // too. The row is still missing either way, so such a record is
-          // keyed and named by the event id, which every record carries.
-          const named = skipped.finding_id ?? skipped.event_id;
-          if (namedFindings.has(named)) continue;
-          namedFindings.add(named);
-          // The event id too, because it is what an operator greps the log
-          // for; the reason because it says the data is short, not the server.
-          process.stderr.write(
-            `bs ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
-          );
-        }
-      } catch (err) {
+    }
+    if (changed.size === 0) return;
+    let batch: Awaited<ReturnType<Projection['applySessions']>>;
+    try {
+      batch = await projection.applySessions([...changed.keys()]);
+    } catch (err) {
+      // The whole batch failed (the database, not one log): every session in
+      // it reports the failure. stop() never closes the handle under a batch.
+      batch = {
+        sessions: [...changed.keys()].map((sessionId) => ({ sessionId, error: err })),
+        skippedFindings: [],
+        unreadableSessions: [],
+      };
+    }
+    generation += 1;
+    for (const result of batch.sessions) {
+      const { sessionId } = result;
+      const fingerprint = changed.get(sessionId) as string;
+      if ('error' in result) {
         // A read is never failed by a log this process does not control. The
         // fingerprint is deliberately NOT recorded, so a torn line caught
         // mid-append is retried on the next request rather than skipped for
         // the life of the process — and the warning is printed once per
         // distinct fingerprint, so a genuinely broken log does not spam the
         // console at the poll interval.
+        const err = result.error;
         const message = `could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}`;
         issues.set(sessionId, [{ sessionId, kind: 'session-not-projected', message }]);
         if (warned.get(sessionId) !== fingerprint) {
           warned.set(sessionId, fingerprint);
           process.stderr.write(`bs ui: ${message}\n`);
         }
+        continue;
       }
+      projected.set(sessionId, fingerprint);
+      advances.push({ session: sessionId, events: result.eventsApplied });
+      const landed: ProjectionIssue[] = result.skippedArtifacts.map((skipped) => ({
+        sessionId,
+        kind: 'artifacts-skipped',
+        eventId: skipped.event_id,
+        message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
+      }));
+      if (landed.length > 0) issues.set(sessionId, landed);
+      else issues.delete(sessionId);
+      for (const issue of landed) {
+        if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
+        namedArtifacts.add(issue.eventId);
+        process.stderr.write(`bs ui: ${issue.message}\n`);
+      }
+    }
+    // D-141 turned "a finding that cannot fill a notNull column" from a
+    // crash into a returned report, on the rule that a loud undercount
+    // beats a crash and both beat a quiet one. That made the catch above
+    // unreachable for this class and left the report unread: this is the
+    // only caller an operator running the dashboard ever goes through, so
+    // the undercount was quiet exactly where it had to be loud (D-248).
+    for (const skipped of batch.skippedFindings) {
+      // `finding_id` is optional on the record for the honest reason that
+      // a payload short of its required fields can be short of that one
+      // too. The row is still missing either way, so such a record is
+      // keyed and named by the event id, which every record carries.
+      const named = skipped.finding_id ?? skipped.event_id;
+      if (namedFindings.has(named)) continue;
+      namedFindings.add(named);
+      // The event id too, because it is what an operator greps the log
+      // for; the reason because it says the data is short, not the server.
+      process.stderr.write(
+        `bs ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
+      );
     }
     // Once per scan, not once per session: a page that hears "three sessions
     // advanced" refetches once. Listeners are notified after every session in
     // this pass has been folded, so a refetch triggered by the frame reads a
     // projection that already holds all of it.
-    if (advances.length === 0) return;
+    if (stopped || advances.length === 0) return;
     for (const listener of [...listeners]) {
       try {
         listener(advances);
@@ -434,9 +464,12 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   }
 
   function refresh(): Promise<void> {
+    if (stopped) return Promise.resolve();
     if (inFlight) return inFlight;
     const run = scan().finally(() => {
       inFlight = null;
+      // A stop() during this scan left the handle open for the batch in flight.
+      if (stopped) closeProjection();
     });
     inFlight = run;
     return run;
@@ -472,6 +505,8 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   }
 
   function stop(): void {
+    stopped = true;
+    if (inFlight === null) closeProjection();
     listeners.clear();
     holds = 0;
     if (ticker !== null) {
