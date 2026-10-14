@@ -32,7 +32,7 @@
 // fold is forward-compatible with whatever Phase 7 emits, since it only
 // depends on the taxonomy's already-existing lesson_type/lesson_level/
 // lesson_status/lesson_scope vocabulary, not on any new taxonomy value.
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -2075,13 +2075,15 @@ async function readAllSessionLogs(
       });
     }
   }
-  logs.sort((a, b) => {
-    const aStart = a.events[0]?.record.ts ?? '';
-    const bStart = b.events[0]?.record.ts ?? '';
-    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
-    return a.sessionId.localeCompare(b.sessionId);
-  });
+  logs.sort(compareSessionLogs);
   return { logs, unreadable };
+}
+
+function compareSessionLogs(a: SessionLog, b: SessionLog): number {
+  const aStart = a.events[0]?.record.ts ?? '';
+  const bStart = b.events[0]?.record.ts ?? '';
+  if (aStart !== bStart) return aStart < bStart ? -1 : 1;
+  return a.sessionId.localeCompare(b.sessionId);
 }
 
 export interface RebuildResult {
@@ -2150,11 +2152,7 @@ export async function rebuild(
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
-    projectTasks(handle, merged, opts);
-    const skippedFindings = projectFindings(handle, merged, opts);
-    projectLessons(handle, merged);
-    projectOperatorFeedback(handle, merged);
-    projectMilestones(handle, opts);
+    const skippedFindings = runGlobalFolds(handle, merged, opts);
     return {
       sessionsProcessed: sessionIds.length,
       eventsApplied,
@@ -2167,6 +2165,136 @@ export async function rebuild(
   }
 }
 
+/** The four global folds, by the name a fold observer is told. */
+export type GlobalFoldName = 'tasks' | 'findings' | 'lessons' | 'feedback';
+
+export interface ProjectionOpts extends DbOpts {
+  /**
+   * Called once each time a global fold runs. Absent by default; it exists so
+   * a test can count fold runs that happen inside this module.
+   */
+  onFold?: (name: GlobalFoldName) => void;
+}
+
+export type SessionApplyResult =
+  | { sessionId: string; eventsApplied: number; skippedArtifacts: SkippedArtifactsRecord[] }
+  | { sessionId: string; error: unknown };
+
+export interface BatchApplyResult {
+  /** One entry per requested session, in request order: applied, or the error. */
+  sessions: SessionApplyResult[];
+  skippedFindings: SkippedFindingRecord[];
+  unreadableSessions: UnreadableSessionRecord[];
+}
+
+export interface Projection {
+  applySessions(sessionIds: readonly string[]): Promise<BatchApplyResult>;
+  close(): void;
+}
+
+/** Runs every global fold over the merged events, once each. */
+function runGlobalFolds(
+  handle: DbHandle,
+  merged: StoredEvent[],
+  opts: ProjectionOpts,
+): SkippedFindingRecord[] {
+  projectTasks(handle, merged, opts);
+  opts.onFold?.('tasks');
+  const skippedFindings = projectFindings(handle, merged, opts);
+  opts.onFold?.('findings');
+  projectLessons(handle, merged);
+  opts.onFold?.('lessons');
+  projectOperatorFeedback(handle, merged);
+  opts.onFold?.('feedback');
+  projectMilestones(handle, opts);
+  return skippedFindings;
+}
+
+interface CachedLog {
+  size: number;
+  mtimeMs: number;
+  events: StoredEvent[];
+}
+
+/**
+ * A reusable projection: the database is opened and migrated once, each log is
+ * parsed once per change (cached by path, size and mtime), and every batch runs
+ * each global fold once however many sessions it names.
+ *
+ * Every session's log is read for the global folds, so one of them being
+ * unreadable is reported in `unreadableSessions`, not thrown. A requested
+ * session whose own log is unreadable gets an `error` entry and the rest of
+ * the batch still projects.
+ */
+export function openProjection(
+  dbPath: string = STATE_DB_PATH,
+  opts: ProjectionOpts = {},
+): Projection {
+  const handle = openDb(dbPath, opts);
+  const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
+  let cache = new Map<string, CachedLog>();
+  let closed = false;
+
+  return {
+    async applySessions(sessionIds) {
+      const all = [...new Set([...listSessionIds(stateDir), ...sessionIds])];
+      const requested = new Set(sessionIds);
+      const logs: SessionLog[] = [];
+      const errors = new Map<string, unknown>();
+      const unreadable: UnreadableSessionRecord[] = [];
+      const nextCache = new Map<string, CachedLog>();
+      for (const sessionId of all) {
+        try {
+          const file = path.join(stateDir, `${sessionId}.jsonl`);
+          const st = existsSync(file) ? statSync(file) : null;
+          const hit = cache.get(sessionId);
+          let events: StoredEvent[];
+          if (st && hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+            events = hit.events;
+          } else {
+            events = await readEvents(sessionId, { stateDir });
+          }
+          if (st) nextCache.set(sessionId, { size: st.size, mtimeMs: st.mtimeMs, events });
+          logs.push({ sessionId, events });
+        } catch (err) {
+          if (requested.has(sessionId)) errors.set(sessionId, err);
+          else {
+            unreadable.push({
+              session_id: sessionId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+      cache = nextCache;
+      logs.sort(compareSessionLogs);
+
+      const byId = new Map(logs.map((l) => [l.sessionId, l.events]));
+      const sessions: SessionApplyResult[] = [];
+      for (const sessionId of sessionIds) {
+        if (errors.has(sessionId)) {
+          sessions.push({ sessionId, error: errors.get(sessionId) });
+          continue;
+        }
+        const events = byId.get(sessionId) ?? [];
+        try {
+          const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
+          sessions.push({ sessionId, eventsApplied: events.length, skippedArtifacts });
+        } catch (error) {
+          sessions.push({ sessionId, error });
+        }
+      }
+      const skippedFindings = runGlobalFolds(handle, mergeSessionLogs(logs), opts);
+      return { sessions, skippedFindings, unreadableSessions: unreadable };
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      handle.sqlite.close();
+    },
+  };
+}
+
 /**
  * Incremental refresh for one session: re-folds ITS current event log and
  * replaces only its rows, leaving every other session's projection intact.
@@ -2177,47 +2305,29 @@ export async function rebuild(
  * why this reads more than the one session it re-folds — `tasks`
  * (projectTasks()), `lessons` (D-199), `findings` (D-200) and
  * `operator_feedback` (projectOperatorFeedback(), same shape).
+ *
+ * The applied session's own log still throws when unreadable: that failure is
+ * the caller's to name, and there is nothing to write for it.
  */
 export async function apply(
   dbPath: string = STATE_DB_PATH,
   sessionId: string,
   opts: DbOpts = {},
 ): Promise<RebuildResult> {
-  const handle = openDb(dbPath, opts);
+  const projection = openProjection(dbPath, opts);
   try {
-    const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
-    // A session whose first event has not landed yet has no file to list, and
-    // readEvents answers `[]` for a log that does not exist (P9-28) — so
-    // naming it anyway costs an empty read and keeps it in the global folds
-    // below, which would otherwise drop the very session being applied.
-    const listed = listSessionIds(stateDir);
-    // Every other session's log is read for the global folds only, so one of
-    // them being unreadable is reported, not thrown: this session's rows do
-    // not depend on it. The applied session's own log still throws -- that
-    // failure is the caller's to name, and there is nothing to write for it.
-    const others = new Set(listed.filter((id) => id !== sessionId));
-    const { logs, unreadable } = await readAllSessionLogs(
-      listed.includes(sessionId) ? listed : [...listed, sessionId],
-      stateDir,
-      others,
-    );
-    const events = logs.find((l) => l.sessionId === sessionId)?.events ?? [];
-    const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
-    const merged = mergeSessionLogs(logs);
-    projectTasks(handle, merged, opts);
-    const skippedFindings = projectFindings(handle, merged, opts);
-    projectLessons(handle, merged);
-    projectOperatorFeedback(handle, merged);
-    projectMilestones(handle, opts);
+    const batch = await projection.applySessions([sessionId]);
+    const only = batch.sessions[0] as SessionApplyResult;
+    if ('error' in only) throw only.error;
     return {
       sessionsProcessed: 1,
-      eventsApplied: events.length,
-      skippedFindings,
-      skippedArtifacts,
-      unreadableSessions: unreadable,
+      eventsApplied: only.eventsApplied,
+      skippedFindings: batch.skippedFindings,
+      skippedArtifacts: only.skippedArtifacts,
+      unreadableSessions: batch.unreadableSessions,
     };
   } finally {
-    handle.sqlite.close();
+    projection.close();
   }
 }
 
