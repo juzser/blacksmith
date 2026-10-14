@@ -1,7 +1,7 @@
 import { claimCoversPath } from './claims.js';
 import type { ClosingReviewEffort } from './effort.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import {
   // The status an amendment can actually put a finding into. Not `amended`:
   // since D-127 that is reachable only once the amendment's task ids land, so
@@ -29,6 +29,7 @@ import {
   diffPlans,
   draftNextVersion,
   livePlanTasks,
+  markFinishedFromLog,
   nextVersion,
   type PlanChanges,
   type PlanDiff,
@@ -41,7 +42,7 @@ import {
   validatePlan,
 } from './plan.js';
 import { readAddedTasks, supersededStubFromLog } from './taskEvents.js';
-import { taskSuccessorsOf } from './taskLifecycle.js';
+import { finishedInLog, taskSuccessorsOf } from './taskLifecycle.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -654,7 +655,9 @@ export async function amendPlan(
   // only holds if this check can run before a plan file exists, and nothing in
   // this codebase deletes a plan file (D-127).
   const { changes, loggedStubs } = await resolveSupersedeKeys(plan, input.changes ?? {}, ctx, opts);
-  const draft = draftNextVersion(plan, changes, loggedStubs);
+  const finished = finishedInLog(await readLineageEvents(ctx.sessionId, opts), epicId);
+  const marked = markFinishedFromLog(plan, finished);
+  const draft = draftNextVersion(marked, changes, loggedStubs);
 
   // D-21: a malformed `--changes` file can still produce a draft that reads
   // fine structurally (every entry a plain object with a string task_id) but
@@ -774,7 +777,7 @@ export async function amendPlan(
   // goes through `nextVersion` rather than from `draft`: `draftNextVersion` is
   // pure, so the two agree by construction, and there stays exactly one
   // function in this codebase that puts a plan version on disk.
-  const amended = nextVersion(plan, changes, opts, loggedStubs);
+  const amended = nextVersion(marked, changes, opts, loggedStubs);
 
   // Old id -> replacement id, for the rename-supersede case only: a same-id
   // supersede needs no pairing (the row already carries the work forward

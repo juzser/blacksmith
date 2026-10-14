@@ -97,3 +97,37 @@ export function honouredReinstatements(
   }
   return reinstated;
 }
+
+/**
+ * The ids the log reports finished: a `wave-merged` names the id and no
+ * `task-superseded` for it follows its last merge, unless the log honours a
+ * reinstatement of it (`honouredReinstatements`). Equals "the projector folds
+ * the task to `completed`". Ids come back as the log spells them.
+ */
+export function finishedInLog(events: readonly StoredEvent[], epicId: string): Set<string> {
+  const merged = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type !== 'wave-merged') continue;
+    if (record.task_id) merged.add(record.task_id);
+    const ids = (record.payload as { task_ids?: unknown } | undefined)?.task_ids;
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') merged.add(id);
+  }
+  const honoured = [...honouredReinstatements(events, epicId)];
+  const finished = new Set<string>();
+  for (const id of merged) {
+    let supersededSinceMerge = false;
+    for (const { record } of events) {
+      if (record.event_type === 'wave-merged' && namesTask(record, id)) {
+        supersededSinceMerge = false;
+      } else if (
+        record.event_type === 'task-superseded' &&
+        record.task_id &&
+        taskIdsMatch(record.task_id, id)
+      ) {
+        supersededSinceMerge = true;
+      }
+    }
+    if (!supersededSinceMerge || honoured.some((h) => taskIdsMatch(h, id))) finished.add(id);
+  }
+  return finished;
+}
