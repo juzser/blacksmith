@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -320,13 +320,18 @@ describe('db/projector.ts — a batch skips the global folds it cannot change', 
       }
     }
 
-    async function firstMismatch(batchDb: string, label: string): Promise<string | null> {
+    async function firstMismatch(
+      batchDb: string,
+      label: string,
+      only?: string[],
+    ): Promise<string | null> {
       const rebuiltDb = path.join(dbDir, 'rebuilt.db');
       await rm(rebuiltDb, { force: true });
       await rebuild(rebuiltDb, 'all', { stateDir, specsDir });
       const batch = dumpTables(batchDb);
       const rebuilt = dumpTables(rebuiltDb);
       for (const [table, want] of rebuilt) {
+        if (only && !only.includes(table)) continue;
         const got = batch.get(table) ?? [];
         const keys = Object.keys(want[0] ?? got[0] ?? {});
         for (let i = 0; i < Math.max(got.length, want.length); i++) {
@@ -367,6 +372,99 @@ describe('db/projector.ts — a batch skips the global folds it cannot change', 
         } finally {
           handle.sqlite.close();
         }
+      } finally {
+        projection.close();
+      }
+    });
+
+    const ALL_FOLDS = ['feedback', 'findings', 'lessons', 'tasks'];
+    const logOf = (session: string) => path.join(stateDir, `${session}.jsonl`);
+
+    // Per-session rows are not the folds' to keep; the cases that skip a re-projection compare these.
+    const GLOBAL = ['tasks', 'findings', 'lessons', 'operator_feedback', 'epics'];
+
+    // Each case leaves a stale table behind unless the batch runs every fold,
+    // then applies a batch whose new events (if any) no predicate accepts.
+    const fallbacks: {
+      guard: string;
+      run: (p: ReturnType<typeof openProjection>) => Promise<void>;
+      only?: string[];
+    }[] = [
+      {
+        guard: 'a log that shrank',
+        run: async (p) => {
+          const lines = readFileSync(logOf('sess-1'), 'utf8').trimEnd().split('\n');
+          writeFileSync(logOf('sess-1'), `${lines.slice(0, -1).join('\n')}\n`);
+          await p.applySessions(['sess-1']);
+        },
+      },
+      {
+        guard: 'a cached session whose log vanished',
+        only: GLOBAL,
+        run: async (p) => {
+          unlinkSync(logOf('sess-1'));
+          await append('sess-2', 'demo-hub-noted', { payload: { note: 'tick' } });
+          await p.applySessions(['sess-2']);
+        },
+      },
+      {
+        guard: 'a previous batch that did not settle',
+        only: GLOBAL,
+        run: async (p) => {
+          // A plan file changes on disk with no event, so only a full run sees it.
+          writePlan('epic-b', 'project-b');
+          writeFileSync(logOf('sess-6'), 'not json\n');
+          await p.applySessions(['sess-6']);
+          await append('sess-2', 'demo-hub-noted', { payload: { note: 'tick' } });
+          await p.applySessions(['sess-2']);
+          unlinkSync(logOf('sess-6')); // rebuild() cannot read it
+        },
+      },
+    ];
+
+    it.each(fallbacks)('runs every fold after $guard', async ({ guard, run, only }) => {
+      await startAll();
+      const projection = openProjection(path.join(dbDir, 'batch.db'), opts());
+      try {
+        await projection.applySessions(SESSIONS);
+        for (const step of steps().slice(1, 3)) {
+          await step.run();
+          await projection.applySessions([step.session]);
+        }
+        folds.length = 0;
+        await run(projection);
+        expect([...new Set(folds)].sort(), guard).toEqual(ALL_FOLDS);
+        expect(await firstMismatch(path.join(dbDir, 'batch.db'), guard, only)).toBeNull();
+      } finally {
+        projection.close();
+      }
+    });
+
+    it("reports the last findings run's skipped findings when the fold is skipped", async () => {
+      await startAll();
+      // A finding from before fingerprints existed, written past the guarded path.
+      appendFileSync(
+        logOf('sess-2'),
+        `${JSON.stringify({
+          session_id: 'sess-2',
+          actor: 'reviewer',
+          event_type: 'finding-raised',
+          task_id: TASK,
+          plan_version: 1,
+          causal_parent: roots.get('sess-2'),
+          ts: '2026-08-15T00:00:00.000Z',
+          payload: finding('finding-legacy').finding,
+        })}\n`,
+      );
+      const projection = openProjection(path.join(dbDir, 'batch.db'), opts());
+      try {
+        const cold = await projection.applySessions(SESSIONS);
+        expect(cold.skippedFindings.map((s) => s.finding_id)).toEqual(['finding-legacy']);
+        folds.length = 0;
+        await append('sess-3', 'demo-hub-noted', { payload: { note: 'tick' } });
+        const next = await projection.applySessions(['sess-3']);
+        expect(folds).toEqual([]);
+        expect(next.skippedFindings).toEqual(cold.skippedFindings);
       } finally {
         projection.close();
       }
