@@ -30,6 +30,7 @@ import type {
   AnalyticsPeriod,
   AnalyticsResult,
   EventKind,
+  OverviewResult,
   Scope,
   TimelineEntry,
 } from '../../../factory/orchestrator/dist/db/queries.js';
@@ -164,6 +165,13 @@ export interface AppOpts {
   stores?: string[];
   /** How often store discovery is recomputed; 5 s in production, 0 in tests. */
   storeRefreshMs?: number;
+  /**
+   * How long a computed overview() is shared between requests while its
+   * store's projection has not moved: `maxAgeMs` (default 4 s, under the 5 s
+   * Home poll) bounds fields that depend on the current time; `now` is the
+   * clock it is measured on.
+   */
+  overviewMemo?: { maxAgeMs?: number; now?: () => number };
 }
 
 /**
@@ -226,6 +234,8 @@ export interface Refresher {
   hold(): () => void;
   /** Drops every listener and stops the ticker outright. closeApp()'s half. */
   stop(): void;
+  /** Counts the sessions a scan has folded; a changed value means the projection moved. */
+  generation?(): number;
 }
 
 export interface AppHandle {
@@ -334,6 +344,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   // behind it is repaired -- the next poll re-projects and finds nothing.
   const issues = new Map<string, ProjectionIssue[]>();
   let inFlight: Promise<void> | null = null;
+  let generation = 0;
 
   async function scan(): Promise<void> {
     const advances: SessionAdvance[] = [];
@@ -356,6 +367,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
           dbOpts,
         );
         projected.set(sessionId, fingerprint);
+        generation += 1;
         advances.push({ session: sessionId, events: eventsApplied });
         const landed: ProjectionIssue[] = skippedArtifacts.map((skipped) => ({
           sessionId,
@@ -473,6 +485,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
     subscribe,
     hold,
     stop,
+    generation: () => generation,
     // An arrow rather than a declaration beside the others, because `issues`
     // is already the map above: a function of that name in this scope would
     // not shadow it, it would redeclare it.
@@ -732,6 +745,33 @@ export function createApp(opts: AppOpts): AppHandle {
   // anything to say about it.
   const readable = (c: Context): StoreEntry[] =>
     c.req.query('session') ? [homeStore] : stores.entries();
+  // One overview() per store per scope while the store's projection has not
+  // moved: Home's poll reads it through /api/active-scope and /api/overview.
+  // An entry also ends at `maxAgeMs`, since overview() reads the clock.
+  const memoNow = opts.overviewMemo?.now ?? Date.now;
+  const memoMaxAgeMs = opts.overviewMemo?.maxAgeMs ?? 4000;
+  const overviewMemo = new WeakMap<
+    SmithDb,
+    Map<string, { generation: string; at: number; data: OverviewResult }>
+  >();
+  const sharedOverview = (db: SmithDb, scope: Scope): OverviewResult => {
+    const entry = db === handle.db ? homeStore : stores.entries().find((e) => e.handle.db === db);
+    const scans = entry?.refresher.generation?.();
+    if (entry === undefined || scans === undefined) return overview(db, scope, clock);
+    // A commit by another connection (the scan's own, or a repaired or broken
+    // cache) moves data_version, so a change the scan never reported cannot
+    // be served stale either.
+    const generation = `${scans}:${entry.handle.sqlite.pragma('data_version', { simple: true })}`;
+    const key = JSON.stringify(scope);
+    const memo = overviewMemo.get(db) ?? new Map();
+    overviewMemo.set(db, memo);
+    const now = memoNow();
+    const hit = memo.get(key);
+    if (hit && hit.generation === generation && now - hit.at < memoMaxAgeMs) return hit.data;
+    const data = overview(db, scope, clock);
+    memo.set(key, { generation, at: now, data });
+    return data;
+  };
   app.use('/api/*', async (_c, next) => {
     await refresher.refresh();
     await stores.refresh();
@@ -803,7 +843,7 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(
       mergeOverview(
         fanOut(readable(c), project, (db, p) =>
-          overview(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }, clock),
+          sharedOverview(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }),
         ),
       ),
     );
@@ -1089,7 +1129,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const nowIso = opts.nowIso ?? new Date().toISOString();
     const stores: ActiveScopeStore[] =
       cli.state === 'ok'
-        ? fanOut(entries, undefined, (db) => overview(db, {}, clock)).map(({ store, data }) => ({
+        ? fanOut(entries, undefined, (db) => sharedOverview(db, {})).map(({ store, data }) => ({
             store,
             activelyRunning: data.epicsActivelyRunning,
             epicProjects: Object.fromEntries(
