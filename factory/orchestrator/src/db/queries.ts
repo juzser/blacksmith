@@ -792,6 +792,7 @@ function epicTokenMaps(
   db: SmithDb,
   scope: Scope,
   taskRows: (typeof tasks.$inferSelect)[],
+  resultRows: TaskResultRow[] = taskResultRows(db, scope),
 ): {
   budgetByEpic: Map<string, number>;
   spentByEpic: Map<string, number>;
@@ -811,7 +812,7 @@ function epicTokenMaps(
   const epicOf = epicResolver(epicByTask);
   const spentByEpic = new Map<string, number>();
   const unmeasuredByEpic = new Map<string, number>();
-  for (const row of taskResultRows(db, scope)) {
+  for (const row of resultRows) {
     const epicId = epicOf(resultTaskId(row));
     if (!epicId) continue;
     const usage = readTokenUsage(row.payload.token_usage);
@@ -1187,7 +1188,14 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
         .all()
     : db.select().from(agents).where(eq(agents.status, 'live')).all();
   if (scope.project === undefined) return liveRows;
-  const scopedTasks = allTasksForScope(db, scope);
+  return agentsOfProject(liveRows, allTasksForScope(db, scope));
+}
+
+/** The live agents a project's tasks (already scoped) place, by task or by epic. */
+function agentsOfProject(
+  liveRows: (typeof agents.$inferSelect)[],
+  scopedTasks: (typeof tasks.$inferSelect)[],
+): (typeof agents.$inferSelect)[] {
   const scopedEpics = new Set(scopedTasks.flatMap((t) => (t.epicId === null ? [] : [t.epicId])));
   // A task OR an epic places a row. Half the dispatches in a real run name an
   // epic and no task at all — a planner, a spec-reviewer, a scribe, the
@@ -1364,7 +1372,11 @@ export function runningSessions(
     string,
     { ts: string; eventType: string; eventId: string; taskId: string | null }
   >();
-  const eventQuery = db
+  // Only the rows at each session's newest ts are read (one per session, more
+  // only on a tie, which isLaterEvent settles below) -- not the whole log.
+  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const newestTs = sql`(${eventsRaw.sessionId}, ${eventsRaw.ts}) IN (SELECT ${eventsRaw.sessionId}, max(${eventsRaw.ts}) FROM ${eventsRaw} ${eventSessionCond ? sql`WHERE ${eventSessionCond}` : sql``} GROUP BY ${eventsRaw.sessionId})`;
+  const newestEvents = db
     .select({
       sessionId: eventsRaw.sessionId,
       taskId: eventsRaw.taskId,
@@ -1372,9 +1384,10 @@ export function runningSessions(
       eventType: eventsRaw.eventType,
       eventId: eventsRaw.eventId,
     })
-    .from(eventsRaw);
-  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  for (const e of eventSessionCond ? eventQuery.where(eventSessionCond).all() : eventQuery.all()) {
+    .from(eventsRaw)
+    .where(eventSessionCond ? and(eventSessionCond, newestTs) : newestTs)
+    .all();
+  for (const e of newestEvents) {
     const seen = lastEvent.get(e.sessionId);
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
@@ -1516,16 +1529,20 @@ function groupLiveAgents(rows: (typeof agents.$inferSelect)[]): LiveAgentGroup[]
   return [...grouped.values()];
 }
 
+/** Every `epics` row for the scope's sessions, project not yet applied. */
+function epicRowsForScope(db: SmithDb, scope: Scope): (typeof epics.$inferSelect)[] {
+  const sessionCond = scopedToSessions(epics.sessionId, scope);
+  return sessionCond
+    ? db.select().from(epics).where(sessionCond).all()
+    : db.select().from(epics).all();
+}
+
 /**
  * Every closed epic in scope, newest close first (D-43/P9-27). One reader for
  * both overview() and projectSummary(), so "in flight" can never mean two
  * different things depending on which card you're looking at.
  */
-function closedEpicsForScope(db: SmithDb, scope: Scope): ClosedEpic[] {
-  const sessionCond = scopedToSessions(epics.sessionId, scope);
-  const rows = sessionCond
-    ? db.select().from(epics).where(sessionCond).all()
-    : db.select().from(epics).all();
+function closedEpicsOf(rows: (typeof epics.$inferSelect)[], scope: Scope): ClosedEpic[] {
   return filterByProject(rows, scope)
     .map((e) => ({
       epicId: e.epicId,
@@ -1716,6 +1733,18 @@ function idleEpics(
 }
 
 /**
+ * What overview() reads once per call and every per-project summary
+ * partitions, so the work does not repeat once per project.
+ */
+interface SharedReads {
+  tasks: (typeof tasks.$inferSelect)[];
+  liveAgents: (typeof agents.$inferSelect)[];
+  epicRows: (typeof epics.$inferSelect)[];
+  resultRows: TaskResultRow[];
+  activity: readonly ActivityRow[];
+}
+
+/**
  * One project's overview slice, computed by the same logic overview() itself
  * uses (no drift). `nowIso` is the caller's single instant, not a fresh
  * read: overview() hands every per-project summary the same "now" it used
@@ -1727,16 +1756,17 @@ function projectSummary(
   project: string,
   baseScope: Scope,
   nowIso: string,
-  activity: readonly ActivityRow[],
+  shared: SharedReads,
 ): ProjectOverviewSummary {
   const scope: Scope = { ...baseScope, project };
-  const liveRows = allAgentsForScope(db, scope);
-  const taskRows = allTasksForScope(db, scope);
-  const closedEpicsHere = closedEpicsForScope(db, scope);
+  const { activity } = shared;
+  const taskRows = filterByProject(shared.tasks, scope);
+  const liveRows = agentsOfProject(shared.liveAgents, taskRows);
+  const closedEpicsHere = closedEpicsOf(shared.epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
   const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, project);
   const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
-  const tokenMaps = epicTokenMaps(db, scope, taskRows);
+  const tokenMaps = epicTokenMaps(db, scope, taskRows, shared.resultRows);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
@@ -1808,24 +1838,6 @@ function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord
   if (scope.project === undefined) return live;
   const scopedTaskIds = new Set(allTasksForScope(db, scope).map((t) => t.taskId));
   return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId));
-}
-
-function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
-  return liveAgentsAt(db, scope, cutoffIso).length;
-}
-
-/**
- * The "working" end of workingAgentCountDelta5m's subtraction: the agents
- * live as of `cutoffIso` (the very re-fold liveAgentCountAt does, project
- * scoping included) that were ALSO within DEFAULT_STALE_HOURS of dispatch
- * *at that cutoff*. Judging the historical rows against today's clock
- * instead would be D-170 again in a new disguise — the "now" end would
- * apply a 4h window and the "ago" end a 4h05m one, and an agent that
- * stalled since the cutoff would read as no change.
- */
-function workingAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
-  return liveAgentsAt(db, scope, cutoffIso).filter((a) => isWorkingAt(a.dispatchedAt, cutoffIso))
-    .length;
 }
 
 /**
@@ -1948,13 +1960,20 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
   const taskRows = allTasksForScope(db, scope);
 
-  const closedEpics = closedEpicsForScope(db, scope);
+  const epicRows = epicRowsForScope(db, scope);
+  const closedEpics = closedEpicsOf(epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
   const activity = epicActivityRows(db, scope);
   const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
   const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
-  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
+  const resultRows = taskResultRows(db, scope);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(
+    db,
+    scope,
+    taskRows,
+    resultRows,
+  );
 
   const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
 
@@ -2017,10 +2036,6 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   let projects: ProjectOverviewSummary[] | undefined;
   if (scope.project === undefined) {
-    const taskSessionCond = scopedToSessions(tasks.sessionId, scope);
-    const allTaskRowsUnfiltered = taskSessionCond
-      ? db.select().from(tasks).where(taskSessionCond).all()
-      : db.select().from(tasks).all();
     // Milestones too, not just tasks: roadmap.md's `- project:` bullet
     // declares a project before any of its work is planned, and
     // milestoneProgressRows() filters phases by that same bullet. This list
@@ -2031,15 +2046,26 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     // Milestones carry no session_id and milestoneProgressRows() never
     // filters them by one, so they join the list under a session scope too.
     const declaredRows = db.select({ project: milestones.project }).from(milestones).all();
-    projects = distinctProjects(allTaskRowsUnfiltered, declaredRows).map((p) =>
-      projectSummary(db, p, scope, nowIso, activity),
+    projects = distinctProjects(taskRows, declaredRows).map((p) =>
+      projectSummary(db, p, scope, nowIso, {
+        tasks: taskRows,
+        liveAgents: liveRows,
+        epicRows,
+        resultRows,
+        activity,
+      }),
     );
   }
 
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
-  const liveAgentCountDelta5m = liveRows.length - liveAgentCountAt(db, scope, fiveMinAgo);
-  const workingAgentCountDelta5m = workingRows.length - workingAgentCountAt(db, scope, fiveMinAgo);
+  // One fold serves both ends of the subtraction. The working end judges the
+  // historical rows against the cutoff, not today's clock (D-170): a 4h window
+  // now against a 4h05m one then would read a stall since the cutoff as no change.
+  const liveAgo = liveAgentsAt(db, scope, fiveMinAgo);
+  const liveAgentCountDelta5m = liveRows.length - liveAgo.length;
+  const workingAgentCountDelta5m =
+    workingRows.length - liveAgo.filter((a) => isWorkingAt(a.dispatchedAt, fiveMinAgo)).length;
 
   // The Budget panel counts the epics the Running-now cards count, so its
   // 1-hour delta is folded over the same set: running epics that declare a
