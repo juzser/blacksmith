@@ -40,14 +40,15 @@ export const FACT_STRIP_COPY: FactStripCopy = {
 
 const FACTS = [
   { label: 'Active sessions', helper: 'Live sessions on a running epic' },
-  { label: 'Agents running', helper: 'Subagents and factory agents; nested ones not counted' },
+  { label: 'Agents running', helper: 'Agents and subagents of every live session, at any depth' },
   { label: 'Budget used', helper: 'Tokens these sessions used, cache reads left out' },
   { label: 'Tasks done', helper: 'Plan tasks on those epics' },
 ] as const;
 
 /**
- * Home's four facts (§4.1 item 1), all over one set: the live sessions on an
- * active epic, and those epics. A null or unmeasured scope reads "Not known".
+ * Home's four facts (§4.1 item 1). Agents running is over every live session;
+ * the other three are over the live sessions on an active epic, and those
+ * epics. A null or unmeasured scope reads "Not known".
  * Under `?project=` the totals are that name's rows in every store, the way
  * Running now matches; a session driving the name's epics in two stores is
  * then counted in each.
