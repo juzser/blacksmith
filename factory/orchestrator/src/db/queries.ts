@@ -2749,9 +2749,22 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   return finishPage(db, page, rowByEventId);
 }
 
-/** The SQL conditions every timeline read shares: event types, session scope, task id. */
-function scopeConditions(filter: TimelineFilter, eventTypes: string[]): SQL[] {
-  const conditions = [inArray(eventsRaw.eventType, eventTypes)];
+/**
+ * The SQL conditions every timeline read shares: event types, session scope, task id.
+ * `forTsOrder` is for the page windows, which ORDER BY ts LIMIT: the unary plus
+ * keeps the event_type term from being an index term, so SQLite walks a
+ * ts-ordered index in order instead of reading every row of those types into a
+ * sorter. The load-all read and the epic pre-pass keep the type index.
+ */
+function scopeConditions(filter: TimelineFilter, eventTypes: string[], forTsOrder = false): SQL[] {
+  const conditions = [
+    forTsOrder
+      ? sql`+${eventsRaw.eventType} in (${sql.join(
+          eventTypes.map((t) => sql`${t}`),
+          sql`, `,
+        )})`
+      : inArray(eventsRaw.eventType, eventTypes),
+  ];
   const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
   if (sessionCond) conditions.push(sessionCond);
   if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
@@ -2848,7 +2861,7 @@ function timelinePage(db: SmithDb, filter: TimelineFilter, limit: number): Timel
   // eventKind ignores its payload, so a kind is a set of event types.
   const kinds = filter.kinds?.length ? new Set(filter.kinds) : undefined;
   const pageTypes = kinds ? eventTypes.filter((t) => kinds.has(eventKind(t, {}))) : eventTypes;
-  const base = scopeConditions(filter, pageTypes);
+  const base = scopeConditions(filter, pageTypes, true);
   if (pageTypes.length === 0) return [];
   if (before) base.push(lte(eventsRaw.ts, before.ts));
   if (after) base.push(gte(eventsRaw.ts, after.ts));
