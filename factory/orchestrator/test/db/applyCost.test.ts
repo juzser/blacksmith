@@ -29,6 +29,12 @@ vi.mock('drizzle-orm/better-sqlite3/migrator', async (importOriginal) => {
   };
 });
 
+import {
+  feedbackFoldReads,
+  findingsFoldReads,
+  lessonsFoldReads,
+  tasksFoldReads,
+} from '../../src/db/foldPredicates.js';
 import { apply, openDb, openProjection } from '../../src/db/projector.js';
 import { appendEvent } from '../../src/events.js';
 
@@ -135,9 +141,29 @@ describe('db/projector.ts — the cost of applying a batch of sessions', () => {
       await projection.applySessions(ids);
       expect([...folds].sort()).toEqual([...FOLDS].sort());
       folds.length = 0;
-      await appendOne(7);
+      const added = await appendEvent(
+        {
+          session_id: ids[7] as string,
+          actor: 'user',
+          event_type: 'task-added',
+          task_id: 'epic-a/task-1',
+          plan_version: 1,
+          causal_parent: roots[7] as string,
+          payload: { epic_id: 'epic-a', case: 'feature', origin: 'user', task_status: 'todo' },
+        },
+        { stateDir },
+      );
       await projection.applySessions([ids[7] as string]);
-      expect([...folds].sort()).toEqual([...FOLDS].sort());
+      const reads = {
+        tasks: tasksFoldReads,
+        findings: findingsFoldReads,
+        lessons: lessonsFoldReads,
+        feedback: feedbackFoldReads,
+      };
+      const expected = Object.entries(reads)
+        .filter(([, accepts]) => accepts(added.record))
+        .map(([name]) => name);
+      expect([...folds].sort()).toEqual(expected.sort());
     } finally {
       projection.close();
     }
