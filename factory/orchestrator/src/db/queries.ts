@@ -13,6 +13,7 @@ import {
   gte,
   inArray,
   isNotNull,
+  isNull,
   lt,
   lte,
   max,
@@ -42,7 +43,11 @@ import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '..
 import { OPEN_FINDING_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { JUDGE_ROLES } from '../judgeRoles.js';
-import { FACTORY_PROJECT_NAME, normalizeProjectName } from '../projectName.js';
+import {
+  FACTORY_PROJECT_NAME,
+  LEGACY_FACTORY_PROJECT,
+  normalizeProjectName,
+} from '../projectName.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { bareTaskId, epicOfTaskId, taskIdsMatch } from '../taskId.js';
@@ -1175,6 +1180,90 @@ export interface RecentDispatch {
 
 const RECENT_DISPATCHES_LIMIT = 10;
 
+type DispatchRow = typeof dispatches.$inferSelect;
+
+/**
+ * One source's newest dispatches: a keyset read on `ts` under `cond`, newest
+ * first, `RECENT_DISPATCHES_LIMIT + 1` rows a page. A full page may cut its
+ * last ts's tie group short, so that group is read whole (`ts = ?`). It pages
+ * on (`ts < cursor`) only while `filterByProject` leaves fewer than the limit.
+ * Every row at or after the cursor is held, so the newest ten of the source
+ * are among the rows returned, in no particular order.
+ */
+function newestDispatchesOf(db: SmithDb, cond: SQL | undefined, scope: Scope): DispatchRow[] {
+  const kept: DispatchRow[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    // With nothing to narrow on, a bound on max(ts) turns the read into an index
+    // search; a bare ORDER BY ts DESC LIMIT would scan the index instead.
+    const bound =
+      cursor !== undefined
+        ? lt(dispatches.ts, cursor)
+        : cond === undefined
+          ? lte(dispatches.ts, sql`(SELECT max(${dispatches.ts}) FROM ${dispatches})`)
+          : undefined;
+    let page = db
+      .select()
+      .from(dispatches)
+      .where(and(cond, bound))
+      .orderBy(desc(dispatches.ts))
+      .limit(RECENT_DISPATCHES_LIMIT + 1)
+      .all();
+    const full = page.length > RECENT_DISPATCHES_LIMIT;
+    if (full) {
+      const edge = (page[page.length - 1] as DispatchRow).ts;
+      const tie = db
+        .select()
+        .from(dispatches)
+        .where(and(cond, eq(dispatches.ts, edge)))
+        .all();
+      page = [...page.filter((r) => r.ts !== edge), ...tie];
+      cursor = edge;
+    }
+    kept.push(...filterByProject(page, scope));
+    if (!full || kept.length >= RECENT_DISPATCHES_LIMIT) return kept;
+  }
+}
+
+/**
+ * The newest `RECENT_DISPATCHES_LIMIT` dispatches in `scope`, newest first,
+ * a tie on `ts` broken in log order (session id, then event index) -- so the
+ * tie has to be broken before the cut, not left to the sort's stability. A
+ * wave admits its whole cohort inside one millisecond, and a comparison that
+ * returned 0 across all of them left the rows in the ascending order they
+ * arrived in: the ten this then kept were the *oldest* ten of the burst,
+ * under a heading that says recent.
+ *
+ * Each source is read on its own index so none needs a sort: one source per
+ * session under a session scope (`dispatches_session_ts_idx`), else one per
+ * stored spelling of the project (`dispatches_project_ts_idx`: the legacy
+ * name, and NULL for the default project), else the whole table
+ * (`dispatches_ts_idx`). Under a session scope the project filter is applied
+ * to the rows read, and a session with few rows of that project is paged
+ * through; that is bounded by the session's own dispatches, not the table's.
+ */
+function newestDispatches(db: SmithDb, scope: Scope): DispatchRow[] {
+  const sessionCond = scopedToSessions(dispatches.sessionId, scope);
+  let sources: (SQL | undefined)[] = [undefined];
+  if (sessionCond !== undefined) {
+    const ids = new Set(
+      scope.sessionIds ?? (scope.sessionId === undefined ? [] : [scope.sessionId]),
+    );
+    sources = [...ids].map((id) => eq(dispatches.sessionId, id));
+  } else {
+    const project = scopeProject(scope);
+    if (project !== undefined) {
+      sources = [eq(dispatches.project, project)];
+      if (project === DEFAULT_PROJECT) sources.push(isNull(dispatches.project));
+      if (project === normalizeProjectName(LEGACY_FACTORY_PROJECT)) {
+        sources.push(eq(dispatches.project, LEGACY_FACTORY_PROJECT));
+      }
+    }
+  }
+  const rows = sources.flatMap((cond) => newestDispatchesOf(db, cond, scope));
+  return inLogOrder(rows).reverse().slice(0, RECENT_DISPATCHES_LIMIT);
+}
+
 function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSelect)[] {
   // agents has no project column of its own (schema.ts) — scope it by
   // membership in this scope's own task set (agents.taskId -> tasks.project),
@@ -1373,20 +1462,21 @@ export function runningSessions(
     { ts: string; eventType: string; eventId: string; taskId: string | null }
   >();
   // Only the rows at each session's newest ts are read (one per session, more
-  // only on a tie, which isLaterEvent settles below) -- not the whole log.
-  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  const newestTs = sql`(${eventsRaw.sessionId}, ${eventsRaw.ts}) IN (SELECT ${eventsRaw.sessionId}, max(${eventsRaw.ts}) FROM ${eventsRaw} ${eventSessionCond ? sql`WHERE ${eventSessionCond}` : sql``} GROUP BY ${eventsRaw.sessionId})`;
-  const newestEvents = db
-    .select({
-      sessionId: eventsRaw.sessionId,
-      taskId: eventsRaw.taskId,
-      ts: eventsRaw.ts,
-      eventType: eventsRaw.eventType,
-      eventId: eventsRaw.eventId,
-    })
-    .from(eventsRaw)
-    .where(eventSessionCond ? and(eventSessionCond, newestTs) : newestTs)
-    .all();
+  // only on a tie, which isLaterEvent settles below) -- not the whole log. The
+  // join order is forced (CROSS JOIN): each session row drives one lookup on
+  // events_raw_session_ts_idx for its max(ts) and one for the rows at that ts,
+  // where a free join let the planner scan events_raw as the outer table.
+  const newestEvents = db.all<{
+    sessionId: string;
+    taskId: string | null;
+    ts: string;
+    eventType: string;
+    eventId: string;
+  }>(sql`SELECT e.session_id AS sessionId, e.task_id AS taskId, e.ts AS ts, e.event_type AS eventType, e.event_id AS eventId
+    FROM ${sessions} CROSS JOIN ${eventsRaw} e
+    WHERE e.session_id = ${sessions.sessionId}
+      AND e.ts = (SELECT max(m.ts) FROM ${eventsRaw} m WHERE m.session_id = ${sessions.sessionId})
+      ${sessionCond ? sql`AND ${sessionCond}` : sql``}`);
   for (const e of newestEvents) {
     const seen = lastEvent.get(e.sessionId);
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
@@ -1977,20 +2067,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
 
-  const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
-  const dispatchRows = dispatchSessionCond
-    ? db.select().from(dispatches).where(dispatchSessionCond).all()
-    : db.select().from(dispatches).all();
-  const scopedDispatches = filterByProject(dispatchRows, scope);
-  // Newest first, then the top ten — so the tie has to be broken before the
-  // slice, not left to the sort's stability. A wave admits its whole cohort
-  // inside one millisecond, and a comparison that returned 0 across all of
-  // them left the rows in the ascending order they arrived in: the ten this
-  // then kept were the *oldest* ten of the burst, under a heading that says
-  // recent.
-  const recentDispatchRows = inLogOrder(scopedDispatches)
-    .reverse()
-    .slice(0, RECENT_DISPATCHES_LIMIT);
+  const recentDispatchRows = newestDispatches(db, scope);
   // agents.id IS the dispatch event id (agents-registry.ts's foldAgents()),
   // so a direct id lookup finds the round regardless of whether that agent
   // is still live or has since gone terminal.
