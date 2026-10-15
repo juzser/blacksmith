@@ -109,6 +109,10 @@ export const dispatches = sqliteTable(
     index('dispatches_provider_idx').on(t.provider),
     index('dispatches_model_tier_idx').on(t.modelTier),
     index('dispatches_project_idx').on(t.project),
+    // The newest-first reads in overview(): by ts alone, per project, per session.
+    index('dispatches_ts_idx').on(t.ts),
+    index('dispatches_project_ts_idx').on(t.project, t.ts),
+    index('dispatches_session_ts_idx').on(t.sessionId, t.ts),
   ],
 );
 

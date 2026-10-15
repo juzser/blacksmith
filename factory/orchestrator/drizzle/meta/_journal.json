@@ -134,6 +134,13 @@
       "when": 1791976726697,
       "tag": "0018_events_raw_scope_ts_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792031861665,
+      "tag": "0019_dispatches_scope_ts_idx",
+      "breakpoints": true
     }
   ]
 }
