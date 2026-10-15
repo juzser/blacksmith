@@ -1,0 +1,1457 @@
+{
+  "epic_id": "bs-audit-4",
+  "version": 5,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-audit-4/task-1-api-middleware-once",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Mount the /api middleware once",
+      "summary": "One loopbackGuard mount for the whole /api prefix replaces the six-route loop.",
+      "objective": "In ui/server/src/app.ts, mount the shared request middleware (loopbackGuard) once for the whole /api prefix, so every /api route, including /api/timeline, /api/stream, /api/health and any route added later, passes it. The six-route loop goes, and the docblocks in app.ts and middleware.ts describe the prefix-wide mount.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 1 (68ae1f67): every /api route passes the same request middleware, mounted once for the whole /api prefix.",
+        "Test first, in ui/server/test/readOnly.test.ts: a test enumerates every GET route under /api from the Hono app's `app.routes` (path parameters substituted with neutral values such as epic-a), requests each with the Host header `other.example`, and asserts status 403 with error `ui.forbidden-host`, cancelling any response body it opens. The enumerated set is asserted to contain /api/timeline, /api/stream and /api/health. Under the null (today's six-route loop) it fails and names the routes that answer without 403; after the fix it passes.",
+        "Positive control in the same file: with Host `127.0.0.1:4680`, /api/health and /api/timeline answer a status other than 403 both before and after the change.",
+        "Revert proof: restoring the six-route loop in app.ts while keeping the new test makes the enumeration test fail again.",
+        "Text proof: `/usr/bin/grep -c \"app.use('/api/\\*', loopbackGuard\" ui/server/src/app.ts` prints 1 after the change, and `git grep -n \"remaining read routes stay unguarded\" -- ui/server/src` prints nothing.",
+        "Gates: `pnpm run test:server`, `pnpm run typecheck:server` and `pnpm run lint` pass, then `bash scripts/check.sh` in full; the coverage thresholds on app.ts still hold."
+      ],
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/src/middleware.ts",
+        "ui/server/test/readOnly.test.ts"
+      ],
+      "budget": {
+        "tokens": 90000,
+        "diff_lines": 250
+      },
+      "contract": {
+        "functional_clauses": [
+          "Exactly one `app.use('/api/*', loopbackGuard())` is registered, after readOnlyGuard and before the first /api route handler; the per-route loop is removed.",
+          "Requests with a loopback Host keep today's status and body on every /api route.",
+          "The comments in app.ts and middleware.ts state that the middleware covers the whole /api prefix."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are unless this task says otherwise.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-2-pr-prompt-data-fence",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Fence pull request text in pr-mod prompts",
+      "summary": "fixConflictPrompt and fixCiPrompt put GitHub-sourced text inside the `bs prompt wrap` data fence.",
+      "objective": "In mods/pr-mod/hooks/prs.ts, put pull request text inside the data fence `bs prompt wrap` produces: fixConflictPrompt and fixCiPrompt place every GitHub-sourced field (title, head branch, base branch, failing check names and lines) inside one fence of kind `issue-text`, byte-identical to the CLI's output for the same text and source, with the prompt's own instructions outside the fence. The fence builder lives in a new mods/pr-mod/hooks/dataFence.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 2 (c45e3df9): text that comes from GitHub reaches the prompt inside the same data fence `bs prompt wrap` produces, labelled as data to read.",
+        "Test first, new mods/pr-mod/hooks/dataFence.test.ts: for a fixed input text and source `pull request #7`, the builder's output equals a literal pinned from `node factory/orchestrator/dist/cli.js prompt wrap - --kind issue-text --source 'pull request #7'` run once by the coder on the same text (header with the 12-hex digest, the data lines, footer). Under the null the module does not exist and the test fails; after the fix it passes byte for byte.",
+        "Test first, in mods/pr-mod/hooks/prs.test.ts: for a pull request fixture with a title, head, base and two failing checks, every occurrence of each of those strings in the fixConflictPrompt and fixCiPrompt output lies between the fence's BEGIN and END lines, and the instruction sentences lie outside it. Under the null there is no `BEGIN UNTRUSTED DATA` line and the JSON-quoted title sits outside any fence, so the test fails; after the fix it passes.",
+        "Consistency: a title that itself contains the fence's marker strings (`<!--`, `-->`, `UNTRUSTED DATA`) and a source containing `|` are escaped exactly as the CLI escapes them (pinned literal), so each prompt holds exactly one BEGIN line and one END line.",
+        "If the mod runtime offers no sha256, the in-mod implementation carries a known-answer test against a published sha256 vector.",
+        "Revert proof: restoring the JSON-only quoting in prs.ts while keeping the new tests makes the prs.test.ts fence test fail again.",
+        "Gates: `pnpm run lint` passes and `bash scripts/check.sh` in full passes; the pr-mod tests run there through `claude plugin test mods/pr-mod`."
+      ],
+      "claims": [
+        "mods/pr-mod/hooks/prs.ts",
+        "mods/pr-mod/hooks/prs.test.ts",
+        "mods/pr-mod/hooks/dataFence.ts",
+        "mods/pr-mod/hooks/dataFence.test.ts"
+      ],
+      "budget": {
+        "tokens": 150000,
+        "diff_lines": 450
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each of fixConflictPrompt and fixCiPrompt emits one fence of kind `issue-text` whose source is the pull request's URL when the input carries one, else `pull request #<number>`.",
+          "The fence bytes (header, digest, escaping, footer) equal the `bs prompt wrap --kind issue-text` output for the same text and source.",
+          "The prompt's instructions to the session stay outside the fence; only GitHub-sourced values sit inside it."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures of prs.ts stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in memory or in temp dirs and read no git history.",
+          "Run `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-3-docs-display-only",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Architecture contract says the dashboard is read-only",
+      "summary": "Drop the lesson and waiver write routes from the architecture spec and two stale comments.",
+      "objective": "Bring docs/specs/black-smith-architecture.md and two orchestrator comments in line with the display-only dashboard: the contract states that readOnlyGuard rejects every non-GET/HEAD request on /api/*, and that lessons and waivers move only through the /bs verbs. The comments in factory/orchestrator/src/cli.ts (the 'reject route' mention) and factory/orchestrator/src/prompts.ts (line 54, 'lesson routes default to it') stop citing dashboard write routes.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 3 (ea0b214d): the contract says the dashboard is read-only; readOnlyGuard rejects every non-GET/HEAD on /api/*, and lessons and waivers move only through the /bs verbs.",
+        "Differential text proof: `git grep -nE \"three lesson routes|lesson/waiver actions are the only writes|reject route|lesson routes default\" -- docs/specs factory/orchestrator/src` prints at least four lines today and nothing after the change.",
+        "The Lessons row of the architecture spec's dashboard table no longer lists approve / edit / reject actions, and the spec names readOnlyGuard and the /bs verbs as stated above.",
+        "Revert proof: restoring the old wording makes the grep above print again.",
+        "cli.ts and prompts.ts change in comments only: `git diff` on them shows no line outside a comment.",
+        "Gates: `pnpm run typecheck` and `pnpm run lint` pass, then `bash scripts/check.sh` in full (its doc lints included)."
+      ],
+      "claims": [
+        "docs/specs/black-smith-architecture.md",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/prompts.ts"
+      ],
+      "budget": {
+        "tokens": 60000,
+        "diff_lines": 150
+      },
+      "contract": {
+        "functional_clauses": [
+          "Every sentence in the architecture spec that describes a dashboard write route is reworded to the read-only contract.",
+          "The cli.ts and prompts.ts edits are comment-only."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of cli.ts or prompts.ts is removed or has its declaration changed; the edits there are comments only.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names.",
+          "Run `pnpm run typecheck` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/prompts.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-4-reinstate-one-predicate",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "One predicate decides a reinstatement",
+      "summary": "projector, ingest and reinstate read one shared 'reinstatement honoured' rule from a new pure module.",
+      "objective": "Create a pure module factory/orchestrator/src/taskLifecycle.ts holding one predicate that decides whether a task's reinstatement is honoured: a task-superseded for T, then a task-reinstated for T, with a wave-merged naming T and no successor for T. The projector's foldTasks, taskEvents' ingest path (idsAlreadyEmitted and reinstatedWithoutSuccessor) and reinstateTask all call it. taskSuccessors' implementation moves into taskLifecycle.ts; spec.ts keeps `export function taskSuccessors` with an unchanged declaration and a body that delegates, which removes both dynamic `import('./spec.js')` calls.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4 (0e7b073d): one shared predicate, so projector and ingest agree on whether T was reinstated; both either honour or ignore the event.",
+        "Test first, new factory/orchestrator/test/taskLifecycle.test.ts: a scenario table over temp-dir event logs runs the projector side (foldTasks) and the ingest side (planIngestGaps or emitTasksAdded against a temp events dir) and asserts they agree. Scenario (a): T superseded, then hand-reinstated, never merged, no successor. Under the null the projector ignores the reinstatement and ingest honours it, so the agreement assertion fails; after the fix both ignore it. Scenario (b): T merged, superseded, reinstated, no successor: both honour it. Scenario (c): T merged, superseded, reinstated, with a successor: both ignore it.",
+        "In the same file, reinstateTask refuses scenarios (a) and (c) with its existing codes (task.reinstate-never-merged, task.reinstate-has-successor) and accepts (b).",
+        "Text proof: `git grep -nE \"import\\('./spec.js'\\)\" -- factory/orchestrator/src` prints two lines today and nothing after. reinstate.ts keeps its dynamic import of ./db/projector.js.",
+        "Revert proof: restoring the old reinstatedWithoutSuccessor body while keeping the new tests makes scenario (a) fail again.",
+        "Existing tests in factory/orchestrator/test/taskEvents.test.ts and factory/orchestrator/test/completedStaysCompleted.test.ts pass; any expectation that encoded the disagreement is updated and named in the result.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/taskLifecycle.ts",
+        "factory/orchestrator/src/taskEvents.ts",
+        "factory/orchestrator/src/reinstate.ts",
+        "factory/orchestrator/src/spec.ts",
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/test/taskLifecycle.test.ts",
+        "factory/orchestrator/test/taskEvents.test.ts",
+        "factory/orchestrator/test/completedStaysCompleted.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/spec.ts",
+        "factory/orchestrator/src/taskEvents.ts",
+        "factory/orchestrator/src/reinstate.ts",
+        "factory/orchestrator/src/db/projector.ts"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "taskLifecycle.ts imports no db module, no spec.ts and no taskEvents.ts, so every fold can import it statically.",
+          "foldTasks, the ingest path and reinstateTask decide 'reinstatement honoured' through the one exported predicate; none restates the rule inline.",
+          "spec.ts's taskSuccessors keeps its declaration text exactly (name, parameters, return type) and delegates to taskLifecycle.ts.",
+          "reinstateTask keeps its refusal codes and their order, and keeps its dynamic import of ./db/projector.js, which keeps the db layer out of the CLI's static import graph."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of spec.ts, taskEvents.ts, reinstate.ts or db/projector.ts is removed or has its declaration changed; adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-5-finished-from-log",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Amendments read 'finished' from the log",
+      "summary": "A merged task stays finished through an amendment even when the plan file still says todo.",
+      "objective": "Derive 'finished' once from the event log for plan amendments: add a pure `finishedInLog(events, epicId)` to factory/orchestrator/src/taskLifecycle.ts (true for a task with a wave-merged naming it and no unhonoured task-superseded after its last merge, using task-4's predicate), and a pure exported helper that marks those tasks completed on a copy of the previous plan. amendPlan (spec.ts) and the spec-change path (specChange.ts) apply it before calling draftNextVersion, so a merged task whose plan-file status is not completed is dropped as finished instead of carried live or superseded. draftNextVersion's declaration stays unchanged.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 5 (4278ea53): 'finished' is derived once from the log (status derived at read time), so a merged task is never superseded by an amendment.",
+        "Test first, new factory/orchestrator/test/finishedFromLog.test.ts: in a temp-dir lineage, plan v1 lists T with task_status todo while the log holds a wave-merged naming T; an amendment that does not name T produces v2. Under the null v2 carries T live as todo (and a later ingest can supersede it); after the fix T is absent from v2's live tasks as finished, and ingesting v2 emits no task-superseded for T.",
+        "Agreement test in the same file: for a table of logs (merged; merged then superseded; superseded then honoured reinstatement; never merged), finishedInLog equals 'foldTasks reports completed' for every row.",
+        "An amendment that names T in `changes.supersede` keeps today's explicit behaviour (asserted unchanged), since the defect is the silent path; the operator confirmed in round 5 that an explicit `changes.supersede` naming a finished task still supersedes it.",
+        "Revert proof: removing the log-derived marking from amendPlan while keeping the tests makes the first test fail again.",
+        "Existing tests in factory/orchestrator/test/plan.test.ts and factory/orchestrator/test/specChange.test.ts pass.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/plan.ts",
+        "factory/orchestrator/src/spec.ts",
+        "factory/orchestrator/src/specChange.ts",
+        "factory/orchestrator/src/taskLifecycle.ts",
+        "factory/orchestrator/test/finishedFromLog.test.ts",
+        "factory/orchestrator/test/plan.test.ts",
+        "factory/orchestrator/test/specChange.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/plan.ts",
+        "factory/orchestrator/src/spec.ts",
+        "factory/orchestrator/src/specChange.ts",
+        "factory/orchestrator/src/taskLifecycle.ts"
+      ],
+      "budget": {
+        "tokens": 170000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "finishedInLog is pure: events in, a set of task ids out; it reuses the reinstatement predicate from task-4 rather than restating it.",
+          "A task finished in the log is treated as finished by draftNextVersion whatever its plan-file task_status says.",
+          "draftNextVersion, amendPlan and the specChange exports keep their declaration text; the log-derived set reaches draftNextVersion through the marked plan copy."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of plan.ts, spec.ts, specChange.ts or taskLifecycle.ts is removed or has its declaration changed; adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-6-ui-dead-exports-liveness",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Delete test-only exports in liveness, format, kanban",
+      "summary": "Remove helpers only their own tests use, and add a guard test that lists such exports.",
+      "objective": "Delete the exports in ui/src/lib/liveness.ts (lastEventLabel, longestRunningSince, activeSessionCount, hiddenSessionsLabel, hiddenAgentsLabel), ui/src/lib/format.ts (formatBudgetPct) and ui/src/lib/kanban.ts (subStatusSummary) that no non-test code uses, together with their tests, and add a guard test ui/test/libExports.test.ts that lists such exports for a named set of modules. Update the lastEventLabel mention in ui/docs/design-spec.md.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 6 (b4b7db1b), part 1: every exported helper in liveness.ts, format.ts and kanban.ts has at least one non-test consumer, or is deleted together with its tests.",
+        "Test first, new ui/test/libExports.test.ts: for the module list [liveness, format, kanban] under ui/src/lib, the guard collects each `export` declaration name and reports it dead when no non-test file under ui/src references it outside its module and its own module never uses it beyond the declaration (comments stripped). It asserts the dead list is empty. Under the null it fails listing the seven names above; after the deletions it passes.",
+        "Revert proof: restoring any one deleted export (with or without its test) makes the guard fail again, naming it.",
+        "Exports that are used inside their own module keep `export` (operator decision, round 5); only exports that nothing uses are deleted.",
+        "Gates: `pnpm run test:ui`, `pnpm run typecheck:ui`, `pnpm run typecheck:ui:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/src/lib/liveness.ts",
+        "ui/src/lib/format.ts",
+        "ui/src/lib/kanban.ts",
+        "ui/test/liveness.test.ts",
+        "ui/test/format.test.ts",
+        "ui/test/kanban.test.ts",
+        "ui/test/libExports.test.ts",
+        "ui/docs/design-spec.md"
+      ],
+      "budget": {
+        "tokens": 120000,
+        "diff_lines": 450
+      },
+      "contract": {
+        "functional_clauses": [
+          "Only exports with no non-test consumer and no use inside their own module are deleted; their tests go with them.",
+          "No rendered output changes: every remaining export keeps its behaviour.",
+          "The guard's module list is a plain array a later task can extend."
+        ],
+        "nonfunctional_clauses": [
+          "Remaining exports keep their names and signatures.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names.",
+          "The guard reads source files from the working tree and no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-7-drop-overview-alerts",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Drop the unread overview alerts block",
+      "summary": "overview() and projectSummary() stop computing alerts nothing reads.",
+      "objective": "Remove the `alerts` block (escalations and pendingWaivers) from overview() and projectSummary() in factory/orchestrator/src/db/queries.ts, from their result types, from the merge in ui/server/src/fanout.ts and from the response types in ui/src/lib/api.ts, together with the test fixtures and assertions that carry it. The private needsOperatorWaiver rule and its two duplicated filters go with the computation, since nothing else reads them.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 7 (515a7717): fields the server computes on each overview call have a reader, or the computation is dropped; the duplicated pendingWaivers filter no longer exists.",
+        "Test first, in factory/orchestrator/test/db/queries.test.ts: `'alerts' in overview(db)` and `'alerts' in` every project summary are asserted false on a temp-dir store with findings. Under the null both are true and the test fails; after the fix it passes. The old 'alerts.pendingWaivers' describe block is removed.",
+        "Test first, in ui/server/test/fanout.test.ts: mergeOverview's result has no `alerts` key. Under the null it does; after the fix it does not.",
+        "Text proof: `git grep -nE \"alerts|needsOperatorWaiver\" -- factory/orchestrator/src/db/queries.ts ui/server/src/fanout.ts ui/src/lib/api.ts` prints lines today and nothing after; gate.ts's own pendingWaivers stays untouched.",
+        "Revert proof: restoring the alerts computation in overview() while keeping the tests makes the queries.test.ts assertion fail again.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run test:ui`, every typecheck script and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/queries.test.ts",
+        "ui/server/src/fanout.ts",
+        "ui/server/test/fanout.test.ts",
+        "ui/src/lib/api.ts",
+        "ui/test/api.test.ts",
+        "ui/test/homeView.test.ts",
+        "ui/test/roadmapWindow.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts",
+        "ui/server/src/fanout.ts",
+        "ui/src/lib/api.ts"
+      ],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 350
+      },
+      "contract": {
+        "functional_clauses": [
+          "overview() and projectSummary() no longer call allFindingsForScope for the alerts count, and their outputs lose only the alerts key.",
+          "Every other overview and summary field keeps its value on the existing fixtures."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of queries.ts, fanout.ts or api.ts is removed or has its declaration changed; removing a field inside an exported interface or type body is allowed.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run every typecheck script and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-8-active-epic-spend-unmeasured",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Unread store counts as unmeasured spend",
+      "summary": "An active epic whose store produced no overview this poll counts as unmeasured, not as 0 tok.",
+      "objective": "In ui/server/src/activeScope.ts, computeActiveScope counts an active epic as unmeasured when its store has no overview in this poll (the store was skipped or unreadable), so the Budget used tile shows 'Not measured' or a floor marker instead of a measured '0 tok'. A store that was read but holds no token entry for the epic stays a measured zero.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 8 (14191ce5): the Budget used tile shows 'Not measured' or a floor marker when no spend could be read for that epic.",
+        "Test first, in ui/server/test/activeScope.test.ts: computeActiveScope with an epic active through its session (writtenSinceStart) whose store id is absent from the per-store overview map. Under the null the response has tokensSpent 0 and tokensUnmeasured 0 and the test fails; after the fix tokensUnmeasured is at least 1.",
+        "Control in the same file: a store present in the map with no entry for the epic yields tokensUnmeasured 0 and tokensSpent 0, both before and after.",
+        "Revert proof: restoring the `?? 0` fallback for a missing store while keeping the tests makes the first test fail again.",
+        "Gates: `pnpm run test:server`, `pnpm run test:ui`, `pnpm run typecheck:server` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/server/src/activeScope.ts",
+        "ui/server/test/activeScope.test.ts"
+      ],
+      "keeps_exports": [
+        "ui/server/src/activeScope.ts"
+      ],
+      "budget": {
+        "tokens": 80000,
+        "diff_lines": 150
+      },
+      "contract": {
+        "functional_clauses": [
+          "A missing store adds one to tokensUnmeasured for each active epic it owns; a read store with no entry for the epic is a measured zero.",
+          "The response shape is unchanged; the existing factStrip rendering of tokensUnmeasured produces the 'Not measured' or floor-marker text."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of activeScope.ts is removed or has its declaration changed.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in memory or in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": true
+    },
+    {
+      "task_id": "bs-audit-4/task-9-factstrip-quiet-from-state",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "factStrip quiet follows the state",
+      "summary": "The quiet flag comes from the underlying state, not from comparing display strings.",
+      "objective": "In ui/src/lib/homeView.ts, factStrip derives each tile's `quiet` flag from the underlying state rather than by comparing the formatted strings to 'Not measured' and 'None': all four tiles are quiet when the scope is null or unmeasured, Budget is quiet when tokensSpent is 0 and tokensUnmeasured is above 0 (today's noTokens), and Tasks is quiet when the scope's task total is 0. The tile copy becomes injectable, with this signature pinned: `factStrip(scope: ActiveScopeResult | null, project?: string, copy?: Partial<FactStripCopy>): FactTile[]`, where `FactStripCopy` is a new exported interface `{ notKnown: string; notMeasured: string; none: string }` and a new exported constant `FACT_STRIP_COPY` holds today's English strings as the default, so a copy change cannot change quiet. ui_affecting is false because the render cannot change: the only caller, ui/src/pages/HomePage.vue, passes no copy argument, and today's three strings appear only in the branches that set quiet (formatCompactNumber and formatCompactValue never produce them), so every tile's value, floor and quiet stay identical for that caller.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 9 (d5b1cc5e): the tile keeps its quiet styling when its copy changes, because the underlying state is unchanged.",
+        "Test first, in ui/test/homeView.test.ts: `factStrip(scope, undefined, { notMeasured: 'Unknown', none: 'No tasks' })` on a measured scope with tasksTotal 0, tokensSpent 0 and tokensUnmeasured above 0 returns the Budget tile as `{ value: 'Unknown', quiet: true }` and the Tasks tile as `{ value: 'No tasks', quiet: true }`; `factStrip(null, undefined, { notKnown: 'Unknown' })` returns four tiles, each with value 'Unknown' and quiet true. Under the null vitest strips types, so the third argument is accepted and ignored: the test runs and fails on its value assertion (it prints 'Not measured' where 'Unknown' is expected), not at compile time. After the fix it passes.",
+        "Control: with no copy argument, every existing factStrip assertion holds unchanged, and `factStrip(scope)` deep-equals `factStrip(scope, undefined, FACT_STRIP_COPY)` for the null, unmeasured, zero-task and populated scopes.",
+        "Revert proof: keeping the copy parameter but restoring the string comparison for quiet makes the first test fail on quiet (it prints false where true is expected).",
+        "Gates: `pnpm run test:ui`, `pnpm run typecheck:ui`, `pnpm run typecheck:ui:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/src/lib/homeView.ts",
+        "ui/test/homeView.test.ts"
+      ],
+      "budget": {
+        "tokens": 80000,
+        "diff_lines": 160
+      },
+      "contract": {
+        "functional_clauses": [
+          "quiet is computed from state values, never from a rendered string.",
+          "Default copy and rendered output are unchanged for today's callers."
+        ],
+        "nonfunctional_clauses": [
+          "factStrip's signature is exactly `factStrip(scope: ActiveScopeResult | null, project?: string, copy?: Partial<FactStripCopy>): FactTile[]`: the existing parameters keep their names, types and order, and the copy parameter is optional and last.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-10-ui-dead-exports-rest",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Delete test-only exports in agentScope, taxonomy, timelineDisplay",
+      "summary": "Extend the export guard to the remaining modules and delete what only tests use.",
+      "objective": "Extend the guard in ui/test/libExports.test.ts to agentScope, taxonomy and timelineDisplay, and delete the exports there that no non-test code uses, together with their tests: the whole ui/src/lib/agentScope.ts module and ui/test/agentScope.test.ts (agentScopeLabel), LozengeVariant, taskStatusTone, runStatusTone, lessonStatusTone and errorGroupIcon in ui/src/lib/taxonomy.ts, and timelineItems, nodesOfItem and matchesKind in ui/src/lib/timelineDisplay.ts. Update the comment in ui/src/lib/api.ts that names lib/agentScope.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 6 (b4b7db1b), part 2: every exported helper in agentScope.ts, taxonomy.ts and timelineDisplay.ts has at least one non-test consumer, or is deleted together with its tests.",
+        "Test first: the guard's module list gains agentScope, taxonomy and timelineDisplay. Under the null it fails listing agentScopeLabel, LozengeVariant, taskStatusTone, runStatusTone, lessonStatusTone, errorGroupIcon, timelineItems, nodesOfItem and matchesKind; after the deletions it passes. A deleted module counts as having no dead exports.",
+        "Revert proof: restoring any one deleted export makes the guard fail again, naming it.",
+        "`git grep -n \"agentScope\" -- ui/src` prints nothing after the change.",
+        "Gates: `pnpm run test:ui`, `pnpm run typecheck:ui`, `pnpm run typecheck:ui:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/src/lib/agentScope.ts",
+        "ui/src/lib/taxonomy.ts",
+        "ui/src/lib/timelineDisplay.ts",
+        "ui/src/lib/api.ts",
+        "ui/test/agentScope.test.ts",
+        "ui/test/taxonomy.test.ts",
+        "ui/test/timelineDisplay.test.ts",
+        "ui/test/libExports.test.ts"
+      ],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "Only exports with no non-test consumer and no use inside their own module are deleted; their tests go with them.",
+          "No rendered output changes: every remaining export keeps its behaviour.",
+          "api.ts changes in a comment only."
+        ],
+        "nonfunctional_clauses": [
+          "Remaining exports keep their names and signatures; keeps_exports: no export of api.ts is removed or has its declaration changed (its edit is a comment).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`; a deleted file is staged with `git rm <path>`.",
+          "English only; no absolute paths and no other project names.",
+          "The guard reads source files from the working tree and no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "ui/src/lib/api.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-11-projector-batch-apply",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Projector applies a batch of sessions in one pass",
+      "summary": "A reusable projection handle reads each changed log once, migrates once, and runs each global fold once per batch, with a fold observer tests can count.",
+      "objective": "Add to factory/orchestrator/src/db/projector.ts a reusable projection handle (for example `openProjection(dbPath, opts)` returning `{ applySessions(sessionIds), close() }`) that opens and migrates the database once per handle, caches each parsed session log by (path, size, mtimeMs) so an unchanged log is not re-read, runs the global folds (tasks, findings, lessons, operator feedback) once per batch rather than once per session, and isolates a failing session so it does not stop the batch. The handle's options take an optional fold observer (for example `onFold(name)`, called once each time a global fold runs, with name 'tasks', 'findings', 'lessons' or 'feedback'); it is absent by default and exists so a test can count fold runs, including foldTasks and foldLessons, which are called inside projector.ts where a module mock cannot reach them. close() closes the handle's connection. apply() and rebuild() keep their signatures and behaviour, built on the same code. projector.ts keeps the four fold entry functions under these names, projectTasks, projectFindings, projectLessons and projectOperatorFeedback, each still the function its global fold runs through (exported or not, as today), because task-18's source guard starts its walk from them and fails naming one it cannot find. Skipping a fold that a batch cannot change is task-17's work, not this task's: here every batch runs every global fold exactly once.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (503e2f36), projector half, limited to what this task's tests count: through the handle, a cold batch reads and parses each log once, a one-event append re-reads only the changed session's log, the database is migrated once per handle, and each global fold runs once per batch instead of once per session. Each fold still runs over every session's merged events on every batch; bounding that is task-17's criterion, and this task claims no proportionality beyond these counts.",
+        "Test first, new factory/orchestrator/test/db/applyCost.test.ts, counting through a pass-through mock of the file-read module the projector uses (count reads of *.jsonl paths): with N = 20 temp-dir sessions, applying all N cold through the new handle reads N logs. The null comparison runs the same N through per-session apply() and observes N x N reads, so the batch path's count differs by construction.",
+        "Same file: after a one-event append to one session, the next batch reads exactly 1 log; the migrator runs once per handle (counted); through the fold observer, a cold batch of N = 20 reports 'tasks', 'findings', 'lessons' and 'feedback' once each, and the batch after a one-event append reports each once again. Under the null there is no handle and no observer, so `openProjection` is undefined and the test fails at run time on its first call (vitest strips types, so this is a TypeError, not a compile error); after the fix it prints 1 of each per batch.",
+        "Upper bound at the dashboard's entry point, same file: the test drives exactly the calls task-12's refresher makes (one `openProjection(dbPath, opts)` per refresher, then one `applySessions(changedIds)` per scan) and asserts at most N = 20 *.jsonl reads on the cold scan and at most 1 on the scan after a one-event append. The null for this bound is a handle that only wraps today's behaviour, its applySessions looping apply() over its ids as the refresher does today: that prints 400 reads against the bound of 20 and 20 against the bound of 1, so the bound fails on today's code path.",
+        "Same file: one malformed session in a batch yields an error for that session while the others project.",
+        "Revert proof: dropping the parse cache while keeping the tests makes the one-event-append count fail; replacing applySessions' body with a loop of apply() over its ids makes the entry-point bound fail (400 reads against 20).",
+        "Existing tests in factory/orchestrator/test/db/projector.test.ts pass; the projected tables for a fixture are equal whether built by apply() per session or by one batch; and `git grep -nE \"^(export )?(async )?function (projectTasks|projectFindings|projectLessons|projectOperatorFeedback)\\(\" -- factory/orchestrator/src/db/projector.ts` prints four lines, today and after, one per fold entry function.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/test/db/applyCost.test.ts",
+        "factory/orchestrator/test/db/projector.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/projector.ts"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "The handle's batch result reports, per session, the applied events or the error, so a caller can keep per-session bookkeeping.",
+          "The projection a batch produces equals the projection per-session apply() produces for the same logs.",
+          "The fold observer is optional and is called once per global fold run; with no observer the handle behaves identically.",
+          "close() closes the handle's connection exactly once; a second close() is a no-op.",
+          "Performance is proven by counts (log reads, migrations, fold runs), never by timing."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of db/projector.ts is removed or has its declaration changed; the handle, its options type and its result type are new exports.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-12-refresher-batch-apply",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Dashboard refresher applies changed sessions in one batch",
+      "summary": "createRefresher holds one projection handle and applies each scan's changed sessions together.",
+      "objective": "In ui/server/src/app.ts, createRefresher opens one projection handle from task-11 when the refresher is created, collects the sessions whose fingerprint changed in a scan, and applies them in one batch through that handle. stop() closes the handle, and a refresh() called after stop() resolves without scanning or applying. A stop() during a running scan ends that scan cleanly: no batch call starts after stop(), the batch already in flight finishes on an open handle, the handle closes once the scan settles (at once when no scan is running), and the scan records no per-session failure and notifies no listener for the shutdown. The projection handle is its own connection, so closeApp closing the app's read handle right after closeStream() does not touch it. Each refresher owns its own handle on its own database path, so the home store and every extra store each hold one handle and never share one. It keeps its per-session bookkeeping (advances, issues, named findings and artifacts, fingerprints) and the projection generation counter task-15 adds.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (503e2f36), dashboard half: the refresher's cold scan reads each log once, about one read per session.",
+        "Test first, new ui/server/test/refreshCost.test.ts, counting *.jsonl reads through a pass-through mock of the file-read module: a cold scan over N = 20 temp-dir sessions reads N logs (under the null, per-session apply, N x N); a second scan after a one-event append to one session reads 1 log (null: N).",
+        "Same file: a malformed session still produces its issue entry and the other sessions advance.",
+        "Handle lifecycle, same file, counting through a pass-through vi.mock of the orchestrator's dist db/projector.js module that records each openProjection call with its dbPath and each handle's applySessions and close calls: (a) createApp over a temp-dir home store with two extra stores (store-a, store-b, passed as opts.stores) opens 1 + 2 handles on three distinct dbPaths, and no handle receives applySessions calls from two refreshers; (b) a refresher's stop() closes its handle exactly once and a second stop() does not close it again, and closeApp closes all three handles, the home one through its refresher's stop() and the extra stores' through stores.close(), which runs the same refresher.stop() a store leaving discovery reaches after its grace period, so no timer is needed; (c) after stop(), with one event appended to a session, refresh() resolves with 0 readdirSync calls on the events dir and 0 apply or applySessions calls. (d) stop() during a running scan, over a home store of 3 temp-dir sessions: the mock holds the first projection call the refresher makes (applySessions after the fix, apply() under the null) on a gate that sits before it delegates to the real function, and records each delegation with whether its handle was already closed; the test starts GET /api/pulse without awaiting it, waits until the gate is entered, calls closeStream() (which runs the refresher's stop()), releases the gate and awaits the request, then reads projectionIssues from a second GET /api/pulse. It asserts 0 projection calls started after stop(), 0 delegations to a closed handle, exactly 1 close of the home handle recorded after the held batch settled, 0 'session-not-projected' entries in projectionIssues, and that the first request resolved. Under the null (task-11 and task-15 merged, task-12 not) the test prints 0 handles, after stop 1 readdir and 1 apply, and for (d) 2 apply calls started after stop() (the per-session loop carries on through the other two sessions), so (a) to (d) fail on their assertions; after the fix it prints 3 handles, 1 close each, 0 and 0 after stop, and for (d) 0 calls after stop(), 0 delegations to a closed handle and 1 close after the batch, with 0 session-not-projected entries.",
+        "Revert proof: restoring the per-session apply loop while keeping the test makes the cold-scan count fail again; removing the close from stop() makes the lifecycle test fail on (b); making stop() close the handle at once while a scan is in flight makes it fail on (d), printing 1 delegation to a closed handle.",
+        "Existing tests in ui/server/test pass unchanged, and the coverage thresholds on app.ts hold.",
+        "Gates: `pnpm run test:server`, `pnpm run typecheck:server` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/test/refreshCost.test.ts"
+      ],
+      "budget": {
+        "tokens": 140000,
+        "diff_lines": 360
+      },
+      "contract": {
+        "functional_clauses": [
+          "One scan makes one batch call for every changed session; the handle opens when the refresher is created and closes in stop(), or, when a scan is running, as soon as that scan settles.",
+          "stop() is idempotent: the handle is closed once however often stop() runs; refresh() after stop() resolves with no scan and no apply; stop() during a running scan starts no further batch call, lets the batch in flight finish on an open handle, and records no per-session failure for the shutdown.",
+          "A handle belongs to one refresher and one database path; no two refreshers share a handle.",
+          "Per-session results feed advances, issues, named findings and named artifacts exactly as today, and every applied batch bumps the projection generation."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures of app.ts stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs, start no listening server and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-13-timeline-indexed-page",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "timeline() reads one page with an indexed query",
+      "summary": "Keyset ORDER BY ts DESC LIMIT windows replace the whole-table load, parse and sort.",
+      "objective": "In factory/orchestrator/src/db/queries.ts, a paged timeline() call (one with a limit) reads its page with keyset windows (`ORDER BY ts DESC ... LIMIT limit + 1`, ascending for an after cursor) and parses only the rows of the windows it reads. Where each filter runs is fixed: (1) In the SQL WHERE: the event-type set `filter.eventTypes ?? timelineEventTypes()`, intersected, when `kinds` is given, with the types whose eventKind is in kinds (eventKind ignores its payload argument, so a kind is a set of event types; this is how the severity-decisions and quorum-decision lens cases move into SQL); the session scope; taskId; and the before/after cursors as an inclusive ts bound against the cursor resolveCursor returns ({ts, eventId}): `ts <= cursor.ts` for before, `ts >= cursor.ts` for after, so the rows that share the cursor's ts reach JS. (2) In JS on raw columns, before any payload parse: the project filter (projectOf); today's cursor filter against that resolved cursor, unchanged (compareLogOrder(e, cursor) < 0 for before, > 0 for after; compareLogOrder lives in factory/orchestrator/src/eventOrder.ts and orders by ts, then session id, then numeric log index); and the ordering of rows that tie on ts with compareLogOrder, so a `#9` event never sorts after a `#10` one. Window order and page order: a before call reads `ORDER BY ts DESC` and its page is, as today, the newest `limit` matching events strictly older than the cursor in compareLogOrder order; an after call reads `ORDER BY ts ASC` and its page is, as today, the oldest `limit` matching events strictly newer than the cursor in compareLogOrder order; both are returned newest-first, as today. Tie groups: a window whose LIMIT is reached reads the rest of the tie group of its last row (the same WHERE, with `ts = lastTs`) before rows are ordered by compareLogOrder and the page is cut, and the next window continues strictly beyond that ts (`ts < lastTs` for before, `ts > lastTs` for after), so no window boundary falls inside a tie group and SQLite's physical order of tied rows never decides which of them a page holds. (3) In JS per window, after the parse, reading further windows until the page plus its more-probe row is full or rows run out: the epic filter (promptInEpic), whose session and named-prompt sets come from one SQL query over the same scoped, project-filtered rows, applying eventTypes but not kinds, because today's epic filter runs before the kinds filter; the query returns each row's task_id column with its payload epic_id and parent_prompt_id extracted by json_extract, parses no payload in JS, and keeps epicOfEntry's precedence: the epic a qualified task id names (through epicOfTaskId) wins, and the payload epic_id counts only when the task id names no epic (null or bare); and the decisions-only lens (applyDecisionsLens), where a dispatch_decision's parent is checked by id lookup against the same filters. (4) After paging, on the page rows only: nearestPromptId (memoized; an ancestor outside the windows read is fetched by id) and the other per-row joins. An unpaged call (no limit) keeps today's load-all path. The paged route's more-probe costs one small window, not a second full query.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 11 (38e415f2): a limit-8 page is read with an ORDER BY ts DESC LIMIT 9 style indexed query, with work independent of history length. Residual, stated exactly: with an epic filter, the page parses only the windows it reads, and the SQL pre-pass that finds the epic's sessions and named prompts reads every scoped row's payload inside SQLite (json_extract) while parsing none in JS.",
+        "Test first, new factory/orchestrator/test/db/timelineCost.test.ts, counting payload parses through a pass-through of the row-to-entry path (or a JSON.parse spy scoped to the call): on a temp-dir store with 2,000 timeline events, timeline(db, {limit: 8}) parses at most 9 payloads plus one boundary tie group, where the boundary tie group is the unread rows that share the ts of the last row a window's LIMIT returned, which the objective reads before cutting. Under the null it parses all 2,000, so the count differs by construction.",
+        "Same file: the more-probe (limit 1 with a before cursor) parses at most 2 payloads plus one boundary tie group; the statement timeline() prepares contains `ORDER BY` and `LIMIT` (statement inspection); on the same store, where 'Gate' kind events are 1 in 20, timeline(db, {limit: 8, kinds: ['Gate']}) parses at most 9 payloads plus one boundary tie group (null: all 2,000); and timeline(db, {limit: 8, epicId: 'epic-a'}) parses only the rows of the windows it reads (counted) while the epic pre-pass parses 0 payloads in JS (null: all 2,000).",
+        "Ordering test, in factory/orchestrator/test/db/timelinePaging.test.ts: (a) events sharing one ts with indexes #9 and #10 across a window boundary come back in compareLogOrder order, and paging through all pages yields every event exactly once. (b) New row, a tie group that spans two sessions and straddles the cursor: on a temp-dir store with one session in project-a (epic-a) and one in project-b (epic-b), log entries #8, #9 and #10 of each session share one ts, so the group holds six events; the fixture projects the session that sorts later in compareLogOrder first, so SQLite's rowid order of the group differs from compareLogOrder order. With the cursor on a group member in the middle of compareLogOrder order, a before page and an after page (limits 1, 2 and 3, so a window boundary falls inside the group) each hold exactly the group members on their own side of the cursor, in compareLogOrder order and newest-first, and paging from that cursor to the end in both directions yields every event of the store other than the cursor exactly once, and the cursor in neither direction. On a failure the test prints the skipped or repeated event id. Null, stated honestly: row (b) passes on today's code, because today filters and orders the full list with compareLogOrder before it cuts; it is the guard the keyset windows must keep, and criterion 6 shows it discriminates.",
+        "Parity test, new factory/orchestrator/test/db/timelineParity.test.ts: a temp-dir store of 300 events across two sessions (epic-a in project-a, epic-b in project-b) holding every timeline event type, prompt chains, operator and non-operator decisions, and ts ties. The fixture also pins epicOfEntry's precedence with two events: one whose only epic reference is a qualified task id (task_id epic-a/task-1, no payload epic_id), and one whose task id and payload name different epics (task_id epic-a/task-2, payload epic_id epic-b), written in epic-b's session, so that session also counts as an epic-a session for its epic-less prompts. For each filter path (none; epicId, run once for epic-a and once for epic-b; taskId; project; eventTypes; kinds, once per EventKind value; decisionsOnly; decisionsOnly with epicId), paging with limit 8 through before cursors, plus one after-cursor page, gives pages that each deep-equal the matching newest-first slice of unpaged timeline(db, sameFilter), nearestPromptId included; the more-probe (limit 1, before the page's last id) answers whether an older row exists exactly as the unpaged list does; and a filtered page fills to its limit when enough matching rows exist, shown by epic-b, whose events are 1 in 25 of the store, still filling pages of 8. This test passes under the null too (the null filters the full list); it is the guard that moving filters into SQL changes no answer. A pre-pass that lets the payload epic_id win, or reads only the payload, fails its epicId rows: the epic-a/task-2 event appears under epic-b and is missing from epic-a, and the epic-a/task-1 event is missing from epic-a.",
+        "Revert proof: restoring the load-all path while keeping the tests makes the parse-count test fail again; dropping the kinds-to-types intersection from the SQL while filtering kinds in JS per window keeps parity green but makes the kinds row of the cost test fail (with 1 in 20 rows matching, filling a page of 8 parses well over 9 payloads); and each of these, kept as a local, uncommitted change with the tests unchanged, makes criterion 4's row (b) fail, naming the skipped or repeated event id: an exclusive SQL cursor bound (`ts < cursor.ts` / `ts > cursor.ts`), which skips the cursor's tie mates on its own side; dropping the compareLogOrder cursor filter while keeping the inclusive bound, which repeats the cursor and its tie mates from the far side; and cutting a window at its LIMIT inside a tie group without reading the rest of the group, which skips the unread members at the next window's strict bound.",
+        "Existing timeline tests pass unchanged.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/timelineCost.test.ts",
+        "factory/orchestrator/test/db/timelinePaging.test.ts",
+        "factory/orchestrator/test/db/timelineParity.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 700
+      },
+      "contract": {
+        "functional_clauses": [
+          "timeline() returns the same entries in the same order, with the same cursors, as today for every filter combination the existing tests cover.",
+          "Work is proven by counts (payload parses, statement text), never by timing.",
+          "No schema migration and no new index unless an existing index cannot serve ts ordering; if one is needed, stop and report error.spec.spec-gap."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-14-overview-constant-work",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "overview() stops refolding whole tables",
+      "summary": "One agent fold per call, one token map shared across projects, and an aggregate query for running sessions.",
+      "objective": "In factory/orchestrator/src/db/queries.ts, cut overview()'s repeated whole-table work: liveAgentsAt's registry fold runs once per overview() call and is shared by the live and working agent counts; epicTokenMaps and the other per-project summary inputs (agents, tasks, findings in scope) are computed once per call and partitioned by project instead of recomputed per project; runningSessions reads an aggregate (one row per session) instead of every events_raw row. Outputs stay equal.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 12 (a2da2311), query half: per-poll database work close to constant; no whole-table refold repeated within one call.",
+        "Test first, new factory/orchestrator/test/db/overviewCost.test.ts, counting through pass-through spies: the agent fold (for example foldAgents) runs once per overview() call (null: twice or more); the task-result-recorded payload parses are equal for a store holding one project and a store holding the same events spread over five projects (null: five times as many); the rows runningSessions reads are at most the number of sessions on a temp-dir store with 2 sessions x 500 events (null: 1,000 or more).",
+        "Same file: overview() output on those fixtures deep-equals the output computed by today's code paths captured in the existing queries tests.",
+        "Revert proof: restoring the second liveAgentsAt fold while keeping the tests makes the fold-count assertion fail again.",
+        "Existing tests in factory/orchestrator/test/db pass unchanged.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 550
+      },
+      "contract": {
+        "functional_clauses": [
+          "runningSessions keeps its declaration and its result; only its query changes.",
+          "Every overview() and projectSummary() field keeps its value on the existing fixtures.",
+          "Work is proven by counts (fold runs, payload parses, rows read), never by timing."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-15-overview-shared-per-projection",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "One overview per store per projection state",
+      "summary": "/api/active-scope and /api/overview share a memo keyed on the projection generation.",
+      "objective": "In ui/server/src/app.ts, compute overview() once per store per projection state and share it between /api/active-scope and /api/overview: a memo keyed on (store, scope, projection generation), where the refresher bumps the generation whenever a scan applies events. An entry also expires after an injectable bound no longer than the 5 s Home poll interval, so fields that depend on the current time stay fresh.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criteria 13 (01f294b6) and 12 (a2da2311), memo half: one overview computation per store per projection state, shared by the endpoints that read it.",
+        "Test first, new ui/server/test/overviewShared.test.ts, counting overview() calls through a pass-through mock of the orchestrator's dist queries module: one Home poll (GET /api/active-scope then GET /api/overview) over two temp-dir stores calls overview() once per store. Under the null it is called at least twice per store, so the test fails; after the fix it passes.",
+        "Same file: a repeat poll with no new events inside the bound calls overview() zero times; after a one-event append and a refresher scan, or once the injected clock passes the bound, it recomputes once per affected store.",
+        "Revert proof: removing the memo lookup while keeping the test makes the first count fail again.",
+        "Existing tests in ui/server/test pass unchanged, and the coverage thresholds on app.ts hold.",
+        "Gates: `pnpm run test:server`, `pnpm run typecheck:server` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/test/overviewShared.test.ts"
+      ],
+      "budget": {
+        "tokens": 120000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "The memo key includes the store, the scope and the projection generation; a scan that applies events bumps the generation.",
+          "No entry is served past the injected bound, which defaults to at most the Home poll interval.",
+          "Responses are equal to today's for the same projection state."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures of app.ts stay as they are; the bound is injected through an optional field.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs, start no listening server and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-16-gate-lineage-once",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "The gate reads the lineage once per run",
+      "summary": "A per-run lineage snapshot replaces one full lineage read per finding.",
+      "objective": "Read and fold the session lineage once per gate run: a new factory/orchestrator/src/lineageSnapshot.ts holds a per-run snapshot that the gate seeds with the run's first lineage read (recordResult in gate.ts) and that every append made during the run extends. Every lineage reader on the gate path reads the snapshot when one travels with the run's opts object and falls back to readLineageEvents otherwise: recordResult (gate.ts); readJudgeTurns (judges.ts); checkUiux (uiuxGate.ts), reached when the task is UI-affecting; routeFindings and recordReattribution (attribution.ts), routeFindings' task-status fold being the one read once per intake; raiseFinding and transition (findings.ts); isWaived (waivers.ts), called by raiseFinding per suppressible finding; recordJudgeRun (quorum.ts), whose actor lookup runs when a configured cross-check escalates a finding and the gate context names no actor; and readAddedTasks and emitFollowUpTask (taskEvents.ts). The appends those modules make during the run (the gate's emit, raiseFinding, transition, recordReattribution, recordJudgeRun's dispatch and verdict, emitFollowUpTask) extend the snapshot. Export declarations stay unchanged; the snapshot rides on the opts object the run already passes (for example a WeakMap keyed on it), so it never outlives or crosses a run.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 14 (5fec9fff): the lineage is read and folded once per gate run.",
+        "Test first, new factory/orchestrator/test/gateLineageReads.test.ts, counting readLineageEvents calls that cross the events.js module boundary, through a pass-through mock of the events module (reads inside events.ts itself, such as appendEvent's own, are outside criterion 14 and not counted). Fixture: a temp-dir lineage, ownership set, a UI-affecting task with its uiux judge reported, and no owed judges. A gate run with 1 finding and the same run with 10 findings each make exactly 1 lineage read. A run whose configured cross-check (a stubbed fetchImpl, as gate.test.ts builds one) escalates 2 of 10 findings, with no actor on the gate context, also makes exactly 1. Under the null the count is above 1 and grows with the finding count (about three reads per finding), so the test fails on its assertion; after the fix it prints 1 for every run. A lineage reader found on the gate path outside the claimed files stops the task with error.spec.spec-gap rather than a looser bound.",
+        "Same file: the gate's outcome (blocking, pending waivers, escalations, reattributed, appended events) is equal with and without the snapshot on the same fixtures, and an event appended mid-run is visible to the next finding's waiver check.",
+        "Same file: two gate runs in one process share no snapshot (the second run reads the lineage afresh).",
+        "Revert proof: dropping the snapshot lookup from isWaived while keeping the tests makes the read-count test fail again; dropping it from routeFindings does too.",
+        "Existing gate, findings, waivers, judges, uiuxGate, quorum, attribution and taskEvents tests pass unchanged.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/gate.ts",
+        "factory/orchestrator/src/findings.ts",
+        "factory/orchestrator/src/taskEvents.ts",
+        "factory/orchestrator/src/attribution.ts",
+        "factory/orchestrator/src/waivers.ts",
+        "factory/orchestrator/src/judges.ts",
+        "factory/orchestrator/src/uiuxGate.ts",
+        "factory/orchestrator/src/quorum.ts",
+        "factory/orchestrator/src/lineageSnapshot.ts",
+        "factory/orchestrator/test/gateLineageReads.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/gate.ts",
+        "factory/orchestrator/src/findings.ts",
+        "factory/orchestrator/src/taskEvents.ts",
+        "factory/orchestrator/src/attribution.ts",
+        "factory/orchestrator/src/waivers.ts",
+        "factory/orchestrator/src/judges.ts",
+        "factory/orchestrator/src/uiuxGate.ts",
+        "factory/orchestrator/src/quorum.ts"
+      ],
+      "budget": {
+        "tokens": 215000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "A snapshot is created per gate run and is never module-level shared state; without one, every function behaves as today.",
+          "Each append made during the run, by any module on the gate path, is pushed into the snapshot, so reads within the run see the same events a fresh lineage read would.",
+          "events.ts is not edited; appendEvent's own read stays as it is."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of gate.ts, findings.ts, taskEvents.ts, attribution.ts, waivers.ts, judges.ts, uiuxGate.ts or quorum.ts is removed or has its declaration changed; lineageSnapshot.ts is a new module. Each edit in those files is a read-site or append-site swap onto the snapshot; no other logic changes.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-17-projector-fold-skip",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Projector skips global folds a batch cannot change",
+      "summary": "A batch re-runs only the global folds whose predicate accepts one of its new events, and fills epics.project in its own back-fill step.",
+      "objective": "In factory/orchestrator/src/db/projector.ts, the projection handle from task-11 skips each global fold (tasks, findings, lessons, operator feedback) on a batch whose new events include none that fold reads. Whether a fold reads an event is answered by the four predicates task-18 exports from factory/orchestrator/src/db/foldPredicates.ts, one per fold; this task imports them and does not edit that module. A session's new events are the suffix of its log beyond the prefix the handle already parsed. A cold first batch, a log that shrank or whose cached prefix no longer matches by event id, and a session that failed in the previous batch run every fold. A skipped fold leaves its table as its last run wrote it and reuses that run's report (skippedFindings), and the merged-events read is skipped when no fold runs. projectMilestones is unchanged. The epics back-fill runs as its own step, not through a wider tasks predicate: projectSession rewrites a re-projected session's epics rows with a per-session project fallback, which is NULL for a continuation that closes an epic it never planned, and the back-fill that fills such a NULL lives in projectTasks, so it is skipped with the tasks fold. After every batch that re-projects at least one session and skips the tasks fold, the handle therefore runs an internal (not exported) back-fill step: it reads (epic_id, project) from the tasks table, which the skipped fold left exactly as its last run wrote it and so holds the rows a re-run would fold, passes them through unanimousEpicProjects, and sets epics.project where it is still NULL, never overwriting a stamped project. The step reads no log, runs no fold and calls no fold observer. projectTasks keeps its own back-fill unchanged, for batches that run the tasks fold and for apply(), rebuild() and the tests that call projectTasks directly.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (503e2f36), fold half: a one-event append runs only the global folds whose predicate accepts that event, so an append that no fold reads runs no global fold and no merged-events read. Residual, stated exactly: an append whose event the tasks predicate accepts (one of the ten task lifecycle types, or any event naming a task_id, task_ids or an epic_id) still re-runs the tasks and findings folds over every session's merged events; and a plan file changed on disk with no event naming its epic is folded at the next batch that runs the tasks fold. The operator accepted this residual in round 5 and deferred it to a later epic; this plan does not close it. Cost of the epics back-fill step, which is not fold work: every batch that re-projects a session and skips the tasks fold runs one SELECT of (epic_id, project) over the tasks table and at most one UPDATE per epic those rows answer unanimously; it reads no log, runs no fold and does not change the sets the observer reports.",
+        "Test first, new factory/orchestrator/test/db/foldSkip.test.ts, counting fold runs through task-11's fold observer over a temp-dir store of 5 sessions (project-a, epic-a): after a cold batch, each row appends one event to one session and applies one batch, and the test asserts the set of folds the observer reported; each expected set is the set of task-18's four predicates that accept the row's event, not a hand-written list: a lesson-candidate-raised event naming no task or epic gives {lessons}; an operator-feedback-recorded event shaped as recordFeedback (feedback.ts) writes it, with envelope task_id epic-a/task-1 and a payload holding feedback_id, task_id epic-a/task-1 and body, gives {tasks, findings, feedback}; a task-added event gives {tasks, findings}; an event of a type no fold compares against that names no task, task_ids or epic gives {} (none). Under the null (the tree after task-11 and task-18, where every batch runs every fold) every row prints {tasks, findings, lessons, feedback}, so every row fails on its assertion (the feedback row by the extra lessons fold, the others by two or more); after the fix each row prints its own set.",
+        "Same file, parity over every table: the fixture holds, each by name, every type task-18's source guard collects (task-added, wave-admitted, wave-merged, dispatch_decision, task-result-recorded, judge-reported, gate-outcome, error-logged, task-superseded, task-reinstated; finding-raised, finding-transitioned and finding-obligation-repaired, the one constant-named type; lesson-candidate-raised, lesson-status-changed, lesson-edited and severity-decisions; operator-feedback-recorded and operator-feedback-resolved), events naming only an epic, and plan files under the fixture's specs dir. It also holds a continuation: epic-a is planned in one session (task-added, project project-a), a second session closes it with an epic-closed event that carries no project and names none of its tasks, and later in the sequence that continuation session gets one more append: an event of a type no fold compares against, naming no task, task_ids or epic, which no predicate accepts. The events are appended one at a time through the handle with a batch after each, and after every batch every table in the database equals, row for row in primary-key order with every column compared, what rebuild() builds from the same logs into a fresh database. The tables are read from sqlite_master of the rebuilt database, every table except drizzle's migrations bookkeeping table, not from a hand-written list, so they include epics with its project column, the four global tables and every per-session table. On a mismatch the test prints the table, the primary key, the column and both values. Under task-11's tree (every fold on every batch) it passes. Under task-17's skip without the back-fill step it fails at the continuation's last append, printing `epics epic-a project: null (batch) vs 'project-a' (rebuild)`; after the fix it passes, with epics.project 'project-a' after every batch.",
+        "Revert proof: restoring 'every fold on every batch' while keeping the tests makes the by-type test fail again (each row prints all four folds); and handing the skip a tasks predicate that returns false for every event (a local, uncommitted change to the predicate it imports from task-18's module) makes the parity test fail on the first task-added append; and removing the epics back-fill step while keeping the skip makes the parity test fail at the continuation's last append, printing `epics epic-a project: null (batch) vs 'project-a' (rebuild)`.",
+        "Existing tests in factory/orchestrator/test/db/projector.test.ts, task-11's applyCost.test.ts and task-18's foldPredicates.test.ts pass unchanged.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/test/db/foldSkip.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/projector.ts"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "After every batch every table the projection writes, epics and its project column included, equals what rebuild() produces from the same logs; a skip may change cost, never content.",
+          "rebuild() and apply() keep their behaviour and run every fold, as today.",
+          "The epics back-fill step reads the tasks table, never a log; it fills only a NULL epics.project and never overwrites a stamped one.",
+          "Work is proven by counts (fold runs through the observer), never by timing."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of db/projector.ts is removed or has its declaration changed; the epics back-fill step is internal and not exported, and the predicates stay in task-18's db/foldPredicates.ts rather than becoming projector.ts exports.",
+          "db/foldPredicates.ts, findings.ts and feedback.ts are read, not edited; a predicate change the skip needs stops the task with error.spec.spec-gap.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-18-fold-predicates",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "One predicate per global fold, checked against the fold's source",
+      "summary": "Four exported predicates say which event records each global fold reads, and a source guard derives each fold's compared types from its code.",
+      "objective": "Create factory/orchestrator/src/db/foldPredicates.ts, a pure module that exports one predicate per global fold over one event record (EventRecord from events.ts): the tasks predicate accepts every event type criterion 3's tasks walk collects, including the types compared inside helpers foldTasks reaches by import, and any record that names a task (envelope or payload task_id, payload task_ids) or an epic (payload epic_id), because foldTasks' alias and epic passes read those fields from every event. On this task's start tree (today's tree plus task-4's change) that is foldTasks' ten switch types (task-added, wave-admitted, wave-merged, dispatch_decision, task-result-recorded, judge-reported, gate-outcome, error-logged, task-superseded, task-reinstated) plus 'plan-version-created', which foldTasks reads through task-4's successor lookup: taskSuccessors' implementation, which task-4 moves into taskLifecycle.ts, compares event_type with PLAN_AMENDED_EVENT. The predicate names that type by importing the constant, never by repeating its value, the way the findings predicate names FINDING_OBLIGATION_REPAIRED_EVENT_TYPE: from taskLifecycle.ts when that module exports the constant taskSuccessors' implementation compares against, otherwise PLAN_AMENDED_EVENT from spec.ts, which exports it today and keeps it under task-4's and task-5's keeps_exports (spec.ts's static value imports reach no module under src/db/, so the import makes no cycle). Accepting the type changes no row: the one writer of plan-version-created, amendPlan's append in spec.ts, names the epic in payload.epic_id, which the tasks predicate already accepts. If the walk on the start tree collects for the tasks fold a type beyond these eleven, the tasks predicate accepts it too and the result names it; the findings predicate accepts the event types foldFindingsDetailed (findings.ts) compares against, including the named constant FINDING_OBLIGATION_REPAIRED_EVENT_TYPE ('finding-obligation-repaired'), which it imports from findings.ts rather than repeating its value, plus everything the tasks predicate accepts, because projectFindings derives a finding's project from the task rows; the lessons and feedback predicates accept the event types foldLessons and foldOperatorFeedback (feedback.ts) compare against. Nothing calls the predicates yet: task-17's skip is their first caller, so this task changes no fold, no projection and no cost. A source guard in the new test file keeps the four lists honest by reading the folds' code, including the helpers they import by relative path from modules under factory/orchestrator/src/. The guard is textual, because the repository's typescript package (7.0.2) exposes no compiler API, as factory/orchestrator/test/helpers/eventTypeScan.ts records; the guard may reuse that helper's tokenizer, delimiter matching and function-head spans by exporting them, an additive edit that changes no scanning rule.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (503e2f36), predicate half: the four predicates task-17's skip consults exist as exports of the pure module factory/orchestrator/src/db/foldPredicates.ts, each accepting every event type its fold compares against and kept honest by a guard derived from the fold's source. Nothing calls them yet, so this task changes no fold, no projection and no cost; the fold-run count is task-17's criterion 1.",
+        "Test first, new factory/orchestrator/test/db/foldPredicates.test.ts, predicate rows over minimal records, written before the module (which types each predicate accepts is criterion 3's guard, derived from the source, not a row list here): (a) a record of an invented type no fold compares against ('demo-hub-noted'), naming no task, task_ids or epic, is rejected by all four predicates; (b) that record with an envelope task_id, with a payload task_id, with a payload task_ids array, or with a payload epic_id is accepted by the tasks and findings predicates and rejected by the lessons and feedback predicates; (c) a record whose payload is not an object (null, or a string) is accepted by all four, because a predicate errs towards running its fold. The test prints, per row, the set of predicates that accepted it. Under the null (the tree after task-4, which has no src/db/foldPredicates.ts) the file fails to load and vitest names the unresolved import of the module, so no row prints a set; after the fix every row prints its own set, (a) printing {} (none), each (b) record printing {tasks, findings} and each (c) record printing {tasks, findings, lessons, feedback}.",
+        "Same file, source guard, derived from the source rather than from a hand-kept list of types. Entry points: for each global fold the guard starts at the fold's entry points (projectTasks, projectFindings, projectLessons and projectOperatorFeedback in factory/orchestrator/src/db/projector.ts; foldFindingsDetailed in factory/orchestrator/src/findings.ts; foldOperatorFeedback in factory/orchestrator/src/feedback.ts). An entry point that is not declared in its named module, as a function declaration or a const bound to a function or arrow expression, fails the test, naming the function and the module: a missing entry point is never an empty walk. Walk: from every reached body it follows, transitively, each call by bare name to a function declared in the same module, and each call to a function imported by relative path from a module under factory/orchestrator/src/ (a named or aliased import, or a namespace import called as `ns.name(`): it resolves the import to the module that declares the function, following `export { ... } from` and `export * from` re-exports, reads that body, and continues the walk there with that module's own declarations and imports. Package and `node:` imports are not followed; nor are method calls on values, `new` expressions, or calls to names that are neither a module-level declaration nor an import (globals, parameters, local closures, whose text is already inside the reached body). An imported name a reached body calls that the guard cannot resolve to a declaring module and a function declared there fails the test, naming the call and the import. The fold* rule becomes: a fold* function imported from another module is walked like any other imported helper, so the round-4 rule that failed on such a call is dropped, and one the guard cannot resolve fails under the resolution rule above. The reached set is computed by that walk and is never written down: the test must not assert that it equals, contains only or is bounded by any written list of function names (for example only, and not a complete list: projectTasks reaches foldTasksWithPlanProject and foldTasks, through them helpers in projector.ts such as assertedTaskIds, taskIdCanonicalizer and unanimousEpicProjects, and imported helpers such as loadPlan in plan.ts and eventTaskId in events.ts). Collection: in every reached body it collects each operand compared with event_type (`case X:`, `event_type === X`, `event_type !== X`): a string literal is taken as written; an identifier is resolved to the string literal its `const` declaration holds, in the same module or in the module it is imported from. An operand it cannot resolve to a string literal, and any other use of event_type (as a call argument, a Set's has, an array's includes), fails the test, naming the function, its module and the expression. It then asserts each fold's predicate accepts a minimal record of every type it collected for that fold, naming no task or epic; a rejected type fails naming the type, the function and the module it was collected from. It prints the collected set per fold. Orientation only, not a list the test asserts: the guard is judged on this task's start tree, today's tree plus task-4's change, and this note describes that tree. A round-5 sweep of today's tree with the import-following walk found one named constant, FINDING_OBLIGATION_REPAIRED_EVENT_TYPE (findings.ts, value 'finding-obligation-repaired'), compared in foldFindingsDetailed; the tasks fold and its helpers, findingTimestamps, foldLessons and foldOperatorFeedback compare string literals only; and the imported helpers the walk reaches today, in plan.ts, projectName.ts, taskId.ts, events.ts, worktree.ts and findings.ts, compare no event_type, and none is an unresolvable import or a namespace call. Task-4 changes that for the walks that reach foldTasks: on the start tree foldTasks reaches, through its relative import of task-4's reinstatement predicate in taskLifecycle.ts, taskSuccessors' implementation there, which compares event_type with PLAN_AMENDED_EVENT, so following imports adds 'plan-version-created' to the tasks set. As task-4's spec describes its code, nothing else changes: the reinstatement rule reads task-superseded, task-reinstated and wave-merged, already switch types, and task-4 edits none of findingTimestamps, foldFindingsDetailed, foldLessons or foldOperatorFeedback. The findings walk reaches foldTasks as well, through projectFindings' call of foldTasksWithPlanProject, so the findings set is the tasks set plus the finding types. So on the start tree the tasks set the test prints holds foldTasks' ten switch types and 'plan-version-created', and the findings set holds those eleven plus 'finding-raised', 'finding-transitioned' and 'finding-obligation-repaired'; the lessons and feedback sets are as today. A further type task-4's code compares in a reached body is collected all the same, and the tasks predicate accepts it by the objective's general rule; a use of event_type in task-4's code that the collection rule refuses lies in a file this task does not claim, so it stops the task with error.spec.spec-gap rather than loosening the rule. Under the null src/db/foldPredicates.ts does not exist, so the file fails to load and vitest names the unresolved import; after the fix it passes. A findings predicate written only from the literals fails here naming 'finding-obligation-repaired'; a tasks predicate written from foldTasks' ten switch types only fails here on the start tree naming 'plan-version-created', the taskLifecycle.ts function that holds taskSuccessors' implementation, and taskLifecycle.ts; and a fold that starts reading a new type, by literal or by constant, in its own module or in a helper it imports, without its predicate learning it fails here naming the type.",
+        "Revert proof: deleting src/db/foldPredicates.ts while keeping the test makes the file fail to load again; writing the findings predicate from the string literals foldFindingsDetailed compares only (finding-raised and finding-transitioned, with the imported constant dropped, so the predicate no longer accepts its type) makes the source guard fail naming 'finding-obligation-repaired'; and dropping payload task_ids from the tasks predicate's naming check makes row (b) fail for the task_ids record, printing {findings} or {} instead of {tasks, findings}. Entry-point arm: renaming projectLessons in projector.ts together with its callers (a local, uncommitted edit) makes the guard fail naming projectLessons and projector.ts, where a walk that skipped a missing entry would pass on an empty lessons set. Imported-helper arm, which discriminates the import-following rule: the tasks walk reaches task-4's reinstatement predicate in factory/orchestrator/src/taskLifecycle.ts through foldTasks' relative import of it. A local, uncommitted edit adds to that predicate's body a comparison of event_type with 'demo-hub-reinstated', a type foldTasks never compares and the tasks predicate rejects for a record naming no task: the guard fails naming 'demo-hub-reinstated', the predicate's name and taskLifecycle.ts. With the same edit, a guard whose walk follows same-module calls only (the round-4 rule, restored as a local change to the test) passes, because it never reads taskLifecycle.ts.",
+        "If this task exports helpers from factory/orchestrator/test/helpers/eventTypeScan.ts, the edit only adds `export` to existing functions; its scanning rules and its type lists are unchanged, and every test that imports it, factory/orchestrator/test/eventTypes.test.ts among them, passes unchanged.",
+        "Gates: `pnpm run test`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/foldPredicates.ts",
+        "factory/orchestrator/test/db/foldPredicates.test.ts",
+        "factory/orchestrator/test/helpers/eventTypeScan.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/test/helpers/eventTypeScan.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each predicate is pure: it reads only the record it is given, holds no state, and touches no file or database.",
+          "A predicate errs towards running its fold: when a record's shape is in doubt (unparseable payload, unknown type naming a task or epic), the fold runs.",
+          "The findings predicate accepts every record the tasks predicate accepts.",
+          "The source guard derives each fold's compared types and its reached functions from the source it reads; it carries no hand-kept list of either."
+        ],
+        "nonfunctional_clauses": [
+          "db/projector.ts, findings.ts and feedback.ts are read, not edited: the folds' event types are listed in db/foldPredicates.ts and kept honest by the source guard.",
+          "The module's only value import from findings.ts is FINDING_OBLIGATION_REPAIRED_EVENT_TYPE, an export task-16 (same round) promises to keep; EventRecord comes from events.ts as a type-only import.",
+          "eventTypeScan.ts is under keeps_exports: no export removed or changed; adding `export` to an existing helper is the only edit allowed there.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests read source files from the working tree and no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-10-ui-dead-exports-rest",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Delete test-only exports in agentScope, taxonomy, timelineDisplay, cascade included",
+      "summary": "Extend the export guard to the remaining modules and delete what only tests use.",
+      "objective": "Extend the guard in ui/test/libExports.test.ts to agentScope, taxonomy and timelineDisplay, and delete the exports there that no non-test code uses, together with their tests: the whole ui/src/lib/agentScope.ts module and ui/test/agentScope.test.ts (agentScopeLabel); LozengeVariant, taskStatusTone, runStatusTone, lessonStatusTone, errorGroupIcon and planStatusTone in ui/src/lib/taxonomy.ts; and timelineItems, nodesOfItem, matchesKind, buildCausalTree and tsForItem in ui/src/lib/timelineDisplay.ts, plus the cascade those deletions leave dead in the same module (groupDispatches, DispatchGroup, TimelineItem, DISPATCH_GROUP_MIN, KIND_OPTIONS and KindOption). Update the comment in ui/src/lib/api.ts that names lib/agentScope.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 6 (b4b7db1b), part 2: every exported helper in agentScope.ts, taxonomy.ts and timelineDisplay.ts has at least one non-test consumer, or is deleted together with its tests.",
+        "Test first: the guard's module list gains agentScope, taxonomy and timelineDisplay. Under the null it fails listing agentScopeLabel, LozengeVariant, taskStatusTone, runStatusTone, lessonStatusTone, errorGroupIcon, planStatusTone, timelineItems, nodesOfItem, matchesKind, buildCausalTree and tsForItem; after the deletions, the cascade (groupDispatches, DispatchGroup, TimelineItem, DISPATCH_GROUP_MIN, KIND_OPTIONS, KindOption) included, it passes. A deleted module counts as having no dead exports.",
+        "Revert proof: restoring any one deleted export makes the guard fail again, naming it.",
+        "`git grep -n \"agentScope\" -- ui/src` prints nothing after the change.",
+        "Gates: `pnpm run test:ui`, `pnpm run typecheck:ui`, `pnpm run typecheck:ui:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "ui/src/lib/agentScope.ts",
+        "ui/src/lib/taxonomy.ts",
+        "ui/src/lib/timelineDisplay.ts",
+        "ui/src/lib/api.ts",
+        "ui/test/agentScope.test.ts",
+        "ui/test/taxonomy.test.ts",
+        "ui/test/timelineDisplay.test.ts",
+        "ui/test/libExports.test.ts"
+      ],
+      "budget": {
+        "tokens": 160000,
+        "diff_lines": 950
+      },
+      "contract": {
+        "functional_clauses": [
+          "Only exports with no non-test consumer are deleted, together with exports whose only use was inside an export this task deletes; their tests go with them.",
+          "No rendered output changes: every remaining export keeps its behaviour.",
+          "api.ts changes in a comment only."
+        ],
+        "nonfunctional_clauses": [
+          "Remaining exports keep their names and signatures; keeps_exports: no export of api.ts is removed or has its declaration changed (its edit is a comment).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`; a deleted file is staged with `git rm <path>`.",
+          "English only; no absolute paths and no other project names.",
+          "The guard reads source files from the working tree and no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "ui/src/lib/api.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-17-projector-fold-skip",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "title": "Projector skips global folds a batch cannot change",
+      "summary": "A batch re-runs only the global folds whose predicate accepts one of its new events, and fills epics.project in its own back-fill step.",
+      "objective": "In factory/orchestrator/src/db/projector.ts, the projection handle from task-11 skips each global fold (tasks, findings, lessons, operator feedback) on a batch whose new events include none that fold reads. Whether a fold reads an event is answered by the four predicates task-18 exports from factory/orchestrator/src/db/foldPredicates.ts, one per fold; this task imports them and does not edit that module. A session's new events are the suffix of its log beyond the prefix the handle already parsed. A cold first batch, a log that shrank or whose cached prefix no longer matches by event id, and a session that failed in the previous batch run every fold. A skipped fold leaves its table as its last run wrote it and reuses that run's report (skippedFindings), and the merged-events read is skipped when no fold runs. projectMilestones is unchanged. The epics back-fill runs as its own step, not through a wider tasks predicate: projectSession rewrites a re-projected session's epics rows with a per-session project fallback, which is NULL for a continuation that closes an epic it never planned, and the back-fill that fills such a NULL lives in projectTasks, so it is skipped with the tasks fold. After every batch that re-projects at least one session and skips the tasks fold, the handle therefore runs an internal (not exported) back-fill step: it reads (epic_id, project) from the tasks table, which the skipped fold left exactly as its last run wrote it and so holds the rows a re-run would fold, passes them through unanimousEpicProjects, and sets epics.project where it is still NULL, never overwriting a stamped project. The step reads no log, runs no fold and calls no fold observer. projectTasks keeps its own back-fill unchanged, for batches that run the tasks fold and for apply(), rebuild() and the tests that call projectTasks directly. Plan v3: task-11's applyCost.test.ts test 'runs each global fold once per batch' expected all four folds after an operator-note tick that no fold reads; this task rewrites that test's second batch as criterion 5 states, the one edit outside projector.ts and foldSkip.test.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (503e2f36), fold half: a one-event append runs only the global folds whose predicate accepts that event, so an append that no fold reads runs no global fold and no merged-events read. Residual, stated exactly: an append whose event the tasks predicate accepts (one of the ten task lifecycle types, or any event naming a task_id, task_ids or an epic_id) still re-runs the tasks and findings folds over every session's merged events; and a plan file changed on disk with no event naming its epic is folded at the next batch that runs the tasks fold. The operator accepted this residual in round 5 and deferred it to a later epic; this plan does not close it. Cost of the epics back-fill step, which is not fold work: every batch that re-projects a session and skips the tasks fold runs one SELECT of (epic_id, project) over the tasks table and at most one UPDATE per epic those rows answer unanimously; it reads no log, runs no fold and does not change the sets the observer reports.",
+        "Test first, new factory/orchestrator/test/db/foldSkip.test.ts, counting fold runs through task-11's fold observer over a temp-dir store of 5 sessions (project-a, epic-a): after a cold batch, each row appends one event to one session and applies one batch, and the test asserts the set of folds the observer reported; each expected set is the set of task-18's four predicates that accept the row's event, not a hand-written list: a lesson-candidate-raised event naming no task or epic gives {lessons}; an operator-feedback-recorded event shaped as recordFeedback (feedback.ts) writes it, with envelope task_id epic-a/task-1 and a payload holding feedback_id, task_id epic-a/task-1 and body, gives {tasks, findings, feedback}; a task-added event gives {tasks, findings}; an event of a type no fold compares against that names no task, task_ids or epic gives {} (none). Under the null (the tree after task-11 and task-18, where every batch runs every fold) every row prints {tasks, findings, lessons, feedback}, so every row fails on its assertion (the feedback row by the extra lessons fold, the others by two or more); after the fix each row prints its own set.",
+        "Same file, parity over every table: the fixture holds, each by name, every type task-18's source guard collects (task-added, wave-admitted, wave-merged, dispatch_decision, task-result-recorded, judge-reported, gate-outcome, error-logged, task-superseded, task-reinstated; finding-raised, finding-transitioned and finding-obligation-repaired, the one constant-named type; lesson-candidate-raised, lesson-status-changed, lesson-edited and severity-decisions; operator-feedback-recorded and operator-feedback-resolved), events naming only an epic, and plan files under the fixture's specs dir. It also holds a continuation: epic-a is planned in one session (task-added, project project-a), a second session closes it with an epic-closed event that carries no project and names none of its tasks, and later in the sequence that continuation session gets one more append: an event of a type no fold compares against, naming no task, task_ids or epic, which no predicate accepts. The events are appended one at a time through the handle with a batch after each, and after every batch every table in the database equals, row for row in primary-key order with every column compared, what rebuild() builds from the same logs into a fresh database. The tables are read from sqlite_master of the rebuilt database, every table except drizzle's migrations bookkeeping table, not from a hand-written list, so they include epics with its project column, the four global tables and every per-session table. On a mismatch the test prints the table, the primary key, the column and both values. Under task-11's tree (every fold on every batch) it passes. Under task-17's skip without the back-fill step it fails at the continuation's last append, printing `epics epic-a project: null (batch) vs 'project-a' (rebuild)`; after the fix it passes, with epics.project 'project-a' after every batch.",
+        "Revert proof: restoring 'every fold on every batch' while keeping the tests makes the by-type test fail again (each row prints all four folds); and handing the skip a tasks predicate that returns false for every event (a local, uncommitted change to the predicate it imports from task-18's module) makes the parity test fail on the first task-added append; and removing the epics back-fill step while keeping the skip makes the parity test fail at the continuation's last append, printing `epics epic-a project: null (batch) vs 'project-a' (rebuild)`.",
+        "Existing tests in factory/orchestrator/test/db/projector.test.ts and task-18's foldPredicates.test.ts pass unchanged. In task-11's factory/orchestrator/test/db/applyCost.test.ts exactly one test changes: in 'runs each global fold once per batch', the second batch appended an operator-note tick that no predicate accepts and expected all four folds, which contradicts criterion 1. That second batch instead appends an event a fold reads (for example a task-added event for epic-a), and asserts that the folds the observer reports, sorted, equal the set of task-18's predicates that accept that event, so each fold runs at most once and a fold no predicate wants does not run. The test's cold first batch and its assertion, the shared appendOne helper and every other test in that file stay unchanged; the event may be appended inline in that test.",
+        "Gates: `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/test/db/foldSkip.test.ts",
+        "factory/orchestrator/test/db/applyCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/projector.ts"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "After every batch every table the projection writes, epics and its project column included, equals what rebuild() produces from the same logs; a skip may change cost, never content.",
+          "rebuild() and apply() keep their behaviour and run every fold, as today.",
+          "The epics back-fill step reads the tasks table, never a log; it fills only a NULL epics.project and never overwrites a stamped one.",
+          "Work is proven by counts (fold runs through the observer), never by timing."
+        ],
+        "nonfunctional_clauses": [
+          "keeps_exports: no export of db/projector.ts is removed or has its declaration changed; the epics back-fill step is internal and not exported, and the predicates stay in task-18's db/foldPredicates.ts rather than becoming projector.ts exports.",
+          "db/foldPredicates.ts, findings.ts and feedback.ts are read, not edited; a predicate change the skip needs stops the task with error.spec.spec-gap.",
+          "ui/server imports the orchestrator's dist, so the change is also checked with `pnpm run test:server`.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-audit-4/task-19-timeline-page-index",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "task_status": "todo",
+      "origin": "user",
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Timeline page on a ts-ordered index",
+      "summary": "Serve timelinePage's window statements and the more-probe from an index ordered by ts, with no temp B-tree, pinned by EXPLAIN QUERY PLAN.",
+      "objective": "Close epic criterion 38e415f2 (verdict-v3 gap 1). timelinePage (factory/orchestrator/src/db/queries.ts) runs one window statement per loop: rows matching scopeConditions (event_type IN the page types, the session scope, the task id), the cursor bounds and the strict lastTs bound, ordered by ts DESC (a before page) or ASC (an after page), LIMIT limit + 1. A full window is followed by a tie-group completion statement on ts = tieTs. ui/server's more-probe reaches the same code as a before page with limit 1. Today SQLite plans the window statement as `SEARCH events_raw USING INDEX events_raw_type_idx (event_type=?)` plus `USE TEMP B-TREE FOR ORDER BY`, so it reads every timeline-type row, payload included, into a sorter before the LIMIT applies. Make SQLite serve the window statement in both directions, the tie-group completion and the more-probe from an index ordered by ts. Each must read O(limit) rows and must not use a temp B-tree. Choose the shape from the query and prove it with EXPLAIN QUERY PLAN against the real migrated schema. One planner probe, on a table shaped like events_raw, suggests three things. A unary plus on the event_type term (`+event_type IN (...)`) moves the unscoped page onto the existing events_raw_ts_idx with no temp B-tree. A composite (event_type, ts) or (ts, event_type) index on its own leaves the planner on type_idx. A session-scoped page needs a (session_id, ts) shaped index to lose its temp B-tree. Treat these as hints to confirm or refute, not as the answer. The fix stays inside the window statements: the load-all path (no limit) and pagedEpicMatcher share scopeConditions, and neither may lose its type_idx plan. A new index with a drizzle migration is allowed; this lifts task-13's no-new-index clause. If one is added, it is migration 0018, generated by drizzle-kit together with its journal entry and snapshot, and schema.ts declares it. Then pin the result at the SQLite level, which task-13's tests did not do: a test captures the statements timelinePage actually prepares and asserts their query plan.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/src/db/schema.ts",
+        "factory/orchestrator/drizzle/0018_*.sql",
+        "factory/orchestrator/drizzle/meta/_journal.json",
+        "factory/orchestrator/drizzle/meta/0018_snapshot.json",
+        "factory/orchestrator/test/db/timelinePlan.test.ts",
+        "factory/orchestrator/test/db/timelineCost.test.ts",
+        "factory/orchestrator/test/db/timelinePaging.test.ts",
+        "factory/orchestrator/test/db/timelineParity.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 260000,
+        "diff_lines": 2400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Every window statement timelinePage prepares is served by an index ordered by ts, reads O(limit) rows, and plans with no `USE TEMP B-TREE FOR ORDER BY`. That covers the limit + 1 window in both directions and the ts = tieTs tie-group completion, and so also the ui/server more-probe, which is a before page with limit 1.",
+          "The change is confined to those statements. The load-all timeline path, pagedEpicMatcher's pre-pass and every other events_raw reader keep their current plans: no `SEARCH ... events_raw_type_idx` becomes a full `SCAN events_raw`.",
+          "Page content, order, cursor semantics and tie handling are unchanged. The existing parity, paging and cursor tests are the contract for that and stay green.",
+          "If an index is added, it lands as a single drizzle migration, 0018, generated by drizzle-kit. No drizzle config file exists, so pass the dialect, schema and output folder on the command line, the way 0017 was produced. The migration includes its meta/_journal.json entry and meta/0018_snapshot.json, schema.ts declares the same index, and the SQL file holds only CREATE INDEX statements. If no index is needed, no migration file is written, and the Result says so.",
+          "A new test, factory/orchestrator/test/db/timelinePlan.test.ts, pins the plan at the SQLite level. It uses the statements and parameters that timelinePage really prepares, captured at the driver; a hand-copied SQL string does not count. It comes with a revert proof."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by query plan or by counts, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server` as well as the orchestrator suite.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. Under factory/orchestrator/drizzle/, only the new 0018 files and the new journal entry are written. No existing migration or snapshot is ever edited.",
+          "The migration, if any, applies cleanly to an existing store at the previous schema (0017), and the existing tests that run the migrator stay green.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so the plan must hold on a store with no statistics.",
+          "A generated drizzle meta snapshot is about 1,800 lines and counts toward diff_lines; the budget allows for one.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "Epic criterion 11 (38e415f2): a limit-8 page is read by an ORDER BY ts LIMIT 9 statement that an index serves. timelinePlan.test.ts builds a store in a temp dir with the real migrations and captures the SQL and parameters timelinePage prepares for four calls: an unscoped before page (limit 8), an after page, the more-probe (a before cursor with limit 1) and a window full enough to trigger the tie-group completion. It runs EXPLAIN QUERY PLAN on each captured statement and asserts three things about every plan: its detail rows name an index whose ordering column is ts (events_raw_ts_idx, or the new index), it contains no `USE TEMP B-TREE`, and it does not name events_raw_type_idx. The Result pastes each plan. Revert proof: with the fix reverted, the test fails and names type_idx and the temp B-tree; paste both outputs.",
+        "Rows read do not grow with history. The same test builds stores at N and 10N timeline rows (N at least 2,000) and asserts that the captured plans are identical at both sizes. A deterministic rows-read count is an acceptable additional instrument, for example the driver's statement counters if the bundled SQLite exposes them, or a fixture whose rows read can be derived exactly. Timing is not acceptable.",
+        "Nothing else regresses. The Result pastes EXPLAIN QUERY PLAN before and after the change for the load-all timeline path (no limit) and for pagedEpicMatcher's pre-pass; neither turns a SEARCH on events_raw_type_idx into a full SCAN events_raw. It also pastes the plans of the session-scoped page variants (one session id and a session id list) and the task-scoped variant. Each of those either has no temp B-tree, or the Result states the residual exactly: rows read are bounded by that session's or that task's own timeline rows, not by the store's.",
+        "timelineCost.test.ts, timelinePaging.test.ts (including its cursor and tie tests) and timelineParity.test.ts stay green, and their assertions are not weakened; quote the pass counts. If a migration was added, three more things hold. A test opens a temp-dir store migrated to 0017, runs the migrator, and shows the new index in sqlite_master. Every existing test that runs the migrator stays green. `git diff --stat` shows no edit to any existing file under factory/orchestrator/drizzle/ except the one new _journal.json entry.",
+        "`pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint` pass, then `bash scripts/check.sh` runs in full. The Result quotes its tail and names every SKIP."
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-20-overview-poll-bounded",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "task_status": "superseded",
+      "origin": "user",
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview poll with bounded work",
+      "summary": "Memoise overview's projection stage until the projection advances, recompute only the clock stage per poll from indexed reads, and route /api/projects and /api/sessions through the memo.",
+      "objective": "Close epic criterion a2da2311 (verdict-v3 gap 2). Today every Home poll repeats whole-history work, for three reasons. First, ui/server/src/app.ts's sharedOverview memo is keyed on the refresher generation plus data_version, but an entry also expires at `overviewMemo.maxAgeMs ?? 4000`, which is shorter than PULSE_POLL_MS = 5000, so every poll recomputes. Second, /api/projects and /api/sessions (the all-stores path and the scoped path) call overview() directly and bypass the memo. Third, overview() itself does whole-history work: it JSON.parses every task-result-recorded row (taskResultRows) and every registry and task-added row up to the 5 min and 1 h cutoffs (liveAgentsAt, tokensSpentAt, tokensBudgetedAt); it reads the whole dispatches table to keep the newest ten; and runningSessions finds each session's newest event with `(session_id, ts) IN (SELECT session_id, max(ts) ... GROUP BY session_id)`, a full scan. Split the work into two stages. The projection stage holds everything that changes only when the projection advances; app.ts memoises it per (store, scope), keyed on projection state alone, with no age bound. The clock stage holds only what depends on now: working and stalled agent counts, idle and actively running epics, per-project working counts and idle epics, runningSessions' working counts, liveAgentCountDelta5m, workingAgentCountDelta5m and budgetUsedPctPointDelta1h. It is recomputed per poll from the memoised stage plus indexed reads whose rows are bounded by the clock windows and the live agents, not by history. One way to bound the deltas: the spend an hour ago is the spend now minus the measured spend in task-result-recorded rows with ts after the cutoff. Whatever method is used, its output must match today's fold, and the overviewDeltas tests decide that. overview(db, scope, opts) keeps its signature and returns the same result, built from the two stages. /api/overview, /api/active-scope, /api/projects and /api/sessions all read the shared memo. runningSessions' newest-event read becomes index-served: one indexed lookup per session, from an index whose leading columns are (session_id, ts), or from a column the projector already maintains. The newest-ten dispatches read becomes an ORDER BY with a LIMIT that an index serves. The parses of task-result-recorded, registry and task-added rows become incremental or window-bounded. Indexes this needs land as migration 0019 (task-19 may have taken 0018). First read what task-19 added, and reuse an index that already serves. Residual, stated exactly and allowed by the epic criterion's 'or a result memoised until the projection advances': when the projection does advance, epicActivityRows (a json_extract GROUP BY), sessionProjects and sessionTitles may still read whole history inside SQLite, once per advance. /api/sessions/:sessionId/agents is out of scope.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/src/db/schema.ts",
+        "factory/orchestrator/drizzle/0019_*.sql",
+        "factory/orchestrator/drizzle/meta/_journal.json",
+        "factory/orchestrator/drizzle/meta/0019_snapshot.json",
+        "factory/orchestrator/test/db/overviewPoll.test.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts",
+        "ui/server/src/app.ts",
+        "ui/server/test/overviewShared.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 450000,
+        "diff_lines": 3200
+      },
+      "contract": {
+        "functional_clauses": [
+          "overview() is built from two stages. The projection stage depends only on projection state, and the clock stage depends on now. overview(db, scope, opts) keeps its signature and its result: for any store and any nowIso it returns what it returns today. New exports for the stages are allowed. No existing export is removed or changes its declaration.",
+          "app.ts memoises the projection stage per (store, scope), keyed on the refresher generation plus data_version, with no age bound. A poll with no projection advance reruns only the clock stage. `overviewMemo.maxAgeMs` no longer ends an entry; the option may stay as an accepted, ignored field, or go if nothing else reads it.",
+          "/api/overview, /api/active-scope, /api/projects and /api/sessions (both its all-stores path and its scoped path) all read through the shared memo, so one Home poll computes the projection stage at most once per (store, scope).",
+          "The clock stage reads only rows bounded by the clock windows and the live agents: the 5 min and 1 h windows, read by index on ts, plus the live agents. Its output for every clock-dependent field equals today's, including liveAgentCountDelta5m, workingAgentCountDelta5m and budgetUsedPctPointDelta1h.",
+          "runningSessions' per-session newest-event read is served by an index, one lookup per session, with no full `SCAN events_raw` and no temp B-tree. The newest-ten dispatches read is an ORDER BY with a LIMIT that an index serves, plus at most one tie group, and keeps today's tie-break order. The task-result-recorded, registry and task-added parses are incremental or bounded by the clock windows.",
+          "Any index this needs is added in schema.ts and lands as a single drizzle migration, 0019, generated by drizzle-kit together with its meta/_journal.json entry and meta/0019_snapshot.json. The SQL file holds only CREATE INDEX statements. If task-19 already added an index that serves, it is reused, not duplicated."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts or query plan, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it. Adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server` as well as the orchestrator suite.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep tests are not claimed: they must stay green unedited. Under factory/orchestrator/drizzle/, only the new 0019 files and the new journal entry are written. No existing migration or snapshot is ever edited.",
+          "The migration applies cleanly to an existing store at the previous schema (0018 if task-19 added one, else 0017), and the existing tests that run the migrator stay green.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so plans must hold on a store with no statistics.",
+          "A generated drizzle meta snapshot is about 1,800 lines and counts toward diff_lines; the budget allows for one.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "Epic criterion 12 (a2da2311): per-poll database work is close to constant. A new test, factory/orchestrator/test/db/overviewPoll.test.ts, builds two stores in temp dirs from the real migrations: one at N events of history and one at 10N (N at least 2,000), with the same live agents and the same activity inside the clock windows. For a repeat poll with the injected clock moved 5 s forward and no new event, it counts four things: projection-stage computations, which must be 0; payload JSON.parse calls; rows the clock stage reads from events_raw; and rows it reads from dispatches. All four counts are equal at N and 10N. The Result pastes the counts. Revert proof: on today's code the parse count grows with N; paste both runs. Counts only, no timing.",
+        "After one appended event and a projection advance, the incremental parses are bounded. In the same test, the payload parses of task-result-recorded, registry and task-added rows are bounded by the appended events plus the rows inside the 5 min and 1 h windows, and are equal at N and 10N. The newest-ten dispatches read returns at most RECENT_DISPATCHES_LIMIT + 1 rows plus one tie group, keeps today's tie-break (shown by a test of a burst of dispatches inside one millisecond), and its EXPLAIN QUERY PLAN shows no full SCAN dispatches and no temp B-tree. If the residual named in the objective remains (epicActivityRows, sessionProjects and sessionTitles reading whole history in SQLite once per advance), the Result states it with file:line.",
+        "runningSessions is index-served. The test captures runningSessions' newest-event statement and runs EXPLAIN QUERY PLAN on it. The plan shows no `SCAN events_raw` other than through an index lookup per session, and no `USE TEMP B-TREE`. Its output is unchanged: runningSessionsLastStep.test.ts stays green unedited. The Result pastes the plan before and after.",
+        "The routes share the memo. ui/server/test/overviewShared.test.ts counts projection-stage computations; the pass-through mock is re-pointed from overview() to the stage export, and that change is stated in the Result. One poll that requests /api/overview, /api/active-scope, /api/projects and /api/sessions, both scoped and all-stores, computes the projection stage once per (store, scope). A repeat poll after the injected clock passes PULSE_POLL_MS with no projection advance computes it 0 times, and the clock-dependent fields still reflect the new clock. The old test 'recomputes each store once the bound has passed' is rewritten to that new contract. The Result names it, and every other rewritten test, with its old and new intent. The remaining overviewShared tests stay green, including 'recomputes only the store whose projection advanced' and 'keeps different scopes apart'.",
+        "Nothing else regresses. overviewCost.test.ts stays green with its assertions not weakened. overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep tests stay green unedited. Quote the pass counts. The migration test opens a temp-dir store at the previous schema, runs the migrator, and shows the new indexes in sqlite_master. `git diff --stat` shows no edit to any existing file under factory/orchestrator/drizzle/ except the one new _journal.json entry.",
+        "`pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server` and `pnpm run lint` pass, then `bash scripts/check.sh` runs in full. The Result quotes its tail and names every SKIP."
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-21-overview-indexed-reads",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: indexed dispatch and last-event reads",
+      "summary": "Migration 0019 adds dispatch indexes; overview's newest-ten dispatches and runningSessions' newest event per session become bounded index reads, proven by EXPLAIN QUERY PLAN and row counts.",
+      "objective": "Part 1 of 3 of task-20's split (finding a2da2311: Home's per-poll database work grows with history). Its first coder ran out of budget before writing anything, so what it found is given here. It touches only the two whole-table SQL reads and the migration. The stage split (task-22) and the app.ts memo (task-23) come later; do not start them.\n\nToday's code (factory/orchestrator/src/db/queries.ts):\n(a) overview() at ~1980-1983 reads the whole dispatches table, scoped only by session id. It then applies filterByProject (~318), sorts with inLogOrder (~324: compareLogOrder by ts, then session id, then the event index) and takes reverse().slice(0, RECENT_DISPATCHES_LIMIT) (~1176, value 10). After that it reads rounds from agents by id and titles from tasks.\n(b) runningSessions() at ~1343-1458 reads each session's newest event at ~1377-1389 with `(session_id, ts) IN (SELECT session_id, max(ts) FROM events_raw [scope] GROUP BY session_id)`, and isLaterEvent settles a tie. On the bundled SQLite 3.53.4 this runs as `SCAN events_raw USING COVERING INDEX events_raw_session_ts_idx`, an O(N) walk even with task-19's 0018 index. A GROUP BY max(ts) cannot become a lookup. It groups by session_id, not cli_session_id.\n(c) The dispatches table (schema.ts ~88-112) has session, task, role, provider, model_tier and project indexes, but no ts index. 0018 already added events_raw_session_ts_idx (session_id, ts) and events_raw_task_ts_idx (task_id, ts). Reuse them; never re-create them.\n\nChange:\n(1) Add one drizzle migration, 0019, generated from schema.ts. It adds dispatches_ts_idx (ts). Add dispatches_project_ts_idx (project, ts) and/or dispatches_session_ts_idx (session_id, ts) only where a scoped read in (2) uses it.\n(2) The recent-dispatches read becomes a keyset read, in four steps:\n  - read `WHERE ts <= (SELECT max(ts) FROM dispatches) ORDER BY ts DESC LIMIT RECENT_DISPATCHES_LIMIT + 1`;\n  - read the boundary ts's tie group once (`WHERE ts = ?`);\n  - let inLogOrder break the tie exactly as today;\n  - page on with `ts < cursor` only while filterByProject drops rows.\n  Planner probe (in-memory, no statistics, SQLite 3.53.4):\n  - The keyset form plans as `SEARCH dispatches USING INDEX dispatches_ts_idx (ts<?)`.\n  - A bare `ORDER BY ts DESC LIMIT 11` plans as `SCAN dispatches USING INDEX dispatches_ts_idx`.\n  - `WHERE project = ? ORDER BY ts DESC LIMIT` plans as a SEARCH on (project, ts). On the existing single-column project index it adds USE TEMP B-TREE FOR ORDER BY. Keep projectOf's null-to-DEFAULT_PROJECT normalisation: for the default project, also read `project IS NULL`.\n  - `session_id IN (?, ?) ORDER BY ts DESC LIMIT` uses a temp B-tree even on (session_id, ts). For a session-list scope, read each listed session with LIMIT on (session_id, ts) and merge with inLogOrder.\n(3) runningSessions' newest event becomes one indexed lookup per session: `FROM sessions s CROSS JOIN events_raw e WHERE e.session_id = s.session_id AND e.ts = (SELECT max(ts) FROM events_raw m WHERE m.session_id = s.session_id)`, plus today's scope condition. The probe plans it as:\n  - `SCAN s` (the sessions table, one row per session);\n  - `SEARCH e USING INDEX events_raw_session_ts_idx (session_id=? AND ts=?)`;\n  - a correlated `SEARCH m USING COVERING INDEX events_raw_session_ts_idx (session_id=?)`.\n  It returns the same rows as today's GROUP BY. A plain JOIN let the planner choose `SCAN e` over all of events_raw, so the join order must be forced (CROSS JOIN, or drizzle's equivalent via sql``). The ts-tie group comes back whole, and isLaterEvent settles it as today.\n\nWrite each proof test first and watch it fail on today's code. The EXPLAIN harness is built like test/db/timelinePlan.test.ts: capture the SQL drizzle sends, then run EXPLAIN QUERY PLAN on the same connection.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/src/db/schema.ts",
+        "factory/orchestrator/drizzle/0019_*.sql",
+        "factory/orchestrator/drizzle/meta/_journal.json",
+        "factory/orchestrator/drizzle/meta/0019_snapshot.json",
+        "factory/orchestrator/test/db/overviewPlan.test.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 260000,
+        "diff_lines": 2600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Migration 0019 is a single drizzle migration generated from schema.ts, with its journal entry and snapshot. Its SQL file holds only CREATE INDEX statements on dispatches: dispatches_ts_idx (ts), plus (project, ts) and/or (session_id, ts) only where a scoped read uses them. 0018's events_raw indexes, which already serve, are reused and not re-created.",
+          "overview()'s recent-dispatches read is an indexed keyset read: ORDER BY ts DESC with LIMIT RECENT_DISPATCHES_LIMIT + 1 on an index, plus at most one read of the boundary tie group. It pages on with ts < cursor only while filterByProject drops rows. recentDispatches is unchanged for every scope shape: none, project, sessionId, sessionIds, and sessionIds with project. Today's tie-break holds: inLogOrder (ts, then session id, then event index), newest first.",
+          "runningSessions() reads each session's newest event with one index lookup per session on events_raw_session_ts_idx. The join order is forced so that events_raw is never the outer scan. Ties at the newest ts are settled by isLaterEvent as today, and the result is unchanged.",
+          "overview() and runningSessions() keep their signatures and results; no other function's behaviour changes."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts or query plan, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it through dist. Adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep, queries and timelinePlan tests are not claimed: they stay green unedited.",
+          "Under factory/orchestrator/drizzle/, write only the new 0019 SQL file, the new 0019 snapshot and one new journal entry. Never edit an existing migration or snapshot.",
+          "The migration applies cleanly to an existing store at 0018, and the existing tests that run the migrator stay green.",
+          "A generated drizzle meta snapshot is about 1,800 lines and counts toward diff_lines; the budget allows for one.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so plans must hold on a store with no statistics.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "test/db/overviewPlan.test.ts (new) runs EXPLAIN QUERY PLAN on runningSessions' newest-event read, unscoped and session-scoped. Neither plan has a `SCAN events_raw` line (only a SEARCH on events_raw_session_ts_idx per session) nor a `USE TEMP B-TREE` line. The result pastes the plan before and after the change.",
+        "The same test runs EXPLAIN on the recent-dispatches read, unscoped and project-scoped, and shows no `SCAN dispatches` line and no `USE TEMP B-TREE` line. It counts the dispatches rows read: at most RECENT_DISPATCHES_LIMIT + 1 plus one tie group, equal on stores at N and 10N dispatches (N >= 2000). For a session-list scope the bound is the same per listed session. Reverting the read to the full-table form makes the count assertion fail; state that revert proof.",
+        "The tie-break holds. A burst of more than RECENT_DISPATCHES_LIMIT dispatches written in one millisecond still yields the newest ten in log order: overviewPlan.test.ts adds a burst that straddles the limit, so the tie-group read is exercised. The burst tests in test/db/queries.test.ts stay green unedited.",
+        "A migration test in overviewPlan.test.ts applies the migrations to a fresh temp store and to a temp store at 0018, and shows the new dispatches indexes in sqlite_master. The existing migrator tests (timelinePlan.test.ts among them) stay green. `git diff --stat` shows no existing drizzle file edited except the new journal entry. The residual is stated with file:line: any scope shape whose read is still unbounded.",
+        "No regressions: overviewCost.test.ts stays green and is not weakened (assertions may be added, none removed or loosened). Its golden overview() output and 'reads at most one events_raw row per session' hold. overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep stay green unedited.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-22-overview-clock-stage",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: projection stage and window-bounded clock stage",
+      "summary": "Split overview() into a projection stage and a clock stage whose reads are bounded by the 5 min and 1 h windows, with payload parses made incremental per store.",
+      "objective": "Part 2 of 3 of task-20's split (finding a2da2311). It lands after task-21's indexed reads. Do not touch ui/server: the app.ts memo is task-23.\n\nToday's code (factory/orchestrator/src/db/queries.ts): overview() at ~1952-2130 recomputes everything on every call.\n- taskResultRows (~726-740) selects and JSON.parses every task-result-recorded row.\n- The delta cutoffs are now-5 min and now-1 h (~2060-2061).\n- liveAgentsAt (~1812-1841) runs once per delta. Each time it re-reads every registry event with ts <= cutoff, sorts them inLogOrder, JSON.parses them, and runs foldLiveAgents(foldAgents(...)).\n- tokensSpentAt (~1860) reads every task-result-recorded row up to the cutoff.\n- tokensBudgetedAt (~1903) reads every task-added row up to the cutoff, in log order.\n\nChange:\n(1) Add two exports:\n  - overviewProjection(db, scope): everything that does not depend on the clock;\n  - overviewAt(db, projection, scope, opts): the clock stage.\n  overview(db, scope, opts) becomes overviewAt(db, overviewProjection(db, scope), scope, opts), with the same signature and result. task-23 memoises overviewProjection in app.ts, so keep these names.\n(2) The clock stage computes:\n  - the working and stalled counts;\n  - idle and active epics;\n  - per-project working counts and idle epics;\n  - runningSessions' working counts;\n  - the three deltas.\n  It reads only rows inside the windows, plus the live agents.\n(3) Design note from the first coder, verbatim: 'foldAgents is run per session by the projector but globally by liveAgentsAt, so the agents table cannot replace the registry fold. A checkpoint resume (open dispatches at checkpoint B, then fold the events in (B, cutoff]) equals the full fold's live set for cutoff >= B.'\n  So: per (db, scope), keep the open dispatches at a checkpoint B <= cutoff and fold only the registry events in (B, cutoff]. Move B forward as the clock does. The log is not ts-ordered across sessions, so an appended event with ts <= B invalidates the checkpoint, and the stage rebuilds it.\n(4) Deltas:\n  - Spend an hour ago = spend now minus the measured spend in task-result-recorded rows after the cutoff.\n  - Budget, where a value is last-wins per task (a re-plan's task-added): resolve each task touched after the cutoff with one lookup on 0018's events_raw_task_ts_idx (task_id, ts).\n  - Keep D-207's id resolution on both ends of the subtraction.\n(5) Parses: keep a per-db cache of parsed payloads keyed by event_id, never by rowid. Rowids are unstable because projectSession deletes and re-inserts a session's events_raw rows. A projection advance then parses only events it has not seen.\n(6) runningSessions (~1343) splits the same way: its working counts move to the clock stage, and its exported signature and result stay.\n\nAllowed residual, to be stated with file:line in the result: epicActivityRows (~1648), sessionProjects (~1231) and sessionTitles (~1303) still read whole history inside SQLite once per projection advance.\n\nWrite each proof test first and watch it fail on today's code. Count parses with vi.spyOn(JSON, 'parse'). Count rows read with a test-side wrapper on handle.sqlite.prepare, as overviewCost.test.ts already does.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/overviewPoll.test.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 340000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "queries.ts exports overviewProjection(db, scope) and overviewAt(db, projection, scope, opts). overview(db, scope, opts) is their composition, with the same signature and a deep-equal result for every scope and clock.",
+          "The clock stage computes the working and stalled counts, idle and active epics, the per-project working counts and idle epics, runningSessions' working counts, and the three deltas (liveAgentCountDelta5m, workingAgentCountDelta5m, budgetUsedPctPointDelta1h). It reads only the events_raw rows inside the 5 min and 1 h windows (plus at most one indexed lookup per task touched inside them) and the live agents. No clock-stage read grows with history.",
+          "Live agents at a cutoff come from a checkpoint resume: the open dispatches at checkpoint B, then the registry events in (B, cutoff]. The result equals the full fold's live set for cutoff >= B. An event appended later with ts <= B invalidates the checkpoint.",
+          "Payload parses are incremental or window-bounded. A per-db cache keyed by event_id (not rowid) means a projection advance parses only events it has not parsed before. The deltas equal today's values.",
+          "runningSessions() keeps its signature and result; its working counts are computed by the clock stage."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts or query plan, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it through dist. Adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep and overviewPlan tests are not claimed: they stay green unedited.",
+          "No schema or migration change: task-21 owns 0019, and this task adds no index.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so plans must hold on a store with no statistics.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "Clock-stage parity, in test/db/overviewPoll.test.ts (new). The test runs a sequence of clocks and appends that includes a burst in one millisecond, a row exactly at each cutoff, and a late-appended event older than the checkpoint. At every step, overviewAt on the warm per-db cache deep-equals overview() on a freshly opened handle at the same clock, where the fresh handle's cache is cold. This holds for scopes none, project, sessionId and sessionIds.",
+        "Clock-stage counts, on stores at N and 10N events (N >= 2000) with the same recent activity. overviewAt on a held projection, with the clock +5 s and no new event, makes equal numbers of payload JSON.parse calls, events_raw rows read and dispatches rows read at N and 10N. Reverting the deltas to the whole-history reads makes the assertion fail; state that revert proof.",
+        "Incremental parses. After one appended event and a projection advance, overviewProjection's payload parses are bounded (the new event's only) and equal at N and 10N. The result names the residual whole-history SQLite reads with file:line.",
+        "No regressions: overviewCost.test.ts stays green and is not weakened. Where a count there moves stage, it is rewritten to an equal or tighter bound, and the result says which and why. overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep and overviewPlan stay green unedited.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-23-overview-shared-memo",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: projection memo with no age bound, for all four routes",
+      "summary": "app.ts memoises overviewProjection per (store, scope) until the projection advances, runs the clock stage per request, and routes /api/overview, /api/active-scope, /api/projects and /api/sessions through it.",
+      "objective": "Part 3 of 3 of task-20's split (finding a2da2311). It lands last and carries the finding's full per-poll proof. task-22 has added overviewProjection and overviewAt to queries.ts, and ui/server reads them through the orchestrator's dist.\n\nToday's code (ui/server/src/app.ts):\n- sharedOverview (~783-809) is a WeakMap<SmithDb, Map<scopeKey, {generation, at, data}>> whose generation is `${scans}:${data_version}`.\n- An entry expires once now - at >= memoMaxAgeMs. That comes from the option overviewMemo.maxAgeMs (~174-179), default 4000. Home polls every 5000 ms (PULSE_POLL_MS in ui/src/composables/usePulse.ts), so every poll recomputes.\n- /api/overview (~875) and /api/active-scope (~1167) use the memo.\n- /api/sessions calls overview() directly, at ~1060 (all-stores path) and ~1097 (single-store path).\n- /api/projects calls overview() directly at ~1193.\n\nChange:\n(1) Memoise overviewProjection per (store, scope), keyed on the generation plus data_version, with no age bound. Remove maxAgeMs or ignore it; the option type may keep the field.\n(2) Every request runs overviewAt on the memoised projection with its own clock.\n(3) Route all four through the memo.\n\nOut of scope: /api/sessions/:sessionId/agents (~1113), which stays as it is.\n\nRewrite ui/server/test/overviewShared.test.ts:\n- Its vi.mock (~15) of dist/db/queries.js spies on overview; re-point the spy to overviewProjection.\n- Its bound test asserts expiry at maxAgeMs, which this change removes.\nAdd ui/server/test/overviewPollCost.test.ts for the end-to-end proof. Write each failing test first.",
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/test/overviewShared.test.ts",
+        "ui/server/test/overviewPollCost.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 700
+      },
+      "contract": {
+        "functional_clauses": [
+          "app.ts memoises overviewProjection per (store, scope), keyed on the projection generation plus data_version, with no age bound. maxAgeMs is removed or ignored, and an entry is replaced only when its store's projection advances.",
+          "Every request runs the clock stage (overviewAt) on the memoised projection with that request's clock, so the clock fields (working and stalled counts, idle epics, deltas) are current on every poll.",
+          "All four routes read through the memo: /api/overview, /api/active-scope, /api/projects, and both paths of /api/sessions (all-stores and single-store). /api/sessions/:sessionId/agents is unchanged.",
+          "Route responses are unchanged for the same store state and clock."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts, never by timing; no test asserts a duration.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. Nothing under factory/orchestrator is edited. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep, overviewPlan, overviewPoll and overviewCost tests stay green unedited.",
+          "Do not rely on ANALYZE or sqlite_stat1.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "overviewShared.test.ts counts projection-stage computations through a vi.mock spy re-pointed to overviewProjection. One poll across the four routes, scoped and all-stores, computes once per (store, scope). A repeat after PULSE_POLL_MS with no advance computes 0 times, while the clock fields reflect the new clock. 'recomputes each store once the bound has passed' is rewritten to that. 'recomputes only the store whose projection advanced' and 'keeps different scopes apart' stay green.",
+        "a2da2311's per-poll proof, end to end, in ui/server/test/overviewPollCost.test.ts (new). Stores at N and 10N events (N >= 2000) with the same recent activity get a Home poll across the four routes, then a repeat poll with the clock +5 s and no new event. The test counts four things on the repeat poll: projection-stage computations (must be 0), payload JSON.parse calls, clock-stage events_raw rows, and dispatches rows. All four are equal at N and 10N. Restoring a memo age bound below PULSE_POLL_MS makes it fail; state that revert proof.",
+        "No regressions: overviewPlan, overviewPoll, overviewCost, overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep stay green unedited, and the existing ui/server route tests stay green.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-audit-4/task-5-finished-from-log",
+      "dependsOn": "bs-audit-4/task-4-reinstate-one-predicate",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-9-factstrip-quiet-from-state",
+      "dependsOn": "bs-audit-4/task-7-drop-overview-alerts",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-9-factstrip-quiet-from-state",
+      "dependsOn": "bs-audit-4/task-6-ui-dead-exports-liveness",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-10-ui-dead-exports-rest",
+      "dependsOn": "bs-audit-4/task-6-ui-dead-exports-liveness",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-10-ui-dead-exports-rest",
+      "dependsOn": "bs-audit-4/task-7-drop-overview-alerts",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-11-projector-batch-apply",
+      "dependsOn": "bs-audit-4/task-4-reinstate-one-predicate",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-12-refresher-batch-apply",
+      "dependsOn": "bs-audit-4/task-11-projector-batch-apply",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-12-refresher-batch-apply",
+      "dependsOn": "bs-audit-4/task-15-overview-shared-per-projection",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-15-overview-shared-per-projection",
+      "dependsOn": "bs-audit-4/task-1-api-middleware-once",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-13-timeline-indexed-page",
+      "dependsOn": "bs-audit-4/task-7-drop-overview-alerts",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-14-overview-constant-work",
+      "dependsOn": "bs-audit-4/task-13-timeline-indexed-page",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-16-gate-lineage-once",
+      "dependsOn": "bs-audit-4/task-4-reinstate-one-predicate",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-17-projector-fold-skip",
+      "dependsOn": "bs-audit-4/task-11-projector-batch-apply",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-18-fold-predicates",
+      "dependsOn": "bs-audit-4/task-4-reinstate-one-predicate",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-17-projector-fold-skip",
+      "dependsOn": "bs-audit-4/task-18-fold-predicates",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-21-overview-indexed-reads",
+      "dependsOn": "bs-audit-4/task-19-timeline-page-index",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-22-overview-clock-stage",
+      "dependsOn": "bs-audit-4/task-21-overview-indexed-reads",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-23-overview-shared-memo",
+      "dependsOn": "bs-audit-4/task-22-overview-clock-stage",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "black-smith",
+  "effort": "medium"
+}

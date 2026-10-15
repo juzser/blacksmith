@@ -1,0 +1,28 @@
+# bs-audit-4 plan v5 changes: task-20 split into three tasks (round 9)
+
+- **Slicing.** The task is cut along the coder's own seams: task-21 (SQL plus 0019), task-22 (orchestrator stages), task-23 (server memo). Each task lands a change that its own tests prove, written test first. No task is tests-only, because the coder's "split 3" proves nothing that its producing task cannot prove. Budgets: 260k/2600 (the 0019 snapshot is about 1,800 lines), 340k/1300 and 200k/700. Each objective carries the facts the coder found: functions and line numbers, the verbatim design note, the event_id cache key, 0018's indexes, and the residual with file:line.
+- **Overlaps and edges.** task-21 and task-22 both claim queries.ts and overviewCost.test.ts, so they get a claim-order edge, task-22 → task-21. task-23 shares no file with task-22 but imports task-22's new exports (overviewProjection, overviewAt) through dist. Its edge, task-23 → task-22, is typed `artifact` (taxonomy.yml: "T consumes an output S produced"), not `claim-order`, which would misstate the reason. This deviates from the brief's wording on purpose. Only task-21 writes schema.ts, 0019, the journal and the snapshot. keeps_exports on queries.ts is set for task-21 and task-22, the two tasks that edit it. The result is a chain: 3 waves, widest 1. Every part edits queries.ts or consumes what it adds.
+- **plan.ts (a).** A supersede into a new id plus `added` is accepted. oneLiveRecordPerId (plan.ts:840) refuses only three cases: an id still held live by a carried task, two supersede keys mapped onto one id with different records, and an added id that is already declared. The amend step records successors task-20 → task-21 and takes obligations from `added` plus the live `superseded`.
+- **plan.ts (b).** task-20's claim-order edge on task-19 is dropped, and it must not be restated:
+  - finishedInLog (taskLifecycle.ts:107) reads task-19 as merged, so the draft drops task-19.
+  - draftNextVersion (plan.ts:907) rewires the edge to task-21 → task-19, then drops it at :1012, because task-19 is no longer declared.
+  - A newEdge naming task-19 would fail validatePlan (:655, "Edge references unknown dependsOn").
+  - The ordering is already met: 0018 is on the integration branch at eb7a2599.
+- **Task-20 criteria (AC) → new tasks.**
+  - AC1 → task-22 AC2 (clock-stage parses, events_raw rows and dispatches rows, equal at N and 10N) plus task-23 AC2 (all four counts end to end, including projection computations = 0).
+  - AC2 → task-21 AC2 and AC3 (dispatch bound, EXPLAIN, burst tie) plus task-22 AC3 (bounded incremental parses, residual).
+  - AC3 → task-21 AC1.
+  - AC4 → task-23 AC1, verbatim.
+  - AC5 → task-21 AC4 and AC5 (migration, drizzle diff, overviewCost) plus task-22 AC4 and task-23 AC3 (no regressions).
+  - AC6 → the last criterion of every task.
+  - Clauses 1-6 map to: clause 1 → task-22 FC1; clauses 2 and 3 → task-23; clause 4 → task-22 FC2-4; clause 5 → task-21 FC2-3 plus task-22 FC4; clause 6 → task-21 FC1.
+- **Where the proofs went (split 3).** The clock-stage parity test and the clock-stage N/10N counts are in task-22's test/db/overviewPoll.test.ts, because they prove task-22's change. The full N/10N per-poll proof for a2da2311 is in task-23's ui/server/test/overviewPollCost.test.ts: task-23 lands last, and only its memo can make the repeat poll compute the projection 0 times.
+- **Plan probe** (in-memory, SQLite 3.53.4, no statistics):
+  - A plain JOIN for runningSessions plans `SCAN e`, all of events_raw; a forced `sessions CROSS JOIN events_raw` with a correlated max(ts) plans SEARCH on events_raw_session_ts_idx.
+  - `ORDER BY ts DESC LIMIT` prints `SCAN dispatches USING INDEX`; a keyset `ts <= (SELECT max(ts))` prints SEARCH.
+  - A session-list IN plus ORDER BY still uses a temp B-tree, hence reads per session.
+- **Import crossings, checked by hand.** I did not run `bs claims impact`.
+  - overviewCost, overviewPlan and overviewPoll import src/db/queries.ts; they are covered by the claims and the claim-order edge.
+  - ui/server/src/app.ts and overviewShared.test.ts import dist/db/queries.js; they are covered by the artifact edge and keeps_exports.
+  - The other importers are covered by keeps_exports and "stay green unedited": 25 or more test/db suites, plus fanout, activeScope, stores and app.test in ui/server.
+- **--rationale:** "task-20 exceeded its 450k budget with no diff; split it per the operator's #122 decision into indexed reads plus migration 0019 (task-21), the projection/clock stage split (task-22) and the unbounded shared memo across four routes (task-23), chained in landing order, with all six criteria carried and the full N/10N per-poll proof on the last task."

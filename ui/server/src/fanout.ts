@@ -150,10 +150,6 @@ export function mergeOverview(
       rows('tokensByEpic'),
       (a, b) => a.epicId.localeCompare(b.epicId) || byStore(a, b),
     ),
-    alerts: {
-      escalations: sum(parts, (o) => o.alerts.escalations),
-      pendingWaivers: sum(parts, (o) => o.alerts.pendingWaivers),
-    },
     // The order one store already uses: roadmap sequence.
     milestoneProgress: sorted(
       rows('milestoneProgress'),

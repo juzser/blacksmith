@@ -1,8 +1,8 @@
 // The dashboard server's two guards. The dashboard only reads: every operator
 // decision goes through the CLI (`/bs waivers`, `/bs lessons`), so
 // readOnlyGuard() refuses any `/api` method that could write, and
-// loopbackGuard() keeps the routes that carry prompt text or other projects'
-// data on this machine. Both are mounted once, in app.ts.
+// loopbackGuard() keeps every `/api` route on this machine. Both are mounted
+// once, in app.ts.
 import type { Context, Next } from 'hono';
 
 // The WHATWG URL parser always returns an IPv6 hostname in bracketed form
@@ -43,13 +43,10 @@ export function readOnlyGuard() {
 }
 
 /**
- * Refuses a request whose Host header does not name a loopback address, so a
- * rebound hostname that resolves to 127.0.0.1 cannot read the route from a
- * foreign page. Mounted app-level (app.ts), ahead of the `/api/*` refresh
- * middleware so a refused request triggers no refresh, on the routes that
- * carry operator prompt text or other projects' data: `/api/cli-sessions`,
- * `/api/overview`, `/api/kanban`, `/api/projects` and `/api/tasks/*`.
- * The remaining read routes stay unguarded.
+ * Refuses a request whose host does not name a loopback address, so the
+ * dashboard answers on this machine only. Mounted once on the whole `/api/*`
+ * prefix (app.ts), ahead of the refresh middleware so a refused request
+ * triggers no refresh; every `/api` route passes it.
  */
 export function loopbackGuard() {
   return async (c: Context, next: Next) => {

@@ -51,7 +51,7 @@ export function isHarnessText(text: string): boolean {
  * ordering the reader infers from timestamps.
  *
  * `actor` defaults to `'user'`, which is what this repo means by the operator
- * — waivers.ts and ui/server's lesson routes default to it, queries.ts's
+ * — waivers.ts and the lesson verbs default to it, queries.ts's
  * Decisions lens selects on it, and event.schema.json names it first. A
  * caller with a different word for the same person can pass their own.
  */

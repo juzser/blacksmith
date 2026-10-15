@@ -430,14 +430,14 @@ above, `event_type` is a free string in event.schema.json, not a closed
 §8 vocabulary value.
 
 Phase 6a addition (same free-string precedent): `lesson-edited`, written
-immediately before a `lesson-status-changed` to `approved` (§10's Lessons page —
-"the edit is folded into a single 'Save & approve' commit"). Payload carries
+immediately before a `lesson-status-changed` to `approved` (an approval with
+an edit goes through the `/bs lessons` verbs, not the dashboard). Payload carries
 only the fields the operator changed (`lesson_id` plus any of
 `statement`/`lesson_type`/`lesson_scope`); `db/projector.ts`'s `foldLessons()`
 merges them onto the existing candidate row. Both events come from
-`lessons.ts`'s `transitionLesson()` — the CLI's `lessons approve|reject` and
-`ui/server`'s three lesson routes are two front doors onto one gate (P9-36);
-neither hand-assembles the envelope.
+`lessons.ts`'s `transitionLesson()` — the one gate the CLI's
+`lessons approve|reject` goes through (P9-36); nothing hand-assembles the
+envelope. The dashboard has no lesson route.
 
 Phase 8 addition (same free-string precedent): `judge-verdict`, appended by
 `src/quorum.ts`'s `recordJudgeRun()` immediately after each cross-provider
@@ -849,7 +849,8 @@ Dimension rules:
 Built from the HDS kit (`knowledge/design-system/hds/`); the `black-smith`
 repo is added to `knowledge/design-system/adopters.md` so uiux/reviewer gating
 applies. **Local-first**: a local web app reading `state/smith.db` via a small
-read-only API; lesson/waiver actions are the only writes. **Cloudflare
+read-only API: `readOnlyGuard` rejects every non-GET/HEAD request on
+`/api/*`, and lessons and waivers move only through the `/bs` verbs. **Cloudflare
 later**: the UI is built stack-compatible with Workers/Pages + D1 from day one
 (§14 stack standard) so deployment is a port of the data layer (SQLite → D1),
 not a rewrite; auth (Cloudflare Access) required before anything is exposed.
@@ -871,7 +872,7 @@ Pages:
 | **Task detail** | spec contract, claims, assigned agents, attempts, review findings, artifacts (screenshots), branch/PR links |
 | **Roadmap** | milestones with goal statements, epic mapping, completion criteria, progress %, budget burn per milestone |
 | **Flow** | the active plan version's task DAG rendered as an interactive graph (Vue Flow): task nodes colored by status, dependency edges styled by edge_type, gate/checkpoint nodes, wave bands showing which tasks and agents run in parallel right now, plan-version switcher with added/superseded diff |
-| **Lessons** | pending candidates with evidence → approve / edit / reject; approved list with "times prevented" counter |
+| **Lessons** | pending candidates with evidence (read-only; decided through the `/bs` verbs); approved list with "times prevented" counter |
 | **Errors** | error log grouped by taxonomy class, trend charts, provider-disagreement cases |
 | **Analytics** | throughput, cost per task by model tier and provider, same-mistake rate, recheck outcomes |
 

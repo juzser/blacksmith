@@ -5,46 +5,11 @@
 // colour. This module is the single place that mapping lives; pages must
 // call it rather than re-deriving tones ad hoc.
 export type Tone = 'info' | 'success' | 'warning' | 'danger' | 'discovery' | 'neutral';
-// Only variants Lozenge.vue can actually render belong here: `subtle` and
-// `bold` are the two the component's `style` computed handles (and the only
-// two that apply `tone` at all), `outline` is served by a .ds-loz--outline
-// rule. A fourth member, `solid`, was declared here and rendered by neither
-// channel — see D-217. dsVariants.test.ts holds the union to that rule.
-export type LozengeVariant = 'subtle' | 'bold' | 'outline';
 
 export interface ToneMapping {
   tone: Tone;
   variant: 'subtle' | 'bold';
 }
-
-const TASK_STATUS_TONE: Record<string, Tone> = {
-  todo: 'neutral',
-  ready: 'neutral',
-  'in-progress': 'info',
-  grading: 'info',
-  reviewing: 'info',
-  merging: 'info',
-  blocked: 'warning',
-  escalated: 'warning',
-  completed: 'success',
-  waived: 'success',
-  failed: 'danger',
-  superseded: 'neutral',
-};
-
-const PLAN_STATUS_TONE: Record<string, Tone> = {
-  draft: 'neutral',
-  'in-review': 'info',
-  active: 'success',
-  superseded: 'neutral',
-};
-
-const RUN_STATUS_TONE: Record<string, Tone> = {
-  queued: 'neutral',
-  running: 'info',
-  done: 'success',
-  dead: 'danger',
-};
 
 const FINDING_STATUS_TONE: Record<string, Tone> = {
   raised: 'info',
@@ -60,15 +25,6 @@ const FINDING_STATUS_TONE: Record<string, Tone> = {
   waived: 'success',
   refuted: 'neutral',
   expired: 'neutral',
-};
-
-const LESSON_STATUS_TONE: Record<string, Tone> = {
-  candidate: 'neutral',
-  'novelty-rejected': 'neutral',
-  superseded: 'neutral',
-  'pending-approval': 'warning',
-  approved: 'success',
-  invalidated: 'danger',
 };
 
 /**
@@ -91,10 +47,6 @@ export const MILESTONE_STATUS_TONE: Record<string, Tone> = {
   'in-progress': 'info',
   completed: 'success',
 };
-
-export function taskStatusTone(status: string): Tone {
-  return TASK_STATUS_TONE[status] ?? 'neutral';
-}
 
 /**
  * What a task_status says about the task's *outcome*, as opposed to its
@@ -148,21 +100,12 @@ export function taskOutcome(status: string): TaskOutcome {
 export function isTaskOver(status: string): boolean {
   return taskOutcome(status) !== 'open';
 }
-export function planStatusTone(status: string): Tone {
-  return PLAN_STATUS_TONE[status] ?? 'neutral';
-}
 /** roadmap.md milestone status -> tone (NOT plan_status — see MILESTONE_STATUS_TONE's comment). */
 export function milestoneStatusTone(status: string): Tone {
   return MILESTONE_STATUS_TONE[status] ?? 'neutral';
 }
-export function runStatusTone(status: string): Tone {
-  return RUN_STATUS_TONE[status] ?? 'neutral';
-}
 export function findingStatusTone(status: string): Tone {
   return FINDING_STATUS_TONE[status] ?? 'neutral';
-}
-export function lessonStatusTone(status: string): Tone {
-  return LESSON_STATUS_TONE[status] ?? 'neutral';
 }
 
 /** DS3 — ds-spec.md §1.1's task_status -> kit `Tag` tone (not the old `Tone`/Lozenge vocabulary). */
@@ -285,20 +228,4 @@ export function severityTone(severity: string): ToneMapping {
     default:
       return { tone: 'neutral', variant: 'subtle' };
   }
-}
-
-/** §3.7 error group.class → icon name (never a colour Lozenge). */
-const ERROR_GROUP_ICON: Record<string, string> = {
-  spec: 'file-text',
-  contract: 'file-check',
-  execution: 'play',
-  integration: 'git-merge',
-  economy: 'coins',
-  judgment: 'scale',
-  coordination: 'users',
-  memory: 'database',
-};
-
-export function errorGroupIcon(group: string): string {
-  return ERROR_GROUP_ICON[group] ?? 'file-text';
 }

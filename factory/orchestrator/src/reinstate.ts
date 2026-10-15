@@ -2,6 +2,7 @@ import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext } from './findings.js';
 import { epicOfTaskId, taskIdsMatch } from './taskId.js';
+import { namesTask, reinstatementBlocker } from './taskLifecycle.js';
 
 /**
  * The corrective event `reinstateTask` appends. Not a taxonomy value: it is a
@@ -14,12 +15,6 @@ export class ReinstateError extends SmithError {}
 
 export interface ReinstateInput {
   reason: string;
-}
-
-function namesTask(record: StoredEvent['record'], taskId: string): boolean {
-  if (record.task_id && taskIdsMatch(record.task_id, taskId)) return true;
-  const ids = (record.payload as { task_ids?: unknown } | undefined)?.task_ids;
-  return Array.isArray(ids) && ids.some((id) => typeof id === 'string' && taskIdsMatch(id, taskId));
 }
 
 /**
@@ -54,10 +49,7 @@ export async function reinstateTask(
   }
 
   // Dynamic: the db layer must stay out of the CLI's static import graph.
-  const [{ foldTasks }, { taskSuccessors }] = await Promise.all([
-    import('./db/projector.js'),
-    import('./spec.js'),
-  ]);
+  const { foldTasks } = await import('./db/projector.js');
   const events = await readLineageEvents(ctx.sessionId, opts);
   const row = foldTasks(events).find((r) => taskIdsMatch(r.taskId, typed));
   if (!row) {
@@ -76,27 +68,26 @@ export async function reinstateTask(
     );
   }
 
-  const merged = events.filter(
-    (e) => e.record.event_type === 'wave-merged' && namesTask(e.record, taskId),
-  );
-  if (merged.length === 0) {
+  const epicId = row.epicId ?? epicOfTaskId(taskId) ?? '';
+  const blocker = reinstatementBlocker(events, taskId, epicId);
+  if (blocker?.code === 'never-merged') {
     throw new ReinstateError(
       'task.reinstate-never-merged',
       `Task "${taskId}" has no wave-merged event in the log: it never finished, so it cannot be put back to completed.`,
       { taskId },
     );
   }
-
-  const epicId = row.epicId ?? epicOfTaskId(taskId) ?? '';
-  for (const [from, to] of taskSuccessors(events, epicId)) {
-    if (taskIdsMatch(from, taskId)) {
-      throw new ReinstateError(
-        'task.reinstate-has-successor',
-        `Task "${taskId}" was superseded by "${to}" in a plan amendment. That supersede is real: the epic verdict waits on "${to}" instead.`,
-        { taskId, successor: to },
-      );
-    }
+  if (blocker?.code === 'has-successor') {
+    throw new ReinstateError(
+      'task.reinstate-has-successor',
+      `Task "${taskId}" was superseded by "${blocker.successor}" in a plan amendment. That supersede is real: the epic verdict waits on "${blocker.successor}" instead.`,
+      { taskId, successor: blocker.successor },
+    );
   }
+
+  const merged = events.filter(
+    (e) => e.record.event_type === 'wave-merged' && namesTask(e.record, taskId),
+  );
 
   const superseded = events.filter(
     (e) => e.record.event_type === 'task-superseded' && namesTask(e.record, taskId),

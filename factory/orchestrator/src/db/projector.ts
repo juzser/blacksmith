@@ -32,7 +32,7 @@
 // fold is forward-compatible with whatever Phase 7 emits, since it only
 // depends on the taxonomy's already-existing lesson_type/lesson_level/
 // lesson_status/lesson_scope vocabulary, not on any new taxonomy value.
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -72,8 +72,15 @@ import {
   qualifyTaskId,
   taskIdsMatch,
 } from '../taskId.js';
+import { honouredReinstatements } from '../taskLifecycle.js';
 import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { LEGACY_BRANCH_PREFIX, RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
+import {
+  feedbackFoldReads,
+  findingsFoldReads,
+  lessonsFoldReads,
+  tasksFoldReads,
+} from './foldPredicates.js';
 import * as schema from './schema.js';
 
 // No ProjectorError: the projector never throws. A record it cannot fold in
@@ -819,9 +826,6 @@ export function foldTasks(
     return row;
   }
 
-  // Tasks a `wave-merged` named so far, for `task-reinstated`'s precondition.
-  const merged = new Set<string>();
-
   for (const { record } of events) {
     // Resolved once, above the switch, for the same reason `touch()` is the
     // one place a row is born: a hand-written event names its task in the
@@ -930,7 +934,6 @@ export function foldTasks(
           // First terminal transition wins — see schema.ts's terminalAt comment.
           if (row.terminalAt === null) row.terminalAt = record.ts;
           row.taskStatus = 'completed';
-          merged.add(row.taskId);
         }
         break;
       }
@@ -943,14 +946,17 @@ export function foldTasks(
       }
       case 'task-reinstated': {
         // The corrective for a `task-superseded` no amendment backed: a task
-        // that finished stays finished unless a plan supersedes it. Applies
-        // only to a row that is superseded NOW and whose merge the log holds,
-        // so a hand-appended event cannot complete a task that never merged;
-        // a later `task-superseded` still wins (last event in the log).
-        // `reinstate.ts` refuses the same cases at the verb.
+        // that finished stays finished unless a plan supersedes it. Whether
+        // the log honours it is taskLifecycle.ts's one rule, shared with
+        // ingest and `reinstate.ts`; a later `task-superseded` still wins
+        // (last event in the log).
         if (!eventTask) break;
         const row = touch(eventTask, record.ts, record.session_id);
-        if (row.taskStatus === 'superseded' && merged.has(row.taskId)) {
+        const epicId = row.epicId ?? epicOfTaskId(row.taskId) ?? '';
+        if (
+          row.taskStatus === 'superseded' &&
+          honouredReinstatements(events, epicId).has(row.taskId)
+        ) {
           row.taskStatus = 'completed';
         }
         break;
@@ -2075,13 +2081,15 @@ async function readAllSessionLogs(
       });
     }
   }
-  logs.sort((a, b) => {
-    const aStart = a.events[0]?.record.ts ?? '';
-    const bStart = b.events[0]?.record.ts ?? '';
-    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
-    return a.sessionId.localeCompare(b.sessionId);
-  });
+  logs.sort(compareSessionLogs);
   return { logs, unreadable };
+}
+
+function compareSessionLogs(a: SessionLog, b: SessionLog): number {
+  const aStart = a.events[0]?.record.ts ?? '';
+  const bStart = b.events[0]?.record.ts ?? '';
+  if (aStart !== bStart) return aStart < bStart ? -1 : 1;
+  return a.sessionId.localeCompare(b.sessionId);
 }
 
 export interface RebuildResult {
@@ -2150,11 +2158,7 @@ export async function rebuild(
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
-    projectTasks(handle, merged, opts);
-    const skippedFindings = projectFindings(handle, merged, opts);
-    projectLessons(handle, merged);
-    projectOperatorFeedback(handle, merged);
-    projectMilestones(handle, opts);
+    const skippedFindings = runGlobalFolds(handle, () => merged, opts);
     return {
       sessionsProcessed: sessionIds.length,
       eventsApplied,
@@ -2167,6 +2171,226 @@ export async function rebuild(
   }
 }
 
+/** The four global folds, by the name a fold observer is told. */
+export type GlobalFoldName = 'tasks' | 'findings' | 'lessons' | 'feedback';
+
+export interface ProjectionOpts extends DbOpts {
+  /**
+   * Called once each time a global fold runs. Absent by default; it exists so
+   * a test can count fold runs that happen inside this module.
+   */
+  onFold?: (name: GlobalFoldName) => void;
+}
+
+export type SessionApplyResult =
+  | { sessionId: string; eventsApplied: number; skippedArtifacts: SkippedArtifactsRecord[] }
+  | { sessionId: string; error: unknown };
+
+export interface BatchApplyResult {
+  /** One entry per requested session, in request order: applied, or the error. */
+  sessions: SessionApplyResult[];
+  skippedFindings: SkippedFindingRecord[];
+  unreadableSessions: UnreadableSessionRecord[];
+}
+
+export interface Projection {
+  applySessions(sessionIds: readonly string[]): Promise<BatchApplyResult>;
+  close(): void;
+}
+
+const ALL_FOLDS: ReadonlySet<GlobalFoldName> = new Set([
+  'tasks',
+  'findings',
+  'lessons',
+  'feedback',
+]);
+
+const FOLD_READS: Record<GlobalFoldName, (record: EventRecord) => boolean> = {
+  tasks: tasksFoldReads,
+  findings: findingsFoldReads,
+  lessons: lessonsFoldReads,
+  feedback: feedbackFoldReads,
+};
+
+/**
+ * Runs the named global folds over the merged events, once each. A fold left
+ * out keeps the rows its last run wrote; `priorSkippedFindings` stands in for
+ * the findings report it would have produced. `merged` is only called when a
+ * fold runs.
+ */
+function runGlobalFolds(
+  handle: DbHandle,
+  merged: () => StoredEvent[],
+  opts: ProjectionOpts,
+  which: ReadonlySet<GlobalFoldName> = ALL_FOLDS,
+  priorSkippedFindings: SkippedFindingRecord[] = [],
+): SkippedFindingRecord[] {
+  let skippedFindings = priorSkippedFindings;
+  if (which.size > 0) {
+    const events = merged();
+    if (which.has('tasks')) {
+      projectTasks(handle, events, opts);
+      opts.onFold?.('tasks');
+    }
+    if (which.has('findings')) {
+      skippedFindings = projectFindings(handle, events, opts);
+      opts.onFold?.('findings');
+    }
+    if (which.has('lessons')) {
+      projectLessons(handle, events);
+      opts.onFold?.('lessons');
+    }
+    if (which.has('feedback')) {
+      projectOperatorFeedback(handle, events);
+      opts.onFold?.('feedback');
+    }
+  }
+  projectMilestones(handle, opts);
+  return skippedFindings;
+}
+
+/**
+ * The epics back-fill of projectTasks(), for a batch that re-projected a
+ * session and skipped the tasks fold. projectSession() rewrote that session's
+ * epics rows with its per-session project fallback, which is NULL for a
+ * continuation closing an epic it never planned. The tasks table holds what
+ * the skipped fold last wrote, so it answers what a re-run would. Reads no
+ * log; never overwrites a stamped project.
+ */
+function backfillEpicProjects(handle: DbHandle): void {
+  handle.db.transaction((txDb) => {
+    const rows = txDb
+      .select({ epicId: schema.tasks.epicId, project: schema.tasks.project })
+      .from(schema.tasks)
+      .all();
+    for (const [epicId, project] of unanimousEpicProjects(rows)) {
+      txDb
+        .update(schema.epics)
+        .set({ project })
+        .where(and(eq(schema.epics.epicId, epicId), isNull(schema.epics.project)))
+        .run();
+    }
+  });
+}
+
+interface CachedLog {
+  size: number;
+  mtimeMs: number;
+  events: StoredEvent[];
+}
+
+/**
+ * A reusable projection: the database is opened and migrated once, each log is
+ * parsed once per change (cached by path, size and mtime), and every batch runs
+ * each global fold once however many sessions it names.
+ *
+ * Every session's log is read for the global folds, so one of them being
+ * unreadable is reported in `unreadableSessions`, not thrown. A requested
+ * session whose own log is unreadable gets an `error` entry and the rest of
+ * the batch still projects.
+ */
+export function openProjection(
+  dbPath: string = STATE_DB_PATH,
+  opts: ProjectionOpts = {},
+): Projection {
+  const handle = openDb(dbPath, opts);
+  const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
+  let cache = new Map<string, CachedLog>();
+  let closed = false;
+  // Whether the last batch left every table as a full run would, and what its
+  // findings fold reported: the two things a skipped fold stands on.
+  let settled = false;
+  let lastSkippedFindings: SkippedFindingRecord[] = [];
+
+  return {
+    async applySessions(sessionIds) {
+      const all = [...new Set([...listSessionIds(stateDir), ...sessionIds])];
+      const requested = new Set(sessionIds);
+      const logs: SessionLog[] = [];
+      const errors = new Map<string, unknown>();
+      const unreadable: UnreadableSessionRecord[] = [];
+      const nextCache = new Map<string, CachedLog>();
+      // Folds that must run: those whose predicate accepts a new event. Every
+      // fold runs when the batch cannot say what is new.
+      let runAll = !settled;
+      const needed = new Set<GlobalFoldName>();
+      for (const sessionId of all) {
+        try {
+          const file = path.join(stateDir, `${sessionId}.jsonl`);
+          const st = existsSync(file) ? statSync(file) : null;
+          const hit = cache.get(sessionId);
+          let events: StoredEvent[];
+          if (st && hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+            events = hit.events;
+          } else {
+            events = await readEvents(sessionId, { stateDir });
+          }
+          const prior = cache.get(sessionId)?.events ?? [];
+          if (events !== prior) {
+            const kept = events.length >= prior.length;
+            if (!kept || prior.some((e, i) => e.event_id !== (events[i] as StoredEvent).event_id)) {
+              runAll = true;
+            } else {
+              for (const { record } of events.slice(prior.length)) {
+                for (const name of ALL_FOLDS) if (FOLD_READS[name](record)) needed.add(name);
+              }
+            }
+          }
+          if (st) nextCache.set(sessionId, { size: st.size, mtimeMs: st.mtimeMs, events });
+          logs.push({ sessionId, events });
+        } catch (err) {
+          if (requested.has(sessionId)) errors.set(sessionId, err);
+          else {
+            unreadable.push({
+              session_id: sessionId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+      for (const sessionId of cache.keys()) if (!nextCache.has(sessionId)) runAll = true;
+      cache = nextCache;
+      settled = false;
+      logs.sort(compareSessionLogs);
+
+      const byId = new Map(logs.map((l) => [l.sessionId, l.events]));
+      const sessions: SessionApplyResult[] = [];
+      let reprojected = 0;
+      for (const sessionId of sessionIds) {
+        if (errors.has(sessionId)) {
+          sessions.push({ sessionId, error: errors.get(sessionId) });
+          continue;
+        }
+        const events = byId.get(sessionId) ?? [];
+        try {
+          const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
+          sessions.push({ sessionId, eventsApplied: events.length, skippedArtifacts });
+          reprojected += 1;
+        } catch (error) {
+          sessions.push({ sessionId, error });
+        }
+      }
+      const which = runAll ? ALL_FOLDS : needed;
+      const skippedFindings = runGlobalFolds(
+        handle,
+        () => mergeSessionLogs(logs),
+        opts,
+        which,
+        lastSkippedFindings,
+      );
+      if (reprojected > 0 && !which.has('tasks')) backfillEpicProjects(handle);
+      lastSkippedFindings = skippedFindings;
+      settled = errors.size === 0 && unreadable.length === 0 && reprojected === sessionIds.length;
+      return { sessions, skippedFindings, unreadableSessions: unreadable };
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      handle.sqlite.close();
+    },
+  };
+}
+
 /**
  * Incremental refresh for one session: re-folds ITS current event log and
  * replaces only its rows, leaving every other session's projection intact.
@@ -2177,47 +2401,29 @@ export async function rebuild(
  * why this reads more than the one session it re-folds — `tasks`
  * (projectTasks()), `lessons` (D-199), `findings` (D-200) and
  * `operator_feedback` (projectOperatorFeedback(), same shape).
+ *
+ * The applied session's own log still throws when unreadable: that failure is
+ * the caller's to name, and there is nothing to write for it.
  */
 export async function apply(
   dbPath: string = STATE_DB_PATH,
   sessionId: string,
   opts: DbOpts = {},
 ): Promise<RebuildResult> {
-  const handle = openDb(dbPath, opts);
+  const projection = openProjection(dbPath, opts);
   try {
-    const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
-    // A session whose first event has not landed yet has no file to list, and
-    // readEvents answers `[]` for a log that does not exist (P9-28) — so
-    // naming it anyway costs an empty read and keeps it in the global folds
-    // below, which would otherwise drop the very session being applied.
-    const listed = listSessionIds(stateDir);
-    // Every other session's log is read for the global folds only, so one of
-    // them being unreadable is reported, not thrown: this session's rows do
-    // not depend on it. The applied session's own log still throws -- that
-    // failure is the caller's to name, and there is nothing to write for it.
-    const others = new Set(listed.filter((id) => id !== sessionId));
-    const { logs, unreadable } = await readAllSessionLogs(
-      listed.includes(sessionId) ? listed : [...listed, sessionId],
-      stateDir,
-      others,
-    );
-    const events = logs.find((l) => l.sessionId === sessionId)?.events ?? [];
-    const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
-    const merged = mergeSessionLogs(logs);
-    projectTasks(handle, merged, opts);
-    const skippedFindings = projectFindings(handle, merged, opts);
-    projectLessons(handle, merged);
-    projectOperatorFeedback(handle, merged);
-    projectMilestones(handle, opts);
+    const batch = await projection.applySessions([sessionId]);
+    const only = batch.sessions[0] as SessionApplyResult;
+    if ('error' in only) throw only.error;
     return {
       sessionsProcessed: 1,
-      eventsApplied: events.length,
-      skippedFindings,
-      skippedArtifacts,
-      unreadableSessions: unreadable,
+      eventsApplied: only.eventsApplied,
+      skippedFindings: batch.skippedFindings,
+      skippedArtifacts: only.skippedArtifacts,
+      unreadableSessions: batch.unreadableSessions,
     };
   } finally {
-    handle.sqlite.close();
+    projection.close();
   }
 }
 

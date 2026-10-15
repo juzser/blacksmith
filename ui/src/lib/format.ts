@@ -1,24 +1,9 @@
-// Date display default: DD/MM/YYYY (design-spec.md §9), pending explicit
-// operator confirmation of UI language/date-format per §7 — recorded as a
-// default, not asserted as final, in ui/docs/DESIGN.md.
-export function formatDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${dd}/${mm}/${d.getFullYear()}`;
-}
-
 export function formatTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const hh = String(d.getHours()).padStart(2, '0');
   const mi = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mi}`;
-}
-
-export function formatDateTime(iso: string): string {
-  return `${formatDate(iso)} ${formatTime(iso)}`;
 }
 
 const SHORT_MONTHS = [
@@ -38,12 +23,8 @@ const SHORT_MONTHS = [
 
 /**
  * "30 Sep 2026, 14:07:12" — the absolute-time text kit/RelativeTime.vue's
- * Tooltip shows (ds-spec.md §2.1's own literal example). Distinct from
- * formatDateTime() above (design-spec.md §9's "DD/MM/YYYY HH:MM", numeric
- * month, no seconds) — that shape stays put for the pages that already
- * render it; this one exists only for the new kit's RelativeTime tooltip,
- * whose spec'd example needs a month name, a comma, and seconds none of the
- * existing formatters produce.
+ * Tooltip shows (ds-spec.md §2.1's own literal example): a month name, a
+ * comma, and seconds.
  */
 export function formatAbsolute(iso: string): string {
   const d = new Date(iso);
@@ -74,8 +55,7 @@ export function formatElapsedRange(startedAt: string, endedAt: string): string {
 /**
  * "12 Sep, 09:14" — RequestQuote.vue's timestamp (ds-review.html ~1239,
  * ~1300: short month name, 24h time, no year). Scoped to RequestQuote only
- * (DS4 S5c fix round 1, fix 4) — formatDateTime() above stays put for the
- * pages that already render its numeric-month shape.
+ * (DS4 S5c fix round 1, fix 4).
  */
 export function formatShortDateTime(iso: string): string {
   const d = new Date(iso);
@@ -90,8 +70,7 @@ export function formatShortDateTime(iso: string): string {
 /**
  * "7 Sep" — LessonCard's "learned from <session> on <date>" (ds-review.html
  * ~1510: day + short month, no year, no leading zero). Scoped to LessonCard
- * only; formatDate() above stays put for the pages that already render its
- * DD/MM/YYYY shape.
+ * only.
  */
 export function formatShortDate(iso: string): string {
   const d = new Date(iso);
@@ -131,48 +110,11 @@ export function dailyTokensTakeaway(groupBy: string, days: number): string {
 }
 
 /**
- * `[how many of this unit make the next one, the suffix it renders as]`.
- *
- * The suffix is spelled out rather than taken from a unit word's first
- * letter: "minute" and "month" share theirs, so a row last touched three
- * months ago rendered "3m ago" -- the same string three minutes ago gets.
- *
+ * `[how many of this unit make the next one, the suffix it renders as]`. The
+ * suffix is spelled out because "minute" and "month" share a first letter.
  * 4.3452 weeks per month is 365/7/12, which puts twelve months at exactly a
- * year. The rounder 4.348 put them a fraction over, so a gap of precisely one
- * year fell short of the year bucket and came out as "11 months" -- the
- * largest month value the table can count to.
+ * year.
  */
-const RELATIVE_UNITS: Array<[number, string]> = [
-  [60, 's'],
-  [60, 'm'],
-  [24, 'h'],
-  [7, 'd'],
-  [4.3452, 'w'],
-  [12, 'mo'],
-  [Number.POSITIVE_INFINITY, 'y'],
-];
-
-/**
- * "3m ago" / "2h ago" / "5d ago" — compact relative timestamp for
- * Roadmap's mini-timeline (operator directive 4) and Timeline rows.
- * `nowIso` is injectable for deterministic tests; defaults to `Date.now()`.
- */
-export function formatRelative(iso: string, nowIso?: string): string {
-  const then = new Date(iso).getTime();
-  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
-  if (Number.isNaN(then)) return iso;
-  let diff = Math.max(0, (now - then) / 1000);
-  if (diff < 5) return 'just now';
-  for (const [size, suffix] of RELATIVE_UNITS) {
-    if (diff < size) {
-      const n = Math.floor(diff);
-      return `${n}${suffix} ago`;
-    }
-    diff /= size;
-  }
-  return iso;
-}
-
 const RELATIVE_VERBOSE_UNITS: Array<[number, string]> = [
   [60, 's'],
   [60, 'min'],
@@ -187,15 +129,7 @@ const RELATIVE_VERBOSE_UNITS: Array<[number, string]> = [
  * "5 min ago" / "2 h ago" / "3 d ago" — kit/RelativeTime.vue's visible text
  * (ds-spec.md §2.1's own literal examples; ds-review.html's rendered
  * .tip-trigger text matches exactly, e.g. "5 min ago", "2 h ago", "8 s ago").
- * Same tiering as formatRelative() above (same thresholds, same "just now"
- * <5s floor) but a different text shape: a space before "ago", and "min"
- * spelled out rather than the bare "m" formatRelative() already ships to
- * Roadmap's mini-timeline and Timeline rows. Kept as a second function
- * rather than changing formatRelative() itself: that function's callers are
- * outside DS0's scope (§5) and its own tests above pin the current "5m ago"
- * shape against pages already live — changing it would be a breaking,
- * out-of-scope behaviour change to already-shipped surfaces, not an
- * additive one.
+ * A space before "ago", "min" spelled out, and a "just now" floor under 5s.
  */
 export function formatRelativeVerbose(iso: string, nowIso?: string): string {
   const parts = relativeVerboseParts(iso, nowIso);
@@ -251,38 +185,8 @@ export function formatLiveStatus(
 }
 
 /**
- * One-line label for a long free-text field.
- *
- * `/api/flow` nodes carry `title = tasks.objective`, and an objective is a
- * paragraph, not a label: a plan's live objectives can run past a thousand
- * characters. FlowPage once rendered that raw, so a single node grew to
- * swallow the canvas. summarize() takes
- * the first sentence when one fits and otherwise hard-caps at a word
- * boundary; callers keep the untruncated text in a `title` attribute (and in
- * the sr-only table) so nothing is actually lost.
- *
- * A period only ends a sentence when whitespace or the string end follows it,
- * so `redact.ts` and `0.5` are not mistaken for boundaries.
- */
-export function summarize(text: string, maxChars = 90): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  if (flat === '') return '';
-
-  const sentenceEnd = flat.search(/[.!?](\s|$)/);
-  if (sentenceEnd !== -1 && sentenceEnd < maxChars) return flat.slice(0, sentenceEnd + 1);
-  if (flat.length <= maxChars) return flat;
-
-  const cut = flat.slice(0, maxChars);
-  const lastSpace = cut.lastIndexOf(' ');
-  // Only honour the word boundary if it does not throw away most of the
-  // budget — a 90-char cap that lands mid-URL should still show ~90 chars.
-  const body = lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut;
-  return `${body.trimEnd()}…`;
-}
-
-/**
  * "7s" / "3m" / "2h 13m" / "2d 4h" — how long something has been RUNNING, as
- * opposed to formatRelative()'s "…ago" for something that already happened.
+ * opposed to "…ago" for something that already happened.
  *
  * Operator directive (Phase 6b round 7): "mind the timestamps so they display
  * better". A live agent's `dispatchedAt` (api.ts LiveAgentEntry) was only
@@ -337,7 +241,7 @@ export function pluralize(
 
 /**
  * `[how many of this unit make the next one, the suffix it renders as]` —
- * same shape as RELATIVE_UNITS above, one tier per order of magnitude.
+ * same shape as RELATIVE_VERBOSE_UNITS above, one tier per order of magnitude.
  *
  * The operator finds raw token integers (a 6-7 digit number is common past a
  * handful of tasks) too technical to read at a glance, so every place that
@@ -382,9 +286,7 @@ export function formatCompactNumber(n: number): string {
  * "1.2M tokens" / "127K" / "43" — kit/CompactNumber.vue (ds-spec.md §2.1:
  * `value`, `unit?: "tok"`). The prop's own value is the short enum literal
  * "tok" (matches the spec's type spelling), but the word it renders is
- * spelled out in full ("tokens") — a deliberate difference from
- * formatMeasuredTokens() below, a narrower, already-shipped budget-caption
- * formatter whose "tok" abbreviation stays put for its own call sites. The
+ * spelled out in full ("tokens"). The
  * unit, when given, is appended even to an unsuffixed small number (spec
  * example "43" has no unit shown because that example passes none).
  */
@@ -394,26 +296,9 @@ export function formatCompactValue(value: number, unit?: 'tok'): string {
 }
 
 /**
- * "2K tok" — or, when one or more of the summed results has
- * `token_usage: { measured: false }` (issue #220), a floor rather than an
- * exact total: "≥2K tok · 3 not measured". `tokensSpent` must already be
- * the sum over the results that DID report usage; this only decides how to
- * caption it. A sum of nothing but unmeasured results renders "not measured"
- * — never "0 tok", which would read as "we spent nothing" rather than
- * "nobody counted". The exact integer is not lost — callers keep it in a
- * `title` tooltip — this only decides the headline text.
- */
-export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): string {
-  if (unmeasured === 0) return `${formatCompactNumber(tokensSpent)}\u00a0tok`;
-  if (tokensSpent === 0) return 'not measured';
-  return `≥${formatCompactNumber(tokensSpent)}\u00a0tok · ${unmeasured} not measured`;
-}
-
-/**
  * A name short enough to sit on one dashboard row without wrapping or
  * fighting a sibling column for space — roughly the width design-spec's
- * single-line Row/Card titles budget elsewhere (summarize()'s own
- * sentence-length cap, above, lands in the same range).
+ * single-line Row/Card titles budget elsewhere.
  */
 const SHORT_TASK_LABEL_MAX = 60;
 
@@ -478,23 +363,4 @@ export function parentLabel(
   if (trimmed && trimmed.length <= SHORT_TASK_LABEL_MAX) return trimmed;
   if (parentTaskId === null || isMintedId(parentTaskId)) return null;
   return slugLabel(parentTaskId);
-}
-
-/**
- * "50%" — or, when one or more of `tokensSpent`'s results has
- * `token_usage: { measured: false }` (issue #220), "≥50%": the true usage can
- * only be higher, never lower, than a sum missing some of its addends. A
- * project with no budget set renders "-" (there is no percentage to compute);
- * one whose results are all unmeasured renders "not measured", not the
- * fabricated "0%" that `tokensSpent / tokensBudget` would otherwise produce.
- */
-export function formatBudgetPct(
-  tokensSpent: number,
-  tokensBudget: number | null,
-  unmeasured: number,
-): string {
-  if (!tokensBudget) return '-';
-  if (tokensSpent === 0 && unmeasured > 0) return 'not measured';
-  const pct = Math.round((tokensSpent / tokensBudget) * 100);
-  return unmeasured > 0 ? `≥${pct}%` : `${pct}%`;
 }

@@ -7,8 +7,10 @@ import {
   type StoredEvent,
 } from './events.js';
 import type { EventContext } from './findings.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
 import { epicOfTaskId, taskIdsMatch } from './taskId.js';
+import { honouredReinstatements } from './taskLifecycle.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { BRANCH_PREFIX, epicBranchPrefix, taskBranchName } from './worktree.js';
 
@@ -149,14 +151,6 @@ async function idsAlreadyEmitted(
   const ids = new Set<string>();
   for (const { record } of events) {
     if (record.event_type === eventType && record.task_id) ids.add(record.task_id);
-    // A reinstatement undoes the supersede on the log, so a later real one is new.
-    if (
-      eventType === 'task-superseded' &&
-      record.event_type === 'task-reinstated' &&
-      record.task_id
-    ) {
-      ids.delete(record.task_id);
-    }
   }
   return ids;
 }
@@ -301,7 +295,7 @@ export async function readAddedTasks(
   ctx: Pick<TaskEventContext, 'sessionId'>,
   opts: EventOpts = {},
 ): Promise<AddedTask[]> {
-  const events = await readLineageEvents(ctx.sessionId, opts);
+  const events = await readLineage(ctx.sessionId, opts);
   const byId = new Map<string, AddedTask>();
   for (const { record } of events) {
     if (record.event_type !== 'task-added' || !record.task_id) continue;
@@ -350,37 +344,15 @@ function specsToIngest(plan: PlanFile): TaskSpecRecord[] {
 }
 
 /**
- * Ids the log has reinstated (a `task-reinstated` after their last
- * `task-superseded`) that no amendment maps to a successor — the exact shape
- * `reinstateTask` repairs, which ingest must not supersede a second time.
- * A `task-reinstated` that follows no supersede corrects nothing, as in the
- * projector, and successor keys match the way `reinstateTask` matches them.
+ * Ids ingest treats as reinstated: the ones the log honours (taskLifecycle.ts),
+ * which ingest must not supersede a second time.
  */
-async function reinstatedWithoutSuccessor(
+export async function reinstatedWithoutSuccessor(
   epicId: string,
   ctx: Pick<TaskEventContext, 'sessionId'>,
   opts: EventOpts,
 ): Promise<Set<string>> {
-  const events = await readLineageEvents(ctx.sessionId, opts);
-  const dead = new Set<string>();
-  const reinstated = new Set<string>();
-  for (const { record } of events) {
-    if (!record.task_id) continue;
-    if (record.event_type === 'task-superseded') {
-      dead.add(record.task_id);
-      reinstated.delete(record.task_id);
-    } else if (record.event_type === 'task-reinstated' && dead.delete(record.task_id)) {
-      reinstated.add(record.task_id);
-    }
-  }
-  if (reinstated.size === 0) return reinstated;
-  // Dynamic: spec.ts imports this module, so a static import would be a cycle.
-  const { taskSuccessors } = await import('./spec.js');
-  const replaced = [...taskSuccessors(events, epicId).keys()];
-  for (const id of [...reinstated]) {
-    if (replaced.some((from) => taskIdsMatch(from, id))) reinstated.delete(id);
-  }
-  return reinstated;
+  return honouredReinstatements(await readLineageEvents(ctx.sessionId, opts), epicId);
 }
 
 /** One event `emitTasksAdded` owes the log for a plan, before it is written. */
@@ -816,7 +788,7 @@ export async function emitFollowUpTask(
   ctx: TaskEventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent | null> {
-  const lineage = await readLineageEvents(ctx.sessionId, opts);
+  const lineage = await readLineage(ctx.sessionId, opts);
   if (
     lineage.some(
       ({ record }) => record.event_type === 'task-added' && record.task_id === input.taskId,
@@ -833,7 +805,7 @@ export async function emitFollowUpTask(
   // than picking one.
   const project = ctx.project ?? fromTaskProject(lineage, input.fromTaskId);
 
-  return appendEvent(
+  return appendTracked(
     envelope(
       project === undefined ? ctx : { ...ctx, project },
       'task-added',

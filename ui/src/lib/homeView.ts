@@ -25,6 +25,19 @@ export interface FactTile {
   quiet: boolean;
 }
 
+/** The words a tile shows in place of a figure; quiet never reads them. */
+export interface FactStripCopy {
+  notKnown: string;
+  notMeasured: string;
+  none: string;
+}
+
+export const FACT_STRIP_COPY: FactStripCopy = {
+  notKnown: 'Not known',
+  notMeasured: 'Not measured',
+  none: 'None',
+};
+
 const FACTS = [
   { label: 'Active sessions', helper: 'Live sessions on a running epic' },
   { label: 'Agents running', helper: 'Agents and subagents of every live session, at any depth' },
@@ -40,9 +53,14 @@ const FACTS = [
  * Running now matches; a session driving the name's epics in two stores is
  * then counted in each.
  */
-export function factStrip(scope: ActiveScopeResult | null, project?: string): FactTile[] {
+export function factStrip(
+  scope: ActiveScopeResult | null,
+  project?: string,
+  copy?: Partial<FactStripCopy>,
+): FactTile[] {
+  const words = { ...FACT_STRIP_COPY, ...copy };
   if (scope?.measured !== true) {
-    return FACTS.map((f) => ({ ...f, value: 'Not known', floor: false, quiet: true }));
+    return FACTS.map((f) => ({ ...f, value: words.notKnown, floor: false, quiet: true }));
   }
   const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((n, row) => n + pick(row), 0);
   let t: Pick<
@@ -70,24 +88,31 @@ export function factStrip(scope: ActiveScopeResult | null, project?: string): Fa
   }
   // No token counted from sessions that could not be read is "nobody counted", not "spent nothing".
   const noTokens = t.tokensSpent === 0 && t.tokensUnmeasured > 0;
+  const noTasks = t.tasksTotal === 0;
   const [sessions, agents, budget, tasks] = FACTS;
   return [
-    { ...sessions, value: formatCompactNumber(t.activeSessions), floor: false },
-    { ...agents, value: formatCompactNumber(t.agentsRunning), floor: t.agentsUnmeasured > 0 },
+    { ...sessions, value: formatCompactNumber(t.activeSessions), floor: false, quiet: false },
+    {
+      ...agents,
+      value: formatCompactNumber(t.agentsRunning),
+      floor: t.agentsUnmeasured > 0,
+      quiet: false,
+    },
     {
       ...budget,
-      value: noTokens ? 'Not measured' : formatCompactValue(t.tokensSpent, 'tok'),
+      value: noTokens ? words.notMeasured : formatCompactValue(t.tokensSpent, 'tok'),
       floor: !noTokens && t.tokensUnmeasured > 0,
+      quiet: noTokens,
     },
     {
       ...tasks,
-      value:
-        t.tasksTotal === 0
-          ? 'None'
-          : `${formatCompactNumber(t.tasksDone)}\u00a0of\u00a0${formatCompactNumber(t.tasksTotal)}`,
+      value: noTasks
+        ? words.none
+        : `${formatCompactNumber(t.tasksDone)}\u00a0of\u00a0${formatCompactNumber(t.tasksTotal)}`,
       floor: false,
+      quiet: noTasks,
     },
-  ].map((tile) => ({ ...tile, quiet: tile.value === 'Not measured' || tile.value === 'None' }));
+  ];
 }
 
 /** The one muted line under the strip, or null when there is nothing to say. */

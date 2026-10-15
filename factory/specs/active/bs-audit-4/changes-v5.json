@@ -1,0 +1,184 @@
+{
+  "supersede": {
+    "bs-audit-4/task-20-overview-poll-bounded": {
+      "task_id": "bs-audit-4/task-21-overview-indexed-reads",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: indexed dispatch and last-event reads",
+      "summary": "Migration 0019 adds dispatch indexes; overview's newest-ten dispatches and runningSessions' newest event per session become bounded index reads, proven by EXPLAIN QUERY PLAN and row counts.",
+      "objective": "Part 1 of 3 of task-20's split (finding a2da2311: Home's per-poll database work grows with history). Its first coder ran out of budget before writing anything, so what it found is given here. It touches only the two whole-table SQL reads and the migration. The stage split (task-22) and the app.ts memo (task-23) come later; do not start them.\n\nToday's code (factory/orchestrator/src/db/queries.ts):\n(a) overview() at ~1980-1983 reads the whole dispatches table, scoped only by session id. It then applies filterByProject (~318), sorts with inLogOrder (~324: compareLogOrder by ts, then session id, then the event index) and takes reverse().slice(0, RECENT_DISPATCHES_LIMIT) (~1176, value 10). After that it reads rounds from agents by id and titles from tasks.\n(b) runningSessions() at ~1343-1458 reads each session's newest event at ~1377-1389 with `(session_id, ts) IN (SELECT session_id, max(ts) FROM events_raw [scope] GROUP BY session_id)`, and isLaterEvent settles a tie. On the bundled SQLite 3.53.4 this runs as `SCAN events_raw USING COVERING INDEX events_raw_session_ts_idx`, an O(N) walk even with task-19's 0018 index. A GROUP BY max(ts) cannot become a lookup. It groups by session_id, not cli_session_id.\n(c) The dispatches table (schema.ts ~88-112) has session, task, role, provider, model_tier and project indexes, but no ts index. 0018 already added events_raw_session_ts_idx (session_id, ts) and events_raw_task_ts_idx (task_id, ts). Reuse them; never re-create them.\n\nChange:\n(1) Add one drizzle migration, 0019, generated from schema.ts. It adds dispatches_ts_idx (ts). Add dispatches_project_ts_idx (project, ts) and/or dispatches_session_ts_idx (session_id, ts) only where a scoped read in (2) uses it.\n(2) The recent-dispatches read becomes a keyset read, in four steps:\n  - read `WHERE ts <= (SELECT max(ts) FROM dispatches) ORDER BY ts DESC LIMIT RECENT_DISPATCHES_LIMIT + 1`;\n  - read the boundary ts's tie group once (`WHERE ts = ?`);\n  - let inLogOrder break the tie exactly as today;\n  - page on with `ts < cursor` only while filterByProject drops rows.\n  Planner probe (in-memory, no statistics, SQLite 3.53.4):\n  - The keyset form plans as `SEARCH dispatches USING INDEX dispatches_ts_idx (ts<?)`.\n  - A bare `ORDER BY ts DESC LIMIT 11` plans as `SCAN dispatches USING INDEX dispatches_ts_idx`.\n  - `WHERE project = ? ORDER BY ts DESC LIMIT` plans as a SEARCH on (project, ts). On the existing single-column project index it adds USE TEMP B-TREE FOR ORDER BY. Keep projectOf's null-to-DEFAULT_PROJECT normalisation: for the default project, also read `project IS NULL`.\n  - `session_id IN (?, ?) ORDER BY ts DESC LIMIT` uses a temp B-tree even on (session_id, ts). For a session-list scope, read each listed session with LIMIT on (session_id, ts) and merge with inLogOrder.\n(3) runningSessions' newest event becomes one indexed lookup per session: `FROM sessions s CROSS JOIN events_raw e WHERE e.session_id = s.session_id AND e.ts = (SELECT max(ts) FROM events_raw m WHERE m.session_id = s.session_id)`, plus today's scope condition. The probe plans it as:\n  - `SCAN s` (the sessions table, one row per session);\n  - `SEARCH e USING INDEX events_raw_session_ts_idx (session_id=? AND ts=?)`;\n  - a correlated `SEARCH m USING COVERING INDEX events_raw_session_ts_idx (session_id=?)`.\n  It returns the same rows as today's GROUP BY. A plain JOIN let the planner choose `SCAN e` over all of events_raw, so the join order must be forced (CROSS JOIN, or drizzle's equivalent via sql``). The ts-tie group comes back whole, and isLaterEvent settles it as today.\n\nWrite each proof test first and watch it fail on today's code. The EXPLAIN harness is built like test/db/timelinePlan.test.ts: capture the SQL drizzle sends, then run EXPLAIN QUERY PLAN on the same connection.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/src/db/schema.ts",
+        "factory/orchestrator/drizzle/0019_*.sql",
+        "factory/orchestrator/drizzle/meta/_journal.json",
+        "factory/orchestrator/drizzle/meta/0019_snapshot.json",
+        "factory/orchestrator/test/db/overviewPlan.test.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 260000,
+        "diff_lines": 2600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Migration 0019 is a single drizzle migration generated from schema.ts, with its journal entry and snapshot. Its SQL file holds only CREATE INDEX statements on dispatches: dispatches_ts_idx (ts), plus (project, ts) and/or (session_id, ts) only where a scoped read uses them. 0018's events_raw indexes, which already serve, are reused and not re-created.",
+          "overview()'s recent-dispatches read is an indexed keyset read: ORDER BY ts DESC with LIMIT RECENT_DISPATCHES_LIMIT + 1 on an index, plus at most one read of the boundary tie group. It pages on with ts < cursor only while filterByProject drops rows. recentDispatches is unchanged for every scope shape: none, project, sessionId, sessionIds, and sessionIds with project. Today's tie-break holds: inLogOrder (ts, then session id, then event index), newest first.",
+          "runningSessions() reads each session's newest event with one index lookup per session on events_raw_session_ts_idx. The join order is forced so that events_raw is never the outer scan. Ties at the newest ts are settled by isLaterEvent as today, and the result is unchanged.",
+          "overview() and runningSessions() keep their signatures and results; no other function's behaviour changes."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts or query plan, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it through dist. Adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep, queries and timelinePlan tests are not claimed: they stay green unedited.",
+          "Under factory/orchestrator/drizzle/, write only the new 0019 SQL file, the new 0019 snapshot and one new journal entry. Never edit an existing migration or snapshot.",
+          "The migration applies cleanly to an existing store at 0018, and the existing tests that run the migrator stay green.",
+          "A generated drizzle meta snapshot is about 1,800 lines and counts toward diff_lines; the budget allows for one.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so plans must hold on a store with no statistics.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "test/db/overviewPlan.test.ts (new) runs EXPLAIN QUERY PLAN on runningSessions' newest-event read, unscoped and session-scoped. Neither plan has a `SCAN events_raw` line (only a SEARCH on events_raw_session_ts_idx per session) nor a `USE TEMP B-TREE` line. The result pastes the plan before and after the change.",
+        "The same test runs EXPLAIN on the recent-dispatches read, unscoped and project-scoped, and shows no `SCAN dispatches` line and no `USE TEMP B-TREE` line. It counts the dispatches rows read: at most RECENT_DISPATCHES_LIMIT + 1 plus one tie group, equal on stores at N and 10N dispatches (N >= 2000). For a session-list scope the bound is the same per listed session. Reverting the read to the full-table form makes the count assertion fail; state that revert proof.",
+        "The tie-break holds. A burst of more than RECENT_DISPATCHES_LIMIT dispatches written in one millisecond still yields the newest ten in log order: overviewPlan.test.ts adds a burst that straddles the limit, so the tie-group read is exercised. The burst tests in test/db/queries.test.ts stay green unedited.",
+        "A migration test in overviewPlan.test.ts applies the migrations to a fresh temp store and to a temp store at 0018, and shows the new dispatches indexes in sqlite_master. The existing migrator tests (timelinePlan.test.ts among them) stay green. `git diff --stat` shows no existing drizzle file edited except the new journal entry. The residual is stated with file:line: any scope shape whose read is still unbounded.",
+        "No regressions: overviewCost.test.ts stays green and is not weakened (assertions may be added, none removed or loosened). Its golden overview() output and 'reads at most one events_raw row per session' hold. overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep stay green unedited.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    }
+  },
+  "added": [
+    {
+      "task_id": "bs-audit-4/task-22-overview-clock-stage",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: projection stage and window-bounded clock stage",
+      "summary": "Split overview() into a projection stage and a clock stage whose reads are bounded by the 5 min and 1 h windows, with payload parses made incremental per store.",
+      "objective": "Part 2 of 3 of task-20's split (finding a2da2311). It lands after task-21's indexed reads. Do not touch ui/server: the app.ts memo is task-23.\n\nToday's code (factory/orchestrator/src/db/queries.ts): overview() at ~1952-2130 recomputes everything on every call.\n- taskResultRows (~726-740) selects and JSON.parses every task-result-recorded row.\n- The delta cutoffs are now-5 min and now-1 h (~2060-2061).\n- liveAgentsAt (~1812-1841) runs once per delta. Each time it re-reads every registry event with ts <= cutoff, sorts them inLogOrder, JSON.parses them, and runs foldLiveAgents(foldAgents(...)).\n- tokensSpentAt (~1860) reads every task-result-recorded row up to the cutoff.\n- tokensBudgetedAt (~1903) reads every task-added row up to the cutoff, in log order.\n\nChange:\n(1) Add two exports:\n  - overviewProjection(db, scope): everything that does not depend on the clock;\n  - overviewAt(db, projection, scope, opts): the clock stage.\n  overview(db, scope, opts) becomes overviewAt(db, overviewProjection(db, scope), scope, opts), with the same signature and result. task-23 memoises overviewProjection in app.ts, so keep these names.\n(2) The clock stage computes:\n  - the working and stalled counts;\n  - idle and active epics;\n  - per-project working counts and idle epics;\n  - runningSessions' working counts;\n  - the three deltas.\n  It reads only rows inside the windows, plus the live agents.\n(3) Design note from the first coder, verbatim: 'foldAgents is run per session by the projector but globally by liveAgentsAt, so the agents table cannot replace the registry fold. A checkpoint resume (open dispatches at checkpoint B, then fold the events in (B, cutoff]) equals the full fold's live set for cutoff >= B.'\n  So: per (db, scope), keep the open dispatches at a checkpoint B <= cutoff and fold only the registry events in (B, cutoff]. Move B forward as the clock does. The log is not ts-ordered across sessions, so an appended event with ts <= B invalidates the checkpoint, and the stage rebuilds it.\n(4) Deltas:\n  - Spend an hour ago = spend now minus the measured spend in task-result-recorded rows after the cutoff.\n  - Budget, where a value is last-wins per task (a re-plan's task-added): resolve each task touched after the cutoff with one lookup on 0018's events_raw_task_ts_idx (task_id, ts).\n  - Keep D-207's id resolution on both ends of the subtraction.\n(5) Parses: keep a per-db cache of parsed payloads keyed by event_id, never by rowid. Rowids are unstable because projectSession deletes and re-inserts a session's events_raw rows. A projection advance then parses only events it has not seen.\n(6) runningSessions (~1343) splits the same way: its working counts move to the clock stage, and its exported signature and result stay.\n\nAllowed residual, to be stated with file:line in the result: epicActivityRows (~1648), sessionProjects (~1231) and sessionTitles (~1303) still read whole history inside SQLite once per projection advance.\n\nWrite each proof test first and watch it fail on today's code. Count parses with vi.spyOn(JSON, 'parse'). Count rows read with a test-side wrapper on handle.sqlite.prepare, as overviewCost.test.ts already does.",
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/overviewPoll.test.ts",
+        "factory/orchestrator/test/db/overviewCost.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts"
+      ],
+      "budget": {
+        "tokens": 340000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "queries.ts exports overviewProjection(db, scope) and overviewAt(db, projection, scope, opts). overview(db, scope, opts) is their composition, with the same signature and a deep-equal result for every scope and clock.",
+          "The clock stage computes the working and stalled counts, idle and active epics, the per-project working counts and idle epics, runningSessions' working counts, and the three deltas (liveAgentCountDelta5m, workingAgentCountDelta5m, budgetUsedPctPointDelta1h). It reads only the events_raw rows inside the 5 min and 1 h windows (plus at most one indexed lookup per task touched inside them) and the live agents. No clock-stage read grows with history.",
+          "Live agents at a cutoff come from a checkpoint resume: the open dispatches at checkpoint B, then the registry events in (B, cutoff]. The result equals the full fold's live set for cutoff >= B. An event appended later with ts <= B invalidates the checkpoint.",
+          "Payload parses are incremental or window-bounded. A per-db cache keyed by event_id (not rowid) means a projection advance parses only events it has not parsed before. The deltas equal today's values.",
+          "runningSessions() keeps its signature and result; its working counts are computed by the clock stage."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts or query plan, never by timing; no test asserts a duration.",
+          "keeps_exports: no export of queries.ts is removed or has its declaration changed. ui/server consumes it through dist. Adding exports is allowed.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep and overviewPlan tests are not claimed: they stay green unedited.",
+          "No schema or migration change: task-21 owns 0019, and this task adds no index.",
+          "Do not rely on ANALYZE or sqlite_stat1: production runs neither, so plans must hold on a store with no statistics.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "Clock-stage parity, in test/db/overviewPoll.test.ts (new). The test runs a sequence of clocks and appends that includes a burst in one millisecond, a row exactly at each cutoff, and a late-appended event older than the checkpoint. At every step, overviewAt on the warm per-db cache deep-equals overview() on a freshly opened handle at the same clock, where the fresh handle's cache is cold. This holds for scopes none, project, sessionId and sessionIds.",
+        "Clock-stage counts, on stores at N and 10N events (N >= 2000) with the same recent activity. overviewAt on a held projection, with the clock +5 s and no new event, makes equal numbers of payload JSON.parse calls, events_raw rows read and dispatches rows read at N and 10N. Reverting the deltas to the whole-history reads makes the assertion fail; state that revert proof.",
+        "Incremental parses. After one appended event and a projection advance, overviewProjection's payload parses are bounded (the new event's only) and equal at N and 10N. The result names the residual whole-history SQLite reads with file:line.",
+        "No regressions: overviewCost.test.ts stays green and is not weakened. Where a count there moves stage, it is rewritten to an equal or tighter bound, and the result says which and why. overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep and overviewPlan stay green unedited.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    },
+    {
+      "task_id": "bs-audit-4/task-23-overview-shared-memo",
+      "epic_id": "bs-audit-4",
+      "plan_version": 5,
+      "project": "black-smith",
+      "agent_role": "coder",
+      "case": "refactor",
+      "origin": "user",
+      "task_status": "todo",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "ui_affecting": false,
+      "title": "Overview: projection memo with no age bound, for all four routes",
+      "summary": "app.ts memoises overviewProjection per (store, scope) until the projection advances, runs the clock stage per request, and routes /api/overview, /api/active-scope, /api/projects and /api/sessions through it.",
+      "objective": "Part 3 of 3 of task-20's split (finding a2da2311). It lands last and carries the finding's full per-poll proof. task-22 has added overviewProjection and overviewAt to queries.ts, and ui/server reads them through the orchestrator's dist.\n\nToday's code (ui/server/src/app.ts):\n- sharedOverview (~783-809) is a WeakMap<SmithDb, Map<scopeKey, {generation, at, data}>> whose generation is `${scans}:${data_version}`.\n- An entry expires once now - at >= memoMaxAgeMs. That comes from the option overviewMemo.maxAgeMs (~174-179), default 4000. Home polls every 5000 ms (PULSE_POLL_MS in ui/src/composables/usePulse.ts), so every poll recomputes.\n- /api/overview (~875) and /api/active-scope (~1167) use the memo.\n- /api/sessions calls overview() directly, at ~1060 (all-stores path) and ~1097 (single-store path).\n- /api/projects calls overview() directly at ~1193.\n\nChange:\n(1) Memoise overviewProjection per (store, scope), keyed on the generation plus data_version, with no age bound. Remove maxAgeMs or ignore it; the option type may keep the field.\n(2) Every request runs overviewAt on the memoised projection with its own clock.\n(3) Route all four through the memo.\n\nOut of scope: /api/sessions/:sessionId/agents (~1113), which stays as it is.\n\nRewrite ui/server/test/overviewShared.test.ts:\n- Its vi.mock (~15) of dist/db/queries.js spies on overview; re-point the spy to overviewProjection.\n- Its bound test asserts expiry at maxAgeMs, which this change removes.\nAdd ui/server/test/overviewPollCost.test.ts for the end-to-end proof. Write each failing test first.",
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/test/overviewShared.test.ts",
+        "ui/server/test/overviewPollCost.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 700
+      },
+      "contract": {
+        "functional_clauses": [
+          "app.ts memoises overviewProjection per (store, scope), keyed on the projection generation plus data_version, with no age bound. maxAgeMs is removed or ignored, and an entry is replaced only when its store's projection advances.",
+          "Every request runs the clock stage (overviewAt) on the memoised projection with that request's clock, so the clock fields (working and stalled counts, idle epics, deltas) are current on every poll.",
+          "All four routes read through the memo: /api/overview, /api/active-scope, /api/projects, and both paths of /api/sessions (all-stores and single-store). /api/sessions/:sessionId/agents is unchanged.",
+          "Route responses are unchanged for the same store state and clock."
+        ],
+        "nonfunctional_clauses": [
+          "Work is proven by counts, never by timing; no test asserts a duration.",
+          "ui/server imports the orchestrator's dist, so run `pnpm run build` and then `pnpm run test:server`, as well as the orchestrator suite (`pnpm run test` from the repo root).",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap. Nothing under factory/orchestrator is edited. The overviewDeltas, overviewIdle, workingAgents, runningSessionsLastStep, overviewPlan, overviewPoll and overviewCost tests stay green unedited.",
+          "Do not rely on ANALYZE or sqlite_stat1.",
+          "In the worktree, node_modules is a symlink to the main clone's; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; fixtures use neutral names (project-a, project-b, epic-a, epic-b, store-a, store-b, demo-hub, blacksmith).",
+          "Tests build their fixtures in temp dirs and read no git history.",
+          "Run the matching typecheck scripts and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "acceptance_criteria": [
+        "overviewShared.test.ts counts projection-stage computations through a vi.mock spy re-pointed to overviewProjection. One poll across the four routes, scoped and all-stores, computes once per (store, scope). A repeat after PULSE_POLL_MS with no advance computes 0 times, while the clock fields reflect the new clock. 'recomputes each store once the bound has passed' is rewritten to that. 'recomputes only the store whose projection advanced' and 'keeps different scopes apart' stay green.",
+        "a2da2311's per-poll proof, end to end, in ui/server/test/overviewPollCost.test.ts (new). Stores at N and 10N events (N >= 2000) with the same recent activity get a Home poll across the four routes, then a repeat poll with the clock +5 s and no new event. The test counts four things on the repeat poll: projection-stage computations (must be 0), payload JSON.parse calls, clock-stage events_raw rows, and dispatches rows. All four are equal at N and 10N. Restoring a memo age bound below PULSE_POLL_MS makes it fail; state that revert proof.",
+        "No regressions: overviewPlan, overviewPoll, overviewCost, overviewDeltas, overviewIdle, workingAgents and runningSessionsLastStep stay green unedited, and the existing ui/server route tests stay green.",
+        "Full gates pass in this order: `pnpm run build`, `pnpm run test`, `pnpm run test:server`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run lint`, then `bash scripts/check.sh` in full. The result quotes check.sh's tail and names every SKIP."
+      ]
+    }
+  ],
+  "newEdges": [
+    {
+      "task": "bs-audit-4/task-22-overview-clock-stage",
+      "dependsOn": "bs-audit-4/task-21-overview-indexed-reads",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-4/task-23-overview-shared-memo",
+      "dependsOn": "bs-audit-4/task-22-overview-clock-stage",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ]
+}

@@ -132,23 +132,6 @@ export function titleCase(status: string): string {
 }
 
 /**
- * Operator directive 1 (Kanban cleanup pass): "sub-status text only where
- * it adds signal" — a folded column whose raw task_status values differ
- * (e.g. Reviewing = reviewing + merging) gets a "Reviewing 5 · Merging 2"
- * caption; a column with only one raw status underneath returns null (no
- * sub-status line — nothing more to say than the count already shown).
- */
-export function subStatusSummary<T extends KanbanTaskLike>(tasks: readonly T[]): string | null {
-  const counts = new Map<string, number>();
-  for (const t of tasks) counts.set(t.taskStatus, (counts.get(t.taskStatus) ?? 0) + 1);
-  if (counts.size <= 1) return null;
-  return [...counts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([status, count]) => `${titleCase(status)} ${count}`)
-    .join(' · ');
-}
-
-/**
  * How many tasks the board actually draws for this payload.
  *
  * The server groups by raw task_status and hides nothing, so summing its

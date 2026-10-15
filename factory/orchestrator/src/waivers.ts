@@ -11,6 +11,7 @@ import {
   transition,
   WAIVABLE_STATUSES,
 } from './findings.js';
+import { appendTracked, readLineage } from './lineageSnapshot.js';
 
 export class WaiverError extends SmithError {}
 
@@ -81,7 +82,7 @@ export async function isWaived(
   ref: SessionRef,
   opts: EventOpts = {},
 ): Promise<boolean> {
-  const events = await readLineageEvents(ref.sessionId, opts);
+  const events = await readLineage(ref.sessionId, opts);
   const equivalents = fingerprintAliases(fingerprint, foldFindings(events));
   let waived = false;
   for (const { record } of events) {
@@ -160,7 +161,7 @@ export async function grantWaiver(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent> {
-  const waiverEvent = await appendEvent(
+  const waiverEvent = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'user',
@@ -269,7 +270,7 @@ export async function denyWaiver(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent> {
-  const denialEvent = await appendEvent(
+  const denialEvent = await appendTracked(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'user',

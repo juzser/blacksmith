@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
 import { eventKind, requestQuoteForTask, timeline } from '../../src/db/queries.js';
+import { compareLogOrder } from '../../src/events.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1 } from './fixtures.js';
 
 /** A raw log line with the ts spelled out, so a tie is the test's and not the
@@ -49,6 +50,36 @@ function crossSessionLine(
     ts,
     ...(taskId ? { task_id: taskId } : {}),
   })}\n`;
+}
+
+/** A raw log line with an explicit project and an optional task id. */
+function projectLine(
+  eventType: string,
+  ts: string,
+  session: string,
+  project: string,
+  taskId?: string,
+): string {
+  return `${JSON.stringify({
+    session_id: session,
+    actor: 'user',
+    event_type: eventType,
+    plan_version: 1,
+    causal_parent: eventType === 'session-start' ? null : `${session}#0`,
+    payload: {},
+    ts,
+    project,
+    ...(taskId ? { task_id: taskId } : {}),
+  })}\n`;
+}
+
+/** What a paged walk skipped or repeated, spelled out for a failure message. */
+function walkDiff(seen: string[], expected: string[]): string {
+  const counts = new Map<string, number>();
+  for (const id of seen) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const repeated = [...counts].filter(([, n]) => n > 1).map(([id]) => id);
+  const skipped = expected.filter((id) => !counts.has(id));
+  return `skipped: [${skipped.join(', ')}] repeated: [${repeated.join(', ')}]`;
 }
 
 /**
@@ -184,6 +215,121 @@ describe('timeline() paging (DS6)', () => {
     // The oldest 2 of those are sessionStartB, noteA1 -- returned newest-first.
     const page = timeline(handle.db, { after: cursorId, limit: 2 });
     expect(page.map((e) => e.payload.note ?? 'session-start')).toEqual(['a1', 'session-start']);
+  });
+
+  it('events that share one ts come back in numeric log order, not text order, across window boundaries', async () => {
+    const a = 'order-a';
+    const tie = '2030-04-01T00:01:00.000Z';
+    let body = tiedLine('session-start', '2030-04-01T00:00:00.000Z', {}, a);
+    for (let i = 1; i <= 12; i += 1) body += tiedLine('operator-note', tie, { note: `n${i}` }, a);
+    await appendFile(path.join(stateDir, `${a}.jsonl`), body, 'utf8');
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    handle = openDb(dbPath);
+
+    // Newest-first: #12 ... #1 then the session start. Text order would put #9 after #10.
+    const expected = [
+      '#12',
+      '#11',
+      '#10',
+      '#9',
+      '#8',
+      '#7',
+      '#6',
+      '#5',
+      '#4',
+      '#3',
+      '#2',
+      '#1',
+      '#0',
+    ].map((n) => `${a}${n}`);
+    for (const limit of [1, 2, 3, 5]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      for (let guard = 0; guard < 20; guard += 1) {
+        const page = timeline(handle.db, { limit, ...(cursor ? { before: cursor } : {}) });
+        if (page.length === 0) break;
+        seen.push(...page.map((e) => e.eventId));
+        cursor = page[page.length - 1]?.eventId;
+      }
+      expect(seen, `limit ${limit}: ${walkDiff(seen, expected)}`).toEqual(expected);
+    }
+  });
+
+  describe('a tie group that spans two sessions and straddles the cursor', () => {
+    const tieTs = '2030-05-01T01:00:00.000Z';
+    const sessions = [
+      { id: 'tie-a', project: 'project-a', task: 'epic-a/task-1' },
+      { id: 'tie-b', project: 'project-b', task: 'epic-b/task-1' },
+    ];
+
+    /** Ascending compareLogOrder order of every event in the store, and the six tied ones. */
+    async function openTieStore(): Promise<{ all: string[]; group: string[] }> {
+      const stamp = (n: number, offset: number) =>
+        new Date(Date.UTC(2030, 4, 1, 0, 0, 0) + n * 2000 + offset).toISOString();
+      const ids: { ts: string; eventId: string }[] = [];
+      for (const [k, s] of sessions.entries()) {
+        let body = projectLine('session-start', stamp(0, k), s.id, s.project);
+        ids.push({ ts: stamp(0, k), eventId: `${s.id}#0` });
+        for (let i = 1; i <= 11; i += 1) {
+          const ts = i >= 8 && i <= 10 ? tieTs : i === 11 ? stamp(20, k) : stamp(i, k);
+          body += projectLine('operator-note', ts, s.id, s.project, s.task);
+          ids.push({ ts, eventId: `${s.id}#${i}` });
+        }
+        await appendFile(path.join(stateDir, `${s.id}.jsonl`), body, 'utf8');
+      }
+      // Project the later-sorting session first, so rowid order of the group
+      // differs from compareLogOrder order.
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, ['tie-b', 'tie-a'], { stateDir });
+      handle = openDb(dbPath);
+      ids.sort(compareLogOrder);
+      return {
+        all: ids.map((e) => e.eventId),
+        group: ids.filter((e) => e.ts === tieTs).map((e) => e.eventId),
+      };
+    }
+
+    it('before and after pages hold their own side of the cursor, and a full walk loses nothing', async () => {
+      const { all, group } = await openTieStore();
+      expect(group).toHaveLength(6);
+      const cursor = group[2] as string;
+      const at = all.indexOf(cursor);
+
+      for (const limit of [1, 2, 3]) {
+        const before = timeline(handle.db, { limit, before: cursor }).map((e) => e.eventId);
+        const wantBefore = all.slice(Math.max(0, at - limit), at).reverse();
+        expect(before, `before, limit ${limit}`).toEqual(wantBefore);
+
+        const after = timeline(handle.db, { limit, after: cursor }).map((e) => e.eventId);
+        const wantAfter = all.slice(at + 1, at + 1 + limit).reverse();
+        expect(after, `after, limit ${limit}`).toEqual(wantAfter);
+
+        const older: string[] = [];
+        for (let cur = cursor, guard = 0; guard < 60; guard += 1) {
+          const page = timeline(handle.db, { limit, before: cur });
+          if (page.length === 0) break;
+          older.push(...page.map((e) => e.eventId));
+          cur = page[page.length - 1]?.eventId as string;
+        }
+        const newer: string[] = [];
+        for (let cur = cursor, guard = 0; guard < 60; guard += 1) {
+          const page = timeline(handle.db, { limit, after: cur });
+          if (page.length === 0) break;
+          newer.push(...page.map((e) => e.eventId).reverse());
+          cur = page[0]?.eventId as string;
+        }
+        const wantOlder = all.slice(0, at).reverse();
+        const wantNewer = all.slice(at + 1);
+        expect(older, `older walk, limit ${limit}: ${walkDiff(older, wantOlder)}`).toEqual(
+          wantOlder,
+        );
+        expect(newer, `newer walk, limit ${limit}: ${walkDiff(newer, wantNewer)}`).toEqual(
+          wantNewer,
+        );
+        expect([...older, ...newer]).not.toContain(cursor);
+      }
+    });
   });
 
   it('an unknown cursor raises a typed error', async () => {

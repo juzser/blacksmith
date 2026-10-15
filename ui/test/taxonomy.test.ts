@@ -4,45 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { MILESTONE_STATUSES } from '../../factory/orchestrator/src/roadmap.js';
 import {
-  errorGroupIcon,
   findingStatusKitTone,
   findingStatusTone,
   isTaskOver,
-  lessonStatusTone,
   MILESTONE_STATUS_TONE,
   milestoneStatusLabel,
   milestoneStatusTone,
-  planStatusTone,
   runOutcomeKitTone,
-  runStatusTone,
   severityKitTone,
   severityTone,
   TASK_STATUS_OUTCOME,
   taskOutcome,
   taskStatusKitTone,
-  taskStatusTone,
 } from '../src/lib/taxonomy.js';
 
 describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
-  it('maps every task_status value per §3.1', () => {
-    expect(taskStatusTone('todo')).toBe('neutral');
-    expect(taskStatusTone('ready')).toBe('neutral');
-    expect(taskStatusTone('in-progress')).toBe('info');
-    expect(taskStatusTone('grading')).toBe('info');
-    expect(taskStatusTone('reviewing')).toBe('info');
-    expect(taskStatusTone('merging')).toBe('info');
-    expect(taskStatusTone('blocked')).toBe('warning');
-    expect(taskStatusTone('escalated')).toBe('warning');
-    expect(taskStatusTone('completed')).toBe('success');
-    expect(taskStatusTone('waived')).toBe('success');
-    expect(taskStatusTone('failed')).toBe('danger');
-    expect(taskStatusTone('superseded')).toBe('neutral');
-  });
-
-  it('falls back to neutral for an unknown task_status', () => {
-    expect(taskStatusTone('not-a-real-status')).toBe('neutral');
-  });
-
   it('TASK_STATUS_OUTCOME covers taxonomy.yml task_status exactly (fails on drift)', () => {
     // The declaration this map answers to is the policy file, not a copy of it
     // in TypeScript: a thirteenth status added there has to be classified here
@@ -91,20 +67,6 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(isTaskOver('not-a-real-status')).toBe(false);
   });
 
-  it('maps plan_status per §3.2', () => {
-    expect(planStatusTone('draft')).toBe('neutral');
-    expect(planStatusTone('in-review')).toBe('info');
-    expect(planStatusTone('active')).toBe('success');
-    expect(planStatusTone('superseded')).toBe('neutral');
-  });
-
-  it('maps run_status per §3.3', () => {
-    expect(runStatusTone('queued')).toBe('neutral');
-    expect(runStatusTone('running')).toBe('info');
-    expect(runStatusTone('done')).toBe('success');
-    expect(runStatusTone('dead')).toBe('danger');
-  });
-
   it('maps severity to tone+variant per §3.4, S1 alone is bold', () => {
     expect(severityTone('S1-stop-the-line')).toEqual({ tone: 'danger', variant: 'bold' });
     expect(severityTone('S2-major')).toEqual({ tone: 'danger', variant: 'subtle' });
@@ -128,15 +90,6 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(findingStatusTone('amended')).toBe('success'); // terminal, discharged
   });
 
-  it('maps lesson_status per §3.6', () => {
-    expect(lessonStatusTone('candidate')).toBe('neutral');
-    expect(lessonStatusTone('novelty-rejected')).toBe('neutral');
-    expect(lessonStatusTone('superseded')).toBe('neutral');
-    expect(lessonStatusTone('pending-approval')).toBe('warning');
-    expect(lessonStatusTone('approved')).toBe('success');
-    expect(lessonStatusTone('invalidated')).toBe('danger');
-  });
-
   it('maps roadmap.md MilestoneStatus (planned/in-progress/completed) — NOT plan_status', () => {
     expect(milestoneStatusTone('planned')).toBe('neutral');
     expect(milestoneStatusTone('in-progress')).toBe('info');
@@ -152,17 +105,6 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(milestoneStatusLabel('in-progress')).toBe('In progress');
     expect(milestoneStatusLabel('completed')).toBe('Done');
     expect(milestoneStatusLabel('unknown-status')).toBe('unknown-status');
-  });
-
-  it('maps every error group to an icon per §3.7, never a colour', () => {
-    expect(errorGroupIcon('spec')).toBe('file-text');
-    expect(errorGroupIcon('contract')).toBe('file-check');
-    expect(errorGroupIcon('execution')).toBe('play');
-    expect(errorGroupIcon('integration')).toBe('git-merge');
-    expect(errorGroupIcon('economy')).toBe('coins');
-    expect(errorGroupIcon('judgment')).toBe('scale');
-    expect(errorGroupIcon('coordination')).toBe('users');
-    expect(errorGroupIcon('memory')).toBe('database');
   });
 });
 

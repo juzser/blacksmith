@@ -2,7 +2,8 @@
 // §10). There are no write endpoints: the dashboard only reads, and every
 // operator decision (a waiver, a lesson review) goes through the CLI
 // (`/bs waivers`, `/bs lessons`). readOnlyGuard() answers 405 to any `/api`
-// method that is not GET or HEAD.
+// method that is not GET or HEAD, and loopbackGuard() answers 403 to any `/api`
+// request whose host is not a loopback address.
 //
 // Imports factory/orchestrator's BUILT `dist/` output, not its `src/` —
 // several orchestrator modules (taxonomy.ts, schemas.ts) resolve policy/
@@ -23,12 +24,19 @@ import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { resolveArtifactPath } from '../../../factory/orchestrator/dist/artifacts.js';
-import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
-import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
+import type {
+  DbHandle,
+  DbOpts,
+  Projection,
+  SmithDb,
+} from '../../../factory/orchestrator/dist/db/projector.js';
+import { openDb, openProjection } from '../../../factory/orchestrator/dist/db/projector.js';
 import type {
   AnalyticsPeriod,
   AnalyticsResult,
   EventKind,
+  OverviewProjection,
+  OverviewResult,
   Scope,
   TimelineEntry,
 } from '../../../factory/orchestrator/dist/db/queries.js';
@@ -41,6 +49,8 @@ import {
   kanban,
   lessonsPage,
   overview,
+  overviewAt,
+  overviewProjection,
   projectedLineage,
   pulse,
   roadmapPage,
@@ -163,6 +173,11 @@ export interface AppOpts {
   stores?: string[];
   /** How often store discovery is recomputed; 5 s in production, 0 in tests. */
   storeRefreshMs?: number;
+  /**
+   * Retained for callers that still pass it; the shared projection has no age
+   * bound, so neither field is read.
+   */
+  overviewMemo?: { maxAgeMs?: number; now?: () => number };
 }
 
 /**
@@ -225,6 +240,8 @@ export interface Refresher {
   hold(): () => void;
   /** Drops every listener and stops the ticker outright. closeApp()'s half. */
   stop(): void;
+  /** Counts the sessions a scan has folded; a changed value means the projection moved. */
+  generation?(): number;
 }
 
 export interface AppHandle {
@@ -333,82 +350,109 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   // behind it is repaired -- the next poll re-projects and finds nothing.
   const issues = new Map<string, ProjectionIssue[]>();
   let inFlight: Promise<void> | null = null;
+  let generation = 0;
+
+  // One handle for the life of this refresher, on its own database path: the
+  // log cache inside it is what lets a scan read each log once.
+  const projection = openProjection(dbPath, dbOpts);
+  let stopped = false;
+  let closed = false;
+
+  function closeProjection(): void {
+    if (closed) return;
+    closed = true;
+    projection.close();
+  }
 
   async function scan(): Promise<void> {
     const advances: SessionAdvance[] = [];
-    if (!existsSync(eventsDir)) return;
+    if (stopped || !existsSync(eventsDir)) return;
+    const changed = new Map<string, string>();
     for (const entry of readdirSync(eventsDir)) {
       if (!entry.endsWith('.jsonl')) continue;
       const sessionId = entry.slice(0, -'.jsonl'.length);
-      let fingerprint: string;
       try {
         const stats = statSync(path.join(eventsDir, entry));
-        fingerprint = `${stats.size}:${stats.mtimeMs}`;
+        const fingerprint = `${stats.size}:${stats.mtimeMs}`;
+        if (projected.get(sessionId) !== fingerprint) changed.set(sessionId, fingerprint);
       } catch {
-        continue; // Deleted between readdir and stat; nothing to project.
+        // Deleted between readdir and stat; nothing to project.
       }
-      if (projected.get(sessionId) === fingerprint) continue;
-      try {
-        const { eventsApplied, skippedFindings, skippedArtifacts } = await applyDb(
-          dbPath,
-          sessionId,
-          dbOpts,
-        );
-        projected.set(sessionId, fingerprint);
-        advances.push({ session: sessionId, events: eventsApplied });
-        const landed: ProjectionIssue[] = skippedArtifacts.map((skipped) => ({
-          sessionId,
-          kind: 'artifacts-skipped',
-          eventId: skipped.event_id,
-          message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
-        }));
-        if (landed.length > 0) issues.set(sessionId, landed);
-        else issues.delete(sessionId);
-        for (const issue of landed) {
-          if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
-          namedArtifacts.add(issue.eventId);
-          process.stderr.write(`bs ui: ${issue.message}\n`);
-        }
-        // D-141 turned "a finding that cannot fill a notNull column" from a
-        // crash into a returned report, on the rule that a loud undercount
-        // beats a crash and both beat a quiet one. That made the catch below
-        // unreachable for this class and left the report unread: this is the
-        // only caller an operator running the dashboard ever goes through, so
-        // the undercount was quiet exactly where it had to be loud (D-248).
-        for (const skipped of skippedFindings) {
-          // `finding_id` is optional on the record for the honest reason that
-          // a payload short of its required fields can be short of that one
-          // too. The row is still missing either way, so such a record is
-          // keyed and named by the event id, which every record carries.
-          const named = skipped.finding_id ?? skipped.event_id;
-          if (namedFindings.has(named)) continue;
-          namedFindings.add(named);
-          // The event id too, because it is what an operator greps the log
-          // for; the reason because it says the data is short, not the server.
-          process.stderr.write(
-            `bs ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
-          );
-        }
-      } catch (err) {
+    }
+    if (changed.size === 0) return;
+    let batch: Awaited<ReturnType<Projection['applySessions']>>;
+    try {
+      batch = await projection.applySessions([...changed.keys()]);
+    } catch (err) {
+      // The whole batch failed (the database, not one log): every session in
+      // it reports the failure. stop() never closes the handle under a batch.
+      batch = {
+        sessions: [...changed.keys()].map((sessionId) => ({ sessionId, error: err })),
+        skippedFindings: [],
+        unreadableSessions: [],
+      };
+    }
+    generation += 1;
+    for (const result of batch.sessions) {
+      const { sessionId } = result;
+      const fingerprint = changed.get(sessionId) as string;
+      if ('error' in result) {
         // A read is never failed by a log this process does not control. The
         // fingerprint is deliberately NOT recorded, so a torn line caught
         // mid-append is retried on the next request rather than skipped for
         // the life of the process — and the warning is printed once per
         // distinct fingerprint, so a genuinely broken log does not spam the
         // console at the poll interval.
+        const err = result.error;
         const message = `could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}`;
         issues.set(sessionId, [{ sessionId, kind: 'session-not-projected', message }]);
         if (warned.get(sessionId) !== fingerprint) {
           warned.set(sessionId, fingerprint);
           process.stderr.write(`bs ui: ${message}\n`);
         }
+        continue;
       }
+      projected.set(sessionId, fingerprint);
+      advances.push({ session: sessionId, events: result.eventsApplied });
+      const landed: ProjectionIssue[] = result.skippedArtifacts.map((skipped) => ({
+        sessionId,
+        kind: 'artifacts-skipped',
+        eventId: skipped.event_id,
+        message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
+      }));
+      if (landed.length > 0) issues.set(sessionId, landed);
+      else issues.delete(sessionId);
+      for (const issue of landed) {
+        if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
+        namedArtifacts.add(issue.eventId);
+        process.stderr.write(`bs ui: ${issue.message}\n`);
+      }
+    }
+    // D-141 turned "a finding that cannot fill a notNull column" from a
+    // crash into a returned report, on the rule that a loud undercount
+    // beats a crash and both beat a quiet one. That made the catch above
+    // unreachable for this class and left the report unread: this is the
+    // only caller an operator running the dashboard ever goes through, so
+    // the undercount was quiet exactly where it had to be loud (D-248).
+    for (const skipped of batch.skippedFindings) {
+      // `finding_id` is optional on the record for the honest reason that
+      // a payload short of its required fields can be short of that one
+      // too. The row is still missing either way, so such a record is
+      // keyed and named by the event id, which every record carries.
+      const named = skipped.finding_id ?? skipped.event_id;
+      if (namedFindings.has(named)) continue;
+      namedFindings.add(named);
+      // The event id too, because it is what an operator greps the log
+      // for; the reason because it says the data is short, not the server.
+      process.stderr.write(
+        `bs ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
+      );
     }
     // Once per scan, not once per session: a page that hears "three sessions
     // advanced" refetches once. Listeners are notified after every session in
     // this pass has been folded, so a refetch triggered by the frame reads a
     // projection that already holds all of it.
-    if (advances.length === 0) return;
+    if (stopped || advances.length === 0) return;
     for (const listener of [...listeners]) {
       try {
         listener(advances);
@@ -421,9 +465,12 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   }
 
   function refresh(): Promise<void> {
+    if (stopped) return Promise.resolve();
     if (inFlight) return inFlight;
     const run = scan().finally(() => {
       inFlight = null;
+      // A stop() during this scan left the handle open for the batch in flight.
+      if (stopped) closeProjection();
     });
     inFlight = run;
     return run;
@@ -459,6 +506,8 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
   }
 
   function stop(): void {
+    stopped = true;
+    if (inFlight === null) closeProjection();
     listeners.clear();
     holds = 0;
     if (ticker !== null) {
@@ -472,6 +521,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
     subscribe,
     hold,
     stop,
+    generation: () => generation,
     // An arrow rather than a declaration beside the others, because `issues`
     // is already the map above: a function of that name in this scope would
     // not shadow it, it would redeclare it.
@@ -704,25 +754,17 @@ export function createApp(opts: AppOpts): AppHandle {
   // no fold and no route below can grow a write by accident.
   app.use('/api/*', readOnlyGuard());
 
+  // Every `/api` route answers loopback requests only: one mount covers the
+  // whole prefix, including routes added later, ahead of the refresh so a
+  // refused request costs no fold.
+  app.use('/api/*', loopbackGuard());
+
   app.get('/api/health', (c) => c.json({ ok: true }));
 
   // Fold any newly-appended events into the projection before ANY api route
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
   const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
-  // Local-only, like /api/cli-sessions: these routes carry operator prompt text
-  // or other projects' data. The guard sits ahead of the refresh, so a refused
-  // request costs no fold.
-  for (const route of [
-    '/api/cli-sessions',
-    '/api/active-scope',
-    '/api/overview',
-    '/api/kanban',
-    '/api/projects',
-    '/api/tasks/*',
-  ]) {
-    app.use(route, loopbackGuard());
-  }
   // Every other live project's store: discovered from the CLI sessions'
   // working directories and read-only (see stores.ts).
   const homeStore: StoreEntry = { id: 'home', label: 'home', handle, refresher, home: true };
@@ -739,6 +781,32 @@ export function createApp(opts: AppOpts): AppHandle {
   // anything to say about it.
   const readable = (c: Context): StoreEntry[] =>
     c.req.query('session') ? [homeStore] : stores.entries();
+  // One overviewProjection() per store per scope while the store's projection
+  // has not moved, with no age bound: every request runs the clock stage
+  // (overviewAt) on the held projection with its own clock, so a repeat poll
+  // with nothing appended re-reads neither the log nor the projection tables.
+  const projectionMemo = new WeakMap<
+    SmithDb,
+    Map<string, { generation: string; data: OverviewProjection }>
+  >();
+  const sharedOverview = (db: SmithDb, scope: Scope): OverviewResult => {
+    const entry = db === handle.db ? homeStore : stores.entries().find((e) => e.handle.db === db);
+    const scans = entry?.refresher.generation?.();
+    if (entry === undefined || scans === undefined) return overview(db, scope, clock);
+    // A commit by another connection (the scan's own, or a repaired or broken
+    // cache) moves data_version, so a change the scan never reported cannot
+    // be served stale either.
+    const generation = `${scans}:${entry.handle.sqlite.pragma('data_version', { simple: true })}`;
+    const key = JSON.stringify(scope);
+    const memo = projectionMemo.get(db) ?? new Map();
+    projectionMemo.set(db, memo);
+    let hit = memo.get(key);
+    if (!hit || hit.generation !== generation) {
+      hit = { generation, data: overviewProjection(db, scope) };
+      memo.set(key, hit);
+    }
+    return overviewAt(db, hit.data, scope, clock);
+  };
   app.use('/api/*', async (_c, next) => {
     await refresher.refresh();
     await stores.refresh();
@@ -810,7 +878,7 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(
       mergeOverview(
         fanOut(readable(c), project, (db, p) =>
-          overview(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }, clock),
+          sharedOverview(db, { ...(db === handle.db ? scope : {}), ...(p ? { project: p } : {}) }),
         ),
       ),
     );
@@ -989,14 +1057,10 @@ export function createApp(opts: AppOpts): AppHandle {
       const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
       const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
       const list = (db: SmithDb, p: string | undefined) =>
-        overview(
-          db,
-          {
-            ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
-            ...(p ? { project: p } : {}),
-          },
-          clock,
-        ).runningSessions;
+        sharedOverview(db, {
+          ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
+          ...(p ? { project: p } : {}),
+        }).runningSessions;
       // The filtered query cannot see a session with no epic, so a filter on
       // a foreign store's label reads that store once more, unfiltered, for
       // those sessions alone.
@@ -1026,14 +1090,10 @@ export function createApp(opts: AppOpts): AppHandle {
           ),
       );
     }
-    const result = overview(
-      handle.db,
-      {
-        ...sessionScope(c),
-        ...(project ? { project } : {}),
-      },
-      clock,
-    );
+    const result = sharedOverview(handle.db, {
+      ...sessionScope(c),
+      ...(project ? { project } : {}),
+    });
     return c.json(result.runningSessions);
   });
 
@@ -1096,7 +1156,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const nowIso = opts.nowIso ?? new Date().toISOString();
     const stores: ActiveScopeStore[] =
       cli.state === 'ok'
-        ? fanOut(entries, undefined, (db) => overview(db, {}, clock)).map(({ store, data }) => ({
+        ? fanOut(entries, undefined, (db) => sharedOverview(db, {})).map(({ store, data }) => ({
             store,
             activelyRunning: data.epicsActivelyRunning,
             epicProjects: Object.fromEntries(
@@ -1122,7 +1182,7 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/projects', (c) => {
     const scope = sessionScope(c);
     const merged = mergeOverview(
-      fanOut(readable(c), undefined, (db) => overview(db, db === handle.db ? scope : {}, clock)),
+      fanOut(readable(c), undefined, (db) => sharedOverview(db, db === handle.db ? scope : {})),
     );
     return c.json(merged.projects ?? []);
   });

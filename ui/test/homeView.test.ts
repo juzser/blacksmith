@@ -16,6 +16,7 @@ import {
   decisionLine,
   decisionsSpanStores,
   decisionTitle,
+  FACT_STRIP_COPY,
   factStrip,
   factStripNote,
   isBudgetOutlier,
@@ -62,7 +63,6 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     epicsIdle: [],
     closedEpics: [],
     tokensByEpic: [],
-    alerts: { escalations: 0, pendingWaivers: 0 },
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
@@ -132,7 +132,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: 10_300_000,
           unmeasured: 0,
           tokensByEpic: [epic('shop-1', 5_000_000, 10_300_000), epic('shop-old', 5_600_000, null)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           project: 'idle',
@@ -145,7 +144,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: null,
           unmeasured: 0,
           tokensByEpic: [],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           // F1: an epic whose only open task is escalated stays in
@@ -161,7 +159,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
           tokensBudget: null,
           unmeasured: 0,
           tokensByEpic: [],
-          alerts: { escalations: 1, pendingWaivers: 0 },
         },
       ],
     });
@@ -204,7 +201,6 @@ describe('lib/homeView.ts runningNowCards()', () => {
       tokensBudget: null,
       unmeasured: 0,
       tokensByEpic: [],
-      alerts: { escalations: 0, pendingWaivers: 0 },
       ...over,
     };
   }
@@ -309,7 +305,6 @@ describe('lib/homeView.ts runningNowCards() with the Active/All scope', () => {
       tokensBudget: null,
       unmeasured: 0,
       tokensByEpic: epics.map((e) => epic(e, 10, 100)),
-      alerts: { escalations: 0, pendingWaivers: 0 },
     };
   }
   function scope(
@@ -495,7 +490,6 @@ describe('lib/homeView.ts budgetPanel()', () => {
           tokensBudget: 100,
           unmeasured: 0,
           tokensByEpic: [epic('epic-a', 10, 100)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
         {
           project: 'project-b',
@@ -508,7 +502,6 @@ describe('lib/homeView.ts budgetPanel()', () => {
           tokensBudget: 200,
           unmeasured: 0,
           tokensByEpic: [epic('epic-b', 20, 200)],
-          alerts: { escalations: 0, pendingWaivers: 0 },
         },
       ],
     });
@@ -997,6 +990,28 @@ describe('lib/homeView.ts factStrip()', () => {
   it('reads 0, 0, 0 tokens and None with nothing live', () => {
     expect(values(totals())).toEqual(['0', '0', '0\u00a0tokens', 'None']);
     expect(floors(totals())).toEqual([false, false, false, false]);
+  });
+
+  it('keeps a tile quiet when its copy changes, because the state is unchanged', () => {
+    const scope = totals({ activeSessions: 1, tokensUnmeasured: 3 });
+    const tiles = factStrip(scope, undefined, { notMeasured: 'Unknown', none: 'No tasks' });
+    expect(tiles[2]).toMatchObject({ value: 'Unknown', quiet: true });
+    expect(tiles[3]).toMatchObject({ value: 'No tasks', quiet: true });
+    const unknown = factStrip(null, undefined, { notKnown: 'Unknown' });
+    expect(unknown).toHaveLength(4);
+    expect(unknown.map((t) => [t.value, t.quiet])).toEqual(Array(4).fill(['Unknown', true]));
+  });
+
+  it('default copy equals no copy argument for null, unmeasured, zero-task and populated scopes', () => {
+    const scopes = [
+      null,
+      totals({ measured: false }),
+      totals({ activeSessions: 1, tokensUnmeasured: 3 }),
+      totals({ activeSessions: 2, tokensSpent: 5_000, tasksDone: 1, tasksTotal: 4 }),
+    ];
+    for (const scope of scopes) {
+      expect(factStrip(scope)).toEqual(factStrip(scope, undefined, FACT_STRIP_COPY));
+    }
   });
 
   it('joins a number to its unit or "of" with a no-break space, so it never wraps there', () => {

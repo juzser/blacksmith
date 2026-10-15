@@ -24,13 +24,12 @@ import {
   taskRuns,
   timeline,
 } from '../../src/db/queries.js';
-import { epics, eventsRaw, findings, tasks } from '../../src/db/schema.js';
+import { eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
-import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
+import { raiseFinding, transition } from '../../src/findings.js';
 import { recordUserPrompt } from '../../src/prompts.js';
 import { loadTaxonomy } from '../../src/taxonomy.js';
-import { WAIVABLE_SEVERITIES } from '../../src/waivers.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
 /** raiseFinding()/transition() return the Finding, not the event id — read the
@@ -162,7 +161,7 @@ describe('db/queries.ts', () => {
   });
 
   describe('overview()', () => {
-    it('reports the two live agents, epics in flight, token spend vs budget, and alerts', () => {
+    it('reports the two live agents, epics in flight, and token spend vs budget', () => {
       const result = overview(handle.db);
 
       expect(result.liveAgentCount).toBe(2); // task-2 and task-4 still have no terminal event
@@ -185,7 +184,6 @@ describe('db/queries.ts', () => {
       expect(result.tokensByEpic).toEqual([
         { epicId: EPIC_ID, tokensSpent: 2000, tokensBudget: 4300, unmeasured: 0 },
       ]);
-      expect(result.alerts).toEqual({ escalations: 1, pendingWaivers: 0 });
     });
 
     it('sums a measured result exactly and counts an unmeasured one instead of folding it in as zero spend (issue #220)', async () => {
@@ -486,133 +484,13 @@ describe('db/queries.ts', () => {
     });
   });
 
-  describe('the pending-waiver count and the roster it is about', () => {
-    /**
-     * The statuses LEGAL_TRANSITIONS lets a waiver be granted from, read off
-     * the table here rather than imported from findings.ts's derivation of
-     * it. That makes this test a second *reader* of the table instead of a
-     * second copy of its answer: the count under test has to move when the
-     * table moves, and the moment that count is spelled out beside the table
-     * rather than read from it, these two stop agreeing.
-     */
-    const waivableByTable = Object.entries(LEGAL_TRANSITIONS)
-      .filter(([, next]) => next.includes('waived'))
-      .map(([status]) => status);
-
-    /** Raise one finding into the fixture's own log and walk it along `steps`. */
-    async function raiseInto(
-      findingId: string,
-      severity: string,
-      summary: string,
-      steps: readonly string[],
-      scope?: 'spec',
-    ): Promise<void> {
-      const ctx: EventContext = {
-        sessionId: SESSION_ID,
-        planVersion: 1,
-        causalParent: await lastEventId({ stateDir }),
-      };
-      const raised = await raiseFinding(
-        {
-          finding: {
-            finding_id: findingId,
-            task_id: TASK_1,
-            finding_category: 'correctness',
-            severity,
-            finding_status: 'raised',
-            summary,
-            failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
-            found_by: 'reviewer',
-            ...(scope === 'spec'
-              ? { finding_scope: 'spec', spec_ref: { plan_version: 1, criterion_ref: summary } }
-              : {}),
-          },
-          filePath: `src/${findingId}.ts`,
-        },
-        ctx,
-        { stateDir },
-      );
-      if (raised.suppressed) throw new Error(`${findingId} unexpectedly suppressed`);
-      for (const step of steps) {
-        await transition(
-          findingId,
-          step,
-          { ...ctx, causalParent: await lastEventId({ stateDir }) },
-          { stateDir },
-          step === 'amend-pending' ? { amendsTaskIds: [TASK_3], amendsPlanVersion: 2 } : {},
-        );
-      }
-    }
-
-    it('counts exactly the findings the waiver machinery would act on', async () => {
-      // Two the count is about, and three it must leave out: one held out by
-      // its status, one by its severity, and one -- the spec finding parked at
-      // `amend-pending` -- that is held out today and would be counted the
-      // moment LEGAL_TRANSITIONS grew that status a `waived` edge. That last
-      // one is what this test is for. A roster restated beside the table
-      // instead of read from it would not move with the table, and the
-      // disagreement is silent: the operator's card says one number and the
-      // batch `/bs waivers` offers holds another.
-      await raiseInto('pw-raised', 'S3-minor', 'a stray console.log in the loader', []);
-      await raiseInto('pw-confirmed', 'S3-minor', 'the retry count is off by one', ['confirmed']);
-      await raiseInto(
-        'pw-amend',
-        'S3-minor',
-        'the spec never says which of two tied claims wins',
-        ['amend-pending'],
-        'spec',
-      );
-      await raiseInto('pw-fixing', 'S3-minor', 'the error message names the wrong file', [
-        'confirmed',
-        'fix-pending',
-      ]);
-      await raiseInto('pw-major', 'S1-stop-the-line', 'the claim lock is never released', []);
-
-      const dbPath = path.join(dbDir, 'pending-waivers.db');
-      await rebuild(dbPath, 'all', { stateDir });
-      const pw = openDb(dbPath);
-      try {
-        const rows = pw.db.select().from(findings).all();
-        const expected = rows.filter(
-          (f) =>
-            WAIVABLE_SEVERITIES.includes(f.severity) &&
-            waivableByTable.includes(f.findingStatus) &&
-            f.waiverId === null,
-        ).length;
-
-        // Anti-vacuity, three ways: the filter has something to count, and
-        // something of each kind to leave out. Without these a roster that
-        // matched nothing at all would read here as agreement.
-        expect(expected).toBeGreaterThan(0);
-        expect(
-          rows.filter(
-            (f) =>
-              WAIVABLE_SEVERITIES.includes(f.severity) &&
-              !waivableByTable.includes(f.findingStatus),
-          ).length,
-        ).toBeGreaterThan(0);
-        expect(
-          rows.filter(
-            (f) =>
-              !WAIVABLE_SEVERITIES.includes(f.severity) &&
-              waivableByTable.includes(f.findingStatus),
-          ).length,
-        ).toBeGreaterThan(0);
-
-        const result = overview(pw.db);
-        expect(result.alerts.pendingWaivers).toBe(expected);
-        // The per-project rows are a second counter over the same findings,
-        // and the operator sees both -- the project card's number and the
-        // global one. Summed rather than indexed, so this does not also
-        // assert how many projects the fixture happens to declare.
-        const perProject = (result.projects ?? []).reduce(
-          (sum, p) => sum + p.alerts.pendingWaivers,
-          0,
-        );
-        expect(perProject).toBe(expected);
-      } finally {
-        pw.sqlite.close();
-      }
+  describe('the overview carries no alerts block', () => {
+    it('has no alerts key on the overview or on any project summary', () => {
+      expect(handle.db.select().from(findings).all().length).toBeGreaterThan(0);
+      const result = overview(handle.db);
+      expect('alerts' in result).toBe(false);
+      expect(result.projects?.length).toBeGreaterThan(0);
+      for (const p of result.projects ?? []) expect('alerts' in p).toBe(false);
     });
   });
 
@@ -2891,175 +2769,6 @@ describe('overview() — closed epics (D-43/P9-27)', () => {
       machineVerdict: 'hold',
       overrideRationale: 'Remaining blockers are carry-forward defects.',
     });
-  });
-});
-
-// The operator's pending-waiver count reads one rule, needsOperatorWaiver():
-// an undecided waivable finding the factory will no longer act on. The
-// dashboard only shows the count; the decision itself goes through
-// `/bs waivers`.
-describe('alerts.pendingWaivers — which findings wait on the operator', () => {
-  let stateDir: string;
-  let dbDir: string;
-  let handle: DbHandle;
-
-  beforeEach(async () => {
-    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-pending-waivers-events-'));
-    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-pending-waivers-db-'));
-    await buildFixture({ stateDir });
-    const dbPath = path.join(dbDir, 'smith.db');
-    await rebuild(dbPath, 'all', { stateDir });
-    handle = openDb(dbPath);
-  });
-
-  afterEach(async () => {
-    handle.sqlite.close();
-    await rm(stateDir, { recursive: true, force: true });
-    await rm(dbDir, { recursive: true, force: true });
-  });
-
-  /** Park a task row at `status`, copied from a fixture row so every
-   * required column is filled; the epic is the fixture's own unless `over`
-   * names another. */
-  function seedTask(
-    taskId: string,
-    status: string,
-    over: Partial<typeof tasks.$inferInsert> = {},
-  ): void {
-    const [base] = handle.db.select().from(tasks).where(eq(tasks.taskId, TASK_1)).all();
-    if (!base) throw new Error('fixture task missing');
-    handle.db.delete(tasks).where(eq(tasks.taskId, taskId)).run();
-    handle.db
-      .insert(tasks)
-      .values({ ...base, taskId, taskStatus: status, ...over })
-      .run();
-  }
-
-  function seedFinding(
-    id: string,
-    taskId: string,
-    over: Partial<typeof findings.$inferInsert> = {},
-  ): void {
-    handle.db
-      .insert(findings)
-      .values({
-        findingId: id,
-        sessionId: SESSION_ID,
-        taskId,
-        epicId: EPIC_ID,
-        fingerprint: id,
-        findingCategory: 'correctness',
-        severity: 'S3-minor',
-        findingStatus: 'raised',
-        summary: 'a stray console.log',
-        foundBy: 'reviewer',
-        raisedAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-        ...over,
-      })
-      .run();
-  }
-
-  /** The global count and the sum of the per-project counts, which must agree. */
-  const counts = () => [
-    overview(handle.db).alerts.pendingWaivers,
-    (overview(handle.db).projects ?? []).reduce((n, p) => n + p.alerts.pendingWaivers, 0),
-  ];
-
-  it('counts a finding on a completed task', () => {
-    seedTask('epic-a/task-1', 'completed');
-    seedFinding('f-done', 'epic-a/task-1');
-    const before = counts();
-    handle.db.delete(findings).where(eq(findings.findingId, 'f-done')).run();
-    expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
-  });
-
-  it.each(['todo', 'in_progress', 'superseded', 'waived', 'escalated'])(
-    'leaves a finding on a %s task out of the count',
-    (status) => {
-      const base = counts();
-      seedTask('epic-a/task-1', status);
-      seedFinding('f-open', 'epic-a/task-1');
-      expect(counts()).toEqual(base);
-    },
-  );
-
-  it('counts a follow-up task finding only once the follow-up has completed', () => {
-    const base = counts();
-    seedTask('epic-a/followup-1a2b3c4d', 'todo');
-    seedFinding('f-follow', 'epic-a/followup-1a2b3c4d');
-    expect(counts()).toEqual(base);
-    handle.db
-      .update(tasks)
-      .set({ taskStatus: 'completed' })
-      .where(eq(tasks.taskId, 'epic-a/followup-1a2b3c4d'))
-      .run();
-    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
-  });
-
-  it('counts an epic-level finding only once its epic is closed', () => {
-    const owner = 'epic-a/integration';
-    const base = counts();
-    seedFinding('f-epic', owner, { epicId: 'epic-a', findingScope: 'spec' });
-    expect(counts()).toEqual(base);
-    handle.db
-      .insert(epics)
-      .values({
-        epicId: 'epic-a',
-        sessionId: SESSION_ID,
-        epicStatus: 'closed',
-        closedBy: 'verdict',
-        closedAt: '2026-01-02T00:00:00.000Z',
-        eventId: `${SESSION_ID}#99`,
-      })
-      .run();
-    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
-  });
-
-  it('finds the task of a bare-id finding on a task row stored qualified', () => {
-    seedTask('epic-a/task-9', 'completed');
-    seedFinding('f-bare', 'task-9', { epicId: null });
-    const before = counts();
-    handle.db.delete(findings).where(eq(findings.findingId, 'f-bare')).run();
-    expect(counts().map((n, i) => n + 1 - (before[i] ?? 0))).toEqual([0, 0]);
-  });
-
-  it('lets an open task row decide a bare-id finding even when its epic is closed', () => {
-    seedTask('epic-a/task-9', 'todo');
-    handle.db
-      .insert(epics)
-      .values({
-        epicId: 'epic-a',
-        sessionId: SESSION_ID,
-        epicStatus: 'closed',
-        closedBy: 'verdict',
-        closedAt: '2026-01-02T00:00:00.000Z',
-        eventId: `${SESSION_ID}#99`,
-      })
-      .run();
-    const base = counts();
-    seedFinding('f-bare-open', 'task-9', { epicId: 'epic-a' });
-    expect(counts()).toEqual(base);
-  });
-
-  it('resolves a bare-id finding to the task row of its own epic', () => {
-    seedTask('epic-a/task-7', 'completed', { epicId: 'epic-a' });
-    seedTask('epic-b/task-7', 'todo', { epicId: 'epic-b' });
-    const base = counts();
-    seedFinding('f-b7', 'task-7', { epicId: 'epic-b' });
-    expect(counts()).toEqual(base);
-    handle.db.delete(findings).where(eq(findings.findingId, 'f-b7')).run();
-    seedFinding('f-a7', 'task-7', { epicId: 'epic-a' });
-    expect(counts().map((n, i) => n - (base[i] ?? 0))).toEqual([1, 1]);
-  });
-
-  it('never counts a decided finding or an S1/S2 finding', () => {
-    seedTask('epic-a/task-1', 'completed');
-    const base = counts();
-    seedFinding('f-decided', 'epic-a/task-1', { waiverId: 'w-1' });
-    seedFinding('f-s1', 'epic-a/task-1', { severity: 'S1-stop-the-line' });
-    seedFinding('f-s2', 'epic-a/task-1', { severity: 'S2-major' });
-    expect(counts()).toEqual(base);
   });
 });
 

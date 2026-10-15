@@ -87,7 +87,6 @@ function summary(project: string, epicsInFlight: string[]): ProjectOverviewSumma
     tokensSpent: 0,
     tokensBudget: null,
     unmeasured: 0,
-    alerts: { escalations: 0, pendingWaivers: 0 },
   };
 }
 

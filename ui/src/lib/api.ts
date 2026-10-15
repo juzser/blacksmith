@@ -55,8 +55,8 @@ export interface LiveAgentEntry {
   /**
    * The epic this agent works on. An epic-level dispatch — planner,
    * spec-reviewer, scribe, epic-close judge — names one and holds no task,
-   * which is half the live fleet in a real run (D-234). Read it through
-   * lib/agentScope.ts, never bare.
+   * which is half the live fleet in a real run (D-234). It can be null, so
+   * never render it bare.
    */
   epicId: string | null;
   dispatchedAt: string;
@@ -209,7 +209,6 @@ export interface ProjectOverviewSummary {
   unmeasured: number;
   /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {
   store?: StoreRef;
@@ -246,7 +245,6 @@ export interface OverviewResult {
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
   milestoneProgress: MilestoneProgress[];
   recentDispatches: RecentDispatch[];
   liveAgentCountDelta5m: number;

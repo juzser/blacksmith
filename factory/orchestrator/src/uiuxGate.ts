@@ -1,7 +1,8 @@
 import { resolveArtifactPath } from './artifacts.js';
 import type { EventOpts, StoredEvent } from './events.js';
-import { eventTaskId, readLineageEvents } from './events.js';
+import { eventTaskId } from './events.js';
 import { foldJudgeTurns, JUDGE_DISPATCH_EVENT_TYPE } from './judges.js';
+import { readLineage } from './lineageSnapshot.js';
 import { taskIdsMatch } from './taskId.js';
 
 /** `judges.ts`'s uiux role, spelled out here rather than imported: the string is the taxonomy value, not an implementation detail of judges.ts. */
@@ -97,7 +98,7 @@ export async function checkUiux(
   ctx: { sessionId: string },
   opts: EventOpts = {},
 ): Promise<UiuxCheckResult> {
-  const events = await readLineageEvents(ctx.sessionId, opts);
+  const events = await readLineage(ctx.sessionId, opts);
   const turns = foldJudgeTurns(events, input.taskId);
 
   const specTurn = turns.find((t) => t.role === UIUX_ROLE && t.kind === 'spec');

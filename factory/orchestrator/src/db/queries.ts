@@ -4,7 +4,22 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, isNotNull, lte, max, type SQL, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  max,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
@@ -24,11 +39,21 @@ import {
 import { isAuditAxisRowId } from '../audit.js';
 import { readTokenUsage } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
-import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
-import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
+import {
+  compareLogOrder,
+  isLaterEvent,
+  parseEventId,
+  ROOT_EVENT_TYPE,
+  type StoredEvent,
+} from '../events.js';
+import { OPEN_FINDING_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { JUDGE_ROLES } from '../judgeRoles.js';
-import { FACTORY_PROJECT_NAME, normalizeProjectName } from '../projectName.js';
+import {
+  FACTORY_PROJECT_NAME,
+  LEGACY_FACTORY_PROJECT,
+  normalizeProjectName,
+} from '../projectName.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { bareTaskId, epicOfTaskId, taskIdsMatch } from '../taskId.js';
@@ -38,7 +63,6 @@ import {
   TERMINAL_TASK_STATUSES,
 } from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
-import { WAIVABLE_SEVERITIES } from '../waivers.js';
 import { type SmithDb, unanimousEpicProjects } from './projector.js';
 import {
   agents,
@@ -310,6 +334,41 @@ function filterByProject<T extends { project: string | null }>(rows: T[], scope:
 /** Rows in the order the log wrote them, oldest first. Never mutates the input. */
 function inLogOrder<T extends { ts: string; eventId: string }>(rows: readonly T[]): T[] {
   return rows.slice().sort(compareLogOrder);
+}
+
+/**
+ * What a held db handle remembers between the dashboard's polls.
+ *
+ * `parsed` is keyed by EVENT ID, never by rowid: `projectSession` deletes and
+ * re-inserts a session's `events_raw` rows, so a rowid names a different row
+ * after any append, while an event id names the same record forever. A hit also
+ * needs the raw payload text to match what was parsed, which is a string
+ * compare and not a second parse -- an id reused for different bytes misses.
+ */
+interface PollCache {
+  parsed: Map<string, { raw: string; value: unknown }>;
+  checkpoints: Map<string, RegistryCheckpoint>;
+}
+
+const pollCaches = new WeakMap<object, PollCache>();
+
+function pollCache(db: SmithDb): PollCache {
+  let cache = pollCaches.get(db);
+  if (cache === undefined) {
+    cache = { parsed: new Map(), checkpoints: new Map() };
+    pollCaches.set(db, cache);
+  }
+  return cache;
+}
+
+/** `JSON.parse(raw)` for the event `eventId`, parsed once per handle. */
+function parsedPayload<T>(db: SmithDb, eventId: string, raw: string): T {
+  const { parsed } = pollCache(db);
+  const hit = parsed.get(eventId);
+  if (hit !== undefined && hit.raw === raw) return hit.value as T;
+  const value = JSON.parse(raw) as T;
+  parsed.set(eventId, { raw, value });
+  return value;
 }
 
 /** Every distinct project value present across the row sets, DEFAULT_PROJECT-normalized, sorted. */
@@ -590,7 +649,6 @@ export interface ProjectOverviewSummary {
   unmeasured: number;
   /** Per-epic spend and budget for the project, as OverviewResult.tokensByEpic. */
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
 }
 
 export interface OverviewResult {
@@ -627,7 +685,6 @@ export interface OverviewResult {
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
-  alerts: { escalations: number; pendingWaivers: number };
   milestoneProgress: MilestoneProgress[];
   /** Phase 6b (closes the 6a DESIGN.md deviation): the 10 most recent dispatch_decisions, newest first. */
   recentDispatches: RecentDispatch[];
@@ -713,7 +770,11 @@ interface TaskResultRow {
 }
 
 function taskResultRows(db: SmithDb, scope: Scope): TaskResultRow[] {
-  const cols = { payload: eventsRaw.payload, envelopeTaskId: eventsRaw.taskId };
+  const cols = {
+    eventId: eventsRaw.eventId,
+    payload: eventsRaw.payload,
+    envelopeTaskId: eventsRaw.taskId,
+  };
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
   const rows = sessionCond
     ? db
@@ -723,7 +784,7 @@ function taskResultRows(db: SmithDb, scope: Scope): TaskResultRow[] {
         .all()
     : db.select(cols).from(eventsRaw).where(eq(eventsRaw.eventType, 'task-result-recorded')).all();
   return rows.map((r) => ({
-    payload: JSON.parse(r.payload) as TaskResultPayload,
+    payload: parsedPayload<TaskResultPayload>(db, r.eventId, r.payload),
     envelopeTaskId: r.envelopeTaskId,
   }));
 }
@@ -781,6 +842,7 @@ function epicTokenMaps(
   db: SmithDb,
   scope: Scope,
   taskRows: (typeof tasks.$inferSelect)[],
+  resultRows: TaskResultRow[] = taskResultRows(db, scope),
 ): {
   budgetByEpic: Map<string, number>;
   spentByEpic: Map<string, number>;
@@ -800,7 +862,7 @@ function epicTokenMaps(
   const epicOf = epicResolver(epicByTask);
   const spentByEpic = new Map<string, number>();
   const unmeasuredByEpic = new Map<string, number>();
-  for (const row of taskResultRows(db, scope)) {
+  for (const row of resultRows) {
     const epicId = epicOf(resultTaskId(row));
     if (!epicId) continue;
     const usage = readTokenUsage(row.payload.token_usage);
@@ -1163,12 +1225,88 @@ export interface RecentDispatch {
 
 const RECENT_DISPATCHES_LIMIT = 10;
 
-function allFindingsForScope(db: SmithDb, scope: Scope): (typeof findings.$inferSelect)[] {
-  const sessionCond = scopedToSessions(findings.sessionId, scope);
-  const rows = sessionCond
-    ? db.select().from(findings).where(sessionCond).all()
-    : db.select().from(findings).all();
-  return filterByProject(rows, scope);
+type DispatchRow = typeof dispatches.$inferSelect;
+
+/**
+ * One source's newest dispatches: a keyset read on `ts` under `cond`, newest
+ * first, `RECENT_DISPATCHES_LIMIT + 1` rows a page. A full page may cut its
+ * last ts's tie group short, so that group is read whole (`ts = ?`). It pages
+ * on (`ts < cursor`) only while `filterByProject` leaves fewer than the limit.
+ * Every row at or after the cursor is held, so the newest ten of the source
+ * are among the rows returned, in no particular order.
+ */
+function newestDispatchesOf(db: SmithDb, cond: SQL | undefined, scope: Scope): DispatchRow[] {
+  const kept: DispatchRow[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    // With nothing to narrow on, a bound on max(ts) turns the read into an index
+    // search; a bare ORDER BY ts DESC LIMIT would scan the index instead.
+    const bound =
+      cursor !== undefined
+        ? lt(dispatches.ts, cursor)
+        : cond === undefined
+          ? lte(dispatches.ts, sql`(SELECT max(${dispatches.ts}) FROM ${dispatches})`)
+          : undefined;
+    let page = db
+      .select()
+      .from(dispatches)
+      .where(and(cond, bound))
+      .orderBy(desc(dispatches.ts))
+      .limit(RECENT_DISPATCHES_LIMIT + 1)
+      .all();
+    const full = page.length > RECENT_DISPATCHES_LIMIT;
+    if (full) {
+      const edge = (page[page.length - 1] as DispatchRow).ts;
+      const tie = db
+        .select()
+        .from(dispatches)
+        .where(and(cond, eq(dispatches.ts, edge)))
+        .all();
+      page = [...page.filter((r) => r.ts !== edge), ...tie];
+      cursor = edge;
+    }
+    kept.push(...filterByProject(page, scope));
+    if (!full || kept.length >= RECENT_DISPATCHES_LIMIT) return kept;
+  }
+}
+
+/**
+ * The newest `RECENT_DISPATCHES_LIMIT` dispatches in `scope`, newest first,
+ * a tie on `ts` broken in log order (session id, then event index) -- so the
+ * tie has to be broken before the cut, not left to the sort's stability. A
+ * wave admits its whole cohort inside one millisecond, and a comparison that
+ * returned 0 across all of them left the rows in the ascending order they
+ * arrived in: the ten this then kept were the *oldest* ten of the burst,
+ * under a heading that says recent.
+ *
+ * Each source is read on its own index so none needs a sort: one source per
+ * session under a session scope (`dispatches_session_ts_idx`), else one per
+ * stored spelling of the project (`dispatches_project_ts_idx`: the legacy
+ * name, and NULL for the default project), else the whole table
+ * (`dispatches_ts_idx`). Under a session scope the project filter is applied
+ * to the rows read, and a session with few rows of that project is paged
+ * through; that is bounded by the session's own dispatches, not the table's.
+ */
+function newestDispatches(db: SmithDb, scope: Scope): DispatchRow[] {
+  const sessionCond = scopedToSessions(dispatches.sessionId, scope);
+  let sources: (SQL | undefined)[] = [undefined];
+  if (sessionCond !== undefined) {
+    const ids = new Set(
+      scope.sessionIds ?? (scope.sessionId === undefined ? [] : [scope.sessionId]),
+    );
+    sources = [...ids].map((id) => eq(dispatches.sessionId, id));
+  } else {
+    const project = scopeProject(scope);
+    if (project !== undefined) {
+      sources = [eq(dispatches.project, project)];
+      if (project === DEFAULT_PROJECT) sources.push(isNull(dispatches.project));
+      if (project === normalizeProjectName(LEGACY_FACTORY_PROJECT)) {
+        sources.push(eq(dispatches.project, LEGACY_FACTORY_PROJECT));
+      }
+    }
+  }
+  const rows = sources.flatMap((cond) => newestDispatchesOf(db, cond, scope));
+  return inLogOrder(rows).reverse().slice(0, RECENT_DISPATCHES_LIMIT);
 }
 
 function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSelect)[] {
@@ -1184,7 +1322,14 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
         .all()
     : db.select().from(agents).where(eq(agents.status, 'live')).all();
   if (scope.project === undefined) return liveRows;
-  const scopedTasks = allTasksForScope(db, scope);
+  return agentsOfProject(liveRows, allTasksForScope(db, scope));
+}
+
+/** The live agents a project's tasks (already scoped) place, by task or by epic. */
+function agentsOfProject(
+  liveRows: (typeof agents.$inferSelect)[],
+  scopedTasks: (typeof tasks.$inferSelect)[],
+): (typeof agents.$inferSelect)[] {
   const scopedEpics = new Set(scopedTasks.flatMap((t) => (t.epicId === null ? [] : [t.epicId])));
   // A task OR an epic places a row. Half the dispatches in a real run name an
   // epic and no task at all — a planner, a spec-reviewer, a scribe, the
@@ -1335,18 +1480,39 @@ export function runningSessions(
   opts: ClockOpts = {},
 ): RunningSession[] {
   const nowIso = opts.nowIso ?? new Date().toISOString();
+  const liveRows = allAgentsForScope(db, scope);
+  return withWorkingCounts(runningSessionRows(db, scope, liveRows), liveRows, nowIso);
+}
+
+/** `rows` with each session's working count judged against `nowIso` -- the only clock-dependent field. */
+function withWorkingCounts(
+  rows: readonly RunningSession[],
+  liveRows: readonly (typeof agents.$inferSelect)[],
+  nowIso: string,
+): RunningSession[] {
+  const workingBySession = new Map<string, number>();
+  for (const a of liveRows) {
+    if (isWorkingAt(a.dispatchedAt, nowIso)) {
+      workingBySession.set(a.sessionId, (workingBySession.get(a.sessionId) ?? 0) + 1);
+    }
+  }
+  return rows.map((s) => ({ ...s, workingAgentCount: workingBySession.get(s.sessionId) ?? 0 }));
+}
+
+/** runningSessions() without its clock: every `workingAgentCount` is 0 until `withWorkingCounts`. */
+function runningSessionRows(
+  db: SmithDb,
+  scope: Scope,
+  liveRows: readonly (typeof agents.$inferSelect)[],
+): RunningSession[] {
   const sessionCond = scopedToSessions(sessions.sessionId, scope);
   const rows = sessionCond
     ? db.select().from(sessions).where(sessionCond).all()
     : db.select().from(sessions).all();
 
   const liveBySession = new Map<string, number>();
-  const workingBySession = new Map<string, number>();
-  for (const a of allAgentsForScope(db, scope)) {
+  for (const a of liveRows) {
     liveBySession.set(a.sessionId, (liveBySession.get(a.sessionId) ?? 0) + 1);
-    if (isWorkingAt(a.dispatchedAt, nowIso)) {
-      workingBySession.set(a.sessionId, (workingBySession.get(a.sessionId) ?? 0) + 1);
-    }
   }
 
   const projectsBySession = sessionProjects(db, scope);
@@ -1361,17 +1527,23 @@ export function runningSessions(
     string,
     { ts: string; eventType: string; eventId: string; taskId: string | null }
   >();
-  const eventQuery = db
-    .select({
-      sessionId: eventsRaw.sessionId,
-      taskId: eventsRaw.taskId,
-      ts: eventsRaw.ts,
-      eventType: eventsRaw.eventType,
-      eventId: eventsRaw.eventId,
-    })
-    .from(eventsRaw);
-  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  for (const e of eventSessionCond ? eventQuery.where(eventSessionCond).all() : eventQuery.all()) {
+  // Only the rows at each session's newest ts are read (one per session, more
+  // only on a tie, which isLaterEvent settles below) -- not the whole log. The
+  // join order is forced (CROSS JOIN): each session row drives one lookup on
+  // events_raw_session_ts_idx for its max(ts) and one for the rows at that ts,
+  // where a free join let the planner scan events_raw as the outer table.
+  const newestEvents = db.all<{
+    sessionId: string;
+    taskId: string | null;
+    ts: string;
+    eventType: string;
+    eventId: string;
+  }>(sql`SELECT e.session_id AS sessionId, e.task_id AS taskId, e.ts AS ts, e.event_type AS eventType, e.event_id AS eventId
+    FROM ${sessions} CROSS JOIN ${eventsRaw} e
+    WHERE e.session_id = ${sessions.sessionId}
+      AND e.ts = (SELECT max(m.ts) FROM ${eventsRaw} m WHERE m.session_id = ${sessions.sessionId})
+      ${sessionCond ? sql`AND ${sessionCond}` : sql``}`);
+  for (const e of newestEvents) {
     const seen = lastEvent.get(e.sessionId);
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
@@ -1389,7 +1561,7 @@ export function runningSessions(
       .from(eventsRaw)
       .where(inArray(eventsRaw.eventId, dispatchIds))
       .all()) {
-      const role = (JSON.parse(r.payload) as { agent_role?: unknown }).agent_role;
+      const role = parsedPayload<{ agent_role?: unknown }>(db, r.eventId, r.payload).agent_role;
       if (typeof role === 'string') roleByEvent.set(r.eventId, role);
     }
     const taskIds = [...lastEvent.values()].flatMap((e) => (e.taskId ? [e.taskId] : []));
@@ -1421,7 +1593,7 @@ export function runningSessions(
         lastEventAt: s.lastEventAt,
         eventCount: s.eventCount,
         liveAgentCount: liveBySession.get(s.sessionId) ?? 0,
-        workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
+        workingAgentCount: 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
         lastStepRole: lastStep(s.sessionId).role,
         lastStepTaskId: lastStep(s.sessionId).taskId,
@@ -1513,16 +1685,20 @@ function groupLiveAgents(rows: (typeof agents.$inferSelect)[]): LiveAgentGroup[]
   return [...grouped.values()];
 }
 
+/** Every `epics` row for the scope's sessions, project not yet applied. */
+function epicRowsForScope(db: SmithDb, scope: Scope): (typeof epics.$inferSelect)[] {
+  const sessionCond = scopedToSessions(epics.sessionId, scope);
+  return sessionCond
+    ? db.select().from(epics).where(sessionCond).all()
+    : db.select().from(epics).all();
+}
+
 /**
  * Every closed epic in scope, newest close first (D-43/P9-27). One reader for
  * both overview() and projectSummary(), so "in flight" can never mean two
  * different things depending on which card you're looking at.
  */
-function closedEpicsForScope(db: SmithDb, scope: Scope): ClosedEpic[] {
-  const sessionCond = scopedToSessions(epics.sessionId, scope);
-  const rows = sessionCond
-    ? db.select().from(epics).where(sessionCond).all()
-    : db.select().from(epics).all();
+function closedEpicsOf(rows: (typeof epics.$inferSelect)[], scope: Scope): ClosedEpic[] {
   return filterByProject(rows, scope)
     .map((e) => ({
       epicId: e.epicId,
@@ -1713,110 +1889,79 @@ function idleEpics(
 }
 
 /**
- * A finding the waiver machinery would actually act on. Both rosters are
- * imported from the modules that own them — the severities from waivers.ts,
- * the statuses from findings.ts, where they are read off LEGAL_TRANSITIONS —
- * rather than spelled out here. `bs waivers pending` lists every such finding:
- * what *could* be waived. The operator's pending-waiver count is narrower,
- * see needsOperatorWaiver() below.
+ * What overview() reads once per call and every per-project summary
+ * partitions, so the work does not repeat once per project.
  */
-function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): boolean {
-  return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
+interface SharedReads {
+  tasks: (typeof tasks.$inferSelect)[];
+  liveAgents: (typeof agents.$inferSelect)[];
+  epicRows: (typeof epics.$inferSelect)[];
+  resultRows: TaskResultRow[];
 }
 
 /**
- * The task row a finding's task id names: exact key first, then taskIdsMatch,
- * the way projectResolver (projector.ts) does it. The log spells one task both
- * bare ("task-1") and qualified ("epic-a/task-1"), and findings keep whichever
- * spelling they were raised with. A bare id matches the same-named task of
- * every epic, so the finding's own epic, when it names one, picks among them.
+ * One project's overview slice, in two halves that overview() computes by the
+ * same logic it uses for itself (no drift). `projectBase` is the part that does
+ * not depend on the clock; `projectAt` takes the caller's single instant, not a
+ * fresh read, so the project rows and the global card can never disagree about
+ * which agents are working.
  */
-function taskResolver<T extends { taskId: string; epicId: string | null }>(
-  taskRows: readonly T[],
-): (taskId: string, epicId: string | null) => T | undefined {
-  const exact = new Map(taskRows.map((t) => [t.taskId, t]));
-  return (taskId, epicId) => {
-    const hit = exact.get(taskId);
-    if (hit) return hit;
-    const matches = taskRows.filter((t) => taskIdsMatch(taskId, t.taskId));
-    return matches.find((t) => epicId !== null && t.epicId === epicId) ?? matches[0];
-  };
+interface ProjectBase {
+  project: string;
+  taskRows: (typeof tasks.$inferSelect)[];
+  liveRows: (typeof agents.$inferSelect)[];
+  closedEpicsHere: ClosedEpic[];
+  epicsInFlight: string[];
+  tokensSpent: number;
+  tokensBudget: number | null;
+  unmeasured: number;
+  tokensByEpic: EpicTokenSpend[];
 }
 
-/**
- * An undecided waivable finding the factory will no longer act on, so only the
- * operator can: its task shipped, or it is epic-level (no task row, such as
- * `<epic>/integration`) and its epic is closed. A task still open is in the
- * factory's own fix loop (a follow-up task exists to fix its finding), a
- * superseded task's findings are moot, and an escalated task is counted under
- * `alerts.escalations`. No shared status set names "shipped" alone —
- * TERMINAL_OK_TASK_STATUSES also holds `waived`, which is decided — so
- * `completed` is spelled out. Both pendingWaivers counts read this one rule,
- * so they agree.
- */
-function needsOperatorWaiver(
-  f: {
-    severity: string;
-    findingStatus: string;
-    waiverId: string | null;
-    taskId: string;
-    epicId: string | null;
-  },
-  resolveTask: (taskId: string, epicId: string | null) => { taskStatus: string } | undefined,
-  closedEpicIds: ReadonlySet<string>,
-): boolean {
-  if (!awaitsWaiverDecision(f) || f.waiverId !== null) return false;
-  const t = resolveTask(f.taskId, f.epicId);
-  if (t) return t.taskStatus === 'completed';
-  return f.epicId !== null && closedEpicIds.has(f.epicId);
-}
-
-/**
- * One project's overview slice, computed by the same logic overview() itself
- * uses (no drift). `nowIso` is the caller's single instant, not a fresh
- * read: overview() hands every per-project summary the same "now" it used
- * for its own counts, so the project rows and the global card can never
- * disagree about which agents are working.
- */
-function projectSummary(
+function projectBase(
   db: SmithDb,
   project: string,
   baseScope: Scope,
-  nowIso: string,
-  activity: readonly ActivityRow[],
-): ProjectOverviewSummary {
+  shared: SharedReads,
+): ProjectBase {
   const scope: Scope = { ...baseScope, project };
-  const liveRows = allAgentsForScope(db, scope);
-  const taskRows = allTasksForScope(db, scope);
-  const closedEpicsHere = closedEpicsForScope(db, scope);
+  const taskRows = filterByProject(shared.tasks, scope);
+  const liveRows = agentsOfProject(shared.liveAgents, taskRows);
+  const closedEpicsHere = closedEpicsOf(shared.epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, project);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
-  const tokenMaps = epicTokenMaps(db, scope, taskRows);
+  const tokenMaps = epicTokenMaps(db, scope, taskRows, shared.resultRows);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
-  const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
-  const tokensBudget =
-    budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
-  const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
-  const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-  const closedEpicIds = new Set(closedEpicsHere.map((e) => e.epicId));
-  const resolveTask = taskResolver(taskRows);
-  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, resolveTask, closedEpicIds),
-  ).length;
-
   return {
     project,
-    liveAgentCount: liveRows.length,
-    workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
+    taskRows,
+    liveRows,
+    closedEpicsHere,
     epicsInFlight,
-    epicsActivelyRunning,
-    epicsIdle,
-    tokensSpent,
-    tokensBudget,
-    unmeasured,
+    tokensSpent: [...spentByEpic.values()].reduce((s, v) => s + v, 0),
+    tokensBudget:
+      budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null,
+    unmeasured: [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0),
     tokensByEpic: epicTokenSpends(tokenMaps),
-    alerts: { escalations, pendingWaivers },
+  };
+}
+
+function projectAt(
+  base: ProjectBase,
+  activity: readonly ActivityRow[],
+  nowIso: string,
+): ProjectOverviewSummary {
+  const epicsIdle = idleEpics(base.taskRows, activity, base.epicsInFlight, nowIso, base.project);
+  return {
+    project: base.project,
+    liveAgentCount: base.liveRows.length,
+    workingAgentCount: base.liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
+    epicsInFlight: base.epicsInFlight,
+    epicsActivelyRunning: activeEpics(base.taskRows, base.closedEpicsHere, epicsIdle),
+    epicsIdle,
+    tokensSpent: base.tokensSpent,
+    tokensBudget: base.tokensBudget,
+    unmeasured: base.unmeasured,
+    tokensByEpic: base.tokensByEpic,
   };
 }
 
@@ -1828,32 +1973,74 @@ function projectSummary(
 const SNAPSHOT_EVENT_TYPES = REGISTRY_EVENT_TYPES as readonly string[];
 
 /**
- * Phase 6b StatCard deltas (6a DESIGN.md deviation closed): live-agent count
- * as of `cutoffIso`, reconstructed by re-running agents-registry.ts's own
- * fold over a `ts <=` slice of events_raw — a real point-in-time scan, not
- * a fabricated trend (the fold logic is REUSED, not re-implemented, so a
- * snapshot can never disagree with the live agents table's own semantics).
+ * The state of the agent registry at one instant, kept per db handle so the
+ * next poll resumes from it instead of re-reading the log.
  *
- * Project scope is applied to the folded agents, not to the events going in
- * — the same "derive via the owning task" route `allAgentsForScope()` takes
- * for the live half of the delta. Filtering the events by their own
- * `project` column instead (D-170) counted a different population at each
- * end of the subtraction: a dispatch logged before Phase 6b carries no
- * project, so its agent stayed in the live count and vanished from the
- * historical one, and the StatCard reported an arrival that never happened.
+ * `at` is the checkpoint B; `seeds` are the original dispatch events of the
+ * agents still open at B, in log order. Folding `seeds` and then the registry
+ * events in (B, cutoff] equals folding the whole log up to the cutoff: the log
+ * order is ts-primary, and everything a closed agent contributed has no effect
+ * on an open one -- a terminal, a supersede or an epic-closed only ever acts on
+ * an entry that is still open.
+ *
+ * The checkpoint is only good while no registry event with ts <= B has been
+ * appended (or removed) since. `counts` is how many registry rows per session
+ * had ts <= B and `fingerprints` is the session row (`eventCount|lastEventAt`)
+ * those counts were taken against: a session whose fingerprint moved is
+ * re-counted with one indexed COUNT, and a differing count discards the
+ * checkpoint. A rowid watermark would not do -- `projectSession` re-inserts a
+ * session's rows -- and `PRAGMA total_changes` would discard it on every write.
  */
-function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord[] {
-  const conds = [lte(eventsRaw.ts, cutoffIso), inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES)];
+interface RegistryCheckpoint {
+  at: string;
+  seeds: Map<string, StoredEvent>;
+  live: AgentRecord[];
+  counts: Map<string, number>;
+  fingerprints: Map<string, string>;
+}
+
+interface WindowRow {
+  eventId: string;
+  sessionId: string;
+  actor: string | null;
+  eventType: string;
+  taskId: string | null;
+  agentId: string | null;
+  planVersion: number;
+  causalParent: string | null;
+  payload: string;
+  ts: string;
+}
+
+/**
+ * Scoped events of the given type condition with `after < ts <= upTo` (either
+ * bound optional). A lower bound pins `events_raw_ts_idx`, so the read costs
+ * the window's rows and not the log's, without leaning on planner statistics.
+ */
+function eventsInWindow(
+  db: SmithDb,
+  scope: Scope,
+  typeCond: SQL,
+  after: string | undefined,
+  upTo: string | undefined,
+): WindowRow[] {
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = inLogOrder(
-    db
-      .select()
-      .from(eventsRaw)
-      .where(and(...conds))
-      .all(),
-  );
-  const storedEvents = rows.map((r) => ({
+  const from =
+    after === undefined ? sql`${eventsRaw}` : sql`${eventsRaw} INDEXED BY events_raw_ts_idx`;
+  return db.all<WindowRow>(sql`SELECT event_id AS eventId, session_id AS sessionId, actor,
+      event_type AS eventType, task_id AS taskId, agent_id AS agentId,
+      plan_version AS planVersion, causal_parent AS causalParent, payload, ts
+    FROM ${from}
+    WHERE ${typeCond}
+      ${after === undefined ? sql`` : sql`AND ${eventsRaw.ts} > ${after}`}
+      ${upTo === undefined ? sql`` : sql`AND ${eventsRaw.ts} <= ${upTo}`}
+      ${sessionCond ? sql`AND ${sessionCond}` : sql``}`);
+}
+
+const registryTypes = (): SQL => inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES);
+
+function toStoredEvent(db: SmithDb, r: WindowRow): StoredEvent {
+  return {
     event_id: r.eventId,
     record: {
       session_id: r.sessionId,
@@ -1863,36 +2050,126 @@ function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord
       agent_id: r.agentId ?? undefined,
       plan_version: r.planVersion,
       causal_parent: r.causalParent,
-      payload: JSON.parse(r.payload) as Record<string, unknown>,
+      payload: parsedPayload<Record<string, unknown>>(db, r.eventId, r.payload),
       ts: r.ts,
     },
-  }));
-  const live = foldLiveAgents(foldAgents(storedEvents));
-  if (scope.project === undefined) return live;
-  const scopedTaskIds = new Set(allTasksForScope(db, scope).map((t) => t.taskId));
-  return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId));
+  };
 }
 
-function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
-  return liveAgentsAt(db, scope, cutoffIso).length;
+function checkpointKey(scope: Scope): string {
+  if (scope.sessionIds !== undefined) return `ids:${[...scope.sessionIds].sort().join('\u0000')}`;
+  if (scope.sessionId !== undefined) return `id:${scope.sessionId}`;
+  return 'all';
+}
+
+function sessionFingerprints(db: SmithDb, scope: Scope): Map<string, string> {
+  const sessionCond = scopedToSessions(sessions.sessionId, scope);
+  const cols = {
+    sessionId: sessions.sessionId,
+    eventCount: sessions.eventCount,
+    lastEventAt: sessions.lastEventAt,
+  };
+  const rows = sessionCond
+    ? db.select(cols).from(sessions).where(sessionCond).all()
+    : db.select(cols).from(sessions).all();
+  return new Map(rows.map((s) => [s.sessionId, `${s.eventCount}|${s.lastEventAt}`]));
+}
+
+/** True while no registry row with ts <= `cp.at` has come or gone since `cp` was taken. */
+function checkpointHolds(db: SmithDb, cp: RegistryCheckpoint, now: Map<string, string>): boolean {
+  for (const [sessionId, fingerprint] of now) {
+    if (cp.fingerprints.get(sessionId) === fingerprint) continue;
+    const row = db
+      .select({ n: sql<number>`count(*)` })
+      .from(eventsRaw)
+      .where(
+        and(
+          eq(eventsRaw.sessionId, sessionId),
+          lte(eventsRaw.ts, cp.at),
+          inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES),
+        ),
+      )
+      .get();
+    if ((row?.n ?? 0) !== (cp.counts.get(sessionId) ?? 0)) return false;
+  }
+  for (const [sessionId, n] of cp.counts) if (n > 0 && !now.has(sessionId)) return false;
+  return true;
 }
 
 /**
- * The "working" end of workingAgentCountDelta5m's subtraction: the agents
- * live as of `cutoffIso` (the very re-fold liveAgentCountAt does, project
- * scoping included) that were ALSO within DEFAULT_STALE_HOURS of dispatch
- * *at that cutoff*. Judging the historical rows against today's clock
- * instead would be D-170 again in a new disguise — the "now" end would
- * apply a 4h window and the "ago" end a 4h05m one, and an agent that
- * stalled since the cutoff would read as no change.
+ * Phase 6b StatCard deltas (6a DESIGN.md deviation closed): live-agent count
+ * as of `cutoffIso`, reconstructed by re-running agents-registry.ts's own
+ * fold over the registry events up to the cutoff -- a real point-in-time scan,
+ * not a fabricated trend (the fold logic is REUSED, not re-implemented, so a
+ * snapshot can never disagree with the live agents table's own semantics).
+ *
+ * The first call (or one after a late event, or with the clock moved back)
+ * folds everything up to the cutoff once; later calls resume from the
+ * `RegistryCheckpoint` and fold only the events since, so a poll costs the
+ * window and not the log.
+ *
+ * Project scope is applied to the folded agents, not to the events going in
+ * -- the same "derive via the owning task" route `allAgentsForScope()` takes
+ * for the live half of the delta. Filtering the events by their own
+ * `project` column instead (D-170) counted a different population at each
+ * end of the subtraction: a dispatch logged before Phase 6b carries no
+ * project, so its agent stayed in the live count and vanished from the
+ * historical one, and the StatCard reported an arrival that never happened.
  */
-function workingAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
-  return liveAgentsAt(db, scope, cutoffIso).filter((a) => isWorkingAt(a.dispatchedAt, cutoffIso))
-    .length;
+function liveAgentsAt(
+  db: SmithDb,
+  scope: Scope,
+  cutoffIso: string,
+  scopedTaskIds: ReadonlySet<string>,
+): AgentRecord[] {
+  const cache = pollCache(db);
+  const key = checkpointKey(scope);
+  const fingerprints = sessionFingerprints(db, scope);
+  const held = cache.checkpoints.get(key);
+  const cp =
+    held !== undefined && cutoffIso >= held.at && checkpointHolds(db, held, fingerprints)
+      ? held
+      : undefined;
+
+  let events: StoredEvent[];
+  let counts: Map<string, number>;
+  let live: AgentRecord[];
+  let seeds: Map<string, StoredEvent>;
+  if (cp !== undefined) {
+    const window = inLogOrder(eventsInWindow(db, scope, registryTypes(), cp.at, cutoffIso));
+    counts = cp.counts;
+    for (const r of window) counts.set(r.sessionId, (counts.get(r.sessionId) ?? 0) + 1);
+    if (window.length === 0) {
+      events = [];
+      live = cp.live;
+      seeds = cp.seeds;
+    } else {
+      events = [...cp.seeds.values(), ...window.map((r) => toStoredEvent(db, r))];
+      live = foldLiveAgents(foldAgents(events));
+      const open = new Set(live.map((a) => a.id));
+      seeds = new Map(events.filter((e) => open.has(e.event_id)).map((e) => [e.event_id, e]));
+    }
+  } else {
+    const rows = inLogOrder(eventsInWindow(db, scope, registryTypes(), undefined, cutoffIso));
+    counts = new Map();
+    for (const r of rows) counts.set(r.sessionId, (counts.get(r.sessionId) ?? 0) + 1);
+    events = rows.map((r) => toStoredEvent(db, r));
+    live = foldLiveAgents(foldAgents(events));
+    const open = new Set(live.map((a) => a.id));
+    seeds = new Map(events.filter((e) => open.has(e.event_id)).map((e) => [e.event_id, e]));
+  }
+  cache.checkpoints.set(key, { at: cutoffIso, seeds, live, counts, fingerprints });
+
+  if (scope.project === undefined) return live;
+  return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId));
 }
 
 /**
  * Total tokens spent (task-result-recorded token_usage) across `epicByTask`'s tasks, as of `cutoffIso`.
+ *
+ * The spend as of the cutoff is the spend over the whole log (held on the
+ * projection, per Result task id) minus the Results written after the cutoff
+ * -- the only rows this read touches -- so it costs the window, not the log.
  *
  * Project scope arrives through `epicByTask`, which is built from rows
  * `allTasksForScope()` already filtered — the same route `epicTokenMaps()`
@@ -1911,26 +2188,60 @@ function workingAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): numb
 function tokensSpentAt(
   db: SmithDb,
   scope: Scope,
+  projection: OverviewProjection,
   cutoffIso: string,
   epicByTask: Map<string, string>,
 ): number {
-  const conds = [eq(eventsRaw.eventType, 'task-result-recorded'), lte(eventsRaw.ts, cutoffIso)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = db
-    .select()
-    .from(eventsRaw)
-    .where(and(...conds))
-    .all();
   const epicOf = epicResolver(epicByTask);
   let total = 0;
-  for (const r of rows) {
-    const payload = JSON.parse(r.payload) as TaskResultPayload;
+  for (const [taskId, spent] of projection.spentByResultTask) if (epicOf(taskId)) total += spent;
+  const after = eventsInWindow(
+    db,
+    scope,
+    sql`${eventsRaw.eventType} = ${'task-result-recorded'}`,
+    cutoffIso,
+    undefined,
+  );
+  for (const r of after) {
+    const payload = parsedPayload<TaskResultPayload>(db, r.eventId, r.payload);
     if (!epicOf(resultTaskId({ payload, envelopeTaskId: r.taskId }))) continue;
     const usage = readTokenUsage(payload.token_usage);
-    if (usage.measured) total += usage.total;
+    if (usage.measured) total -= usage.total;
   }
   return total;
+}
+
+/** The last budget `taskId` was given by a task-added row with ts <= `cutoffIso`, in log order. */
+function budgetAsOf(db: SmithDb, scope: Scope, taskId: string, cutoffIso: string): number {
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const sessionSql = sessionCond ? sql`AND ${sessionCond}` : sql``;
+  // Walk the task's task-added rows newest timestamp first, one timestamp
+  // group at a time, and stop at the first group that defines a budget: only
+  // the last definition matters, so older history is never read.
+  let upper = cutoffIso;
+  let inclusive = true;
+  for (;;) {
+    const top = db.all<{ ts: string }>(
+      sql`SELECT ts FROM ${eventsRaw} INDEXED BY events_raw_task_ts_idx
+        WHERE ${eventsRaw.taskId} = ${taskId} AND ${eventsRaw.eventType} = ${'task-added'}
+          AND ${inclusive ? sql`${eventsRaw.ts} <= ${upper}` : sql`${eventsRaw.ts} < ${upper}`} ${sessionSql}
+        ORDER BY ts DESC LIMIT 1`,
+    )[0];
+    if (!top) return 0;
+    const group = db.all<{ eventId: string; ts: string; payload: string }>(
+      sql`SELECT event_id AS eventId, ts, payload FROM ${eventsRaw} INDEXED BY events_raw_task_ts_idx
+        WHERE ${eventsRaw.taskId} = ${taskId} AND ${eventsRaw.ts} = ${top.ts}
+          AND ${eventsRaw.eventType} = ${'task-added'} ${sessionSql}`,
+    );
+    let budget: number | undefined;
+    for (const r of inLogOrder(group)) {
+      const v = parsedPayload<{ budget_tokens?: number }>(db, r.eventId, r.payload).budget_tokens;
+      if (v !== undefined) budget = v;
+    }
+    if (budget !== undefined) return budget;
+    upper = top.ts;
+    inclusive = false;
+  }
 }
 
 /**
@@ -1941,6 +2252,10 @@ function tokensSpentAt(
  * type ever writes it (projector.ts's `task-added` case, `p.budget_tokens ??
  * row.budgetTokens`, keyed on the envelope's task id), so folding those rows
  * up to the cutoff in the same order reproduces the column as it stood then.
+ * The projection holds that fold over the whole log (`budgetNowByTask`); the
+ * budget as of the cutoff differs from it only for tasks a task-added row
+ * touched after the cutoff, so only those are looked up (one indexed read
+ * each) and swapped for the value they had then.
  *
  * Scope and epic attribution arrive through `epicByTask`, exactly as in
  * `tokensSpentAt` and for the reasons D-170 and D-207 record there: the two
@@ -1950,39 +2265,37 @@ function tokensSpentAt(
  * hour retroactively shrank the historical percentage, so an epic that had
  * burned 90% of its budget and then had a large task planned into it read as
  * a one-point rise while the gauge in fact fell eighty.
+ *
+ * Last write per task wins, as the projector's fold does. Which write is
+ * last is the log's answer, not `ts`'s: this read used to break the tie on
+ * `event_id` as text, so within one re-plan's burst the eleventh task-added
+ * sorted before the ninth and a task could keep the budget it had been
+ * re-planned out of.
  */
 function tokensBudgetedAt(
   db: SmithDb,
   scope: Scope,
+  projection: OverviewProjection,
   cutoffIso: string,
   epicByTask: Map<string, string>,
 ): number {
-  const conds = [eq(eventsRaw.eventType, 'task-added'), lte(eventsRaw.ts, cutoffIso)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = inLogOrder(
-    db
-      .select()
-      .from(eventsRaw)
-      .where(and(...conds))
-      .all(),
-  );
   const epicOf = epicResolver(epicByTask);
-  // Last write per task wins, as the projector's fold does — a re-plan that
-  // re-states a task carries the budget it has from then on. Which write is
-  // last is the log's answer, not `ts`'s: this read used to break the tie on
-  // `event_id` as text, so within one re-plan's burst the eleventh task-added
-  // sorted before the ninth and a task could keep the budget it had been
-  // re-planned out of.
-  const budgetByTask = new Map<string, number>();
-  for (const r of rows) {
-    if (!r.taskId || !epicOf(r.taskId)) continue;
-    const payload = JSON.parse(r.payload) as { budget_tokens?: number };
-    if (payload.budget_tokens === undefined) continue;
-    budgetByTask.set(r.taskId, payload.budget_tokens);
-  }
   let total = 0;
-  for (const v of budgetByTask.values()) total += v;
+  for (const [taskId, budget] of projection.budgetNowByTask) if (epicOf(taskId)) total += budget;
+  const touched = new Set<string>();
+  for (const r of eventsInWindow(
+    db,
+    scope,
+    sql`${eventsRaw.eventType} = ${'task-added'}`,
+    cutoffIso,
+    undefined,
+  )) {
+    if (r.taskId && epicOf(r.taskId)) touched.add(r.taskId);
+  }
+  for (const taskId of touched) {
+    total -= projection.budgetNowByTask.get(taskId) ?? 0;
+    total += budgetAsOf(db, scope, taskId, cutoffIso);
+  }
   return total;
 }
 
@@ -2001,48 +2314,49 @@ export interface ClockOpts {
 export type OverviewOpts = ClockOpts;
 
 export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}): OverviewResult {
-  // One instant for everything this call reports. runningSessions(), the
-  // per-project summaries and the deltas each take the clock as an argument
-  // rather than reading it, so a request that straddles a threshold cannot
-  // count an agent as working in one field and stalled in the next.
-  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
-  const nowIso = now.toISOString();
+  return overviewAt(db, overviewProjection(db, scope), scope, opts);
+}
+
+/**
+ * Everything overview() reports that does not depend on the clock, held so a
+ * poll can ask the clock-dependent half again without re-reading the log.
+ * Build one with `overviewProjection()`; it is a snapshot, so rebuild it when
+ * the log (or the projection tables) moved.
+ */
+export interface OverviewProjection {
+  readonly taskRows: (typeof tasks.$inferSelect)[];
+  readonly scopedTaskIds: ReadonlySet<string>;
+  readonly liveRows: (typeof agents.$inferSelect)[];
+  readonly closedEpics: ClosedEpic[];
+  readonly epicsInFlight: string[];
+  readonly activity: readonly ActivityRow[];
+  readonly budgetByEpic: Map<string, number>;
+  readonly spentByEpic: Map<string, number>;
+  readonly tokensByEpic: EpicTokenSpend[];
+  readonly recentDispatches: RecentDispatch[];
+  readonly milestoneProgress: ReturnType<typeof milestoneProgressRows>;
+  readonly sessionRows: RunningSession[];
+  readonly projectBases: ProjectBase[] | undefined;
+  /** Measured spend per Result task id, over the whole log. */
+  readonly spentByResultTask: Map<string, number>;
+  /** The budget each task has now: the last defined `budget_tokens` of its task-added rows. */
+  readonly budgetNowByTask: Map<string, number>;
+}
+
+export function overviewProjection(db: SmithDb, scope: Scope = {}): OverviewProjection {
   const liveRows = allAgentsForScope(db, scope);
-  const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
   const taskRows = allTasksForScope(db, scope);
 
-  const closedEpics = closedEpicsForScope(db, scope);
+  const epicRows = epicRowsForScope(db, scope);
+  const closedEpics = closedEpicsOf(epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
   const activity = epicActivityRows(db, scope);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
-  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
+  const resultRows = taskResultRows(db, scope);
+  const tokenMaps = epicTokenMaps(db, scope, taskRows, resultRows);
+  const tokensByEpic = epicTokenSpends(tokenMaps);
 
-  const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
-
-  const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-
-  const closedEpicIds = new Set(closedEpics.map((e) => e.epicId));
-  const resolveTask = taskResolver(taskRows);
-  const pendingWaivers = allFindingsForScope(db, scope).filter((f) =>
-    needsOperatorWaiver(f, resolveTask, closedEpicIds),
-  ).length;
-
-  const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
-  const dispatchRows = dispatchSessionCond
-    ? db.select().from(dispatches).where(dispatchSessionCond).all()
-    : db.select().from(dispatches).all();
-  const scopedDispatches = filterByProject(dispatchRows, scope);
-  // Newest first, then the top ten — so the tie has to be broken before the
-  // slice, not left to the sort's stability. A wave admits its whole cohort
-  // inside one millisecond, and a comparison that returned 0 across all of
-  // them left the rows in the ascending order they arrived in: the ten this
-  // then kept were the *oldest* ten of the burst, under a heading that says
-  // recent.
-  const recentDispatchRows = inLogOrder(scopedDispatches)
-    .reverse()
-    .slice(0, RECENT_DISPATCHES_LIMIT);
+  const recentDispatchRows = newestDispatches(db, scope);
   // agents.id IS the dispatch event id (agents-registry.ts's foldAgents()),
   // so a direct id lookup finds the round regardless of whether that agent
   // is still live or has since gone terminal.
@@ -2086,12 +2400,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     round: roundByEventId.get(d.eventId) ?? 1,
   }));
 
-  let projects: ProjectOverviewSummary[] | undefined;
+  let projectBases: ProjectBase[] | undefined;
   if (scope.project === undefined) {
-    const taskSessionCond = scopedToSessions(tasks.sessionId, scope);
-    const allTaskRowsUnfiltered = taskSessionCond
-      ? db.select().from(tasks).where(taskSessionCond).all()
-      : db.select().from(tasks).all();
     // Milestones too, not just tasks: roadmap.md's `- project:` bullet
     // declares a project before any of its work is planned, and
     // milestoneProgressRows() filters phases by that same bullet. This list
@@ -2102,19 +2412,97 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     // Milestones carry no session_id and milestoneProgressRows() never
     // filters them by one, so they join the list under a session scope too.
     const declaredRows = db.select({ project: milestones.project }).from(milestones).all();
-    projects = distinctProjects(allTaskRowsUnfiltered, declaredRows).map((p) =>
-      projectSummary(db, p, scope, nowIso, activity),
+    projectBases = distinctProjects(taskRows, declaredRows).map((p) =>
+      projectBase(db, p, scope, { tasks: taskRows, liveAgents: liveRows, epicRows, resultRows }),
     );
   }
 
+  const spentByResultTask = new Map<string, number>();
+  for (const row of resultRows) {
+    const taskId = resultTaskId(row);
+    if (taskId === undefined) continue;
+    const usage = readTokenUsage(row.payload.token_usage);
+    if (usage.measured)
+      spentByResultTask.set(taskId, (spentByResultTask.get(taskId) ?? 0) + usage.total);
+  }
+  const budgetNowByTask = new Map<string, number>();
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const budgetCols = {
+    eventId: eventsRaw.eventId,
+    ts: eventsRaw.ts,
+    taskId: eventsRaw.taskId,
+    payload: eventsRaw.payload,
+  };
+  const addedRows = sessionCond
+    ? db
+        .select(budgetCols)
+        .from(eventsRaw)
+        .where(and(eq(eventsRaw.eventType, 'task-added'), sessionCond))
+        .all()
+    : db.select(budgetCols).from(eventsRaw).where(eq(eventsRaw.eventType, 'task-added')).all();
+  for (const r of inLogOrder(addedRows)) {
+    if (!r.taskId) continue;
+    const v = parsedPayload<{ budget_tokens?: number }>(db, r.eventId, r.payload).budget_tokens;
+    if (v !== undefined) budgetNowByTask.set(r.taskId, v);
+  }
+
+  return {
+    taskRows,
+    scopedTaskIds: new Set(taskRows.map((t) => t.taskId)),
+    liveRows,
+    closedEpics,
+    epicsInFlight,
+    activity,
+    budgetByEpic: tokenMaps.budgetByEpic,
+    spentByEpic: tokenMaps.spentByEpic,
+    tokensByEpic,
+    recentDispatches,
+    milestoneProgress: milestoneProgressRows(db, scope),
+    sessionRows: runningSessionRows(db, scope, liveRows),
+    projectBases,
+    spentByResultTask,
+    budgetNowByTask,
+  };
+}
+
+/**
+ * The clock-dependent half of overview(): working vs stalled, idle and active
+ * epics, and the three StatCard deltas, computed against `opts.nowIso` on a
+ * held `OverviewProjection`. Reads only the rows inside the 5 min and 1 h
+ * windows (and the registry checkpoint) -- never the whole log.
+ */
+export function overviewAt(
+  db: SmithDb,
+  projection: OverviewProjection,
+  scope: Scope = {},
+  opts: OverviewOpts = {},
+): OverviewResult {
+  // One instant for everything this call reports. The per-session and
+  // per-project counts and the deltas each take the clock as an argument
+  // rather than reading it, so a request that straddles a threshold cannot
+  // count an agent as working in one field and stalled in the next.
+  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
+  const nowIso = now.toISOString();
+  const { liveRows, taskRows, closedEpics, epicsInFlight, activity } = projection;
+  const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
+
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
+
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
-  const liveAgentCountDelta5m = liveRows.length - liveAgentCountAt(db, scope, fiveMinAgo);
-  const workingAgentCountDelta5m = workingRows.length - workingAgentCountAt(db, scope, fiveMinAgo);
+  // One fold serves both ends of the subtraction. The working end judges the
+  // historical rows against the cutoff, not today's clock (D-170): a 4h window
+  // now against a 4h05m one then would read a stall since the cutoff as no change.
+  const liveAgo = liveAgentsAt(db, scope, fiveMinAgo, projection.scopedTaskIds);
+  const liveAgentCountDelta5m = liveRows.length - liveAgo.length;
+  const workingAgentCountDelta5m =
+    workingRows.length - liveAgo.filter((a) => isWorkingAt(a.dispatchedAt, fiveMinAgo)).length;
 
   // The Budget panel counts the epics the Running-now cards count, so its
   // 1-hour delta is folded over the same set: running epics that declare a
   // budget (an unbudgeted epic adds to neither side of the card's ratio).
+  const { budgetByEpic, spentByEpic } = projection;
   const runningBudgeted = new Set(epicsActivelyRunning.filter((e) => budgetByEpic.has(e)));
   const epicByTask = new Map(
     taskRows
@@ -2130,8 +2518,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   let budgetUsedPctPointDelta1h: number | null = null;
   if (totalBudgetNow > 0) {
     const currentPct = (totalSpentNow / totalBudgetNow) * 100;
-    const spentAgo = tokensSpentAt(db, scope, oneHourAgo, epicByTask);
-    const budgetAgo = tokensBudgetedAt(db, scope, oneHourAgo, epicByTask);
+    const spentAgo = tokensSpentAt(db, scope, projection, oneHourAgo, epicByTask);
+    const budgetAgo = tokensBudgetedAt(db, scope, projection, oneHourAgo, epicByTask);
     // Nothing was budgeted an hour ago, so nothing was used: the card read
     // "No budget set" then, and the honest reading of the move since is the
     // whole of today's percentage. Dividing by today's budget instead would
@@ -2139,6 +2527,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     const pctAgo = budgetAgo > 0 ? (spentAgo / budgetAgo) * 100 : 0;
     budgetUsedPctPointDelta1h = currentPct - pctAgo;
   }
+
+  const projects = projection.projectBases?.map((b) => projectAt(b, activity, nowIso));
 
   return {
     liveAgents: groupLiveAgents(liveRows),
@@ -2159,15 +2549,14 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     liveAgentCount: liveRows.length,
     workingAgentCount: workingRows.length,
     stalledAgentCount: liveRows.length - workingRows.length,
-    runningSessions: runningSessions(db, scope, { nowIso }),
+    runningSessions: withWorkingCounts(projection.sessionRows, liveRows, nowIso),
     epicsInFlight,
     epicsActivelyRunning,
     epicsIdle,
     closedEpics,
-    tokensByEpic,
-    alerts: { escalations, pendingWaivers },
-    milestoneProgress: milestoneProgressRows(db, scope),
-    recentDispatches,
+    tokensByEpic: projection.tokensByEpic,
+    milestoneProgress: projection.milestoneProgress,
+    recentDispatches: projection.recentDispatches,
     liveAgentCountDelta5m,
     workingAgentCountDelta5m,
     budgetUsedPctPointDelta1h,
@@ -2673,10 +3062,22 @@ function causalChain(
  * out, which is the honest answer for a legacy row that recorded neither.
  */
 function epicOfEntry(entry: TimelineEntry): string | null {
-  const fromTaskId = entry.taskId === null ? null : epicOfTaskId(entry.taskId);
+  return epicOf(entry.taskId, entry.payload.epic_id);
+}
+
+/** `epicOfEntry` over the two columns it reads, so a row that was never parsed can answer it too. */
+function epicOf(taskId: string | null, payloadEpic: unknown): string | null {
+  const fromTaskId = taskId === null ? null : epicOfTaskId(taskId);
   if (fromTaskId !== null) return fromTaskId;
-  const fromPayload = entry.payload.epic_id;
-  return typeof fromPayload === 'string' ? fromPayload : null;
+  return typeof payloadEpic === 'string' ? payloadEpic : null;
+}
+
+/** What `promptInEpic` needs to know of one row: its epic reference and the prompt it names. */
+interface EpicFact {
+  sessionId: string;
+  isPrompt: boolean;
+  own: string | null;
+  parent: unknown;
 }
 
 /**
@@ -2692,26 +3093,36 @@ function epicOfEntry(entry: TimelineEntry): string | null {
  * epic-less entries, with both. The `prompts-<uuid>` home log has no entries
  * of its own. Every other epic-less entry is dropped.
  */
-function promptInEpic(
-  entries: readonly TimelineEntry[],
-  epicId: string,
-): (e: TimelineEntry) => boolean {
+function epicMatcher(facts: Iterable<EpicFact>, epicId: string): (e: TimelineEntry) => boolean {
   const sessions = new Set<string>();
-  for (const e of entries) {
-    if (e.eventType !== 'user_prompt' && epicOfEntry(e) === epicId) sessions.add(e.sessionId);
+  for (const f of facts) {
+    if (!f.isPrompt && f.own === epicId) sessions.add(f.sessionId);
   }
   const named = new Set<string>();
-  for (const e of entries) {
-    const own = epicOfEntry(e);
-    if (own !== null ? own !== epicId : !sessions.has(e.sessionId)) continue;
-    const parent = e.payload.parent_prompt_id;
-    if (typeof parent === 'string') named.add(parent);
+  for (const f of facts) {
+    if (f.own !== null ? f.own !== epicId : !sessions.has(f.sessionId)) continue;
+    if (typeof f.parent === 'string') named.add(f.parent);
   }
   return (e) => {
     const own = epicOfEntry(e);
     if (own !== null) return own === epicId;
     return e.eventType === 'user_prompt' && (sessions.has(e.sessionId) || named.has(e.eventId));
   };
+}
+
+function promptInEpic(
+  entries: readonly TimelineEntry[],
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  return epicMatcher(
+    entries.map((e) => ({
+      sessionId: e.sessionId,
+      isPrompt: e.eventType === 'user_prompt',
+      own: epicOfEntry(e),
+      parent: e.payload.parent_prompt_id,
+    })),
+    epicId,
+  );
 }
 
 export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntry[] {
@@ -2735,11 +3146,11 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     return chain;
   }
 
+  if (filter.limit !== undefined && filter.limit >= 1)
+    return timelinePage(db, filter, filter.limit);
+
   const eventTypes = filter.eventTypes ?? timelineEventTypes();
-  const conditions = [inArray(eventsRaw.eventType, eventTypes)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
-  if (sessionCond) conditions.push(sessionCond);
-  if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
+  const conditions = scopeConditions(filter, eventTypes);
 
   const rows = inLogOrder(
     db
@@ -2770,9 +3181,46 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   // free (one query already brought them all into memory); a fallback cache
   // handles the rare ancestor outside that set (e.g. a cross-session hop).
   const rowByEventId = new Map(rows.map((row) => [row.eventId, row]));
+  return finishPage(db, page, rowByEventId);
+}
+
+/**
+ * The SQL conditions every timeline read shares: event types, session scope, task id.
+ * `forTsOrder` is for the page windows, which ORDER BY ts LIMIT: the unary plus
+ * keeps the event_type term from being an index term, so SQLite walks a
+ * ts-ordered index in order instead of reading every row of those types into a
+ * sorter. The load-all read and the epic pre-pass keep the type index.
+ */
+function scopeConditions(filter: TimelineFilter, eventTypes: string[], forTsOrder = false): SQL[] {
+  const conditions = [
+    forTsOrder
+      ? sql`+${eventsRaw.eventType} in (${sql.join(
+          eventTypes.map((t) => sql`${t}`),
+          sql`, `,
+        )})`
+      : inArray(eventsRaw.eventType, eventTypes),
+  ];
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
+  if (sessionCond) conditions.push(sessionCond);
+  if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
+  return conditions;
+}
+
+/** `scopedToSessions` for a row already in memory (a decision's parent, fetched by id). */
+function inSessionScope(sessionId: string, scope: Scope): boolean {
+  if (scope.sessionIds !== undefined) return scope.sessionIds.includes(sessionId);
+  return scope.sessionId === undefined || scope.sessionId === sessionId;
+}
+
+/** Fills `nearestPromptId` and the per-row joins on a finished page. `knownRows` answers the causal walk before any lookup by id. */
+function finishPage(
+  db: SmithDb,
+  page: TimelineEntry[],
+  knownRows: ReadonlyMap<string, EventsRawRow>,
+): TimelineEntry[] {
   const ancestorCache = new Map<string, EventsRawRow | null>();
   const getRow = (eventId: string): EventsRawRow | null =>
-    rowByEventId.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
+    knownRows.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
   const promptMemo = new Map<string, string | null>();
   for (const entry of page) {
     entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
@@ -2782,6 +3230,159 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   joinSessionTitles(db, page);
   joinTaskTitles(db, page);
   return page;
+}
+
+/**
+ * The epic filter's two sets for a paged call, from one SQL pass over the same
+ * scoped rows the load-all path would have parsed: each row's task id column
+ * plus `epic_id` and `parent_prompt_id` read out of the payload by SQLite.
+ * Nothing is parsed in JS. Only a JSON string counts, as `epicOfEntry` and
+ * `promptInEpic` require `typeof === 'string'`.
+ */
+function pagedEpicMatcher(
+  db: SmithDb,
+  filter: TimelineFilter,
+  eventTypes: string[],
+  epicId: string,
+): (e: TimelineEntry) => boolean {
+  const textAt = (path: string) =>
+    sql<
+      string | null
+    >`case when json_type(${eventsRaw.payload}, ${path}) = 'text' then json_extract(${eventsRaw.payload}, ${path}) end`;
+  const rows = filterByProject(
+    db
+      .select({
+        sessionId: eventsRaw.sessionId,
+        taskId: eventsRaw.taskId,
+        project: eventsRaw.project,
+        eventType: eventsRaw.eventType,
+        epic: textAt('$.epic_id'),
+        parent: textAt('$.parent_prompt_id'),
+      })
+      .from(eventsRaw)
+      .where(and(...scopeConditions(filter, eventTypes)))
+      .all(),
+    filter,
+  );
+  return epicMatcher(
+    rows.map((r) => ({
+      sessionId: r.sessionId,
+      isPrompt: r.eventType === 'user_prompt',
+      own: epicOf(r.taskId, r.epic),
+      parent: r.parent,
+    })),
+    epicId,
+  );
+}
+
+/**
+ * The paged read: keyset windows over `events_raw` instead of the whole table.
+ *
+ * A before call reads `ORDER BY ts DESC` from the cursor's ts, an after call
+ * `ORDER BY ts ASC`. The SQL cursor bound is inclusive and the exact cursor
+ * test is the same `compareLogOrder` the load-all path uses, so the rows that
+ * tie with the cursor reach JS and are split there. A window that hits its LIMIT
+ * also reads the rest of its last ts's tie group before ordering, and the next
+ * window starts strictly beyond that ts, so SQLite's physical order of tied
+ * rows never decides which of them a page holds. Rows are parsed only after
+ * the raw-column filters, in order, and only until the page is full.
+ */
+function timelinePage(db: SmithDb, filter: TimelineFilter, limit: number): TimelineEntry[] {
+  const newestFirst = filter.after === undefined;
+  const before = filter.before === undefined ? undefined : resolveCursor(db, filter.before);
+  const after = filter.after === undefined ? undefined : resolveCursor(db, filter.after);
+
+  const eventTypes = filter.eventTypes ?? timelineEventTypes();
+  // eventKind ignores its payload, so a kind is a set of event types.
+  const kinds = filter.kinds?.length ? new Set(filter.kinds) : undefined;
+  const pageTypes = kinds ? eventTypes.filter((t) => kinds.has(eventKind(t, {}))) : eventTypes;
+  const base = scopeConditions(filter, pageTypes, true);
+  if (pageTypes.length === 0) return [];
+  if (before) base.push(lte(eventsRaw.ts, before.ts));
+  if (after) base.push(gte(eventsRaw.ts, after.ts));
+
+  const inEpic = filter.epicId
+    ? pagedEpicMatcher(db, filter, eventTypes, filter.epicId)
+    : undefined;
+  const pageTypeSet = new Set(pageTypes);
+  const seenRows = new Map<string, EventsRawRow>();
+  const parentCache = new Map<string, EventsRawRow | null>();
+  const getRow = (eventId: string): EventsRawRow | null =>
+    seenRows.get(eventId) ?? fetchEventRow(db, eventId, parentCache);
+  const project = scopeProject(filter);
+
+  // A dispatch's parent is looked up by id and must pass the same filters the
+  // load-all path applied before its lens ran.
+  const decisionMemo = new Map<string, boolean>();
+  const isDecisionId = (id: unknown): boolean => {
+    if (typeof id !== 'string') return false;
+    const known = decisionMemo.get(id);
+    if (known !== undefined) return known;
+    const row = getRow(id);
+    let answer = false;
+    if (
+      row &&
+      pageTypeSet.has(row.eventType) &&
+      inSessionScope(row.sessionId, filter) &&
+      (!filter.taskId || row.taskId === filter.taskId) &&
+      (project === undefined || projectOf(row.project) === project)
+    ) {
+      const entry = toEntry(row, null);
+      answer = (!inEpic || inEpic(entry)) && isDecisionEntry(entry);
+    }
+    decisionMemo.set(id, answer);
+    return answer;
+  };
+  const passesLens = (e: TimelineEntry): boolean => {
+    if (isDecisionEntry(e)) return true;
+    if (e.eventType !== 'dispatch_decision') return false;
+    return isDecisionId(e.payload.parent_prompt_id) || isDecisionId(e.causalParent);
+  };
+
+  const kept: TimelineEntry[] = [];
+  let lastTs: string | undefined;
+  while (kept.length < limit) {
+    const conditions = [...base];
+    if (lastTs !== undefined) {
+      conditions.push(newestFirst ? lt(eventsRaw.ts, lastTs) : gt(eventsRaw.ts, lastTs));
+    }
+    const rows = db
+      .select()
+      .from(eventsRaw)
+      .where(and(...conditions))
+      .orderBy(newestFirst ? desc(eventsRaw.ts) : asc(eventsRaw.ts))
+      .limit(limit + 1)
+      .all();
+    const full = rows.length > limit;
+    if (full) {
+      // Complete the tie group of the window's last row before ordering it.
+      const tieTs = (rows[rows.length - 1] as EventsRawRow).ts;
+      const have = new Set(rows.map((r) => r.eventId));
+      const rest = db
+        .select()
+        .from(eventsRaw)
+        .where(and(...conditions, eq(eventsRaw.ts, tieTs)))
+        .all();
+      for (const r of rest) if (!have.has(r.eventId)) rows.push(r);
+      lastTs = tieTs;
+    }
+    for (const r of rows) seenRows.set(r.eventId, r);
+
+    let window = filterByProject(rows, filter);
+    if (before) window = window.filter((r) => compareLogOrder(r, before) < 0);
+    if (after) window = window.filter((r) => compareLogOrder(r, after) > 0);
+    window = inLogOrder(window);
+    if (newestFirst) window.reverse();
+    for (const row of window) {
+      if (kept.length >= limit) break;
+      const entry = toEntry(row, null);
+      if (inEpic && !inEpic(entry)) continue;
+      if (filter.decisionsOnly && !passesLens(entry)) continue;
+      kept.push(entry);
+    }
+    if (!full) break;
+  }
+  return finishPage(db, newestFirst ? kept : kept.reverse(), seenRows);
 }
 
 /** Fills `taskTitle` on every entry in `page`: one lookup for the page's task ids. */

@@ -322,7 +322,7 @@ function listTsFiles(root: string): string[] {
   return out;
 }
 
-interface Tokenized {
+export interface Tokenized {
   /** Source with comment bodies blanked; string bodies are left intact. */
   code: string;
   /** 1 where an offset sits inside a comment, string, template or regex. */
@@ -336,7 +336,7 @@ const REGEX_PRECEDERS = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{
  * get their own case because `/'/` or `/\/\//` would otherwise open a string
  * or a comment that never closes and swallow the rest of the file.
  */
-function tokenize(text: string): Tokenized {
+export function tokenize(text: string): Tokenized {
   const code = text.split('');
   const masked = new Uint8Array(text.length);
   let previous = '';
@@ -437,7 +437,7 @@ const OPENERS = '([{';
 const CLOSERS = ')]}';
 
 /** Index of the delimiter closing the one at `open`, or -1. */
-function matchDelimiter({ code, masked }: Tokenized, open: number): number {
+export function matchDelimiter({ code, masked }: Tokenized, open: number): number {
   let depth = 0;
   for (let i = open; i < code.length; i += 1) {
     if (masked[i]) continue;
@@ -476,7 +476,7 @@ function splitTopLevel({ code, masked }: Tokenized, from: number, to: number): S
 }
 
 /** End of the expression that starts at `from`: the next top-level `,`, `;` or closer. */
-function expressionEnd({ code, masked }: Tokenized, from: number): number {
+export function expressionEnd({ code, masked }: Tokenized, from: number): number {
   let depth = 0;
   for (let i = from; i < code.length; i += 1) {
     if (masked[i]) continue;
@@ -551,7 +551,7 @@ interface Writers {
  * blind spot with no reason behind it, which is the failure this whole file is
  * about.
  */
-const FUNCTION_HEADS =
+export const FUNCTION_HEADS =
   /(?:\bfunction\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>\s*)?\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;]+?)?=\s*(?:async\s+)?(?:<[^>()]*>\s*)?\()/g;
 
 /**
