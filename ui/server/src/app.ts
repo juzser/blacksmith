@@ -35,6 +35,7 @@ import type {
   AnalyticsPeriod,
   AnalyticsResult,
   EventKind,
+  OverviewProjection,
   OverviewResult,
   Scope,
   TimelineEntry,
@@ -48,6 +49,8 @@ import {
   kanban,
   lessonsPage,
   overview,
+  overviewAt,
+  overviewProjection,
   projectedLineage,
   pulse,
   roadmapPage,
@@ -171,10 +174,8 @@ export interface AppOpts {
   /** How often store discovery is recomputed; 5 s in production, 0 in tests. */
   storeRefreshMs?: number;
   /**
-   * How long a computed overview() is shared between requests while its
-   * store's projection has not moved: `maxAgeMs` (default 4 s, under the 5 s
-   * Home poll) bounds fields that depend on the current time; `now` is the
-   * clock it is measured on.
+   * Retained for callers that still pass it; the shared projection has no age
+   * bound, so neither field is read.
    */
   overviewMemo?: { maxAgeMs?: number; now?: () => number };
 }
@@ -780,14 +781,13 @@ export function createApp(opts: AppOpts): AppHandle {
   // anything to say about it.
   const readable = (c: Context): StoreEntry[] =>
     c.req.query('session') ? [homeStore] : stores.entries();
-  // One overview() per store per scope while the store's projection has not
-  // moved: Home's poll reads it through /api/active-scope and /api/overview.
-  // An entry also ends at `maxAgeMs`, since overview() reads the clock.
-  const memoNow = opts.overviewMemo?.now ?? Date.now;
-  const memoMaxAgeMs = opts.overviewMemo?.maxAgeMs ?? 4000;
-  const overviewMemo = new WeakMap<
+  // One overviewProjection() per store per scope while the store's projection
+  // has not moved, with no age bound: every request runs the clock stage
+  // (overviewAt) on the held projection with its own clock, so a repeat poll
+  // with nothing appended re-reads neither the log nor the projection tables.
+  const projectionMemo = new WeakMap<
     SmithDb,
-    Map<string, { generation: string; at: number; data: OverviewResult }>
+    Map<string, { generation: string; data: OverviewProjection }>
   >();
   const sharedOverview = (db: SmithDb, scope: Scope): OverviewResult => {
     const entry = db === handle.db ? homeStore : stores.entries().find((e) => e.handle.db === db);
@@ -798,14 +798,14 @@ export function createApp(opts: AppOpts): AppHandle {
     // be served stale either.
     const generation = `${scans}:${entry.handle.sqlite.pragma('data_version', { simple: true })}`;
     const key = JSON.stringify(scope);
-    const memo = overviewMemo.get(db) ?? new Map();
-    overviewMemo.set(db, memo);
-    const now = memoNow();
-    const hit = memo.get(key);
-    if (hit && hit.generation === generation && now - hit.at < memoMaxAgeMs) return hit.data;
-    const data = overview(db, scope, clock);
-    memo.set(key, { generation, at: now, data });
-    return data;
+    const memo = projectionMemo.get(db) ?? new Map();
+    projectionMemo.set(db, memo);
+    let hit = memo.get(key);
+    if (!hit || hit.generation !== generation) {
+      hit = { generation, data: overviewProjection(db, scope) };
+      memo.set(key, hit);
+    }
+    return overviewAt(db, hit.data, scope, clock);
   };
   app.use('/api/*', async (_c, next) => {
     await refresher.refresh();
@@ -1057,14 +1057,10 @@ export function createApp(opts: AppOpts): AppHandle {
       const entries = stores.entries().filter((e) => !sessions || sessions.has(e.id));
       const idOf = new Map(entries.map((e) => [e.handle.db, e.id]));
       const list = (db: SmithDb, p: string | undefined) =>
-        overview(
-          db,
-          {
-            ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
-            ...(p ? { project: p } : {}),
-          },
-          clock,
-        ).runningSessions;
+        sharedOverview(db, {
+          ...(sessions ? { sessionIds: sessions.get(idOf.get(db) as string) as string[] } : {}),
+          ...(p ? { project: p } : {}),
+        }).runningSessions;
       // The filtered query cannot see a session with no epic, so a filter on
       // a foreign store's label reads that store once more, unfiltered, for
       // those sessions alone.
@@ -1094,14 +1090,10 @@ export function createApp(opts: AppOpts): AppHandle {
           ),
       );
     }
-    const result = overview(
-      handle.db,
-      {
-        ...sessionScope(c),
-        ...(project ? { project } : {}),
-      },
-      clock,
-    );
+    const result = sharedOverview(handle.db, {
+      ...sessionScope(c),
+      ...(project ? { project } : {}),
+    });
     return c.json(result.runningSessions);
   });
 
@@ -1190,7 +1182,7 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/projects', (c) => {
     const scope = sessionScope(c);
     const merged = mergeOverview(
-      fanOut(readable(c), undefined, (db) => overview(db, db === handle.db ? scope : {}, clock)),
+      fanOut(readable(c), undefined, (db) => sharedOverview(db, db === handle.db ? scope : {})),
     );
     return c.json(merged.projects ?? []);
   });
