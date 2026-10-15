@@ -95,6 +95,15 @@ describe('overview shared per projection state', () => {
     expect(await poll()).toHaveLength(0);
   });
 
+  it('serves each of the four routes from the held projection after a Home poll', async () => {
+    await poll();
+    for (const route of ['/api/projects', '/api/sessions', '/api/sessions?stores=all']) {
+      vi.mocked(overviewProjection).mockClear();
+      expect((await handle.app.request(route)).status, route).toBe(200);
+      expect(vi.mocked(overviewProjection), route).not.toHaveBeenCalled();
+    }
+  });
+
   it('recomputes only the store whose projection advanced', async () => {
     await poll();
     const events = await readEvents(SESSION_ID, { stateDir: eventsA });
