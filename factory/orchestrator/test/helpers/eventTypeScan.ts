@@ -56,6 +56,18 @@ export interface FreeEventType {
  */
 export const FREE_EVENT_TYPES: FreeEventType[] = [
   {
+    eventType: 'session-bound',
+    writtenBy: 'src',
+    reason:
+      "Written by sessionBinding.ts bindingInput when the operator runs `/bs use <project>`: the record of which project a CLI session works on. Free because it is the operator's own act captured by the prompt hook, not a task or a dispatch, so no dimension declares it; only the hook may write it.",
+  },
+  {
+    eventType: 'pipeline-bypass-approved',
+    writtenBy: 'src',
+    reason:
+      "Written by sessionBinding.ts bypassInput when the operator answers the small-change question with the yes: one change may skip the pipeline. Free because it is the operator's own answer captured by the hook, not a task or a dispatch, so no dimension declares it; only the hook may write it.",
+  },
+  {
     eventType: 'audit-opened',
     writtenBy: 'src',
     reason:
