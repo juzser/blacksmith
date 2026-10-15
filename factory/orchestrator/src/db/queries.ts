@@ -39,7 +39,13 @@ import {
 import { isAuditAxisRowId } from '../audit.js';
 import { readTokenUsage } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
-import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
+import {
+  compareLogOrder,
+  isLaterEvent,
+  parseEventId,
+  ROOT_EVENT_TYPE,
+  type StoredEvent,
+} from '../events.js';
 import { OPEN_FINDING_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { JUDGE_ROLES } from '../judgeRoles.js';
@@ -328,6 +334,41 @@ function filterByProject<T extends { project: string | null }>(rows: T[], scope:
 /** Rows in the order the log wrote them, oldest first. Never mutates the input. */
 function inLogOrder<T extends { ts: string; eventId: string }>(rows: readonly T[]): T[] {
   return rows.slice().sort(compareLogOrder);
+}
+
+/**
+ * What a held db handle remembers between the dashboard's polls.
+ *
+ * `parsed` is keyed by EVENT ID, never by rowid: `projectSession` deletes and
+ * re-inserts a session's `events_raw` rows, so a rowid names a different row
+ * after any append, while an event id names the same record forever. A hit also
+ * needs the raw payload text to match what was parsed, which is a string
+ * compare and not a second parse -- an id reused for different bytes misses.
+ */
+interface PollCache {
+  parsed: Map<string, { raw: string; value: unknown }>;
+  checkpoints: Map<string, RegistryCheckpoint>;
+}
+
+const pollCaches = new WeakMap<object, PollCache>();
+
+function pollCache(db: SmithDb): PollCache {
+  let cache = pollCaches.get(db);
+  if (cache === undefined) {
+    cache = { parsed: new Map(), checkpoints: new Map() };
+    pollCaches.set(db, cache);
+  }
+  return cache;
+}
+
+/** `JSON.parse(raw)` for the event `eventId`, parsed once per handle. */
+function parsedPayload<T>(db: SmithDb, eventId: string, raw: string): T {
+  const { parsed } = pollCache(db);
+  const hit = parsed.get(eventId);
+  if (hit !== undefined && hit.raw === raw) return hit.value as T;
+  const value = JSON.parse(raw) as T;
+  parsed.set(eventId, { raw, value });
+  return value;
 }
 
 /** Every distinct project value present across the row sets, DEFAULT_PROJECT-normalized, sorted. */
@@ -729,7 +770,11 @@ interface TaskResultRow {
 }
 
 function taskResultRows(db: SmithDb, scope: Scope): TaskResultRow[] {
-  const cols = { payload: eventsRaw.payload, envelopeTaskId: eventsRaw.taskId };
+  const cols = {
+    eventId: eventsRaw.eventId,
+    payload: eventsRaw.payload,
+    envelopeTaskId: eventsRaw.taskId,
+  };
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
   const rows = sessionCond
     ? db
@@ -739,7 +784,7 @@ function taskResultRows(db: SmithDb, scope: Scope): TaskResultRow[] {
         .all()
     : db.select(cols).from(eventsRaw).where(eq(eventsRaw.eventType, 'task-result-recorded')).all();
   return rows.map((r) => ({
-    payload: JSON.parse(r.payload) as TaskResultPayload,
+    payload: parsedPayload<TaskResultPayload>(db, r.eventId, r.payload),
     envelopeTaskId: r.envelopeTaskId,
   }));
 }
@@ -1435,18 +1480,39 @@ export function runningSessions(
   opts: ClockOpts = {},
 ): RunningSession[] {
   const nowIso = opts.nowIso ?? new Date().toISOString();
+  const liveRows = allAgentsForScope(db, scope);
+  return withWorkingCounts(runningSessionRows(db, scope, liveRows), liveRows, nowIso);
+}
+
+/** `rows` with each session's working count judged against `nowIso` -- the only clock-dependent field. */
+function withWorkingCounts(
+  rows: readonly RunningSession[],
+  liveRows: readonly (typeof agents.$inferSelect)[],
+  nowIso: string,
+): RunningSession[] {
+  const workingBySession = new Map<string, number>();
+  for (const a of liveRows) {
+    if (isWorkingAt(a.dispatchedAt, nowIso)) {
+      workingBySession.set(a.sessionId, (workingBySession.get(a.sessionId) ?? 0) + 1);
+    }
+  }
+  return rows.map((s) => ({ ...s, workingAgentCount: workingBySession.get(s.sessionId) ?? 0 }));
+}
+
+/** runningSessions() without its clock: every `workingAgentCount` is 0 until `withWorkingCounts`. */
+function runningSessionRows(
+  db: SmithDb,
+  scope: Scope,
+  liveRows: readonly (typeof agents.$inferSelect)[],
+): RunningSession[] {
   const sessionCond = scopedToSessions(sessions.sessionId, scope);
   const rows = sessionCond
     ? db.select().from(sessions).where(sessionCond).all()
     : db.select().from(sessions).all();
 
   const liveBySession = new Map<string, number>();
-  const workingBySession = new Map<string, number>();
-  for (const a of allAgentsForScope(db, scope)) {
+  for (const a of liveRows) {
     liveBySession.set(a.sessionId, (liveBySession.get(a.sessionId) ?? 0) + 1);
-    if (isWorkingAt(a.dispatchedAt, nowIso)) {
-      workingBySession.set(a.sessionId, (workingBySession.get(a.sessionId) ?? 0) + 1);
-    }
   }
 
   const projectsBySession = sessionProjects(db, scope);
@@ -1495,7 +1561,7 @@ export function runningSessions(
       .from(eventsRaw)
       .where(inArray(eventsRaw.eventId, dispatchIds))
       .all()) {
-      const role = (JSON.parse(r.payload) as { agent_role?: unknown }).agent_role;
+      const role = parsedPayload<{ agent_role?: unknown }>(db, r.eventId, r.payload).agent_role;
       if (typeof role === 'string') roleByEvent.set(r.eventId, role);
     }
     const taskIds = [...lastEvent.values()].flatMap((e) => (e.taskId ? [e.taskId] : []));
@@ -1527,7 +1593,7 @@ export function runningSessions(
         lastEventAt: s.lastEventAt,
         eventCount: s.eventCount,
         liveAgentCount: liveBySession.get(s.sessionId) ?? 0,
-        workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
+        workingAgentCount: 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
         lastStepRole: lastStep(s.sessionId).role,
         lastStepTaskId: lastStep(s.sessionId).taskId,
@@ -1831,49 +1897,71 @@ interface SharedReads {
   liveAgents: (typeof agents.$inferSelect)[];
   epicRows: (typeof epics.$inferSelect)[];
   resultRows: TaskResultRow[];
-  activity: readonly ActivityRow[];
 }
 
 /**
- * One project's overview slice, computed by the same logic overview() itself
- * uses (no drift). `nowIso` is the caller's single instant, not a fresh
- * read: overview() hands every per-project summary the same "now" it used
- * for its own counts, so the project rows and the global card can never
- * disagree about which agents are working.
+ * One project's overview slice, in two halves that overview() computes by the
+ * same logic it uses for itself (no drift). `projectBase` is the part that does
+ * not depend on the clock; `projectAt` takes the caller's single instant, not a
+ * fresh read, so the project rows and the global card can never disagree about
+ * which agents are working.
  */
-function projectSummary(
+interface ProjectBase {
+  project: string;
+  taskRows: (typeof tasks.$inferSelect)[];
+  liveRows: (typeof agents.$inferSelect)[];
+  closedEpicsHere: ClosedEpic[];
+  epicsInFlight: string[];
+  tokensSpent: number;
+  tokensBudget: number | null;
+  unmeasured: number;
+  tokensByEpic: EpicTokenSpend[];
+}
+
+function projectBase(
   db: SmithDb,
   project: string,
   baseScope: Scope,
-  nowIso: string,
   shared: SharedReads,
-): ProjectOverviewSummary {
+): ProjectBase {
   const scope: Scope = { ...baseScope, project };
-  const { activity } = shared;
   const taskRows = filterByProject(shared.tasks, scope);
   const liveRows = agentsOfProject(shared.liveAgents, taskRows);
   const closedEpicsHere = closedEpicsOf(shared.epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, project);
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere, epicsIdle);
   const tokenMaps = epicTokenMaps(db, scope, taskRows, shared.resultRows);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = tokenMaps;
-  const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
-  const tokensBudget =
-    budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
-  const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
-
   return {
     project,
-    liveAgentCount: liveRows.length,
-    workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
+    taskRows,
+    liveRows,
+    closedEpicsHere,
     epicsInFlight,
-    epicsActivelyRunning,
-    epicsIdle,
-    tokensSpent,
-    tokensBudget,
-    unmeasured,
+    tokensSpent: [...spentByEpic.values()].reduce((s, v) => s + v, 0),
+    tokensBudget:
+      budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null,
+    unmeasured: [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0),
     tokensByEpic: epicTokenSpends(tokenMaps),
+  };
+}
+
+function projectAt(
+  base: ProjectBase,
+  activity: readonly ActivityRow[],
+  nowIso: string,
+): ProjectOverviewSummary {
+  const epicsIdle = idleEpics(base.taskRows, activity, base.epicsInFlight, nowIso, base.project);
+  return {
+    project: base.project,
+    liveAgentCount: base.liveRows.length,
+    workingAgentCount: base.liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
+    epicsInFlight: base.epicsInFlight,
+    epicsActivelyRunning: activeEpics(base.taskRows, base.closedEpicsHere, epicsIdle),
+    epicsIdle,
+    tokensSpent: base.tokensSpent,
+    tokensBudget: base.tokensBudget,
+    unmeasured: base.unmeasured,
+    tokensByEpic: base.tokensByEpic,
   };
 }
 
@@ -1885,32 +1973,74 @@ function projectSummary(
 const SNAPSHOT_EVENT_TYPES = REGISTRY_EVENT_TYPES as readonly string[];
 
 /**
- * Phase 6b StatCard deltas (6a DESIGN.md deviation closed): live-agent count
- * as of `cutoffIso`, reconstructed by re-running agents-registry.ts's own
- * fold over a `ts <=` slice of events_raw — a real point-in-time scan, not
- * a fabricated trend (the fold logic is REUSED, not re-implemented, so a
- * snapshot can never disagree with the live agents table's own semantics).
+ * The state of the agent registry at one instant, kept per db handle so the
+ * next poll resumes from it instead of re-reading the log.
  *
- * Project scope is applied to the folded agents, not to the events going in
- * — the same "derive via the owning task" route `allAgentsForScope()` takes
- * for the live half of the delta. Filtering the events by their own
- * `project` column instead (D-170) counted a different population at each
- * end of the subtraction: a dispatch logged before Phase 6b carries no
- * project, so its agent stayed in the live count and vanished from the
- * historical one, and the StatCard reported an arrival that never happened.
+ * `at` is the checkpoint B; `seeds` are the original dispatch events of the
+ * agents still open at B, in log order. Folding `seeds` and then the registry
+ * events in (B, cutoff] equals folding the whole log up to the cutoff: the log
+ * order is ts-primary, and everything a closed agent contributed has no effect
+ * on an open one -- a terminal, a supersede or an epic-closed only ever acts on
+ * an entry that is still open.
+ *
+ * The checkpoint is only good while no registry event with ts <= B has been
+ * appended (or removed) since. `counts` is how many registry rows per session
+ * had ts <= B and `fingerprints` is the session row (`eventCount|lastEventAt`)
+ * those counts were taken against: a session whose fingerprint moved is
+ * re-counted with one indexed COUNT, and a differing count discards the
+ * checkpoint. A rowid watermark would not do -- `projectSession` re-inserts a
+ * session's rows -- and `PRAGMA total_changes` would discard it on every write.
  */
-function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord[] {
-  const conds = [lte(eventsRaw.ts, cutoffIso), inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES)];
+interface RegistryCheckpoint {
+  at: string;
+  seeds: Map<string, StoredEvent>;
+  live: AgentRecord[];
+  counts: Map<string, number>;
+  fingerprints: Map<string, string>;
+}
+
+interface WindowRow {
+  eventId: string;
+  sessionId: string;
+  actor: string | null;
+  eventType: string;
+  taskId: string | null;
+  agentId: string | null;
+  planVersion: number;
+  causalParent: string | null;
+  payload: string;
+  ts: string;
+}
+
+/**
+ * Scoped events of the given type condition with `after < ts <= upTo` (either
+ * bound optional). A lower bound pins `events_raw_ts_idx`, so the read costs
+ * the window's rows and not the log's, without leaning on planner statistics.
+ */
+function eventsInWindow(
+  db: SmithDb,
+  scope: Scope,
+  typeCond: SQL,
+  after: string | undefined,
+  upTo: string | undefined,
+): WindowRow[] {
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = inLogOrder(
-    db
-      .select()
-      .from(eventsRaw)
-      .where(and(...conds))
-      .all(),
-  );
-  const storedEvents = rows.map((r) => ({
+  const from =
+    after === undefined ? sql`${eventsRaw}` : sql`${eventsRaw} INDEXED BY events_raw_ts_idx`;
+  return db.all<WindowRow>(sql`SELECT event_id AS eventId, session_id AS sessionId, actor,
+      event_type AS eventType, task_id AS taskId, agent_id AS agentId,
+      plan_version AS planVersion, causal_parent AS causalParent, payload, ts
+    FROM ${from}
+    WHERE ${typeCond}
+      ${after === undefined ? sql`` : sql`AND ${eventsRaw.ts} > ${after}`}
+      ${upTo === undefined ? sql`` : sql`AND ${eventsRaw.ts} <= ${upTo}`}
+      ${sessionCond ? sql`AND ${sessionCond}` : sql``}`);
+}
+
+const registryTypes = (): SQL => inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES);
+
+function toStoredEvent(db: SmithDb, r: WindowRow): StoredEvent {
+  return {
     event_id: r.eventId,
     record: {
       session_id: r.sessionId,
@@ -1920,18 +2050,126 @@ function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord
       agent_id: r.agentId ?? undefined,
       plan_version: r.planVersion,
       causal_parent: r.causalParent,
-      payload: JSON.parse(r.payload) as Record<string, unknown>,
+      payload: parsedPayload<Record<string, unknown>>(db, r.eventId, r.payload),
       ts: r.ts,
     },
-  }));
-  const live = foldLiveAgents(foldAgents(storedEvents));
+  };
+}
+
+function checkpointKey(scope: Scope): string {
+  if (scope.sessionIds !== undefined) return `ids:${[...scope.sessionIds].sort().join('\u0000')}`;
+  if (scope.sessionId !== undefined) return `id:${scope.sessionId}`;
+  return 'all';
+}
+
+function sessionFingerprints(db: SmithDb, scope: Scope): Map<string, string> {
+  const sessionCond = scopedToSessions(sessions.sessionId, scope);
+  const cols = {
+    sessionId: sessions.sessionId,
+    eventCount: sessions.eventCount,
+    lastEventAt: sessions.lastEventAt,
+  };
+  const rows = sessionCond
+    ? db.select(cols).from(sessions).where(sessionCond).all()
+    : db.select(cols).from(sessions).all();
+  return new Map(rows.map((s) => [s.sessionId, `${s.eventCount}|${s.lastEventAt}`]));
+}
+
+/** True while no registry row with ts <= `cp.at` has come or gone since `cp` was taken. */
+function checkpointHolds(db: SmithDb, cp: RegistryCheckpoint, now: Map<string, string>): boolean {
+  for (const [sessionId, fingerprint] of now) {
+    if (cp.fingerprints.get(sessionId) === fingerprint) continue;
+    const row = db
+      .select({ n: sql<number>`count(*)` })
+      .from(eventsRaw)
+      .where(
+        and(
+          eq(eventsRaw.sessionId, sessionId),
+          lte(eventsRaw.ts, cp.at),
+          inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES),
+        ),
+      )
+      .get();
+    if ((row?.n ?? 0) !== (cp.counts.get(sessionId) ?? 0)) return false;
+  }
+  for (const [sessionId, n] of cp.counts) if (n > 0 && !now.has(sessionId)) return false;
+  return true;
+}
+
+/**
+ * Phase 6b StatCard deltas (6a DESIGN.md deviation closed): live-agent count
+ * as of `cutoffIso`, reconstructed by re-running agents-registry.ts's own
+ * fold over the registry events up to the cutoff -- a real point-in-time scan,
+ * not a fabricated trend (the fold logic is REUSED, not re-implemented, so a
+ * snapshot can never disagree with the live agents table's own semantics).
+ *
+ * The first call (or one after a late event, or with the clock moved back)
+ * folds everything up to the cutoff once; later calls resume from the
+ * `RegistryCheckpoint` and fold only the events since, so a poll costs the
+ * window and not the log.
+ *
+ * Project scope is applied to the folded agents, not to the events going in
+ * -- the same "derive via the owning task" route `allAgentsForScope()` takes
+ * for the live half of the delta. Filtering the events by their own
+ * `project` column instead (D-170) counted a different population at each
+ * end of the subtraction: a dispatch logged before Phase 6b carries no
+ * project, so its agent stayed in the live count and vanished from the
+ * historical one, and the StatCard reported an arrival that never happened.
+ */
+function liveAgentsAt(
+  db: SmithDb,
+  scope: Scope,
+  cutoffIso: string,
+  scopedTaskIds: ReadonlySet<string>,
+): AgentRecord[] {
+  const cache = pollCache(db);
+  const key = checkpointKey(scope);
+  const fingerprints = sessionFingerprints(db, scope);
+  const held = cache.checkpoints.get(key);
+  const cp =
+    held !== undefined && cutoffIso >= held.at && checkpointHolds(db, held, fingerprints)
+      ? held
+      : undefined;
+
+  let events: StoredEvent[];
+  let counts: Map<string, number>;
+  let live: AgentRecord[];
+  let seeds: Map<string, StoredEvent>;
+  if (cp !== undefined) {
+    const window = inLogOrder(eventsInWindow(db, scope, registryTypes(), cp.at, cutoffIso));
+    counts = cp.counts;
+    for (const r of window) counts.set(r.sessionId, (counts.get(r.sessionId) ?? 0) + 1);
+    if (window.length === 0) {
+      events = [];
+      live = cp.live;
+      seeds = cp.seeds;
+    } else {
+      events = [...cp.seeds.values(), ...window.map((r) => toStoredEvent(db, r))];
+      live = foldLiveAgents(foldAgents(events));
+      const open = new Set(live.map((a) => a.id));
+      seeds = new Map(events.filter((e) => open.has(e.event_id)).map((e) => [e.event_id, e]));
+    }
+  } else {
+    const rows = inLogOrder(eventsInWindow(db, scope, registryTypes(), undefined, cutoffIso));
+    counts = new Map();
+    for (const r of rows) counts.set(r.sessionId, (counts.get(r.sessionId) ?? 0) + 1);
+    events = rows.map((r) => toStoredEvent(db, r));
+    live = foldLiveAgents(foldAgents(events));
+    const open = new Set(live.map((a) => a.id));
+    seeds = new Map(events.filter((e) => open.has(e.event_id)).map((e) => [e.event_id, e]));
+  }
+  cache.checkpoints.set(key, { at: cutoffIso, seeds, live, counts, fingerprints });
+
   if (scope.project === undefined) return live;
-  const scopedTaskIds = new Set(allTasksForScope(db, scope).map((t) => t.taskId));
   return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId));
 }
 
 /**
  * Total tokens spent (task-result-recorded token_usage) across `epicByTask`'s tasks, as of `cutoffIso`.
+ *
+ * The spend as of the cutoff is the spend over the whole log (held on the
+ * projection, per Result task id) minus the Results written after the cutoff
+ * -- the only rows this read touches -- so it costs the window, not the log.
  *
  * Project scope arrives through `epicByTask`, which is built from rows
  * `allTasksForScope()` already filtered — the same route `epicTokenMaps()`
@@ -1950,26 +2188,60 @@ function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord
 function tokensSpentAt(
   db: SmithDb,
   scope: Scope,
+  projection: OverviewProjection,
   cutoffIso: string,
   epicByTask: Map<string, string>,
 ): number {
-  const conds = [eq(eventsRaw.eventType, 'task-result-recorded'), lte(eventsRaw.ts, cutoffIso)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = db
-    .select()
-    .from(eventsRaw)
-    .where(and(...conds))
-    .all();
   const epicOf = epicResolver(epicByTask);
   let total = 0;
-  for (const r of rows) {
-    const payload = JSON.parse(r.payload) as TaskResultPayload;
+  for (const [taskId, spent] of projection.spentByResultTask) if (epicOf(taskId)) total += spent;
+  const after = eventsInWindow(
+    db,
+    scope,
+    sql`${eventsRaw.eventType} = ${'task-result-recorded'}`,
+    cutoffIso,
+    undefined,
+  );
+  for (const r of after) {
+    const payload = parsedPayload<TaskResultPayload>(db, r.eventId, r.payload);
     if (!epicOf(resultTaskId({ payload, envelopeTaskId: r.taskId }))) continue;
     const usage = readTokenUsage(payload.token_usage);
-    if (usage.measured) total += usage.total;
+    if (usage.measured) total -= usage.total;
   }
   return total;
+}
+
+/** The last budget `taskId` was given by a task-added row with ts <= `cutoffIso`, in log order. */
+function budgetAsOf(db: SmithDb, scope: Scope, taskId: string, cutoffIso: string): number {
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const sessionSql = sessionCond ? sql`AND ${sessionCond}` : sql``;
+  // Walk the task's task-added rows newest timestamp first, one timestamp
+  // group at a time, and stop at the first group that defines a budget: only
+  // the last definition matters, so older history is never read.
+  let upper = cutoffIso;
+  let inclusive = true;
+  for (;;) {
+    const top = db.all<{ ts: string }>(
+      sql`SELECT ts FROM ${eventsRaw} INDEXED BY events_raw_task_ts_idx
+        WHERE ${eventsRaw.taskId} = ${taskId} AND ${eventsRaw.eventType} = ${'task-added'}
+          AND ${inclusive ? sql`${eventsRaw.ts} <= ${upper}` : sql`${eventsRaw.ts} < ${upper}`} ${sessionSql}
+        ORDER BY ts DESC LIMIT 1`,
+    )[0];
+    if (!top) return 0;
+    const group = db.all<{ eventId: string; ts: string; payload: string }>(
+      sql`SELECT event_id AS eventId, ts, payload FROM ${eventsRaw} INDEXED BY events_raw_task_ts_idx
+        WHERE ${eventsRaw.taskId} = ${taskId} AND ${eventsRaw.ts} = ${top.ts}
+          AND ${eventsRaw.eventType} = ${'task-added'} ${sessionSql}`,
+    );
+    let budget: number | undefined;
+    for (const r of inLogOrder(group)) {
+      const v = parsedPayload<{ budget_tokens?: number }>(db, r.eventId, r.payload).budget_tokens;
+      if (v !== undefined) budget = v;
+    }
+    if (budget !== undefined) return budget;
+    upper = top.ts;
+    inclusive = false;
+  }
 }
 
 /**
@@ -1980,6 +2252,10 @@ function tokensSpentAt(
  * type ever writes it (projector.ts's `task-added` case, `p.budget_tokens ??
  * row.budgetTokens`, keyed on the envelope's task id), so folding those rows
  * up to the cutoff in the same order reproduces the column as it stood then.
+ * The projection holds that fold over the whole log (`budgetNowByTask`); the
+ * budget as of the cutoff differs from it only for tasks a task-added row
+ * touched after the cutoff, so only those are looked up (one indexed read
+ * each) and swapped for the value they had then.
  *
  * Scope and epic attribution arrive through `epicByTask`, exactly as in
  * `tokensSpentAt` and for the reasons D-170 and D-207 record there: the two
@@ -1989,39 +2265,37 @@ function tokensSpentAt(
  * hour retroactively shrank the historical percentage, so an epic that had
  * burned 90% of its budget and then had a large task planned into it read as
  * a one-point rise while the gauge in fact fell eighty.
+ *
+ * Last write per task wins, as the projector's fold does. Which write is
+ * last is the log's answer, not `ts`'s: this read used to break the tie on
+ * `event_id` as text, so within one re-plan's burst the eleventh task-added
+ * sorted before the ninth and a task could keep the budget it had been
+ * re-planned out of.
  */
 function tokensBudgetedAt(
   db: SmithDb,
   scope: Scope,
+  projection: OverviewProjection,
   cutoffIso: string,
   epicByTask: Map<string, string>,
 ): number {
-  const conds = [eq(eventsRaw.eventType, 'task-added'), lte(eventsRaw.ts, cutoffIso)];
-  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
-  if (sessionCond) conds.push(sessionCond);
-  const rows = inLogOrder(
-    db
-      .select()
-      .from(eventsRaw)
-      .where(and(...conds))
-      .all(),
-  );
   const epicOf = epicResolver(epicByTask);
-  // Last write per task wins, as the projector's fold does — a re-plan that
-  // re-states a task carries the budget it has from then on. Which write is
-  // last is the log's answer, not `ts`'s: this read used to break the tie on
-  // `event_id` as text, so within one re-plan's burst the eleventh task-added
-  // sorted before the ninth and a task could keep the budget it had been
-  // re-planned out of.
-  const budgetByTask = new Map<string, number>();
-  for (const r of rows) {
-    if (!r.taskId || !epicOf(r.taskId)) continue;
-    const payload = JSON.parse(r.payload) as { budget_tokens?: number };
-    if (payload.budget_tokens === undefined) continue;
-    budgetByTask.set(r.taskId, payload.budget_tokens);
-  }
   let total = 0;
-  for (const v of budgetByTask.values()) total += v;
+  for (const [taskId, budget] of projection.budgetNowByTask) if (epicOf(taskId)) total += budget;
+  const touched = new Set<string>();
+  for (const r of eventsInWindow(
+    db,
+    scope,
+    sql`${eventsRaw.eventType} = ${'task-added'}`,
+    cutoffIso,
+    undefined,
+  )) {
+    if (r.taskId && epicOf(r.taskId)) touched.add(r.taskId);
+  }
+  for (const taskId of touched) {
+    total -= projection.budgetNowByTask.get(taskId) ?? 0;
+    total += budgetAsOf(db, scope, taskId, cutoffIso);
+  }
   return total;
 }
 
@@ -2040,32 +2314,47 @@ export interface ClockOpts {
 export type OverviewOpts = ClockOpts;
 
 export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}): OverviewResult {
-  // One instant for everything this call reports. runningSessions(), the
-  // per-project summaries and the deltas each take the clock as an argument
-  // rather than reading it, so a request that straddles a threshold cannot
-  // count an agent as working in one field and stalled in the next.
-  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
-  const nowIso = now.toISOString();
+  return overviewAt(db, overviewProjection(db, scope), scope, opts);
+}
+
+/**
+ * Everything overview() reports that does not depend on the clock, held so a
+ * poll can ask the clock-dependent half again without re-reading the log.
+ * Build one with `overviewProjection()`; it is a snapshot, so rebuild it when
+ * the log (or the projection tables) moved.
+ */
+export interface OverviewProjection {
+  readonly taskRows: (typeof tasks.$inferSelect)[];
+  readonly scopedTaskIds: ReadonlySet<string>;
+  readonly liveRows: (typeof agents.$inferSelect)[];
+  readonly closedEpics: ClosedEpic[];
+  readonly epicsInFlight: string[];
+  readonly activity: readonly ActivityRow[];
+  readonly budgetByEpic: Map<string, number>;
+  readonly spentByEpic: Map<string, number>;
+  readonly tokensByEpic: EpicTokenSpend[];
+  readonly recentDispatches: RecentDispatch[];
+  readonly milestoneProgress: ReturnType<typeof milestoneProgressRows>;
+  readonly sessionRows: RunningSession[];
+  readonly projectBases: ProjectBase[] | undefined;
+  /** Measured spend per Result task id, over the whole log. */
+  readonly spentByResultTask: Map<string, number>;
+  /** The budget each task has now: the last defined `budget_tokens` of its task-added rows. */
+  readonly budgetNowByTask: Map<string, number>;
+}
+
+export function overviewProjection(db: SmithDb, scope: Scope = {}): OverviewProjection {
   const liveRows = allAgentsForScope(db, scope);
-  const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
   const taskRows = allTasksForScope(db, scope);
 
   const epicRows = epicRowsForScope(db, scope);
   const closedEpics = closedEpicsOf(epicRows, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
   const activity = epicActivityRows(db, scope);
-  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
-  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const resultRows = taskResultRows(db, scope);
-  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(
-    db,
-    scope,
-    taskRows,
-    resultRows,
-  );
-
-  const tokensByEpic = epicTokenSpends({ budgetByEpic, spentByEpic, unmeasuredByEpic });
+  const tokenMaps = epicTokenMaps(db, scope, taskRows, resultRows);
+  const tokensByEpic = epicTokenSpends(tokenMaps);
 
   const recentDispatchRows = newestDispatches(db, scope);
   // agents.id IS the dispatch event id (agents-registry.ts's foldAgents()),
@@ -2111,7 +2400,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     round: roundByEventId.get(d.eventId) ?? 1,
   }));
 
-  let projects: ProjectOverviewSummary[] | undefined;
+  let projectBases: ProjectBase[] | undefined;
   if (scope.project === undefined) {
     // Milestones too, not just tasks: roadmap.md's `- project:` bullet
     // declares a project before any of its work is planned, and
@@ -2123,23 +2412,89 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     // Milestones carry no session_id and milestoneProgressRows() never
     // filters them by one, so they join the list under a session scope too.
     const declaredRows = db.select({ project: milestones.project }).from(milestones).all();
-    projects = distinctProjects(taskRows, declaredRows).map((p) =>
-      projectSummary(db, p, scope, nowIso, {
-        tasks: taskRows,
-        liveAgents: liveRows,
-        epicRows,
-        resultRows,
-        activity,
-      }),
+    projectBases = distinctProjects(taskRows, declaredRows).map((p) =>
+      projectBase(db, p, scope, { tasks: taskRows, liveAgents: liveRows, epicRows, resultRows }),
     );
   }
+
+  const spentByResultTask = new Map<string, number>();
+  for (const row of resultRows) {
+    const taskId = resultTaskId(row);
+    if (taskId === undefined) continue;
+    const usage = readTokenUsage(row.payload.token_usage);
+    if (usage.measured)
+      spentByResultTask.set(taskId, (spentByResultTask.get(taskId) ?? 0) + usage.total);
+  }
+  const budgetNowByTask = new Map<string, number>();
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const budgetCols = {
+    eventId: eventsRaw.eventId,
+    ts: eventsRaw.ts,
+    taskId: eventsRaw.taskId,
+    payload: eventsRaw.payload,
+  };
+  const addedRows = sessionCond
+    ? db
+        .select(budgetCols)
+        .from(eventsRaw)
+        .where(and(eq(eventsRaw.eventType, 'task-added'), sessionCond))
+        .all()
+    : db.select(budgetCols).from(eventsRaw).where(eq(eventsRaw.eventType, 'task-added')).all();
+  for (const r of inLogOrder(addedRows)) {
+    if (!r.taskId) continue;
+    const v = parsedPayload<{ budget_tokens?: number }>(db, r.eventId, r.payload).budget_tokens;
+    if (v !== undefined) budgetNowByTask.set(r.taskId, v);
+  }
+
+  return {
+    taskRows,
+    scopedTaskIds: new Set(taskRows.map((t) => t.taskId)),
+    liveRows,
+    closedEpics,
+    epicsInFlight,
+    activity,
+    budgetByEpic: tokenMaps.budgetByEpic,
+    spentByEpic: tokenMaps.spentByEpic,
+    tokensByEpic,
+    recentDispatches,
+    milestoneProgress: milestoneProgressRows(db, scope),
+    sessionRows: runningSessionRows(db, scope, liveRows),
+    projectBases,
+    spentByResultTask,
+    budgetNowByTask,
+  };
+}
+
+/**
+ * The clock-dependent half of overview(): working vs stalled, idle and active
+ * epics, and the three StatCard deltas, computed against `opts.nowIso` on a
+ * held `OverviewProjection`. Reads only the rows inside the 5 min and 1 h
+ * windows (and the registry checkpoint) -- never the whole log.
+ */
+export function overviewAt(
+  db: SmithDb,
+  projection: OverviewProjection,
+  scope: Scope = {},
+  opts: OverviewOpts = {},
+): OverviewResult {
+  // One instant for everything this call reports. The per-session and
+  // per-project counts and the deltas each take the clock as an argument
+  // rather than reading it, so a request that straddles a threshold cannot
+  // count an agent as working in one field and stalled in the next.
+  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
+  const nowIso = now.toISOString();
+  const { liveRows, taskRows, closedEpics, epicsInFlight, activity } = projection;
+  const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
+
+  const epicsIdle = idleEpics(taskRows, activity, epicsInFlight, nowIso, scopeProject(scope));
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics, epicsIdle);
 
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
   // One fold serves both ends of the subtraction. The working end judges the
   // historical rows against the cutoff, not today's clock (D-170): a 4h window
   // now against a 4h05m one then would read a stall since the cutoff as no change.
-  const liveAgo = liveAgentsAt(db, scope, fiveMinAgo);
+  const liveAgo = liveAgentsAt(db, scope, fiveMinAgo, projection.scopedTaskIds);
   const liveAgentCountDelta5m = liveRows.length - liveAgo.length;
   const workingAgentCountDelta5m =
     workingRows.length - liveAgo.filter((a) => isWorkingAt(a.dispatchedAt, fiveMinAgo)).length;
@@ -2147,6 +2502,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   // The Budget panel counts the epics the Running-now cards count, so its
   // 1-hour delta is folded over the same set: running epics that declare a
   // budget (an unbudgeted epic adds to neither side of the card's ratio).
+  const { budgetByEpic, spentByEpic } = projection;
   const runningBudgeted = new Set(epicsActivelyRunning.filter((e) => budgetByEpic.has(e)));
   const epicByTask = new Map(
     taskRows
@@ -2162,8 +2518,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   let budgetUsedPctPointDelta1h: number | null = null;
   if (totalBudgetNow > 0) {
     const currentPct = (totalSpentNow / totalBudgetNow) * 100;
-    const spentAgo = tokensSpentAt(db, scope, oneHourAgo, epicByTask);
-    const budgetAgo = tokensBudgetedAt(db, scope, oneHourAgo, epicByTask);
+    const spentAgo = tokensSpentAt(db, scope, projection, oneHourAgo, epicByTask);
+    const budgetAgo = tokensBudgetedAt(db, scope, projection, oneHourAgo, epicByTask);
     // Nothing was budgeted an hour ago, so nothing was used: the card read
     // "No budget set" then, and the honest reading of the move since is the
     // whole of today's percentage. Dividing by today's budget instead would
@@ -2171,6 +2527,8 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     const pctAgo = budgetAgo > 0 ? (spentAgo / budgetAgo) * 100 : 0;
     budgetUsedPctPointDelta1h = currentPct - pctAgo;
   }
+
+  const projects = projection.projectBases?.map((b) => projectAt(b, activity, nowIso));
 
   return {
     liveAgents: groupLiveAgents(liveRows),
@@ -2191,14 +2549,14 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     liveAgentCount: liveRows.length,
     workingAgentCount: workingRows.length,
     stalledAgentCount: liveRows.length - workingRows.length,
-    runningSessions: runningSessions(db, scope, { nowIso }),
+    runningSessions: withWorkingCounts(projection.sessionRows, liveRows, nowIso),
     epicsInFlight,
     epicsActivelyRunning,
     epicsIdle,
     closedEpics,
-    tokensByEpic,
-    milestoneProgress: milestoneProgressRows(db, scope),
-    recentDispatches,
+    tokensByEpic: projection.tokensByEpic,
+    milestoneProgress: projection.milestoneProgress,
+    recentDispatches: projection.recentDispatches,
     liveAgentCountDelta5m,
     workingAgentCountDelta5m,
     budgetUsedPctPointDelta1h,
