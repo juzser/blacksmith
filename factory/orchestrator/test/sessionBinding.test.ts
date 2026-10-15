@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb, rebuild } from '../src/db/projector.js';
 import { timeline } from '../src/db/queries.js';
 import type { EventInput, StoredEvent } from '../src/events.js';
-import { OVERLAY_ROOT, REPO_ROOT } from '../src/paths.js';
+import {
+  OVERLAY_ROOT,
+  SESSION_BINDING_POLICY_DEFAULT_PATH as PATHS_DEFAULT,
+  SESSION_BINDING_POLICY_PATH as PATHS_OVERLAY,
+  REPO_ROOT,
+} from '../src/paths.js';
 import { FACTORY_PROJECT_NAME, LEGACY_FACTORY_PROJECT } from '../src/projectName.js';
 import {
   BINDING_TAIL_BYTES,
@@ -223,6 +228,16 @@ describe('policy', () => {
     expect(bindingPolicyReadPath({ repoRoot, overlayRoot })).toBe(policyAt(repoRoot));
     write(policyAt(overlayRoot), 'max_files: 1\n');
     expect(bindingPolicyReadPath({ repoRoot, overlayRoot })).toBe(policyAt(overlayRoot));
+  });
+
+  it('paths.ts declares the overlay pair that bindingPolicyReadPath resolves between', () => {
+    const roots = { repoRoot: REPO_ROOT, overlayRoot: OVERLAY_ROOT };
+    expect(PATHS_DEFAULT).toBe(path.join(REPO_ROOT, 'factory', 'policies', 'session-binding.yml'));
+    expect(PATHS_OVERLAY).toBe(
+      path.join(OVERLAY_ROOT, 'factory', 'policies', 'session-binding.yml'),
+    );
+    expect(bindingPolicyReadPath(roots, () => true)).toBe(PATHS_OVERLAY);
+    expect(bindingPolicyReadPath(roots, () => false)).toBe(PATHS_DEFAULT);
   });
 
   it('the default reads the file bindingPolicyReadPath names', () => {

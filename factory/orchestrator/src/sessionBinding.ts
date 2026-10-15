@@ -9,6 +9,8 @@ import {
   resolveOverlayRead,
   resolveProjectsDir,
   resolveWorkRoot,
+  SESSION_BINDING_POLICY_DEFAULT_PATH,
+  SESSION_BINDING_POLICY_PATH,
 } from './paths.js';
 import { normalizeProjectName } from './projectName.js';
 import { factoryProjects } from './projects.js';
@@ -26,8 +28,8 @@ export const REMINDER_PREFIX = 'bs use: ';
 export const BINDING_TAIL_BYTES = 1048576;
 
 const POLICY_FILE = ['factory', 'policies', 'session-binding.yml'];
-export const SESSION_BINDING_POLICY_DEFAULT_PATH = path.join(REPO_ROOT, ...POLICY_FILE);
-export const SESSION_BINDING_POLICY_PATH = path.join(OVERLAY_ROOT, ...POLICY_FILE);
+
+export { SESSION_BINDING_POLICY_DEFAULT_PATH, SESSION_BINDING_POLICY_PATH };
 
 /** The operator's copy when it exists, else the shipped file. */
 export function bindingPolicyReadPath(
