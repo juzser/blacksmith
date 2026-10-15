@@ -1,12 +1,4 @@
-/**
- * The pure rules of a session binding (epic bs-use): which project a CLI
- * session is working on, the two events that record it, and the reminder text
- * the capture hook prints. No caller lives here and nothing here refuses,
- * holds or delays a turn.
- *
- * The import graph stays small on purpose: no db layer, no `cli.ts`, no
- * `usage.ts`, so the UserPromptSubmit hook can reach it cheaply.
- */
+/** The pure rules of a session binding (epic bs-use); nothing here refuses or holds a turn. No db, cli or usage imports, so the hook stays light. */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -23,7 +15,6 @@ import { factoryProjects } from './projects.js';
 
 export const SESSION_BOUND_EVENT_TYPE = 'session-bound';
 export const BYPASS_APPROVED_EVENT_TYPE = 'pipeline-bypass-approved';
-/** Types only the capture hook may write; `bs event append` refuses them. */
 export const HOOK_ONLY_EVENT_TYPES: readonly string[] = [
   SESSION_BOUND_EVENT_TYPE,
   BYPASS_APPROVED_EVENT_TYPE,
@@ -32,16 +23,13 @@ export const HOOK_ONLY_EVENT_TYPES: readonly string[] = [
 export const BYPASS_HEADER = 'Small change';
 export const BYPASS_YES = 'Yes, skip the pipeline';
 export const REMINDER_PREFIX = 'bs use: ';
-/** How much of a log's end the hook reads to find the current binding. */
 export const BINDING_TAIL_BYTES = 1048576;
 
 const POLICY_FILE = ['factory', 'policies', 'session-binding.yml'];
-/** Shipped with the factory, read-only. */
 export const SESSION_BINDING_POLICY_DEFAULT_PATH = path.join(REPO_ROOT, ...POLICY_FILE);
-/** The operator's copy; in a clone it is the shipped file itself. */
 export const SESSION_BINDING_POLICY_PATH = path.join(OVERLAY_ROOT, ...POLICY_FILE);
 
-/** The operator's copy when it exists, the shipped file before anyone made one. */
+/** The operator's copy when it exists, else the shipped file. */
 export function bindingPolicyReadPath(
   roots: { repoRoot: string; overlayRoot: string },
   exists?: (file: string) => boolean,
@@ -87,7 +75,7 @@ export function loadBindingPolicy(
   return { ok: false, file, problem: 'invalid' };
 }
 
-/** `/bs use <name>` gives {name}; a bare `/bs use` gives {name: null}; anything else null. */
+/** `/bs use <name>` gives {name}, a bare `/bs use` {name: null}, anything else null. */
 export function parseUseCommand(prompt: string): { name: string | null } | null {
   const m = /^\/bs use(?:\s+(\S+))?(?:\s|$)/.exec(prompt);
   return m === null ? null : { name: m[1] ?? null };
@@ -99,7 +87,7 @@ export function matchProject(name: string, known: readonly string[]): string | u
   return known.find((k) => normalizeProjectName(k) === want);
 }
 
-/** The project names the factory knows, under the roots the capture hook's M4 rule uses. */
+/** Known project names under the roots the capture hook's M4 rule uses; [] on failure. */
 export function knownProjectNames(input: {
   repoRoot: string;
   cwd: string;
@@ -122,7 +110,6 @@ export function knownProjectNames(input: {
 const bindingProject = (r: EventRecord): string | undefined =>
   typeof r.payload.project === 'string' ? r.payload.project : r.project;
 
-/** The newest binding the given CLI session wrote into this log. */
 export function newestBinding(
   events: readonly StoredEvent[],
   cli: string,
@@ -170,7 +157,6 @@ interface BuilderBase {
   planVersion: number;
 }
 
-/** The record of `/bs use`; the caller's append options stamp the CLI session. */
 export function bindingInput(input: BuilderBase & { promptId?: string }): EventInput {
   return {
     session_id: input.target,
@@ -187,7 +173,6 @@ export function bindingInput(input: BuilderBase & { promptId?: string }): EventI
   };
 }
 
-/** The record of the operator's yes to one small change. */
 export function bypassInput(
   input: BuilderBase & { promptId: string; question: string },
 ): EventInput {
@@ -207,7 +192,6 @@ export function bypassInput(
   };
 }
 
-/** The answer row that is exactly the small-change yes, with a real question. */
 export function bypassRow(
   rows: readonly Record<string, unknown>[],
 ): { question: string } | undefined {
@@ -221,7 +205,6 @@ export function bypassRow(
 
 const line = (text: string): string => `${REMINDER_PREFIX}${text}`;
 
-/** The reminder printed on every prompt of a bound session. */
 export function reminderLines(project: string, read: BindingPolicyRead): string[] {
   const bound = line(`this session is bound to ${project}.`);
   if (!read.ok) {
@@ -245,7 +228,6 @@ export function reminderLines(project: string, read: BindingPolicyRead): string[
   ];
 }
 
-/** What `/bs use <name>` prints when the name matches no known project. */
 export function unknownProjectLines(known: readonly string[]): string[] {
   return [
     line('that name is not a project this factory knows.'),
@@ -253,7 +235,6 @@ export function unknownProjectLines(known: readonly string[]): string[] {
   ];
 }
 
-/** What `/bs use` prints when the binding event could not be written. */
 export function notRecordedLines(): string[] {
   return [
     line(

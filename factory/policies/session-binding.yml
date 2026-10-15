@@ -1,11 +1,7 @@
 # Small-change policy for a session bound with `/bs use` (epic bs-use).
-#
-# These are the numbers the per-prompt reminder quotes: a change that touches at
-# most max_files files and at most max_changed_lines changed lines (added plus
-# removed) may skip the pipeline once, after the operator says yes to a
-# "Small change" question. Everything larger goes through `/bs plan` and
-# `/bs run`.
-#
+# A change touching at most max_files files and max_changed_lines changed lines
+# (added plus removed) may skip the pipeline once, after the operator says yes
+# to a "Small change" question. Larger work goes through `/bs plan` and `/bs run`.
 # To change them, keep a copy at <work root>/factory/policies/session-binding.yml
 # (in a clone, this file is that copy). A missing or invalid file removes the
 # bypass for the turn; nothing else is blocked.
