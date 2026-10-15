@@ -297,6 +297,28 @@ describe('recent dispatches keep the log-order tie-break', () => {
     });
   }
 
+  it('yields nothing for a scope naming only an unknown session', () => {
+    for (const scope of [{ sessionId: 'no-such' }, { sessionIds: ['no-such'] }] as Scope[]) {
+      expect(overview(store.handle.db, scope).recentDispatches).toEqual([]);
+    }
+  });
+
+  it('ignores an unknown session listed beside a known one', () => {
+    const scope: Scope = { sessionIds: ['no-such', SESSIONS[0] as string] };
+    expect(overview(store.handle.db, scope).recentDispatches.map((d) => d.eventId)).toEqual(
+      expectedRecent(store.handle, { sessionId: SESSIONS[0] }),
+    );
+  });
+
+  it('settles a tie at the newest ts in log order (runningSessions)', () => {
+    // plan-a ends its burst at i=25 and plan-b at i=26, all in one millisecond.
+    const byId = new Map(
+      runningSessions(store.handle.db, {}).map((r) => [r.sessionId, r.lastStepTaskId]),
+    );
+    expect(byId.get('plan-a')).toBe('epic-a/task-125');
+    expect(byId.get('plan-b')).toBe('epic-a/task-126');
+  });
+
   it('pages past a boundary tie group the project filter empties', () => {
     // Only five of the burst's rows in this session are project-a, so the first
     // page (all burst) leaves the filter short and the read has to page on
