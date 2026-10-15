@@ -268,31 +268,51 @@ describe('overviewAt cost on a held projection', () => {
     }
   }
 
-  it('does equal work at N and 10N events on a held projection', { timeout: 120_000 }, () => {
+  it('does equal work at N and 10N events on a held projection, every scope', {
+    timeout: 240_000,
+  }, () => {
+    const scopes: Scope[] = [
+      {},
+      { project: 'project-a' },
+      { sessionId: 'sess-poll-cost' },
+      { sessionIds: ['sess-poll-cost'] },
+    ];
     const counts = [2000, 20000].map((n) => {
       handle.sqlite.close();
       handle = openDb(path.join(dir, `smith-${n}.db`));
       load(n);
-      const projection = overviewProjection(handle.db, {});
-      const opts = { nowIso: iso(NOW_MS) };
-      overviewAt(handle.db, projection, {}, opts);
-      return measure(() => overviewAt(handle.db, projection, {}, { nowIso: iso(NOW_MS + 5_000) }));
+      return scopes.map((scope) => {
+        const projection = overviewProjection(handle.db, scope);
+        overviewAt(handle.db, projection, scope, { nowIso: iso(NOW_MS) });
+        return measure(() =>
+          overviewAt(handle.db, projection, scope, { nowIso: iso(NOW_MS + 5_000) }),
+        );
+      });
     });
-    expect(counts[0]?.parses).toBeGreaterThanOrEqual(0);
     expect(counts[1]).toEqual(counts[0]);
+    // The recent tail is a handful of rows; a whole-history read would be thousands.
+    for (const c of counts[1] ?? []) {
+      expect(c.eventRows).toBeLessThan(100);
+      expect(c.dispatchRows).toBeLessThan(100);
+      expect(c.parses).toBeLessThan(100);
+    }
   });
 
-  it('parses only the new event when the projection advances', { timeout: 120_000 }, () => {
+  it('parses only the new event when the projection advances, every scope', {
+    timeout: 240_000,
+  }, () => {
+    const scopes: Scope[] = [{}, { project: 'project-b' }, { sessionId: 'sess-poll-cost' }];
     const parsesAfterAppend = [2000, 20000].map((n) => {
       handle.sqlite.close();
       handle = openDb(path.join(dir, `smith-adv-${n}.db`));
       const log = load(n);
-      overviewProjection(handle.db, {});
+      const held = scopes.map((scope) => overviewProjection(handle.db, scope));
+      expect(held).toHaveLength(scopes.length);
       result(log, 'epic-b/task-2', 'project-b', iso(NOW_MS - 2 * MIN), 5);
       projectSession(handle, log.session, log.events);
-      return measure(() => overviewProjection(handle.db, {})).parses;
+      return scopes.map((scope) => measure(() => overviewProjection(handle.db, scope)).parses);
     });
-    expect(parsesAfterAppend[0]).toBeLessThanOrEqual(1);
-    expect(parsesAfterAppend[1]).toBe(parsesAfterAppend[0]);
+    for (const p of parsesAfterAppend[0] ?? []) expect(p).toBeLessThanOrEqual(1);
+    expect(parsesAfterAppend[1]).toEqual(parsesAfterAppend[0]);
   });
 });
