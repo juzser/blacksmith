@@ -77,6 +77,7 @@ import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
 import {
   appendEvent,
+  EventError,
   type EventOpts,
   filterEvents,
   followEvents,
@@ -203,6 +204,7 @@ import {
   type SecurityTriggerTask,
   securityTriggers,
 } from './security.js';
+import { HOOK_ONLY_EVENT_TYPES } from './sessionBinding.js';
 import { parseLessons } from './severity.js';
 import { amendPlan, recordSpecReview, successorChainPath, taskSuccessors } from './spec.js';
 import {
@@ -3101,6 +3103,30 @@ async function main(): Promise<number> {
   if (namespace === 'event' && action === 'append') {
     const [json] = requirePositionals(positional, usageFor('event append')) as [string];
     const input = JSON.parse(json);
+    // The capture hook is the only writer of the records a session's binding
+    // is read from: the two hook-only types, and a user_prompt carrying the
+    // hook's source or `bound_to`. A hand-written prompt uses `prompt record`.
+    if (input !== null && typeof input === 'object') {
+      const type = (input as { event_type?: unknown }).event_type;
+      if (typeof type === 'string' && HOOK_ONLY_EVENT_TYPES.includes(type)) {
+        throw new EventError(
+          'events.hook-only-event-type',
+          `${type} is written by the capture hook from the operator's own prompt or answer; bs event append refuses it.`,
+        );
+      }
+      const payload = (input as { payload?: unknown }).payload;
+      if (
+        type === 'user_prompt' &&
+        payload !== null &&
+        typeof payload === 'object' &&
+        ((payload as { source?: unknown }).source === 'hook' || Object.hasOwn(payload, 'bound_to'))
+      ) {
+        throw new EventError(
+          'events.hook-only-event-type',
+          'user_prompt with source hook or bound_to is written by the capture hook; bs event append refuses it. Use bs prompt record for a hand-written prompt.',
+        );
+      }
+    }
     const result = await appendEvent(input, eventOptsFromFlags(flags));
     // D-163. `event_type` is open here and closed in timeline(): the schema
     // keeps the write side free so an unknown type is never rejected and lost,

@@ -1,6 +1,6 @@
 ---
 name: bs
-description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from any Claude Code session that has Blacksmith installed — a clone of the repo, or the plugin plus the `bs` CLI from npm.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, use, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from any Claude Code session that has Blacksmith installed — a clone of the repo, or the plugin plus the `bs` CLI from npm.
 ---
 
 # /bs — Blacksmith operator console
@@ -180,6 +180,7 @@ that drifts.
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer | [`plan.md`](plan.md) |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge | [`run.md`](run.md), the epic tier, which reads [`wave.md`](wave.md) for steps 2-10 |
 | `/bs audit <project-dir>` | Audit a project on four axes, rank, decide at a hard stop, cut one epic | [`audit.md`](audit.md) |
+| `/bs use <project>` | Bind this session to one project; changes go through the pipeline | [`use.md`](use.md) |
 | `/bs status` | Live agent count, budget burn, epic phase | [`status.md`](status.md) |
 | `/bs ui` | Serve the local dashboard | [`ui.md`](ui.md) |
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic | [`waivers.md`](waivers.md) |
