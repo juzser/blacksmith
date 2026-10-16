@@ -263,6 +263,20 @@ export const STACK_POLICY_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'polici
  * upgrade cannot reach it.
  */
 export const STACK_POLICY_PATH = path.join(OVERLAY_ROOT, 'factory', 'policies', 'stack.yml');
+/** The session-binding small-change policy, as shipped: read-only, upgraded with the checkout. */
+export const SESSION_BINDING_POLICY_DEFAULT_PATH = path.join(
+  REPO_ROOT,
+  'factory',
+  'policies',
+  'session-binding.yml',
+);
+/** The operator's copy of the small-change policy, under the work root where an upgrade cannot reach it. */
+export const SESSION_BINDING_POLICY_PATH = path.join(
+  OVERLAY_ROOT,
+  'factory',
+  'policies',
+  'session-binding.yml',
+);
 /** The stack answers to read: the operator's if they have any, the shipped questionnaire if not. */
 export function stackPolicyReadPath(): string {
   return resolveOverlayRead(STACK_POLICY_PATH, STACK_POLICY_DEFAULT_PATH);

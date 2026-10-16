@@ -1,0 +1,9 @@
+# Small-change policy for a session bound with `/bs use` (epic bs-use).
+# A change touching at most max_files files and max_changed_lines changed lines
+# (added plus removed) may skip the pipeline once, after the operator says yes
+# to a "Small change" question. Larger work goes through `/bs plan` and `/bs run`.
+# To change them, keep a copy at <work root>/factory/policies/session-binding.yml
+# (in a clone, this file is that copy). A missing or invalid file removes the
+# bypass for the turn; nothing else is blocked.
+max_files: 1
+max_changed_lines: 10
