@@ -8,10 +8,12 @@
 // reason `policyHook.ts` gives.
 //
 // Never blocks a prompt: every failure is a silent exit 0.
-//   promptHook.js                 stdin = hook JSON; prints one line on a write
+//   promptHook.js                 stdin = hook JSON; prints the capture line on a write,
+//                                 then the binding reminder of a bound session
 //   promptHook.js answer          stdin = PostToolUse AskUserQuestion JSON; same line
 //   promptHook.js --resolve <cwd> prints the store this cwd records into, if any
 import { readFileSync } from 'node:fs';
+import { promptTurnLines } from './bindingReminder.js';
 import { captureContext, capturePrompt, resolveLine } from './promptCapture.js';
 
 try {
@@ -20,13 +22,19 @@ try {
     const cwd = args[1];
     const line = cwd === undefined ? null : resolveLine(cwd, captureContext(cwd, process.env));
     if (line !== null) process.stdout.write(`${line}\n`);
-  } else {
+  } else if (args[0] === 'answer') {
     const line = await capturePrompt(
       readFileSync(0, 'utf8'),
       captureContext(process.cwd(), process.env),
-      args[0] === 'answer' ? 'answer' : 'prompt',
+      'answer',
     );
     if (line !== null) process.stdout.write(`${line}\n`);
+  } else {
+    const lines = await promptTurnLines(
+      readFileSync(0, 'utf8'),
+      captureContext(process.cwd(), process.env),
+    );
+    for (const line of lines) process.stdout.write(`${line}\n`);
   }
 } catch {
   // A capture that fails loses one record; the prompt itself goes through.
