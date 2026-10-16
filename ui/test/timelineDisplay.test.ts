@@ -762,6 +762,22 @@ describe('lib/timelineDisplay.ts', () => {
       expect(titleFor(e)).toBe('Pipeline bypass approved for project-a');
     });
 
+    const unnamed: Record<string, unknown>[] = [{}, { project: null }, { project: '' }];
+
+    it('titles session-bound with the bare phrase when no project is named', () => {
+      for (const payload of unnamed) {
+        expect(titleFor(entry({ eventType: 'session-bound', payload }))).toBe('Session bound');
+      }
+    });
+
+    it('titles pipeline-bypass-approved with the bare phrase when no project is named', () => {
+      for (const payload of unnamed) {
+        expect(titleFor(entry({ eventType: 'pipeline-bypass-approved', payload }))).toBe(
+          'Pipeline bypass approved',
+        );
+      }
+    });
+
     it('gives both the prompt kind', () => {
       expect(kindFor(entry({ eventType: 'session-bound' }))).toBe('prompt');
       expect(kindFor(entry({ eventType: 'pipeline-bypass-approved' }))).toBe('prompt');

@@ -1203,6 +1203,44 @@ test.describe('Home: Live sessions', () => {
     await expect(third.getByRole('link')).toHaveCount(0);
   });
 
+  test('a bound unlinked session names its project and stays not linked', async ({ page }) => {
+    const bound = liveCard({
+      cliSessionId: 'cli-3',
+      status: 'idle',
+      statusSince: null,
+      name: 'session-c',
+      project: 'project-a',
+    });
+    await serveLive(page, liveResponse({ sessions: [bound] }));
+    await page.goto('/overview');
+    const item = page.getByRole('list', { name: 'Live sessions' }).getByRole('listitem').nth(0);
+    await expect(item).toContainText('project-a · workspace-c · session-c');
+    await expect(item).toContainText('Not linked to a Blacksmith epic');
+    await expect(item).not.toContainText('Now');
+    await expect(item).not.toContainText('Next');
+    await expect(item.getByRole('link')).toHaveCount(0);
+
+    await page.setViewportSize(PHONE);
+    await expect(item).toContainText('project-a · workspace-c · session-c');
+    // The top bar re-lays out for a moment after a resize, so poll for the settled width.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(false);
+    const inside = await page.evaluate(() => {
+      const card = document.querySelector('.bs-live-card');
+      const title = document.querySelector('.bs-live-card__title');
+      if (!card || !title) return null;
+      const c = card.getBoundingClientRect();
+      const t = title.getBoundingClientRect();
+      return t.left >= c.left && t.right <= c.right;
+    });
+    expect(inside).toBe(true);
+  });
+
   test('375px: one Now line, the rest behind "+ N more", and no sideways scroll', async ({
     page,
   }) => {

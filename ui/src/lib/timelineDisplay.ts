@@ -377,9 +377,13 @@ export function titleFor(entry: TimelineEntry): string {
       return kind ? `${kind}: ${String(body)}` : String(body);
     }
     case 'session-bound':
-      return `Session bound to ${String(p.project ?? 'a project')}`;
+      return typeof p.project === 'string' && p.project !== ''
+        ? `Session bound to ${p.project}`
+        : 'Session bound';
     case 'pipeline-bypass-approved':
-      return `Pipeline bypass approved for ${String(p.project ?? 'a project')}`;
+      return typeof p.project === 'string' && p.project !== ''
+        ? `Pipeline bypass approved for ${p.project}`
+        : 'Pipeline bypass approved';
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
       // Tier and provider are shown only when present: "(/)" says nothing.
