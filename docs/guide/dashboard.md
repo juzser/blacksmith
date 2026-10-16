@@ -70,9 +70,14 @@ Home lists one card per live, in-scope Claude Code CLI session, from
 `GET /api/cli-sessions`. A session that drives a Blacksmith epic reads
 `<project> · <epic> · wave N`, with a status tag, a **Now** line per working agent
 (role and task title) and a **Next** line (the next task's title, or "Waiting on
-you"). The title links to the epic on the Kanban board. A session linked to no epic
-shows its working folder and name only; so does a session whose only epics are
-closed.
+you"). The title links to the epic on the Kanban board. A session bound with
+`/bs use <project>` shows that project on its card, linked to an epic or not: when
+it drives an open epic the card reads `<project> · <epic> · wave N` with the bound
+project in place of the epic's own, so it never names both; when it is linked to no
+open epic the card reads `<project> · <folder>` (the project once when it equals the
+folder), the name muted, and still says it is not linked to an epic. An unbound
+session linked to no epic shows its working folder and name only; so does an unbound
+one whose only epics are closed.
 
 The wave number comes from the newest session named `<epic>-w<N>-…` (a re-run,
 `<epic>-w<N>r-…`, is still wave N) that is not older than the newest open wave; when
@@ -143,7 +148,7 @@ Two more pages carry the rest:
 
 | Page | What it is for |
 |---|---|
-| **Activity** (`/activity`) | The event log itself — every prompt, dispatch, return, finding, gate result, merge and error, in order, filtered by project, session and kind. `/timeline` lands here; `/errors` opens it on errors, with the errors grouped by taxonomy class above the feed — the raw material the lessons loop distills from. |
+| **Activity** (`/activity`) | The event log itself — every prompt, dispatch, return, finding, gate result, merge and error, in order, filtered by project, session and kind. A binding reads "Session bound to <project>" and a bypass approval "Pipeline bypass approved for <project>"; each title is bare ("Session bound", "Pipeline bypass approved") when the event names no project. `/timeline` lands here; `/errors` opens it on errors, with the errors grouped by taxonomy class above the feed — the raw material the lessons loop distills from. |
 | **Sessions** (`/sessions`) | The history of runs, active first; pick one and it lists every agent the run dispatched and how each ended. |
 
 ## The screenshots are real
