@@ -133,7 +133,7 @@ const use = (s: Setup, name: string) =>
 const say = (s: Setup, text: string, over: Record<string, unknown> = {}) =>
   capturePrompt(prompt(text, over), ctxFor(s.env, s.cwd));
 
-describe('/bs use writes the binding (epic criterion 1)', () => {
+describe('`/bs use` writes the binding (epic criterion 1)', () => {
   it('rule M2: exactly one session-bound event, none for a repeat, one more for another project', async () => {
     await use(m2, 'project-a');
     let rows = readLog(m2.dir, home);
@@ -171,7 +171,7 @@ describe('/bs use writes the binding (epic criterion 1)', () => {
 });
 
 describe('the binding decides the project of home-log prompts (epic criterion 2)', () => {
-  it('files the /bs use prompt and the next prompt under the bound project, and re-binds', async () => {
+  it('files the `/bs use` prompt and the next prompt under the bound project, and re-binds', async () => {
     await use(m2, 'project-a');
     await say(m2, 'next thing');
     let rows = readLog(m2.dir, home);
@@ -181,7 +181,7 @@ describe('the binding decides the project of home-log prompts (epic criterion 2)
     await use(m2, 'project-b');
     await say(m2, 'after the switch');
     rows = readLog(m2.dir, home);
-    // The /bs use prompt's parent is a project-a prompt, yet the binding wins.
+    // The `/bs use` prompt's parent is a project-a prompt, yet the binding wins.
     expect(ofType(rows, 'user_prompt').map((p) => p.project)).toEqual([
       'project-a',
       'project-a',
@@ -238,8 +238,8 @@ describe('the binding decides the project of home-log prompts (epic criterion 2)
   });
 });
 
-describe('what /bs use does not bind (epic criterion 3)', () => {
-  it('an unknown name or a bare /bs use binds nothing and keeps the old binding', async () => {
+describe('what `/bs use` does not bind (epic criterion 3)', () => {
+  it('an unknown name or a bare `/bs use` binds nothing and keeps the old binding', async () => {
     await use(m2, 'project-a');
     const before = ofType(readLog(m2.dir, home), 'user_prompt').length;
     await use(m2, 'nothing-here');
@@ -377,7 +377,7 @@ describe('a home log that cannot be read', () => {
       expect(ofType(allLogs(), 'pipeline-bypass-approved')).toHaveLength(0);
     });
 
-    it(`a /bs use turn with a malformed home log files the prompt and binds nothing (${label})`, async () => {
+    it(`a /bs use <project> turn with a malformed home log files the prompt and binds nothing (${label})`, async () => {
       breakHome();
       await seedEpicLog(m2.dir, 'project-b');
       const line = await use(m2, 'project-a');

@@ -77,7 +77,7 @@ export function loadBindingPolicy(
   return { ok: false, file, problem: 'invalid' };
 }
 
-/** `/bs use <name>` gives {name}, a bare `/bs use` {name: null}, anything else null. */
+/** `/bs use <project>` gives {name}, a bare `/bs use` {name: null}, anything else null. */
 export function parseUseCommand(prompt: string): { name: string | null } | null {
   const m = /^\/bs use(?:\s+(\S+))?(?:\s|$)/.exec(prompt);
   return m === null ? null : { name: m[1] ?? null };

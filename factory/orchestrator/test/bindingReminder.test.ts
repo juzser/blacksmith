@@ -159,7 +159,7 @@ describe('bindingReminder: /bs use', () => {
     expect(lines.join('\n')).not.toContain('zebra-marker');
   });
 
-  it('treats a bare /bs use as an unknown name', async () => {
+  it('treats a bare `/bs use` as an unknown name', async () => {
     const lines = await bindingReminder(payload('/bs use'), ctx);
     expect(lines).toEqual(unknownProjectLines(known()));
   });
