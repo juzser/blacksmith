@@ -3062,6 +3062,45 @@ describe('cliSessions reader', () => {
         });
       });
 
+      describe('session binding', () => {
+        const bind = (f: Awaited<ReturnType<typeof factorySession>>, project: string) =>
+          f.add('session-bound', { project, source: 'hook' }, { actor: 'user', project });
+
+        it('names the bound project on a bound session that drives no epic', async () => {
+          const home = await factorySession(`prompts-${SID_B}`, SID_B);
+          await bind(home, 'project-a');
+          const card = await cardOf(230);
+          expect(card.project).toBe('project-a');
+        });
+
+        it('names the newest binding when the session was rebound', async () => {
+          const home = await factorySession(`prompts-${SID_B}`, SID_B);
+          await bind(home, 'project-a');
+          await pause();
+          await bind(home, 'project-b');
+          const card = await cardOf(231);
+          expect(card.project).toBe('project-b');
+        });
+
+        it('lets the bound project win over an open linked epic of another project', async () => {
+          const a = await factorySession('sess-a', SID_B);
+          await a.addTask('epic-a', 'epic-a/task-1', {}, 'project-a');
+          await pause();
+          await bind(a, 'project-b');
+          const card = await cardOf(232);
+          expect(card.project).toBe('project-b');
+          expect(card.focus).toMatchObject({ epicId: 'epic-a', project: 'project-b' });
+        });
+
+        it('keeps the open-epic project when the session was never bound', async () => {
+          const a = await factorySession('sess-a', SID_B);
+          await a.addTask('epic-a', 'epic-a/task-1', {}, 'project-a');
+          const card = await cardOf(233);
+          expect(card.project).toBe('project-a');
+          expect(card.focus).toMatchObject({ epicId: 'epic-a', project: 'project-a' });
+        });
+      });
+
       describe('across stores', () => {
         let foreignDir: string;
         let foreignDb: string;
