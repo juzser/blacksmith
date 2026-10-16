@@ -333,27 +333,37 @@ export async function capturePrompt(
       ? matchProject(useName, knownProjectNames({ ...ctx, cwd }))
       : undefined;
   if (wanted !== undefined) {
-    await appendWithin(
-      home,
-      (existing) => {
-        if (newestBinding(existing, cli)?.project === wanted) return [];
-        const out: EventInput[] = existing.length === 0 ? [rootInput(home)] : [];
-        const parent = newestMain(existing, cli) ?? existing[0];
-        out.push(
-          bindingInput({
-            target: home,
-            project: wanted,
-            causalParent: parent?.event_id ?? `${home}#0`,
-            planVersion: parent?.record.plan_version ?? 1,
-            ...(promptId === undefined ? {} : { promptId }),
-          }),
-        );
-        return out;
-      },
-      { stateDir: eventsDir, cliSessionId: cli },
-    );
+    try {
+      await appendWithin(
+        home,
+        (existing) => {
+          if (newestBinding(existing, cli)?.project === wanted) return [];
+          const out: EventInput[] = existing.length === 0 ? [rootInput(home)] : [];
+          const parent = newestMain(existing, cli) ?? existing[0];
+          out.push(
+            bindingInput({
+              target: home,
+              project: wanted,
+              causalParent: parent?.event_id ?? `${home}#0`,
+              planVersion: parent?.record.plan_version ?? 1,
+              ...(promptId === undefined ? {} : { promptId }),
+            }),
+          );
+          return out;
+        },
+        { stateDir: eventsDir, cliSessionId: cli },
+      );
+    } catch {
+      // A binding that cannot be written binds nothing; the prompt still goes on.
+    }
   }
-  const bound = newestBinding(await readEvents(home, { stateDir: eventsDir }), cli);
+  // A home log that cannot be read yields no binding for this prompt.
+  let bound: ReturnType<typeof newestBinding>;
+  try {
+    bound = newestBinding(await readEvents(home, { stateDir: eventsDir }), cli);
+  } catch {
+    bound = undefined;
+  }
 
   const write = (target: string) =>
     appendWithin(

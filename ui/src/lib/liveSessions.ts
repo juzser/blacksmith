@@ -22,6 +22,8 @@ export interface LiveCard {
   cwdLabel: string;
   status: LiveStatus;
   statusSince: string | null;
+  /** The project a `/bs use` binds the session to, as the server sends it. */
+  project?: string | null;
   focus: {
     store: StoreRef;
     project: string | null;
@@ -89,8 +91,12 @@ export function liveCardView(
   const since = card.statusSince;
   const f = card.focus;
   if (f === null) {
+    const bound = typeof card.project === 'string' && card.project !== '' ? card.project : null;
     return {
-      title: card.cwdLabel,
+      title:
+        bound === null || bound === card.cwdLabel
+          ? (bound ?? card.cwdLabel)
+          : `${bound} · ${card.cwdLabel}`,
       titleMuted: card.name ? ` · ${card.name}` : null,
       titleLink: null,
       titleLabel: null,

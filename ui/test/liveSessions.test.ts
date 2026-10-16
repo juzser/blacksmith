@@ -94,6 +94,43 @@ describe('liveCardView title', () => {
     expect(v.next).toBeNull();
   });
 
+  it('names the bound project ahead of the working folder when unlinked', () => {
+    const v = liveCardView(card({ project: 'project-a', name: 'fix login' }), {
+      phone: false,
+      expanded: false,
+    });
+    expect(v.title).toBe('project-a · workspace-c');
+    expect(v.titleMuted).toBe(' · fix login');
+    expect(v.meta).toBe('Not linked to a Blacksmith epic');
+    expect(v.titleLink).toBeNull();
+    expect(v.now).toEqual([]);
+    expect(v.next).toBeNull();
+  });
+
+  it('guard (passes before and after): an unlinked card without a bound project reads as before, and a folder named like the project shows it once', () => {
+    const opts = { phone: false, expanded: false };
+    for (const project of [undefined, null, '']) {
+      const v = liveCardView(card({ project, name: 'fix login' }), opts);
+      expect(v.title).toBe('workspace-c');
+      for (const bad of ['null', 'undefined']) expect(v.title).not.toContain(bad);
+      expect(v.titleMuted).toBe(' · fix login');
+      expect(v.meta).toBe('Not linked to a Blacksmith epic');
+    }
+    expect(liveCardView(card({ project: 'project-a', cwdLabel: 'project-a' }), opts).title).toBe(
+      'project-a',
+    );
+  });
+
+  it('compares the bound project with the whole working-folder label, exactly and case-sensitively', () => {
+    const opts = { phone: false, expanded: false };
+    expect(liveCardView(card({ project: 'project-a', cwdLabel: 'Project-A' }), opts).title).toBe(
+      'project-a · Project-A',
+    );
+    expect(
+      liveCardView(card({ project: 'project-a', cwdLabel: 'apps/project-a' }), opts).title,
+    ).toBe('project-a · apps/project-a');
+  });
+
   it('has no muted part for an unlinked session without a name', () => {
     const v = liveCardView(card(), { phone: false, expanded: false });
     expect(v.titleMuted).toBeNull();

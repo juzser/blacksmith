@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -335,5 +343,83 @@ describe('the bound_to stamp (epic criterion 4)', () => {
     expect(ofType(readLog(m2.dir, 'epic-b-main'), 'user_prompt').at(-1).payload.bound_to).toBe(
       undefined,
     );
+  });
+});
+
+describe('a home log that cannot be read', () => {
+  const homePath = () => path.join(m2.dir, `${home}.jsonl`);
+  const allLogs = (): Row[] =>
+    readdirSync(m2.dir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .flatMap((f) => readLog(m2.dir, f.replace(/\.jsonl$/, '')));
+  const malformed = (): string => {
+    writeFileSync(homePath(), 'this line is not json\n');
+    return readFileSync(homePath(), 'utf8');
+  };
+  const unreadable = (): void => mkdirSync(homePath());
+  const breakers: [string, () => void][] = [
+    ['malformed', () => void malformed()],
+    ['a directory', unreadable],
+  ];
+
+  for (const [label, breakHome] of breakers) {
+    it(`a malformed home log does not stop a prompt reaching its epic log (${label})`, async () => {
+      breakHome();
+      await seedEpicLog(m2.dir, 'project-b');
+      const line = await say(m2, 'into the epic');
+      expect(line).toContain('bs prompt capture:');
+      expect(JSON.parse(line?.slice(line.indexOf('{')) ?? '{}').session_id).toBe('epic-b-main');
+      const prompts = ofType(readLog(m2.dir, 'epic-b-main'), 'user_prompt');
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].payload.prompt).toBe('into the epic');
+      expect(prompts[0].project).toBe('project-b');
+      expect(prompts[0].payload.bound_to).toBeUndefined();
+      expect(ofType(allLogs(), 'pipeline-bypass-approved')).toHaveLength(0);
+    });
+
+    it(`a /bs use turn with a malformed home log files the prompt and binds nothing (${label})`, async () => {
+      breakHome();
+      await seedEpicLog(m2.dir, 'project-b');
+      const line = await use(m2, 'project-a');
+      expect(JSON.parse(line?.slice(line.indexOf('{')) ?? '{}').session_id).toBe('epic-b-main');
+      const prompts = ofType(readLog(m2.dir, 'epic-b-main'), 'user_prompt');
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0].payload.prompt).toBe('/bs use project-a');
+      expect(prompts[0].project).toBe('project-b');
+      expect(prompts[0].payload.bound_to).toBeUndefined();
+      expect(ofType(allLogs(), 'session-bound')).toHaveLength(0);
+    });
+  }
+
+  it('a malformed home log keeps its bytes when the prompt goes to an epic log', async () => {
+    const before = malformed();
+    await seedEpicLog(m2.dir, 'project-b');
+    await say(m2, 'into the epic');
+    await use(m2, 'project-a');
+    expect(readFileSync(homePath(), 'utf8')).toBe(before);
+  });
+
+  it('guard (passes before and after): a malformed home log that is itself the target refuses the prompt as before task-2', async () => {
+    const before = malformed();
+    await expect(say(m2, 'here')).rejects.toMatchObject({ code: 'events.unreadable-session-log' });
+    await expect(use(m2, 'project-a')).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+    });
+    expect(readFileSync(homePath(), 'utf8')).toBe(before);
+    expect(readdirSync(m2.dir).filter((f) => f.endsWith('.jsonl'))).toEqual([`${home}.jsonl`]);
+  });
+
+  it('guard (passes before and after): a well-formed home log binding is still read', async () => {
+    await use(m2, 'project-a');
+    await say(m2, 'here');
+    const rows = readLog(m2.dir, home);
+    const bindingId = newestBinding(stored(rows, home), CLI)?.eventId;
+    const last = ofType(rows, 'user_prompt').at(-1);
+    expect(last.project).toBe('project-a');
+    expect(last.payload.bound_to).toBe(bindingId);
+
+    await seedEpicLog(m2.dir, 'project-b');
+    await capturePrompt(answer('toolu_9'), ctxFor(m2.env, m2.cwd), 'answer');
+    expect(ofType(readLog(m2.dir, 'epic-b-main'), 'pipeline-bypass-approved')).toHaveLength(1);
   });
 });
