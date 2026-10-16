@@ -23,7 +23,8 @@
 //   `timestamp` are ever kept (never `pastedContents` or `project`). A missing
 //   or unreadable file is not an error.
 // - the projection, via `cliSessionLinks` (events_raw.cli_session_id): the
-//   stamp events.ts puts on every write made inside a CLI session.
+//   stamp events.ts puts on every write made inside a CLI session; and via
+//   `cliSessionBindings`, the project its newest `session-bound` event names.
 //
 // Scope (what counts as a Blacksmith session): cwd inside a known root, a
 // `<root parent>/.wt/<root name>/` worktree or a `git worktree list` entry
@@ -48,7 +49,9 @@ import { isWorkingAt } from '../../../factory/orchestrator/dist/agents-registry.
 import type { DbHandle } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { StatusCounts } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
+  type CliSessionBinding,
   type CliSessionLink,
+  cliSessionBindings,
   cliSessionLinks,
   projectedLineage,
   statusBucketForTaskStatus,
@@ -170,7 +173,7 @@ export interface CliSessionCard {
   nameSource: string | null;
   startedAt: string | null;
   cwdLabel: string;
-  /** The focus epic's project: the newest open linked epic with an id; null when there is none. */
+  /** The project the session is bound to, else the newest open linked epic's; null when neither. */
   project: string | null;
   inScopeBy: 'cwd' | 'stamped' | 'heuristic';
   status: CliSessionStatus;
@@ -2138,6 +2141,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     epics: readonly LinkedEpic[],
     status: CliSessionStatus,
     registryWaiting: boolean,
+    boundProject: string | null,
   ): CliSessionFocus | null {
     const epic = epics.find((x) => x.epicId !== null && !x.closed);
     if (epic === undefined || epic.epicId === null) return null;
@@ -2159,7 +2163,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
           : null;
     return {
       store: epic.store,
-      project: epic.project ?? (epic.store.id === HOME_STORE_ID ? null : epic.store.label),
+      project:
+        boundProject ?? epic.project ?? (epic.store.id === HOME_STORE_ID ? null : epic.store.label),
       epicId: epic.epicId,
       epicTitle: null,
       wave,
@@ -2246,15 +2251,21 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
     // Per store, so a session driving another project's own Blacksmith home is
     // linked too. One store that cannot be read leaves the others standing.
     const factoryBy = new Map<string, { store: CliStore; links: CliSessionLink[] }[]>();
+    const boundBy = new Map<string, CliSessionBinding>();
     for (const store of stores) {
       let links: CliSessionLink[];
+      let bindings: CliSessionBinding[];
       try {
-        links = cliSessionLinks(
-          store.handle.db,
-          entries.map((e) => e.cliSessionId),
-        );
+        const ids = entries.map((e) => e.cliSessionId);
+        links = cliSessionLinks(store.handle.db, ids);
+        bindings = cliSessionBindings(store.handle.db, ids);
       } catch {
         continue;
+      }
+      // The newest binding across stores wins.
+      for (const b of bindings) {
+        const held = boundBy.get(b.cliSessionId);
+        if (held === undefined || b.boundAt > held.boundAt) boundBy.set(b.cliSessionId, b);
       }
       const by = new Map<string, CliSessionLink[]>();
       for (const l of links) by.set(l.cliSessionId, [...(by.get(l.cliSessionId) ?? []), l]);
@@ -2294,6 +2305,8 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
             x.rootSessionId.localeCompare(y.rootSessionId),
         );
       const linked = ids ? { epics } : null;
+      const bound = boundBy.get(e.cliSessionId);
+      const boundProject = bound ? normalizeProjectName(bound.project) : null;
       const status = statusOf(e, t);
       const hist = history.get(e.cliSessionId);
       const prompt: Prompt | null = hist
@@ -2309,7 +2322,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
         nameSource: e.nameSource,
         startedAt: e.startedAt,
         cwdLabel: labelFor(cwd, hit),
-        project: epics.find((x) => x.epicId !== null && !x.closed)?.project ?? null,
+        project: boundProject ?? epics.find((x) => x.epicId !== null && !x.closed)?.project ?? null,
         inScopeBy: by,
         status,
         statusSince: e.statusSince,
@@ -2324,7 +2337,7 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
               }
             : null,
         next: a?.next ?? null,
-        focus: focusOf(epics, status, e.status === 'waiting_operator'),
+        focus: focusOf(epics, status, e.status === 'waiting_operator', boundProject),
         transcript: t.state,
         subagentsRunning: await subagentsRunningOf(main, e, t),
         tokens: await tokensOf(main, e),
