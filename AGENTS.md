@@ -24,7 +24,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Agent templates — one `bs-<role>.md` per role, for every harness: Claude Code reads them in place, `bs harness plan` hands the same file to a cli harness | `.claude/agents/` |
 | Approved lessons (injected into agents) | `factory/policies/lessons.md` |
 | Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
-| Operator console (`/bs new\|mcp\|plan\|run\|audit\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |
+| Operator console (`/bs new\|mcp\|plan\|run\|audit\|use\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |
 | The dispatch contract every `/bs` playbook dispatches under | `.claude/skills/bs/dispatch.md` |
 | `/bs run` — the epic tier (`run.md`) and steps 2-10, one wave, thrown away when it lands (`wave.md`) | `.claude/skills/bs/run.md`, `.claude/skills/bs/wave.md` |
 | Operator guide — the index only; the guide is one file per question under `docs/guide/operator-guide/`, and its `§` numbers are guide-wide, so read the part a cite names | `docs/guide/operator-guide.md` |

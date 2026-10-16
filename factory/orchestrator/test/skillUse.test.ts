@@ -9,7 +9,7 @@ const skill = () => readFileSync(path.join(SKILL_DIR, 'SKILL.md'), 'utf8');
 const useDoc = () => readFileSync(path.join(SKILL_DIR, 'use.md'), 'utf8');
 const flat = (s: string) => s.toLowerCase().replace(/\s+/g, ' ');
 
-describe('/bs use routing and playbook', () => {
+describe('`/bs use` routing and playbook', () => {
   it('has a subcommand table row for /bs use <project> linking use.md', () => {
     const row = skill()
       .split('\n')

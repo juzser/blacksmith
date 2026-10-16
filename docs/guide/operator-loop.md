@@ -19,6 +19,7 @@ is your console:
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
 | `/bs mcp <project>` | Layer the MCP surface on, at its own milestone |
 | `/bs audit <project-dir>` | Audit an existing project on four axes, rank, decide at a hard stop, cut one epic |
+| `/bs use <project>` | Bind this session to one project (see [Binding a session](#binding-a-session--bs-use-project)) |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner |
 | `/bs run <epic>` | Admit a wave and drive it through the loop (the epic tier is [`run.md`](../../.claude/skills/bs/run.md); steps 2-10 live in the sibling playbook [`wave.md`](../../.claude/skills/bs/wave.md)) |
 | `/bs status` | Live agent count, budget burn, epic phase |
@@ -210,6 +211,36 @@ next worker is handed. Whether it is working is a number —
 
 The review surface is built; the *cadence* is yours to set — nothing prompts
 you on a schedule.
+
+## Binding a session — `/bs use <project>`
+
+Type `/bs use <project>` with a name the factory knows and the session is bound
+to that project. The capture hook records the binding as a `session-bound`
+event in the session's own home log; a name it does not know binds nothing and
+the hook lists the names it does know. From then on the hook prints a short
+reminder on every prompt, and each prompt you type is filed under the bound
+project. A later `/bs use` with another name re-binds. The playbook the model
+follows is [`use.md`](../../.claude/skills/bs/use.md).
+
+The reminder says that questions are free and that every change goes through
+`/bs plan` and `/bs run`. The binding is a record and a reminder; every
+prompt and tool call goes through as it did before.
+
+The one way around the pipeline is a very small change. The size limits are in
+[`factory/policies/session-binding.yml`](../../factory/policies/session-binding.yml);
+the reminder quotes them each turn. To change them, keep a copy of that file under
+your work root at the same path (in a clone, the file itself is that copy). When
+the file is missing or invalid, the reminder names the file and says no bypass is
+available that turn; every change then goes through the pipeline.
+
+A small change starts with the model asking you a question whose header and
+yes label the reminder prints. The question names every file the change will
+touch and its estimated changed lines. Your yes is recorded as a
+`pipeline-bypass-approved` event that carries that question; one yes covers one
+change, and a second change asks again. Any other answer sends the change
+through `/bs plan`.
+
+The [dashboard](dashboard.md) shows the bound project on the session's card.
 
 ## Where to go next
 

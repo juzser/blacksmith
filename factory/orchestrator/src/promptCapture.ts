@@ -326,7 +326,7 @@ export async function capturePrompt(
     ...(declared === undefined ? {} : { project: declared }),
   });
 
-  // `/bs use <known project>` binds the session, in the home log only and never by rule M3.
+  // `/bs use <project>` for a known project binds the session, in the home log only and never by rule M3.
   const useName = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt)?.name : null;
   const wanted =
     typeof useName === 'string'
