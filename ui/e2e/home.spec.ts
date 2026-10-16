@@ -1222,18 +1222,23 @@ test.describe('Home: Live sessions', () => {
 
     await page.setViewportSize(PHONE);
     await expect(item).toContainText('project-a · workspace-c · session-c');
-    const fits = await page.evaluate(() => {
+    // The top bar re-lays out for a moment after a resize, so poll for the settled width.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        ),
+      )
+      .toBe(false);
+    const inside = await page.evaluate(() => {
       const card = document.querySelector('.bs-live-card');
       const title = document.querySelector('.bs-live-card__title');
       if (!card || !title) return null;
       const c = card.getBoundingClientRect();
       const t = title.getBoundingClientRect();
-      return {
-        scrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-        inside: t.left >= c.left && t.right <= c.right,
-      };
+      return t.left >= c.left && t.right <= c.right;
     });
-    expect(fits).toEqual({ scrolls: false, inside: true });
+    expect(inside).toBe(true);
   });
 
   test('375px: one Now line, the rest behind "+ N more", and no sideways scroll', async ({
