@@ -130,7 +130,7 @@ switch that could later make it one.
 - **Reminder content.** Built from the binding's project, fixed strings in
   `factory/orchestrator/src/sessionBinding.ts`, and the two numbers in the
   policy file (or, when the file cannot be read, its path) — and nothing
-  else. Every line starts with the fixed prefix `bs use: `. It is the same on
+  else. Every line starts with the fixed prefix `"bs use: "`. It is the same on
   every turn (open question 4 asks whether to shorten it).
 - **Very small, defined, and the operator's to tune.** A change that touches
   at most `max_files` files and at most `max_changed_lines` added plus
@@ -204,7 +204,7 @@ fails on `main` at `1cdb9aaf` and passes after the plan.
    the printed text contains none of the typed prompt text.
 4. **Every turn of a bound session is reminded, at a bounded cost.** A
    prompt-mode run of the hook in a bound session prints the reminder lines
-   on stdout, each starting `bs use: `, built from the binding's project,
+   on stdout, each starting `"bs use: "`, built from the binding's project,
    fixed strings and the policy numbers only; they print when the capture
    wrote nothing (duplicate prompt, harness text) and when the capture threw,
    and the capture line prints when the reminder threw. The reminder reads at
