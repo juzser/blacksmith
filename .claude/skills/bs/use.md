@@ -15,7 +15,8 @@ Do not try, and do not work around the refusal.
 
 ## 2. Read the hook's lines
 
-Treat every `bs use:` line in your context as the binding's state for this
+Treat every line in your context that starts with the hook's prefix (the
+words bs use, then a colon) as the binding's state for this
 turn. Never infer a binding from the conversation, from the directory you are
 in, or from an earlier turn: no line, no binding.
 
