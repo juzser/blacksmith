@@ -153,6 +153,8 @@ export function kindFor(entry: TimelineEntry & { kind?: string }): EventKind {
   switch (entry.eventType) {
     case 'user_prompt':
     case 'operator-note':
+    case 'session-bound':
+    case 'pipeline-bypass-approved':
       return 'prompt';
     case 'dispatch_decision':
       return 'dispatch';
@@ -374,6 +376,14 @@ export function titleFor(entry: TimelineEntry): string {
       if (body === undefined) return kind || 'Operator note';
       return kind ? `${kind}: ${String(body)}` : String(body);
     }
+    case 'session-bound':
+      return typeof p.project === 'string' && p.project !== ''
+        ? `Session bound to ${p.project}`
+        : 'Session bound';
+    case 'pipeline-bypass-approved':
+      return typeof p.project === 'string' && p.project !== ''
+        ? `Pipeline bypass approved for ${p.project}`
+        : 'Pipeline bypass approved';
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
       // Tier and provider are shown only when present: "(/)" says nothing.

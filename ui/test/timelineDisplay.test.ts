@@ -748,6 +748,42 @@ describe('lib/timelineDisplay.ts', () => {
     });
   });
 
+  describe('session binding events', () => {
+    it('titles session-bound by the project it names', () => {
+      const e = entry({ eventType: 'session-bound', payload: { project: 'project-b' } });
+      expect(titleFor(e)).toBe('Session bound to project-b');
+    });
+
+    it('titles pipeline-bypass-approved by the project it names', () => {
+      const e = entry({
+        eventType: 'pipeline-bypass-approved',
+        payload: { project: 'project-a' },
+      });
+      expect(titleFor(e)).toBe('Pipeline bypass approved for project-a');
+    });
+
+    const unnamed: Record<string, unknown>[] = [{}, { project: null }, { project: '' }];
+
+    it('titles session-bound with the bare phrase when no project is named', () => {
+      for (const payload of unnamed) {
+        expect(titleFor(entry({ eventType: 'session-bound', payload }))).toBe('Session bound');
+      }
+    });
+
+    it('titles pipeline-bypass-approved with the bare phrase when no project is named', () => {
+      for (const payload of unnamed) {
+        expect(titleFor(entry({ eventType: 'pipeline-bypass-approved', payload }))).toBe(
+          'Pipeline bypass approved',
+        );
+      }
+    });
+
+    it('gives both the prompt kind', () => {
+      expect(kindFor(entry({ eventType: 'session-bound' }))).toBe('prompt');
+      expect(kindFor(entry({ eventType: 'pipeline-bypass-approved' }))).toBe('prompt');
+    });
+  });
+
   /**
    * The independent finder's row. In shadow mode this event is the ONLY thing
    * a run produces -- it gates nothing by construction -- so if it does not

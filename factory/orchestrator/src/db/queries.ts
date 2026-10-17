@@ -1667,6 +1667,57 @@ export function cliSessionLinks(db: SmithDb, cliIds: readonly string[]): CliSess
   );
 }
 
+/** The project a CLI session was last bound to (see cliSessionBindings). */
+export interface CliSessionBinding {
+  cliSessionId: string;
+  project: string;
+  /** The `ts` of the binding event. */
+  boundAt: string;
+}
+
+/**
+ * The newest `session-bound` event of each of `cliIds`: one row per CLI
+ * session that has one, newest by `ts` and then by log order, so a rebind
+ * replaces an earlier binding and a session never bound answers with nothing.
+ * Read off `events_raw.cli_session_id` like cliSessionLinks, and like it a
+ * label for the dashboard, never evidence of anything.
+ */
+export function cliSessionBindings(db: SmithDb, cliIds: readonly string[]): CliSessionBinding[] {
+  // No ids, no question -- and no `inArray(col, [])` either.
+  if (cliIds.length === 0) return [];
+  const rows = db
+    .select({
+      eventId: eventsRaw.eventId,
+      cliSessionId: eventsRaw.cliSessionId,
+      ts: eventsRaw.ts,
+      project: eventsRaw.project,
+    })
+    .from(eventsRaw)
+    .where(
+      and(
+        eq(eventsRaw.eventType, 'session-bound'),
+        isNotNull(eventsRaw.project),
+        inArray(eventsRaw.cliSessionId, [...new Set(cliIds)]),
+      ),
+    )
+    .all();
+  const newest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (row.cliSessionId === null || row.project === null) continue;
+    const held = newest.get(row.cliSessionId);
+    if (held === undefined || compareLogOrder(held, row) < 0) newest.set(row.cliSessionId, row);
+  }
+  return [...newest.values()]
+    .flatMap((r) =>
+      r.cliSessionId === null || r.project === null
+        ? []
+        : [{ cliSessionId: r.cliSessionId, project: r.project, boundAt: r.ts }],
+    )
+    .sort((a, b) =>
+      a.cliSessionId < b.cliSessionId ? -1 : a.cliSessionId > b.cliSessionId ? 1 : 0,
+    );
+}
+
 function groupLiveAgents(rows: (typeof agents.$inferSelect)[]): LiveAgentGroup[] {
   const grouped = new Map<string, LiveAgentGroup>();
   for (const row of rows) {
@@ -2648,6 +2699,11 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   'audit-cut',
   'audit-resolved',
   'audit-closed',
+  // The operator's own acts, written by the capture hook: which project a
+  // session is bound to, and the yes that lets one small change skip the
+  // pipeline.
+  'session-bound',
+  'pipeline-bypass-approved',
   // The integration PR run.md step 17 opens, appended by hand through `smith
   // event append` under `<epic>/integration`. It is the epic's terminal
   // deliverable -- the one thing the operator is asked to merge -- and the
@@ -2746,6 +2802,8 @@ export function eventKind(eventType: string, _payload: Record<string, unknown>):
   switch (eventType) {
     case 'user_prompt':
     case 'operator-note':
+    case 'session-bound':
+    case 'pipeline-bypass-approved':
       return 'Prompt';
     case DISPATCH_EVENT_TYPE:
       return 'Dispatched';

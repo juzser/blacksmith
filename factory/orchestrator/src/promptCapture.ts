@@ -26,6 +26,15 @@ import {
 } from './paths.js';
 import { factoryProjects } from './projects.js';
 import { isHarnessText } from './prompts.js';
+import {
+  bindingInput,
+  bypassInput,
+  bypassRow,
+  knownProjectNames,
+  matchProject,
+  newestBinding,
+  parseUseCommand,
+} from './sessionBinding.js';
 import { gitTop, hasEvents, storeRootAt } from './storeRoot.js';
 
 /** Which rule found the store. M3 is `/bs` run where the work root already has one. */
@@ -269,6 +278,7 @@ export async function capturePrompt(
   let prompt: string;
   let promptId = typeof input.prompt_id === 'string' ? input.prompt_id : undefined;
   let extra: Record<string, unknown> = {};
+  let answerRows: Obj[] = [];
   if (mode === 'answer') {
     const result = input.tool_response;
     if (input.tool_name !== 'AskUserQuestion' || !isObj(result)) return null;
@@ -279,6 +289,7 @@ export async function capturePrompt(
     if (got === null || isHarnessText(got.prompt)) return null;
     prompt = got.prompt;
     promptId = input.tool_use_id;
+    answerRows = got.answers;
     extra = {
       kind: 'answer',
       answers: got.answers,
@@ -305,6 +316,54 @@ export async function capturePrompt(
   }
   const home = `prompts-${cli}`;
   const found = await findMainLog(eventsDir, cli, floorMs);
+  const rootInput = (target: string): EventInput => ({
+    session_id: target,
+    actor: 'system',
+    event_type: ROOT_EVENT_TYPE,
+    plan_version: 1,
+    causal_parent: null,
+    payload: { kind: 'prompt-log' },
+    ...(declared === undefined ? {} : { project: declared }),
+  });
+
+  // `/bs use <project>` for a known project binds the session, in the home log only and never by rule M3.
+  const useName = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt)?.name : null;
+  const wanted =
+    typeof useName === 'string'
+      ? matchProject(useName, knownProjectNames({ ...ctx, cwd }))
+      : undefined;
+  if (wanted !== undefined) {
+    try {
+      await appendWithin(
+        home,
+        (existing) => {
+          if (newestBinding(existing, cli)?.project === wanted) return [];
+          const out: EventInput[] = existing.length === 0 ? [rootInput(home)] : [];
+          const parent = newestMain(existing, cli) ?? existing[0];
+          out.push(
+            bindingInput({
+              target: home,
+              project: wanted,
+              causalParent: parent?.event_id ?? `${home}#0`,
+              planVersion: parent?.record.plan_version ?? 1,
+              ...(promptId === undefined ? {} : { promptId }),
+            }),
+          );
+          return out;
+        },
+        { stateDir: eventsDir, cliSessionId: cli },
+      );
+    } catch {
+      // A binding that cannot be written binds nothing; the prompt still goes on.
+    }
+  }
+  // A home log that cannot be read yields no binding for this prompt.
+  let bound: ReturnType<typeof newestBinding>;
+  try {
+    bound = newestBinding(await readEvents(home, { stateDir: eventsDir }), cli);
+  } catch {
+    bound = undefined;
+  }
 
   const write = (target: string) =>
     appendWithin(
@@ -323,20 +382,15 @@ export async function capturePrompt(
         if (duplicate) return [];
 
         const out: EventInput[] = [];
-        if (existing.length === 0) {
-          out.push({
-            session_id: target,
-            actor: 'system',
-            event_type: ROOT_EVENT_TYPE,
-            plan_version: 1,
-            causal_parent: null,
-            payload: { kind: 'prompt-log' },
-            ...(declared === undefined ? {} : { project: declared }),
-          });
-        }
+        if (existing.length === 0) out.push(rootInput(target));
         const parent = newestMain(existing, cli) ?? existing[0];
+        const binding = target === home ? newestBinding(existing, cli) : undefined;
         const project =
-          parent?.record.project ?? declared ?? (out[0]?.project as string | undefined);
+          binding?.project ??
+          parent?.record.project ??
+          declared ??
+          (out[0]?.project as string | undefined);
+        const promptEventId = `${target}#${existing.length + out.length}`;
         out.push({
           session_id: target,
           actor: 'user',
@@ -347,11 +401,25 @@ export async function capturePrompt(
             prompt,
             source: 'hook',
             ...extra,
+            ...(binding === undefined ? {} : { bound_to: binding.eventId }),
             ...(promptId === undefined ? {} : { prompt_id: promptId }),
             ...(command === undefined ? {} : { command }),
           },
           ...(project === undefined ? {} : { project }),
         });
+        const approved = bound === undefined ? undefined : bypassRow(answerRows);
+        if (approved !== undefined && promptId !== undefined) {
+          out.push(
+            bypassInput({
+              target,
+              project: project ?? bound?.project ?? '',
+              causalParent: promptEventId,
+              planVersion: parent?.record.plan_version ?? 1,
+              promptId,
+              question: approved.question,
+            }),
+          );
+        }
         return out;
       },
       { stateDir: eventsDir, cliSessionId: cli },
@@ -367,7 +435,7 @@ export async function capturePrompt(
     target = home;
     stored = await write(target);
   }
-  const written = stored[stored.length - 1];
+  const written = [...stored].reverse().find((e) => e.record.event_type === 'user_prompt');
   if (written === undefined) return null;
   return `bs prompt capture: ${JSON.stringify({ event_id: written.event_id, session_id: target })}`;
 }

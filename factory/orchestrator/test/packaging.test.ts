@@ -106,13 +106,14 @@ const WRITTEN = new Set([
  *
  * The written half hangs off OVERLAY_ROOT rather than WORK_ROOT, and the
  * difference is the whole of that last clause: `SMITH_HOME` moves the work
- * root out of a clone on purpose, and these three files are tracked in the
+ * root out of a clone on purpose, and these four files are tracked in the
  * clone, so following it would orphan the committed copies. OVERLAY_ROOT is
  * WORK_ROOT under an install and the checkout in a clone, always.
  */
 const OVERLAID = new Map([
   ['ROADMAP_PATH', 'ROADMAP_DEFAULT_PATH'],
   ['STACK_POLICY_PATH', 'STACK_POLICY_DEFAULT_PATH'],
+  ['SESSION_BINDING_POLICY_PATH', 'SESSION_BINDING_POLICY_DEFAULT_PATH'],
   ['LESSONS_MD_PATH', 'LESSONS_MD_DEFAULT_PATH'],
 ]);
 

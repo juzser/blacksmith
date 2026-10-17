@@ -1,0 +1,134 @@
+{
+  "epic_id": "bs-use",
+  "version": 6,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-use/task-6-flow-test-and-docs",
+      "epic_id": "bs-use",
+      "plan_version": 6,
+      "project": "black-smith",
+      "title": "Flow test, name scan and docs",
+      "summary": "One end-to-end flow test over the merged pieces, a hermetic scan of the project names in every added file, and the operator and router docs for `/bs use`.",
+      "objective": "Prove the whole flow once over the merged work of task-1 to task-5 and document it: a flow test drives `/bs use`, a follow-up prompt, a bypass answer and the projection in one temp store, plus runs of the built hook binding the factory's own name; a hermetic test scans every file this plan adds for project names outside the placeholders; the operator docs gain the `/bs use` verb, the reminder, the policy file, the bypass record and the dashboard label, and the router files list the verb.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criteria 1, 2, 4, 7 and 9 together, in factory/orchestrator/test/sessionBindingFlow.test.ts (new), in process with a temp factory-shaped checkout and a temp roadmap declaring project-a and project-b: capturePrompt on `/bs use project-a`, then bindingReminder on a follow-up prompt returns lines naming project-a; the follow-up user_prompt carries project-a; every home-log user_prompt after the binding carries payload.bound_to = the session-bound event's id, and bindingFromTail over the log's records with the session-bound record removed still returns project-a; a bypass answer adds one pipeline-bypass-approved event carrying its question; after projecting the log into a temp db, cliSessionBindings names project-a for the cli id and the timeline holds both new types.",
+        "Epic criteria 1, 5 and 11, built hook: dist/promptHook.js run on `/bs use ` followed by FACTORY_PROJECT_NAME (imported, never typed) in a temp M2 checkout exits 0, prints the capture line and reminder lines naming that project and no JSON line, and leaves exactly one session-bound event in that checkout's home log; a follow-up prompt prints the reminder again and its user_prompt carries that project.",
+        "Epic criterion 12 (documented): README.md's subcommand table and docs/guide/operator-loop.md's table gain a `/bs use <project>` row; docs/guide/operator-loop.md gains a short section on binding a session (what the operator types, what the reminder says, that nothing blocks, where the size numbers live and how an operator overrides them, what the reminder says when the policy file is missing or invalid, how the yes is recorded and that the question names the change, what the dashboard shows); the 'Putting your own words in the log' paragraph of docs/guide/operator-guide/queue-and-gate.md names the session-bound and pipeline-bypass-approved events, the home-log filing rule, and that `bs event append` refuses both types; the `/bs` verb list on CLAUDE.md line 42 and in the AGENTS.md router-table row for the operator console gains `use`; the 'Live sessions' section of docs/guide/dashboard.md says a bound session's card shows the bound project, ahead of a linked epic's.",
+        "Test first: the flow test is written before the docs and run on the branch carrying task-1 to task-5; under the null (main at 1cdb9aaf) it fails at the import of sessionBinding.ts and bindingReminder.ts; after the plan it passes. test/docCommands.test.ts and test/operatorLanguage.test.ts pass over the edited docs.",
+        "Text proof: the edited docs, CLAUDE.md, AGENTS.md and docs/guide/dashboard.md included, name no project except through <project> placeholders, hold no absolute path, and restate no number from factory/policies/session-binding.yml.",
+        "Epic criterion 11 (mechanical part), in factory/orchestrator/test/sessionBindingNames.test.ts (new), reading repo files only: it lists the files this plan adds (factory/orchestrator/src/sessionBinding.ts, factory/orchestrator/test/sessionBinding.test.ts, factory/policies/session-binding.yml, factory/orchestrator/test/promptCaptureBinding.test.ts, factory/orchestrator/src/bindingReminder.ts, factory/orchestrator/test/bindingReminder.test.ts, .claude/skills/bs/use.md, factory/orchestrator/test/skillUse.test.ts, factory/orchestrator/test/eventAppendHookOnly.test.ts, factory/orchestrator/test/db/cliSessionBinding.test.ts, factory/orchestrator/test/sessionBindingFlow.test.ts) and asserts each exists. In every file this plan adds or edits it reads each `/bs use` argument (the token after `/bs use` and spaces, made of letters, digits, `<`, `>`, `_`, `.` and `-`); in the added files it also reads each `project:` or `\"project\":` value given as a quoted string and each `- project:` line's value. Every value read is project-a, project-b or <project>, plus nothing-here for a `/bs use` argument; a value starting with `$` and an unquoted identifier are skipped. A positive control runs the same readers on inline samples: `/bs use other-name`, `project: 'other-name'` and `- project: other-name` give three hits, and `/bs use <project>`, `project: name` and `project: '${x}'` give none. The file excludes itself from the scan. Under the null the added files are absent and the existence assertion fails; revert proof: put `/bs use other-name` in use.md and the scan fails.",
+        "Gates: `pnpm run build`, `pnpm run test` in full, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/test/sessionBindingFlow.test.ts",
+        "factory/orchestrator/test/sessionBindingNames.test.ts",
+        "README.md",
+        "docs/guide/operator-loop.md",
+        "docs/guide/operator-guide/queue-and-gate.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "docs/guide/dashboard.md"
+      ],
+      "budget": {
+        "tokens": 190000,
+        "diff_lines": 560
+      },
+      "contract": {
+        "functional_clauses": [
+          "The docs describe behaviour as task-1 to task-5 shipped it; a gap between a doc and the code is raised as a finding against the owning task, not papered over in prose.",
+          "Each doc gets its own row or section; no doc restates another doc's section, and the operator-loop section links use.md rather than copying it.",
+          "The built-hook case reads only its temp checkout's store and asserts nothing about which other names the shipped roadmap declares.",
+          "CLAUDE.md and AGENTS.md change only by adding `use` to the existing verb lists; the dashboard.md edit is limited to the live-session card's project in its 'Live sessions' section.",
+          "The name scan is hermetic: it reads the listed repo files and its inline samples only, never a roadmap, the overlay, factoryProjects or git history, so it gives the same result on CI and on a workstation. The edited files it scans for `/bs use` arguments are the files task-1 to task-6 claim that already exist at 1cdb9aaf."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; the unknown name in a `/bs use` example is nothing-here; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project; the factory's own name is read from FACTORY_PROJECT_NAME, never typed.",
+          "Tests build their fixtures in temp dirs (temp checkouts and stores, a temp db, a fake CLI session id), read no git history, and never read the real session registry, the user's home config directory or the real state/ store.",
+          "No doc describes a binding as a block, a hold or a permission; it is a record and a reminder.",
+          "Run `pnpm run build`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use/task-8-flow-test-and-docs",
+      "epic_id": "bs-use",
+      "plan_version": 6,
+      "project": "black-smith",
+      "title": "Flow test, name scan and docs (replaces task-6)",
+      "summary": "Replaces task-6, with its claims widened by the operator's decision of 2026-10-16 to five merged files whose comments and test titles the name scan flags (wording only): one end-to-end flow test over the merged pieces, a hermetic scan of the project names in every added and edited file, and the operator and router docs for `/bs use`. The coder may restore task-6's eight draft files from branch bs/bs-use/task-6-flow-test-and-docs (commit 4f37eacb, cut from 107be5f3) onto task-8's branch, cut from the integration head, and must re-verify them against every criterion.",
+      "objective": "Replace task-6, with its claims widened by the operator's decision of 2026-10-16 (spec finding f-bs-use/integration-a42a8c8d), and prove the whole flow once over the merged work of task-1 to task-5 and task-7 and document it: a flow test drives `/bs use`, a follow-up prompt, a bypass answer and the projection in one temp store, plus runs of the built hook binding the factory's own name; a hermetic test scans every file this plan adds or edits for project names outside the placeholders and names every bad site in one failure; the 10 comment and test-title sites in five merged files that the scan flags are reworded, wording only; the operator docs gain the `/bs use` verb, the reminder, the policy file, the bypass record and the dashboard's bound-card label and timeline titles, and the router files list the verb.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criteria 1, 2, 4, 7 and 9 together, in factory/orchestrator/test/sessionBindingFlow.test.ts (new), in process with a temp factory-shaped checkout and a temp roadmap declaring project-a and project-b: capturePrompt on `/bs use project-a`, then bindingReminder on a follow-up prompt returns lines naming project-a; the follow-up user_prompt carries project-a; every home-log user_prompt after the binding carries payload.bound_to = the session-bound event's id, and bindingFromTail over the log's records with the session-bound record removed still returns project-a; a bypass answer adds one pipeline-bypass-approved event carrying its question; after projecting the log into a temp db, cliSessionBindings names project-a for the cli id and the timeline holds both new types.",
+        "Epic criteria 1, 5 and 11, built hook: dist/promptHook.js run on `/bs use ` followed by FACTORY_PROJECT_NAME (imported, never typed) in a temp M2 checkout exits 0, prints the capture line and reminder lines naming that project and no JSON line, and leaves exactly one session-bound event in that checkout's home log; a follow-up prompt prints the reminder again and its user_prompt carries that project.",
+        "Epic criterion 12 (documented): README.md's subcommand table and docs/guide/operator-loop.md's table gain a `/bs use <project>` row; docs/guide/operator-loop.md gains a short section on binding a session (what the operator types, what the reminder says, that nothing blocks, where the size numbers live and how an operator overrides them, what the reminder says when the policy file is missing or invalid, how the yes is recorded and that the question names the change, what the dashboard shows); the 'Putting your own words in the log' paragraph of docs/guide/operator-guide/queue-and-gate.md names the session-bound and pipeline-bypass-approved events, the home-log filing rule, and that `bs event append` refuses both types; the `/bs` verb list on CLAUDE.md line 42 and in the AGENTS.md router-table row for the operator console gains `use`. docs/guide/dashboard.md matches task-7's code at 71956789: its 'Live sessions' section says the bound project shows on every bound live card, linked to an epic or not (ui/src/lib/liveSessions.ts): a bound session driving an open epic reads `<project> · <epic> · wave N` with the bound project shown in place of the epic's own project (ui/server/src/cliSessions.ts sets the focus project to the bound one before the epic's), so the card never names both, and a bound session linked to no open epic reads `<project> · <folder>` (the project once when it equals the folder label), its name muted and the card still saying it is not linked to an epic; the 'folder and name only' sentence is kept for unbound sessions, linked to no epic or only to closed ones. The Activity row of its pages table says a binding reads 'Session bound to <project>' and a bypass approval 'Pipeline bypass approved for <project>', and that each title is bare ('Session bound', 'Pipeline bypass approved') when the event names no project (ui/src/lib/timelineDisplay.ts).",
+        "Test first: the flow test is written before the docs and run on task-8's branch, cut from the integration head 71956789 (task-1 to task-5 and task-7 merged); under the null (main at 1cdb9aaf) it fails at the import of sessionBinding.ts and bindingReminder.ts; after the plan it passes. The name scan is written before the wording edits and its red run at the cut point is quoted (epic criterion 11 below). test/docCommands.test.ts and test/operatorLanguage.test.ts pass over the edited docs.",
+        "Text proof: the edited docs, CLAUDE.md, AGENTS.md and docs/guide/dashboard.md included, name no project except through <project> placeholders, hold no absolute path, and restate no number from factory/policies/session-binding.yml.",
+        "Epic criterion 11 (mechanical part), in factory/orchestrator/test/sessionBindingNames.test.ts (new), reading repo files only: it lists the files this plan adds (factory/orchestrator/src/sessionBinding.ts, factory/orchestrator/test/sessionBinding.test.ts, factory/policies/session-binding.yml, factory/orchestrator/test/promptCaptureBinding.test.ts, factory/orchestrator/src/bindingReminder.ts, factory/orchestrator/test/bindingReminder.test.ts, .claude/skills/bs/use.md, factory/orchestrator/test/skillUse.test.ts, factory/orchestrator/test/eventAppendHookOnly.test.ts, factory/orchestrator/test/db/cliSessionBinding.test.ts, factory/orchestrator/test/sessionBindingFlow.test.ts) and asserts each exists, and it lists the files this plan edits (.claude/skills/bs/SKILL.md, factory/orchestrator/src/cli.ts, factory/orchestrator/src/db/queries.ts, factory/orchestrator/src/paths.ts, factory/orchestrator/src/promptCapture.ts, factory/orchestrator/src/promptHook.ts, factory/orchestrator/test/helpers/eventTypeScan.ts, factory/orchestrator/test/packaging.test.ts, factory/orchestrator/test/promptHookEntry.test.ts, ui/server/src/cliSessions.ts, ui/server/test/cliSessions.test.ts, ui/src/lib/timelineDisplay.ts, ui/test/timelineDisplay.test.ts, ui/src/lib/liveSessions.ts, ui/test/liveSessions.test.ts, ui/e2e/home.spec.ts, README.md, docs/guide/operator-loop.md, docs/guide/operator-guide/queue-and-gate.md, CLAUDE.md, AGENTS.md, docs/guide/dashboard.md). In every file this plan adds or edits it reads each `/bs use` argument (the token after `/bs use` and spaces, made of letters, digits, `<`, `>`, `_`, `.` and `-`); in the added files it also reads each `project:` or `\"project\":` value given as a quoted string and each `- project:` line's value. Every value read is project-a, project-b or <project>, plus nothing-here for a `/bs use` argument; a value starting with `$` and an unquoted identifier are skipped. The readers and the allowed set are exactly these and are not loosened to pass a file. Each reader collects every bad value across all files as `<file>:<line> <value>` and the test asserts each collected list is empty once, so one failing run names every bad site instead of stopping at the first failing file. A positive control runs the same readers on inline samples: `/bs use other-name`, `project: 'other-name'` and `- project: other-name` give three hits, and `/bs use <project>`, `project: name` and `project: '${x}'` give none; and the collector run over two inline samples standing for two files, each holding one bad argument, returns both `<file>:<line> <value>` entries. The file excludes itself from the scan. Under the null the added files are absent and the existence assertion fails. Red first: on task-8's branch at the cut point, before the wording edits, the scan fails once and names exactly the 10 sites the wording criterion lists, and no other site in a file that exists at 71956789 (quoted). Revert proof: restore the describe title at factory/orchestrator/test/skillUse.test.ts:12 to '/bs use routing and playbook' and put `/bs use other-name` in use.md; the one failure names both `factory/orchestrator/test/skillUse.test.ts:12 routing` and use.md's line with `other-name`. A judge checks both lists against `git diff --name-status --no-renames 1cdb9aaf <task-8 head>`: every added path but the name scan itself is in the added list, every modified path is in the edited list, and neither list names any other file.",
+        "Wording only in the five widened files (operator decision of 2026-10-16, spec finding f-bs-use/integration-a42a8c8d): the 10 sites the name scan flags at 71956789 are reworded so the reader reads no value outside the allowed set: factory/orchestrator/src/sessionBinding.ts:80 (JSDoc), factory/orchestrator/src/promptCapture.ts:329 (comment), factory/orchestrator/test/promptCaptureBinding.test.ts:136, 174, 184, 241, 242 and 380 (describe/it titles, and the comment at 184), factory/orchestrator/test/bindingReminder.test.ts:162 and factory/orchestrator/test/skillUse.test.ts:12 (titles). A rewording passes without weakening the reader by closing the code span right after the verb (write `/bs use` as inline code followed by the rest, e.g. a title beginning with the backticked command and then 'writes the binding', so a backtick, not a space, follows `use`) or by naming the placeholder (`/bs use <project>`, which suits the template-literal title at 380 without escaped backticks); the reader, its pattern and the four allowed arguments stay untouched. In those five files every changed line is a comment line or the title string of a describe/it, plus any formatter re-wrap of that same statement; no import, export, test logic, assertion, fixture, inline sample or runtime string changes (parseUseCommand's pattern and every prompt a test feeds stay byte-identical). Two checks, applied the same way to all five files. The hunk rule: in `git diff 71956789 -- <file>` every changed line is a comment line or the title string of a describe/it (or a formatter re-wrap of that same statement); the two source files, factory/orchestrator/src/sessionBinding.ts and factory/orchestrator/src/promptCapture.ts, hold no describe/it, so there every changed line is a comment line. The count rule: the three test files, factory/orchestrator/test/promptCaptureBinding.test.ts, factory/orchestrator/test/bindingReminder.test.ts and factory/orchestrator/test/skillUse.test.ts, each run the same number of tests at the cut point and in the final run, and the coder quotes both per-file counts; the two source files hold no suite, so no count is quoted for them and the hunk rule alone checks them. The coder also lists every reworded title old -> new, since other criteria cite tests by title. A judge applies the hunk rule to each of the five diffs and compares the quoted counts for the three test files; `git diff --numstat 71956789 --` over the five files shows ten lines removed and ten added, more only where the formatter re-wraps a reworded title.",
+        "Gates: `pnpm run build`, `pnpm run test` in full, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/test/sessionBindingFlow.test.ts",
+        "factory/orchestrator/test/sessionBindingNames.test.ts",
+        "README.md",
+        "docs/guide/operator-loop.md",
+        "docs/guide/operator-guide/queue-and-gate.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "docs/guide/dashboard.md",
+        "factory/orchestrator/src/sessionBinding.ts",
+        "factory/orchestrator/src/promptCapture.ts",
+        "factory/orchestrator/test/promptCaptureBinding.test.ts",
+        "factory/orchestrator/test/bindingReminder.test.ts",
+        "factory/orchestrator/test/skillUse.test.ts"
+      ],
+      "budget": {
+        "tokens": 215000,
+        "diff_lines": 630
+      },
+      "contract": {
+        "functional_clauses": [
+          "The docs describe behaviour as task-1 to task-5 shipped it; a gap between a doc and the code is raised as a finding against the owning task, not papered over in prose.",
+          "Each doc gets its own row or section; no doc restates another doc's section, and the operator-loop section links use.md rather than copying it.",
+          "The built-hook case reads only its temp checkout's store and asserts nothing about which other names the shipped roadmap declares.",
+          "CLAUDE.md and AGENTS.md change only by adding `use` to the existing verb lists; the dashboard.md edit is limited to the bound live card's project in its 'Live sessions' section and one sentence on the binding and bypass titles in the Activity row of its pages table.",
+          "The name scan is hermetic: it reads the listed repo files and its inline samples only, never a roadmap, the overlay, factoryProjects or git history, so it gives the same result on CI and on a workstation. The edited files it scans for `/bs use` arguments are the files task-1 to task-5, task-7 and task-8 claim that already exist at 1cdb9aaf; the added files are the ones they claim that do not, the name scan itself excepted.",
+          "Files restored from the task-6 draft come back by path from 4f37eacb, never by cherry-pick, so the draft's commit subject stays out of history, and they meet every criterion here as if new. The draft predates task-7: its name scan lists none of task-7's three files and stops at the first failing file, the describe title at line 77 of its flow test fails the scan, its dashboard.md text predates the bound-card and bare-title changes and says a bound card shows its project 'ahead of a linked epic's project', which the coder corrects to the bound project shown in place of the epic's own, and its queue-and-gate paragraph files both new types into the home log, while only session-bound is home-log only and a pipeline-bypass-approved event goes to the log its answer's user_prompt goes to."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "Wording only in factory/orchestrator/src/sessionBinding.ts, factory/orchestrator/src/promptCapture.ts, factory/orchestrator/test/promptCaptureBinding.test.ts, factory/orchestrator/test/bindingReminder.test.ts and factory/orchestrator/test/skillUse.test.ts: every changed line is a comment line or the title string of a describe/it (or a formatter re-wrap of that same statement); no import, export, test logic, assertion, fixture, inline sample or runtime string changes. The three test files (promptCaptureBinding.test.ts, bindingReminder.test.ts, skillUse.test.ts) each run the same number of tests before and after; the two source files hold no suite and no describe/it, so every changed line there is a comment line and that changed-line rule alone checks them. Any other change these files need stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; the unknown name in a `/bs use` example is nothing-here; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project; the factory's own name is read from FACTORY_PROJECT_NAME, never typed.",
+          "Tests build their fixtures in temp dirs (temp checkouts and stores, a temp db, a fake CLI session id), read no git history, and never read the real session registry, the user's home config directory or the real state/ store.",
+          "No doc describes a binding as a block, a hold or a permission; it is a record and a reminder.",
+          "Run `pnpm run build`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/sessionBinding.ts",
+        "factory/orchestrator/src/promptCapture.ts"
+      ]
+    }
+  ],
+  "edges": [],
+  "project": "black-smith",
+  "effort": "medium"
+}

@@ -1,0 +1,375 @@
+{
+  "epic_id": "bs-use",
+  "version": 4,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-use/task-2-capture-writes-binding",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "Capture writes the binding",
+      "summary": "capturePrompt records `/bs use`, files and stamps bound home-log prompts under the project, and records the bypass yes with its question.",
+      "objective": "Teach capturePrompt in factory/orchestrator/src/promptCapture.ts to append a session-bound event when the operator types `/bs use <known project>`, to file a bound session's home-log prompts and answers under the bound project and stamp them with the binding's id, and to append a pipeline-bypass-approved event carrying the answered question when a bound session's AskUserQuestion answer picks the fixed yes, all through the existing capture path and with nothing else about capture changing.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 1: in a temp factory-shaped checkout resolved by M2 (and once by M1 through a temp BS_HOME), with a temp roadmap declaring project-a and project-b whose checkouts sit under the M4 roots, capturePrompt on `/bs use project-a` leaves exactly one session-bound event in prompts-<cli>: actor 'user', project 'project-a', cli_session_id the payload's session id, causal_parent an event of that log. A second `/bs use project-a` adds none; `/bs use project-b` adds one, and newestBinding over the log returns project-b.",
+        "Epic criterion 2: after `/bs use project-a`, the `/bs use` prompt and the next typed prompt filed in the home log carry project 'project-a'; after `/bs use project-b` the next prompt carries 'project-b' although its parent carries 'project-a'; an answer-mode user_prompt filed in the home log carries the bound project; a prompt filed in an existing epic log of the same cli id keeps that log's project; an unbound session's records are what main writes.",
+        "Epic criterion 3: `/bs use nothing-here` and a bare `/bs use` add no session-bound event, leave an earlier binding standing, and still record the prompt; `/bs use project-a` in a directory that resolves only by rule M3 adds no session-bound event.",
+        "Epic criterion 7: in a bound session, an answer payload with a row whose header is BYPASS_HEADER, whose answer is BYPASS_YES and whose question is non-empty leaves one pipeline-bypass-approved event in the answer's log with causal_parent = the answer user_prompt's event_id, payload.prompt_id = the tool_use_id, payload.question = that row's question text, and record project and payload.project both equal to the answer user_prompt's project. Repeating the same tool_use_id, picking another label, the yes with an empty question, and the same answer in an unbound session each add none. A session bound to project-a whose cli id also has an epic log of project-b gets the bypass event in that epic log with project 'project-b', so the epic log holds one project.",
+        "Test first, in factory/orchestrator/test/promptCaptureBinding.test.ts (new), written before the change: under the null (main at 1cdb9aaf) the session-bound count after `/bs use project-a` is 0, the next prompt has no project and no pipeline-bypass-approved event exists, so the criterion-1, -2 and -7 cases fail; after the change they pass. The epic-log, unbound and M3 cases are guards that pass before and after; their test names say so.",
+        "Revert proof: remove the binding-first precedence for home-log prompts and the `/bs use project-b` case fails; remove the bypass append and the criterion-7 case fails; let an M3 store bind and the M3 case fails.",
+        "test/promptCapture.test.ts, test/promptCaptureWrapper.test.ts and test/promptHookEntry.test.ts pass with no edit.",
+        "Revert proof for the bypass record: pass an empty question to bypassInput and the payload.question case fails; set the bypass event's project from the binding instead of the answer user_prompt and the epic-log case fails.",
+        "Epic criterion 4 (the stamp the bounded read relies on): every user_prompt filed in the home log of a bound session, in prompt and answer mode, carries payload.bound_to = the event_id of the binding newestBinding returns for that log, and the `/bs use` prompt carries the id of the binding written for it; prompts filed in an epic log and an unbound session's prompts carry no bound_to. Under the null no prompt carries bound_to, so the case fails; revert proof: drop the stamp and it fails.",
+        "Gates: `pnpm run test` in full, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/promptCapture.ts",
+        "factory/orchestrator/test/promptCaptureBinding.test.ts"
+      ],
+      "budget": {
+        "tokens": 215000,
+        "diff_lines": 640
+      },
+      "contract": {
+        "functional_clauses": [
+          "On a prompt-mode payload whose prompt parseUseCommand reads as a name that matchProject finds in knownProjectNames for this turn's context, in a store resolved by M1, M2 or M4: append bindingInput to the home log prompts-<cli> of that store before the prompt's own user_prompt is built, unless newestBinding of that log already names the project. A home log with no events gets its session-start root first, written the way the home-log prompt path writes it today; causal_parent is the newest main-thread event of the home log for this cli, else its root.",
+          "The binding is read with readEvents from the home log of the resolved store, and written there only; no other file, variable or table holds a binding.",
+          "Project precedence for a user_prompt filed in the home log of a bound session: the binding's project, then the parent's, then the declared project, then the root's. Filing in an epic log is unchanged.",
+          "In a bound session, a user_prompt filed in the home log gets payload.bound_to = the newest binding's event_id; nothing else about its payload changes. Epic-log prompts get no stamp.",
+          "In answer mode in a bound session, when bypassRow(answers) matches, the same appendWithin callback that returns the answer's user_prompt also returns bypassInput with causalParent = the id that user_prompt is stored under, question = bypassRow's question, and project = the project that user_prompt is filed with (the same variable), so the bypass event in an epic log takes that log's project; when the callback returns [] for a duplicate, it returns no bypass event either.",
+          "keeps_exports: every export promptCapture.ts has at 1cdb9aaf keeps its name and signature, because task-3 imports them concurrently; new exports are allowed.",
+          "The return line keeps its format, `bs prompt capture: ` followed by the event_id and session_id of the user_prompt written.",
+          "No change to resolveCaptureStore's rules, to dedupe, to the epic-log scan, or to the cli.ts verb `bs prompt capture`, which reaches this code unchanged."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are unless this task says otherwise.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; the unknown name in a `/bs use` example is nothing-here; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project; the factory's own name is read from FACTORY_PROJECT_NAME, never typed. task-6's name scan checks this.",
+          "Tests build their fixtures in temp dirs (a temp checkout with its store, a temp roadmap, a temp BS_HOME, a fake CLI session id such as 11111111-2222-4333-8444-555555555555), read no git history, and never read the real session registry, the user's home config directory or the real state/ store.",
+          "Nothing added here refuses, holds or delays a prompt or a tool call; capturePrompt still returns null or one line and throws only on a store failure.",
+          "Run `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/promptCapture.ts"
+      ]
+    },
+    {
+      "task_id": "bs-use/task-3-reminder-every-turn",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "Reminder on every turn",
+      "summary": "The hook prints the binding reminder from a bounded tail read, independent of the capture, exit 0, plain text, never a hook decision.",
+      "objective": "Print the binding reminder on every prompt turn of a bound session from the hook process: a new module factory/orchestrator/src/bindingReminder.ts computes the lines from the payload and a bounded tail of the session's home log, and runs the capture and the reminder as two independent steps; factory/orchestrator/src/promptHook.ts prints what they return, so the hook keeps exiting 0 with plain-text stdout whatever happens and a large log never costs the capture its line.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4: bindingReminder on a prompt-mode payload in a temp M2 store whose home log holds a session-bound event for the payload's cli id (seeded with bindingInput and appendWithin) returns reminderLines(project, loadBindingPolicy()); with no binding it returns []; with only another cli id's binding it returns [].",
+        "Epic criterion 3: for `/bs use nothing-here` it returns unknownProjectLines(known), followed by the standing binding's reminder when there is one, and no returned line contains 'nothing-here' or a unique marker word placed later in the prompt; for a matched name the newest binding does not name it returns notRecordedLines() followed by the standing binding's reminder, if any; for `/bs use project-a` in a directory with no store or an M3-only store it returns notRecordedLines().",
+        "Epic criterion 4, independence from the capture: the built hook prints the reminder lines for a bound session on a duplicate prompt (the capture writes nothing and prints no capture line) and on a harness-text prompt.",
+        "Epic criterion 5, in factory/orchestrator/test/promptHookEntry.test.ts against dist/promptHook.js: for a bound session (seeded binding), an unbound session, `/bs use nothing-here`, and an internal failure (the home log replaced by a line that is not JSON), the process exits 0, every stdout line starts with `bs prompt capture: ` or REMINDER_PREFIX, and JSON.parse throws on every stdout line, so no line carries decision, continue, hookSpecificOutput or permissionDecision. Answer mode in a bound session prints no reminder line. The file's existing cases keep their expectations, including 'does not reach the database layer'.",
+        "Operator decision 5, one capture path (supports epic criteria 4 and 5): bindingReminder writes nothing (the store directory listing is identical before and after a call), and promptHook reads stdin once and hands the same text to capturePrompt and bindingReminder; .claude/hooks/hooks.json and .claude/hooks/prompt-capture.sh are untouched.",
+        "Test first, in factory/orchestrator/test/bindingReminder.test.ts (new) and the new cases of test/promptHookEntry.test.ts, written before the change: under the null (main at 1cdb9aaf) the module import fails and the built hook prints no `bs use: ` line for a bound session, a duplicate prompt or an unknown name, so those cases fail; after the change they pass. The exit-status and no-JSON checks for the unbound and internal-failure cases are guards that pass before and after; their test names say so.",
+        "Revert proof: print the reminder only when capturePrompt returned a line and the duplicate-prompt case fails; let a reminder error escape its try/catch and the internal-failure case fails on exit status.",
+        "Epic criterion 4, bounded read (large-log fixture): a temp M2 home log holds a session-start, a session-bound project-a for the payload's cli id, then a line that is not JSON, then more than 4 MiB of user_prompt records for that cli id with project 'project-a', payload.source 'hook' and payload.bound_to set, written directly with appendFileSync, so the bad line ends more than BINDING_TAIL_BYTES before the end of the file. bindingReminder on a prompt in that store returns reminderLines('project-a', loadBindingPolicy()), and the built hook on that store prints those lines and exits 0, whatever the capture does with that log. A whole-log read throws on the bad line, so under the null (and for a version that calls readEvents on the home log) both cases fail. The stated bound: on a turn that is not a `/bs use` command the reminder reads at most BINDING_TAIL_BYTES of the home log plus the policy file, after the store resolution the capture already does. Revert proof: read the binding with readEvents over the whole home log and both cases fail.",
+        "Epic criterion 4, each step alone: promptTurnLines(raw, ctx, steps) with a capture step that throws still returns the reminder step's lines; with a reminder step that throws it still returns the capture step's line; with both throwing it returns []; with both succeeding it returns the capture line then the reminder lines. Under the null the module is absent, so the cases fail; revert proof: run both steps inside one try/catch and the throwing-capture case fails.",
+        "Gates: `pnpm run build` (the entry tests read dist), `pnpm run test` in full, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/bindingReminder.ts",
+        "factory/orchestrator/src/promptHook.ts",
+        "factory/orchestrator/test/bindingReminder.test.ts",
+        "factory/orchestrator/test/promptHookEntry.test.ts"
+      ],
+      "budget": {
+        "tokens": 215000,
+        "diff_lines": 660
+      },
+      "contract": {
+        "functional_clauses": [
+          "bindingReminder(raw: string, ctx: CaptureContext): Promise<string[]> parses the payload as capturePrompt does (a JSON object, session_id matching CLI_ID, no agent_id, a string prompt) and returns [] for anything else; resolves the store with resolveCaptureStore using the payload cwd when present and the prompt's command token; reads the binding from the home log file <eventsDir>/prompts-<cli>.jsonl (the file readEvents('prompts-<cli>', {stateDir: eventsDir}) reads) with one positioned read of at most BINDING_TAIL_BYTES from its end, drops the window's first line unless the window starts at offset 0, parses each complete line (a line that is not JSON throws, which promptTurnLines catches), and folds with bindingFromTail; it never calls readEvents on the home log. It may throw on a store failure.",
+          "Line selection, with the binding taken from bindingFromTail: a `/bs use` prompt with no store or an M3 store gives notRecordedLines(); a `/bs use` prompt with a null or unmatched name gives unknownProjectLines(knownProjectNames(...)) then the standing binding's reminder; a matched name the binding names gives its reminder; a matched name the binding does not name gives notRecordedLines() then the standing binding's reminder; any other prompt in a store resolved by M1, M2 or M4 with a binding gives reminderLines(binding.project, loadBindingPolicy()); everything else gives []. knownProjectNames (the roadmap) is read only on a `/bs use` turn.",
+          "promptTurnLines(raw: string, ctx: CaptureContext, steps = {capture: (r, c) => capturePrompt(r, c, 'prompt'), reminder: bindingReminder}): Promise<string[]> lives in bindingReminder.ts; it runs steps.capture then steps.reminder, each awaited inside its own try/catch, and returns the capture line when it is a non-null string followed by the reminder lines.",
+          "promptHook.ts: in prompt mode only, stdin is read once and each line promptTurnLines returns is written to stdout with a newline; `--resolve` and answer mode are unchanged; the outer try/catch stays; process.exitCode stays 0; nothing is written to stdout except the capture line and REMINDER_PREFIX lines.",
+          "bindingReminder.ts imports from promptCapture.ts only exports that exist at 1cdb9aaf (resolveCaptureStore, capturePrompt, commandOf, CLI_ID, isObj, str and the CaptureContext type), plus sessionBinding.ts, events.ts (types only) and node built-ins; task-2 edits promptCapture.ts concurrently under a keeps_exports promise, and this task does not edit it.",
+          "The cli.ts verb `bs prompt capture` is not changed and does not print the reminder."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are unless this task says otherwise.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; the unknown name in a `/bs use` example is nothing-here; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project; the factory's own name is read from FACTORY_PROJECT_NAME, never typed. task-6's name scan checks the files this plan adds and every `/bs use` argument; a `project:` or `\"project\":` value in a case this task adds to an edited test file (factory/orchestrator/test/promptHookEntry.test.ts) follows the same rule and is checked by the reviewer.",
+          "Tests build their fixtures in temp dirs (a temp checkout with its store, a fake CLI session id such as 11111111-2222-4333-8444-555555555555), read no git history, and never read the real session registry, the user's home config directory or the real state/ store; entry-test assertions on the unknown-name list check its shape, not which names the shipped roadmap holds.",
+          "The hook never prints a JSON hook response and never exits non-zero; no field named decision, continue, hookSpecificOutput or permissionDecision appears in the diff's output paths.",
+          "Run `pnpm run build`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use/task-4-skill-use-playbook",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "/bs use playbook and append guard",
+      "summary": "SKILL.md routes `/bs use <project>` to a new use.md playbook, pinned by a test; `bs event append` refuses the two hook-only event types.",
+      "objective": "Add `/bs use <project>` to the operator console: a row in the subcommand table and a word in the description of .claude/skills/bs/SKILL.md, and a new playbook .claude/skills/bs/use.md telling the session what to do with the hook's `bs use:` lines and how to ask for one small change, with a test that pins the routing and keeps the reminder the one copy of the bypass wording. Make `bs event append` in factory/orchestrator/src/cli.ts refuse session-bound and pipeline-bypass-approved, so the capture hook stays the only writer of both.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (routing): SKILL.md's subcommand table has a row for `/bs use <project>` whose playbook link is use.md, and the frontmatter description names `use` among the subcommands; use.md exists and its links resolve (the link check in test/pluginManifest.test.ts passes).",
+        "Epic criterion 10 (content): use.md says the capture hook writes the binding from the operator's typed command and the session never writes one (`bs event append` refuses session-bound and pipeline-bypass-approved); says to confirm the binding from the hook's `bs use:` lines, or to tell the operator it was not recorded or the name is unknown and repeat the known names the hook printed; says to relay the hook's line when the policy file is missing or invalid; says every change to the bound project goes through `/bs plan` and `/bs run`; says a very small change may skip them only after asking with AskUserQuestion using exactly the header and yes label the reminder prints, with a question that lists the files the change will touch and its estimated changed lines; says one yes covers one change and a second change asks again; says nothing blocks and a reminder is not a refusal; names factory/policies/session-binding.yml as where the size numbers live without restating them.",
+        "Epic criterion 11: no project name appears in the new SKILL.md row or in use.md; examples use <project>, and every `/bs use` followed by a space is followed by <project> or nothing-here (a bare mention is written `/bs use` in backticks). The `/bs use` arguments and project values in use.md and SKILL.md are checked mechanically by task-6's name scan; a project name in prose that fits none of the scanned forms is the reviewer gate's to catch.",
+        "Test first, in factory/orchestrator/test/skillUse.test.ts (new), written before the docs: it asserts the table row, the description word, the link, that use.md names session-bound, pipeline-bypass-approved and factory/policies/session-binding.yml, and that use.md contains neither BYPASS_HEADER nor BYPASS_YES (imported from sessionBinding.ts). Under the null (main at 1cdb9aaf) SKILL.md has no `/bs use` row and use.md is absent, so it fails; after the change it passes.",
+        "Revert proof: delete the SKILL.md row and the test fails; paste BYPASS_YES into use.md and the test fails.",
+        "test/docCommands.test.ts and test/operatorLanguage.test.ts pass: every `bs <verb>` span in use.md names a shipped verb, and `/bs use` is always written with its slash so it is never read as a CLI verb.",
+        "Epic criterion 7 (one yes, one change), in skillUse.test.ts: the test reads use.md, lowercases it and collapses every run of whitespace to one space, then asserts that the fixed phrase 'names every file the change will touch and its estimated changed lines' occurs exactly once and that 'one yes covers one change' occurs. use.md carries that fixed phrase verbatim, as plain text with no emphasis or code span inside it, in the one sentence that says what the AskUserQuestion question must contain (for example 'The question names every file the change will touch and its estimated changed lines.'), and nowhere else. Under the null use.md is absent, so the case fails; revert proof: delete that one sentence, leave the rest of use.md unchanged, and the phrase count drops to 0, so the case fails.",
+        "Epic criterion 7 (trust model), in factory/orchestrator/test/eventAppendHookOnly.test.ts (new) against the built dist/cli.js with --state-dir set to a temp dir: `bs event append` of a well-formed session-bound event, and of a well-formed pipeline-bypass-approved event, each exits 1, prints {\"error\":{\"code\":\"events.hook-only-event-type\", ...}} with a message naming the type, and leaves the target log as it was (absent, or the same bytes). A user_prompt append to the same temp dir exits 0 and writes its line; that case is a guard that passes before and after, and its name says so. Under the null (main with task-1 merged) both hook-only appends exit 0 and write, so those cases fail; revert proof: remove the check and both fail.",
+        "Gates: `pnpm run build` (the guard test reads dist), `pnpm run test` in full, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        ".claude/skills/bs/SKILL.md",
+        ".claude/skills/bs/use.md",
+        "factory/orchestrator/test/skillUse.test.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/test/eventAppendHookOnly.test.ts"
+      ],
+      "budget": {
+        "tokens": 160000,
+        "diff_lines": 420
+      },
+      "contract": {
+        "functional_clauses": [
+          "use.md follows the playbook shape of its siblings (status.md, ui.md): what the verb does, its steps, what it does not do; it does not restate SKILL.md's envelope or the dispatch contract, and it dispatches nothing.",
+          "The SKILL.md row sits in the subcommand table with the other verbs; the paragraph naming the verbs that read dispatch.md is unchanged, since `/bs use` dispatches nothing.",
+          "use.md tells the session to treat every `bs use:` line as the binding's state for this turn and never to infer a binding from the conversation.",
+          "In cli.ts, the `event append` branch, after JSON.parse and before appendEvent, throws new EventError('events.hook-only-event-type', <message>) when the parsed input is an object whose event_type is in HOOK_ONLY_EVENT_TYPES (imported from sessionBinding.ts). The message names the type and says the capture hook writes it from the operator's own prompt or answer. The existing top-level handler turns it into the error JSON and exit 1. No other cli.ts line changes: no new verb, no usage.ts edit, and `bs prompt capture` is unchanged.",
+          "The refusal is not a block: it refuses a hand-written record of those two types and nothing else; no prompt, tool call or other event type is refused or held."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; examples use <project>, and a project value in the guard test is project-a or project-b. task-6's name scan checks this.",
+          "Tests read the repo's own files only, build any fixture in a temp dir, and read no git history; the guard test writes only under its temp --state-dir.",
+          "Nothing in the playbook tells a session to refuse, hold or delay a prompt or tool call because of a binding.",
+          "Run `pnpm run build`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use/task-5-dashboard-bound-project",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "Dashboard shows the binding",
+      "summary": "Live-session card names the bound project; both new events get timeline titles in the dashboard.",
+      "objective": "Show the binding on the dashboard: a reader cliSessionBindings in factory/orchestrator/src/db/queries.ts over events_raw, the live-session card in ui/server/src/cliSessions.ts naming the bound project, and titles and the prompt kind for both new event types in ui/src/lib/timelineDisplay.ts. Task-1 already put both types on the timeline.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 9 (reader), in factory/orchestrator/test/db/cliSessionBinding.test.ts (new): over a temp store whose projected log holds, for cli A, session-bound project-a then project-b and, for cli B, one session-bound project-a, cliSessionBindings(db, [A, B, C]) returns one row for A with project-b and one for B with project-a, boundAt the event ts, and nothing for C; cliSessionBindings(db, []) returns [].",
+        "Epic criterion 8 (timeline, carried from task-1): over the same temp store as the reader case, the timeline query returns the session-bound row with kind 'Prompt'. This is a guard that passes before and after this task; its test name says so.",
+        "Epic criterion 9 (card), in ui/server/test/cliSessions.test.ts: a live fake session built the way the file's existing cases build one (temp config dir, fake registry, temp store) with a session-bound event for its cli id has card.project equal to the bound project; with a binding and an open linked epic of another project, the bound project wins; with no binding, project is what the existing rule gives and the existing cases keep their expectations.",
+        "Epic criterion 8 (titles), in ui/test/timelineDisplay.test.ts: session-bound renders 'Session bound to <project>' and pipeline-bypass-approved renders 'Pipeline bypass approved for <project>', reading payload.project, and kindFor gives 'prompt' for both.",
+        "Test first, all four files written before the change: under the null (main with task-1 merged) cliSessionBindings is not exported, the card's project is null for a bound session, and the titles fall back to the raw event type, so every new case except the named timeline guard fails; after the change they pass.",
+        "Revert proof: drop the binding lookup in cliSessions.ts and the card cases fail; make cliSessionBindings return the oldest binding and the project-b case fails; drop the session-bound title and its timelineDisplay case fails.",
+        "Gates: `pnpm run build` (ui/server reads the orchestrator dist), `pnpm run test` in full, `pnpm run test:server`, `pnpm run test:ui`, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run typecheck:server`, `pnpm run typecheck:ui`, `pnpm run typecheck:ui:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/queries.ts",
+        "factory/orchestrator/test/db/cliSessionBinding.test.ts",
+        "ui/server/src/cliSessions.ts",
+        "ui/server/test/cliSessions.test.ts",
+        "ui/src/lib/timelineDisplay.ts",
+        "ui/test/timelineDisplay.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "cliSessionBindings(db: SmithDb, cliIds: readonly string[]): CliSessionBinding[] with CliSessionBinding {cliSessionId: string; project: string; boundAt: string}: one row per CLI session id, the newest events_raw row with event_type 'session-bound' and a non-null project, newest by ts then log order; it builds no inArray over an empty list.",
+          "FREE_TIMELINE_EVENT_TYPES and eventKind are task-1's edit and stay as task-1 left them; this task adds only the reader to queries.ts.",
+          "cliSessions.ts calls cliSessionBindings per store beside cliSessionLinks, skips a store that throws as it does today, and sets card.project to the newest binding across stores, normalized through normalizeProjectName, else to the existing open-epic rule.",
+          "keeps_exports: queries.ts, cliSessions.ts and timelineDisplay.ts only add; every existing export keeps its name and signature.",
+          "The visible change is the project label on a live-session card and two timeline titles; no new component, style, route or write path."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are unless this task says otherwise.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only, UI copy included; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project. task-6's name scan checks the files this plan adds and every `/bs use` argument; a `project:` or `\"project\":` value in a case this task adds to an edited test file (ui/server/test/cliSessions.test.ts, ui/test/timelineDisplay.test.ts) follows the same rule and is checked by the reviewer.",
+          "Tests build their fixtures in temp dirs (temp stores, a temp config dir and fake registry, fake CLI session ids), read no git history, and never read the real session registry, the user's home config directory or the real state/ store; no test starts a server on a dashboard port.",
+          "The dashboard stays display-only: nothing here adds an action on a binding.",
+          "Run every gate named in the acceptance criteria, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": true,
+      "keeps_exports": [
+        "factory/orchestrator/src/db/queries.ts",
+        "ui/server/src/cliSessions.ts",
+        "ui/src/lib/timelineDisplay.ts"
+      ]
+    },
+    {
+      "task_id": "bs-use/task-6-flow-test-and-docs",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "Flow test, name scan and docs",
+      "summary": "One end-to-end flow test over the merged pieces, a hermetic scan of the project names in every added file, and the operator and router docs for `/bs use`.",
+      "objective": "Prove the whole flow once over the merged work of task-1 to task-5 and document it: a flow test drives `/bs use`, a follow-up prompt, a bypass answer and the projection in one temp store, plus runs of the built hook binding the factory's own name; a hermetic test scans every file this plan adds for project names outside the placeholders; the operator docs gain the `/bs use` verb, the reminder, the policy file, the bypass record and the dashboard label, and the router files list the verb.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criteria 1, 2, 4, 7 and 9 together, in factory/orchestrator/test/sessionBindingFlow.test.ts (new), in process with a temp factory-shaped checkout and a temp roadmap declaring project-a and project-b: capturePrompt on `/bs use project-a`, then bindingReminder on a follow-up prompt returns lines naming project-a; the follow-up user_prompt carries project-a; every home-log user_prompt after the binding carries payload.bound_to = the session-bound event's id, and bindingFromTail over the log's records with the session-bound record removed still returns project-a; a bypass answer adds one pipeline-bypass-approved event carrying its question; after projecting the log into a temp db, cliSessionBindings names project-a for the cli id and the timeline holds both new types.",
+        "Epic criteria 1, 5 and 11, built hook: dist/promptHook.js run on `/bs use ` followed by FACTORY_PROJECT_NAME (imported, never typed) in a temp M2 checkout exits 0, prints the capture line and reminder lines naming that project and no JSON line, and leaves exactly one session-bound event in that checkout's home log; a follow-up prompt prints the reminder again and its user_prompt carries that project.",
+        "Epic criterion 12 (documented): README.md's subcommand table and docs/guide/operator-loop.md's table gain a `/bs use <project>` row; docs/guide/operator-loop.md gains a short section on binding a session (what the operator types, what the reminder says, that nothing blocks, where the size numbers live and how an operator overrides them, what the reminder says when the policy file is missing or invalid, how the yes is recorded and that the question names the change, what the dashboard shows); the 'Putting your own words in the log' paragraph of docs/guide/operator-guide/queue-and-gate.md names the session-bound and pipeline-bypass-approved events, the home-log filing rule, and that `bs event append` refuses both types; the `/bs` verb list on CLAUDE.md line 42 and in the AGENTS.md router-table row for the operator console gains `use`; the 'Live sessions' section of docs/guide/dashboard.md says a bound session's card shows the bound project, ahead of a linked epic's.",
+        "Test first: the flow test is written before the docs and run on the branch carrying task-1 to task-5; under the null (main at 1cdb9aaf) it fails at the import of sessionBinding.ts and bindingReminder.ts; after the plan it passes. test/docCommands.test.ts and test/operatorLanguage.test.ts pass over the edited docs.",
+        "Text proof: the edited docs, CLAUDE.md, AGENTS.md and docs/guide/dashboard.md included, name no project except through <project> placeholders, hold no absolute path, and restate no number from factory/policies/session-binding.yml.",
+        "Epic criterion 11 (mechanical part), in factory/orchestrator/test/sessionBindingNames.test.ts (new), reading repo files only: it lists the files this plan adds (factory/orchestrator/src/sessionBinding.ts, factory/orchestrator/test/sessionBinding.test.ts, factory/policies/session-binding.yml, factory/orchestrator/test/promptCaptureBinding.test.ts, factory/orchestrator/src/bindingReminder.ts, factory/orchestrator/test/bindingReminder.test.ts, .claude/skills/bs/use.md, factory/orchestrator/test/skillUse.test.ts, factory/orchestrator/test/eventAppendHookOnly.test.ts, factory/orchestrator/test/db/cliSessionBinding.test.ts, factory/orchestrator/test/sessionBindingFlow.test.ts) and asserts each exists. In every file this plan adds or edits it reads each `/bs use` argument (the token after `/bs use` and spaces, made of letters, digits, `<`, `>`, `_`, `.` and `-`); in the added files it also reads each `project:` or `\"project\":` value given as a quoted string and each `- project:` line's value. Every value read is project-a, project-b or <project>, plus nothing-here for a `/bs use` argument; a value starting with `$` and an unquoted identifier are skipped. A positive control runs the same readers on inline samples: `/bs use other-name`, `project: 'other-name'` and `- project: other-name` give three hits, and `/bs use <project>`, `project: name` and `project: '${x}'` give none. The file excludes itself from the scan. Under the null the added files are absent and the existence assertion fails; revert proof: put `/bs use other-name` in use.md and the scan fails.",
+        "Gates: `pnpm run build`, `pnpm run test` in full, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        "factory/orchestrator/test/sessionBindingFlow.test.ts",
+        "factory/orchestrator/test/sessionBindingNames.test.ts",
+        "README.md",
+        "docs/guide/operator-loop.md",
+        "docs/guide/operator-guide/queue-and-gate.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "docs/guide/dashboard.md"
+      ],
+      "budget": {
+        "tokens": 190000,
+        "diff_lines": 560
+      },
+      "contract": {
+        "functional_clauses": [
+          "The docs describe behaviour as task-1 to task-5 shipped it; a gap between a doc and the code is raised as a finding against the owning task, not papered over in prose.",
+          "Each doc gets its own row or section; no doc restates another doc's section, and the operator-loop section links use.md rather than copying it.",
+          "The built-hook case reads only its temp checkout's store and asserts nothing about which other names the shipped roadmap declares.",
+          "CLAUDE.md and AGENTS.md change only by adding `use` to the existing verb lists; the dashboard.md edit is limited to the live-session card's project in its 'Live sessions' section.",
+          "The name scan is hermetic: it reads the listed repo files and its inline samples only, never a roadmap, the overlay, factoryProjects or git history, so it gives the same result on CI and on a workstation. The edited files it scans for `/bs use` arguments are the files task-1 to task-6 claim that already exist at 1cdb9aaf."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names. A project value in a file this plan adds (a `project:` or `\"project\":` value, a `- project:` roadmap line, a `/bs use` argument) is project-a or project-b, or <project> in prose; the unknown name in a `/bs use` example is nothing-here; epic-a, epic-b, store-a, store-b, demo-hub and blacksmith name epics, stores, hubs and checkouts, never a project; the factory's own name is read from FACTORY_PROJECT_NAME, never typed.",
+          "Tests build their fixtures in temp dirs (temp checkouts and stores, a temp db, a fake CLI session id), read no git history, and never read the real session registry, the user's home config directory or the real state/ store.",
+          "No doc describes a binding as a block, a hold or a permission; it is a record and a reminder.",
+          "Run `pnpm run build`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use/task-4-skill-use-playbook",
+      "epic_id": "bs-use",
+      "plan_version": 4,
+      "project": "black-smith",
+      "title": "/bs use playbook and append guard",
+      "summary": "SKILL.md routes `/bs use <project>` to a new use.md playbook, pinned by a test; `bs event append` refuses the two hook-only event types.",
+      "objective": "Add `/bs use <project>` to the operator console: a row in the subcommand table and a word in the description of .claude/skills/bs/SKILL.md, and a new playbook .claude/skills/bs/use.md telling the session what to do with the hook's `bs use:` lines and how to ask for one small change, with a test that pins the routing and keeps the reminder the one copy of the bypass wording. Make `bs event append` in factory/orchestrator/src/cli.ts refuse session-bound and pipeline-bypass-approved, so the capture hook stays the only writer of both. Plan v4: the same guard also refuses a hand-written user_prompt whose payload claims source 'hook' or carries bound_to, the two fields bindingFromTail reads, so the hook stays the only writer of every record the binding is read from.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 10 (routing): SKILL.md's subcommand table has a row for `/bs use <project>` whose playbook link is use.md, and the frontmatter description names `use` among the subcommands; use.md exists and its links resolve (the link check in test/pluginManifest.test.ts passes).",
+        "Epic criterion 10 (content): use.md says the capture hook writes the binding from the operator's typed command and the session never writes one (`bs event append` refuses session-bound and pipeline-bypass-approved); says to confirm the binding from the hook's `bs use:` lines, or to tell the operator it was not recorded or the name is unknown and repeat the known names the hook printed; says to relay the hook's line when the policy file is missing or invalid; says every change to the bound project goes through `/bs plan` and `/bs run`; says a very small change may skip them only after asking with AskUserQuestion using exactly the header and yes label the reminder prints, with a question that lists the files the change will touch and its estimated changed lines; says one yes covers one change and a second change asks again; says nothing blocks and a reminder is not a refusal; names factory/policies/session-binding.yml as where the size numbers live without restating them.",
+        "Epic criterion 11: no project name appears in the new SKILL.md row or in use.md; examples use <project>, and every `/bs use` followed by a space is followed by <project> or nothing-here (a bare mention is written `/bs use` in backticks). The `/bs use` arguments and project values in use.md and SKILL.md are checked mechanically by task-6's name scan; a project name in prose that fits none of the scanned forms is the reviewer gate's to catch.",
+        "Test first, in factory/orchestrator/test/skillUse.test.ts (new), written before the docs: it asserts the table row, the description word, the link, that use.md names session-bound, pipeline-bypass-approved and factory/policies/session-binding.yml, and that use.md contains neither BYPASS_HEADER nor BYPASS_YES (imported from sessionBinding.ts). Under the null (main at 1cdb9aaf) SKILL.md has no `/bs use` row and use.md is absent, so it fails; after the change it passes.",
+        "Revert proof: delete the SKILL.md row and the test fails; paste BYPASS_YES into use.md and the test fails.",
+        "test/docCommands.test.ts and test/operatorLanguage.test.ts pass: every `bs <verb>` span in use.md names a shipped verb, and `/bs use` is always written with its slash so it is never read as a CLI verb.",
+        "Epic criterion 7 (one yes, one change), in skillUse.test.ts: the test reads use.md, lowercases it and collapses every run of whitespace to one space, then asserts that the fixed phrase 'names every file the change will touch and its estimated changed lines' occurs exactly once and that 'one yes covers one change' occurs. use.md carries that fixed phrase verbatim, as plain text with no emphasis or code span inside it, in the one sentence that says what the AskUserQuestion question must contain (for example 'The question names every file the change will touch and its estimated changed lines.'), and nowhere else. Under the null use.md is absent, so the case fails; revert proof: delete that one sentence, leave the rest of use.md unchanged, and the phrase count drops to 0, so the case fails.",
+        "Epic criterion 7 (trust model), in factory/orchestrator/test/eventAppendHookOnly.test.ts (new) against the built dist/cli.js with --state-dir set to a temp dir: `bs event append` of a well-formed session-bound event, and of a well-formed pipeline-bypass-approved event, each exits 1, prints {\"error\":{\"code\":\"events.hook-only-event-type\", ...}} with a message naming the type, and leaves the target log as it was (absent, or the same bytes). A user_prompt append to the same temp dir exits 0 and writes its line; that case is a guard that passes before and after, and its name says so. Under the null (main with task-1 merged) both hook-only appends exit 0 and write, so those cases fail; revert proof: remove the check and both fail. Plan v4: a user_prompt append whose payload.source is 'hook', and one whose payload carries a bound_to key, each exits 1, prints {\"error\":{\"code\":\"events.hook-only-event-type\", ...}} with a message naming user_prompt and saying the capture hook writes it, and leaves the log as it was; the passing user_prompt guard case carries neither field (payload {prompt} alone, as `bs prompt record` writes). Under the null both new cases exit 0 and write, so they fail; revert proof: remove the user_prompt check, keep the HOOK_ONLY_EVENT_TYPES check, and both new cases fail while the session-bound and pipeline-bypass-approved cases still pass.",
+        "Gates: `pnpm run build` (the guard test reads dist), `pnpm run test` in full, `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm run lint`, then `bash scripts/check.sh` in full."
+      ],
+      "claims": [
+        ".claude/skills/bs/SKILL.md",
+        ".claude/skills/bs/use.md",
+        "factory/orchestrator/test/skillUse.test.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/test/eventAppendHookOnly.test.ts"
+      ],
+      "budget": {
+        "tokens": 160000,
+        "diff_lines": 420
+      },
+      "contract": {
+        "functional_clauses": [
+          "use.md follows the playbook shape of its siblings (status.md, ui.md): what the verb does, its steps, what it does not do; it does not restate SKILL.md's envelope or the dispatch contract, and it dispatches nothing.",
+          "The SKILL.md row sits in the subcommand table with the other verbs; the paragraph naming the verbs that read dispatch.md is unchanged, since `/bs use` dispatches nothing.",
+          "use.md tells the session to treat every `bs use:` line as the binding's state for this turn and never to infer a binding from the conversation.",
+          "In cli.ts, the `event append` branch, after JSON.parse and before appendEvent, throws new EventError('events.hook-only-event-type', <message>) when the parsed input is an object whose event_type is in HOOK_ONLY_EVENT_TYPES (imported from sessionBinding.ts). The message names the type and says the capture hook writes it from the operator's own prompt or answer. The existing top-level handler turns it into the error JSON and exit 1. No other cli.ts line changes: no new verb, no usage.ts edit, and `bs prompt capture` is unchanged. Plan v4: the same branch also throws EventError('events.hook-only-event-type', <message>) when event_type is 'user_prompt' and payload is an object whose source is 'hook' or that has an own bound_to key; that message names user_prompt, says the capture hook writes a prompt with those fields, and points to `bs prompt record` for a hand-written one. The rule stays in cli.ts beside the HOOK_ONLY_EVENT_TYPES check; sessionBinding.ts is not edited.",
+          "The refusal is not a block: it refuses a hand-written record of session-bound or pipeline-bypass-approved, and a hand-written user_prompt that claims the hook's source or carries bound_to (plan v4), and nothing else; no prompt, tool call or other event type is refused or held, and a plain user_prompt still appends."
+        ],
+        "nonfunctional_clauses": [
+          "Exported names and signatures stay as they are.",
+          "Edit only the claimed files; a needed edit outside them stops the task with error.spec.spec-gap.",
+          "In the worktree, symlink the main clone's node_modules; stage files by name and never run `git add -A`.",
+          "English only; no absolute paths and no other project names; examples use <project>, and a project value in the guard test is project-a or project-b. task-6's name scan checks this.",
+          "Tests read the repo's own files only, build any fixture in a temp dir, and read no git history; the guard test writes only under its temp --state-dir.",
+          "Nothing in the playbook tells a session to refuse, hold or delay a prompt or tool call because of a binding.",
+          "Run `pnpm run build`, `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm run lint`, then `bash scripts/check.sh` in full as the final gate; quote its tail and name every SKIP."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-use/task-6-flow-test-and-docs",
+      "dependsOn": "bs-use/task-2-capture-writes-binding",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-use/task-6-flow-test-and-docs",
+      "dependsOn": "bs-use/task-3-reminder-every-turn",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-use/task-6-flow-test-and-docs",
+      "dependsOn": "bs-use/task-4-skill-use-playbook",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-use/task-6-flow-test-and-docs",
+      "dependsOn": "bs-use/task-5-dashboard-bound-project",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "black-smith",
+  "effort": "medium"
+}

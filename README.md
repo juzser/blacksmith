@@ -313,6 +313,7 @@ or in a clone:
 | `/bs new <project> [--ui]` | Scaffold a new target project from your stack answers |
 | `/bs mcp <project>` | Layer the MCP surface on and make its milestone due |
 | `/bs audit <project-dir>` | Audit an existing project on four axes, rank, decide at a hard stop, cut one epic |
+| `/bs use <project>` | Bind this session to one project; a reminder keeps the pipeline in front of its changes |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge |
 | `/bs status` | Live agent count, budget burn, epic phase |

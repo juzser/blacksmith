@@ -342,7 +342,13 @@ bs gate run epic-1/task-1 \
 automatic: its `UserPromptSubmit` hook records each prompt you type, and its
 `PostToolUse` hook on `AskUserQuestion` records each option answer you pick,
 both as `user_prompt` events (`bs prompt capture`), and prints the stored
-`event_id` into the model's context. `prompt record` is the manual path, for a
+`event_id` into the model's context. The same hook writes two more event
+types: `session-bound` (from `/bs use <project>`), which goes into the session's
+home log only, and `pipeline-bypass-approved` (from the yes to a small-change
+question), which goes to the log its answer's `user_prompt` goes to. Once a
+session is bound, the prompts it files carry the bound project. `bs event
+append` refuses both types, so no hand-written record of either can exist.
+`prompt record` is the manual path, for a
 machine where the hook is not installed. `bs prompt record <file|-> --session
 <id> --causal-parent <event-id>` appends a `user_prompt` holding what you
 typed, verbatim, and prints its event id:
