@@ -218,8 +218,8 @@ Type `/bs use <project>` with a name the factory knows and the session is bound
 to that project. The capture hook records the binding as a `session-bound`
 event in the session's own home log; a name it does not know binds nothing and
 the hook lists the names it does know. From then on the hook prints a short
-reminder on every prompt, and each prompt you type is filed under the bound
-project. A later `/bs use` with another name re-binds. The playbook the model
+reminder on every prompt, and the prompts the session files into its own home
+log carry the bound project. A later `/bs use` with another name re-binds. The playbook the model
 follows is [`use.md`](../../.claude/skills/bs/use.md).
 
 The reminder says that questions are free and that every change goes through

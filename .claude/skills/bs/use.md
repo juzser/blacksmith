@@ -10,8 +10,8 @@ needed here.
 
 The capture hook writes the binding from the command the operator typed. You
 never write one: `bs event append` refuses `session-bound` and
-`pipeline-bypass-approved`, so a hand-written record of either cannot exist.
-Do not try, and do not work around the refusal.
+`pipeline-bypass-approved`. Do not try, and do not work around the refusal. The
+records are an audit trail, not proof.
 
 ## 2. Read the hook's lines
 
