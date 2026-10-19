@@ -12021,6 +12021,75 @@ describe('cli.ts (built binary)', () => {
         expect(parsed.breaks).toEqual([]);
       });
     });
+
+    describe('post-run, on a promised barrel of star re-exports', () => {
+      const barrel = "export * from './a.ts';\nexport * from './b.ts';\n";
+      const repos: string[] = [];
+
+      // One repo per task branch: the barrel on integration, the task's edit on top.
+      async function taskBranchWith(after: string): Promise<[string, string]> {
+        const worktree = await mkdtemp(path.join(tmpdir(), 'smith-cli-impact-barrel-'));
+        repos.push(worktree);
+        runOrThrow('git', ['init', '-q', '-b', 'smith/epic-1/integration', worktree]);
+        runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: worktree });
+        runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: worktree });
+        await mkdir(path.join(worktree, 'src'), { recursive: true });
+        await writeFile(path.join(worktree, 'src/index.ts'), barrel);
+        for (const name of ['a', 'b', 'c']) {
+          await writeFile(path.join(worktree, `src/${name}.ts`), `export const ${name} = 1;\n`);
+        }
+        runOrThrow('git', ['add', '.'], { cwd: worktree });
+        runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: worktree });
+        runOrThrow('git', ['checkout', '-q', '-b', 'smith/epic-1/task-1'], { cwd: worktree });
+        await writeFile(path.join(worktree, 'src/index.ts'), after);
+        runOrThrow('git', ['commit', '-q', '-am', 'edit the barrel'], { cwd: worktree });
+        const specPath = path.join(worktree, 'spec.json');
+        await writeFile(
+          specPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            claims: ['src/index.ts'],
+            keeps_exports: ['src/index.ts'],
+          }),
+        );
+        return [worktree, specPath];
+      }
+
+      afterAll(async () => {
+        for (const worktree of repos) await rm(worktree, { recursive: true, force: true });
+      });
+
+      it('exits 0 with the promise kept when the task appends a star re-export', async () => {
+        const [worktree, specPath] = await taskBranchWith(`${barrel}export * from './c.ts';\n`);
+        const { stdout, status } = runCli(['claims', 'impact', worktree, specPath]);
+        expect(status).toBe(0);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.ok).toBe(true);
+        expect(parsed.promises).toEqual([
+          {
+            file: 'src/index.ts',
+            status: 'kept',
+            removed: [],
+            signatureChanged: [],
+            added: ["* from './c.ts'"],
+          },
+        ]);
+      });
+
+      it('exits 1 with the promise broken when the task drops a star re-export', async () => {
+        const [worktree, specPath] = await taskBranchWith("export * from './b.ts';\n");
+        const { stdout, status } = runCli(['claims', 'impact', worktree, specPath]);
+        expect(status).toBe(1);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.ok).toBe(false);
+        expect(parsed.promises[0]).toMatchObject({
+          status: 'broken',
+          reason: 'removed',
+          removed: ["* from './a.ts'"],
+          signatureChanged: [],
+        });
+      });
+    });
   });
 
   // The security-reviewer's trigger used to fire only when the orchestrator

@@ -611,6 +611,86 @@ describe('what an export diff proves', () => {
     expect(diff.unverifiable).toBe(true);
     expect(diff.removed).toEqual([]);
   });
+
+  it('names each export once, however many clauses declare it', () => {
+    const before = 'export function f(a: string): void;\nexport function f(a: number): void;\n';
+    const after = 'export function f(a: string): void;\nexport function f(a: boolean): void;\n';
+    expect(diffExports(before, after, 'src/a.ts').signatureChanged).toEqual(['f']);
+    expect(diffExports(before, '', 'src/a.ts').removed).toEqual(['f']);
+    expect(diffExports('', before, 'src/a.ts').added).toEqual(['f']);
+  });
+});
+
+describe('what an export diff proves about a barrel of star re-exports', () => {
+  const barrel = "export * from './a.ts';\nexport * from './b.ts';\n";
+
+  it('calls an appended star re-export an addition and nothing else', () => {
+    const diff = diffExports(barrel, `${barrel}export * from './c.ts';\n`, 'src/index.ts');
+    expect(diff).toEqual({
+      file: 'src/index.ts',
+      removed: [],
+      added: ["* from './c.ts'"],
+      signatureChanged: [],
+      unverifiable: false,
+    });
+  });
+
+  it('reports nothing when star re-exports are only reordered', () => {
+    const reordered = "export * from './b.ts';\nexport * from './a.ts';\n";
+    const diff = diffExports(barrel, reordered, 'src/index.ts');
+    expect(diff.removed).toEqual([]);
+    expect(diff.added).toEqual([]);
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('names a dropped star re-export as removed, whichever line it was', () => {
+    const dropFirst = diffExports(barrel, "export * from './b.ts';\n", 'src/index.ts');
+    expect(dropFirst.removed).toEqual(["* from './a.ts'"]);
+    expect(dropFirst.signatureChanged).toEqual([]);
+    const dropLast = diffExports(barrel, "export * from './a.ts';\n", 'src/index.ts');
+    expect(dropLast.removed).toEqual(["* from './b.ts'"]);
+  });
+
+  it('reads a changed specifier as the old module removed and the new one added', () => {
+    const diff = diffExports(
+      barrel,
+      "export * from './a.ts';\nexport * from './b2.ts';\n",
+      'src/index.ts',
+    );
+    expect(diff.removed).toEqual(["* from './b.ts'"]);
+    expect(diff.added).toEqual(["* from './b2.ts'"]);
+    expect(diff.signatureChanged).toEqual([]);
+  });
+
+  it('names a module forwarded twice once', () => {
+    const twice = `${barrel}export * from './a.ts';\n`;
+    expect(diffExports(barrel, twice, 'src/index.ts')).toMatchObject({
+      removed: [],
+      added: [],
+      signatureChanged: [],
+    });
+    expect(diffExports(twice, '', 'src/index.ts').removed).toEqual([
+      "* from './a.ts'",
+      "* from './b.ts'",
+    ]);
+  });
+
+  it('calls a star re-export turned type-only a changed declaration', () => {
+    const typeOnly = "export * from './a.ts';\nexport type * from './b.ts';\n";
+    expect(diffExports(barrel, typeOnly, 'src/index.ts').signatureChanged).toEqual([
+      "* from './b.ts'",
+    ]);
+  });
+
+  it('keeps a namespace re-export keyed by its own name', () => {
+    const before = "export * as ns from './a.ts';\n";
+    expect(diffExports(before, "export * as ns from './b.ts';\n", 'src/index.ts')).toMatchObject({
+      removed: [],
+      added: [],
+      signatureChanged: ['ns'],
+    });
+    expect(diffExports(before, '', 'src/index.ts').removed).toEqual(['ns']);
+  });
 });
 
 describe('what the post-run export impact proves', () => {
@@ -845,6 +925,49 @@ describe('what the post-run export impact holds a keeps_exports promise to', () 
     ]);
     expect(report.ok).toBe(true);
     expect(report.detail).toContain('Promise unverified: src/a.ts');
+  });
+
+  describe('on a barrel of star re-exports', () => {
+    const before = "export * from './a.ts';\nexport * from './b.ts';\n";
+    const barrelGraph = graphOf({
+      'src/index.ts': before,
+      'src/a.ts': 'export const a = 1;',
+      'src/b.ts': 'export const b = 2;',
+      'src/use.ts': "import { a } from './index.ts';\nexport const u = a;",
+    });
+    const impactOf = (after: string) =>
+      exportImpact(
+        barrelGraph,
+        [diffExports(before, after, 'src/index.ts')],
+        ['src/index.ts', 'src/c.ts'],
+        ['src/index.ts'],
+      );
+
+    it('calls the promise kept when a star re-export is appended', () => {
+      const report = impactOf(`${before}export * from './c.ts';\n`);
+      expect(report.promises).toEqual([
+        {
+          file: 'src/index.ts',
+          status: 'kept',
+          removed: [],
+          signatureChanged: [],
+          added: ["* from './c.ts'"],
+        },
+      ]);
+      expect(report.ok).toBe(true);
+    });
+
+    it('calls the promise broken when a star re-export is dropped', () => {
+      const report = impactOf("export * from './b.ts';\n");
+      expect(report.promises[0]).toMatchObject({
+        status: 'broken',
+        reason: 'removed',
+        removed: ["* from './a.ts'"],
+        signatureChanged: [],
+      });
+      expect(report.ok).toBe(false);
+      expect(report.detail).toContain("Promise broken: src/index.ts removed [* from './a.ts'].");
+    });
   });
 });
 

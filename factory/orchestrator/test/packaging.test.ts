@@ -273,7 +273,9 @@ describe('the published package', () => {
     const imported = new Set<string>();
     for (const abs of walk(src)) {
       if (!abs.endsWith('.ts')) continue;
-      for (const match of readFileSync(abs, 'utf8').matchAll(/from\s+'([^'.][^']*)'/g)) {
+      // `$` is excluded because a template literal such as `* from '${x}'` is a
+      // string, and no import specifier starts with an interpolation.
+      for (const match of readFileSync(abs, 'utf8').matchAll(/from\s+'([^'.$][^']*)'/g)) {
         const spec = match[1] as string;
         if (spec.startsWith('node:')) continue;
         const name = spec.startsWith('@')
