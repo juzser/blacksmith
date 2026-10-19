@@ -365,6 +365,8 @@ interface DispatchRow {
   actor: string;
   role: string;
   taskId: string | null;
+  /** The earlier dispatch this one resumes, when the payload names one. */
+  continuationOf: string | null;
 }
 
 interface TerminalRow {
@@ -428,9 +430,31 @@ function readDispatches(events: readonly StoredEvent[]): DispatchRow[] {
       actor: record.actor,
       role,
       taskId: record.task_id ?? str(payload, 'task_id'),
+      continuationOf: str(payload, 'continuation_of'),
     });
   }
   return rows;
+}
+
+/**
+ * The dispatch a continuation resumes, followed through every same-role,
+ * same-task `continuation_of` link to the one that names no further original.
+ * A dispatch with no valid link is its own root; so is one on a cycle, which
+ * then finds no session and stays unanswered.
+ */
+function rootDispatch(d: DispatchRow, byId: ReadonlyMap<string, DispatchRow>): DispatchRow {
+  const sameTask = (a: string | null, b: string | null): boolean =>
+    a === null || b === null ? a === b : taskIdsMatch(a, b);
+  const seen = new Set([d.eventId]);
+  let current = d;
+  while (current.continuationOf !== null) {
+    const next = byId.get(current.continuationOf);
+    if (next === undefined || next.role !== d.role || !sameTask(next.taskId, d.taskId)) break;
+    if (seen.has(next.eventId)) return d;
+    seen.add(next.eventId);
+    current = next;
+  }
+  return current;
 }
 
 function readTerminals(events: readonly StoredEvent[]): TerminalRow[] {
@@ -546,7 +570,9 @@ export function checkDelegationLog(
   const inScope = (rowTask: string | null): boolean =>
     taskId === null || (rowTask !== null && taskIdsMatch(rowTask, taskId));
 
-  const dispatches = readDispatches(events).filter((d) => inScope(d.taskId));
+  const allDispatches = readDispatches(events);
+  const dispatchById = new Map(allDispatches.map((d) => [d.eventId, d]));
+  const dispatches = allDispatches.filter((d) => inScope(d.taskId));
   const terminals = readTerminals(events);
   const opened = new Map([...(options.openedElsewhere ?? []), ...sessionsOpenedByDispatch(events)]);
   const checks: DelegationLogCheck[] = [];
@@ -577,7 +603,10 @@ export function checkDelegationLog(
     // Rule 2 -- a grantee that must open a log did.
     const grant = byRole.get(d.role);
     if (grant === undefined || !grant.mustOpenSession) continue;
-    const child = opened.get(d.eventId);
+    // A continuation is answered by the session its original dispatch opened;
+    // `delegated` is untouched, so rule 3 keeps the original as the owner.
+    const origin = rootDispatch(d, dispatchById);
+    const child = opened.get(origin.eventId);
     if (child !== undefined) {
       checks.push({
         role: d.role,
@@ -591,10 +620,10 @@ export function checkDelegationLog(
     }
     const finished = terminals.some(
       (t) =>
-        t.sessionId === d.sessionId &&
-        t.role === d.role &&
-        t.ts >= d.ts &&
-        (t.taskId === null || d.taskId === null || taskIdsMatch(t.taskId, d.taskId)),
+        t.sessionId === origin.sessionId &&
+        t.role === origin.role &&
+        t.ts >= origin.ts &&
+        (t.taskId === null || origin.taskId === null || taskIdsMatch(t.taskId, origin.taskId)),
     );
     checks.push({
       role: d.role,

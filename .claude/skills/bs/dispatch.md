@@ -495,3 +495,12 @@ the topology — did anyone get `Agent` without a grant, or a grant that hands a
 role its own auditor or critic — and `log` is the run: did each grantee open
 its session before it dispatched. Fail-closed like the other two, and a
 grantee that has not opened its log *yet* is `unverifiable`, not `ok`.
+
+When you resume a sub-agent that already opened its session (a wave-runner you
+take back up after a hand-back), you log a new `dispatch_decision` for it, and
+no session will ever open against that new event. Say so in the payload: add
+`continuation_of`, set to the event id of the original `dispatch_decision` of the
+same role and task. The check then answers the continuation from the session the
+original opened, and adds no session of its own. Leave the field out on a fresh
+dispatch; a value naming an unknown event, another role or another task is
+ignored, and that dispatch is judged as a fresh one.
