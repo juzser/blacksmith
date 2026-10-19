@@ -6,6 +6,7 @@ import {
   CLAUDE_CHECK_COMMAND,
   type DoctorDeps,
   doctorExitCode,
+  formatChecks,
   PLUGIN_INSTALL_COMMANDS,
   type RunResult,
   runChecks,
@@ -142,5 +143,47 @@ describe('installCheck probes', () => {
     expect(doc).toContain(CLAUDE_CHECK_COMMAND);
     for (const cmd of PLUGIN_INSTALL_COMMANDS) expect(doc).toContain(cmd);
     expect(doc).toContain('bs doctor');
+  });
+});
+
+describe('installCheck extra edges', () => {
+  it('plugin: a lookalike name is not blacksmith@blacksmith', () => {
+    const run = (cmd: string) =>
+      cmd === 'claude' ? done('  xblacksmith@blacksmith\n') : done('1\n');
+    expect(check({ run }, 'plugin').status).toBe('missing');
+  });
+
+  it('plugin and claude probes ask for exactly the read-only commands', () => {
+    const seen: string[] = [];
+    runChecks(
+      deps({
+        run: (cmd, args) => {
+          seen.push(`${cmd} ${args.join(' ')}`);
+          return done('blacksmith@blacksmith\n');
+        },
+      }),
+    );
+    expect(seen).toContain('claude plugin list');
+    expect(seen).toContain('claude --version');
+    expect(seen.every((s) => /--version$|plugin list$/.test(s))).toBe(true);
+  });
+
+  it('node: accepts a full semver floor', () => {
+    expect(check({ enginesNode: '>=22.0.0', nodeVersion: 'v21.9.0' }, 'node').status).toBe(
+      'missing',
+    );
+    expect(check({ enginesNode: '>=22.0.0', nodeVersion: 'v22.1.0' }, 'node').status).toBe('ok');
+  });
+
+  it('formatChecks: one line per check, fix shown only when not ok', () => {
+    const lines = formatChecks([
+      { id: 'a', status: 'ok', detail: 'fine', fix: '' },
+      { id: 'b', status: 'missing', detail: 'gone', fix: 'do this' },
+    ])
+      .trimEnd()
+      .split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).not.toContain('->');
+    expect(lines[1]).toContain('do this');
   });
 });
