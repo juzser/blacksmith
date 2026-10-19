@@ -1588,6 +1588,91 @@ function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): nu
   return -1;
 }
 
+/** Git builtins that only read: a same-named alias never replaces a builtin, and none of them writes a ref. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  'grep',
+  'log',
+  'show',
+  'diff',
+  'status',
+  'ls-files',
+  'ls-tree',
+  'blame',
+  'shortlog',
+  'rev-parse',
+  'cat-file',
+  'rev-list',
+  'describe',
+  'for-each-ref',
+  'show-ref',
+  'diff-tree',
+]);
+
+/** Global options that take no value, so the word after one is still the next option or the subcommand. */
+const GIT_GLOBAL_FLAGS_WITHOUT_VALUE = new Set([
+  '--no-pager',
+  '-P',
+  '-p',
+  '--paginate',
+  '--bare',
+  '--no-replace-objects',
+  '--literal-pathspecs',
+  '--no-literal-pathspecs',
+  '--glob-pathspecs',
+  '--noglob-pathspecs',
+  '--icase-pathspecs',
+  '--no-optional-locks',
+  '--no-advice',
+]);
+
+const READ_ONLY_SEGMENT_FORBIDDEN_RE = /[;&|\n()`#<>{}]/;
+
+/**
+ * True when `segment` is provably one simple `git <read-only builtin> ...`
+ * command, so a gated word (`push`, `reset`, ...) elsewhere in it is only an
+ * argument to that builtin, such as a search term. Every condition falls back
+ * to the plain-word gate's own answer when it does not hold:
+ *  - no command separator, grouping, substitution, comment or redirection
+ *    character anywhere, quoted or not, because `topLevelCommands` can hand
+ *    back several commands as one segment when it cannot read the line;
+ *  - exactly one `git` word, so no second invocation hides in the arguments;
+ *  - `git` is the first word, so no assignment or wrapper changes what runs;
+ *  - every word before the subcommand is a global option this function knows
+ *    (a value-taking one is followed by a plain value), because an option it
+ *    does not know may take a value and move the subcommand;
+ *  - the subcommand is written plainly and is a read-only builtin.
+ * It can only turn a refusal of such a command into an allow; later layers
+ * still read the words after the subcommand.
+ */
+function isReadOnlyGitCommand(segment: string): boolean {
+  const stripped = stripRedirections(segment);
+  if (READ_ONLY_SEGMENT_FORBIDDEN_RE.test(stripped)) return false;
+  if ((segment.match(/\bgit\b/gi) ?? []).length !== 1) return false;
+  const words = splitDequotedWords(stripped);
+  if (words[0]?.raw !== 'git') return false;
+  let i = 1;
+  while (i < words.length) {
+    const word = words[i];
+    if (word === undefined || !word.text.startsWith('-')) break;
+    if (!isPlainWord(word.raw)) return false;
+    if (GIT_GLOBAL_VALUE_FLAGS.has(word.text)) {
+      const value = words[i + 1];
+      if (value === undefined || !isPlainWord(value.raw)) return false;
+      i += 2;
+    } else if (/^--[^=\s]+=/.test(word.text) || GIT_GLOBAL_FLAGS_WITHOUT_VALUE.has(word.text)) {
+      i += 1;
+    } else {
+      return false;
+    }
+  }
+  const subcommand = words[i];
+  return (
+    subcommand !== undefined &&
+    subcommand.raw === subcommand.text &&
+    READ_ONLY_GIT_SUBCOMMANDS.has(subcommand.text)
+  );
+}
+
 const SUBCOMMAND_NOT_PLAIN_REASON =
   'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
 
@@ -1728,7 +1813,10 @@ function checkForcePushSubcommandWord(
  * ref, every word after the subcommand must be plain — see `isPlainWord`.
  * A word this rule cannot read safely is refused rather than guessed at; the
  * gate decides only readability, not force-ness, which the checks below
- * still do once the words are known safe to read.
+ * still do once the words are known safe to read. A segment that is provably
+ * one read-only git builtin (`isReadOnlyGitCommand`) is not covered by the
+ * gate, since there the gated word is only an argument; the checks below
+ * still read it.
  */
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
@@ -1760,7 +1848,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // So once a covered subcommand is found, an undecoded `$'...'` span
     // anywhere in the segment is already a plain-word failure on its own;
     // otherwise (no span at all) the raw segment is checked directly.
-    if (isCoveredForcePushSegment(decoded.text)) {
+    // The one exemption: a read-only builtin that only names a gated word as
+    // an argument (`git grep push -- 'x/*.ts'`) skips the plain-word block.
+    // Every layer after it still reads the segment.
+    const readOnlyBuiltin = decoded.text === segment && isReadOnlyGitCommand(segment);
+    if (isCoveredForcePushSegment(decoded.text) && !readOnlyBuiltin) {
       if (decoded.text !== segment) return violation(rule, PLAIN_WORD_REASON);
       if (hasUnsafeWord(segment)) return violation(rule, PLAIN_WORD_REASON);
     }

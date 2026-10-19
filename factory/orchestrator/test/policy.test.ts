@@ -1113,6 +1113,79 @@ describe('evaluateCommand — rule 2: force-push', () => {
   });
 });
 
+describe('evaluateCommand — a read-only git builtin that names a gated word', () => {
+  // git itself runs `grep`/`log`/..., a builtin no alias replaces, and the
+  // gated word is only an argument to it.
+  it.each([
+    "git grep -n push -- 'x/*.ts'",
+    "git log --grep push -- 'src/*.ts'",
+    "git grep -n -e reset -e rebase -- '*.md'",
+    "git log -S push --format='%h %s'",
+    "git -C repo grep -n push -- 'x/*.ts'",
+    'git -c core.quotepath=off log --grep=push -- "$f"',
+    'git --no-pager grep -n update-ref -- "$dir"',
+    'git -P grep push $X',
+    "git grep -n filter-branch -- 'x/*.ts'",
+  ])('allows git naming a gated word as a search term: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).not.toContain('force-push');
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    'git show HEAD:x.ts | grep push',
+    "git grep -n -w branch -- 'x/*.ts'",
+    "git grep -n 'git push'",
+    'git log -S push "x"',
+  ])('still allows %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    'git push --force origin x',
+    'git push origin "$(echo +main)"',
+    'git push origin +main',
+    'git -C x push $REF',
+    'git -c a=b push "$R"',
+    'git --git-dir=.git push origin $X',
+    'git --no-pager -C x push $X',
+    'git --attr-source x push origin $X',
+    'git --attr-source grep push $X',
+    'git --exec-path grep push $X',
+    'git grep push $(git push origin "$X")',
+    'git grep push `git push origin $X`',
+    'git grep push <(git push origin $X)',
+    'sudo -u git git push origin $X',
+    'env git push origin "$X"',
+    'GIT_DIR=x git push $X',
+    'git x push origin "$X"',
+    'git grep push && git push origin "$X"',
+    'git grep push ; git reset --hard "$X"',
+    'git grep push -- x; git branch -D "$B"',
+    "git grep push 'x' & git push $X",
+    "git grep push '${x}' ; g\\it push $X",
+    "bash -c 'git grep push; git push origin $X'",
+    'eval "git grep push; git push \\$X"',
+    'git g\\rep push origin $X',
+    'git "grep" push $X',
+    "git grep push $'\\x70ush' $X",
+    'git grep push -- x git push $X',
+    "git grep -n push -- 'x/*.ts' --force",
+    "git grep -n push --for\\\nce -- 'x/*.ts'",
+    'git p\\\nush origin "$X"',
+    'git p\\ush origin "$X"',
+    'git pu""sh origin "$X"',
+    'git branch -D "$B"',
+    'git rebase -i $X',
+    'git reset --hard "$(x)"',
+    'git log --grep push -- \'x\' ; git update-ref -d "$R"',
+  ])('still refuses a gated subcommand outside a read-only builtin: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+});
+
 describe('evaluateCommand — rule 3: merge-into-protected', () => {
   // A merge has exactly one destination: the branch you are standing on.
   // Every ref on the command line is a source. Refreshing a stale side branch
