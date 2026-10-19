@@ -686,6 +686,15 @@ describe('checkDelegationLog on a continuation dispatch', () => {
     expect(report.checks.map((c) => c.status)).toEqual(['unverifiable', 'unverifiable']);
   });
 
+  it('terminates on a continuation_of that names its own event id', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      continuation('epic-1', 1, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable']);
+  });
+
   it('judges a continuation_of naming an unknown event as a fresh dispatch', () => {
     const events = [
       event('epic-1', 0, 'session-start'),
