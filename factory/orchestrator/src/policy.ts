@@ -1063,19 +1063,51 @@ function findAnsiCQuoteEnd(text: string, start: number): number {
  * whether any `$'` opener was read, for a caller that only needs to know
  * whether the construct is present.
  *
- * Quotes are read the way bash reads them. Outside quotes a `$'` opens an
- * ANSI-C span, but a plain `'...'` span is literal (a `$` that ends it, as in
+ * Two readings, chosen per segment. The quote-aware reading applies only
+ * where it is certain to match bash: outside quotes a `$'` opens an ANSI-C
+ * span, a plain `'...'` span is literal (a `$` that ends it, as in
  * `grep 'a$'`, is ordinary text and its closing `'` is not an opener), and a
- * backslash makes the next character ordinary (`\$'...'` is a literal `$`
- * and then a plain single-quoted span). Inside double quotes a `'` is
- * literal; a `$'` there is still decoded, as before. A plain `'` that is
- * never closed is copied through to the end of the segment.
+ * backslash makes the next character ordinary. A plain `'` that is never
+ * closed is copied through to the end of the segment. A segment holding a
+ * construct that starts quoting of its own is read as before instead: every
+ * `$'` pair is decoded wherever it sits. Those constructs are a backtick,
+ * `$(`, `${`, `$$` (a parameter, so a `'` after it is a plain quote), `<<`
+ * (a here-document body is not quoted text), `#` (a comment is not quoted
+ * text), and a `$'` met inside double quotes (bash reads it as literal text).
+ * When unsure, the segment gets the as-before reading.
  */
+const UNCERTAIN_QUOTING = /`|\$\(|\$\{|\$\$|<<|#/;
+
+/** The as-before reading: every `$'` pair is decoded, whatever surrounds it. */
+function scanEveryAnsiCPair(segment: string): {
+  text: string;
+  unterminated: boolean;
+  opened: boolean;
+} {
+  let result = '';
+  let opened = false;
+  let i = 0;
+  while (i < segment.length) {
+    if (segment[i] === '$' && segment[i + 1] === "'") {
+      opened = true;
+      const end = findAnsiCQuoteEnd(segment, i + 2);
+      if (end === -1) return { text: result + segment.slice(i), unterminated: true, opened };
+      result += decodeAnsiCPayload(segment.slice(i + 2, end));
+      i = end + 1;
+      continue;
+    }
+    result += segment[i];
+    i += 1;
+  }
+  return { text: result, unterminated: false, opened };
+}
+
 function scanAnsiCQuoting(segment: string): {
   text: string;
   unterminated: boolean;
   opened: boolean;
 } {
+  if (UNCERTAIN_QUOTING.test(segment)) return scanEveryAnsiCPair(segment);
   let result = '';
   let opened = false;
   let inDouble = false;
@@ -1088,6 +1120,7 @@ function scanAnsiCQuoting(segment: string): {
       continue;
     }
     if (c === '$' && segment[i + 1] === "'") {
+      if (inDouble) return scanEveryAnsiCPair(segment);
       opened = true;
       const end = findAnsiCQuoteEnd(segment, i + 2);
       if (end === -1) return { text: result + segment.slice(i), unterminated: true, opened };

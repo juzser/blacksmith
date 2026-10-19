@@ -698,6 +698,22 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(ruleIds(d)).toContain('force-push');
   });
 
+  // A quote met inside an expansion, a comment or a here-document body does
+  // not start a plain single-quoted span the way the quote-aware reading
+  // assumes, so those lines are read as before: every `$'` pair is decoded.
+  it.each([
+    ['echo "${x:-"\'"}" ; git push origin $\'--\\x66orce\''],
+    ["# it's\ngit push origin $'--\\x66orce'"],
+    ["cat <<EOF\nit's\nEOF\ngit push origin $'--\\x66orce'"],
+    ['echo "$(echo "\'")" ; git push origin $\'--\\x66orce\''],
+    ['echo "`echo "\'"`" ; git push origin $\'--\\x66orce\''],
+    ["echo \"$'\"'x' \"'\" ; git push origin $'--\\x66orce'"],
+    ["echo $$'a\\' ; git push origin $'--\\x66orce'"],
+  ])('refuses a force flag after quoting the plain reading cannot follow: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
   it("allows git commit -m $'line1\\nline2' — commit is not a gated subcommand", () => {
     const d = evaluateCommand(
       ctx({ command: "git commit -m $'line1\\nline2'", branch: 'feature' }),
@@ -1476,6 +1492,19 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
       expect(ruleIds(d)).toContain('unbounded-rm');
     },
   );
+
+  it.each([
+    ['echo "${x:-"\'"}" ; rm -rf $\'/\''],
+    ["# it's\nrm -rf $'/'"],
+    ["cat <<EOF\nit's\nEOF\nrm -rf $'/'"],
+    ['echo "$(echo "\'")" ; rm -rf $\'/\''],
+    ['echo "`echo "\'"`" ; rm -rf $\'/\''],
+    ["echo \"$'\"'x' \"'\" ; rm -rf $'/'"],
+    ["echo $$'a\\' ; rm -rf $'/'"],
+  ])('refuses a removal after quoting the plain reading cannot follow: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
 
   it('allows rm -rf on the bare allowed root itself', () => {
     const d = evaluateCommand(ctx({ command: 'rm -rf state', repoRoot: '/repo' }), policy);
