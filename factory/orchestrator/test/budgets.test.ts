@@ -89,6 +89,7 @@ describe('tier-scaled budgets', () => {
       verifier: { capTokens: 40_000 },
       'security-reviewer': { capTokens: 80_000 },
       auditor: { capTokens: 90_000 },
+      uiux: { capTokens: 90_000 },
     });
   });
 
@@ -167,11 +168,17 @@ describe('per-role judge caps', () => {
     expect(roleCapTokens(policy, 'auditor')).toBe(90_000);
   });
 
+  it('prices uiux at 90k per dispatch, scaled by tier', () => {
+    expect(roleCapTokens(loadBudgetPolicy(undefined, {}, 'medium'), 'uiux')).toBe(90_000);
+    expect(roleCapTokens(loadBudgetPolicy(undefined, {}, 'small'), 'uiux')).toBe(45_000);
+    expect(roleCapTokens(loadBudgetPolicy(undefined, {}, 'huge'), 'uiux')).toBe(180_000);
+  });
+
   it('prices planner and tester, and leaves the roles budgets.yml does not name unpriced', () => {
     const policy = loadBudgetPolicy(undefined, {}, 'medium');
     expect(roleCapTokens(policy, 'planner')).toBe(110_000);
     expect(roleCapTokens(policy, 'tester')).toBe(60_000);
-    for (const role of ['merger', 'uiux', 'scribe', 'wave-runner', 'nobody']) {
+    for (const role of ['merger', 'scribe', 'wave-runner', 'nobody']) {
       expect(roleCapTokens(policy, role)).toBeNull();
     }
     expect([...PRICED_ROLES].sort()).toEqual(Object.keys(policy.task).sort());
@@ -374,6 +381,7 @@ describe('env overrides on top of budgets.yml', () => {
         81_000,
       ],
       ['SMITH_TASK_AUDITOR_CAP_TOKENS', '91000', (p) => p.task.auditor.capTokens, 91_000],
+      ['SMITH_TASK_UIUX_CAP_TOKENS', '92000', (p) => p.task.uiux.capTokens, 92_000],
     ];
     expect(cases.map(([name]) => name).sort()).toEqual([...BUDGET_ENV_VARS].sort());
     for (const [name, value, read, expected] of cases) {

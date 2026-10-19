@@ -184,7 +184,7 @@ is under too, which is why an epic with an unpriceable dispatch comes back
 
 - **A role `budgets.yml` prices nowhere** (`rolesWithoutCap`). The policy prices
   `coder`, `tester`, `planner`, `researcher`, the four judges,
-  `security-reviewer` and `auditor`. It does not price `merger`, `uiux`,
+  `security-reviewer`, `auditor` and `uiux`. It does not price `merger`,
   `scribe` or `wave-runner`, all of which the factory dispatches. (A policy
   file that still carries the pre-2026-09-29 shared `task.judges` bucket is
   read as the cap for each judge it does not price by name.) Those dispatches are in neither number,

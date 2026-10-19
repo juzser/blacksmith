@@ -132,7 +132,7 @@ export interface BudgetAlarmOptions {
  * The priced roles whose tokens reach a Result, and so `task-result-recorded`.
  * Every other priced role (the judges, planner, security-reviewer, auditor)
  * produces findings or a plan whose spend reaches no result event, so it is
- * always projected. A role budgets.yml prices nowhere (merger, uiux, scribe,
+ * always projected. A role budgets.yml prices nowhere (merger, scribe,
  * wave-runner) is reported rather than assumed free — see rolesWithoutCap.
  */
 const WORKER_ROLES: readonly string[] = ['coder', 'researcher', 'tester'];
