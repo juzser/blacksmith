@@ -40,6 +40,16 @@ than appearing in it.
 
 ### Fixed
 
+- **`claims impact` reads each `export * from` line on its own.** The scanner
+  named every star re-export `*`, so all the lines in a barrel shared one name.
+  Appending a line or reordering two read as a changed declaration, and a
+  barrel in `keeps_exports` failed with "Promise broken" and exit 1. Dropping
+  any line but the last went unnoticed. Each line is now named after the
+  module it forwards, such as `* from './a.ts'`. Appending or reordering
+  breaks no promise, and dropping a line is reported as a removal. The export
+  diff also lists each name once: an overloaded function used to appear once
+  per overload.
+
 - **A plan amendment no longer supersedes a finished task it did not name.**
   The next plan version used to drop a completed task's record while keeping
   older dead copies of its id, so ingest wrote `task-superseded` for a task that
