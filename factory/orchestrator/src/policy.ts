@@ -1240,8 +1240,9 @@ function joinLineContinuations(command: string): string {
  *   (`-c alias.p=`, `-calias.p=`, `-c 'alias.p=...'`).
  * - `--config-env` naming an `alias.` key, whose value is the *name* of an
  *   environment variable read later — never visible on this line at all.
- * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list,
- *   assigned or exported.
+ * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list:
+ *   its entries are read one by one by `checkGitConfigValues`, which refuses
+ *   an `alias.` entry the same way.
  * - A `GIT_CONFIG_KEY_<n>=` pair whose value is an `alias.` key, or is a
  *   shell variable (`$V`, `${V}`) or command substitution (`` `cmd` ``,
  *   `$(cmd)`) this scanner cannot resolve — read alongside a
@@ -1259,7 +1260,6 @@ function joinLineContinuations(command: string): string {
 function definesInlineGitAlias(segment: string): boolean {
   if (/(^|\s)-c\s*['"]?alias\./i.test(segment)) return true;
   if (/--config-env(=|\s+)['"]?alias\./i.test(segment)) return true;
-  if (/\bGIT_CONFIG_PARAMETERS\b/.test(segment)) return true;
   if (/\bGIT_CONFIG_KEY_\d+=(['"]?)(alias\.|\$|`)/i.test(segment)) return true;
   return false;
 }
@@ -1872,6 +1872,168 @@ function checkForcePushSubcommandWord(
   return null;
 }
 
+/** The value of a shell variable set on the command line, or `null` when its text cannot be read statically. */
+type EnvValue = string | null;
+
+const GIT_CONFIG_ENV_NAME_RE =
+  /^(?:GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
+
+const GIT_CONFIG_UNREADABLE_REASON =
+  'a git configuration value here holds a parameter or substitution, so the guard cannot tell what git will run — write the value out plainly';
+
+/**
+ * Records the variables a run of words sets: `NAME=value` words and, after
+ * `export`, a bare configuration variable name (set from somewhere this line
+ * does not show, so unreadable). With `leadingOnly` the scan stops at the
+ * first word that is neither `export`, `env` nor an assignment, which is how a
+ * segment with no `git` word is read; otherwise every word is scanned, which
+ * is how the words in front of a `git` word are read.
+ */
+function readAssignments(
+  words: readonly DequotedWord[],
+  env: Map<string, EnvValue>,
+  leadingOnly: boolean,
+): void {
+  let afterExport = false;
+  for (const word of words) {
+    const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1];
+    if (name !== undefined) {
+      env.set(name, hasUnreadableShellForm(word.raw) ? null : word.text.slice(name.length + 1));
+    } else if (word.text === 'export') {
+      afterExport = true;
+    } else if (afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text)) {
+      env.set(word.text, null);
+    } else if (leadingOnly && word.text !== 'env' && !afterExport) {
+      break;
+    }
+  }
+}
+
+/**
+ * The entries of a `GIT_CONFIG_PARAMETERS` value, in both spellings git
+ * writes, `'key=value'` and `'key'='value'`, separated by spaces, with git's
+ * `'\''` escape for a single quote inside an entry. `null` when the text is
+ * not a list of such entries.
+ */
+function parseConfigParameters(text: string): Array<{ key: string; value: string }> | null {
+  const entries: Array<{ key: string; value: string }> = [];
+  let i = 0;
+  const readQuoted = (): string | null => {
+    if (text.charAt(i) !== "'") return null;
+    i += 1;
+    let out = '';
+    for (;;) {
+      const end = text.indexOf("'", i);
+      if (end === -1) return null;
+      out += text.slice(i, end);
+      i = end + 1;
+      if (!text.startsWith("\\''", i)) return out;
+      out += "'";
+      i += 3;
+    }
+  };
+  while (i < text.length) {
+    if (text.charAt(i) === ' ') {
+      i += 1;
+      continue;
+    }
+    const first = readQuoted();
+    if (first === null) return null;
+    if (text.charAt(i) === '=') {
+      i += 1;
+      const second = readQuoted();
+      if (second === null) return null;
+      entries.push({ key: first, value: second });
+      continue;
+    }
+    const eq = first.indexOf('=');
+    entries.push(
+      eq === -1
+        ? { key: first, value: '' }
+        : { key: first.slice(0, eq), value: first.slice(eq + 1) },
+    );
+  }
+  return entries;
+}
+
+/**
+ * Reads every git configuration value that git runs as a command the same
+ * way the rule reads that command line typed directly: `-c key=value` and
+ * `--config-env=key=VAR` among the global options, the `-O` /
+ * `--open-files-in-pager` option of `git grep`, and the environment of the
+ * command (`GIT_PAGER`, `GIT_EXTERNAL_DIFF`, `GIT_CONFIG_PARAMETERS`,
+ * `GIT_CONFIG_COUNT` / `_KEY_<n>` / `_VALUE_<n>`), whether set on the segment,
+ * through `env`, or by an earlier segment. A readable value is checked as a
+ * nested command line; a value holding a parameter, substitution or backtick
+ * is refused whatever its key, so no list of keys is kept.
+ */
+function checkGitConfigValues(
+  words: readonly DequotedWord[],
+  gitIndex: number,
+  env: ReadonlyMap<string, EnvValue>,
+  policy: GuardrailPolicy,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  const unreadable = violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+  const checkValue = (value: EnvValue): PolicyViolation | null =>
+    value === null ? unreadable : checkForcePush(value, policy);
+  for (const [name, value] of env) {
+    if (!GIT_CONFIG_ENV_NAME_RE.test(name)) continue;
+    if (name === 'GIT_CONFIG_PARAMETERS') {
+      const entries = value === null ? null : parseConfigParameters(value);
+      if (entries === null) return unreadable;
+      for (const entry of entries) {
+        if (/^alias\./i.test(entry.key)) return violation(rule);
+        const found = checkValue(entry.value);
+        if (found) return found;
+      }
+    } else if (/^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) {
+      if (value === null) return unreadable;
+    } else {
+      const found = checkValue(value);
+      if (found) return found;
+    }
+  }
+  let i = gitIndex + 1;
+  for (; i < words.length; i += 1) {
+    const word = words[i];
+    if (word === undefined || !word.text.startsWith('-')) break;
+    const isConfigEnv = word.text.startsWith('--config-env');
+    if (!word.text.startsWith('-c') && !isConfigEnv) {
+      i += GIT_GLOBAL_VALUE_FLAGS.has(word.text) ? 1 : 0;
+      continue;
+    }
+    let operand = word.text.slice(isConfigEnv ? '--config-env'.length : 2).replace(/^=/, '');
+    if (operand === '') {
+      operand = words[i + 1]?.text ?? '';
+      if (hasUnreadableShellForm(words[i + 1]?.raw ?? '')) return unreadable;
+      i += 1;
+    } else if (hasUnreadableShellForm(word.raw)) {
+      return unreadable;
+    }
+    const eq = operand.indexOf('=');
+    if (eq === -1) continue;
+    const rest = operand.slice(eq + 1);
+    const found = isConfigEnv
+      ? env.has(rest)
+        ? checkValue(env.get(rest) ?? null)
+        : null
+      : checkValue(rest);
+    if (found) return found;
+  }
+  const subcommand = words[i];
+  if (subcommand?.text !== 'grep') return null;
+  for (const arg of words.slice(i + 1)) {
+    if (!isGrepPagerOption(arg.text)) continue;
+    if (hasUnreadableShellForm(arg.raw)) return unreadable;
+    const marker = arg.text.startsWith('--') ? arg.text.indexOf('=') : arg.text.indexOf('O');
+    const found = marker === -1 ? null : checkValue(arg.text.slice(marker + 1));
+    if (found) return found;
+  }
+  return null;
+}
+
 /**
  * Rule 2's main defence: a plain-word gate, not a growing list of individual
  * shell tricks. In a segment that reaches `push`, `rebase`, `reset`,
@@ -1890,6 +2052,8 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   // subcommand-word gate, and the plain-word gate over the words after it —
   // reads the command the way bash will run it, with no continuation left to
   // hide a subcommand word inside.
+  // Variables set by earlier segments, carried to the git segments after them.
+  const carried = new Map<string, EnvValue>();
   for (const segment of topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
@@ -1905,6 +2069,17 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
       continue;
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
+
+    const words = splitDequotedWords(stripRedirections(segment));
+    const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
+    if (gitIndex === -1) {
+      readAssignments(words, carried, true);
+    } else {
+      const env = new Map(carried);
+      readAssignments(words.slice(0, gitIndex), env, false);
+      const configViolation = checkGitConfigValues(words, gitIndex, env, policy, rule);
+      if (configViolation) return configViolation;
+    }
 
     // Subcommand detection reads the decoded text, so a subcommand word
     // hidden inside a `$'...'` span (`$'\x70ush'`) is still found. But a
