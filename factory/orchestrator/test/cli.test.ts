@@ -9162,6 +9162,141 @@ describe('cli.ts (built binary)', () => {
         ).toEqual([]);
       });
 
+      // A task that finished before the epic's last amendment is dropped from
+      // the latest plan version outright (draftNextVersion), so the latest
+      // live roster alone leaves its work nowhere a clause may cite it. The
+      // log is what earns the credit: a plan row's own `completed` never does.
+      describe('a task finished before the last amendment', () => {
+        const row = (id: string, status: string) => ({ task_id: id, task_status: status });
+        const FINISHED = 'epic-1/task-1';
+        const KEPT = [row('epic-1/task-2', 'todo')];
+
+        /** plan-v1 holds task-1 and task-2; plan-v2 (the --plan file) holds what `latest` says. */
+        async function specsWith(name: string, latest: ReturnType<typeof row>[]) {
+          const specsDir = path.join(scratchDir, `${name}-specs`);
+          await mkdir(path.join(specsDir, 'epic-1'), { recursive: true });
+          const v1 = {
+            epic_id: 'epic-1',
+            version: 1,
+            status: 'active',
+            edges: [],
+            tasks: [row(FINISHED, 'completed'), row('epic-1/task-2', 'todo')],
+          };
+          const v2 = { ...v1, version: 2, tasks: latest };
+          await writeFile(path.join(specsDir, 'epic-1', 'plan-v1.json'), JSON.stringify(v1));
+          await writeFile(path.join(specsDir, 'epic-1', 'plan-v2.json'), JSON.stringify(v2));
+          return { specsDir, planPath: path.join(specsDir, 'epic-1', 'plan-v2.json') };
+        }
+
+        function goalCheck(
+          s: { sessionId: string; eventsDir: string },
+          specs: { specsDir: string; planPath: string },
+          roadmapPath: string,
+          coveragePath: string,
+        ) {
+          return runCli([
+            'epic',
+            'goal-check',
+            '--epic',
+            'epic-1',
+            '--plan',
+            specs.planPath,
+            '--specs-dir',
+            specs.specsDir,
+            '--roadmap-path',
+            roadmapPath,
+            '--coverage',
+            coveragePath,
+            '--checked-by',
+            'spec-reviewer',
+            '--session',
+            s.sessionId,
+            '--causal-parent',
+            `${s.sessionId}#0`,
+            '--state-dir',
+            s.eventsDir,
+          ]);
+        }
+
+        const cites = (taskId: string) => [
+          { clause: CLAUSES[0], verdict: 'covered', taskIds: [taskId] },
+          { clause: CLAUSES[1], verdict: 'covered', taskIds: ['epic-1/task-2'] },
+        ];
+
+        function merge(s: { sessionId: string; eventsDir: string }, ids: string[]) {
+          append(s.sessionId, s.eventsDir, {
+            event_type: 'wave-merged',
+            payload: { task_ids: ids },
+          });
+        }
+
+        it('credits it when the log reports it merged', async () => {
+          const s = await session();
+          const specs = await specsWith('cli-goal-fin-ok', KEPT);
+          merge(s, [FINISHED]);
+          const result = goalCheck(
+            s,
+            specs,
+            await roadmap('cli-goal-fin-ok'),
+            await coverageFile('cli-goal-fin-ok', cites(FINISHED)),
+          );
+          expect(result.status).toBe(0);
+          expect(checks(s.sessionId, s.eventsDir)).toHaveLength(1);
+        });
+
+        const refused: { name: string; setup: string; latest: ReturnType<typeof row>[] }[] = [
+          { name: 'never merged in the log', setup: 'none', latest: KEPT },
+          { name: 'superseded after its last merge', setup: 'superseded', latest: KEPT },
+          { name: 'merged under a bare log id', setup: 'bare', latest: KEPT },
+          { name: 'merged under another epic', setup: 'other-epic', latest: KEPT },
+          {
+            name: 'superseded in the latest version, though merged',
+            setup: 'merged',
+            latest: [row(FINISHED, 'superseded'), ...KEPT],
+          },
+        ];
+        for (const c of refused) {
+          it(`still refuses it when it was ${c.name}`, async () => {
+            const s = await session();
+            const specs = await specsWith(`cli-goal-fin-${c.setup}`, c.latest);
+            if (c.setup === 'merged') merge(s, [FINISHED]);
+            if (c.setup === 'superseded') {
+              merge(s, [FINISHED]);
+              append(s.sessionId, s.eventsDir, {
+                event_type: 'task-superseded',
+                task_id: FINISHED,
+                payload: {},
+              });
+            }
+            if (c.setup === 'bare') merge(s, ['task-1']);
+            if (c.setup === 'other-epic') merge(s, ['epic-9/task-1']);
+            const result = goalCheck(
+              s,
+              specs,
+              await roadmap(`cli-goal-fin-${c.setup}`),
+              await coverageFile(`cli-goal-fin-${c.setup}`, cites(FINISHED)),
+            );
+            expect(result.status).toBe(1);
+            expect(JSON.parse(result.stdout).error.code).toBe('goal-check.unknown-task');
+            expect(checks(s.sessionId, s.eventsDir)).toEqual([]);
+          });
+        }
+
+        it('still refuses an id no plan version ever held', async () => {
+          const s = await session();
+          const specs = await specsWith('cli-goal-fin-never', KEPT);
+          merge(s, ['epic-1/task-9']);
+          const result = goalCheck(
+            s,
+            specs,
+            await roadmap('cli-goal-fin-never'),
+            await coverageFile('cli-goal-fin-never', cites('epic-1/task-9')),
+          );
+          expect(result.status).toBe(1);
+          expect(JSON.parse(result.stdout).error.code).toBe('goal-check.unknown-task');
+        });
+      });
+
       // Same shape as the D-139 check on `epic spec-review`: an undeclared
       // flag is a refusal, so the usage line is load-bearing.
       it('documents every flag epic goal-check requires', () => {

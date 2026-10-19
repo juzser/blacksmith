@@ -26,6 +26,7 @@ import {
   transition,
 } from './findings.js';
 import {
+  creditableTaskIds,
   type EpicGoalStatus,
   type GoalCheckStatus,
   goalCheckBlockers,
@@ -33,7 +34,14 @@ import {
 } from './goalCheck.js';
 import { type IntegrationCheckRecord, latestIntegrationCheck } from './integration.js';
 import { type McpSurfaceStatus, mcpBlockers } from './mcp.js';
-import { bareTaskId, latestPlanVersion, livePlanTasks, loadPlan, type PlanOpts } from './plan.js';
+import {
+  bareTaskId,
+  latestPlanVersion,
+  livePlanTasks,
+  loadEarlierPlans,
+  loadPlan,
+  type PlanOpts,
+} from './plan.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
 import {
   enabledExternalProviders,
@@ -637,6 +645,12 @@ export interface EpicSummary {
 export interface EpicPlanRoster {
   version: number;
   tasks: readonly EpicTaskSummary[];
+  /**
+   * The ids a goal-check may credit (`creditableTaskIds`): `tasks` plus the
+   * tasks that finished before the last amendment. Absent means `tasks` alone.
+   * Kept apart from `tasks` so the undispatched-task check does not move.
+   */
+  creditableTaskIds?: readonly string[];
 }
 
 /**
@@ -1078,7 +1092,7 @@ export function summarizeEpic(
       epicId,
       goalCheck,
       plan?.version ?? null,
-      plan?.tasks.map((t) => t.taskId) ?? [],
+      plan?.creditableTaskIds ?? plan?.tasks.map((t) => t.taskId) ?? [],
     ),
   ];
 
@@ -1557,7 +1571,11 @@ function epicQuorumDecisionPayload(
  * exactly when the operator most needs it. The blocker set is unchanged in
  * that case, and `planVersion: null` records that nothing was consulted.
  */
-function resolvePlanRoster(epicId: string, planOpts: PlanOpts): EpicPlanRoster | null {
+function resolvePlanRoster(
+  epicId: string,
+  planOpts: PlanOpts,
+  events: readonly StoredEvent[],
+): EpicPlanRoster | null {
   const version = latestPlanVersion(epicId, planOpts);
   if (version === null) return null;
   try {
@@ -1565,6 +1583,12 @@ function resolvePlanRoster(epicId: string, planOpts: PlanOpts): EpicPlanRoster |
     return {
       version,
       tasks: livePlanTasks(plan).map((t) => ({ taskId: t.task_id, taskStatus: t.task_status })),
+      creditableTaskIds: creditableTaskIds(
+        epicId,
+        plan,
+        loadEarlierPlans(epicId, version, planOpts),
+        events,
+      ),
     };
   } catch {
     return null;
@@ -1638,7 +1662,7 @@ async function computeEpicSummary(
     // read, so the pair is what makes "current" decidable.
     { check: latestGoalCheck(events, input.epicId), goal: input.goal },
     input.effort,
-    resolvePlanRoster(input.epicId, input.planOpts ?? {}),
+    resolvePlanRoster(input.epicId, input.planOpts ?? {}, events),
     skipped,
     // Off the same lineage `events` every other fact here came from — the
     // wave record is in that log already, so measuring width costs this call

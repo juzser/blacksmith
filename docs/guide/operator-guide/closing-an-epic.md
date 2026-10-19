@@ -447,7 +447,9 @@ bs epic goal-check --epic epic-1 \
 ```
 
 Three verdicts, and each one costs something. `covered` must name live plan
-tasks — a clause credited to a task the plan does not have is refused
+tasks, or a task that finished before the last amendment dropped it from the
+plan (the event log must show it merged; a plan row's own `completed` earns
+nothing) — a clause credited to a task the plan does not have is refused
 (`goal-check.unknown-task`), because a clause delivered by a task that does not
 exist is a clause nothing delivers. `uncovered` mints an **S2-major**
 spec-scoped finding against the plan file itself, which no task diff can close:

@@ -262,6 +262,29 @@ export function loadPlan(epicId: string, version: number, opts: PlanOpts = {}): 
 }
 
 /**
+ * Every plan version of `epicId` below `beforeVersion` that can be read,
+ * oldest first. Best effort by design: a version that is missing or does not
+ * parse is skipped, never thrown, because the caller (the goal-check credit
+ * set) only ever uses these to WIDEN what may be cited, and an unreadable
+ * version must leave that set narrower, not break the verb.
+ */
+export function loadEarlierPlans(
+  epicId: string,
+  beforeVersion: number,
+  opts: PlanOpts = {},
+): PlanFile[] {
+  const earlier: PlanFile[] = [];
+  for (let version = 1; version < beforeVersion; version++) {
+    try {
+      earlier.push(loadPlan(epicId, version, opts));
+    } catch {
+      // skipped on purpose; see above
+    }
+  }
+  return earlier;
+}
+
+/**
  * A task ref's project, read off its own epic's latest plan version -- the
  * D-246 precedent (`db/projector.ts`'s `planProjectResolver`, for the board)
  * restated here so `errorIssues.ts` can answer the same question without

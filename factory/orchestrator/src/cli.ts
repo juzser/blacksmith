@@ -117,7 +117,12 @@ import {
 } from './findings.js';
 import type { CommandResult } from './gh.js';
 import { runGit } from './git.js';
-import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
+import {
+  type ClauseCoverage,
+  creditableTaskIds,
+  recordGoalCheck,
+  resolveEpicGoal,
+} from './goalCheck.js';
 import {
   loadHarnessPolicy,
   type ModelTier,
@@ -163,6 +168,7 @@ import {
   latestPlanVersion,
   livePlanTasks,
   liveSpec,
+  loadEarlierPlans,
   loadPlan,
   type PlanChanges,
   type PlanFile,
@@ -4290,13 +4296,28 @@ async function main(): Promise<number> {
       );
     }
     const coverage = readJsonFile<ClauseCoverage[]>(requireFlag(flags, 'coverage'));
+    // The creditable set is the one the epic gate reads (`creditableTaskIds`):
+    // the plan's live tasks plus any that finished before the last amendment.
+    // Best effort: a log or plan version that cannot be read narrows the set
+    // back to the plan's live tasks, never widens it.
+    let logEvents: StoredEvent[] = [];
+    try {
+      logEvents = await readLineageEvents(requireFlag(flags, 'session'), eventOptsFromFlags(flags));
+    } catch {
+      // the fallback above stands
+    }
     const record = await recordGoalCheck(
       {
         epicId,
         milestoneId: goal.milestoneId,
         goal: goal.goal,
         planVersion: plan.version,
-        livePlanTaskIds: livePlanTasks(plan).map((spec) => spec.task_id),
+        livePlanTaskIds: creditableTaskIds(
+          epicId,
+          plan,
+          loadEarlierPlans(epicId, plan.version, planOptsFromFlags(flags)),
+          logEvents,
+        ),
         checkedBy: requireFlag(flags, 'checked-by'),
         ...(flags['checked-by-provider']
           ? { checkedByProvider: flags['checked-by-provider'] }
