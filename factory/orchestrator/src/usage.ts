@@ -670,7 +670,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'epic goal-check',
     positionals: '',
-    flags: `--epic <id> --plan <plan.json> --coverage <file> --checked-by <role> [--checked-by-provider <name>] [--roadmap-path <file>] ${EVENTS_DIR}`,
+    flags: `--epic <id> --plan <plan.json> --coverage <file> --checked-by <role> [--checked-by-provider <name>] [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary:
       'Record the plan checked clause by clause against the roadmap goal — the one reference the planner did not write.',
   },

@@ -32,6 +32,7 @@ const POLICY: BudgetPolicy = {
     verifier: { capTokens: 40_000 },
     'security-reviewer': { capTokens: 80_000 },
     auditor: { capTokens: 90_000 },
+    uiux: { capTokens: 90_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],

@@ -731,7 +731,8 @@ export async function amendPlan(
   // That function is the one place this question gets answered (P9-15).
   // `TaskSpecRecord.claims` is `unknown` and the plan's own schema is what
   // guarantees it is a string array, so it is filtered rather than re-validated
-  // here — the same call `ownershipFromPlan` makes. A task with no claims
+  // here — the same call `ownershipFromPlan` makes
+  // for the claims shape. A task with no claims
   // contributes no coverage, which leaves its sites unclaimed rather than
   // silently covered: the safe direction for a list whose job is to be read.
   const obligated = new Set(obligations);

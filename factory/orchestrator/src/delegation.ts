@@ -348,6 +348,14 @@ export interface DelegationLogReport {
 export interface DelegationLogOptions {
   sessionId: string;
   taskId?: string;
+  /**
+   * Sessions opened against an event, keyed by that event's id, read from every
+   * log's entry edge in the state directory (`sessionsOpenedByEdge`). Rule 2
+   * needs it from a wave session, whose lineage holds the epic's earlier
+   * dispatches but not the sibling sessions that took them up. Absent, rule 2
+   * answers from `events` alone, as in-memory callers always have.
+   */
+  openedElsewhere?: ReadonlyMap<string, string>;
 }
 
 interface DispatchRow {
@@ -443,7 +451,12 @@ function readTerminals(events: readonly StoredEvent[]): TerminalRow[] {
   return rows;
 }
 
-/** The session a dispatch opened, keyed by the dispatch's event id. */
+/**
+ * The session a dispatch opened, keyed by the dispatch's event id, as far as
+ * `events` can see: only sessions whose `session-start` is in this slice. A
+ * lineage omits its siblings, so `checkDelegationLog` widens this with
+ * `DelegationLogOptions.openedElsewhere`.
+ */
 function sessionsOpenedByDispatch(events: readonly StoredEvent[]): Map<string, string> {
   const opened = new Map<string, string>();
   for (const { record } of events) {
@@ -489,6 +502,12 @@ export function sessionOwnerRole(events: readonly StoredEvent[], sessionId: stri
 /**
  * Asserts delegation.yml against a lineage's log.
  *
+ * Rule 2 asks of each dispatch whether a session opened against it. The
+ * lineage answers for its own sessions; a session outside it (an earlier
+ * wave, seen from a later one) is answered by `options.openedElsewhere`, and
+ * the lineage's own record wins where both speak. Rule 3 reads dispatches in
+ * `events`, so it is unchanged: it still fires only inside the lineage.
+ *
  * D-181: scope is `taskIdsMatch`'s question, not `===`'s -- the log writes
  * `E1/t-1` and an operator types `t-1`.
  */
@@ -529,7 +548,7 @@ export function checkDelegationLog(
 
   const dispatches = readDispatches(events).filter((d) => inScope(d.taskId));
   const terminals = readTerminals(events);
-  const opened = sessionsOpenedByDispatch(events);
+  const opened = new Map([...(options.openedElsewhere ?? []), ...sessionsOpenedByDispatch(events)]);
   const checks: DelegationLogCheck[] = [];
 
   // Which sessions a grant opened, and for whom. Built before the per-dispatch

@@ -657,6 +657,63 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(ruleIds(d)).toContain('force-push');
   });
 
+  // In bash a `$` before a `'` only opens an ANSI-C span outside quotes. The
+  // `$` that ends a plain single-quoted word (`grep 'a$'`) or follows a
+  // backslash (`\$`) is ordinary text, so these read-only commands carry no
+  // ANSI-C span at all and were refused only because the decoder paired the
+  // wrong quotes.
+  it.each([
+    ["git ls-files | grep 'a$'"],
+    ["git log | grep 'x$'"],
+    ["git status; echo 'a$'"],
+    ["git status && echo 'end$'"],
+    ["git ls-files | grep -v '^\\s*$'"],
+    ["git ls-files | grep 'a\\$'"],
+    ["git ls-files | grep -E 'hooks\\.json$|settings\\.json$' | head"],
+    ["git grep -n -l 'needle' HEAD; sed -n 1,30p a.ts | grep -E -v '^\\s*$' | head -25"],
+  ])('allows %s — a quoted trailing dollar is plain text', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  // The same reading must not let a real ANSI-C span through, alone or next
+  // to a plain quoted dollar word.
+  it.each([
+    ["git push origin $'--force'"],
+    ["git push origin $'--force'; echo 'a$'"],
+    ["echo 'a$'; git push origin $'\\x2d\\x2dforce'"],
+    ["git $'push' --force origin x"],
+    ["echo 'a$'; git $'\\x70ush' --force origin x"],
+    // A real span left open on a line that pushes.
+    ["git push origin $'x"],
+    ["echo 'a$'; git push origin $'x"],
+    // A plain-quoted dollar word does not excuse a force flag on the push.
+    ["git push --force origin x; echo 'a$'"],
+    ["git status; echo 'a$'; git push -f origin x"],
+    // A lone `'` inside double quotes is text, so the real span after it is
+    // still found.
+    ["echo \"it's\"; git push origin $'\\x2d\\x2dforce'"],
+  ])('still denies %s — a real ANSI-C span is read as one', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // A quote met inside an expansion, a comment or a here-document body does
+  // not start a plain single-quoted span the way the quote-aware reading
+  // assumes, so those lines are read as before: every `$'` pair is decoded.
+  it.each([
+    ['echo "${x:-"\'"}" ; git push origin $\'--\\x66orce\''],
+    ["# it's\ngit push origin $'--\\x66orce'"],
+    ["cat <<EOF\nit's\nEOF\ngit push origin $'--\\x66orce'"],
+    ['echo "$(echo "\'")" ; git push origin $\'--\\x66orce\''],
+    ['echo "`echo "\'"`" ; git push origin $\'--\\x66orce\''],
+    ["echo \"$'\"'x' \"'\" ; git push origin $'--\\x66orce'"],
+    ["echo $$'a\\' ; git push origin $'--\\x66orce'"],
+  ])('refuses a force flag after quoting the plain reading cannot follow: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
   it("allows git commit -m $'line1\\nline2' — commit is not a gated subcommand", () => {
     const d = evaluateCommand(
       ctx({ command: "git commit -m $'line1\\nline2'", branch: 'feature' }),
@@ -1416,6 +1473,37 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
   it('allows rm -rf under workspaces/', () => {
     const d = evaluateCommand(ctx({ command: 'rm -rf workspaces/foo', repoRoot: '/repo' }), policy);
     expect(d.allowed).toBe(true);
+  });
+
+  // A plain single-quoted word ending in `$` is ordinary text, not the start
+  // of an ANSI-C span; the removal stays inside the allowed root.
+  it.each([["rm -rf workspaces/foo 'workspaces/a$'"], ["rm -rf 'workspaces/a$' && echo ok"]])(
+    'allows %s — a quoted trailing dollar is plain text',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it.each([["rm -rf src 'a$'"], ["rm -rf $'src' 'a$'"], ["rm -rf workspaces/foo $'x"]])(
+    'still denies %s — the removal leaves the allowed root or hides a span',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it.each([
+    ['echo "${x:-"\'"}" ; rm -rf $\'/\''],
+    ["# it's\nrm -rf $'/'"],
+    ["cat <<EOF\nit's\nEOF\nrm -rf $'/'"],
+    ['echo "$(echo "\'")" ; rm -rf $\'/\''],
+    ['echo "`echo "\'"`" ; rm -rf $\'/\''],
+    ["echo \"$'\"'x' \"'\" ; rm -rf $'/'"],
+    ["echo $$'a\\' ; rm -rf $'/'"],
+  ])('refuses a removal after quoting the plain reading cannot follow: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
   });
 
   it('allows rm -rf on the bare allowed root itself', () => {

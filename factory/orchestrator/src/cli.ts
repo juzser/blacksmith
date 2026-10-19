@@ -87,6 +87,7 @@ import {
   readLineageEvents,
   requireSession,
   type StoredEvent,
+  sessionsOpenedByEdge,
   sessionTree,
   startSession,
   tailEvents,
@@ -116,7 +117,12 @@ import {
 } from './findings.js';
 import type { CommandResult } from './gh.js';
 import { runGit } from './git.js';
-import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
+import {
+  type ClauseCoverage,
+  creditableTaskIds,
+  recordGoalCheck,
+  resolveEpicGoal,
+} from './goalCheck.js';
 import {
   loadHarnessPolicy,
   type ModelTier,
@@ -162,10 +168,12 @@ import {
   latestPlanVersion,
   livePlanTasks,
   liveSpec,
+  loadEarlierPlans,
   loadPlan,
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
+  planClaimedTasks,
   planProjectResolverForTaskRef,
   planSelfFallbackForTaskRef,
   resolveTaskId,
@@ -955,15 +963,14 @@ function noveltyThresholdOverride(flags: Record<string, string>): number | undef
 
 /**
  * The plan's claims map, as the ownership input routeFindings takes (D-41/P9-24).
- * `TaskSpecRecord.claims` is `unknown` — the plan's own schema is what
- * guarantees it is a string array, so validating it a second time here would
- * only add a second opinion. A task without claims owns no file, and is
- * dropped rather than defaulted to owning everything.
+ * Live records only (D-126): a plan version keeps each superseded copy of a
+ * task beside its replacement, often under the same id, and a `.find` by id
+ * would answer with the dead one. That rule is `planClaimedTasks`, shared with
+ * `audit resolve`; a task without claims owns no file and is dropped rather
+ * than defaulted to owning everything.
  */
 function ownershipFromPlan(plan: PlanFile): ClaimedTask[] {
-  return plan.tasks
-    .filter((task) => Array.isArray(task.claims))
-    .map((task) => ({ task_id: task.task_id, claims: task.claims as string[] }));
+  return planClaimedTasks(plan);
 }
 
 /** `--plan <file>` is optional everywhere findings are raised; without it, ownership is unknown. */
@@ -3377,6 +3384,11 @@ async function main(): Promise<number> {
     // own session is where its dispatches land, so a check that read only the
     // epic's session would see the delegation it exists to audit as absent.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    // The lineage leaves out sibling sessions on purpose, so from a later wave
+    // the epic's earlier wave-runner dispatches would read as taken up by
+    // nobody. Whether a session opened against one is a question for every
+    // log's entry edge, not for the lineage.
+    const openedElsewhere = await sessionsOpenedByEdge(eventOptsFromFlags(flags));
     const policy = loadDelegationPolicy(flags.policy);
     const crosscheck = loadCrosscheckPolicy(flags.crosscheck);
     const grants = checkDelegationGrants(policy, {
@@ -3387,6 +3399,7 @@ async function main(): Promise<number> {
     const log = checkDelegationLog(events, policy, {
       sessionId,
       ...(flags.task ? { taskId: flags.task } : {}),
+      openedElsewhere,
     });
     printJson({ session: sessionId, grants, log, ok: grants.ok && log.ok });
     // Same fail-closed contract as `dispatch check`: `unverifiable` exits 1,
@@ -4283,13 +4296,28 @@ async function main(): Promise<number> {
       );
     }
     const coverage = readJsonFile<ClauseCoverage[]>(requireFlag(flags, 'coverage'));
+    // The creditable set is the one the epic gate reads (`creditableTaskIds`):
+    // the plan's live tasks plus any that finished before the last amendment.
+    // Best effort: a log or plan version that cannot be read narrows the set
+    // back to the plan's live tasks, never widens it.
+    let logEvents: StoredEvent[] = [];
+    try {
+      logEvents = await readLineageEvents(requireFlag(flags, 'session'), eventOptsFromFlags(flags));
+    } catch {
+      // the fallback above stands
+    }
     const record = await recordGoalCheck(
       {
         epicId,
         milestoneId: goal.milestoneId,
         goal: goal.goal,
         planVersion: plan.version,
-        livePlanTaskIds: livePlanTasks(plan).map((spec) => spec.task_id),
+        livePlanTaskIds: creditableTaskIds(
+          epicId,
+          plan,
+          loadEarlierPlans(epicId, plan.version, planOptsFromFlags(flags)),
+          logEvents,
+        ),
         checkedBy: requireFlag(flags, 'checked-by'),
         ...(flags['checked-by-provider']
           ? { checkedByProvider: flags['checked-by-provider'] }

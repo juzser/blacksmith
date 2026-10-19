@@ -1059,15 +1059,39 @@ function findAnsiCQuoteEnd(text: string, start: number): number {
  * rule-2 checks below read what git will actually receive rather than the
  * quoted spelling. An unterminated span — no closing `'` before the segment
  * ends — cannot be decoded with confidence; `unterminated` tells the caller
- * to fail closed rather than silently reading past it.
+ * to fail closed rather than silently reading past it. `opened` reports
+ * whether any `$'` opener was read, for a caller that only needs to know
+ * whether the construct is present.
+ *
+ * Two readings, chosen per segment. The quote-aware reading applies only
+ * where it is certain to match bash: outside quotes a `$'` opens an ANSI-C
+ * span, a plain `'...'` span is literal (a `$` that ends it, as in
+ * `grep 'a$'`, is ordinary text and its closing `'` is not an opener), and a
+ * backslash makes the next character ordinary. A plain `'` that is never
+ * closed is copied through to the end of the segment. A segment holding a
+ * construct that starts quoting of its own is read as before instead: every
+ * `$'` pair is decoded wherever it sits. Those constructs are a backtick,
+ * `$(`, `${`, `$$` (a parameter, so a `'` after it is a plain quote), `<<`
+ * (a here-document body is not quoted text), `#` (a comment is not quoted
+ * text), and a `$'` met inside double quotes (bash reads it as literal text).
+ * When unsure, the segment gets the as-before reading.
  */
-function decodeAnsiCQuoting(segment: string): { text: string; unterminated: boolean } {
+const UNCERTAIN_QUOTING = /`|\$\(|\$\{|\$\$|<<|#/;
+
+/** The as-before reading: every `$'` pair is decoded, whatever surrounds it. */
+function scanEveryAnsiCPair(segment: string): {
+  text: string;
+  unterminated: boolean;
+  opened: boolean;
+} {
   let result = '';
+  let opened = false;
   let i = 0;
   while (i < segment.length) {
     if (segment[i] === '$' && segment[i + 1] === "'") {
+      opened = true;
       const end = findAnsiCQuoteEnd(segment, i + 2);
-      if (end === -1) return { text: result + segment.slice(i), unterminated: true };
+      if (end === -1) return { text: result + segment.slice(i), unterminated: true, opened };
       result += decodeAnsiCPayload(segment.slice(i + 2, end));
       i = end + 1;
       continue;
@@ -1075,7 +1099,52 @@ function decodeAnsiCQuoting(segment: string): { text: string; unterminated: bool
     result += segment[i];
     i += 1;
   }
-  return { text: result, unterminated: false };
+  return { text: result, unterminated: false, opened };
+}
+
+function scanAnsiCQuoting(segment: string): {
+  text: string;
+  unterminated: boolean;
+  opened: boolean;
+} {
+  if (UNCERTAIN_QUOTING.test(segment)) return scanEveryAnsiCPair(segment);
+  let result = '';
+  let opened = false;
+  let inDouble = false;
+  let i = 0;
+  while (i < segment.length) {
+    const c = segment[i];
+    if (c === '\\') {
+      result += segment.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (c === '$' && segment[i + 1] === "'") {
+      if (inDouble) return scanEveryAnsiCPair(segment);
+      opened = true;
+      const end = findAnsiCQuoteEnd(segment, i + 2);
+      if (end === -1) return { text: result + segment.slice(i), unterminated: true, opened };
+      result += decodeAnsiCPayload(segment.slice(i + 2, end));
+      i = end + 1;
+      continue;
+    }
+    if (!inDouble && c === "'") {
+      const close = segment.indexOf("'", i + 1);
+      const spanEnd = close === -1 ? segment.length : close + 1;
+      result += segment.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (c === '"') inDouble = !inDouble;
+    result += c;
+    i += 1;
+  }
+  return { text: result, unterminated: false, opened };
+}
+
+function decodeAnsiCQuoting(segment: string): { text: string; unterminated: boolean } {
+  const { text, unterminated } = scanAnsiCQuoting(segment);
+  return { text, unterminated };
 }
 
 /**
@@ -1690,7 +1759,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
  * let a force flag through.
  */
 function topLevelCommands(command: string): string[] {
-  if (/\$'|\$\{|<<|(^|[^$])#/.test(command)) return [command];
+  if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return [command];
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
   let start = 0;

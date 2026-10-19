@@ -277,7 +277,8 @@ playbooks are written to prevent.
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
-    `covered` must name live plan task ids; `out-of-scope` must give a reason,
+    `covered` must name live plan task ids (or a task the log shows merged
+    before an amendment dropped it); `out-of-scope` must give a reason,
     and that reason is quoted back to the epic judge. `uncovered` mints an
     S2-major spec finding against the plan file — no task diff can contain
     that fix, so the answer is `bs plan amend`, which cuts v(n+1) and sends

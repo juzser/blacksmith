@@ -49,7 +49,10 @@ import { createHash } from 'node:crypto';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import { type EventContext, type FindingEvidence, mintFindings, raiseFinding } from './findings.js';
+import { livePlanTasks, type PlanFile } from './plan.js';
 import { loadRoadmap, ownsEpic } from './roadmap.js';
+import { bareTaskId, epicOfTaskId, isQualifiedTaskId } from './taskId.js';
+import { finishedInLog } from './taskLifecycle.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 export class GoalCheckError extends SmithError {}
@@ -235,6 +238,52 @@ const ROADMAP_REMEDY =
   "Give the milestone that owns it a `- goal:` line in factory/specs/roadmap.md, or add the epic to an existing milestone's `- epics:` list.";
 
 /**
+ * The task ids a coverage map may credit: the one set both `epic goal-check`
+ * (record time) and the epic gate (`goalCheckBlockers`) read, so they cannot
+ * disagree.
+ *
+ * Every live task of the latest plan, plus every task that finished before the
+ * last amendment: `draftNextVersion` drops a completed, unsuperseded id from
+ * the next version outright, so without the second half an epic amended late
+ * has its finished work nowhere a clause may cite it. An id joins when an
+ * earlier version holds a live (non-`superseded`) record of it, the latest
+ * version holds no record of it at all (a `superseded` one is a decision to
+ * drop the work), and the event log reports it finished (`finishedInLog`).
+ *
+ * The log earns the credit, never a plan row's own `completed` (D-126/D-138).
+ * A log id counts only when it is qualified under THIS epic, for the reason
+ * `mergedSupersededClaims` (audit.ts) gives: a `wave-merged` payload carries no
+ * `epic_id` and the lineage is not epic-scoped, so a bare id could belong to
+ * another epic, and trusting it would credit work nothing here delivered.
+ */
+export function creditableTaskIds(
+  epicId: string,
+  latest: PlanFile,
+  earlier: readonly PlanFile[],
+  events: readonly StoredEvent[],
+): string[] {
+  const credit = new Set(livePlanTasks(latest).map((task) => task.task_id));
+  if (earlier.length === 0) return [...credit];
+
+  const inLatest = new Set(latest.tasks.map((task) => bareTaskId(task.task_id)));
+  const finishedBare = new Set(
+    [...finishedInLog(events, epicId)]
+      .filter((id) => isQualifiedTaskId(id) && epicOfTaskId(id) === epicId)
+      .map((id) => bareTaskId(id)),
+  );
+  if (finishedBare.size === 0) return [...credit];
+
+  for (const plan of earlier) {
+    for (const task of livePlanTasks(plan)) {
+      const bare = bareTaskId(task.task_id);
+      if (inLatest.has(bare) || !finishedBare.has(bare)) continue;
+      credit.add(task.task_id);
+    }
+  }
+  return [...credit];
+}
+
+/**
  * The epic gate refusing to certify a plan nobody checked against the goal it
  * was written from.
  *
@@ -249,9 +298,9 @@ const ROADMAP_REMEDY =
  * the digest. Neither may stand in for the other — the moment a goal is
  * rewritten is the moment a plan is likeliest to no longer answer it.
  *
- * `livePlanTaskIds` is the plan's live roster. Coverage citing an id that is
- * not on it is rejected here as well as at record time, because an event can
- * also arrive by hand.
+ * `livePlanTaskIds` is the creditable set (`creditableTaskIds`). Coverage
+ * citing an id that is not in it is rejected here as well as at record time,
+ * because an event can also arrive by hand.
  */
 export function goalCheckBlockers(
   epicId: string,

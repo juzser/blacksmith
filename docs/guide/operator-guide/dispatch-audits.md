@@ -365,6 +365,10 @@ the dispatches a wave-runner writes live in the wave's session, so a check
 scoped to the epic's own log would report the delegation it exists to audit as
 never having happened. Either id answers — `delegation check epic-1` walks
 down into the wave, `delegation check wave-1` walks up to the epic.
+The lineage leaves out sibling waves, so from `wave-2` the epic's wave-1
+dispatch is in view but wave-1's own log is not; whether a session opened
+against a dispatch is therefore read from every log's first line in the state
+directory, and the dispatch reads `ok` from either wave.
 
 **What it does not claim.** It does not read the wave's *work*, only its
 bookkeeping: a wave-runner that opened its log correctly and then dispatched
