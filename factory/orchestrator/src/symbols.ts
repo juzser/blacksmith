@@ -56,7 +56,11 @@ export interface ModuleImport {
 /** Everything the scanner could read out of one file. */
 export interface ModuleFacts {
   file: string;
-  /** Export names in source order. `default` for a default export, `*` for `export *`. */
+  /**
+   * Export names in source order. `default` for a default export, and
+   * `* from './x.js'` for `export * from './x.js'`: a star re-export has no
+   * name of its own, so it is keyed by the module it forwards.
+   */
   exports: string[];
   imports: ModuleImport[];
   /**
@@ -930,7 +934,12 @@ function readClauseExports(
     }
     const { importNames, exportNames, typeOnly } = parseExportFromHead(head);
     facts.imports.push({ specifier, resolved: null, names: importNames, typeOnly, dynamic: false });
-    facts.exports.push(...exportNames);
+    // Keyed on `*` alone, every star line in a barrel shared one name and one
+    // signature (the last line's), so appending a line read as every line
+    // changed and dropping any but the last read as nothing at all.
+    facts.exports.push(
+      ...exportNames.map((name) => (name === '*' ? `* from '${specifier}'` : name)),
+    );
     return;
   }
 

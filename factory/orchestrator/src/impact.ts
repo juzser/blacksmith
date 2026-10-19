@@ -316,13 +316,15 @@ export function diffExports(before: string, after: string, file: string): Export
   if (b.unterminated || a.unterminated) {
     return { file, removed: [], added: [], signatureChanged: [], unverifiable: true };
   }
+  // A Set, not the list: an overload, or a module forwarded twice, is one
+  // surface under one name, and each name is reported once, in source order.
   const afterNames = new Set(a.exports);
   const beforeNames = new Set(b.exports);
   return {
     file,
-    removed: b.exports.filter((name) => !afterNames.has(name)),
-    added: a.exports.filter((name) => !beforeNames.has(name)),
-    signatureChanged: b.exports.filter(
+    removed: [...beforeNames].filter((name) => !afterNames.has(name)),
+    added: [...afterNames].filter((name) => !beforeNames.has(name)),
+    signatureChanged: [...beforeNames].filter(
       (name) =>
         afterNames.has(name) && b.exportSignatures.get(name) !== a.exportSignatures.get(name),
     ),

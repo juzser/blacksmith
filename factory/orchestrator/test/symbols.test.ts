@@ -47,8 +47,15 @@ describe('what the scanner reads', () => {
 
   it('reads a star re-export as the widest edge there is', () => {
     expect(facts("export * from './x.js';").imports[0]?.names).toEqual(['*']);
-    expect(facts("export * from './x.js';").exports).toEqual(['*']);
     expect(facts("export * as ns from './x.js';").exports).toEqual(['ns']);
+  });
+
+  it('names a star re-export export by the module it forwards', () => {
+    // One `*` per barrel line would give every line the same name, and the
+    // export diff could not tell one forwarded module from another.
+    const m = facts('export * from \'./x.js\';\nexport * from "./y.js";');
+    expect(m.exports).toEqual(["* from './x.js'", "* from './y.js'"]);
+    expect(m.imports.map((edge) => edge.names)).toEqual([['*'], ['*']]);
   });
 
   it('reads a local re-export list without inventing an edge', () => {
