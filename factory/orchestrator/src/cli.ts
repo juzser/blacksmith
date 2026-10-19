@@ -87,6 +87,7 @@ import {
   readLineageEvents,
   requireSession,
   type StoredEvent,
+  sessionsOpenedByEdge,
   sessionTree,
   startSession,
   tailEvents,
@@ -3377,6 +3378,11 @@ async function main(): Promise<number> {
     // own session is where its dispatches land, so a check that read only the
     // epic's session would see the delegation it exists to audit as absent.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    // The lineage leaves out sibling sessions on purpose, so from a later wave
+    // the epic's earlier wave-runner dispatches would read as taken up by
+    // nobody. Whether a session opened against one is a question for every
+    // log's entry edge, not for the lineage.
+    const openedElsewhere = await sessionsOpenedByEdge(eventOptsFromFlags(flags));
     const policy = loadDelegationPolicy(flags.policy);
     const crosscheck = loadCrosscheckPolicy(flags.crosscheck);
     const grants = checkDelegationGrants(policy, {
@@ -3387,6 +3393,7 @@ async function main(): Promise<number> {
     const log = checkDelegationLog(events, policy, {
       sessionId,
       ...(flags.task ? { taskId: flags.task } : {}),
+      openedElsewhere,
     });
     printJson({ session: sessionId, grants, log, ok: grants.ok && log.ok });
     // Same fail-closed contract as `dispatch check`: `unverifiable` exits 1,

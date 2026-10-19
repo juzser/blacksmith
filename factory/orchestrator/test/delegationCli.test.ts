@@ -147,6 +147,114 @@ describe('smith delegation check (D13 step 3)', () => {
     expect(checks.map((c) => c.status)).toEqual(['ok']);
   });
 
+  /** A wave-runner's terminal in the epic session, as the epic session logs a failed wave. */
+  function waveRunnerFails(parent: string): void {
+    const run = smith([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: EPIC,
+        actor: 'operator',
+        event_type: 'error-logged',
+        task_id: T1,
+        plan_version: 1,
+        causal_parent: parent,
+        payload: {
+          error: 'execution.env-failure',
+          severity: 'S2-major',
+          task_ref: T1,
+          agent: 'wave-runner',
+          agent_role: 'wave-runner',
+        },
+      }),
+    ]);
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+  }
+
+  describe('from a later wave session, whose earlier siblings are outside its lineage', () => {
+    const WAVE2 = 'wave-2';
+    const T2 = 'E1/t-2';
+
+    /** Epic dispatches wave 1 and wave 2; each wave-runner opens its own session. */
+    function twoWaves(): { epicRoot: string; first: string; second: string } {
+      const epicRoot = start(EPIC);
+      const first = dispatch(EPIC, epicRoot, 'operator', 'wave-runner', T1);
+      const waveRoot = start(WAVE, first, 'wave-runner');
+      dispatch(WAVE, waveRoot, 'wave-runner', 'coder', T1);
+      const second = dispatch(EPIC, first, 'operator', 'wave-runner', T2);
+      const wave2Root = start(WAVE2, second, 'wave-runner');
+      dispatch(WAVE2, wave2Root, 'wave-runner', 'coder', T2);
+      return { epicRoot, first, second };
+    }
+
+    it('reads the earlier wave-runner dispatch as ok, because a session opened against it', () => {
+      twoWaves();
+
+      const { run, checks, ok } = check(WAVE2);
+
+      expect(checks.map((c) => `${c.status}:${c.sessionId}`).sort()).toEqual([
+        'ok:wave-1',
+        'ok:wave-2',
+      ]);
+      expect(ok).toBe(true);
+      expect(run.status).toBe(0);
+    });
+
+    it('still reads a dispatch that opened no session anywhere as unverifiable', () => {
+      const { first } = twoWaves();
+      const lost = dispatch(EPIC, first, 'operator', 'wave-runner', 'E1/t-3');
+
+      const { run, checks, ok } = check(WAVE2);
+
+      expect(ok).toBe(false);
+      expect(run.status).toBe(1);
+      const unverifiable = checks.filter((c) => c.status === 'unverifiable');
+      expect(unverifiable).toHaveLength(1);
+      expect(unverifiable[0]?.detail).toContain(lost);
+    });
+
+    it('still reads it as a violation when a wave-runner terminal follows it in the epic', () => {
+      const { first } = twoWaves();
+      const lost = dispatch(EPIC, first, 'operator', 'wave-runner', T1);
+      waveRunnerFails(lost);
+
+      const { run, checks, ok } = check(WAVE2);
+
+      expect(ok).toBe(false);
+      expect(run.status).toBe(1);
+      expect(checks.some((c) => c.status === 'violation')).toBe(true);
+    });
+
+    // Observed, not endorsed: a resumed wave-runner keeps writing into the
+    // session it opened and opens no new one, so the second dispatch of the
+    // same role and task has no session of its own to point at.
+    it('reports a re-dispatch that resumes an open wave-runner the same from the epic and from the wave', () => {
+      const { first } = twoWaves();
+      dispatch(EPIC, first, 'operator', 'wave-runner', T1);
+
+      const fromEpic = check(EPIC);
+      const fromWave = check(WAVE);
+
+      expect(fromEpic.checks.map((c) => c.status).sort()).toEqual(
+        fromWave.checks.map((c) => c.status).sort(),
+      );
+      expect(fromEpic.checks.filter((c) => c.status === 'unverifiable')).toHaveLength(1);
+    });
+
+    it('answers from the epic session as it always did', () => {
+      twoWaves();
+
+      const { run, checks, ok } = check(EPIC);
+
+      expect(checks.map((c) => `${c.status}:${c.sessionId}`).sort()).toEqual([
+        'ok:wave-1',
+        'ok:wave-2',
+      ]);
+      expect(ok).toBe(true);
+      expect(run.status).toBe(0);
+    });
+  });
+
   it('reports a grantee dispatching outside its grant as a violation, and exits 1', () => {
     const dispatched = dispatchTheWave();
     const waveRoot = start(WAVE, dispatched, 'wave-runner');
