@@ -212,4 +212,40 @@ describe('readSessionTokens', () => {
       expect(r === cfg || r.startsWith(`${cfg}${path.sep}`)).toBe(true);
     }
   });
+
+  it('is complete:false when a listed sub-agent file is unreadable, and when the listing fails', async () => {
+    writeFileSync(main, jl([asst('m1', 'r1', U(1, 0, 1))]));
+    const real: TranscriptFs = {
+      readFile: async (p) => readFileSync(p, 'utf8'),
+      readdir: async (p) => readdirSync(p),
+    };
+    const ghost: TranscriptFs = {
+      ...real,
+      readdir: async (p) => (p.endsWith('subagents') ? ['agent-ghost.jsonl'] : readdirSync(p)),
+    };
+    sub('other', [asst('s1', 'q1', U(1, 0, 1))], { toolUseId: 't' });
+    let res = await readSessionTokens({ configDir: cfg, cliSessionId: SID, fs: ghost });
+    expect(res.complete).toBe(false);
+    expect(res.subagents).toEqual([{ agentId: 'ghost', role: null, used: 0, complete: false }]);
+    const broken: TranscriptFs = {
+      ...real,
+      readdir: async (p) => {
+        if (p.endsWith('subagents')) throw Object.assign(new Error('x'), { code: 'EACCES' });
+        return readdirSync(p);
+      },
+    };
+    res = await readSessionTokens({ configDir: cfg, cliSessionId: SID, fs: broken });
+    expect(res).toEqual({ used: 2, complete: false, subagents: [] });
+  });
+
+  it('treats a missing subagents directory as a complete session and honours injected roles', async () => {
+    writeFileSync(main, jl([asst('m1', 'r1', U(1, 0, 1)), launch('tu1', 'bs-coder')]));
+    expect(await readSessionTokens({ configDir: cfg, cliSessionId: SID })).toMatchObject({
+      complete: true,
+      subagents: [],
+    });
+    sub('a1', [asst('s1', 'q1', U(1, 0, 1))], { toolUseId: 'tu1' });
+    const res = await readSessionTokens({ configDir: cfg, cliSessionId: SID, roles: ['tester'] });
+    expect(res.subagents[0]?.role).toBeNull();
+  });
 });
