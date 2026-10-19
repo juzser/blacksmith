@@ -1155,34 +1155,75 @@ function decodeAnsiCQuoting(segment: string): { text: string; unterminated: bool
  * the middle reads as `git` to every scanner below rather than as two
  * fragments a literal-substring or exact-word match would miss.
  *
- * Two spans are left untouched because bash itself treats a backslash there
- * differently: a single-quoted span is fully literal, so a backslash-newline
- * pair inside it is data, not a continuation; and a `$'...'` span decodes its
- * own escapes — `decodeAnsiCPayload` already reads a `\`-newline pair inside
- * one through unchanged, so joining it here first would be a second, and
- * conflicting, decode of the same text.
+ * Two readings, chosen per command. A backslash and the character after it
+ * are always one pair, so an escaped backslash never joins with the newline
+ * after it.
+ *
+ * - A command holding none of the constructs `UNCERTAIN_QUOTING` lists is read
+ *   with bash's own quoting, and a pair is kept (not joined) only where bash
+ *   keeps it: inside a `'...'` span, which is fully literal, and inside a
+ *   `$'...'` span, whose escapes `decodeAnsiCPayload` already reads through.
+ *   Outside quotes a backslash escapes the next character, so `\'` opens no
+ *   span. Inside double quotes a `'` and a `$'` are literal text and open
+ *   nothing; only an unescaped `"` closes the span.
+ * - A command holding one of those constructs (a backtick, `$(`, `${`, `$$`,
+ *   `<<`, `#`) is read with no spans at all: every continuation is joined.
+ *   Their quoting rules (a comment, a here-document body, a nested expansion,
+ *   a parameter before a `'`) are not modelled here.
+ * - A span that is never closed is read the second way from its opener on.
+ *   Bash never runs that remainder.
+ *
+ * The second reading is the safe direction. Joining a pair bash keeps only
+ * removes a newline from what the guard reads of a quoted string, and the
+ * pairing rule above never changes how the characters after it pair with a
+ * backslash, so it cannot move where any quote ends. Joining fewer pairs than
+ * bash does is the only direction that can split a word the shell reads whole.
  */
 function joinLineContinuations(command: string): string {
+  const joinEvery = (text: string): string => {
+    let out = '';
+    let k = 0;
+    while (k < text.length) {
+      if (text[k] === '\\') {
+        if (text[k + 1] !== '\n') out += text.slice(k, k + 2);
+        k += 2;
+        continue;
+      }
+      out += text[k];
+      k += 1;
+    }
+    return out;
+  };
+  if (UNCERTAIN_QUOTING.test(command)) return joinEvery(command);
   let result = '';
+  let inDouble = false;
   let i = 0;
   while (i < command.length) {
     const c = command[i];
-    if (c === "'") {
-      const end = command.indexOf("'", i + 1);
-      const spanEnd = end === -1 ? command.length : end + 1;
-      result += command.slice(i, spanEnd);
-      i = spanEnd;
-      continue;
-    }
-    if (c === '$' && command[i + 1] === "'") {
-      const end = findAnsiCQuoteEnd(command, i + 2);
-      const spanEnd = end === -1 ? command.length : end + 1;
-      result += command.slice(i, spanEnd);
-      i = spanEnd;
-      continue;
-    }
-    if (c === '\\' && command[i + 1] === '\n') {
+    if (c === '\\') {
+      if (command[i + 1] !== '\n') result += command.slice(i, i + 2);
       i += 2;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false;
+      result += c;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = true;
+      result += c;
+      i += 1;
+      continue;
+    }
+    if (c === "'" || (c === '$' && command[i + 1] === "'")) {
+      const ansiC = c === '$';
+      const open = ansiC ? i + 2 : i + 1;
+      const end = ansiC ? findAnsiCQuoteEnd(command, open) : command.indexOf("'", open);
+      if (end === -1) return result + joinEvery(command.slice(i));
+      result += command.slice(i, end + 1);
+      i = end + 1;
       continue;
     }
     result += c;

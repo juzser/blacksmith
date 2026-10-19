@@ -2256,6 +2256,57 @@ describe('evaluateCommand — a line continuation inside an rm invocation', () =
   });
 });
 
+// Bash deletes a backslash-newline pair everywhere except inside a literal
+// single-quoted span, a `$'...'` span, a comment or a here-document body. The
+// guard joins every continuation bash joins: a quote inside double quotes is
+// literal text, an escaped quote opens no span, and a comment or here-document
+// body is not quoted text, so none of them may hide a later continuation.
+describe('evaluateCommand — a continuation after text bash reads as literal', () => {
+  const CONT = '\\\n';
+  it.each([
+    ['a double-quoted apostrophe', `echo "'" ; rm -r${CONT}f / ; echo "'"`],
+    ['an escaped apostrophe', `echo \\' ; rm -r${CONT}f / ; echo \\'`],
+    ['a double-quoted escaped quote and apostrophe', `echo "a\\"'" ; rm -r${CONT}f / ; echo "'"`],
+    ['a double-quoted dollar-apostrophe', `echo "$'" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe after a process-id parameter', `echo $$'a\\' ; rm -r${CONT}f /`],
+    ['an apostrophe in a comment', `# it's\nrm -r${CONT}f /\n# that's`],
+    ['an apostrophe in a nested substitution', `echo "$(echo "'")" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe in a nested expansion', `echo "\${x:-"'"}" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe in a here-document body', `cat <<EOF\nit's\nEOF\nrm -r${CONT}f /\necho "'"`],
+    ['a contraction inside double quotes', `echo "it's" && rm -r${CONT}f / && echo "it's"`],
+  ])('refuses a recursive force removal continued across lines after %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([
+    ['a double-quoted apostrophe', `echo "'" ; git push --for${CONT}ce origin x ; echo "'"`],
+    ['an escaped apostrophe', `echo \\' ; git push --for${CONT}ce origin x ; echo \\'`],
+    ['an apostrophe in a comment', `# it's\ngit push --for${CONT}ce origin x\n# that's`],
+  ])('refuses a force push continued across lines after %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    ["git ls-files | grep 'a$'"],
+    ["git log | grep 'x$'"],
+    ["git status; echo 'a$'"],
+    ["git status && echo 'end$'"],
+    ["git ls-files | grep -v '^\\s*$'"],
+    ["git ls-files | grep 'a\\$'"],
+    ["git ls-files | grep -E 'hooks\\.json$|settings\\.json$' | head"],
+    ["git grep -n -l 'needle' HEAD; sed -n 1,30p a.ts | grep -E -v '^\\s*$' | head -25"],
+    [`printf '%s${CONT}' x`],
+    [`git log --format='%h ${CONT}%s' -3`],
+    [`echo "a" ${CONT}  "b"`],
+    [`echo "it's" ; git status`],
+  ])('allows %s — single-quoted text is still read as literal', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
