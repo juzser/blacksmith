@@ -85,6 +85,24 @@ describe('redact', () => {
   });
 });
 
+describe('redact edge cases', () => {
+  it('replaces every occurrence in one string and a bare home with no subpath', () => {
+    expect(redact('/Users/example-user and /home/example-user /tmp/a', HOME)).toBe(
+      '<home> and <home> <tmp>',
+    );
+  });
+
+  it('accepts a homeDir written with a trailing slash', () => {
+    expect(redact('/opt/example-home/repo', { homeDir: '/opt/example-home/' })).toBe('<home>/repo');
+  });
+
+  it('redacts a path inside a JSON string and keeps the surrounding quotes', () => {
+    expect(redact('{"cwd":"/Users/example-user/repo","n":1}', HOME)).toBe(
+      '{"cwd":"<home>/repo","n":1}',
+    );
+  });
+});
+
 describe('renderCheckState', () => {
   const states: CheckState[] = ['passed', 'failed', 'not-run', 'unknown'];
 
