@@ -1627,6 +1627,54 @@ const GIT_GLOBAL_FLAGS_WITHOUT_VALUE = new Set([
 
 const READ_ONLY_SEGMENT_FORBIDDEN_RE = /[;&|\n()`#<>{}]/;
 
+/** Global options `isReadOnlyGitCommand` takes a value for; unlike `GIT_GLOBAL_VALUE_FLAGS`, it leaves out the ones whose value git can run. */
+const READ_ONLY_GIT_VALUE_FLAGS = new Set(['-C', '--git-dir', '--work-tree', '--namespace']);
+
+/** `--name=value` global options whose value is only a path or a name. */
+const READ_ONLY_GIT_EQUALS_FLAGS = new Set(['--git-dir', '--work-tree', '--namespace']);
+
+const GREP_PAGER_LONG_OPTION = '--open-files-in-pager';
+
+/**
+ * True when `word` (as written) holds a parameter expansion, a substitution
+ * or an unquoted glob character, so the shell may turn it into something
+ * else before git sees it. A single-quoted span, an escaped character and a
+ * glob inside double quotes are literal and do not count.
+ */
+function hasUnreadableShellForm(word: string): boolean {
+  let i = 0;
+  while (i < word.length) {
+    const c = word.charAt(i);
+    if (c === '\\') {
+      i += 2;
+    } else if (c === "'") {
+      const end = word.indexOf("'", i + 1);
+      i = end === -1 ? word.length : end + 1;
+    } else if (c === '"') {
+      i += 1;
+      while (i < word.length && word.charAt(i) !== '"') {
+        const d = word.charAt(i);
+        if (d === '$' || d === '`') return true;
+        i += d === '\\' ? 2 : 1;
+      }
+      i += 1;
+    } else if (c === '$' || c === '`' || c === '*' || c === '?' || c === '[') {
+      return true;
+    } else {
+      i += 1;
+    }
+  }
+  return false;
+}
+
+/** True when `text` is an option of `git grep` whose value git runs as a command. */
+function isGrepPagerOption(text: string): boolean {
+  if (/^-[^-]*O/.test(text)) return true;
+  if (!text.startsWith('--')) return false;
+  const name = text.split('=')[0] ?? '';
+  return name.length >= 4 && GREP_PAGER_LONG_OPTION.startsWith(name);
+}
+
 /**
  * True when `segment` is provably one simple `git <read-only builtin> ...`
  * command, so a gated word (`push`, `reset`, ...) elsewhere in it is only an
@@ -1639,8 +1687,13 @@ const READ_ONLY_SEGMENT_FORBIDDEN_RE = /[;&|\n()`#<>{}]/;
  *  - `git` is the first word, so no assignment or wrapper changes what runs;
  *  - every word before the subcommand is a global option this function knows
  *    (a value-taking one is followed by a plain value), because an option it
- *    does not know may take a value and move the subcommand;
- *  - the subcommand is written plainly and is a read-only builtin.
+ *    does not know may take a value and move the subcommand; `-c`,
+ *    `--config-env`, `--exec-path` and any other `--name=value` form are not
+ *    known, since a setting or path they give can make git run its value;
+ *  - the subcommand is written plainly and is a read-only builtin;
+ *  - for `grep`, no word after the subcommand is an `-O` / `--open-files-in-pager`
+ *    option (git runs its value as a command) and none holds a parameter
+ *    expansion, substitution or unquoted glob that could expand into one.
  * It can only turn a refusal of such a command into an allow; later layers
  * still read the words after the subcommand.
  */
@@ -1655,22 +1708,35 @@ function isReadOnlyGitCommand(segment: string): boolean {
     const word = words[i];
     if (word === undefined || !word.text.startsWith('-')) break;
     if (!isPlainWord(word.raw)) return false;
-    if (GIT_GLOBAL_VALUE_FLAGS.has(word.text)) {
+    if (READ_ONLY_GIT_VALUE_FLAGS.has(word.text)) {
       const value = words[i + 1];
       if (value === undefined || !isPlainWord(value.raw)) return false;
       i += 2;
-    } else if (/^--[^=\s]+=/.test(word.text) || GIT_GLOBAL_FLAGS_WITHOUT_VALUE.has(word.text)) {
+    } else if (
+      READ_ONLY_GIT_EQUALS_FLAGS.has(word.text.split('=')[0] ?? '') &&
+      word.text.includes('=')
+    ) {
+      i += 1;
+    } else if (GIT_GLOBAL_FLAGS_WITHOUT_VALUE.has(word.text)) {
       i += 1;
     } else {
       return false;
     }
   }
   const subcommand = words[i];
-  return (
-    subcommand !== undefined &&
-    subcommand.raw === subcommand.text &&
-    READ_ONLY_GIT_SUBCOMMANDS.has(subcommand.text)
-  );
+  if (
+    subcommand === undefined ||
+    subcommand.raw !== subcommand.text ||
+    !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand.text)
+  ) {
+    return false;
+  }
+  if (subcommand.text === 'grep') {
+    for (const arg of words.slice(i + 1)) {
+      if (isGrepPagerOption(arg.text) || hasUnreadableShellForm(arg.raw)) return false;
+    }
+  }
+  return true;
 }
 
 const SUBCOMMAND_NOT_PLAIN_REASON =

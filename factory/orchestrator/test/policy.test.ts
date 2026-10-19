@@ -1122,14 +1122,36 @@ describe('evaluateCommand — a read-only git builtin that names a gated word', 
     "git grep -n -e reset -e rebase -- '*.md'",
     "git log -S push --format='%h %s'",
     "git -C repo grep -n push -- 'x/*.ts'",
-    'git -c core.quotepath=off log --grep=push -- "$f"',
-    'git --no-pager grep -n update-ref -- "$dir"',
-    'git -P grep push $X',
+    'git -C repo log --grep=push -- "$f"',
+    "git --no-pager grep -n update-ref -- 'x/*.ts'",
+    'git -P log --grep push $X',
+    "git grep -niw push -- 'x/*.ts'",
+    "git grep --or -e push -e reset -- 'x/*.ts'",
     "git grep -n filter-branch -- 'x/*.ts'",
   ])('allows git naming a gated word as a search term: %s', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(ruleIds(d)).not.toContain('force-push');
     expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    'git grep -Ogit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -nOgit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -e -- -Ogit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -Ogit\\ update-ref\\ -d\\ refs/heads/x x',
+    "git -c core.pager=sh -p grep -h reset -- 'x/*.ts'",
+    "git -c diff.external=sh diff push -- 'x/*.ts'",
+    "git --config-env=core.pager=P -p log --grep push -- 'x/*.ts'",
+    "git --exec-path=x grep push -- 'x/*.ts'",
+    'git grep push $X',
+    'git grep push "$X"',
+    'git grep push x*',
+    'git -c core.quotepath=off log --grep=push -- "$f"',
+    'git --no-pager grep -n update-ref -- "$dir"',
+    'git -P grep push $X',
+  ])('refuses a read-only builtin that would run a command named on the line: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
   });
 
   it.each([
