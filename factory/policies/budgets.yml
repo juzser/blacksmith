@@ -250,16 +250,20 @@ task:
     cap_tokens: 80000        # p90 77k
   auditor:
     cap_tokens: 90000        # p90 89k
+  uiux:
+    cap_tokens: 90000        # p90 89k (new, 2026-10-17, 355 dispatches)
   # The old shared `judges:` bucket is gone. A policy file that still carries
   # `judges: {cap_tokens: N}` has N read for spec-reviewer, reviewer, verifier
   # and grader wherever it does not name that role itself.
   #
-  # Not priced here, and dispatched anyway: merger, uiux, scribe, wave-runner.
+  # Not priced here, and dispatched anyway: merger, scribe, wave-runner.
   # `bs budget alarm` cannot put a number on those dispatches, so an epic
   # that used one is reported unverifiable rather than under — the omission is
   # visible instead of free. Left unpriced on purpose until there is real spend
   # data to size them from; inventing a cap would make the projection look
-  # complete without making it true.
+  # complete without making it true. For wave-runner the final-turn size and
+  # the cumulative spend differ about tenfold (p90 100k against 1.17M,
+  # 2026-10-17), so neither is a sound basis for a cap yet.
 
 pre_code_budget:
   # researcher + uiux together, before any code is written for the epic

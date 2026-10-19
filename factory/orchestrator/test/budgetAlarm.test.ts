@@ -35,6 +35,7 @@ const POLICY: BudgetPolicy = {
     verifier: { capTokens: 40_000 },
     'security-reviewer': { capTokens: 80_000 },
     auditor: { capTokens: 90_000 },
+    uiux: { capTokens: 90_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],
@@ -379,7 +380,7 @@ describe('checkBudgetAlarm', () => {
   });
 
   it('is unverifiable when a dispatched role has no declared cap', () => {
-    // budgets.yml prices ten roles. The factory also dispatches merger, uiux,
+    // budgets.yml prices eleven roles. The factory also dispatches merger,
     // scribe and wave-runner. A role the policy is silent about cannot be
     // projected, and a projection with a hole in it is not an upper bound.
     seq = 0;
@@ -392,6 +393,29 @@ describe('checkBudgetAlarm', () => {
     expect(epic?.status).toBe('unverifiable');
     expect(epic?.rolesWithoutCap).toEqual(['merger']);
     expect(report.ok).toBe(false);
+  });
+
+  it('prices a uiux dispatch at its cap and still lists merger, scribe and wave-runner as unpriced', () => {
+    seq = 0;
+    const priced = checkBudgetAlarm(
+      [waveAdmitted('epic-1', ['task-1']), dispatch('uiux', 'task-1')],
+      POLICY,
+      OPTS,
+    );
+    expect(priced.epics[0]?.rolesWithoutCap).toEqual([]);
+    expect(priced.epics[0]?.projectedFrom).toEqual({ uiux: 90_000 });
+    seq = 0;
+    const unpriced = checkBudgetAlarm(
+      [
+        waveAdmitted('epic-1', ['task-1']),
+        dispatch('merger', 'task-1'),
+        dispatch('scribe', 'task-1'),
+        dispatch('wave-runner', 'task-1'),
+      ],
+      POLICY,
+      OPTS,
+    );
+    expect(unpriced.epics[0]?.rolesWithoutCap).toEqual(['merger', 'scribe', 'wave-runner']);
   });
 
   it('prices a planner, tester, auditor or security-reviewer dispatch from its own cap', () => {

@@ -1315,6 +1315,28 @@ test.describe('Home: Live sessions', () => {
     });
   }
 
+  // The Now line reads "<role> on <task>": the task link is an inline link in
+  // prose, but its tap box still reaches 24px on a 390px phone.
+  for (const font of FONT_VARIANTS) {
+    test(`390px: the Now line's task link is at least 24px tall${font.label}`, async ({ page }) => {
+      await serveLive(page, liveResponse({ sessions: [...LIVE_CARDS, LONG_CARD] }));
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto('/overview');
+      if (font.css) await page.addStyleTag({ content: font.css });
+      await expect(page.locator('.bs-live-card')).toHaveCount(4);
+      const heights = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.bs-live-card__v:not(.bs-live-card__v--solo) a')).map(
+          (a) => ({
+            name: (a.textContent ?? '').trim().slice(0, 30),
+            h: Math.min(...Array.from(a.getClientRects()).map((r) => r.height)),
+          }),
+        ),
+      );
+      expect(heights.length).toBeGreaterThanOrEqual(3);
+      for (const t of heights) expect(t.h, `Now link "${t.name}"`).toBeGreaterThanOrEqual(24);
+    });
+  }
+
   test('card body padding is space-3 at 375px and space-4 on desktop, on all four sides', async ({
     page,
   }) => {

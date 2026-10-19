@@ -346,8 +346,10 @@ both as `user_prompt` events (`bs prompt capture`), and prints the stored
 types: `session-bound` (from `/bs use <project>`), which goes into the session's
 home log only, and `pipeline-bypass-approved` (from the yes to a small-change
 question), which goes to the log its answer's `user_prompt` goes to. Once a
-session is bound, the prompts it files carry the bound project. `bs event
-append` refuses both types, so no hand-written record of either can exist.
+session is bound, the prompts it files into its own home log carry the bound
+project. `bs event append` refuses both types. The two records are an audit
+trail of what the session was told and what you said yes to, not proof, and
+nothing gates on them.
 `prompt record` is the manual path, for a
 machine where the hook is not installed. `bs prompt record <file|-> --session
 <id> --causal-parent <event-id>` appends a `user_prompt` holding what you
