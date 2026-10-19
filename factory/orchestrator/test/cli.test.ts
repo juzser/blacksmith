@@ -4047,6 +4047,91 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(noRole.stdout).error.code).toBe('cli.missing-positional');
   });
 
+  it('lessons for-dispatch: scopes to the live record of a task, never a superseded copy of it', () => {
+    const planPath = path.join(scratchDir, 'dispatch-superseded-plan.json');
+    const lessonsPath = path.join(scratchDir, 'dispatch-superseded-lessons.md');
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 2,
+        status: 'active',
+        tasks: [
+          // The dead copy sits first, under the same id, as an amendment leaves it.
+          { task_id: 'epic-1/task-1', claims: ['old-area/**'], task_status: 'superseded' },
+          { task_id: 'epic-1/task-1', claims: ['live-area/**'], task_status: 'todo' },
+        ],
+        edges: [],
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      lessonsPath,
+      [
+        '## claim-path',
+        '',
+        '### lesson-old-1: dead area',
+        '',
+        '- lesson_id: lesson-old-1',
+        '- finding_category: correctness',
+        '- claim_path: old-area/**',
+        '- statement: Applies to the superseded record only.',
+        '',
+        '### lesson-live-1: live area',
+        '',
+        '- lesson_id: lesson-live-1',
+        '- finding_category: correctness',
+        '- claim_path: live-area/**',
+        '- statement: Applies to the live record.',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const scoped = runCli([
+      'lessons',
+      'for-dispatch',
+      'coder',
+      '--plan',
+      planPath,
+      '--task',
+      'epic-1/task-1',
+      '--lessons',
+      lessonsPath,
+    ]);
+    expect(scoped.status).toBe(0);
+    expect(JSON.parse(scoped.stdout).lessons.map((l: { lessonId: string }) => l.lessonId)).toEqual([
+      'lesson-live-1',
+    ]);
+
+    // A task whose every record is dead has no claims to scope to: refused
+    // like an unknown task, not answered with the dead record's claims.
+    const deadPlanPath = path.join(scratchDir, 'dispatch-all-superseded-plan.json');
+    writeFileSync(
+      deadPlanPath,
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 2,
+        status: 'active',
+        tasks: [{ task_id: 'epic-1/task-1', claims: ['old-area/**'], task_status: 'superseded' }],
+        edges: [],
+      }),
+      'utf8',
+    );
+    const dead = runCli([
+      'lessons',
+      'for-dispatch',
+      'coder',
+      '--plan',
+      deadPlanPath,
+      '--task',
+      'epic-1/task-1',
+      '--lessons',
+      lessonsPath,
+    ]);
+    expect(dead.status).toBe(1);
+    expect(JSON.parse(dead.stdout).error.code).toBe('cli.task-not-in-plan');
+  });
+
   it('lessons for-dispatch: resolves the task id the same way its siblings do (case-type)', () => {
     const planPath = path.join(scratchDir, 'dispatch-case-plan.json');
     const lessonsPath = path.join(scratchDir, 'dispatch-case-lessons.md');
@@ -7050,6 +7135,60 @@ describe('cli.ts (built binary)', () => {
         });
       });
 
+      it('attributes by the live record of a task, not a superseded copy of it', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = path.join(scratchDir, `${sessionId}-superseded-plan.json`);
+        await writeFile(
+          planPath,
+          JSON.stringify({
+            epic_id: 'epic-1',
+            version: 2,
+            status: 'active',
+            tasks: [
+              { task_id: 'epic-1/task-1', claims: ['src/old/**'], task_status: 'superseded' },
+              { task_id: 'epic-1/task-1', claims: ['src/live/**'], task_status: 'todo' },
+              // Superseded under a new id: its old files belong to nobody it names.
+              { task_id: 'epic-1/task-2', claims: ['src/gone/**'], task_status: 'superseded' },
+            ],
+            edges: [],
+          }),
+        );
+        const raise = async (name: string, file: string) => {
+          const evidence = await evidenceFile(name, [{ ...EVIDENCE[0], file_path: file }]);
+          const result = runCli([
+            'findings',
+            'raise',
+            '--evidence',
+            evidence,
+            '--found-by',
+            'reviewer',
+            '--task',
+            'epic-1/task-1',
+            '--plan',
+            planPath,
+            '--session',
+            sessionId,
+            '--causal-parent',
+            `${sessionId}#0`,
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(result.status).toBe(0);
+          return JSON.parse(result.stdout)[0];
+        };
+
+        expect(await raise('raise-live', 'src/live/a.ts')).toMatchObject({
+          taskId: 'epic-1/task-1',
+          attribution: 'gated',
+        });
+        expect(await raise('raise-dead', 'src/old/a.ts')).toMatchObject({
+          attribution: 'follow-up',
+        });
+        expect(await raise('raise-gone', 'src/gone/a.ts')).toMatchObject({
+          attribution: 'follow-up',
+        });
+      });
+
       it('refuses to raise a finding with neither --task nor --plan to own it', async () => {
         const { sessionId, eventsDir } = await session();
         const evidence = await evidenceFile('raise-ownerless');
@@ -9316,6 +9455,85 @@ describe('cli.ts (built binary)', () => {
           'epic-1/task-2',
         );
         expect(records.filter((r) => r.event_type === 'finding-reattributed')).toHaveLength(1);
+      });
+    });
+
+    describe('gate run ownership reads live records only', () => {
+      it('does not attribute a finding to a superseded copy of the gated task', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = path.join(scratchDir, `${sessionId}-gate-superseded-plan.json`);
+        await writeFile(
+          planPath,
+          JSON.stringify({
+            epic_id: 'epic-1',
+            version: 2,
+            status: 'active',
+            tasks: [
+              { task_id: 'epic-1/task-1', claims: ['src/bar/**'], task_status: 'superseded' },
+              { task_id: 'epic-1/task-1', claims: ['src/live/**'], task_status: 'todo' },
+            ],
+            edges: [],
+          }),
+        );
+        const worktreeDir = await committedWorktree('gate-ownership-superseded');
+        const checksPath = path.join(scratchDir, `${sessionId}-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
+        const evidencePath = path.join(scratchDir, `${sessionId}-evidence.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        await writeFile(
+          evidencePath,
+          JSON.stringify([
+            {
+              file_path: 'src/bar/thing.ts',
+              finding_category: 'correctness',
+              severity: 'S2-major',
+              summary: 'off-by-one in loop bound',
+              failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+            },
+          ]),
+        );
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--evidence',
+          evidencePath,
+          '--found-by',
+          'reviewer',
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        // src/bar/ was claimed only by the dead copy, so the finding is not
+        // task-1's: it must not block task-1 nor be stamped with its id.
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised[0]?.task_id).not.toBe('epic-1/task-1');
       });
     });
 

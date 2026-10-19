@@ -166,6 +166,7 @@ import {
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
+  planClaimedTasks,
   planProjectResolverForTaskRef,
   planSelfFallbackForTaskRef,
   resolveTaskId,
@@ -955,15 +956,14 @@ function noveltyThresholdOverride(flags: Record<string, string>): number | undef
 
 /**
  * The plan's claims map, as the ownership input routeFindings takes (D-41/P9-24).
- * `TaskSpecRecord.claims` is `unknown` — the plan's own schema is what
- * guarantees it is a string array, so validating it a second time here would
- * only add a second opinion. A task without claims owns no file, and is
- * dropped rather than defaulted to owning everything.
+ * Live records only (D-126): a plan version keeps each superseded copy of a
+ * task beside its replacement, often under the same id, and a `.find` by id
+ * would answer with the dead one. That rule is `planClaimedTasks`, shared with
+ * `audit resolve`; a task without claims owns no file and is dropped rather
+ * than defaulted to owning everything.
  */
 function ownershipFromPlan(plan: PlanFile): ClaimedTask[] {
-  return plan.tasks
-    .filter((task) => Array.isArray(task.claims))
-    .map((task) => ({ task_id: task.task_id, claims: task.claims as string[] }));
+  return planClaimedTasks(plan);
 }
 
 /** `--plan <file>` is optional everywhere findings are raised; without it, ownership is unknown. */
