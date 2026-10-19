@@ -198,10 +198,11 @@ one entry per clause, in the printed order. Each entry carries `clause` (copied
 verbatim), `verdict`, and whichever of `taskIds`/`reason` the verdict demands:
 
 - `covered` — the plan commits to delivering this clause. `taskIds` must name
-  at least one **live** task of the plan version you were handed
-  (`goal-check.covered-without-task`, `goal-check.unknown-task`). "Covered
-  somewhere" and a task id from a superseded version are refusals, not
-  warnings. Name the task that would have to change if the clause changed
+  at least one **live** task of the plan version you were handed, or a task
+  that finished before an amendment dropped it from that version and that the
+  log shows merged (`goal-check.covered-without-task`,
+  `goal-check.unknown-task`). "Covered somewhere" and a task id from a
+  superseded version are refusals, not warnings. Name the task that would have to change if the clause changed
 - `out-of-scope` — the clause is not this epic's to answer: a sibling epic of
   the same milestone owns it, or the sentence is history rather than a
   requirement. `reason` is required (`goal-check.dismissal-without-reason`) and

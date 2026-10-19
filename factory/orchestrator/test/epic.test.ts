@@ -1954,7 +1954,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
    * to write one — which is the point, and is why this sits beside
    * addSpecReview rather than being folded into it.
    */
-  async function addGoalCheck(planVersion = 1) {
+  async function addGoalCheck(planVersion = 1, cited: string[] = [`${epicId}/task-1`]) {
     await appendEvent(
       {
         session_id: sessionId,
@@ -1969,7 +1969,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
           plan_version: planVersion,
           goal_digest: goalDigest(GOAL_TEXT),
           checked_by: 'spec-reviewer',
-          coverage: [{ clause: GOAL_TEXT, verdict: 'covered', taskIds: [`${epicId}/task-1`] }],
+          coverage: [{ clause: GOAL_TEXT, verdict: 'covered', taskIds: cited }],
           clause_count: 1,
           uncovered_count: 0,
           out_of_scope_count: 0,
@@ -2251,6 +2251,106 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       expect(await readEvents(sessionId, { stateDir })).toHaveLength(before.length);
     } finally {
       await rm(specsDir, { recursive: true, force: true });
+    }
+  });
+
+  // A task that finished before the last amendment is dropped from the latest
+  // plan version outright, so the latest live roster alone would make a clause
+  // that its work delivered uncitable. The log earns the credit.
+  describe('a goal-check crediting a task finished before the last amendment', () => {
+    const FINISHED = `${epicId}/task-1`;
+    const KEPT = `${epicId}/task-2`;
+    type Row = { task_id: string; task_status: string };
+    const row = (task_id: string, task_status: string): Row => ({ task_id, task_status });
+
+    async function blockersWith(opts: { latest: Row[]; merged: string[]; cited: string }) {
+      const specsDir = await mkdtemp(path.join(tmpdir(), 'smith-epic-earlier-'));
+      try {
+        await mkdir(path.join(specsDir, epicId), { recursive: true });
+        const base = { epic_id: epicId, status: 'active', edges: [] };
+        await writeFile(
+          path.join(specsDir, epicId, 'plan-v1.json'),
+          JSON.stringify({
+            ...base,
+            version: 1,
+            tasks: [row(FINISHED, 'completed'), row(KEPT, 'todo')],
+          }),
+          'utf8',
+        );
+        await writeFile(
+          path.join(specsDir, epicId, 'plan-v2.json'),
+          JSON.stringify({ ...base, version: 2, tasks: opts.latest }),
+          'utf8',
+        );
+        await addTask(FINISHED, 'completed');
+        await addTask(KEPT, 'completed');
+        if (opts.merged.length > 0) {
+          await appendEvent(
+            {
+              session_id: sessionId,
+              actor: 'system',
+              event_type: 'wave-merged',
+              plan_version: 1,
+              causal_parent: `${sessionId}#0`,
+              payload: { task_ids: opts.merged },
+            },
+            { stateDir },
+          );
+        }
+        await addIntegrationCheck();
+        await addSpecReview();
+        await addGoalCheck(2, [opts.cited]);
+        const outcome = await runEpicVerdict(
+          {
+            effort: alwaysEffort(),
+            epicId,
+            integrationHeadSha: HEAD_SHA,
+            integrationBranch: `bs/${epicId}/integration`,
+            mcp: MCP_SURFACE_NOT_REQUIRED,
+            goal: goalStatus(),
+            crosscheck: { policy: policyWith() },
+            planOpts: { specsDir },
+          },
+          ctx(),
+          { stateDir },
+        );
+        return outcome.summary.blockers;
+      } finally {
+        await rm(specsDir, { recursive: true, force: true });
+      }
+    }
+
+    it('lets the credit stand when the log reports the task merged', async () => {
+      const blockers = await blockersWith({
+        latest: [row(KEPT, 'todo')],
+        merged: [FINISHED],
+        cited: FINISHED,
+      });
+      expect(blockers.filter((b) => b.includes('does not have'))).toEqual([]);
+    });
+
+    const refused: [string, Row[], string[], string][] = [
+      ['never merged in the log', [row(KEPT, 'todo')], [], FINISHED],
+      ['merged under a bare log id', [row(KEPT, 'todo')], ['task-1'], FINISHED],
+      ['merged under another epic', [row(KEPT, 'todo')], ['epic-9/task-1'], FINISHED],
+      [
+        'superseded in the latest version',
+        [row(FINISHED, 'superseded'), row(KEPT, 'todo')],
+        [FINISHED],
+        FINISHED,
+      ],
+      [
+        'held by no plan version at all',
+        [row(KEPT, 'todo')],
+        [`${epicId}/task-9`],
+        `${epicId}/task-9`,
+      ],
+    ];
+    for (const [name, latest, merged, cited] of refused) {
+      it(`still blocks a hand-written credit to a task ${name}`, async () => {
+        const blockers = await blockersWith({ latest, merged, cited });
+        expect(blockers.some((b) => b.includes('does not have') && b.includes(cited))).toBe(true);
+      });
     }
   });
 

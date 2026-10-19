@@ -1218,6 +1218,38 @@ function errorText(err: unknown): string {
 }
 
 /**
+ * Every session in the state directory that has an entry edge, with that edge,
+ * in session-id order. One bounded read per log, as `continuationIndex` pays.
+ */
+async function entryEdges(opts: EventOpts): Promise<[string, string][]> {
+  const edges: [string, string][] = [];
+  for (const sessionId of listSessionIds(opts.stateDir ?? STATE_EVENTS_DIR)) {
+    const edge = await readEntryEdge(sessionId, opts);
+    if (edge === undefined || edge === null) continue;
+    edges.push([sessionId, edge]);
+  }
+  return edges;
+}
+
+/**
+ * The session each event opened, across the WHOLE state directory: keyed by
+ * the event id a session's entry edge names, valued by that session.
+ *
+ * `delegation check` asks of a dispatch "did a session open against it?", and
+ * the true answer lives in some other log's first line -- a sibling wave's,
+ * which `readLineageEvents` deliberately does not fold in. This answers from
+ * the entry edges alone, so the lineage's scope stays as narrow as it is and
+ * a wave session can still tell that the epic's earlier dispatches were taken
+ * up. Where several sessions name the same event the id-last one wins, as the
+ * in-memory fold's last write does.
+ */
+export async function sessionsOpenedByEdge(opts: EventOpts = {}): Promise<Map<string, string>> {
+  const opened = new Map<string, string>();
+  for (const [sessionId, edge] of await entryEdges(opts)) opened.set(edge, sessionId);
+  return opened;
+}
+
+/**
  * Every session in the state directory that continues another, keyed by the
  * session it continues.
  *
@@ -1234,9 +1266,7 @@ function errorText(err: unknown): string {
  */
 async function continuationIndex(opts: EventOpts): Promise<Map<string, string[]>> {
   const index = new Map<string, string[]>();
-  for (const sessionId of listSessionIds(opts.stateDir ?? STATE_EVENTS_DIR)) {
-    const edge = await readEntryEdge(sessionId, opts);
-    if (edge === undefined || edge === null) continue;
+  for (const [sessionId, edge] of await entryEdges(opts)) {
     const parent = parseEventId(edge).sessionId;
     // A root naming its own log is not a continuation; the upward walk stops
     // on the same condition.

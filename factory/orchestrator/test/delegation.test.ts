@@ -465,6 +465,29 @@ describe('checkDelegationLog', () => {
     expect(report.checks.some((c) => c.status === 'unverifiable')).toBe(false);
   });
 
+  it('reads a dispatch as taken up when the session that opened it is outside the events', () => {
+    const events = [event('epic-1', 0, 'session-start'), dispatch('epic-1', 1, 'wave-runner')];
+    const report = checkDelegationLog(events, WAVE_POLICY, {
+      sessionId: 'wave-2',
+      openedElsewhere: new Map([['epic-1#1', 'wave-1']]),
+    });
+    expect(report.ok).toBe(true);
+    expect(report.checks.map((c) => `${c.status}:${c.sessionId}`)).toEqual(['ok:wave-1']);
+  });
+
+  it('lets the events win where they and openedElsewhere name different sessions', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+    ];
+    const report = checkDelegationLog(events, WAVE_POLICY, {
+      sessionId: 'wave-1',
+      openedElsewhere: new Map([['epic-1#1', 'other']]),
+    });
+    expect(report.checks.map((c) => c.sessionId)).toEqual(['wave-1']);
+  });
+
   it('reports a still-open wave-runner as unverifiable, and fails on it', () => {
     const events = [event('epic-1', 0, 'session-start'), dispatch('epic-1', 1, 'wave-runner')];
     const report = log(events);

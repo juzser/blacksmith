@@ -291,7 +291,7 @@ function describeType(value: unknown): string {
  *
  * The codebase already settles claims-shape questions by asking which
  * direction is safe for the reader asking them. `ownershipFromPlan` drops an
- * unreadable set because "a task without claims owns no file, and is dropped
+ * unreadable set (and a superseded record) because "a task without claims owns no file, and is dropped
  * rather than defaulted to owning everything"; spec.ts drops one because that
  * "leaves its sites unclaimed rather than silently covered". Both are right,
  * and both answer a question whose safe direction is *less*.
