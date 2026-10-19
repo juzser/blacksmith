@@ -138,6 +138,22 @@ describe('force-push rule reads a command named in a git configuration value', (
     );
   });
 
+  // A backslash inside single quotes is literal to the shell that holds the
+  // value, so only reading the value as a command line (dequoting it) shows
+  // the forced push; a scan of the raw text does not.
+  it('reads the dequoted form of a -c value', () => {
+    expect(refused("git -c core.pager='git p\\ush -f origin main' log")).toBe(true);
+  });
+
+  it('reads the dequoted form of a git grep -O value', () => {
+    expect(refused("git grep -O'git p\\ush -f origin main' x")).toBe(true);
+  });
+
+  it('reads an unreadable -c operand written in the attached form', () => {
+    expect(refused('git -ccore.pager="$P" log')).toBe(true);
+    expect(refused('git -c=core.pager="$P" log')).toBe(true);
+  });
+
   it('reads a value that is itself a nested shell command', () => {
     expect(refused('git -c core.pager="sh -c \'git push -f origin main\'" log')).toBe(true);
   });
@@ -263,6 +279,26 @@ describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
         `GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'core.pager=git push -f origin main'" git log`,
       ),
     ).toBe(true);
+  });
+
+  it('reads the dequoted form of an entry value', () => {
+    expect(
+      refused(`GIT_CONFIG_PARAMETERS="'core.pager=git p\\\\ush -f origin main'" git log`),
+    ).toBe(true);
+  });
+
+  it('keeps reading entries after an escaped single quote', () => {
+    expect(
+      refused(
+        `GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'core.pager=git p\\\\ush -f origin main'" git log`,
+      ),
+    ).toBe(true);
+  });
+
+  it('allows an entry that carries an escaped single quote and sets nothing forced', () => {
+    expect(allowed(`GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'color.ui=always'" git log`)).toBe(
+      true,
+    );
   });
 
   it('refuses an entry that defines an alias', () => {
