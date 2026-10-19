@@ -21,6 +21,7 @@ interface Manifest {
   readonly publishConfig?: { readonly access?: string };
   readonly bin: Record<string, string>;
   readonly files: readonly string[];
+  readonly scripts: Record<string, string>;
   readonly dependencies: Record<string, string>;
 }
 
@@ -265,23 +266,65 @@ describe('the published package', () => {
     expect(dropped).toEqual([]);
   });
 
-  it('depends on exactly what the CLI imports', () => {
+  it('ships the dashboard the CLI launches', () => {
+    // `smith ui` imports the built server entry off REPO_ROOT. The entry is
+    // read out of cli.ts as spelled, so moving it moves this check with it.
+    const cli = readFileSync(
+      path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'cli.ts'),
+      'utf8',
+    );
+    const join = /const serverEntry = path\.join\(REPO_ROOT,([^)]*)\)/.exec(cli);
+    expect(join, 'cli.ts no longer builds `serverEntry` off REPO_ROOT').not.toBeNull();
+    const entry = path.join(
+      ...[...(join?.[1] ?? '').matchAll(/'([^']*)'/g)].map((seg) => seg[1] as string),
+    );
+    expect(entry.startsWith(path.join('ui', 'server', 'dist'))).toBe(true);
+    expect(isShipped(entry), `${entry} is launched by the CLI and not in package.json#files`).toBe(
+      true,
+    );
+    expect(
+      isShipped('ui/dist/index.html'),
+      'the built dashboard is not in package.json#files',
+    ).toBe(true);
+    expect(manifest.files).toContain('ui/dist');
+    expect(manifest.files).toContain('ui/server/dist');
+  });
+
+  it('builds the dashboard before it packs', () => {
+    const prepack = manifest.scripts.prepack ?? '';
+    for (const step of ['build', 'build:server', 'build:ui']) {
+      expect(prepack, `prepack does not run ${step}`).toMatch(
+        new RegExp(`pnpm run ${step}(?![\\w:-])`),
+      );
+    }
+  });
+
+  it('depends on exactly what the CLI and the dashboard server import', () => {
     // Everything under `dependencies` is installed by every `npx` of the
     // CLI. Before this pin the list carried a UI framework the CLI never
-    // loads (PP-3): a user running `smith epic verdict` downloaded Vue.
-    const src = path.join(REPO_ROOT, 'factory', 'orchestrator', 'src');
+    // loads (PP-3): a user running `smith epic verdict` downloaded Vue. The
+    // dashboard server ships too, so its runtime imports count; its tests
+    // and type-only imports do not, because neither survives the build.
     const imported = new Set<string>();
-    for (const abs of walk(src)) {
-      if (!abs.endsWith('.ts')) continue;
-      // `$` is excluded because a template literal such as `* from '${x}'` is a
-      // string, and no import specifier starts with an interpolation.
-      for (const match of readFileSync(abs, 'utf8').matchAll(/from\s+'([^'.$][^']*)'/g)) {
-        const spec = match[1] as string;
-        if (spec.startsWith('node:')) continue;
-        const name = spec.startsWith('@')
-          ? spec.split('/').slice(0, 2).join('/')
-          : (spec.split('/')[0] as string);
-        imported.add(name);
+    for (const root of [
+      path.join(REPO_ROOT, 'factory', 'orchestrator', 'src'),
+      path.join(REPO_ROOT, 'ui', 'server', 'src'),
+    ]) {
+      for (const abs of walk(root)) {
+        if (!abs.endsWith('.ts') || abs.endsWith('.test.ts')) continue;
+        // `$` is excluded because a template literal such as `* from '${x}'` is a
+        // string, and no import specifier starts with an interpolation.
+        for (const match of readFileSync(abs, 'utf8').matchAll(
+          /^(import|export)\s+(type\s+)?[^;]*?\bfrom\s+'([^'.$][^']*)'/gm,
+        )) {
+          if (match[2] !== undefined) continue;
+          const spec = match[3] as string;
+          if (spec.startsWith('node:')) continue;
+          const name = spec.startsWith('@')
+            ? spec.split('/').slice(0, 2).join('/')
+            : (spec.split('/')[0] as string);
+          imported.add(name);
+        }
       }
     }
     expect([...imported].sort()).toEqual(Object.keys(manifest.dependencies).sort());
