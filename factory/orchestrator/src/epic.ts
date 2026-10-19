@@ -446,7 +446,7 @@ export interface ClearedFollowUp {
   taskId: string;
   /** Its raw status in the log — never rewritten; see clearedFollowUpFindings's doc. */
   taskStatus: string;
-  /** Every finding it owns, all waived — the rule's own evidence, named. */
+  /** Every finding it owns, each fix-verified, refuted or waived — the rule's own evidence, named. */
   waivedFindingIds: string[];
 }
 
@@ -1911,6 +1911,16 @@ function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
     // says so, because none of it blocked.
     ungated_tasks: summary.ungatedTasks.map(taskRef),
     waived_tasks: summary.waivedTasks.map(taskRef),
+    // Follow-ups counted terminal-OK because every finding they own is closed.
+    // They keep their raw status (`task_status`, often `todo`), so without this
+    // the close lists them as open tasks beside a zero non-terminal count and
+    // nothing explains the difference. `finding_ids` covers fix-verified,
+    // refuted and waived findings alike.
+    cleared_follow_ups: summary.clearedFollowUps.map((c) => ({
+      task_id: c.taskId,
+      task_status: c.taskStatus,
+      finding_ids: c.waivedFindingIds,
+    })),
     open_findings: summary.openFindings.map(findingRef),
     discretionary_findings: summary.discretionaryFindings.map(findingRef),
     // D-127 Part B: satisfied amend-pending findings are not blockers, but

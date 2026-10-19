@@ -2640,7 +2640,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
   const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
 
-  async function addTask(taskId: string, status: string, planVersion?: number) {
+  async function addTask(taskId: string, status: string, planVersion?: number, origin?: string) {
     if (TERMINAL_OK.has(status)) await addGateRun(taskId, sessionId, stateDir);
     await appendEvent(
       {
@@ -2653,6 +2653,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         payload: {
           epic_id: epicId,
           task_status: status,
+          ...(origin === undefined ? {} : { origin }),
           // foldTasks() reads planVersion from the payload, not the event
           // envelope's own plan_version — leaving this unset (as every
           // pre-D-127 caller here does) leaves row.planVersion null.
@@ -3100,6 +3101,8 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     // Empty, and said so: every task here was gated, and that is a fact about
     // this close worth recording rather than an absence to be inferred.
     expect(summary.ungated_tasks).toEqual([]);
+    // Present and empty: no follow-up was cleared by rule in this close.
+    expect(summary.cleared_follow_ups).toEqual([]);
     expect(summary.mcp).toEqual({
       required: false,
       milestone_id: null,
@@ -3107,6 +3110,61 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       problem: null,
       check: null,
     });
+  });
+
+  // A follow-up whose every finding is closed counts terminal-OK while its raw
+  // status stays `todo`. The judge is told so; the close record has to be too,
+  // or it lists an open-looking task beside a zero non-terminal count.
+  it('records a follow-up cleared by rule, with its raw status, so the close explains the todo row', async () => {
+    await addTask('epic-1/task-1', 'completed');
+    await addTask('epic-1/followup-9a8f6ac7', 'todo', undefined, 'escalation');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+    await raiseFinding(
+      {
+        finding: {
+          finding_id: 'finding-followup',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          finding_category: 'maintainability',
+          severity: 'S3-minor',
+          finding_status: 'raised',
+          finding_scope: 'diff',
+          summary: 'names the local `t` where the file spells it `task`',
+          failure_scenario: { inputs: 'n/a', expected: 'n/a', actual: 'n/a' },
+          found_by: 'reviewer',
+        },
+        filePath: 'src/foo.ts',
+      },
+      ctx(),
+      { stateDir },
+    );
+    await transition('finding-followup', 'waived', ctx(), { stateDir });
+
+    const record = await closeEpic(
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(record.machineVerdict).toBe('go');
+
+    const payload = (await closedEvents())[0]?.record.payload as Record<string, unknown>;
+    const summary = payload.summary as Record<string, unknown>;
+    expect(summary.non_terminal_task_count).toBe(0);
+    expect(summary.cleared_follow_ups).toEqual([
+      {
+        task_id: 'epic-1/followup-9a8f6ac7',
+        task_status: 'todo',
+        finding_ids: ['finding-followup'],
+      },
+    ]);
   });
 
   it('refuses to close a held epic without an override rationale, and appends nothing', async () => {
