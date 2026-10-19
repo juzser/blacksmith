@@ -1155,34 +1155,75 @@ function decodeAnsiCQuoting(segment: string): { text: string; unterminated: bool
  * the middle reads as `git` to every scanner below rather than as two
  * fragments a literal-substring or exact-word match would miss.
  *
- * Two spans are left untouched because bash itself treats a backslash there
- * differently: a single-quoted span is fully literal, so a backslash-newline
- * pair inside it is data, not a continuation; and a `$'...'` span decodes its
- * own escapes — `decodeAnsiCPayload` already reads a `\`-newline pair inside
- * one through unchanged, so joining it here first would be a second, and
- * conflicting, decode of the same text.
+ * Two readings, chosen per command. A backslash and the character after it
+ * are always one pair, so an escaped backslash never joins with the newline
+ * after it.
+ *
+ * - A command holding none of the constructs `UNCERTAIN_QUOTING` lists is read
+ *   with bash's own quoting, and a pair is kept (not joined) only where bash
+ *   keeps it: inside a `'...'` span, which is fully literal, and inside a
+ *   `$'...'` span, whose escapes `decodeAnsiCPayload` already reads through.
+ *   Outside quotes a backslash escapes the next character, so `\'` opens no
+ *   span. Inside double quotes a `'` and a `$'` are literal text and open
+ *   nothing; only an unescaped `"` closes the span.
+ * - A command holding one of those constructs (a backtick, `$(`, `${`, `$$`,
+ *   `<<`, `#`) is read with no spans at all: every continuation is joined.
+ *   Their quoting rules (a comment, a here-document body, a nested expansion,
+ *   a parameter before a `'`) are not modelled here.
+ * - A span that is never closed is read the second way from its opener on.
+ *   Bash never runs that remainder.
+ *
+ * The second reading is the safe direction. Joining a pair bash keeps only
+ * removes a newline from what the guard reads of a quoted string, and the
+ * pairing rule above never changes how the characters after it pair with a
+ * backslash, so it cannot move where any quote ends. Joining fewer pairs than
+ * bash does is the only direction that can split a word the shell reads whole.
  */
 function joinLineContinuations(command: string): string {
+  const joinEvery = (text: string): string => {
+    let out = '';
+    let k = 0;
+    while (k < text.length) {
+      if (text[k] === '\\') {
+        if (text[k + 1] !== '\n') out += text.slice(k, k + 2);
+        k += 2;
+        continue;
+      }
+      out += text[k];
+      k += 1;
+    }
+    return out;
+  };
+  if (UNCERTAIN_QUOTING.test(command)) return joinEvery(command);
   let result = '';
+  let inDouble = false;
   let i = 0;
   while (i < command.length) {
     const c = command[i];
-    if (c === "'") {
-      const end = command.indexOf("'", i + 1);
-      const spanEnd = end === -1 ? command.length : end + 1;
-      result += command.slice(i, spanEnd);
-      i = spanEnd;
-      continue;
-    }
-    if (c === '$' && command[i + 1] === "'") {
-      const end = findAnsiCQuoteEnd(command, i + 2);
-      const spanEnd = end === -1 ? command.length : end + 1;
-      result += command.slice(i, spanEnd);
-      i = spanEnd;
-      continue;
-    }
-    if (c === '\\' && command[i + 1] === '\n') {
+    if (c === '\\') {
+      if (command[i + 1] !== '\n') result += command.slice(i, i + 2);
       i += 2;
+      continue;
+    }
+    if (inDouble) {
+      if (c === '"') inDouble = false;
+      result += c;
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = true;
+      result += c;
+      i += 1;
+      continue;
+    }
+    if (c === "'" || (c === '$' && command[i + 1] === "'")) {
+      const ansiC = c === '$';
+      const open = ansiC ? i + 2 : i + 1;
+      const end = ansiC ? findAnsiCQuoteEnd(command, open) : command.indexOf("'", open);
+      if (end === -1) return result + joinEvery(command.slice(i));
+      result += command.slice(i, end + 1);
+      i = end + 1;
       continue;
     }
     result += c;
@@ -1547,6 +1588,157 @@ function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): nu
   return -1;
 }
 
+/** Git builtins that only read: a same-named alias never replaces a builtin, and none of them writes a ref. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  'grep',
+  'log',
+  'show',
+  'diff',
+  'status',
+  'ls-files',
+  'ls-tree',
+  'blame',
+  'shortlog',
+  'rev-parse',
+  'cat-file',
+  'rev-list',
+  'describe',
+  'for-each-ref',
+  'show-ref',
+  'diff-tree',
+]);
+
+/** Global options that take no value, so the word after one is still the next option or the subcommand. */
+const GIT_GLOBAL_FLAGS_WITHOUT_VALUE = new Set([
+  '--no-pager',
+  '-P',
+  '-p',
+  '--paginate',
+  '--bare',
+  '--no-replace-objects',
+  '--literal-pathspecs',
+  '--no-literal-pathspecs',
+  '--glob-pathspecs',
+  '--noglob-pathspecs',
+  '--icase-pathspecs',
+  '--no-optional-locks',
+  '--no-advice',
+]);
+
+const READ_ONLY_SEGMENT_FORBIDDEN_RE = /[;&|\n()`#<>{}]/;
+
+/** Global options `isReadOnlyGitCommand` takes a value for; unlike `GIT_GLOBAL_VALUE_FLAGS`, it leaves out the ones whose value git can run. */
+const READ_ONLY_GIT_VALUE_FLAGS = new Set(['-C', '--git-dir', '--work-tree', '--namespace']);
+
+/** `--name=value` global options whose value is only a path or a name. */
+const READ_ONLY_GIT_EQUALS_FLAGS = new Set(['--git-dir', '--work-tree', '--namespace']);
+
+const GREP_PAGER_LONG_OPTION = '--open-files-in-pager';
+
+/**
+ * True when `word` (as written) holds a parameter expansion, a substitution
+ * or an unquoted glob character, so the shell may turn it into something
+ * else before git sees it. A single-quoted span, an escaped character and a
+ * glob inside double quotes are literal and do not count.
+ */
+function hasUnreadableShellForm(word: string): boolean {
+  let i = 0;
+  while (i < word.length) {
+    const c = word.charAt(i);
+    if (c === '\\') {
+      i += 2;
+    } else if (c === "'") {
+      const end = word.indexOf("'", i + 1);
+      i = end === -1 ? word.length : end + 1;
+    } else if (c === '"') {
+      i += 1;
+      while (i < word.length && word.charAt(i) !== '"') {
+        const d = word.charAt(i);
+        if (d === '$' || d === '`') return true;
+        i += d === '\\' ? 2 : 1;
+      }
+      i += 1;
+    } else if (c === '$' || c === '`' || c === '*' || c === '?' || c === '[') {
+      return true;
+    } else {
+      i += 1;
+    }
+  }
+  return false;
+}
+
+/** True when `text` is an option of `git grep` whose value git runs as a command. */
+function isGrepPagerOption(text: string): boolean {
+  if (/^-[^-]*O/.test(text)) return true;
+  if (!text.startsWith('--')) return false;
+  const name = text.split('=')[0] ?? '';
+  return name.length >= 4 && GREP_PAGER_LONG_OPTION.startsWith(name);
+}
+
+/**
+ * True when `segment` is provably one simple `git <read-only builtin> ...`
+ * command, so a gated word (`push`, `reset`, ...) elsewhere in it is only an
+ * argument to that builtin, such as a search term. Every condition falls back
+ * to the plain-word gate's own answer when it does not hold:
+ *  - no command separator, grouping, substitution, comment or redirection
+ *    character anywhere, quoted or not, because `topLevelCommands` can hand
+ *    back several commands as one segment when it cannot read the line;
+ *  - exactly one `git` word, so no second invocation hides in the arguments;
+ *  - `git` is the first word, so no assignment or wrapper changes what runs;
+ *  - every word before the subcommand is a global option this function knows
+ *    (a value-taking one is followed by a plain value), because an option it
+ *    does not know may take a value and move the subcommand; `-c`,
+ *    `--config-env`, `--exec-path` and any other `--name=value` form are not
+ *    known, since a setting or path they give can make git run its value;
+ *  - the subcommand is written plainly and is a read-only builtin;
+ *  - for `grep`, no word after the subcommand is an `-O` / `--open-files-in-pager`
+ *    option (git runs its value as a command) and none holds a parameter
+ *    expansion, substitution or unquoted glob that could expand into one.
+ * It can only turn a refusal of such a command into an allow; later layers
+ * still read the words after the subcommand.
+ */
+function isReadOnlyGitCommand(segment: string): boolean {
+  const stripped = stripRedirections(segment);
+  if (READ_ONLY_SEGMENT_FORBIDDEN_RE.test(stripped)) return false;
+  if ((segment.match(/\bgit\b/gi) ?? []).length !== 1) return false;
+  const words = splitDequotedWords(stripped);
+  if (words[0]?.raw !== 'git') return false;
+  let i = 1;
+  while (i < words.length) {
+    const word = words[i];
+    if (word === undefined || !word.text.startsWith('-')) break;
+    if (!isPlainWord(word.raw)) return false;
+    if (READ_ONLY_GIT_VALUE_FLAGS.has(word.text)) {
+      const value = words[i + 1];
+      if (value === undefined || !isPlainWord(value.raw)) return false;
+      i += 2;
+    } else if (
+      READ_ONLY_GIT_EQUALS_FLAGS.has(word.text.split('=')[0] ?? '') &&
+      word.text.includes('=')
+    ) {
+      i += 1;
+    } else if (GIT_GLOBAL_FLAGS_WITHOUT_VALUE.has(word.text)) {
+      i += 1;
+    } else {
+      return false;
+    }
+  }
+  const subcommand = words[i];
+  if (
+    subcommand === undefined ||
+    subcommand.raw !== subcommand.text ||
+    !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand.text)
+  ) {
+    return false;
+  }
+  if (subcommand.text === 'grep') {
+    for (const arg of words.slice(i + 1)) {
+      if (isGrepPagerOption(arg.text) || hasUnreadableShellForm(arg.raw)) return false;
+    }
+  }
+  return true;
+}
+
 const SUBCOMMAND_NOT_PLAIN_REASON =
   'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
 
@@ -1687,7 +1879,10 @@ function checkForcePushSubcommandWord(
  * ref, every word after the subcommand must be plain — see `isPlainWord`.
  * A word this rule cannot read safely is refused rather than guessed at; the
  * gate decides only readability, not force-ness, which the checks below
- * still do once the words are known safe to read.
+ * still do once the words are known safe to read. A segment that is provably
+ * one read-only git builtin (`isReadOnlyGitCommand`) is not covered by the
+ * gate, since there the gated word is only an argument; the checks below
+ * still read it.
  */
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
@@ -1719,7 +1914,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // So once a covered subcommand is found, an undecoded `$'...'` span
     // anywhere in the segment is already a plain-word failure on its own;
     // otherwise (no span at all) the raw segment is checked directly.
-    if (isCoveredForcePushSegment(decoded.text)) {
+    // The one exemption: a read-only builtin that only names a gated word as
+    // an argument (`git grep push -- 'x/*.ts'`) skips the plain-word block.
+    // Every layer after it still reads the segment.
+    const readOnlyBuiltin = decoded.text === segment && isReadOnlyGitCommand(segment);
+    if (isCoveredForcePushSegment(decoded.text) && !readOnlyBuiltin) {
       if (decoded.text !== segment) return violation(rule, PLAIN_WORD_REASON);
       if (hasUnsafeWord(segment)) return violation(rule, PLAIN_WORD_REASON);
     }

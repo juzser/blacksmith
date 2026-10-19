@@ -40,6 +40,28 @@ than appearing in it.
 
 ### Fixed
 
+- **Read-only git searches for a word such as `push` are no longer refused.**
+  The force-push rule refused a read-only git command that only searched for
+  one of the words it watches (`push`, `rebase`, `reset`, `filter-branch`,
+  `update-ref`), such as `git grep -n push -- 'x/*.ts'` or
+  `git log -S push --format='%h %s'`, as soon as another word on the line was
+  quoted, a glob or a parameter. A segment that is exactly one read-only git
+  builtin, with global options the rule knows, now skips that one word check.
+  Every other check of the rule still reads it.
+
+- **The epic-closed record names follow-ups that closed through their
+  findings.** A follow-up counts as finished once every finding it owns is
+  closed, but it keeps its raw status, so the close listed it as `todo` beside
+  `non_terminal_task_count: 0` with nothing saying why. The `epic-closed`
+  summary now carries `cleared_follow_ups`: each such follow-up, its raw
+  `task_status`, and the finding ids that cleared it. The key is always
+  present, empty when none applied.
+
+- **The guard reads line continuations by bash's quoting rules.** An
+  apostrophe bash reads as plain text, such as one inside double quotes or
+  escaped with a backslash, no longer changes how the guard joins a
+  backslash-newline after it.
+
 - **`claims impact` reads each `export * from` line on its own.** The scanner
   named every star re-export `*`, so all the lines in a barrel shared one name.
   Appending a line or reordering two read as a changed declaration, and a

@@ -1113,6 +1113,101 @@ describe('evaluateCommand — rule 2: force-push', () => {
   });
 });
 
+describe('evaluateCommand — a read-only git builtin that names a gated word', () => {
+  // git itself runs `grep`/`log`/..., a builtin no alias replaces, and the
+  // gated word is only an argument to it.
+  it.each([
+    "git grep -n push -- 'x/*.ts'",
+    "git log --grep push -- 'src/*.ts'",
+    "git grep -n -e reset -e rebase -- '*.md'",
+    "git log -S push --format='%h %s'",
+    "git -C repo grep -n push -- 'x/*.ts'",
+    'git -C repo log --grep=push -- "$f"',
+    "git --no-pager grep -n update-ref -- 'x/*.ts'",
+    'git -P log --grep push $X',
+    "git grep -niw push -- 'x/*.ts'",
+    "git grep --or -e push -e reset -- 'x/*.ts'",
+    "git grep -n filter-branch -- 'x/*.ts'",
+  ])('allows git naming a gated word as a search term: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).not.toContain('force-push');
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    'git grep -Ogit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -nOgit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -e -- -Ogit\\ reset\\ --hard\\ HEAD~5 x',
+    'git grep -Ogit\\ update-ref\\ -d\\ refs/heads/x x',
+    "git -c core.pager=sh -p grep -h reset -- 'x/*.ts'",
+    "git -c diff.external=sh diff push -- 'x/*.ts'",
+    "git --config-env=core.pager=P -p log --grep push -- 'x/*.ts'",
+    "git --exec-path=x grep push -- 'x/*.ts'",
+    'git grep push $X',
+    'git grep push "$X"',
+    'git grep push x*',
+    'git -c core.quotepath=off log --grep=push -- "$f"',
+    'git --no-pager grep -n update-ref -- "$dir"',
+    'git -P grep push $X',
+  ])('refuses a read-only builtin that would run a command named on the line: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    'git show HEAD:x.ts | grep push',
+    "git grep -n -w branch -- 'x/*.ts'",
+    "git grep -n 'git push'",
+    'git log -S push "x"',
+  ])('still allows %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    'git push --force origin x',
+    'git push origin "$(echo +main)"',
+    'git push origin +main',
+    'git -C x push $REF',
+    'git -c a=b push "$R"',
+    'git --git-dir=.git push origin $X',
+    'git --no-pager -C x push $X',
+    'git --attr-source x push origin $X',
+    'git --attr-source grep push $X',
+    'git --exec-path grep push $X',
+    'git grep push $(git push origin "$X")',
+    'git grep push `git push origin $X`',
+    'git grep push <(git push origin $X)',
+    'sudo -u git git push origin $X',
+    'env git push origin "$X"',
+    'GIT_DIR=x git push $X',
+    'git x push origin "$X"',
+    'git grep push && git push origin "$X"',
+    'git grep push ; git reset --hard "$X"',
+    'git grep push -- x; git branch -D "$B"',
+    "git grep push 'x' & git push $X",
+    "git grep push '${x}' ; g\\it push $X",
+    "bash -c 'git grep push; git push origin $X'",
+    'eval "git grep push; git push \\$X"',
+    'git g\\rep push origin $X',
+    'git "grep" push $X',
+    "git grep push $'\\x70ush' $X",
+    'git grep push -- x git push $X',
+    "git grep -n push -- 'x/*.ts' --force",
+    "git grep -n push --for\\\nce -- 'x/*.ts'",
+    'git p\\\nush origin "$X"',
+    'git p\\ush origin "$X"',
+    'git pu""sh origin "$X"',
+    'git branch -D "$B"',
+    'git rebase -i $X',
+    'git reset --hard "$(x)"',
+    'git log --grep push -- \'x\' ; git update-ref -d "$R"',
+  ])('still refuses a gated subcommand outside a read-only builtin: %s', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+});
+
 describe('evaluateCommand — rule 3: merge-into-protected', () => {
   // A merge has exactly one destination: the branch you are standing on.
   // Every ref on the command line is a source. Refreshing a stale side branch
@@ -2251,6 +2346,57 @@ describe('evaluateCommand — a line continuation inside an rm invocation', () =
 
   it('allows a commit message with a continuation inside its quotes — still prose, not a command', () => {
     const command = 'git commit -m "line one\\\nline two"';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
+// Bash deletes a backslash-newline pair everywhere except inside a literal
+// single-quoted span, a `$'...'` span, a comment or a here-document body. The
+// guard joins every continuation bash joins: a quote inside double quotes is
+// literal text, an escaped quote opens no span, and a comment or here-document
+// body is not quoted text, so none of them may hide a later continuation.
+describe('evaluateCommand — a continuation after text bash reads as literal', () => {
+  const CONT = '\\\n';
+  it.each([
+    ['a double-quoted apostrophe', `echo "'" ; rm -r${CONT}f / ; echo "'"`],
+    ['an escaped apostrophe', `echo \\' ; rm -r${CONT}f / ; echo \\'`],
+    ['a double-quoted escaped quote and apostrophe', `echo "a\\"'" ; rm -r${CONT}f / ; echo "'"`],
+    ['a double-quoted dollar-apostrophe', `echo "$'" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe after a process-id parameter', `echo $$'a\\' ; rm -r${CONT}f /`],
+    ['an apostrophe in a comment', `# it's\nrm -r${CONT}f /\n# that's`],
+    ['an apostrophe in a nested substitution', `echo "$(echo "'")" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe in a nested expansion', `echo "\${x:-"'"}" ; rm -r${CONT}f / ; echo "'"`],
+    ['an apostrophe in a here-document body', `cat <<EOF\nit's\nEOF\nrm -r${CONT}f /\necho "'"`],
+    ['a contraction inside double quotes', `echo "it's" && rm -r${CONT}f / && echo "it's"`],
+  ])('refuses a recursive force removal continued across lines after %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([
+    ['a double-quoted apostrophe', `echo "'" ; git push --for${CONT}ce origin x ; echo "'"`],
+    ['an escaped apostrophe', `echo \\' ; git push --for${CONT}ce origin x ; echo \\'`],
+    ['an apostrophe in a comment', `# it's\ngit push --for${CONT}ce origin x\n# that's`],
+  ])('refuses a force push continued across lines after %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    ["git ls-files | grep 'a$'"],
+    ["git log | grep 'x$'"],
+    ["git status; echo 'a$'"],
+    ["git status && echo 'end$'"],
+    ["git ls-files | grep -v '^\\s*$'"],
+    ["git ls-files | grep 'a\\$'"],
+    ["git ls-files | grep -E 'hooks\\.json$|settings\\.json$' | head"],
+    ["git grep -n -l 'needle' HEAD; sed -n 1,30p a.ts | grep -E -v '^\\s*$' | head -25"],
+    [`printf '%s${CONT}' x`],
+    [`git log --format='%h ${CONT}%s' -3`],
+    [`echo "a" ${CONT}  "b"`],
+    [`echo "it's" ; git status`],
+  ])('allows %s — single-quoted text is still read as literal', (command) => {
     const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
   });
