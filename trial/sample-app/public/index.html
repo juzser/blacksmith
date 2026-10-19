@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sample notes</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Sample notes</h1>
+      <form id="note-form">
+        <input id="note-title" placeholder="Title" required />
+        <textarea id="note-body" placeholder="Body"></textarea>
+        <button type="submit">Add note</button>
+      </form>
+      <form id="tag-form">
+        <input id="tag-name" placeholder="New tag" required />
+        <button type="submit">Add tag</button>
+      </form>
+      <ul id="notes"></ul>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
