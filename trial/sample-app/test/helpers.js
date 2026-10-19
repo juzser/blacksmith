@@ -8,7 +8,6 @@ export function freshDb() {
   return db;
 }
 
-// Starts the app on an ephemeral port; returns a small JSON client.
 export async function startApp() {
   const db = freshDb();
   const server = createServer(db);
@@ -21,12 +20,8 @@ export async function startApp() {
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
-    let json = null;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      // not JSON (static files)
-    }
+    const isJson = (res.headers.get("content-type") ?? "").includes("json");
+    const json = isJson ? JSON.parse(text) : null;
     return { status: res.status, json, text, headers: res.headers };
   }
   return {

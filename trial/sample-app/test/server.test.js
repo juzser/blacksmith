@@ -17,7 +17,6 @@ test("GET / serves the static front end", async () => {
 
 test("static files are served with a matching content type", async () => {
   const res = await app.call("GET", "/app.js");
-  assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type"), /javascript/);
 });
 

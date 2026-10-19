@@ -10,7 +10,6 @@ const TYPES = {
   ".css": "text/css; charset=utf-8",
 };
 
-// Serves a file from public/; returns false when there is nothing to serve.
 export async function serveStatic(pathname, res) {
   const rel = pathname === "/" ? "/index.html" : pathname;
   const file = normalize(join(PUBLIC_DIR, rel));

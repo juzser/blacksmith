@@ -47,10 +47,4 @@ document.getElementById("note-form").addEventListener("submit", async (event) =>
   await refresh();
 });
 
-document.getElementById("tag-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  await api("POST", "/api/tags", { name: document.getElementById("tag-name").value });
-  event.target.reset();
-});
-
 refresh();

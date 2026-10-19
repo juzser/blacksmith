@@ -1,6 +1,5 @@
 body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #222; }
 main { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
 form { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
-ul { list-style: none; padding: 0; }
-li { background: #fff; padding: 0.75rem; margin-bottom: 0.5rem; border-radius: 4px; }
-.tag { background: #e0e7ef; border-radius: 3px; padding: 0 0.4rem; margin-right: 0.25rem; }
+li { background: #fff; padding: 0.75rem; margin-bottom: 0.5rem; list-style: none; }
+.tag { background: #e0e7ef; padding: 0 0.4rem; margin-right: 0.25rem; }

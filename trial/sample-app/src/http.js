@@ -16,10 +16,7 @@ export function sendJson(res, status, payload) {
   res.end(body);
 }
 
-export function sendNoContent(res) {
-  res.writeHead(204);
-  res.end();
-}
+export const sendNoContent = (res) => res.writeHead(204).end();
 
 export async function readJson(req) {
   const chunks = [];

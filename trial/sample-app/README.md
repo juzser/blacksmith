@@ -13,11 +13,8 @@ dependency-free.
   recorded.
 - A static front end in the public directory (plain HTML, CSS and JavaScript)
   that calls the API.
-- Tests written with the built-in test runner.
-
-The code lives under src: routes hold the HTTP handlers, repos hold the SQL,
-and the remaining modules cover the server, static files, migrations and
-database access.
+- Tests on the built-in test runner.
+Code lives under src: routes hold the HTTP handlers, repos hold the SQL.
 
 ## Run it
 
@@ -25,18 +22,11 @@ Needs Node 22.13 or newer. There is nothing to install.
 
     npm start
 
-The app listens on port 3000 (override with the PORT environment variable) and
-keeps its data in a sample-app.db file (override with DB_PATH). Open the
-printed address in a browser for the front end.
+It listens on port 3000 (PORT overrides) and stores data in sample-app.db
+(DB_PATH overrides). Open the printed address in a browser.
 
 ## Test it
 
     npm test
 
 The tests use an in-memory database and an ephemeral port.
-
-## API
-
-- GET, POST /api/notes and GET, PUT, DELETE /api/notes/:id
-  (GET /api/notes accepts a tag query parameter holding a tag id)
-- GET, POST /api/tags and DELETE /api/tags/:id

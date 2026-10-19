@@ -5,7 +5,6 @@ import { serveStatic } from "./static.js";
 
 const routes = [...noteRoutes, ...tagRoutes];
 
-// Builds the request listener for a database handle.
 export function createApp(db) {
   return async function app(req, res) {
     const url = new URL(req.url, "http://localhost");

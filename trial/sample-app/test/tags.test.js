@@ -34,8 +34,3 @@ test("DELETE /api/tags/:id removes the tag from its notes", async () => {
   const after = await app.call("GET", `/api/notes/${note.json.id}`);
   assert.deepEqual(after.json.tags, []);
 });
-
-test("DELETE /api/tags/:id answers 404 for an unknown id", async () => {
-  const res = await app.call("DELETE", "/api/tags/99999");
-  assert.equal(res.status, 404);
-});

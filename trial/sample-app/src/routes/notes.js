@@ -11,12 +11,6 @@ function validate(input) {
   return input;
 }
 
-function requireNote(db, id) {
-  const note = getNote(db, id);
-  if (!note) throw new HttpError(404, "note not found");
-  return note;
-}
-
 export const noteRoutes = [
   {
     method: "GET",
@@ -37,7 +31,11 @@ export const noteRoutes = [
   {
     method: "GET",
     pattern: /^\/api\/notes\/(\d+)$/,
-    handler: ({ db, res, params }) => sendJson(res, 200, requireNote(db, Number(params[0]))),
+    handler: ({ db, res, params }) => {
+      const note = getNote(db, Number(params[0]));
+      if (!note) throw new HttpError(404, "note not found");
+      sendJson(res, 200, note);
+    },
   },
   {
     method: "PUT",

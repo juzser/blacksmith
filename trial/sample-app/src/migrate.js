@@ -4,14 +4,12 @@ import { fileURLToPath } from "node:url";
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
-// Migration files are named NNN_description.sql and applied in name order.
 export function listMigrationFiles() {
   return readdirSync(MIGRATIONS_DIR)
     .filter((f) => /^\d+_.+\.sql$/.test(f))
     .sort();
 }
 
-// Applies every migration not yet recorded; returns the names it applied.
 export function migrate(db) {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)");
   const done = new Set(
