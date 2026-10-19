@@ -262,8 +262,8 @@ task:
   # visible instead of free. Left unpriced on purpose until there is real spend
   # data to size them from; inventing a cap would make the projection look
   # complete without making it true. For wave-runner the final-turn size and
-  # the cumulative spend differ about tenfold, so neither is a sound basis for
-  # a cap yet.
+  # the cumulative spend differ about tenfold (p90 100k against 1.17M,
+  # 2026-10-17), so neither is a sound basis for a cap yet.
 
 pre_code_budget:
   # researcher + uiux together, before any code is written for the epic
