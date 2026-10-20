@@ -1875,8 +1875,11 @@ function checkForcePushSubcommandWord(
 /** The value of a shell variable set on the command line, or `null` when its text cannot be read statically. */
 type EnvValue = string | null;
 
-const GIT_CONFIG_ENV_NAME_RE =
-  /^(?:GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+const GIT_CONFIG_ENV_NAMES =
+  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+';
+const GIT_CONFIG_ENV_NAME_RE = new RegExp(`^(?:${GIT_CONFIG_ENV_NAMES})$`);
+/** Any mention of a configuration variable in a segment's text. */
+const GIT_CONFIG_ENV_MENTION_RE = new RegExp(`\\b(?:${GIT_CONFIG_ENV_NAMES})\\b`, 'g');
 const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
 
 /** Builtins whose following words name variables they set, like `export`. */
@@ -1892,26 +1895,31 @@ const GIT_CONFIG_UNREADABLE_REASON =
  * With `leadingOnly` the scan stops at the first word that is neither one of
  * those builtins, `env` nor an assignment, which is how a
  * segment with no `git` word is read; otherwise every word is scanned, which
- * is how the words in front of a `git` word are read.
+ * is how the words in front of a `git` word are read. Returns how many
+ * configuration variables it recorded.
  */
 function readAssignments(
   words: readonly DequotedWord[],
   env: Map<string, EnvValue>,
   leadingOnly: boolean,
-): void {
+): number {
   let afterExport = false;
+  let recorded = 0;
   for (const word of words) {
-    const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1];
-    if (name !== undefined) {
+    const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1] ?? null;
+    const bareName = afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text) ? word.text : null;
+    if (name !== null) {
       env.set(name, hasUnreadableShellForm(word.raw) ? null : word.text.slice(name.length + 1));
     } else if (VARIABLE_DECLARING_BUILTIN_RE.test(word.text)) {
       afterExport = true;
-    } else if (afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text)) {
-      env.set(word.text, null);
+    } else if (bareName !== null) {
+      env.set(bareName, null);
     } else if (leadingOnly && word.text !== 'env' && !afterExport) {
       break;
     }
+    if (GIT_CONFIG_ENV_NAME_RE.test(name ?? bareName ?? '')) recorded += 1;
   }
+  return recorded;
 }
 
 /**
@@ -2074,11 +2082,15 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
 
     const words = splitDequotedWords(stripRedirections(segment));
     const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
-    if (gitIndex === -1) {
-      readAssignments(words, carried, true);
-    } else {
-      const env = new Map(carried);
-      readAssignments(words.slice(0, gitIndex), env, false);
+    const env = gitIndex === -1 ? carried : new Map(carried);
+    const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
+    const recorded = readAssignments(leading, env, gitIndex === -1);
+    // A configuration variable named in the segment beyond the assignments
+    // read above is set in a form the rule does not read: unreadable.
+    if ((decoded.text.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length > recorded) {
+      return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+    }
+    if (gitIndex !== -1) {
       const configViolation = checkGitConfigValues(words, gitIndex, env, policy, rule);
       if (configViolation) return configViolation;
     }

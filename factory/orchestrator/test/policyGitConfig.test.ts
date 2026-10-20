@@ -354,6 +354,8 @@ describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
     ['declare -x', '&&'],
     ['typeset -x', ';'],
     ['typeset -x', '&&'],
+    ['local -x', ';'],
+    ['readonly', '&&'],
   ])('reads a value set by %s before a %s separator', (builtin, sep) => {
     expect(
       refused(`${builtin} GIT_CONFIG_PARAMETERS="'alias.l=push -f'" ${sep} git l origin main`),
@@ -369,6 +371,28 @@ describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
     expect(allowed(`${builtin} GIT_CONFIG_PARAMETERS="'color.ui=always'" ${sep} git log`)).toBe(
       true,
     );
+  });
+
+  // A mention of a configuration variable that the assignment reader does not
+  // record as a readable value is refused as unreadable.
+  const V = 'GIT_CONFIG_PARAMETERS';
+  const A = `"'alias.l=push -f'"`;
+  it.each([
+    [`{ export ${V}=${A}; git l origin main; }`],
+    [`{ export ${V}=${A}; }; git l origin main`],
+    [`if true; then export ${V}=${A}; fi; git l origin main`],
+    [`for i in 1; do export ${V}=${A}; done; git l origin main`],
+    [`builtin export ${V}=${A}; git l origin main`],
+    [`command export ${V}=${A}; git l origin main`],
+    [`export ${V}+=${A}; git l origin main`],
+    [`${V}+=${A} git l origin main`],
+    [`set -a; read -r ${V} < file; git l origin main`],
+    [`set -a; printf -v ${V} '%s' ${A}; git l origin main`],
+    [`f(){ export ${V}=${A}; }; f; git l origin main`],
+    [`declare -n R=${V}; export R=${A}; git l origin main`],
+    ["{ export GIT_PAGER='git push -f origin main'; }; git log"],
+  ])('refuses a configuration variable set in a form the reader does not record: %s', (command) => {
+    expect(refused(command)).toBe(true);
   });
 
   it('allows a bare alias call when no configuration variable is set', () => {
