@@ -136,6 +136,7 @@ import {
   type WorktreeFingerprint,
 } from './immutability.js';
 import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
+import { doctorExitCode, formatChecks, realDeps, runChecks } from './installCheck.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
@@ -2192,6 +2193,14 @@ async function main(): Promise<number> {
     // error: report it as red rather than leaving them to notice later that
     // the questionnaire they were told to answer is not there.
     return report.files.some((file) => file.status === 'missing-default') ? 1 : 0;
+  }
+
+  if (namespace === 'doctor') {
+    const checks = runChecks(realDeps(REPO_ROOT));
+    const exitCode = doctorExitCode(checks);
+    if (flags.json === 'true') printJson({ checks, ok: exitCode === 0 });
+    else process.stdout.write(formatChecks(checks));
+    return exitCode;
   }
 
   if (namespace === 'new') {

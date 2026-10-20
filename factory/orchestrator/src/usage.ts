@@ -225,6 +225,15 @@ export const COMMANDS: readonly CommandDoc[] = [
       'file the factory ships a default of for you to edit. Idempotent; a clone needs none of it.',
   },
   {
+    command: 'doctor',
+    positionals: '',
+    flags: '[--json]',
+    summary:
+      'Check the install: Node, pnpm, git, the bs version, the claude CLI, the Blacksmith plugin ' +
+      'and the built dashboard, each ok, missing or unknown with a one-line fix. Reads, never ' +
+      'installs. Exit 1 when any check is missing.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',

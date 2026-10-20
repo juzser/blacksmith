@@ -699,10 +699,20 @@ OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ## Part 4 — Verify the install
 
-For the package and the plugin, two commands answer it: `bs --help` lists
-every command and namespace, and `claude plugin details blacksmith` reports
-`Skills (1)` and `Agents (14)`. If both do, you are installed; the rest of
-this part is the clone's. If you took an optional plugin,
+For the package and the plugin, one command answers it:
+
+```bash
+bs doctor
+```
+
+It checks Node, pnpm, git, the `bs` version, the `claude` CLI, the Blacksmith
+plugin and the built dashboard, one line each: `ok`, `missing` with the fix, or
+`unknown` when it could not tell (an unreadable `claude plugin list` is
+`unknown`, never `ok`). It exits non-zero when anything is `missing`, and
+`bs doctor --json` prints the same checks as `{checks: [{id, status, detail,
+fix}], ok}`. It only reads. Run `claude --version` to confirm the CLI by hand;
+`claude plugin details blacksmith` reports `Skills (1)` and `Agents (14)`. If
+the checks pass, you are installed; the rest of this part is the clone's. If you took an optional plugin,
 `claude plugin details bs-mod` or `claude plugin details pr-mod` shows it.
 Then start a new session and look. bs-mod's band sits above the prompt; with
 no epic in view it is idle and ends in the dim line `no running epic ·
