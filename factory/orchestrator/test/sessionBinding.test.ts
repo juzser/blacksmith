@@ -26,6 +26,7 @@ import {
   bypassRow,
   HOOK_ONLY_EVENT_TYPES,
   knownProjectNames,
+  knownProjectRefs,
   loadBindingPolicy,
   matchProject,
   newestBinding,
@@ -384,6 +385,26 @@ describe('names', () => {
           resolveUseProject(arg, at(input, env)).matched,
           `${arg} ${JSON.stringify(env)}`,
         ).toBe(undefined);
+      }
+    });
+
+    it('knownProjectRefs names match knownProjectNames and carry the checkout directory', () => {
+      const { input, real } = build();
+      const refs = knownProjectRefs(input);
+      expect(refs.map((r) => r.name)).toEqual(knownProjectNames(input));
+      expect(refs.find((r) => r.name === 'project-b')?.dir).toBe(real);
+    });
+
+    it('a tilde alone resolves to HOME, a relative HOME and a tilde-user form match nothing', () => {
+      const { input, real } = build();
+      expect(resolveUseProject('~', at(input, { HOME: real })).matched).toBe('project-b');
+      expect(resolveUseProject('./../project-b', input).matched).toBe('project-b');
+      for (const [arg, env] of [
+        ['~/project-b', { HOME: 'relative/home' }],
+        ['~user/project-b', { HOME: base }],
+        ['~project-b', { HOME: base }],
+      ] as [string, Record<string, string>][]) {
+        expect(resolveUseProject(arg, at(input, env)).matched, arg).toBeUndefined();
       }
     });
 
