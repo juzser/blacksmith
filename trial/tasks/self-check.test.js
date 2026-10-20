@@ -73,6 +73,10 @@ test("a missing or empty check directory fails the run", () => {
   assert.notEqual(corpus(gone).status, 0);
   const bare = ({ dir }) => rmSync(join(dir, "check", "pass_to_pass", "wants-one.test.js"));
   assert.notEqual(corpus(bare).status, 0);
+  const noFail = ({ dir }) => rmSync(join(dir, "check", "fail_to_pass"), { recursive: true });
+  const r = corpus(noFail);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout, /fail_to_pass directory check\/fail_to_pass is missing/);
 });
 
 test("a manifest that breaks the schema fails the run", () => {
