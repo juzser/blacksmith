@@ -1,0 +1,9 @@
+{
+  "kind": "large-refactor",
+  "title": "Split the notes repository into modules",
+  "prompt": "prompt.md",
+  "start_state": null,
+  "fail_to_pass": "check/fail_to_pass",
+  "pass_to_pass": "check/pass_to_pass",
+  "touched_areas": ["src/repos"]
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "multi-file-bug",
+  "title": "Fix tag filtering and tag deletion",
+  "prompt": "prompt.md",
+  "start_state": "start.patch",
+  "fail_to_pass": "check/fail_to_pass",
+  "pass_to_pass": "check/pass_to_pass",
+  "touched_areas": ["src/routes", "src/db.js"]
+}

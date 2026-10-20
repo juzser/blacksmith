@@ -1,0 +1,9 @@
+{
+  "kind": "rest-endpoint",
+  "title": "Add a note search endpoint",
+  "prompt": "prompt.md",
+  "start_state": null,
+  "fail_to_pass": "check/fail_to_pass",
+  "pass_to_pass": "check/pass_to_pass",
+  "touched_areas": ["src/routes", "src/repos"]
+}
