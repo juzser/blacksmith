@@ -195,6 +195,13 @@ export async function runIntegrationCheck(
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
   });
 
+  // Store what each check ran beside how it exited. `run` returns results in
+  // check order (and stops early only when runAll is off), so index pairs them.
+  const results: CheckResult[] = outcome.results.map((r, i) => {
+    const cmd = input.checks[i]?.cmd;
+    return cmd === undefined ? r : { ...r, cmd };
+  });
+
   const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
@@ -208,7 +215,7 @@ export async function runIntegrationCheck(
         branch,
         head_sha: headSha,
         pass: outcome.pass,
-        results: outcome.results,
+        results,
       },
     },
     opts,
@@ -219,7 +226,7 @@ export async function runIntegrationCheck(
     branch,
     headSha,
     pass: outcome.pass,
-    results: outcome.results,
+    results,
     eventId: stored.event_id,
     ts: stored.record.ts,
   };

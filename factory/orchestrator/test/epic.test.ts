@@ -4512,6 +4512,42 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       expect(prompt).toContain('test: passed (exit 0)');
     });
 
+    it('shows the command each check ran, so a bare name is never all the judge has', () => {
+      const prompt = promptFor([doneTask()], [], {
+        check: checkRecord({
+          results: [
+            { name: 'unit', cmd: 'npm test', pass: true, exitCode: 0, tail: '' },
+            { name: 'lint', pass: true, exitCode: 0, tail: '' },
+          ],
+        }),
+        headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
+      });
+      expect(prompt).toContain('unit (`npm test`): passed (exit 0)');
+      // A record written before commands were stored still renders by name.
+      expect(prompt).toContain('lint: passed (exit 0)');
+    });
+
+    it('never prints the output tail of a check', () => {
+      const prompt = promptFor([doneTask()], [], {
+        check: checkRecord({
+          results: [
+            {
+              name: 'unit',
+              cmd: 'npm test',
+              pass: false,
+              exitCode: 1,
+              tail: 'SECRET-TOKEN-IN-OUTPUT',
+            },
+          ],
+        }),
+        headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
+      });
+      expect(prompt).not.toContain('SECRET-TOKEN-IN-OUTPUT');
+      expect(prompt).toContain('unit (`npm test`): FAILED (exit 1)');
+    });
+
     // The command set is the refutable part: an epic whose integration check ran
     // one command called `lint` and nothing else is green and unshippable, and
     // that is a judgement about a list — which a judge can make and a blocker
@@ -5071,5 +5107,36 @@ describe('epic.ts — how wide the epic ran', () => {
       expect(flat).toMatch(/not by itself a refutation/i);
       expect(flat).toMatch(/admitted and nothing shows them running/i);
     });
+  });
+});
+
+describe('epic.ts epicVerdictJudgeRequest — closing spec review line', () => {
+  const BUDGET = { timeout_ms: 1_000, max_output_bytes: 4_096 };
+  const missingReview = (skippedByTier: boolean) => {
+    const base = summarizeEpic(
+      'epic-1',
+      [taskRow({ taskStatus: 'completed' })],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      { review: null, headSha: HEAD_SHA, branch: INTEGRATION_BRANCH },
+      okGoalCheck(),
+      alwaysEffort(),
+    );
+    return epicVerdictJudgeRequest(
+      { ...base, closingSpecReviewSkippedByTier: skippedByTier },
+      BUDGET,
+    ).prompt;
+  };
+
+  it('states plainly that a tier-skipped closing review was not due', () => {
+    const prompt = missingReview(true);
+    expect(prompt).not.toContain('no closing spec review on record');
+    expect(prompt).toContain('No closing spec review was due');
+    expect(prompt).toContain('plan is still v1');
+  });
+
+  it('still reports a genuinely missing closing review', () => {
+    expect(missingReview(false)).toContain('There is no closing spec review on record');
   });
 });

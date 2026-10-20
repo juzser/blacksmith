@@ -40,6 +40,17 @@ than appearing in it.
 
 ### Fixed
 
+- **The verdict judge sees what the integration check ran, and that a skipped
+  closing review was not due.** The judge prompt listed each integration
+  command by name and exit code only, so `unit: passed (exit 0)` was refuted
+  as "no test command is shown". The `integration-check` record now stores
+  each check's command, and the prompt reads `unit (`npm test`): passed
+  (exit 0)`. A record written before this change has no command and still
+  shows the name. Command output (`tail`) is still never sent. Separately, an
+  epic whose effort tier skips the closing spec review on an unamended v1 plan
+  used to show "no closing spec review on record"; the prompt now says the
+  review was not due.
+
 - **Read-only git searches for a word such as `push` are no longer refused.**
   The force-push rule refused a read-only git command that only searched for
   one of the words it watches (`push`, `rebase`, `reset`, `filter-branch`,

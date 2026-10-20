@@ -1194,8 +1194,12 @@ function mcpVerdict(mcp: McpSurfaceStatus): string {
  *
  * NEVER include CheckResult.tail: it is the last 50 lines of combined
  * stdout+stderr from commands run at the integration root, and this prompt goes
- * to an external provider (guardrails.md, "No secrets in outputs"). The name
- * and the exit code are the refutable part; the output is not.
+ * to an external provider (guardrails.md, "No secrets in outputs"). The name,
+ * the command and the exit code are the refutable part; the output is not. The
+ * command is shown because a bare `unit: passed` hides what ran and a judge
+ * refutes it as "no test command shown"; it is safe because it is the declared
+ * check from the project's config, not anything the run printed. A record
+ * written before commands were stored has none and renders by name.
  */
 export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudget): JudgeRequest {
   // Keyed by taskId: a row in here is one clearedFollowUpFindings() cleared,
@@ -1239,10 +1243,11 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
           `  Branch: ${branch}`,
           `  Checked at commit ${check.headSha.slice(0, 8)}${coverage(check.headSha, headSha)}, recorded ${check.ts}`,
           `  Result: ${check.pass ? 'passed' : 'FAILED'} — ${check.results.length} command${check.results.length === 1 ? '' : 's'} ran:`,
-          // Name and exit code only — see this function's header on tail.
+          // Name, command and exit code — never tail; see this function's header.
           ...listOr(
             check.results.map(
-              (r) => `  ${r.name}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`,
+              (r) =>
+                `  ${r.name}${r.cmd === undefined ? '' : ` (\`${r.cmd}\`)`}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`,
             ),
             '  (none — the check recorded no commands at all)',
           ),
@@ -1251,7 +1256,12 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
   const review = summary.specReview.review;
   const specReviewLines =
     review === null
-      ? ['  There is no closing spec review on record for this epic.']
+      ? summary.closingSpecReviewSkippedByTier
+        ? [
+            '  No closing spec review was due: this effort tier runs it only when the plan was amended,',
+            '  and the plan is still v1. Its absence is not a gap.',
+          ]
+        : ['  There is no closing spec review on record for this epic.']
       : [
           `  Reviewed by: ${review.reviewedBy}`,
           `  Against commit ${review.headSha.slice(0, 8)}${coverage(review.headSha, summary.specReview.headSha)}, plan v${review.planVersion}`,
@@ -1413,10 +1423,10 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     '',
     "What you have: the roster above and each task's status, the commands that",
     'ran against the assembled branch and whether each passed, the closing spec',
-    'review, the MCP surface verdict, how wide the waves ran, and every closure',
+    'review (or the statement that none was due), the MCP surface verdict, how wide the waves ran, and every closure',
     'a person decided.',
     'What you do NOT have: file contents, the diff for any task, or the output',
-    'of any command — only its name and how it exited.',
+    'of any command — only its name, the command line and how it exited.',
     '',
     'Refute if a line above is inconsistent with the readiness claim, and name',
     'the line you are refuting. Do not refute merely because the diff is absent:',

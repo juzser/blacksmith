@@ -233,6 +233,42 @@ describe('integration.ts', () => {
     expect(latestIntegrationCheck(events, 'other-epic')).toBe(null);
   });
 
+  it('records each check command and latestIntegrationCheck folds it back', async () => {
+    await runIntegrationCheck(
+      { epicId, projectDir, checks: [{ name: 'unit', cmd: 'echo hi && true' }] },
+      ctx(),
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    const latest = latestIntegrationCheck(events, epicId);
+    expect(latest?.results[0]?.cmd).toBe('echo hi && true');
+  });
+
+  it('reads a record written before commands were stored, with no cmd', async () => {
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'integration-check',
+        task_id: `${epicId}/integration`,
+        plan_version: 1,
+        causal_parent: ctx().causalParent,
+        payload: {
+          epic_id: epicId,
+          branch: `bs/${epicId}/integration`,
+          head_sha: 'abc',
+          pass: true,
+          results: [{ name: 'unit', pass: true, exitCode: 0, tail: '' }],
+        },
+      },
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    const latest = latestIntegrationCheck(events, epicId);
+    expect(latest?.results[0]?.name).toBe('unit');
+    expect(latest?.results[0]?.cmd).toBeUndefined();
+  });
+
   // Operator decision 3 (bs-rename): an epic that already integrates on
   // smith/ keeps reading and checking that branch, not a bs/ branch that
   // was never created for it.

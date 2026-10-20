@@ -24,6 +24,12 @@ export interface CheckCommand {
 
 export interface CheckResult {
   name: string;
+  /**
+   * The command the check ran. Set only where a record is written for a
+   * reader who needs to know what ran (the integration check); absent on
+   * results from `run` and on records written before it was stored.
+   */
+  cmd?: string;
   pass: boolean;
   exitCode: number;
   /**
