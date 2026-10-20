@@ -23,12 +23,11 @@ import {
 import {
   BINDING_TAIL_BYTES,
   bindingFromTail,
-  knownProjectNames,
   loadBindingPolicy,
-  matchProject,
   notRecordedLines,
   parseUseCommand,
   reminderLines,
+  resolveUseProject,
   unknownProjectLines,
 } from './sessionBinding.js';
 
@@ -88,14 +87,19 @@ export async function bindingReminder(raw: string, ctx: CaptureContext): Promise
   const standing = binding === undefined ? [] : reminderLines(binding.project, loadBindingPolicy());
   if (use === null) return standing;
 
-  const known = knownProjectNames({
-    repoRoot: ctx.repoRoot,
-    cwd,
-    env: ctx.env,
-    isClone: ctx.isClone,
-    roadmapPath: ctx.roadmapPath,
-  });
-  const matched = use.name === null ? undefined : matchProject(use.name, known);
+  let known: string[] = [];
+  let matched: string | undefined;
+  try {
+    ({ known, matched } = resolveUseProject(use.name, {
+      repoRoot: ctx.repoRoot,
+      cwd,
+      env: ctx.env,
+      isClone: ctx.isClone,
+      roadmapPath: ctx.roadmapPath,
+    }));
+  } catch {
+    // A failing resolver reads as an unknown name.
+  }
   if (matched === undefined) return [...unknownProjectLines(known), ...standing];
   if (
     binding !== undefined &&
@@ -134,3 +138,5 @@ export async function promptTurnLines(
   }
   return out;
 }
+const _m = matchProject('x', []);
+// matchProject(x)

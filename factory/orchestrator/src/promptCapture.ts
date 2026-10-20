@@ -30,11 +30,10 @@ import {
   bypassInput,
   bypassRow,
   declaredAs,
-  knownProjectNames,
-  matchProject,
   newestBinding,
   overlayRoadmapAt,
   parseUseCommand,
+  resolveUseProject,
 } from './sessionBinding.js';
 import { gitTop, hasEvents, storeRootAt } from './storeRoot.js';
 
@@ -303,11 +302,21 @@ export async function capturePrompt(
   });
 
   // `/bs use <project>` for a known project binds the session, in the home log only and never by rule M3.
-  const useName = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt)?.name : null;
-  const wanted =
-    typeof useName === 'string'
-      ? matchProject(useName, knownProjectNames({ ...ctx, cwd }))
-      : undefined;
+  const use = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt) : null;
+  let wanted: string | undefined;
+  if (use !== null) {
+    try {
+      wanted = resolveUseProject(use.name, {
+        repoRoot: ctx.repoRoot,
+        cwd,
+        env: ctx.env,
+        isClone: ctx.isClone,
+        roadmapPath: ctx.roadmapPath,
+      }).matched;
+    } catch {
+      wanted = undefined;
+    }
+  }
   if (wanted !== undefined) {
     try {
       await appendWithin(

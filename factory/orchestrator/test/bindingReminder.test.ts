@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -13,7 +14,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bindingReminder, promptTurnLines } from '../src/bindingReminder.js';
 import { appendWithin, ROOT_EVENT_TYPE } from '../src/events.js';
-import type { CaptureContext } from '../src/promptCapture.js';
+import { type CaptureContext, capturePrompt } from '../src/promptCapture.js';
 import {
   BINDING_TAIL_BYTES,
   bindingInput,
@@ -272,5 +273,56 @@ describe('promptTurnLines: each step alone', () => {
       'bs use: one',
       'bs use: two',
     ]);
+  });
+});
+
+describe('bindingReminder agrees with the binding write (bs-use-2 criteria 5 and 6)', () => {
+  const unknownHead = unknownProjectLines([])[0] as string;
+
+  it('session-bound written equals no unknown-name line, for every prompt', async () => {
+    writeFileSync(ctx.roadmapPath, '# Roadmap\n');
+    const overlay = path.join(base, 'project-b', '.blacksmith', 'factory', 'specs', 'roadmap.md');
+    mkdirSync(path.dirname(overlay), { recursive: true });
+    writeFileSync(overlay, `# Roadmap\n${['project-b', 'project-a'].map(milestone).join('')}`);
+    const homeCtx = { ...ctx, env: { HOME: base } };
+    const rows: [string, boolean][] = [
+      ['project-b', true],
+      ['../project-b', true],
+      [path.join(base, 'project-b'), true],
+      ['~/project-b', true],
+      ['../nothing-here', false],
+      ['project-a', false],
+    ];
+    for (const [i, [arg, binds]] of rows.entries()) {
+      const cli = `${i + 1}1111111-2222-4333-8444-555555555555`;
+      const raw = payload(`/bs use ${arg}`, { session_id: cli });
+      await capturePrompt(raw, homeCtx, 'prompt');
+      const log = readFileSync(path.join(eventsDir, `prompts-${cli}.jsonl`), 'utf8');
+      const written = log.includes('"event_type":"session-bound"');
+      const lines = await bindingReminder(raw, homeCtx);
+      const unknown = lines.some((l) => l.includes(unknownHead));
+      expect(written, arg).toBe(binds);
+      expect(unknown, arg).toBe(!written);
+      if (binds) expect(lines).toEqual(standing('project-b'));
+      else expect(lines.join('\n')).toContain('project-b');
+    }
+  });
+
+  it('only the two call sites call resolveUseProject, and neither keeps the old calls', () => {
+    const src = path.join(import.meta.dirname, '..', 'src');
+    const files = readdirSync(src, { recursive: true, encoding: 'utf8' })
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => f.split(path.sep).join('/'));
+    const count = (text: string, needle: string): number => text.split(needle).length - 1;
+    for (const f of files) {
+      if (f === 'sessionBinding.ts') continue;
+      const text = readFileSync(path.join(src, f), 'utf8');
+      const sites = f === 'promptCapture.ts' || f === 'bindingReminder.ts';
+      expect(count(text, 'resolveUseProject('), `${f}: resolveUseProject(`).toBe(sites ? 1 : 0);
+      if (sites) {
+        expect(count(text, 'knownProjectNames('), `${f}: knownProjectNames(`).toBe(0);
+        expect(count(text, 'matchProject('), `${f}: matchProject(`).toBe(0);
+      }
+    }
   });
 });

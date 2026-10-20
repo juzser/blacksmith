@@ -423,3 +423,40 @@ describe('a home log that cannot be read', () => {
     expect(ofType(readLog(m2.dir, 'epic-b-main'), 'pipeline-bypass-approved')).toHaveLength(1);
   });
 });
+
+describe('`/bs use` binds an overlay-declared project by name or path (bs-use-2 criterion 4)', () => {
+  const overlayAt = (dir: string, names: string[]): void => {
+    const file = path.join(dir, '.blacksmith', 'factory', 'specs', 'roadmap.md');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, `# Roadmap\n${names.map(milestone).join('')}`);
+  };
+  const boundFor = async (text: string, cli: string): Promise<Row[]> => {
+    await capturePrompt(prompt(text, { session_id: cli }), ctxFor({ HOME: base }, m2.cwd));
+    return ofType(readLog(m2.dir, `prompts-${cli}`), 'session-bound');
+  };
+
+  beforeEach(() => {
+    writeFileSync(roadmapPath, '# Roadmap\n');
+    overlayAt(path.join(base, 'project-b'), ['project-b', 'project-a']);
+  });
+
+  it.each([
+    ['a bare name', () => 'project-b'],
+    ['a relative path', () => '../project-b'],
+    ['an absolute path', () => path.join(base, 'project-b')],
+    ['a home path', () => '~/project-b'],
+  ])('%s binds project-b exactly once', async (_label, arg) => {
+    const rows = await boundFor(`/bs use ${arg()}`, '21111111-2222-4333-8444-555555555555');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.project).toBe('project-b');
+  });
+
+  it('a path to nothing and the overlay foreign bullet bind nothing', async () => {
+    expect(
+      await boundFor('/bs use ../nothing-here', '31111111-2222-4333-8444-555555555555'),
+    ).toHaveLength(0);
+    expect(
+      await boundFor('/bs use project-a', '41111111-2222-4333-8444-555555555555'),
+    ).toHaveLength(0);
+  });
+});
