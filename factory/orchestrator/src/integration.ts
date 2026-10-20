@@ -2,7 +2,7 @@ import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent, validateEventEnvelope } from './events.js';
 import type { EventContext } from './findings.js';
 import { runGit as git } from './git.js';
-import { type CheckCommand, type CheckResult, run } from './testgate.js';
+import { type CheckCommand, type CheckResult, maskCommandCredentials, run } from './testgate.js';
 import { epicBranchPrefix, integrationBranchName, RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -196,10 +196,13 @@ export async function runIntegrationCheck(
   });
 
   // Store what each check ran beside how it exited. `run` returns results in
-  // check order (and stops early only when runAll is off), so index pairs them.
+  // check order (and stops early only when runAll is off), so index pairs them;
+  // integration.test.ts's "pairs each result with its own command when the run
+  // stops early" guards that. The command is masked here, before the record is
+  // written, so a credential typed inline never reaches the log or a reader.
   const results: CheckResult[] = outcome.results.map((r, i) => {
     const cmd = input.checks[i]?.cmd;
-    return cmd === undefined ? r : { ...r, cmd };
+    return cmd === undefined ? r : { ...r, cmd: maskCommandCredentials(cmd) };
   });
 
   const stored = await appendEvent(

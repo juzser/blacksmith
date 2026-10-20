@@ -4517,6 +4517,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
         check: checkRecord({
           results: [
             { name: 'unit', cmd: 'npm test', pass: true, exitCode: 0, tail: '' },
+            { name: 'e2e', cmd: 'npm run e2e', pass: false, exitCode: 1, tail: '' },
             { name: 'lint', pass: true, exitCode: 0, tail: '' },
           ],
         }),
@@ -4524,28 +4525,40 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
         branch: INTEGRATION_BRANCH,
       });
       expect(prompt).toContain('unit (`npm test`): passed (exit 0)');
+      expect(prompt).toContain('e2e (`npm run e2e`): FAILED (exit 1)');
       // A record written before commands were stored still renders by name.
       expect(prompt).toContain('lint: passed (exit 0)');
     });
 
-    it('never prints the output tail of a check', () => {
+    // The payload is read back from the log untyped: a cmd that is not a
+    // non-empty string must not print as a command the check ran.
+    it('renders a check by name only when its stored command is null or blank', () => {
       const prompt = promptFor([doneTask()], [], {
         check: checkRecord({
           results: [
-            {
-              name: 'unit',
-              cmd: 'npm test',
-              pass: false,
-              exitCode: 1,
-              tail: 'SECRET-TOKEN-IN-OUTPUT',
-            },
+            { name: 'lint', cmd: null as unknown as string, pass: true, exitCode: 0, tail: '' },
+            { name: 'unit', cmd: '  ', pass: true, exitCode: 0, tail: '' },
           ],
         }),
         headSha: HEAD_SHA,
         branch: INTEGRATION_BRANCH,
       });
-      expect(prompt).not.toContain('SECRET-TOKEN-IN-OUTPUT');
-      expect(prompt).toContain('unit (`npm test`): FAILED (exit 1)');
+      expect(prompt).toContain('lint: passed (exit 0)');
+      expect(prompt).toContain('unit: passed (exit 0)');
+      expect(prompt).not.toContain('`null`');
+    });
+
+    it('keeps a multi-line command on the one line its check renders on', () => {
+      const prompt = promptFor([doneTask()], [], {
+        check: checkRecord({
+          results: [
+            { name: 'unit', cmd: 'pnpm build\n  && pnpm test', pass: true, exitCode: 0, tail: '' },
+          ],
+        }),
+        headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
+      });
+      expect(prompt).toContain('unit (`pnpm build && pnpm test`): passed (exit 0)');
     });
 
     // The command set is the refutable part: an epic whose integration check ran
@@ -5110,33 +5123,45 @@ describe('epic.ts — how wide the epic ran', () => {
   });
 });
 
+// Both summaries come from summarizeEpic itself, so the flag the prompt reads
+// is the one the tier rule sets (run.md step 13), never one set by hand.
 describe('epic.ts epicVerdictJudgeRequest — closing spec review line', () => {
   const BUDGET = { timeout_ms: 1_000, max_output_bytes: 4_096 };
-  const missingReview = (skippedByTier: boolean) => {
-    const base = summarizeEpic(
+  const smallEffort = (): ClosingReviewEffort => ({
+    tier: 'small',
+    closingSpecReview: 'when-plan-amended',
+  });
+  const rosterV1: EpicPlanRoster = {
+    version: 1,
+    tasks: [{ taskId: 'epic-1/task-1', taskStatus: 'completed' }],
+  };
+  const noReview = (effort: ClosingReviewEffort) =>
+    summarizeEpic(
       'epic-1',
       [taskRow({ taskStatus: 'completed' })],
       [],
       okIntegration(),
       MCP_SURFACE_NOT_REQUIRED,
       { review: null, headSha: HEAD_SHA, branch: INTEGRATION_BRANCH },
-      okGoalCheck(),
-      alwaysEffort(),
+      okGoalCheck(1),
+      effort,
+      rosterV1,
     );
-    return epicVerdictJudgeRequest(
-      { ...base, closingSpecReviewSkippedByTier: skippedByTier },
-      BUDGET,
-    ).prompt;
-  };
 
   it('states plainly that a tier-skipped closing review was not due', () => {
-    const prompt = missingReview(true);
+    const summary = noReview(smallEffort());
+    expect(summary.closingSpecReviewSkippedByTier).toBe(true);
+    const prompt = epicVerdictJudgeRequest(summary, BUDGET).prompt;
     expect(prompt).not.toContain('no closing spec review on record');
     expect(prompt).toContain('No closing spec review was due');
     expect(prompt).toContain('plan is still v1');
   });
 
   it('still reports a genuinely missing closing review', () => {
-    expect(missingReview(false)).toContain('There is no closing spec review on record');
+    const summary = noReview(alwaysEffort());
+    expect(summary.closingSpecReviewSkippedByTier).toBe(false);
+    expect(epicVerdictJudgeRequest(summary, BUDGET).prompt).toContain(
+      'There is no closing spec review on record',
+    );
   });
 });

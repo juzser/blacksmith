@@ -1198,8 +1198,10 @@ function mcpVerdict(mcp: McpSurfaceStatus): string {
  * the command and the exit code are the refutable part; the output is not. The
  * command is shown because a bare `unit: passed` hides what ran and a judge
  * refutes it as "no test command shown"; it is safe because it is the declared
- * check from the project's config, not anything the run printed. A record
- * written before commands were stored has none and renders by name.
+ * check from the project's config, not anything the run printed, and it is
+ * stored with credential values masked (maskCommandCredentials), so a token
+ * typed inline into it never reaches the provider either. A record written
+ * before commands were stored has none and renders by name.
  */
 export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudget): JudgeRequest {
   // Keyed by taskId: a row in here is one clearedFollowUpFindings() cleared,
@@ -1245,10 +1247,12 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
           `  Result: ${check.pass ? 'passed' : 'FAILED'} — ${check.results.length} command${check.results.length === 1 ? '' : 's'} ran:`,
           // Name, command and exit code — never tail; see this function's header.
           ...listOr(
-            check.results.map(
-              (r) =>
-                `  ${r.name}${r.cmd === undefined ? '' : ` (\`${r.cmd}\`)`}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`,
-            ),
+            check.results.map((r) => {
+              // The payload is read back untyped, so the field is checked, not
+              // trusted, and a multi-line command is kept to its one line here.
+              const cmd = typeof r.cmd === 'string' ? r.cmd.replace(/\s+/g, ' ').trim() : '';
+              return `  ${r.name}${cmd === '' ? '' : ` (\`${cmd}\`)`}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`;
+            }),
             '  (none — the check recorded no commands at all)',
           ),
         ];
@@ -1423,8 +1427,8 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     '',
     "What you have: the roster above and each task's status, the commands that",
     'ran against the assembled branch and whether each passed, the closing spec',
-    'review (or the statement that none was due), the MCP surface verdict, how wide the waves ran, and every closure',
-    'a person decided.',
+    'review (or the statement that none was due), the MCP surface verdict, how',
+    'wide the waves ran, and every closure a person decided.',
     'What you do NOT have: file contents, the diff for any task, or the output',
     'of any command — only its name, the command line and how it exited.',
     '',

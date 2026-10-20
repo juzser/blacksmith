@@ -132,7 +132,7 @@ your working tree for you is not this command's business), and a dirty tree
 (the checks would certify something that is not the branch).
 
 ```json
-{"epicId":"epic-1","branch":"bs/epic-1/integration","headSha":"8962df9...","pass":false,"results":[{"name":"lint","pass":false,"exitCode":1,"tail":"Found a nested root configuration..."}],"eventId":"sess-1#42","ts":"2026-08-07T09:00:00.000Z"}
+{"epicId":"epic-1","branch":"bs/epic-1/integration","headSha":"8962df9...","pass":false,"results":[{"name":"lint","cmd":"pnpm lint","pass":false,"exitCode":1,"tail":"Found a nested root configuration..."}],"eventId":"sess-1#42","ts":"2026-08-07T09:00:00.000Z"}
 ```
 
 Exit 1 means the assembled branch is broken; raise a finding and fix it as a
