@@ -21,3 +21,15 @@ test("creating a note with existing tags still links them", async () => {
   assert.equal(res.status, 201);
   assert.deepEqual(res.json.tags, [{ id: tag.json.id, name: "work" }]);
 });
+
+test("a valid tag mixed with an unknown one rejects the whole create", async () => {
+  const tag = await app.call("POST", "/api/tags", { name: "mixed" });
+  const before = await app.call("GET", "/api/notes");
+  const res = await app.call("POST", "/api/notes", {
+    title: "c",
+    tags: [tag.json.id, 9999],
+  });
+  assert.ok(res.status === 400 || res.status === 404, `got ${res.status}`);
+  const after = await app.call("GET", "/api/notes");
+  assert.deepEqual(after.json, before.json);
+});
