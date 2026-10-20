@@ -310,6 +310,41 @@ describe('names', () => {
         }
       });
 
+      it('accepts only plain characters: a space in the name adds nothing', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        const name = 'project-b' + ' two';
+        const dir = checkout(name);
+        expect(knownProjectNames(input)).toEqual(before);
+        expect(resolveUseProject(dir, input).matched).toBeUndefined();
+      });
+
+      it('accepts only plain characters: a quote in the name adds nothing', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        const name = 'project-b' + "'s";
+        const dir = checkout(name);
+        expect(knownProjectNames(input)).toEqual(before);
+        expect(resolveUseProject(dir, input).matched).toBeUndefined();
+      });
+
+      it('accepts a name of 64 characters and not one of 65', () => {
+        const input = setup();
+        const long = 'p'.repeat(65);
+        const exact = 'p'.repeat(64);
+        checkout(long);
+        expect(knownProjectNames(input)).not.toContain(long);
+        checkout(exact);
+        expect(knownProjectNames(input)).toContain(exact);
+      });
+
+      it('accepts a 1-character name and the dot and underscore characters', () => {
+        const input = setup();
+        const names = ['p', 'project-a' + '_b.c'];
+        for (const name of names) checkout(name);
+        expect(knownProjectNames(input)).toEqual(expect.arrayContaining(names));
+      });
+
       it('lists overlay checkouts in sorted order, not creation order', () => {
         const input = setup();
         checkout('project-b');
