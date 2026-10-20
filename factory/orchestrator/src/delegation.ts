@@ -603,10 +603,11 @@ export function checkDelegationLog(
     // Rule 2 -- a grantee that must open a log did.
     const grant = byRole.get(d.role);
     if (grant === undefined || !grant.mustOpenSession) continue;
-    // A continuation is answered by the session its original dispatch opened;
-    // `delegated` is untouched, so rule 3 keeps the original as the owner.
+    // A dispatch is answered by the session it opened itself, else by the one
+    // its chain's original opened; `delegated` is untouched, so rule 3 keeps
+    // the original as the owner.
     const origin = rootDispatch(d, dispatchById);
-    const child = opened.get(origin.eventId);
+    const child = opened.get(d.eventId) ?? opened.get(origin.eventId);
     if (child !== undefined) {
       checks.push({
         role: d.role,

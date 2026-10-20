@@ -598,6 +598,18 @@ describe('checkDelegationLog on a continuation dispatch', () => {
     expect(summary(report)).toEqual(['epic-1#1:ok:wave-1', 'epic-1#2:ok:wave-1']);
   });
 
+  it('answers a continuation from its own session when the original opened none', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+      event('wave-2', 0, 'session-start', { parent: 'epic-1#2' }),
+    ];
+    const report = log(events);
+    expect(summary(report)).toEqual(['epic-1#1:unverifiable:epic-1', 'epic-1#2:ok:wave-2']);
+    expect(report.delegatedSessions).toBe(1);
+  });
+
   it('gives a continuation of an unanswered original the original status: unverifiable while unfinished', () => {
     const events = [
       event('epic-1', 0, 'session-start'),
