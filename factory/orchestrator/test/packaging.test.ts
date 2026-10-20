@@ -167,6 +167,18 @@ describe('the published package', () => {
     expect(manifest.bin['bs-prompt-hook']).toBe('factory/orchestrator/dist/promptHook.js');
   });
 
+  it('declares the opt-in policy hook bin, shipped, and its shim in the plugin source', () => {
+    expect(manifest.bin['bs-policy-hook']).toBe('factory/orchestrator/dist/policyHook.js');
+    expect(isShipped(manifest.bin['bs-policy-hook'] as string)).toBe(true);
+    // The plugin's source directory is `.claude` (the marketplace entry), so
+    // the shim ships with the plugin when it sits under it and hooks.json
+    // names it.
+    const shim = '.claude/hooks/plugin-policy.sh';
+    expect(existsSync(path.join(REPO_ROOT, shim))).toBe(true);
+    const hooksJson = readFileSync(path.join(REPO_ROOT, '.claude/hooks/hooks.json'), 'utf8');
+    expect(hooksJson).toContain('hooks/plugin-policy.sh');
+  });
+
   it('ships every root paths.ts reads, and ships none it writes', () => {
     // This check used to hold a hand-written list of the six roots somebody
     // remembered, and `ROADMAP_PATH` was simply not in it -- so 0.1.0 shipped
