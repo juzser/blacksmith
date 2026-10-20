@@ -1,9 +1,10 @@
 /** The pure rules of a session binding (epic bs-use); nothing here refuses or holds a turn. No db, cli or usage imports, so the hook stays light. */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { EventInput, EventRecord, StoredEvent } from './events.js';
 import {
+  isFactoryCheckout,
   OVERLAY_ROOT,
   REPO_ROOT,
   resolveOverlayRead,
@@ -89,7 +90,82 @@ export function matchProject(name: string, known: readonly string[]): string | u
   return known.find((k) => normalizeProjectName(k) === want);
 }
 
-/** Known project names under the roots the capture hook's M4 rule uses; [] on failure. */
+export const realOr = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/** The checkout's own roadmap, read only after M1 and M2 miss (Q5b). */
+export const overlayRoadmapAt = (top: string): string =>
+  path.join(top, '.blacksmith', 'factory', 'specs', 'roadmap.md');
+
+/** The name a roadmap gives the checkout at `top`, or undefined. Never throws. */
+export function declaredAs(
+  top: string,
+  roadmapPath: string,
+  roots: readonly string[],
+): string | undefined {
+  const want = realOr(top);
+  const ref = factoryProjects({ roadmapPath, roots }).find(
+    (r) => !r.self && realOr(r.dir) === want,
+  );
+  return ref?.name;
+}
+
+export interface UseInput {
+  repoRoot: string;
+  cwd: string;
+  env: Readonly<Record<string, string | undefined>>;
+  isClone: boolean;
+  roadmapPath: string;
+}
+
+const isPlainSegment = (name: string, entry: string): boolean =>
+  name === entry && !/[/\\]/.test(name) && name !== '.' && name !== '..';
+
+/**
+ * Known projects under the roots the capture hook's M4 rule uses: the context
+ * roadmap's list, then each directory directly under a root whose own overlay
+ * roadmap declares it by name. Never throws.
+ */
+export function knownProjectRefs(input: UseInput): { name: string; dir: string }[] {
+  const { repoRoot, cwd, env, isClone, roadmapPath } = input;
+  try {
+    const roots = [
+      resolveProjectsDir(repoRoot, cwd, isClone),
+      path.join(resolveWorkRoot(repoRoot, cwd, env, isClone), 'workspaces'),
+    ];
+    const refs = factoryProjects({ roadmapPath, roots }).map(({ name, dir }) => ({ name, dir }));
+    const seen = new Set(refs.map((r) => normalizeProjectName(r.name)));
+    const self = realOr(repoRoot);
+    for (const root of roots) {
+      try {
+        for (const entry of readdirSync(root).sort()) {
+          const dir = path.join(root, entry);
+          if (isFactoryCheckout(dir) || realOr(dir) === self) continue;
+          const overlay = overlayRoadmapAt(dir);
+          if (!existsSync(overlay)) continue;
+          const name = declaredAs(dir, overlay, roots);
+          if (name === undefined || !isPlainSegment(name, entry)) continue;
+          const key = normalizeProjectName(name);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          refs.push({ name, dir });
+        }
+      } catch {
+        // One bad root does not hide the others.
+      }
+    }
+    return refs;
+  } catch {
+    return [];
+  }
+}
+
+/** Known project names; [] on failure. */
 export function knownProjectNames(input: {
   repoRoot: string;
   cwd: string;
@@ -97,16 +173,35 @@ export function knownProjectNames(input: {
   isClone: boolean;
   roadmapPath: string;
 }): string[] {
-  const { repoRoot, cwd, env, isClone, roadmapPath } = input;
-  try {
-    const roots = [
-      resolveProjectsDir(repoRoot, cwd, isClone),
-      path.join(resolveWorkRoot(repoRoot, cwd, env, isClone), 'workspaces'),
-    ];
-    return factoryProjects({ roadmapPath, roots }).map((r) => r.name);
-  } catch {
-    return [];
+  return knownProjectRefs(input).map((r) => r.name);
+}
+
+const isPathArg = (arg: string): boolean =>
+  arg.includes('/') || arg.startsWith('.') || arg.startsWith('~');
+
+/** A `/bs use` argument to an absolute path, or undefined when it cannot be one. */
+function resolveUsePath(arg: string, input: UseInput): string | undefined {
+  if (arg !== '~' && !arg.startsWith('~/')) {
+    return arg.startsWith('~') ? undefined : path.resolve(input.cwd, arg);
   }
+  const home = input.env.HOME;
+  if (home === undefined || home === '' || !path.isAbsolute(home)) return undefined;
+  return path.resolve(home, arg.slice(2));
+}
+
+/** The one decision for `/bs use`: the known list and the name `arg` (a name or a path) matches. */
+export function resolveUseProject(
+  arg: string | null,
+  input: UseInput,
+): { known: string[]; matched: string | undefined } {
+  const refs = knownProjectRefs(input);
+  const known = refs.map((r) => r.name);
+  if (arg === null) return { known, matched: undefined };
+  if (!isPathArg(arg)) return { known, matched: matchProject(arg, known) };
+  const resolved = resolveUsePath(arg, input);
+  if (resolved === undefined) return { known, matched: undefined };
+  const want = realOr(resolved);
+  return { known, matched: refs.find((r) => realOr(r.dir) === want)?.name };
 }
 
 const bindingProject = (r: EventRecord): string | undefined =>
