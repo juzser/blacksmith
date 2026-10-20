@@ -149,6 +149,25 @@ describe('project names in the files the bs-use plan adds or edits', () => {
     expect(flagged('/bs use ../project-b/')).toEqual(['f.md:1 ../project-b/']);
   });
 
+  it('path edge cases: leading slash, empty or non-dot segments, bare dots', () => {
+    const flagged = (text: string) => collect({ 'f.md': text }, useArguments, useArgOk);
+    for (const ok of ['/bs use project-a', '/bs use ./../project-a', '/bs use ~/../project-b']) {
+      expect(flagged(ok)).toEqual([]);
+    }
+    for (const bad of [
+      '/project-a',
+      '../dir-x/project-a',
+      '~/dir-x/<project>',
+      '..',
+      '~/',
+      '../',
+      'bad-one',
+    ]) {
+      expect(flagged(`/bs use ${bad}`)).toEqual([`f.md:1 ${bad}`]);
+    }
+    expect(flagged('/bs use ../project-a and /bs use ../bad-one')).toEqual(['f.md:1 ../bad-one']);
+  });
+
   it('the collector names every bad site across files, not only the first', () => {
     const files = {
       'one.md': 'ok\n/bs use bad-one',
