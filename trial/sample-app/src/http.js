@@ -18,9 +18,18 @@ export function sendJson(res, status, payload) {
 
 export const sendNoContent = (res) => res.writeHead(204).end();
 
+export const MAX_BODY_BYTES = 1024 * 1024;
+
 export async function readJson(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    // Past the cap, keep draining so the 413 can be delivered, but stop buffering.
+    if (size > MAX_BODY_BYTES) chunks.length = 0;
+    else chunks.push(chunk);
+  }
+  if (size > MAX_BODY_BYTES) throw new HttpError(413, "request body is too large");
   const raw = Buffer.concat(chunks).toString("utf8");
   if (raw === "") return {};
   try {
