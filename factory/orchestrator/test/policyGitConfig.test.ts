@@ -245,9 +245,9 @@ describe('a readable configuration value goes through the same checks as a neste
   });
 
   it('reads a --force-with-lease inside GIT_EXTERNAL_DIFF set through env', () => {
-    expect(refused("env GIT_EXTERNAL_DIFF='git push --force-with-lease origin main' git diff")).toBe(
-      true,
-    );
+    expect(
+      refused("env GIT_EXTERNAL_DIFF='git push --force-with-lease origin main' git diff"),
+    ).toBe(true);
   });
 
   it('allows a value that runs a plain push of a feature branch', () => {
