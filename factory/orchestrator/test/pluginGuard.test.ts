@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -106,6 +106,40 @@ describe('plugin-policy.sh', () => {
     const out = JSON.parse(run.stdout) as {
       hookSpecificOutput: { permissionDecision: string };
     };
+    expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+  });
+
+  it('does not run the named hook at all while the switch is off', () => {
+    const marker = path.join(tmp, 'ran');
+    const stub = path.join(tmp, 'sentinel-hook.js');
+    writeFileSync(stub, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'x');\n`);
+    const run = runShim(STATUS, { PATH: NODE_DIR, BS_POLICY_HOOK: stub });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe('');
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('prefers BS_POLICY_HOOK over bs-policy-hook on PATH', () => {
+    const bin = path.join(tmp, 'bs-policy-hook');
+    writeFileSync(bin, '#!/bin/sh\nprintf \'{"from":"path-bin"}\\n\'\n');
+    chmodSync(bin, 0o755);
+    const stub = path.join(tmp, 'named-hook.js');
+    writeFileSync(stub, 'process.stdout.write(\'{"from":"named"}\\n\');\n');
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${tmp}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+    });
+    expect(run.stdout.trim()).toBe('{"from":"named"}');
+  });
+
+  it('asks when the bs-policy-hook on PATH exits with an error', () => {
+    const bin = path.join(tmp, 'bs-policy-hook');
+    writeFileSync(bin, '#!/bin/sh\nexit 4\n');
+    chmodSync(bin, 0o755);
+    const run = runShim(STATUS, { PATH: tmp, BS_PLUGIN_GUARD: '1' });
+    expect(run.status).toBe(0);
+    const out = JSON.parse(run.stdout) as { hookSpecificOutput: { permissionDecision: string } };
     expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
   });
 });
