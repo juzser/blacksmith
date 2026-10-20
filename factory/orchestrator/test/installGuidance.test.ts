@@ -81,6 +81,43 @@ describe('installGuidance', () => {
   });
 });
 
+describe('installGuidance edge cases', () => {
+  it('names the next command, bs new, for a clone and an installed package', () => {
+    expect(initGuidance(true)).toContain('bs new');
+    expect(initGuidance(false)).toContain('bs new');
+  });
+
+  it('gives a clone no plugin step, since the clone ships the plugin', () => {
+    expect(initGuidance(true)).not.toContain('/plugin ');
+  });
+
+  it('ends the guidance with one newline so stderr stays line-terminated', () => {
+    for (const isClone of [true, false]) {
+      const out = initGuidance(isClone);
+      expect(out.endsWith('\n')).toBe(true);
+      expect(out.endsWith('\n\n')).toBe(false);
+    }
+  });
+
+  it('keeps the plugin lines before the bs doctor step for an installed package', () => {
+    const out = initGuidance(false);
+    expect(out.indexOf('/plugin install')).toBeLessThan(out.indexOf('bs doctor'));
+  });
+
+  it('names no build script in the installed-package message and no install command in the clone one', () => {
+    const entry = '/example/ui/server/dist/index.js';
+    expect(uiNotBuiltMessage(entry, false)).not.toContain('build:server');
+    expect(uiNotBuiltMessage(entry, true)).not.toContain(installCommand());
+  });
+
+  it('extracts fences by column-0 position: an indented fence does not open a block', () => {
+    const doc = ['  ```bash', '  x', '  ```', '```', '/plugin a', '```'].join('\n');
+    const found = fences(doc);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.lines).toEqual(['/plugin a']);
+  });
+});
+
 describe('bs init output streams', () => {
   let workRoot: string;
   beforeAll(async () => {
