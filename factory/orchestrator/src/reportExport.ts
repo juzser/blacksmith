@@ -117,8 +117,7 @@ export function renderChecksTable(title: string, rows: CheckRow[], opts: RedactO
     title,
     ['Task', 'Check', 'State', 'Detail'],
     rows.map((r) => {
-      const cols = [r.task, r.check, renderCheckState(r.state)];
-      if (r.detail !== undefined) cols.push(r.detail);
+      const cols = [r.task, r.check, renderCheckState(r.state), r.detail ?? ''];
       return cols.map((c) => cell(c, opts));
     }),
     opts,
