@@ -348,4 +348,30 @@ describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
     ).toBe(true);
     expect(allowed(`export GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`)).toBe(true);
   });
+
+  it.each([
+    ['declare -x', ';'],
+    ['declare -x', '&&'],
+    ['typeset -x', ';'],
+    ['typeset -x', '&&'],
+  ])('reads a value set by %s before a %s separator', (builtin, sep) => {
+    expect(
+      refused(`${builtin} GIT_CONFIG_PARAMETERS="'alias.l=push -f'" ${sep} git l origin main`),
+    ).toBe(true);
+    expect(
+      refused(`${builtin} GIT_CONFIG_PARAMETERS="'alias.l'='push'" ${sep} git l -f origin main`),
+    ).toBe(true);
+    expect(
+      refused(
+        `${builtin} GIT_CONFIG_PARAMETERS="'core.pager=git push -f origin main'" ${sep} git log`,
+      ),
+    ).toBe(true);
+    expect(allowed(`${builtin} GIT_CONFIG_PARAMETERS="'color.ui=always'" ${sep} git log`)).toBe(
+      true,
+    );
+  });
+
+  it('allows a bare alias call when no configuration variable is set', () => {
+    expect(allowed('git l -f origin main')).toBe(true);
+  });
 });

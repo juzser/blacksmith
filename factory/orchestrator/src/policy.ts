@@ -1879,14 +1879,18 @@ const GIT_CONFIG_ENV_NAME_RE =
   /^(?:GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
 const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
 
+/** Builtins whose following words name variables they set, like `export`. */
+const VARIABLE_DECLARING_BUILTIN_RE = /^(?:export|declare|typeset|local|readonly)$/;
+
 const GIT_CONFIG_UNREADABLE_REASON =
   'a git configuration value here holds a parameter or substitution, so the guard cannot tell what git will run — write the value out plainly';
 
 /**
  * Records the variables a run of words sets: `NAME=value` words and, after
- * `export`, a bare configuration variable name (set from somewhere this line
- * does not show, so unreadable). With `leadingOnly` the scan stops at the
- * first word that is neither `export`, `env` nor an assignment, which is how a
+ * `export` (or `declare`, `typeset`, `local`, `readonly`), a bare configuration
+ * variable name (set from somewhere this line does not show, so unreadable).
+ * With `leadingOnly` the scan stops at the first word that is neither one of
+ * those builtins, `env` nor an assignment, which is how a
  * segment with no `git` word is read; otherwise every word is scanned, which
  * is how the words in front of a `git` word are read.
  */
@@ -1900,7 +1904,7 @@ function readAssignments(
     const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1];
     if (name !== undefined) {
       env.set(name, hasUnreadableShellForm(word.raw) ? null : word.text.slice(name.length + 1));
-    } else if (word.text === 'export') {
+    } else if (VARIABLE_DECLARING_BUILTIN_RE.test(word.text)) {
       afterExport = true;
     } else if (afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text)) {
       env.set(word.text, null);
