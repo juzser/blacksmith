@@ -338,6 +338,13 @@ describe('names', () => {
         expect(knownProjectNames(input)).toContain(exact);
       });
 
+      it('accepts a 1-character name and the dot and underscore characters', () => {
+        const input = setup();
+        const names = ['p', 'project-a' + '_b.c'];
+        for (const name of names) checkout(name);
+        expect(knownProjectNames(input)).toEqual(expect.arrayContaining(names));
+      });
+
       it('lists overlay checkouts in sorted order, not creation order', () => {
         const input = setup();
         checkout('project-b');
