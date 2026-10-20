@@ -166,7 +166,13 @@ export function knownProjectRefs(input: UseInput): { name: string; dir: string }
 }
 
 /** Known project names; [] on failure. */
-export function knownProjectNames(input: UseInput): string[] {
+export function knownProjectNames(input: {
+  repoRoot: string;
+  cwd: string;
+  env: Readonly<Record<string, string | undefined>>;
+  isClone: boolean;
+  roadmapPath: string;
+}): string[] {
   return knownProjectRefs(input).map((r) => r.name);
 }
 
