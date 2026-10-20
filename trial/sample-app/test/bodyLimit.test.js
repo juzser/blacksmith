@@ -32,3 +32,22 @@ test("a body under the cap is parsed as before, invalid JSON still 400", async (
     await app.close();
   }
 });
+
+test("a body of exactly the cap is still accepted, one byte more is refused", async () => {
+  const app = await startApp();
+  try {
+    const frame = JSON.stringify({ title: "" }).length;
+    const exact = JSON.stringify({ title: "x".repeat(MAX_BODY_BYTES - frame) });
+    assert.equal(Buffer.byteLength(exact), MAX_BODY_BYTES);
+    const post = (body) =>
+      fetch(`${app.base}/api/notes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+    assert.equal((await post(exact)).status, 201);
+    assert.equal((await post(`${exact} `)).status, 413);
+  } finally {
+    await app.close();
+  }
+});
