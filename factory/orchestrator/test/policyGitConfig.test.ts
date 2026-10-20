@@ -235,6 +235,26 @@ describe('force-push rule allows readable configuration that runs nothing forced
   });
 });
 
+describe('a readable configuration value goes through the same checks as a nested command line', () => {
+  it('reads a +refspec inside a -c value', () => {
+    expect(refused("git -c core.pager='git push origin +main' log")).toBe(true);
+  });
+
+  it('reads a +refspec inside GIT_PAGER', () => {
+    expect(refused("GIT_PAGER='git push origin +feat:main' git log")).toBe(true);
+  });
+
+  it('reads a --force-with-lease inside GIT_EXTERNAL_DIFF set through env', () => {
+    expect(refused("env GIT_EXTERNAL_DIFF='git push --force-with-lease origin main' git diff")).toBe(
+      true,
+    );
+  });
+
+  it('allows a value that runs a plain push of a feature branch', () => {
+    expect(allowed("GIT_PAGER='git push origin feat' git log")).toBe(true);
+  });
+});
+
 describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
   it('refuses a single-quoted key=value entry that sets a forced push', () => {
     expect(refused(`GIT_CONFIG_PARAMETERS="'core.pager=git push -f origin main'" git log`)).toBe(
