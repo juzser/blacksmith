@@ -451,6 +451,29 @@ describe('`/bs use` binds an overlay-declared project by name or path (bs-use-2 
     expect(rows[0].payload.project).toBe('project-b');
   });
 
+  it('a repeat through another spelling of the same project adds no second event', async () => {
+    const cli = '51111111-2222-4333-8444-555555555555';
+    await boundFor('/bs use project-b', cli);
+    const rows = await boundFor('/bs use ../project-b', cli);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.project).toBe('project-b');
+  });
+
+  it('a prompt that is not `/bs use` binds nothing even when it names a project', async () => {
+    expect(
+      await boundFor('please use project-b for this', '61111111-2222-4333-8444-555555555555'),
+    ).toHaveLength(0);
+  });
+
+  it('a resolver that cannot read its roadmap degrades to no binding and does not throw', async () => {
+    rmSync(roadmapPath, { force: true });
+    mkdirSync(roadmapPath);
+    rmSync(path.join(base, 'project-b'), { recursive: true, force: true });
+    expect(
+      await boundFor('/bs use project-b', '71111111-2222-4333-8444-555555555555'),
+    ).toHaveLength(0);
+  });
+
   it('a path to nothing and the overlay foreign bullet bind nothing', async () => {
     expect(
       await boundFor('/bs use ../nothing-here', '31111111-2222-4333-8444-555555555555'),

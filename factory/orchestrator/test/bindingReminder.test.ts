@@ -308,6 +308,13 @@ describe('bindingReminder agrees with the binding write (bs-use-2 criteria 5 and
     }
   });
 
+  it('a roadmap that cannot be read reads as an unknown name and does not throw', async () => {
+    rmSync(ctx.roadmapPath, { force: true });
+    mkdirSync(ctx.roadmapPath);
+    const lines = await bindingReminder(payload('/bs use project-b'), ctx);
+    expect(lines.some((l) => l.includes(unknownHead))).toBe(true);
+  });
+
   it('only the two call sites call resolveUseProject, and neither keeps the old calls', () => {
     const src = path.join(import.meta.dirname, '..', 'src');
     const files = readdirSync(src, { recursive: true, encoding: 'utf8' })
