@@ -2015,11 +2015,9 @@ function checkGitConfigValues(
     const eq = operand.indexOf('=');
     if (eq === -1) continue;
     const rest = operand.slice(eq + 1);
-    const found = isConfigEnv
-      ? env.has(rest)
-        ? checkValue(env.get(rest) ?? null)
-        : null
-      : checkValue(rest);
+    // A `--config-env` value is read from a named variable: the value is
+    // checked when this line sets it, and is unreadable when it does not.
+    const found = checkValue(isConfigEnv ? (env.get(rest) ?? null) : rest);
     if (found) return found;
   }
   const subcommand = words[i];

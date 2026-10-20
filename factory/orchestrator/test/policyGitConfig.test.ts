@@ -206,6 +206,11 @@ describe('force-push rule refuses a configuration value it cannot read, whatever
     expect(refused('git grep -O"$P" x')).toBe(true);
   });
 
+  it('refuses --config-env naming a variable whose value the line does not show', () => {
+    expect(refused('git --config-env=core.pager=SOMEVAR log')).toBe(true);
+    expect(refused('git --config-env=user.email=E commit -m y')).toBe(true);
+  });
+
   it('refuses --config-env naming a variable the line sets to an unreadable value', () => {
     expect(refused('P="$Q" git --config-env=core.pager=P log')).toBe(true);
   });
