@@ -46,6 +46,15 @@ than appearing in it.
   the project's name, and a project that only its own overlay roadmap declares
   is no longer answered as unknown. The names scan reads such a path argument.
 
+- **The guardrails describe where secrets are masked.** The "No secrets in
+  outputs" rule in `docs/standards/guardrails.md` said the event logger
+  redacts values matching a denylist before write. It does not: it checks
+  each event against its schema and taxonomy and writes its values as given.
+  The rule now says it rests on the agents and on the gitleaks gate, and
+  names the points that do mask a known credential shape: URL userinfo in
+  git and `gh` errors, stored integration-check commands, and an API judge's
+  own key in a provider's error body.
+
 - **The verdict judge sees what the integration check ran, and that a skipped
   closing review was not due.** The judge prompt listed each integration
   command by name and exit code only, so `unit: passed (exit 0)` was refuted
