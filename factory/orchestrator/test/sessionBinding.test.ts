@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -33,6 +33,7 @@ import {
   parseUseCommand,
   REMINDER_PREFIX,
   reminderLines,
+  resolveUseProject,
   SESSION_BINDING_POLICY_DEFAULT_PATH,
   SESSION_BOUND_EVENT_TYPE,
   unknownProjectLines,
@@ -209,6 +210,211 @@ describe('names', () => {
       expect(knownProjectNames({ ...input, roadmapPath: path.join(base, 'no') })).toBeInstanceOf(
         Array,
       );
+    });
+
+    describe('overlay-declared projects', () => {
+      const overlayFile = (dir: string): string =>
+        path.join(dir, '.blacksmith', 'factory', 'specs', 'roadmap.md');
+      const writeOverlay = (dir: string, names: string[]): void => {
+        mkdirSync(path.dirname(overlayFile(dir)), { recursive: true });
+        writeFileSync(overlayFile(dir), `# Roadmap\n${names.map(milestone).join('')}`);
+      };
+      const checkout = (name: string, declares: string[] = [name]): string => {
+        const dir = path.join(base, name);
+        mkdirSync(dir, { recursive: true });
+        writeOverlay(dir, declares);
+        return dir;
+      };
+      const setup = (cloneDeclares: string[] = []) => {
+        const clone = path.join(base, 'clone');
+        mkdirSync(path.join(clone, '.git'), { recursive: true });
+        const roadmapPath = path.join(base, 'clone-roadmap.md');
+        writeFileSync(roadmapPath, `# Roadmap\n${cloneDeclares.map(milestone).join('')}`);
+        return { repoRoot: clone, cwd: clone, env: {}, isClone: true, roadmapPath };
+      };
+
+      it('a project declared only in its own overlay is known, a foreign bullet is not', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        mkdirSync(path.join(base, 'project-a'));
+        checkout('project-b', ['project-b', 'project-a']);
+        const names = knownProjectNames(input);
+        expect(names).toEqual(expect.arrayContaining(before));
+        expect(names).toContain('project-b');
+        expect(names).not.toContain('project-a');
+      });
+
+      it('a name declared in the clone roadmap and its own overlay appears once', () => {
+        const input = setup(['project-b']);
+        checkout('project-b');
+        expect(knownProjectNames(input).filter((n) => n === 'project-b')).toHaveLength(1);
+      });
+
+      it('the legacy factory spelling adds nothing', () => {
+        const input = setup();
+        checkout(LEGACY_FACTORY_PROJECT);
+        const names = knownProjectNames(input);
+        expect(names.filter((n) => n === FACTORY_PROJECT_NAME)).toHaveLength(1);
+        expect(names).not.toContain(LEGACY_FACTORY_PROJECT);
+      });
+
+      it('the context repoRoot carrying an overlay adds nothing', () => {
+        const input = setup();
+        writeOverlay(input.repoRoot, [path.basename(input.repoRoot)]);
+        expect(knownProjectNames(input)).not.toContain(path.basename(input.repoRoot));
+      });
+
+      it('missing roots, files, bare dirs and bad overlays add nothing and never throw', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        writeFileSync(path.join(base, 'plain-file'), 'x');
+        mkdirSync(path.join(base, 'bare-dir'));
+        const broken = path.join(base, 'broken');
+        mkdirSync(path.dirname(overlayFile(broken)), { recursive: true });
+        writeFileSync(overlayFile(broken), '\0\0 not: [a roadmap');
+        checkout('only-others', ['project-a']);
+        expect(() => knownProjectNames(input)).not.toThrow();
+        expect(knownProjectNames(input)).toEqual(before);
+      });
+
+      it('a symlink under a root to an overlay checkout elsewhere is known once', () => {
+        const input = setup();
+        const real = path.join(base, 'elsewhere', 'real-b');
+        mkdirSync(real, { recursive: true });
+        writeOverlay(real, ['project-b']);
+        symlinkSync(real, path.join(base, 'project-b'));
+        expect(knownProjectNames(input).filter((n) => n === 'project-b')).toHaveLength(1);
+      });
+
+      it('plain segment: path-like spellings of the entry name add nothing', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        for (const spelling of ['./project-b', 'project-b/../project-b', 'project-b/']) {
+          checkout('project-b', [spelling]);
+          expect(knownProjectNames(input), spelling).toEqual(before);
+          expect(resolveUseProject('../project-b', input).matched, spelling).toBeUndefined();
+        }
+      });
+
+      it('out of scope: a differently named checkout stays unknown by name and path', () => {
+        const input = setup();
+        const before = knownProjectNames(input);
+        for (const withProjectA of [false, true]) {
+          if (withProjectA) mkdirSync(path.join(base, 'project-a'));
+          checkout('dir-x', ['project-a']);
+          const names = knownProjectNames(input);
+          expect(names).toEqual(before);
+          expect(resolveUseProject('dir-x', input).matched).toBeUndefined();
+          expect(resolveUseProject('../dir-x', input).matched).toBeUndefined();
+        }
+      });
+
+      it('lists overlay checkouts in sorted order, not creation order', () => {
+        const input = setup();
+        checkout('project-b');
+        checkout('project-a');
+        const names = knownProjectNames(input);
+        expect(names.indexOf('project-a')).toBeGreaterThanOrEqual(0);
+        expect(names.indexOf('project-a')).toBeLessThan(names.indexOf('project-b'));
+      });
+    });
+  });
+
+  describe('resolveUseProject', () => {
+    const milestone = (project: string): string =>
+      `\n## m-${project}\n- id: m-${project}\n- status: completed\n- project: ${project}\n- epics: []\n- goal: whatever.\n`;
+    const build = () => {
+      const clone = path.join(base, 'clone');
+      mkdirSync(path.join(clone, '.git'), { recursive: true });
+      const roadmapPath = path.join(base, 'clone-roadmap.md');
+      writeFileSync(roadmapPath, '# Roadmap\n');
+      const real = path.join(base, 'project-b');
+      mkdirSync(path.join(real, '.blacksmith', 'factory', 'specs'), { recursive: true });
+      writeFileSync(
+        path.join(real, '.blacksmith', 'factory', 'specs', 'roadmap.md'),
+        `# Roadmap\n${milestone('project-b')}`,
+      );
+      const input = {
+        repoRoot: clone,
+        cwd: clone,
+        env: {} as Record<string, string | undefined>,
+        isClone: true,
+        roadmapPath,
+      };
+      return { input, real };
+    };
+    const at = (input: ReturnType<typeof build>['input'], env: Record<string, string>) => ({
+      ...input,
+      env,
+    });
+
+    it('a path to the checkout gives its name', () => {
+      const { input, real } = build();
+      const link = path.join(base, 'elsewhere-link');
+      symlinkSync(real, link);
+      const rows: [string, Record<string, string>][] = [
+        ['../project-b', {}],
+        [real, {}],
+        ['~/project-b', { HOME: base }],
+        ['../project-b/', {}],
+        [link, {}],
+      ];
+      for (const [arg, env] of rows) {
+        expect(resolveUseProject(arg, at(input, env)).matched, arg).toBe('project-b');
+      }
+    });
+
+    it('the factory checkout resolves to the factory name', () => {
+      const { input } = build();
+      expect(resolveUseProject(REPO_ROOT, input).matched).toBe(FACTORY_PROJECT_NAME);
+    });
+
+    it('unknown directories, missing paths and an unusable HOME match nothing', () => {
+      const { input } = build();
+      mkdirSync(path.join(base, 'unknown-dir'));
+      const rows: [string, Record<string, string>][] = [
+        ['../unknown-dir', {}],
+        ['../does-not-exist', {}],
+        ['~/project-b', {}],
+        ['~/../project-b', { HOME: '' }],
+        ['~/project-b', { HOME: '..' }],
+      ];
+      for (const [arg, env] of rows) {
+        expect(
+          resolveUseProject(arg, at(input, env)).matched,
+          `${arg} ${JSON.stringify(env)}`,
+        ).toBe(undefined);
+      }
+    });
+
+    it('a bare name matches as matchProject does, known mirrors knownProjectNames, null matches nothing', () => {
+      const { input } = build();
+      const known = knownProjectNames(input);
+      for (const name of ['project-b', 'nothing-here', LEGACY_FACTORY_PROJECT]) {
+        const r = resolveUseProject(name, input);
+        expect(r.matched).toBe(matchProject(name, known));
+        expect(r.known).toEqual(known);
+      }
+      expect(resolveUseProject(null, input).matched).toBeUndefined();
+    });
+  });
+
+  describe('hook-light imports', () => {
+    it('sessionBinding.ts imports no db, cli, usage, promptCapture or bindingReminder module', () => {
+      const text = readFileSync(
+        path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'sessionBinding.ts'),
+        'utf8',
+      );
+      const specifiers = [
+        ...text.matchAll(/\bfrom\s+'([^']+)'/g),
+        ...text.matchAll(/\bimport\s*\(\s*'([^']+)'\s*\)/g),
+        ...text.matchAll(/\bimport\s+'([^']+)'/g),
+      ].map((m) => m[1] as string);
+      const heavy = new Set(['db', 'cli', 'usage', 'promptCapture', 'bindingReminder']);
+      const bad = specifiers.filter((s) =>
+        s.split('/').some((seg) => heavy.has(seg.replace(/\.js$/, ''))),
+      );
+      expect(bad).toEqual([]);
     });
   });
 });
