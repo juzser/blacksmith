@@ -233,6 +233,90 @@ describe('integration.ts', () => {
     expect(latestIntegrationCheck(events, 'other-epic')).toBe(null);
   });
 
+  it('records each check command and latestIntegrationCheck folds it back', async () => {
+    await runIntegrationCheck(
+      { epicId, projectDir, checks: [{ name: 'unit', cmd: 'echo hi && true' }] },
+      ctx(),
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    const latest = latestIntegrationCheck(events, epicId);
+    expect(latest?.results[0]?.cmd).toBe('echo hi && true');
+  });
+
+  // The stored command reaches the event log, the CLI's JSON and the verdict
+  // judge's provider, so a credential stated inside it is masked before the
+  // record is written, not on the way out.
+  it('stores a check command with its credential values masked', async () => {
+    const outcome = await runIntegrationCheck(
+      { epicId, projectDir, checks: [{ name: 'e2e', cmd: 'API_TOKEN=abc123 test -f README.md' }] },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome.pass).toBe(true);
+    expect(outcome.results[0]?.cmd).toBe('API_TOKEN=*** test -f README.md');
+
+    const events = await readEvents(sessionId, { stateDir });
+    const recorded = events.find((e) => e.record.event_type === 'integration-check');
+    expect(JSON.stringify(recorded?.record)).not.toContain('abc123');
+    expect(latestIntegrationCheck(events, epicId)?.results[0]?.cmd).toBe(
+      'API_TOKEN=*** test -f README.md',
+    );
+  });
+
+  // `run` returns an in-order prefix of the checks and stops at the first
+  // failure when runAll is off, so pairing by index must give each result its
+  // own command and invent nothing for a check that never ran.
+  it('pairs each result with its own command when the run stops early', async () => {
+    const outcome = await runIntegrationCheck(
+      {
+        epicId,
+        projectDir,
+        runAll: false,
+        checks: [
+          { name: 'lint', cmd: 'true' },
+          { name: 'unit', cmd: 'exit 2' },
+          { name: 'e2e', cmd: 'echo never' },
+        ],
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome.pass).toBe(false);
+    expect(outcome.results.map((r) => [r.name, r.cmd, r.exitCode])).toEqual([
+      ['lint', 'true', 0],
+      ['unit', 'exit 2', 2],
+    ]);
+
+    const events = await readEvents(sessionId, { stateDir });
+    expect(latestIntegrationCheck(events, epicId)?.results).toHaveLength(2);
+  });
+
+  it('reads a record written before commands were stored, with no cmd', async () => {
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'integration-check',
+        task_id: `${epicId}/integration`,
+        plan_version: 1,
+        causal_parent: ctx().causalParent,
+        payload: {
+          epic_id: epicId,
+          branch: `bs/${epicId}/integration`,
+          head_sha: 'abc',
+          pass: true,
+          results: [{ name: 'unit', pass: true, exitCode: 0, tail: '' }],
+        },
+      },
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    const latest = latestIntegrationCheck(events, epicId);
+    expect(latest?.results[0]?.name).toBe('unit');
+    expect(latest?.results[0]?.cmd).toBeUndefined();
+  });
+
   // Operator decision 3 (bs-rename): an epic that already integrates on
   // smith/ keeps reading and checking that branch, not a bs/ branch that
   // was never created for it.

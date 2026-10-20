@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
 import { BS_PREFIX, LEGACY_PREFIX } from './env.js';
+import { redactCredentials } from './git.js';
 
 // No TestGateError: a command that fails, times out or is killed is a
 // CheckResult with the exit code and the output in it. Throwing would lose
@@ -24,6 +25,13 @@ export interface CheckCommand {
 
 export interface CheckResult {
   name: string;
+  /**
+   * The command the check ran, with credential values masked
+   * (`maskCommandCredentials`). Set only where a record is written for a
+   * reader who needs to know what ran (the integration check); absent on
+   * results from `run` and on records written before it was stored.
+   */
+  cmd?: string;
   pass: boolean;
   exitCode: number;
   /**
@@ -33,6 +41,35 @@ export interface CheckResult {
    * does not admit it is a fragment gets read as the whole run.
    */
   tail: string;
+}
+
+/** `key` also covers API_KEY and APIKEY; `passw` covers PASSWORD and PASSWD. */
+const SENSITIVE_NAME = /key|token|secret|passw|pwd|credential|auth/i;
+/** A quoted value whole, or an unquoted one up to whitespace. */
+const VALUE = String.raw`"[^"]*"|'[^']*'|\S+`;
+const ENV_ASSIGNMENT = new RegExp(String.raw`(^|[\s;&|(])([A-Za-z_]\w*)=(?:${VALUE})`, 'g');
+/** A bare flag's value is the next word, unless that word is a flag or a shell operator. */
+const LONG_FLAG = new RegExp(String.raw`(^|\s)(--[\w-]+)(=|\s+(?![-;&|]))(?:${VALUE})`, 'g');
+
+/**
+ * A declared check command with its credential values replaced by `***`:
+ * URL userinfo, the value of a `NAME=value` env assignment whose name reads
+ * as a secret, and the value of such a long flag (`--token=x`, `--password x`).
+ *
+ * Defence in depth for a command the project declared, not a general secret
+ * scanner. `projectCommandEnv` documents stating env inside the command
+ * string, and a stored command goes to the append-only event log, the CLI's
+ * JSON and an external judge's prompt, so a value typed there inline is
+ * masked once, before the record is written. It errs toward masking.
+ */
+export function maskCommandCredentials(cmd: string): string {
+  return redactCredentials(cmd)
+    .replace(ENV_ASSIGNMENT, (match, lead: string, name: string) =>
+      SENSITIVE_NAME.test(name) ? `${lead}${name}=***` : match,
+    )
+    .replace(LONG_FLAG, (match, lead: string, flag: string, sep: string) =>
+      SENSITIVE_NAME.test(flag) ? `${lead}${flag}${sep}***` : match,
+    );
 }
 
 export interface RunOptions {
