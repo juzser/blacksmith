@@ -1,3 +1,5 @@
+import { HttpError } from "../http.js";
+
 function tagsFor(db, noteId) {
   return db
     .prepare(
@@ -36,6 +38,10 @@ export function getNote(db, id) {
 }
 
 export function createNote(db, { title, body = "", tags = [] }) {
+  const known = db.prepare("SELECT 1 FROM tags WHERE id = ?");
+  for (const tagId of tags) {
+    if (!known.get(tagId)) throw new HttpError(404, `tag ${tagId} not found`);
+  }
   const info = db.prepare("INSERT INTO notes (title, body) VALUES (?, ?)").run(title, body);
   const id = Number(info.lastInsertRowid);
   setTags(db, id, tags);
