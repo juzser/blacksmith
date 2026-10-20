@@ -1,0 +1,178 @@
+{
+  "epic_id": "bs-use-2",
+  "version": 1,
+  "status": "draft",
+  "effort": "small",
+  "project": "blacksmith",
+  "edges": [
+    {
+      "task": "bs-use-2/task-2-call-sites",
+      "dependsOn": "bs-use-2/task-1-use-resolver",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-use-2/task-2-call-sites",
+      "dependsOn": "bs-use-2/task-3-names-scan-and-docs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "open_questions": [],
+  "planner_notes": "Three tasks, nine distinct claim paths (size.small). task-1 and task-3 run together in wave 1; task-2 waits on task-1 (new resolver export, moved M4 helpers, shared promptCapture.ts claim) and on task-3 (its tests type `/bs use ../project-b`, which the names scan at the base sha reads as `..`). Names scan: shape (b) of spec-review finding 1 -- task-1 stays beside task-3 and writes no literal outside today's allowed sets, because folding the reader widening into task-1 would push it past the 350-line cap. task-1's tests call resolveUseProject with bare arguments and build fixture bullets through a `- project: ${name}` template, which the scan skips. Source scans (finding 5): promptHookEntry.test.ts only checks the built hook for drizzle/sqlite specifiers, so it does not cover sessionBinding.ts's relative imports or the call sites; the hook-light scan goes in task-1's sessionBinding.test.ts and the call-site scan in task-2's bindingReminder.test.ts, both already claimed. task-1 diff estimate (finding 4): sessionBinding.ts about 110 added (moved helpers 20, knownProjectRefs with sort/skip/plain-segment/dedupe 40, resolveUseProject with HOME rule 30, comments 20), promptCapture.ts about 20 (helper removal plus import), sessionBinding.test.ts about 190 (tree builder 20, criterion 1 15, criterion 2 ten cases 95, criterion 3 table 45, import scan 15): about 320, budget raised to the 350 cap. Helpers move into sessionBinding.ts rather than projects.ts (would make 10 paths and touch a widely read module) or a new module (would have to join the names scan's ADDED list before it exists); promptCapture.ts already imports sessionBinding.js and the reverse edge does not exist, so no cycle. skillUse.test.ts is not claimed: its assertions are containment checks a one-line use.md addition cannot break; task-3 runs it in the full suite.",
+  "tasks": [
+    {
+      "task_id": "bs-use-2/task-1-use-resolver",
+      "epic_id": "bs-use-2",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "title": "One /bs use resolver over clone and overlay roadmaps",
+      "summary": "sessionBinding.ts learns overlay-declared projects and path arguments in one resolver; the M4 helpers move there.",
+      "objective": "Give sessionBinding.ts one resolver for `/bs use` that both call sites can share. Move `overlayRoadmapAt`, `declaredAs` and the `realOr` they need out of promptCapture.ts into sessionBinding.ts as exports, and make rule M4 import them (no behaviour change to M4). Add `knownProjectRefs(input)` returning `{ name, dir }` for today's `factoryProjects` list plus each directory directly under the same two roots (entries sorted) whose own overlay roadmap declares it by the M4 dir-match rule, counting a name only when it is one plain path segment equal to the root entry's name (deduped by `normalizeProjectName`, clone spelling and directory win; the context repoRoot and any `isFactoryCheckout` directory are not scanned). `knownProjectNames(input)` keeps its signature and returns those names. Add `resolveUseProject(arg: string | null, input) -> { known: string[]; matched: string | undefined }`: a bare name matches through `matchProject` as today; an argument that contains `/` or starts with `.` or `~` is a path, resolved against `env.HOME` for `~`/`~/...` (only when HOME is a non-empty absolute path) and the input cwd otherwise, realpath'd (raw on failure), and matched to the known entry whose directory realpaths to it. TDD: write the epic criterion 1 test in factory/orchestrator/test/sessionBinding.test.ts first, watch it fail at the base sha (`project-b` missing from the list), then implement. This task runs beside task-3, which widens the names scan: every literal in this task's files must pass sessionBindingNames.test.ts as it stands at the base sha (see the names-scan clause). Read factory/specs/active/bs-use-2/epic-spec.md before starting; it is the contract this task's criteria cite.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 1, in factory/orchestrator/test/sessionBinding.test.ts `describe('knownProjectNames')`: temp tree with clone `base/clone` (has `.git`), a clone roadmap declaring no other project, and `base/project-b/.blacksmith/factory/specs/roadmap.md` declaring `project-b` and `project-a` while `base/project-a` exists with no overlay. At the base sha the list lacks `project-b` (the test fails on that assertion); after the change it holds every name it held before plus `project-b`, and not `project-a`.",
+        "Epic criterion 2, same file, one `it` per case: (a) a name declared in both the clone roadmap and its checkout's own overlay appears once, clone spelling; (b) a directory named by the imported LEGACY_FACTORY_PROJECT whose overlay declares that spelling adds nothing (FACTORY_PROJECT_NAME exactly once, the legacy spelling never); (c) the context repoRoot carrying its own overlay roadmap adds nothing; (d) a missing root, a plain file under a root, a directory with no overlay, an unparseable overlay, and an overlay declaring only other projects add nothing and do not throw; (e) a symlink `base/project-b` to an overlay checkout outside the roots makes `project-b` known exactly once; (f) plain segment: `base/project-b` whose overlay declares only `./project-b`, `project-b/../project-b` and `project-b/` adds nothing, and `resolveUseProject('../project-b', ...)` gives `matched` undefined there; (g) out of scope pinned: `base/dir-x` whose overlay declares only `project-a`, once with `base/project-a` absent and once with it present without an overlay, adds neither `dir-x` nor `project-a`, and `resolveUseProject` gives `matched` undefined for `'dir-x'` and `'../dir-x'`; (h) order: overlay checkouts `project-b` then `project-a` created in that order list `project-a` before `project-b`. For (f), if `factoryProjects` already drops a spelling, the hand-back names it and the mutation proof (remove the plain-segment check, watch (f) fail by name, restore) uses a spelling it keeps.",
+        "Epic criterion 3, same file, `describe('resolveUseProject')`: `matched` is `project-b` for `../project-b` with cwd `base/clone`, for the absolute path, for `~/project-b` with `env.HOME` = base, for `../project-b/` (trailing slash), and for both the symlink and its target; `matched` is FACTORY_PROJECT_NAME for the absolute path of the imported REPO_ROOT; `matched` is undefined for an existing unknown directory, a non-existent path, `~/project-b` with HOME absent from env, `~/../project-b` with HOME `''`, and `~/project-b` with HOME `'..'` (cwd `base/clone` in each; a cwd-anchored fallback would resolve the last two to `base/project-b` and return `project-b`, so these rows fail on that bug and pass only when HOME is required to be non-empty and absolute); a bare name gives the same `matched` as `matchProject(name, known)`; `known` deep-equals `knownProjectNames(input)`; `arg` null gives `matched` undefined.",
+        "Epic criterion 6 (helpers and hook-light half): promptCapture.ts no longer defines `overlayRoadmapAt` or `declaredAs` and imports both from `./sessionBinding.js`; every existing M4 test passes unchanged; a source-scan `it` in sessionBinding.test.ts reads src/sessionBinding.ts, collects every `from '...'` and `import('...')` specifier, and fails naming the specifier if any resolves to a `db`, `cli`, `usage`, `promptCapture` or `bindingReminder` module. Mutation proof in the hand-back: add `import './promptCapture.js';` to sessionBinding.ts, watch the scan fail by name, revert.",
+        "Epic criterion 9: Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/sessionBinding.ts",
+        "factory/orchestrator/src/promptCapture.ts",
+        "factory/orchestrator/test/sessionBinding.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/sessionBinding.ts",
+        "factory/orchestrator/src/promptCapture.ts"
+      ],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 350
+      },
+      "contract": {
+        "functional_clauses": [
+          "Known projects = `factoryProjects({ roadmapPath, roots })` for the context roadmap, then, for each root in order and each entry of `readdirSync(root).sort()` (default code-unit order, so macOS and Linux agree), the name `declaredAs(dir, overlayRoadmapAt(dir), roots)` gives when `existsSync(overlayRoadmapAt(dir))`; only that directory's own name is taken, never another bullet of its overlay.",
+          "Plain segment: an overlay-derived name counts only when it contains no `/` or `\\`, is not `.` or `..`, and equals the root entry's name (the directory name under the root, before realpath); anything else contributes nothing, so no path-like string reaches the known list, the reminder line or a recorded binding.",
+          "An overlay-derived name is dropped when `normalizeProjectName` of it equals that of a name already in the list; the earlier entry's spelling and directory are kept.",
+          "A root entry whose realpath equals the realpath of the input repoRoot, or for which `isFactoryCheckout` is true, is skipped before its overlay is read.",
+          "Path test: an argument is a path exactly when it contains `/` or starts with `.` or `~`. `~` alone and `~/rest` resolve against `input.env.HOME` only when HOME is a non-empty absolute path; absent, empty or relative HOME, and `~user/...`, match nothing; every other path resolves with `path.resolve(input.cwd, arg)`.",
+          "A path matches the first known entry whose `realOr(dir)` equals `realOr(resolved)`; the result is that entry's name, never the path.",
+          "`knownProjectNames` keeps its exported signature, still returns [] when anything throws, and returns exactly the names of `knownProjectRefs` in order.",
+          "Rule M4 in `resolveCaptureStore` is behaviourally unchanged: same roots, same order (context roadmap, then the cwd checkout's overlay), same result."
+        ],
+        "nonfunctional_clauses": [
+          "Never throws: a missing or unreadable root, entry or overlay contributes nothing; each root's scan is wrapped so one bad root does not hide the others.",
+          "Hook-light: sessionBinding.ts adds only `node:fs`/`node:path` and existing light-module imports; no import of db, cli, usage, promptCapture or bindingReminder (no new import cycle); the criterion 6 source scan enforces it.",
+          "Performance: the root scan runs only inside `knownProjectRefs`/`resolveUseProject`; nothing in this task calls them from a path every prompt takes.",
+          "No real project name anywhere in code, tests, comments or docs: placeholders only (`project-a`, `project-b`, `<project>`, `nothing-here`; `dir-x` only as a directory name or resolver argument). `project-c` is not used. The factory's own name and its legacy spelling are imported from `projectName.ts` (`FACTORY_PROJECT_NAME`, `LEGACY_FACTORY_PROJECT`), never typed.",
+          "Names scan as it stands (this task runs beside task-3): every literal in the three claimed files passes factory/orchestrator/test/sessionBindingNames.test.ts at the base sha. So: no `/bs use` text followed by a path anywhere, in tests or comments (tests call `resolveUseProject` with the bare argument, `'../project-b'`); no `/bs use` argument or quoted `project:` value outside today's sets; fixture roadmaps write bullets through an interpolated `- project: ${name}` template (the scan skips `$` values), and `dir-x`, `./project-b` and similar appear only as directory names, array entries or resolver arguments.",
+          "Claims: edit only the three claimed files; existing exports of sessionBinding.ts and promptCapture.ts keep their declarations (keeps_exports).",
+          "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.9,
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use-2/task-3-names-scan-and-docs",
+      "epic_id": "bs-use-2",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "title": "Names scan reads path arguments; use.md and CHANGELOG",
+      "summary": "The hermetic names scan accepts placeholder paths after /bs use and flags real ones; the playbook and changelog record the fix.",
+      "objective": "Let the hermetic names scan (factory/orchestrator/test/sessionBindingNames.test.ts) read a path after `/bs use`, so task-2's tests can type `/bs use ../project-b`, and document the fix. Widen the `/bs use` argument reader to path characters (`/` and `~`); a path argument passes when every segment before the last is `.`, `..` or `~` and the last segment is in USE_ARGS, and is flagged otherwise. The allowed sets stay as they are. Add `CHANGELOG.md` to `EDITED`. Add one sentence to `.claude/skills/bs/use.md` and a `### Fixed` entry under `## Unreleased` in CHANGELOG.md. TDD: add the inline samples of epic criterion 7 first and watch the `../project-a` sample fail at the base sha (it reads as `..`). Read factory/specs/active/bs-use-2/epic-spec.md before starting; it is the contract this task's criteria cite.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 7, in factory/orchestrator/test/sessionBindingNames.test.ts: inline samples prove `/bs use ../project-a`, `/bs use ~/project-b`, `/bs use ./<project>`, `/bs use ~/<project>` and `/bs use ../nothing-here` yield no hit, while `/bs use ../bad-one`, `/bs use /abs/bad-two` and `/bs use ../<dir>` each yield one hit whose value is the full path. At the base sha the `../project-a` sample yields a hit with value `..`; after the change it yields none. Existing samples keep their results.",
+        "Epic criterion 7, sweep: `CHANGELOG.md` is in `EDITED`; USE_ARGS and PROJECT_VALUES are unchanged; with the widened reader the scan passes over every file in `ADDED` and `EDITED` at this task's tree, and the hand-back lists each `/bs use` argument the widened reader newly captures in those files (expected: none outside this task's own additions; the planner's sweep at the base sha found only `<project>`, `project-a` and `nothing-here`).",
+        "Epic criterion 8: `.claude/skills/bs/use.md` gains one sentence saying a path to the checkout (written `/bs use ../<project>` or `/bs use ~/<project>`, and an absolute path named in words, never as a literal) binds the same way as its name, and that a project declared only in its own overlay roadmap is known; CHANGELOG.md `## Unreleased` `### Fixed` gains one entry for the fix under the same wording rule. No `../<dir>`, `~/...` or other non-placeholder last segment after `/bs use`. factory/orchestrator/test/skillUse.test.ts still passes untouched.",
+        "Epic criterion 9: Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/test/sessionBindingNames.test.ts",
+        ".claude/skills/bs/use.md",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 60000,
+        "diff_lines": 120
+      },
+      "contract": {
+        "functional_clauses": [
+          "The reader stays one regex plus a value check; an argument without `/` keeps today's rule (in USE_ARGS or flagged).",
+          "A path value is split on `/`; an empty leading segment (absolute path) or an empty last segment (trailing slash) is not allowed, so `/abs/...` and `../project-b/` are flagged.",
+          "The use.md sentence and the CHANGELOG entry describe the behaviour in epic-spec.md's design section and nothing more (no claim about directory names differing from declared names)."
+        ],
+        "nonfunctional_clauses": [
+          "No real project name anywhere in code, tests, comments or docs: placeholders only (`project-a`, `project-b`, `<project>`, `nothing-here`; `dir-x` only as a directory name or resolver argument). `project-c` is not used. The factory's own name and its legacy spelling are imported from `projectName.ts` (`FACTORY_PROJECT_NAME`, `LEGACY_FACTORY_PROJECT`), never typed.",
+          "Hermetic: the scan still reads only repo files and its own inline samples, never a roadmap, overlay or git history.",
+          "Claims: edit only the three claimed files.",
+          "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-use-2/task-2-call-sites",
+      "epic_id": "bs-use-2",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "title": "Binding write and reply share the resolver",
+      "summary": "promptCapture and bindingReminder decide /bs use through resolveUseProject, so an overlay name or a path binds and the reply agrees.",
+      "objective": "Switch both `/bs use` call sites to task-1's `resolveUseProject`: the binding write in factory/orchestrator/src/promptCapture.ts (today `parseUseCommand` -> `matchProject(useName, knownProjectNames({...ctx, cwd}))`) and the reply in factory/orchestrator/src/bindingReminder.ts (today `knownProjectNames` -> `matchProject` -> unknown / not-recorded / standing lines). Each site calls the resolver only after `parseUseCommand` returned non-null, passing the same `{ repoRoot, cwd, env, isClone, roadmapPath }` it passes today; the reminder uses `known` for `unknownProjectLines` and `matched` for its branch. TDD: write the epic criterion 4 test in factory/orchestrator/test/promptCaptureBinding.test.ts first and watch it fail on the tree with task-1 and task-3 merged (no `session-bound` for `/bs use project-b`). Read factory/specs/active/bs-use-2/epic-spec.md before starting; it is the contract this task's criteria cite.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4, in factory/orchestrator/test/promptCaptureBinding.test.ts: in a temp clone-shaped store whose clone roadmap declares no other project, with `base/project-b` carrying an overlay roadmap that declares `project-b` and `project-a` (`base/project-a` exists, no overlay), `capturePrompt` on `/bs use project-b`, `/bs use ../project-b`, the absolute path (built with `path.join`, never typed after `/bs use`), and `/bs use ~/project-b` with ctx env HOME = base each leaves exactly one new `session-bound` event with `payload.project` = `project-b` (fresh cli id per prompt). Before the change: zero such events. `/bs use ../nothing-here` and `/bs use project-a` (the overlay's foreign bullet) leave none.",
+        "Epic criterion 5, in factory/orchestrator/test/bindingReminder.test.ts: after the capture of each binding prompt above, `bindingReminder` returns no line starting with the unknown-name text and returns the standing lines naming `project-b` (before: the unknown lines, whose known list lacks `project-b`); on `/bs use ../nothing-here` and `/bs use project-a` it returns the unknown lines and their known list includes `project-b`. One table-driven test runs capture then reply per prompt and asserts `session-bound written` equals `reply has no unknown-name line` for every row.",
+        "Epic criterion 6 (call-site half), a source-scan `it` in factory/orchestrator/test/bindingReminder.test.ts: over every `.ts` file under factory/orchestrator/src except sessionBinding.ts, `resolveUseProject(` appears exactly once in promptCapture.ts, once in bindingReminder.ts and nowhere else, and neither of those two files contains `knownProjectNames(` or `matchProject(`; it fails naming the file. Each call sits inside the branch where `parseUseCommand` returned non-null (read in review). Mutation proof in the hand-back: put back a `matchProject(` call in bindingReminder.ts, watch the scan fail by name, revert.",
+        "Epic criterion 9: Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/promptCapture.ts",
+        "factory/orchestrator/src/bindingReminder.ts",
+        "factory/orchestrator/test/promptCaptureBinding.test.ts",
+        "factory/orchestrator/test/bindingReminder.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/promptCapture.ts",
+        "factory/orchestrator/src/bindingReminder.ts"
+      ],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "The binding write still happens only in prompt mode, never under rule M3, only to the home log, and is skipped when `newestBinding` already names the matched project (bs-use behaviour kept).",
+          "The binding records `matched` (a name), never the typed argument or a path.",
+          "The reply's branches are unchanged apart from their inputs: no match -> unknownProjectLines(known) + standing; match equal to the standing binding -> standing; else notRecordedLines + standing.",
+          "A bare `/bs use` (no argument) behaves as today."
+        ],
+        "nonfunctional_clauses": [
+          "Nothing blocks: neither site throws, refuses or holds a turn; a resolver failure degrades to the unknown lines and no write.",
+          "Performance: no prompt that is not a `/bs use` command reaches the resolver.",
+          "No real project name anywhere in code, tests, comments or docs: placeholders only (`project-a`, `project-b`, `<project>`, `nothing-here`; `dir-x` only as a directory name or resolver argument). `project-c` is not used. The factory's own name and its legacy spelling are imported from `projectName.ts` (`FACTORY_PROJECT_NAME`, `LEGACY_FACTORY_PROJECT`), never typed.",
+          "Names scan: this task runs after task-3 widened the `/bs use` reader, so `/bs use ../project-b`, `/bs use ~/project-b` and `/bs use ../nothing-here` pass; the absolute path is built with `path.join`, never typed after `/bs use`; every quoted `project:` value is `project-a`, `project-b` or `<project>`, or interpolated.",
+          "Claims: edit only the four claimed files; existing exports keep their declarations (keeps_exports).",
+          "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "ui_affecting": false
+    }
+  ]
+}
