@@ -123,8 +123,10 @@ export interface UseInput {
   roadmapPath: string;
 }
 
+const PLAIN_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+
 const isPlainSegment = (name: string, entry: string): boolean =>
-  name === entry && !/[/\\]/.test(name) && name !== '.' && name !== '..';
+  name === entry && !/[/\\]/.test(name) && name !== '.' && name !== '..' && PLAIN_NAME.test(name);
 
 /**
  * Known projects under the roots the capture hook's M4 rule uses: the context
