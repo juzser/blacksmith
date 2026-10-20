@@ -137,6 +137,7 @@ import {
 } from './immutability.js';
 import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
 import { doctorExitCode, formatChecks, realDeps, runChecks } from './installCheck.js';
+import { initGuidance, uiNotBuiltMessage } from './installGuidance.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
@@ -155,6 +156,7 @@ import {
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
   DOTENV_PATH,
+  IS_CLONE,
   LESSONS_MD_PATH,
   lessonsReadPath,
   REPO_ROOT,
@@ -2189,6 +2191,8 @@ async function main(): Promise<number> {
     // file inside node_modules survives exactly until the first upgrade.
     const report = initWorkRoot(flags['work-root'] ? { workRoot: flags['work-root'] } : {});
     printJson(report);
+    // Guidance goes to stderr so init's stdout stays the JSON report alone.
+    process.stderr.write(initGuidance(IS_CLONE));
     // A default that did not ship is a packaging defect, not an operator
     // error: report it as red rather than leaving them to notice later that
     // the questionnaire they were told to answer is not there.
@@ -5179,11 +5183,9 @@ async function main(): Promise<number> {
     try {
       mod = await import(pathToFileURL(serverEntry).href);
     } catch (err) {
-      throw new SmithError(
-        'ui.not-built',
-        `ui/server is not built (expected ${serverEntry}). Run "pnpm build:server" first.`,
-        { cause: err instanceof Error ? err.message : String(err) },
-      );
+      throw new SmithError('ui.not-built', uiNotBuiltMessage(serverEntry, IS_CLONE), {
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
     const dbPath = flags.db ?? STATE_DB_PATH;
     const stateDir = flags['state-dir'];
