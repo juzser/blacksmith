@@ -61,6 +61,10 @@ import { JUDGE_TURN_ROLES } from '../../../factory/orchestrator/dist/judgeRoles.
 import { normalizeProjectName } from '../../../factory/orchestrator/dist/projectName.js';
 import { isHarnessText } from '../../../factory/orchestrator/dist/prompts.js';
 import { taskIdsMatch } from '../../../factory/orchestrator/dist/taskId.js';
+import {
+  countRecordTokens,
+  dedupeKey,
+} from '../../../factory/orchestrator/dist/transcriptTokens.js';
 
 export interface CliFs {
   readdir(p: string): Promise<string[]>;
@@ -1228,21 +1232,12 @@ export function createCliSessionsReader(deps: CliSessionsDeps): {
       } catch {
         continue;
       }
-      if (typeof j !== 'object' || j === null) continue;
-      const rec = j as { type?: unknown; requestId?: unknown; message?: unknown };
-      if (rec.type !== 'assistant') continue;
-      const msg = rec.message as { id?: unknown; usage?: unknown } | null | undefined;
-      const u = msg?.usage as Record<string, unknown> | null | undefined;
-      if (typeof msg !== 'object' || msg === null || typeof u !== 'object' || u === null) continue;
-      if (typeof msg.id === 'string') {
-        const key = `${msg.id}\u0000${typeof rec.requestId === 'string' ? rec.requestId : ''}`;
+      const key = dedupeKey(j);
+      if (key !== null) {
         if (into.seen.has(key)) continue;
         into.seen.add(key);
       }
-      for (const k of ['input_tokens', 'cache_creation_input_tokens', 'output_tokens']) {
-        const n = u[k];
-        if (typeof n === 'number' && Number.isFinite(n)) into.total += n;
-      }
+      into.total += countRecordTokens(j);
     }
   }
 
