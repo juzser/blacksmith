@@ -40,6 +40,12 @@ than appearing in it.
 
 ### Fixed
 
+- **`/bs use` binds by path and knows a project declared only in its own
+  overlay roadmap.** A path to the checkout, written `/bs use ../<project>` or
+  `/bs use ~/<project>` (an absolute path works too), binds the same way as
+  the project's name, and a project that only its own overlay roadmap declares
+  is no longer answered as unknown. The names scan reads such a path argument.
+
 - **Read-only git searches for a word such as `push` are no longer refused.**
   The force-push rule refused a read-only git command that only searched for
   one of the words it watches (`push`, `rebase`, `reset`, `filter-branch`,
