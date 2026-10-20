@@ -209,6 +209,100 @@ describe('effectiveness escaped defects', () => {
   });
 });
 
+describe('effectiveness edge cases', () => {
+  it('does not count a task whose latest pre-merge gate-outcome is not a pass', async () => {
+    const events = [
+      gate('t1', 'pass'),
+      gate('t1', 'blocked'),
+      merged('t1'),
+      finding('f1', 't1', 'reviewer'),
+      transition('f1', 'confirmed'),
+    ];
+    const r = await effectiveness(events, { readTokens: reader({}) });
+    expect(r.escapedDefects.count).toBe(0);
+    expect(r.escapedDefects.items).toEqual([]);
+  });
+
+  it('ignores a gate-outcome that arrives after the merge', async () => {
+    const events = [
+      merged('t1'),
+      gate('t1', 'pass'),
+      finding('f1', 't1', 'reviewer'),
+      transition('f1', 'confirmed'),
+    ];
+    const r = await effectiveness(events, { readTokens: reader({}) });
+    expect(r.escapedDefects.count).toBe(0);
+  });
+
+  it('does not count an issue reported before the merge', async () => {
+    const events = [
+      gate('t1', 'pass'),
+      ev('issue-reported', { outcome: 'opened', task_ref: 't1' }),
+      merged('t1'),
+    ];
+    const r = await effectiveness(events, { readTokens: reader({}) });
+    expect(r.escapedDefects.count).toBe(0);
+  });
+
+  it('carries the merge and gate event ids on each escaped item', async () => {
+    const g = gate('t1', 'pass');
+    const m = merged('t1');
+    const f = finding('f1', 't1', 'reviewer');
+    const r = await effectiveness([g, m, f, transition('f1', 'confirmed')], {
+      readTokens: reader({}),
+    });
+    expect(r.escapedDefects.items[0]).toMatchObject({
+      eventId: f.event_id,
+      mergeEventId: m.event_id,
+      gateEventId: g.event_id,
+    });
+  });
+
+  it('sums one task across two sessions and reads each session once', async () => {
+    const calls: string[] = [];
+    const table: Record<string, SessionTokens> = {
+      [CLI_A]: { used: 100, complete: true, subagents: [sub('agent-a', 100)] },
+      [CLI_B]: { used: 50, complete: true, subagents: [sub('agent-b', 50)] },
+    };
+    const events = [
+      dispatch('t1', 'coder', 'agent-a', CLI_A),
+      dispatch('t1', 'coder', 'agent-a2', CLI_A),
+      dispatch('t1', 'tester', 'agent-b', CLI_B),
+    ];
+    const r = await effectiveness(events, {
+      readTokens: async (id) => {
+        calls.push(id);
+        return table[id] as SessionTokens;
+      },
+    });
+    expect(calls.sort()).toEqual([CLI_A, CLI_B].sort());
+    expect(r.tokens.byTask.t1?.used).toBe(150);
+    expect(r.tokens.unattributed.used).toBe(0);
+  });
+
+  it('reports a sub-agent whose dispatch names no task under its role only', async () => {
+    const d = ev(
+      'dispatch_decision',
+      { agent_role: 'planner' },
+      { agent_id: 'agent-p', cli_session_id: CLI_A },
+    );
+    const read = reader({
+      [CLI_A]: { used: 70, complete: true, subagents: [sub('agent-p', 70)] },
+    });
+    const r = await effectiveness([d], { readTokens: read });
+    expect(r.tokens.byRole.planner?.used).toBe(70);
+    expect(r.tokens.byTask).toEqual({});
+    expect(r.tokens.unattributed.used).toBe(0);
+  });
+
+  it('returns empty, complete totals for an empty log', async () => {
+    const r = await effectiveness([], { readTokens: reader({}) });
+    expect(r.tokens.complete).toBe(true);
+    expect(r.escapedDefects).toMatchObject({ count: 0, pending: 0, items: [] });
+    expect(r.precision).toEqual({});
+  });
+});
+
 describe('effectiveness precision', () => {
   it('reads 0.75 for 3 confirmed and 1 refuted, with the counts', async () => {
     const events = [
