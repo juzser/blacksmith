@@ -1340,6 +1340,67 @@ describe('dream', () => {
     expect(secondResult.skippedAlreadyExtracted).toBe(1);
   });
 
+  describe('dream-pass lesson ids', () => {
+    const session = 'example-team-session';
+    async function runDream(reasons: string[]): Promise<string[]> {
+      const dir = mkdtempSync(path.join(tmpdir(), 'smith-dream-'));
+      try {
+        const root = await appendEvent(
+          {
+            session_id: session,
+            actor: 'user',
+            event_type: 'session-start',
+            plan_version: 1,
+            causal_parent: null,
+            payload: {},
+          },
+          { stateDir: dir },
+        );
+        let last = root.event_id;
+        for (const [i, reason] of reasons.entries()) {
+          const ev = await appendEvent(
+            {
+              session_id: session,
+              actor: 'system',
+              event_type: 'gate-outcome',
+              task_id: `epic-${i}/task-${i}`,
+              plan_version: 1,
+              causal_parent: last,
+              payload: { outcome: 'blocked', reason },
+            },
+            { stateDir: dir },
+          );
+          last = ev.event_id;
+        }
+        const events = await readEvents(session, { stateDir: dir });
+        const result = await dream(
+          events,
+          { sessionId: session, planVersion: 1, causalParent: last },
+          { stateDir: dir },
+          { noveltyThreshold: 0.99 },
+        );
+        return result.raised;
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    it('is a digest of the source event id and never echoes the session name', async () => {
+      const raised = await runDream(['tests-failed']);
+      expect(raised).toHaveLength(1);
+      expect(raised[0]).toMatch(/^lesson-dream-[0-9a-f]{12}$/);
+      expect(raised[0]).not.toContain('example-team-session');
+    });
+
+    it('is deterministic across fresh logs, and differs between checkpoints', async () => {
+      const a = await runDream(['tests-failed', 'coverage-below-threshold-on-the-parser-module']);
+      const b = await runDream(['tests-failed', 'coverage-below-threshold-on-the-parser-module']);
+      expect(a).toHaveLength(2);
+      expect(b).toEqual(a);
+      expect(new Set(a).size).toBe(2);
+    });
+  });
+
   // DS8 plan §2.3 (Q1 = A, operator signed off) -- the Lessons page's "last
   // checked" line needs a durable mark that a pass happened, even an empty
   // one, so a session with no checkpoints at all still proves dream() ran.

@@ -1212,10 +1212,6 @@ const SCOPE_FOR_CHECKPOINT: Record<CheckpointType, string> = {
   'gate-block': 'stack-wide',
 };
 
-function sanitizeId(eventId: string): string {
-  return eventId.replace(/[^a-zA-Z0-9-_]/g, '-');
-}
-
 export interface DreamContext {
   sessionId: string;
   planVersion: number;
@@ -1298,7 +1294,7 @@ export async function dream(
       continue;
     }
 
-    const lessonId = `lesson-dream-${sanitizeId(checkpoint.sourceEventId)}`;
+    const lessonId = `lesson-dream-${createHash('sha256').update(checkpoint.sourceEventId).digest('hex').slice(0, 12)}`;
     // Novelty is decided BEFORE the raise is appended, so a possible
     // contradiction is recorded on the SAME event rather than needing a
     // follow-up write.
