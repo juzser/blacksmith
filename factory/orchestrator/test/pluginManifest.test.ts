@@ -174,13 +174,17 @@ describe('plugin payload', () => {
         }
       ).hooks;
 
-    it('registers exactly one UserPromptSubmit and one PostToolUse on AskUserQuestion, both the capture wrapper', () => {
-      // The one hook the plugin ships: a non-blocking recorder. The policy hook
-      // (guard.sh) stays clone-shaped and is never registered here, because a
-      // guard that cannot find its binary degrades to `ask` in front of every
-      // command (plugin-port-scope Fork 4).
+    it('registers the capture wrapper twice and one opt-in PreToolUse policy shim', () => {
+      // The capture hooks are non-blocking recorders. The clone-shaped policy
+      // hook (guard.sh) is never registered here; the PreToolUse entry runs
+      // plugin-policy.sh, which is inert unless BS_PLUGIN_GUARD=1.
       const hooks = registered();
-      expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'UserPromptSubmit']);
+      expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'PreToolUse', 'UserPromptSubmit']);
+      const pre = hooks.PreToolUse as Group[];
+      expect(pre).toHaveLength(1);
+      expect(pre[0]?.matcher).toBe('Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task');
+      expect(pre[0]?.hooks).toHaveLength(1);
+      expect(pre[0]?.hooks[0]?.command).toMatch(/plugin-policy\.sh"?$/);
       const submit = hooks.UserPromptSubmit as Group[];
       expect(submit).toHaveLength(1);
       expect(submit[0]?.hooks).toHaveLength(1);
