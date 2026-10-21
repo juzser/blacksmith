@@ -86,6 +86,25 @@ describe('the directory lookup resolves each directory once', () => {
     expect(gitCalls.count).toBe(0);
   });
 
+  it('judges a line at the cap and refuses one directory past it', () => {
+    // The cwd counts as one distinct directory: 63 named plus cwd is 64.
+    gitCalls.count = 0;
+    expect(decide(cdSteps(dirs.slice(0, 63)))).toBeNull();
+    expect(gitCalls.count).toBe(2 * 64);
+    gitCalls.count = 0;
+    const past = decide(cdSteps(dirs.slice(0, 64)));
+    expect(past?.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(gitCalls.count).toBe(0);
+  });
+
+  it('refuses a line past the cap even when its first steps are repeats', () => {
+    const steps = [...dirs.slice(0, 5), ...dirs.slice(0, 5), ...dirs];
+    gitCalls.count = 0;
+    const decision = decide(cdSteps(steps));
+    expect(decision?.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(gitCalls.count).toBe(0);
+  });
+
   it('still judges every directory on a line under the cap', () => {
     gitCalls.count = 0;
     expect(decide(cdSteps(dirs.slice(0, 20)))).toBeNull();
