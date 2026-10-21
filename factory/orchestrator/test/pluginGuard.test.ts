@@ -211,6 +211,20 @@ describe('plugin-policy.sh answering in time', () => {
     expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
   });
 
+  it('the shim always answers in time: a malformed limit override falls back to the default', () => {
+    const { stub } = slowStub();
+    const started = Date.now();
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+      BS_PLUGIN_GUARD_WATCHDOG: '20; echo x',
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+    const out = JSON.parse(run.stdout) as { hookSpecificOutput: { permissionDecision: string } };
+    expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+  });
+
   it('returns the hook answer promptly and does not wait out the limit when the hook is fast', () => {
     const stub = path.join(tmp, 'fast-hook.js');
     writeFileSync(stub, 'process.stdout.write(\'{"from":"fast"}\\n\');\n');
