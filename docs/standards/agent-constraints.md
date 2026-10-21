@@ -190,6 +190,12 @@ M-3).
   the default, because a 1h write costs more than it saves there. The env
   `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` and the `subagentPromptCacheTtl`
   setting override the template.
+- **The harness caps concurrency; the install raises it.** Claude Code runs at
+  most 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`) and 10 parallel
+  tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`, undocumented) by default.
+  A plugin cannot ship `env`, so the install asks the operator to set both in
+  `~/.claude/settings.json`; see
+  [INSTALL.md](../../INSTALL.md#raise-the-concurrency-caps).
 
 ## dispatch topology (factory-wide, 2026-08-05)
 
