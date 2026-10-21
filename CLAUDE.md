@@ -19,9 +19,9 @@ including a bare *"install Blacksmith"* — read that file and run it.
 
 Which part depends on what they are standing in. Asked from a project that is
 not this repo, the install is the block at the top of the file — the global
-package, the plugin, `bs init` — plus Step 5, the stack interview, and
-nothing else. Asked inside this checkout, work through Part 2 step by step, in
-order.
+package, the plugin, `bs init`, the concurrency caps — plus Step 5, the stack
+interview, and nothing else. Asked inside this checkout, work through Part 2
+step by step, in order.
 
 `INSTALL.md` Part 0 states the rules that bind you while you run it. The two
 that matter most:

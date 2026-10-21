@@ -14,13 +14,16 @@ Two inside a Claude Code session:
 ```
 
 Then `bs init` in the project you want it to work on, and you have `/bs`.
-One more step belongs here: [raise the concurrency caps](#raise-the-concurrency-caps)
-in `~/.claude/settings.json`, after a yes, or Claude Code throttles a wave.
 Both halves are required and they are different things —
 [Which install](#which-install) says why. Two optional mods come from the
 same marketplace: bs-mod is the live HUD, your epic's progress above the
 prompt, and pr-mod lists the repo's open pull requests. Blacksmith runs the
 same without them.
+
+One more step, outside the project:
+[raise Claude Code's concurrency caps](#raise-the-concurrency-caps) in
+`~/.claude/settings.json` — the install proposes the two lines and waits for a
+yes — or a wide wave is throttled.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -190,8 +193,8 @@ that is yours; the rest of it builds a checkout you do not have.
 #### Raise the concurrency caps
 
 Claude Code caps how much one session runs at once: 20 subagents and 10 parallel
-tool calls in a message, by default. A `/bs` wave fans out past both, so the
-defaults throttle it. Two `env` settings raise them:
+tool calls in a message, by default. A wide `/bs` wave can fan out past both,
+and then the defaults throttle it. Two `env` settings raise them:
 
 - `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` is documented by Claude Code and
   needs Claude Code v2.1.217 or later. Any positive integer is accepted.
@@ -212,10 +215,12 @@ A plugin cannot ship `env` (plugin settings honour only `agent` and
 }
 ```
 
-This edits a file outside the clone, so under Part 0 propose the exact lines
-and wait for a yes. There is no "unlimited" value; 1000 is a ceiling, not a
-target, and real fan-out stays bounded by the claim graph and the machine. A
-team may instead commit the block to a project's `.claude/settings.json`.
+This edits a file outside the project, so under
+[Part 0](#part-0--rules-for-an-agent-running-this-file) propose the exact
+lines and wait for a yes. There is no "unlimited" value; 1000 is a ceiling,
+not a target, and real fan-out stays bounded by the claim graph and the
+machine. A team may instead commit the block to a project's
+`.claude/settings.json`.
 Restart Claude Code afterwards: a running session may not pick the change up.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
