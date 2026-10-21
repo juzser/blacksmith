@@ -63,6 +63,33 @@ describe('effectiveness with reserved object keys as ids', () => {
       );
     });
 
+    it(`accumulates two agents into one "${id}" bucket`, async () => {
+      const events = [
+        ev(
+          'dispatch_decision',
+          { agent_role: id },
+          { task_id: id, agent_id: 'agent-x', cli_session_id: CLI },
+        ),
+        ev('dispatch_decision', { agent_role: id }, { task_id: id, agent_id: 'agent-z' }),
+      ];
+      const two = async (): Promise<SessionTokens> => ({
+        used: 100,
+        complete: true,
+        subagents: [
+          { agentId: 'agent-x', role: null, used: 40, complete: true },
+          { agentId: 'agent-z', role: null, used: 10, complete: false },
+        ],
+      });
+      const r = await effectiveness(events, { readTokens: two });
+      expect(Object.keys(r.tokens.byTask)).toEqual([id]);
+      expect(Object.getOwnPropertyDescriptor(r.tokens.byTask, id)?.value).toEqual({
+        used: 50,
+        complete: false,
+        agentIds: ['agent-x', 'agent-z'],
+      });
+      expect(Object.hasOwn(Object.prototype, 'used')).toBe(false);
+    });
+
     it(`counts precision for a finder named "${id}"`, async () => {
       const events = [
         ev('finding-raised', {
