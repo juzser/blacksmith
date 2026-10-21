@@ -20,10 +20,9 @@ same marketplace: bs-mod is the live HUD, your epic's progress above the
 prompt, and pr-mod lists the repo's open pull requests. Blacksmith runs the
 same without them.
 
-One more step, outside the project:
-[raise Claude Code's concurrency caps](#raise-the-concurrency-caps) in
-`~/.claude/settings.json` — the install proposes the two lines and waits for a
-yes — or a wide wave is throttled.
+`bs init` also [raises Claude Code's concurrency caps](#raise-the-concurrency-caps)
+for the project, so a wide wave is not throttled. Restart Claude Code
+afterwards.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -203,8 +202,15 @@ and then the defaults throttle it. Two `env` settings raise them:
   change without notice.
 
 A plugin cannot ship `env` (plugin settings honour only `agent` and
-`subagentStatusLine`), so the install asks. Merge these into the `env` block of
-`~/.claude/settings.json`, never replacing the file:
+`subagentStatusLine`), and Claude Code never reads Blacksmith's `.env`.
+
+`bs init` does this for you. It writes the two lines below into the project's
+`.claude/settings.local.json`, adds only what is not already set anywhere
+(Claude Code's environment, the user settings, the project settings, the local
+file), never overwrites or lowers a value, and keeps the file out of git via
+`.git/info/exclude`. Restart Claude Code after `bs init`: a running session
+does not pick the change up. A clone carries the same lines in its tracked
+`.claude/settings.json`.
 
 ```json
 {
@@ -215,13 +221,14 @@ A plugin cannot ship `env` (plugin settings honour only `agent` and
 }
 ```
 
-This edits a file outside the project, so under
+There is no "unlimited" value; 1000 is a ceiling, not a target, and real
+fan-out stays bounded by the claim graph and the machine.
+
+Optionally, the same lines in the `env` block of `~/.claude/settings.json`
+cover every project at once. That file is outside the project, so under
 [Part 0](#part-0--rules-for-an-agent-running-this-file) propose the exact
-lines and wait for a yes. There is no "unlimited" value; 1000 is a ceiling,
-not a target, and real fan-out stays bounded by the claim graph and the
-machine. A team may instead commit the block to a project's
-`.claude/settings.json`.
-Restart Claude Code afterwards: a running session may not pick the change up.
+lines and wait for a yes, merge them without replacing the file, and restart
+Claude Code afterwards.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of
@@ -603,8 +610,9 @@ claude --version
 Without it, the CLI and the gate still work — you simply cannot dispatch the
 agents that do the work.
 
-Then [raise the concurrency caps](#raise-the-concurrency-caps), the same
-consented `env` step a plugin install does, so a wave is not throttled.
+A clone already carries the [concurrency caps](#raise-the-concurrency-caps) in
+its tracked `.claude/settings.json`; there is nothing to propose. Restart
+Claude Code if you changed them.
 
 ### Step 7 — Link the `bs` command *(optional)*
 
