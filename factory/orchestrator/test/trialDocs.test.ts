@@ -83,6 +83,24 @@ describe('trial docs', () => {
     }
   });
 
+  it('reads every value in the Blacksmith effectiveness table as NOT MEASURED', () => {
+    const rows = tableRows(read(RESULTS), 'Blacksmith arm effectiveness');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row).toHaveLength(2);
+      expect(row[0]).not.toBe('');
+      expect(row[1]).toBe('NOT MEASURED');
+    }
+  });
+
+  it('carries no absolute home path and no percentage in either doc', () => {
+    for (const file of [METHODOLOGY, RESULTS]) {
+      const md = read(file);
+      expect(md).not.toMatch(/\/Users\/|\/home\//);
+      expect(md).not.toMatch(/\d\s*%/);
+    }
+  });
+
   it('puts no digit in results.md outside of headings and links', () => {
     const body = read(RESULTS)
       .split('\n')
