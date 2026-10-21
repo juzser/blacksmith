@@ -68,13 +68,22 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+// Event-supplied ids key plain objects, so read with `hasOwn` and write with
+// `defineProperty`: `map['__proto__']` would reach `Object.prototype`.
+function slot<T>(map: Record<string, T>, key: string, make: () => T): T {
+  if (Object.hasOwn(map, key)) return map[key] as T;
+  const v = make();
+  Object.defineProperty(map, key, {
+    value: v,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+  return v;
+}
+
 function bucket(map: Record<string, TokenTotal>, key: string): TokenTotal {
-  let t = map[key];
-  if (t === undefined) {
-    t = { used: 0, complete: true, agentIds: [] };
-    map[key] = t;
-  }
-  return t;
+  return slot(map, key, () => ({ used: 0, complete: true, agentIds: [] }));
 }
 
 async function foldTokens(
@@ -235,17 +244,13 @@ function foldPrecision(findings: ReturnType<typeof foldFindings>): Record<string
   for (const f of findings) {
     const role = f.found_by;
     if (typeof role !== 'string' || role === '') continue;
-    let p = out[role];
-    if (p === undefined) {
-      p = {
-        value: null,
-        confirmed: 0,
-        refuted: 0,
-        waived: 0,
-        ids: { confirmed: [], refuted: [], waived: [] },
-      };
-      out[role] = p;
-    }
+    const p = slot(out, role, () => ({
+      value: null,
+      confirmed: 0,
+      refuted: 0,
+      waived: 0,
+      ids: { confirmed: [], refuted: [], waived: [] },
+    }));
     const s = f.finding_status;
     const key = CONFIRMED_LIKE(s) ? 'confirmed' : s === 'refuted' || s === 'waived' ? s : null;
     if (key === null) continue;
