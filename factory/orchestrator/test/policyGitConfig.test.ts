@@ -366,6 +366,21 @@ describe('a mention of a configuration variable the rule did not record as an as
     expect(allowed('printenv GIT_PAGER')).toBe(true);
   });
 
+  it('allows echo "$GIT_PAGER" on its own', () => {
+    expect(allowed('echo "$GIT_PAGER"')).toBe(true);
+  });
+
+  it('allows printenv GIT_PAGER on its own', () => {
+    expect(allowed('printenv GIT_PAGER')).toBe(true);
+  });
+
+  it('allows a mention of each other configuration variable on a line that does not run git', () => {
+    expect(allowed('echo "$GIT_EXTERNAL_DIFF"')).toBe(true);
+    expect(allowed('echo "$GIT_CONFIG_COUNT" "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0"')).toBe(
+      true,
+    );
+  });
+
   it('does not refuse a recorded assignment spelled with a quote pair or a backslash', () => {
     expect(allowed("export GIT_PA''GER=cat; git log")).toBe(true);
     expect(allowed('export GIT_PA\\GER=cat; git log')).toBe(true);
