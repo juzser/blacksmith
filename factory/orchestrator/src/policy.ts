@@ -1571,6 +1571,8 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
   '--namespace',
   '--exec-path',
   '--config-env',
+  '--attr-source',
+  '--super-prefix',
 ]);
 
 /** The subcommand word of a `git` invocation found at `words[gitIndex]`, walking past global options the way `git` itself does. */
@@ -2031,7 +2033,9 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
     const words = splitDequotedWords(stripRedirections(segment));
-    const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
+    // The git word is `git` or a path ending in `/git`, the same definition
+    // the per-line `runsGit` check uses.
+    const gitIndex = words.findIndex((word) => /(?:^|\/)git$/i.test(word.text));
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
     recorded += readAssignments(leading, env, gitIndex === -1);

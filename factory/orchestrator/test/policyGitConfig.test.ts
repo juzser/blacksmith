@@ -393,3 +393,55 @@ describe('local and readonly set a variable the rule reads', () => {
     expect(allowed('local GIT_PAGER=cat; git log')).toBe(true);
   });
 });
+
+describe('a git run by path is read the same way as a bare git word', () => {
+  it('reads a leading assignment and an export before a path-form git', () => {
+    expect(refused('GIT_PAGER="$X" /usr/bin/git log')).toBe(true);
+    expect(refused('export GIT_PAGER="$X"; /usr/bin/git log')).toBe(true);
+    expect(refused('GIT_EXTERNAL_DIFF=$(cat f) /usr/bin/git diff')).toBe(true);
+    expect(refused("GIT_PAGER='git push -f origin main' /usr/bin/git log")).toBe(true);
+  });
+
+  it('reads an env prefix before a path-form git', () => {
+    expect(refused('env GIT_EXTERNAL_DIFF="$(cat f)" /usr/bin/git diff')).toBe(true);
+    expect(refused("env GIT_PAGER='git push -f origin main' ./git log")).toBe(true);
+  });
+
+  it('reads -c, --config-env and grep -O after a path-form git', () => {
+    expect(refused('/usr/bin/git -c core.pager="$X" log')).toBe(true);
+    expect(refused('./git -c core.pager="$X" log')).toBe(true);
+    expect(refused("/usr/bin/git -c core.pager='git push -f origin main' log")).toBe(true);
+    expect(refused('/usr/bin/git --config-env=core.pager=SOMEVAR log')).toBe(true);
+    expect(refused('/usr/bin/git grep -O"$X" x')).toBe(true);
+    expect(refused("/usr/bin/git grep -O'git push -f origin main' x")).toBe(true);
+  });
+
+  it('allows the readable and unrelated counterparts of a path-form git', () => {
+    expect(allowed('/usr/bin/git -c core.pager=cat log')).toBe(true);
+    expect(allowed('GIT_PAGER=cat /usr/bin/git log')).toBe(true);
+    expect(allowed('env GIT_PAGER=less ./git log')).toBe(true);
+    expect(allowed('/usr/bin/git -c user.name=x commit -m y')).toBe(true);
+    expect(allowed('/usr/bin/git grep -n foo')).toBe(true);
+  });
+});
+
+describe('a separate-value global option is walked past', () => {
+  it('reads -c, --config-env and grep -O after --attr-source <tree-ish>', () => {
+    expect(refused('git --attr-source HEAD -c core.pager="$X" log')).toBe(true);
+    expect(refused('git --attr-source HEAD grep -O"$X" x')).toBe(true);
+    expect(refused('git --attr-source HEAD --config-env=core.pager=SOMEVAR log')).toBe(true);
+    expect(refused("git --attr-source HEAD -c core.pager='git push -f origin main' log")).toBe(
+      true,
+    );
+  });
+
+  it('reads the same options with the = spelling and with no such option', () => {
+    expect(refused('git --attr-source=HEAD -c core.pager="$X" log')).toBe(true);
+    expect(refused('git -c core.pager="$X" log')).toBe(true);
+  });
+
+  it('allows readable values after --attr-source', () => {
+    expect(allowed('git --attr-source HEAD -c core.pager=cat log')).toBe(true);
+    expect(allowed('git --attr-source HEAD grep -n foo')).toBe(true);
+  });
+});
