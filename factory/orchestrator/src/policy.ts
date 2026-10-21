@@ -1890,6 +1890,56 @@ const VARIABLE_DECLARING_BUILTIN_RE = /^(?:export|declare|typeset|local|readonly
 const GIT_CONFIG_UNREADABLE_REASON =
   'a git configuration value here holds a parameter or substitution, so the guard cannot tell what git will run — write the value out plainly';
 
+/** `env` options that take the next word as their value. */
+const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
+
+/**
+ * The index where a segment's command starts: past the leading `NAME=value`
+ * words and the `env` prefix (its options, their values and its assignments),
+ * none of which is a command word.
+ */
+function commandStart(words: readonly DequotedWord[]): number {
+  let start = 0;
+  while (start < words.length) {
+    const text = words[start]?.text ?? '';
+    if (ASSIGNMENT_WORD_RE.test(text)) {
+      start += 1;
+    } else if (text === 'env') {
+      start += 1;
+      while (start < words.length) {
+        const operand = words[start]?.text ?? '';
+        if (operand.startsWith('-')) start += ENV_VALUE_OPTIONS.has(operand) ? 2 : 1;
+        else if (ASSIGNMENT_WORD_RE.test(operand)) start += 1;
+        else break;
+      }
+    } else {
+      break;
+    }
+  }
+  return start;
+}
+
+/**
+ * The index of the git word of a segment, or -1 when it has none: `git` or a
+ * path ending in `/git`, found from `commandStart` on. This is the one
+ * definition every caller uses.
+ */
+function gitWordIndex(words: readonly DequotedWord[]): number {
+  const start = commandStart(words);
+  return words.findIndex(
+    (word, index) =>
+      index >= start && !ASSIGNMENT_WORD_RE.test(word.text) && /(?:^|\/)git$/i.test(word.text),
+  );
+}
+
+/** Whether any configuration variable the line has set holds a value that cannot be read statically. */
+function hasUnreadableConfigValue(env: ReadonlyMap<string, EnvValue>): boolean {
+  for (const [name, value] of env) {
+    if (value === null && GIT_CONFIG_ENV_NAME_RE.test(name)) return true;
+  }
+  return false;
+}
+
 /**
  * Records the variables a run of words sets: `NAME=value` words and, after
  * `export` (or `declare`, `typeset`, `local`, `readonly`), a bare configuration
@@ -1945,14 +1995,11 @@ function checkGitConfigValues(
   const unreadable = violation(rule, GIT_CONFIG_UNREADABLE_REASON);
   const checkValue = (value: EnvValue): PolicyViolation | null =>
     value === null ? unreadable : checkForcePush(value, policy);
+  if (hasUnreadableConfigValue(env)) return unreadable;
   for (const [name, value] of env) {
-    if (!GIT_CONFIG_ENV_NAME_RE.test(name)) continue;
-    if (/^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) {
-      if (value === null) return unreadable;
-    } else {
-      const found = checkValue(value);
-      if (found) return found;
-    }
+    if (!GIT_CONFIG_ENV_NAME_RE.test(name) || /^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) continue;
+    const found = checkValue(value);
+    if (found) return found;
   }
   let i = gitIndex + 1;
   for (; i < words.length; i += 1) {
@@ -2033,9 +2080,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
     const words = splitDequotedWords(stripRedirections(segment));
-    // The git word is `git` or a path ending in `/git`, the same definition
-    // the per-line `runsGit` check uses.
-    const gitIndex = words.findIndex((word) => /(?:^|\/)git$/i.test(word.text));
+    const gitIndex = gitWordIndex(words);
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
     recorded += readAssignments(leading, env, gitIndex === -1);
@@ -2046,7 +2091,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
       .map((word) => word.text)
       .join(' ');
     mentions += (dequoted.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length;
-    const commandWord = words.find((word) => !ASSIGNMENT_WORD_RE.test(word.text));
+    const commandWord = words[commandStart(words)];
     runsGit =
       runsGit ||
       /\bgit\b/i.test(dequoted) ||
@@ -2089,8 +2134,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     }
   }
   // On a line that runs git, a configuration variable named beyond the
-  // assignments read above is set in a form the rule does not read: refused.
-  if (runsGit && mentions > recorded) return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+  // assignments read above is set in a form the rule does not read, and a
+  // recorded value that cannot be read statically cannot be checked: refused.
+  if (runsGit && (mentions > recorded || hasUnreadableConfigValue(carried))) {
+    return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+  }
   return null;
 }
 

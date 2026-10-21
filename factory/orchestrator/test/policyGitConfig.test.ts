@@ -477,3 +477,88 @@ describe('a configuration value is read in each compound-command position', () =
     ).toBe(true);
   });
 });
+
+// One table of the shapes a git word can take, run against each carrier of a
+// configuration value, so a shape read for one carrier is read for all.
+const GIT_SHAPES: ReadonlyArray<readonly [string, (args: string) => string]> = [
+  ['bare git', (args) => `git ${args}`],
+  ['path-form git', (args) => `/usr/bin/git ${args}`],
+  ['assignment prefix with a /git value', (args) => `GIT_DIR=/repo/git git ${args}`],
+  ['lowercase assignment prefix with a /git value', (args) => `x=/a/git git ${args}`],
+  ['env prefix with a /git value', (args) => `env FOO=/a/git git ${args}`],
+  ['env option operand ending in /git', (args) => `env -u /a/git git ${args}`],
+  [
+    'assignment, env and path-form git',
+    (args) => `GIT_DIR=/r/git env FOO=/a/git /usr/bin/git ${args}`,
+  ],
+  ['git after &&', (args) => `cd /tmp/project-a && git ${args}`],
+];
+
+const CARRIERS: ReadonlyArray<readonly [string, string, string]> = [
+  ['-c', '-c core.pager="$X" log', '-c core.pager=cat log'],
+  [
+    '-c with a forced command',
+    "-c core.pager='git push -f origin main' log",
+    '-c core.pager=less log',
+  ],
+  ['--config-env', '--config-env=core.pager=SOMEVAR log', '-c color.ui=always log'],
+  ['grep -O', 'grep -O"$X" x', 'grep -Oless x'],
+  ['grep -O with a forced command', "grep -O'git push -f origin main' x", 'grep -n foo'],
+];
+
+describe('every git-word shape is read against every carrier', () => {
+  describe.each(GIT_SHAPES)('%s', (_shape, build) => {
+    it.each(CARRIERS)('refuses an unreadable or forced value: %s', (_carrier, bad) => {
+      expect(refused(build(bad))).toBe(true);
+    });
+
+    it.each(CARRIERS)('allows the readable counterpart: %s', (_carrier, _bad, good) => {
+      expect(allowed(build(good))).toBe(true);
+    });
+  });
+});
+
+const RECORDING_FORMS: ReadonlyArray<readonly [string, (value: string, run: string) => string]> = [
+  ['leading assignment', (value, run) => `GIT_PAGER=${value} ${run}`],
+  ['env prefix', (value, run) => `env GIT_PAGER=${value} ${run}`],
+  ['export', (value, run) => `export GIT_PAGER=${value}; ${run}`],
+  ['declare -x', (value, run) => `declare -x GIT_PAGER=${value}; ${run}`],
+  ['typeset -x', (value, run) => `typeset -x GIT_PAGER=${value}; ${run}`],
+  ['local', (value, run) => `f() { local GIT_PAGER=${value}; ${run}; }; f`],
+  ['readonly', (value, run) => `readonly GIT_PAGER=${value}; ${run}`],
+];
+
+const RUN_SHAPES: ReadonlyArray<readonly [string, string]> = [
+  ['bare git', 'git log'],
+  ['path-form git', '/usr/bin/git log'],
+  ['assignment prefix with a /git value', 'GIT_DIR=/repo/git git log'],
+  ['env prefix with a /git value', 'env FOO=/a/git git log'],
+  ['unreadable command word', '$G log'],
+  ['quoted unreadable command word', '"$G" log'],
+  ['substitution command word', '$(which git) log'],
+  ['shell -c payload', "bash -c 'git log'"],
+  ['sh -c payload', "sh -c 'git log'"],
+];
+
+describe('a recorded configuration value is judged on every way a line runs git', () => {
+  describe.each(RECORDING_FORMS)('%s', (form, build) => {
+    it.each(RUN_SHAPES)('refuses an unreadable value: %s', (_run, command) => {
+      expect(refused(build('"$X"', command))).toBe(true);
+    });
+
+    it.each(RUN_SHAPES)('refuses a forced value: %s', (_run, command) => {
+      expect(refused(build("'git push -f origin main'", command))).toBe(true);
+    });
+
+    // A declaration inside a function body is not read as an assignment, so
+    // the rule refuses it whatever the value (it is unsure).
+    it.each(RUN_SHAPES)('reads a readable value: %s', (_run, command) => {
+      expect(allowed(build('cat', command))).toBe(form !== 'local');
+    });
+  });
+
+  it('allows an unreadable value on a line that does not run git', () => {
+    expect(allowed('GIT_PAGER="$X" echo hi')).toBe(true);
+    expect(allowed('export GIT_PAGER="$X"; echo hi')).toBe(true);
+  });
+});
