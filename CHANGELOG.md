@@ -161,9 +161,10 @@ than appearing in it.
 ### Added
 
 - **0.5.1 — `/bs use` binds a session to one project, and the dashboard
-  only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Entries
-  above and below this one landed after 0.5.0 and ship in it: the read-only
-  dashboard (#459) under *Changed*; under *Fixed*, `/bs use` by path (#485),
+  only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Eleven
+  entries above this one and one below landed after 0.5.0 and ship in it:
+  the read-only dashboard (#459) under *Changed*; under *Fixed*, `/bs use`
+  by path (#485),
   where secrets are masked (#484), the verdict judge's evidence (#482), the
   guard's git-search and line-continuation fixes with `cleared_follow_ups`
   on the close record (#476), `claims impact` on star re-exports (#475),
@@ -188,41 +189,29 @@ than appearing in it.
   `bs budget alarm` no longer lists uiux as uncapped. Merger, scribe and
   wave-runner stay unpriced.
 
-  *Plans, claims and delegation (#474, #471).* Claim ownership reads only
-  live plan records, so a dispatch for a task whose every record is
-  superseded is refused with `cli.task-not-in-plan`. `delegation check` finds
-  a dispatch's session when a sibling wave opened it. `epic goal-check` and
-  the epic gate credit a task that an earlier plan version held and the log
-  reports finished. An amendment reads a task's finished state from the
-  event log, not the plan file, and one predicate decides for the projector,
-  ingest and `bs task reinstate` alike whether a reinstatement is honoured
-  (#471). The guard reads a quoted trailing `$` as plain text, and keeps its
-  old, stricter reading where quoting is uncertain (#474).
+  *Plans, claims and delegation (#474, #471).* A dispatch for a task whose
+  every plan record is superseded is refused with `cli.task-not-in-plan`,
+  `delegation check` finds a dispatch's session when a sibling wave opened
+  it, and `epic goal-check` and the epic gate credit a task an earlier plan
+  version held and the log reports finished. The guard reads a quoted
+  trailing `$` as plain text (#474). Amendments and `bs task reinstate` read
+  a task's finished state from the event log (#471).
 
   *bs-audit-4 (#463, #464, #471).* A self-audit after 0.5.0 became an epic
-  of 14 accepted findings. Most are the dashboard's read cost: the overview
-  and the timeline read through indexes and keyset time windows instead of
-  loading every event, one held overview is shared per store, and the
-  refresher applies a scan's changed sessions in one batch. The `/api`
-  request check is mounted once for the whole prefix, so a route added later
-  gets it too. Payloads and exports nothing read since the dashboard went
-  display-only are gone, with a guard that lists unused lib exports. pr-mod's
-  fix-conflict and fix-CI prompts carry pull request text as fenced data.
-  The gate reads the session lineage once per run.
+  of 14 accepted findings: the dashboard reads through indexes and time
+  windows instead of loading every event, every `/api` route gets the
+  request check, payloads and exports nothing reads are gone, and pr-mod
+  fences pull request text in its fix prompts.
 
-  *The dashboard.* It runs from a clone and is not in the npm package.
-  Besides the entries named above and bs-audit-4, Home's Agents running now
-  counts, over every live CLI session, the main agent plus every running
-  subagent at any depth, nested ones included; a completed, handed-back or
+  *The dashboard.* Home's Agents running counts every live CLI session's
+  main agent and running subagents at any depth; a completed, handed-back or
   killed subagent stops counting (#465). Screenshot baselines of retired
   routes are dropped (#455).
 
   *Docs (#441, #453, #454).* The policy comments name the `bs-<role>` agent
-  files (#441). The README says what the package, the plugin and a clone
-  each carry and what the eight dashboard pages show, and the dashboard
-  guide says which pages read other projects' stores (#453).
-  INSTALL.md Step 5 and the operator guides point at an install's own
-  `.blacksmith/factory/policies/stack.yml` (#454).
+  files (#441), and the README and guides say what the package, plugin and
+  clone carry, which dashboard pages read other stores, and where an
+  install's `stack.yml` lives (#453, #454).
 
   *Packaging and migrations.* The npm package carries the CLI side of all
   of the above: the binding capture, the claims, plan and guard fixes, the
@@ -238,17 +227,19 @@ than appearing in it.
   blacksmith`, then `claude plugin update blacksmith` (the `/bs` playbooks
   and the `bs-spec-reviewer` agent changed) and, where installed,
   `claude plugin update pr-mod@blacksmith`, and start a new session. bs-mod
-  changes only its version. The INSTALL.md floors (Node 22, git 2.38) did
-  not move.
+  changes only its version; `claude plugin update bs-mod@blacksmith` is
+  optional. The INSTALL.md floors (Node 22, git 2.38) did not move.
 
 - **Home opens with four facts.** Under the page header, four read-only
-  tiles read Active sessions, Agents running, Budget used and Tasks done. All
-  four describe one set: the live CLI sessions linked to a running epic.
+  tiles read Active sessions, Agents running, Budget used and Tasks done.
+  Active sessions, Budget used and Tasks done describe one set: the live CLI
+  sessions linked to a running epic.
   Budget used is the tokens those sessions and their subagents used, read
   from the session transcripts with cache reads left out, and Tasks done reads
-  "13 of 25"; each epic counts once, even when two sessions run it. Agents running
-  counts a session's subagents and the factory agents on its epics once
-  each, and leaves out subagents nested inside another subagent. The strip follows
+  "13 of 25"; each epic counts once, even when two sessions run it. Agents
+  running reads every live CLI session, linked or not: its main agent plus
+  every running subagent at any depth, lifted to its epics' working factory
+  agents where those are more (#465). The strip follows
   the project filter, reads "Not known" when session data could not be read,
   and forms a 2×2 grid on a phone.
 
