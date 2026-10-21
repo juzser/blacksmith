@@ -99,9 +99,9 @@ function deps(spawn: Spawner): HarnessDeps {
   return { spawn, now: () => NOW, tasksDir, appDir };
 }
 
-function transcript(configDir: string, lines: object[], sid = SID): void {
+function transcript(configDir: string, lines: object[], sid = SID, project = 'project-a'): void {
   put(
-    path.join(configDir, 'projects', 'project-a', `${sid}.jsonl`),
+    path.join(configDir, 'projects', project, `${sid}.jsonl`),
     `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
   );
 }
@@ -213,9 +213,9 @@ describe('record', () => {
     const rec = await record(base(), deps(spawn));
     const runs = calls.filter((c) => c.cmd === 'node');
     expect(runs.map((c) => c.args)).toEqual([
-      ['--test', path.join(tasksDir, 'kind-a/gates/must-flip/one.test.js')],
-      ['--test', path.join(tasksDir, 'kind-a/gates/must-flip/two.test.js')],
-      ['--test', path.join(tasksDir, 'kind-a/gates/must-hold/b.test.js')],
+      ['--test', '--test-reporter=tap', path.join(tasksDir, 'kind-a/gates/must-flip/one.test.js')],
+      ['--test', '--test-reporter=tap', path.join(tasksDir, 'kind-a/gates/must-flip/two.test.js')],
+      ['--test', '--test-reporter=tap', path.join(tasksDir, 'kind-a/gates/must-hold/b.test.js')],
     ]);
     expect(runs.every((c) => c.cwd === work)).toBe(true);
     expect(rec.check).toBe('passed');
@@ -285,6 +285,44 @@ describe('record', () => {
   it('record keeps failed over unknown when both occur', async () => {
     writeTask('kind-a', { f2p: { 'a.test.js': NO_TEST, 'bad.test.js': FAILING } });
     expect((await record(base(), deps(withFakeGit))).check).toBe('failed');
+  });
+
+  it('record finds a transcript in a project directory named like a real one (leading dash)', async () => {
+    writeTask('kind-a', {});
+    const b = base();
+    const realName = work.replace(/[\\/]/g, '-');
+    expect(realName.startsWith('-')).toBe(true);
+    transcript(
+      b.claudeConfigDir,
+      [asst('m1', '2026-01-01T10:00:00.000Z', 100), asst('m2', '2026-01-01T10:00:10.000Z', 50)],
+      SID,
+      realName,
+    );
+    const rec = await record(b, deps(fakeSpawner().spawn));
+    expect(rec.tokens).toEqual({ used: 170, complete: true });
+    expect(rec.wall_clock_ms).toBe(10000);
+  });
+
+  it('record asks for the TAP reporter so a passing run is not read as unknown', async () => {
+    writeTask('kind-a', {});
+    const { spawn, calls } = fakeSpawner((c) =>
+      c.cmd === 'node' && !c.args.includes('--test-reporter=tap')
+        ? { stdout: 'pass 1\n' }
+        : undefined,
+    );
+    expect((await record(base(), deps(spawn))).check).toBe('passed');
+    expect(
+      calls.filter((c) => c.cmd === 'node').every((c) => c.args[1] === '--test-reporter=tap'),
+    ).toBe(true);
+  });
+
+  it('record leaves the Blacksmith install directory out of the diff stats (real git)', async () => {
+    writeTask('kind-a', {});
+    prepare({ task: 'kind-a', arm: 'blacksmith', dir: work }, deps(nodeSpawner));
+    put(path.join(work, '.blacksmith/factory/policies/stack.yml'), 'a\nb\nc\n');
+    put(path.join(work, 'src/new.js'), 'export const two = 2;\n');
+    const rec = await record({ ...base(), arm: 'blacksmith' }, deps(nodeSpawner));
+    expect(rec.diff).toEqual({ files: 1, added: 1, removed: 0 });
   });
 
   it('record with no transcript stores tokens null and wall_clock_ms null', async () => {

@@ -73,6 +73,8 @@ export const nodeSpawner: Spawner = (cmd, args, opts) => {
   };
 };
 
+/** The directory Blacksmith's install creates in a prepared copy. */
+const INSTALL_DIR = '.blacksmith';
 const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 function checkKind(task: string): void {
@@ -219,7 +221,7 @@ function runChecks(deps: HarnessDeps, task: string, dir: string): CheckResult {
   }
   let unknown = false;
   for (const file of files) {
-    const r = deps.spawn('node', ['--test', file], { cwd: dir });
+    const r = deps.spawn('node', ['--test', '--test-reporter=tap', file], { cwd: dir });
     if (r.error || r.status === null) unknown = true;
     else if (r.status !== 0) return 'failed';
     else if (passingTests(r.stdout, file) === 0) unknown = true;
@@ -237,8 +239,10 @@ function diffStats(deps: HarnessDeps, dir: string): TrialRecord['diff'] {
     .stdout.trim()
     .split('\n')[0];
   if (!root) throw new Error('diff failed: no start commit');
-  git(deps, dir, ['add', '-N', '.'], 'diff (marking new files)');
-  const out = git(deps, dir, ['diff', '--numstat', '-z', root], 'diff');
+  // The install directory is created after the start commit; keep it out of the numbers.
+  const skip = `:(exclude)${INSTALL_DIR}`;
+  git(deps, dir, ['add', '-N', '--', '.', skip], 'diff (marking new files)');
+  const out = git(deps, dir, ['diff', '--numstat', '-z', root, '--', '.', skip], 'diff');
   const stats = parseNumstat(out.stdout);
   return {
     files: stats.length,
@@ -255,7 +259,8 @@ async function findMainTranscript(configDir: string, sid: string): Promise<strin
     return null;
   }
   for (const p of projects) {
-    if (!PLAIN_NAME.test(p)) continue;
+    // Real project directories are the working path with separators turned into dashes.
+    if (p === '.' || p === '..' || /[\\/\0]/.test(p)) continue;
     try {
       return await readFile(path.join(configDir, 'projects', p, `${sid}.jsonl`), 'utf8');
     } catch {}
