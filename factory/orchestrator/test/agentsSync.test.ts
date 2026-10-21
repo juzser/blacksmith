@@ -285,3 +285,29 @@ describe('the shipped templates', () => {
     }
   });
 });
+
+describe('a nested experimental block after maxTurns', () => {
+  const withCacheTtl = (maxTurns: number) =>
+    template('coder', maxTurns).replace(
+      `maxTurns: ${maxTurns}\n`,
+      `maxTurns: ${maxTurns}\nexperimental:\n  cacheTtl: 1h\n`,
+    );
+
+  it('survives a sync and a reset byte for byte', () => {
+    const file = path.join(agentsDir, 'bs-coder.md');
+    writeFileSync(file, withCacheTtl(40));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync(
+      'git',
+      ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'],
+      { cwd: root },
+    );
+
+    syncAgentMaxTurns({ agentsDir, env: { SMITH_MAXTURNS_CODER: '55' } });
+    expect(read('coder')).toBe(withCacheTtl(55));
+
+    resetAgentMaxTurns({ agentsDir });
+    expect(read('coder')).toBe(withCacheTtl(40));
+  });
+});
