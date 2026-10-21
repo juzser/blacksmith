@@ -160,6 +160,87 @@ than appearing in it.
 
 ### Added
 
+- **0.5.1 — `/bs use` binds a session to one project, and the dashboard
+  only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Entries
+  above and below this one landed after 0.5.0 and ship in it: the read-only
+  dashboard (#459) under *Changed*; under *Fixed*, `/bs use` by path (#485),
+  where secrets are masked (#484), the verdict judge's evidence (#482), the
+  guard's git-search and line-continuation fixes with `cleared_follow_ups`
+  on the close record (#476), `claims impact` on star re-exports (#475),
+  finished tasks an amendment keeps and `bs task reinstate` (#457, #461), and
+  the dashboard fixes (#444–#452, #456, written up by #458); and Home's four
+  facts (#460, #462) below. This entry does not repeat them.
+
+  *`/bs use` (#472, #473, #474).* `/bs use <project>` binds a Claude Code
+  session to one project. The prompt-capture hook records the binding as a
+  `session-bound` event and, on every later prompt, reminds the session that
+  changes to that project go through `/bs plan` and `/bs run`. A very small
+  change may skip them once, after the operator says yes to a "Small change"
+  question, recorded as `pipeline-bypass-approved`; the limits (one file, ten
+  changed lines) live in the new `factory/policies/session-binding.yml`, and
+  a copy under the work root overrides them. Only the hook writes either
+  record: `bs event append` refuses both. Nothing blocks. The playbook is
+  `.claude/skills/bs/use.md`, and the dashboard shows the bound project on
+  the live-session card and the timeline.
+
+  *Budgets (#473).* A uiux dispatch is capped at 90k tokens at medium (45k
+  small, 180k huge), with `BS_TASK_UIUX_CAP_TOKENS` in `.env.example`, so
+  `bs budget alarm` no longer lists uiux as uncapped. Merger, scribe and
+  wave-runner stay unpriced.
+
+  *Plans, claims and delegation (#474, #471).* Claim ownership reads only
+  live plan records, so a dispatch for a task whose every record is
+  superseded is refused with `cli.task-not-in-plan`. `delegation check` finds
+  a dispatch's session when a sibling wave opened it. `epic goal-check` and
+  the epic gate credit a task that an earlier plan version held and the log
+  reports finished. An amendment reads a task's finished state from the
+  event log, not the plan file, and one predicate decides for the projector,
+  ingest and `bs task reinstate` alike whether a reinstatement is honoured
+  (#471). The guard reads a quoted trailing `$` as plain text, and keeps its
+  old, stricter reading where quoting is uncertain (#474).
+
+  *bs-audit-4 (#463, #464, #471).* A self-audit after 0.5.0 became an epic
+  of 14 accepted findings. Most are the dashboard's read cost: the overview
+  and the timeline read through indexes and keyset time windows instead of
+  loading every event, one held overview is shared per store, and the
+  refresher applies a scan's changed sessions in one batch. The `/api`
+  request check is mounted once for the whole prefix, so a route added later
+  gets it too. Payloads and exports nothing read since the dashboard went
+  display-only are gone, with a guard that lists unused lib exports. pr-mod's
+  fix-conflict and fix-CI prompts carry pull request text as fenced data.
+  The gate reads the session lineage once per run.
+
+  *The dashboard.* It runs from a clone and is not in the npm package.
+  Besides the entries named above and bs-audit-4, Home's Agents running now
+  counts, over every live CLI session, the main agent plus every running
+  subagent at any depth, nested ones included; a completed, handed-back or
+  killed subagent stops counting (#465). Screenshot baselines of retired
+  routes are dropped (#455).
+
+  *Docs (#441, #453, #454).* The policy comments name the `bs-<role>` agent
+  files (#441). The README says what the package, the plugin and a clone
+  each carry and what the eight dashboard pages show, and the dashboard
+  guide says which pages read other projects' stores (#453).
+  INSTALL.md Step 5 and the operator guides point at an install's own
+  `.blacksmith/factory/policies/stack.yml` (#454).
+
+  *Packaging and migrations.* The npm package carries the CLI side of all
+  of the above: the binding capture, the claims, plan and guard fixes, the
+  new `session-binding.yml` policy, the `use.md` playbook and both
+  migrations. Bins, `files`, `engines` and runtime dependencies are
+  unchanged; the Dependabot bumps (#466–#470: `@types/node`, vite,
+  `@vitejs/plugin-vue`, vue-router, `@playwright/test`, hono, `@lucide/vue`)
+  are dev dependencies. Two migrations add indexes only and apply when the
+  store next opens: `0018_events_raw_scope_ts_idx` (events by session and by
+  task, with time) and `0019_dispatches_scope_ts_idx` (dispatches by time,
+  project and session) (#471). To upgrade an install, run
+  `npm i -g @juzser/blacksmith@latest` and `claude plugin marketplace update
+  blacksmith`, then `claude plugin update blacksmith` (the `/bs` playbooks
+  and the `bs-spec-reviewer` agent changed) and, where installed,
+  `claude plugin update pr-mod@blacksmith`, and start a new session. bs-mod
+  changes only its version. The INSTALL.md floors (Node 22, git 2.38) did
+  not move.
+
 - **Home opens with four facts.** Under the page header, four read-only
   tiles read Active sessions, Agents running, Budget used and Tasks done. All
   four describe one set: the live CLI sessions linked to a running epic.

@@ -421,7 +421,7 @@ runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
-The CLI is on npm as `@juzser/blacksmith`, at `0.5.0`. Two binaries are
+The CLI is on npm as `@juzser/blacksmith`, at `0.5.1`. Two binaries are
 the ones you run: `bs`, and `bs-run` (since `0.2.0`), which runs a rendered
 turn on a `cli` harness such as Codex. `bs-prompt-hook` is the lean hook
 entry that records operator prompts. `smith` and `smith-run` remain as
