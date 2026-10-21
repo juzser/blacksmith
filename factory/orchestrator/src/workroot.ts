@@ -157,12 +157,18 @@ export interface InitOptions {
 
 export interface ClaudeCapsReport {
   readonly settingsPath: string;
-  readonly status: 'written' | 'updated' | 'kept' | 'not-applicable' | 'unreadable';
+  readonly status: 'written' | 'updated' | 'kept' | 'not-applicable' | 'unreadable' | 'failed';
   /** Caps this run wrote. */
   readonly added: readonly string[];
   /** Caps already set somewhere, left exactly as they were. */
   readonly kept: readonly string[];
-  readonly gitExclude: 'added' | 'already-ignored' | 'not-a-repo' | 'not-applicable';
+  readonly gitExclude:
+    | 'added'
+    | 'already-ignored'
+    | 'tracked'
+    | 'not-a-repo'
+    | 'not-applicable'
+    | 'failed';
   /** True iff something was added: a running session does not see it. */
   readonly restartNeeded: boolean;
 }
@@ -180,11 +186,26 @@ function readJsonObject(file: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function envBlock(settings: Record<string, unknown> | undefined): Record<string, unknown> {
   const env = settings?.env;
-  return env !== null && typeof env === 'object' && !Array.isArray(env)
-    ? (env as Record<string, unknown>)
-    : {};
+  return isObject(env) ? env : {};
+}
+
+/**
+ * Claude Code's user settings: `$CLAUDE_CONFIG_DIR/settings.json` when that is
+ * set, else `~/.claude/settings.json`. Takes the env and home so a test never
+ * reads the real ones.
+ */
+export function defaultUserSettingsPath(
+  env: Readonly<Record<string, string | undefined>>,
+  home: string,
+): string {
+  const dir = env.CLAUDE_CONFIG_DIR;
+  return path.join(dir ? dir : path.join(home, '.claude'), 'settings.json');
 }
 
 function git(cwd: string, args: readonly string[]): string {
@@ -200,6 +221,16 @@ function git(cwd: string, args: readonly string[]): string {
  * `.gitignore`: `.git/info/exclude` is this clone's own and is never shared.
  */
 function excludeFromGit(projectDir: string, file: string): ClaudeCapsReport['gitExclude'] {
+  // Never let a git or filesystem hiccup take `bs init` down after the
+  // settings file is already written.
+  try {
+    return tryExcludeFromGit(projectDir, file);
+  } catch {
+    return 'failed';
+  }
+}
+
+function tryExcludeFromGit(projectDir: string, file: string): ClaudeCapsReport['gitExclude'] {
   try {
     if (git(projectDir, ['rev-parse', '--is-inside-work-tree']).trim() !== 'true') {
       return 'not-a-repo';
@@ -212,6 +243,14 @@ function excludeFromGit(projectDir: string, file: string): ClaudeCapsReport['git
     return 'already-ignored';
   } catch {
     // Exit 1 means not ignored; fall through and add it.
+  }
+  // check-ignore says nothing about a tracked file, and an exclude rule can
+  // never apply to one.
+  try {
+    git(projectDir, ['ls-files', '--error-unmatch', '--', file]);
+    return 'tracked';
+  } catch {
+    // Not tracked.
   }
   const exclude = path.resolve(
     projectDir,
@@ -265,6 +304,19 @@ function raiseConcurrencyCaps(
     };
   }
 
+  // An `env` that is present but not an object is the operator's, not ours to
+  // replace.
+  if (localSettings.env !== undefined && !isObject(localSettings.env)) {
+    return {
+      settingsPath,
+      status: 'unreadable',
+      added: [],
+      kept: [],
+      gitExclude: 'not-applicable',
+      restartNeeded: false,
+    };
+  }
+
   const sources = [
     env,
     envBlock(readJsonObject(userSettingsPath)),
@@ -280,8 +332,24 @@ function raiseConcurrencyCaps(
   if (added.length > 0) {
     const merged = { ...envBlock(localSettings) };
     for (const name of added) merged[name] = CONCURRENCY_CAPS[name];
-    mkdirSync(path.dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, `${JSON.stringify({ ...localSettings, env: merged }, null, 2)}\n`);
+    try {
+      mkdirSync(path.dirname(settingsPath), { recursive: true });
+      writeFileSync(
+        settingsPath,
+        `${JSON.stringify({ ...localSettings, env: merged }, null, 2)}\n`,
+      );
+    } catch {
+      // `.claude` is a file, or the directory is unwritable: report it rather
+      // than fail `bs init`.
+      return {
+        settingsPath,
+        status: 'failed',
+        added: [],
+        kept,
+        gitExclude: 'not-applicable',
+        restartNeeded: false,
+      };
+    }
   }
 
   return {
@@ -343,12 +411,11 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
     }
   }
 
-  const claudeDir = options.env?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR;
+  const env = options.env ?? process.env;
   const claudeCaps = raiseConcurrencyCaps(
     options.projectDir ?? process.cwd(),
-    options.userSettingsPath ??
-      path.join(claudeDir ? claudeDir : path.join(homedir(), '.claude'), 'settings.json'),
-    options.env ?? process.env,
+    options.userSettingsPath ?? defaultUserSettingsPath(env, homedir()),
+    env,
     inPlace,
   );
 

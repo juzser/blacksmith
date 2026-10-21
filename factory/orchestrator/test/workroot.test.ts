@@ -1,11 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REPO_ROOT, ROADMAP_DEFAULT_PATH, STACK_POLICY_DEFAULT_PATH } from '../src/paths.js';
-import { CONCURRENCY_CAPS, initWorkRoot, OVERLAY_FILES, seedFromShipped } from '../src/workroot.js';
+import {
+  CONCURRENCY_CAPS,
+  defaultUserSettingsPath,
+  initWorkRoot,
+  OVERLAY_FILES,
+  seedFromShipped,
+} from '../src/workroot.js';
 
 // ---------------------------------------------------------------------------
 // The write side of the overlay paths.ts declares.
@@ -340,6 +346,83 @@ describe('initWorkRoot concurrency caps', () => {
     expect(caps.status).toBe('not-applicable');
     expect(caps.restartNeeded).toBe(false);
     expect(existsSync(local)).toBe(false);
+  });
+
+  it('reports failed and does not throw when .claude is a regular file', () => {
+    put(path.join(project, '.claude'), 'not a dir');
+
+    const caps = init();
+
+    expect(caps.status).toBe('failed');
+    expect(caps.added).toEqual([]);
+    expect(caps.restartNeeded).toBe(false);
+    expect(readFileSync(path.join(project, '.claude'), 'utf8')).toBe('not a dir');
+  });
+
+  it('reports a failed git exclude and keeps the written settings file', () => {
+    // A directory where the exclude file should be makes the append fail.
+    const exclude = path.resolve(
+      project,
+      git(project, 'rev-parse', '--git-path', 'info/exclude').trim(),
+    );
+    rmSync(exclude, { force: true });
+    mkdirSync(exclude, { recursive: true });
+
+    const caps = init();
+
+    expect(caps.status).toBe('written');
+    expect(caps.gitExclude).toBe('failed');
+    expect(existsSync(local)).toBe(true);
+  });
+
+  it('writes the exclude rule with the repo-relative path for a project in a subdirectory', () => {
+    const sub = path.join(project, 'sub');
+    mkdirSync(sub);
+    const caps = init({ projectDir: sub, workRoot: path.join(sub, '.blacksmith') });
+
+    expect(caps.gitExclude).toBe('added');
+    const exclude = path.resolve(
+      project,
+      git(project, 'rev-parse', '--git-path', 'info/exclude').trim(),
+    );
+    expect(readFileSync(exclude, 'utf8').split('\n')).toContain('/sub/.claude/settings.local.json');
+    expect(() => git(sub, 'check-ignore', '-q', '.claude/settings.local.json')).not.toThrow();
+  });
+
+  it('reports tracked and appends nothing when settings.local.json is already tracked', () => {
+    put(local, JSON.stringify({ env: { [CAP_A]: '9' } }));
+    git(project, 'add', '-f', '.claude/settings.local.json');
+
+    const caps = init();
+
+    expect(caps.gitExclude).toBe('tracked');
+    const exclude = path.resolve(
+      project,
+      git(project, 'rev-parse', '--git-path', 'info/exclude').trim(),
+    );
+    const text = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+    expect(text).not.toContain('settings.local.json');
+  });
+
+  it.each([['"str"'], ['[1]'], ['null']])(
+    'leaves a local file whose env is %s untouched',
+    (value) => {
+      const text = `{"env": ${value}}`;
+      put(local, text);
+
+      const caps = init();
+
+      expect(caps.status).toBe('unreadable');
+      expect(caps.added).toEqual([]);
+      expect(readFileSync(local, 'utf8')).toBe(text);
+    },
+  );
+
+  it('resolves the user settings path from CLAUDE_CONFIG_DIR, else ~/.claude', () => {
+    expect(defaultUserSettingsPath({ CLAUDE_CONFIG_DIR: '/cfg' }, '/home/u')).toBe(
+      '/cfg/settings.json',
+    );
+    expect(defaultUserSettingsPath({}, '/home/u')).toBe('/home/u/.claude/settings.json');
   });
 
   it('the tracked .claude/settings.json carries the same caps and keeps its other keys', () => {
