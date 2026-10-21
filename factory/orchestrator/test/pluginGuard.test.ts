@@ -14,6 +14,8 @@ import { runProcess } from './helpers/process.js';
 const SHIM = path.join(REPO_ROOT, '.claude/hooks/plugin-policy.sh');
 const BUILT_HOOK = path.join(REPO_ROOT, 'factory/orchestrator/dist/policyHook.js');
 const NODE_DIR = path.dirname(process.execPath);
+// The shim needs mktemp, cat, sleep and rm when the guard is on.
+const SYS_BIN = '/usr/bin:/bin';
 
 const bashInput = (command: string): string =>
   JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: REPO_ROOT });
@@ -51,7 +53,11 @@ describe('plugin-policy.sh', () => {
   });
 
   it('with the switch on and the built hook named, denies a force push to main and allows git status', () => {
-    const env = { PATH: NODE_DIR, BS_PLUGIN_GUARD: '1', BS_POLICY_HOOK: BUILT_HOOK };
+    const env = {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: BUILT_HOOK,
+    };
     const denied = runShim(FORCE_PUSH, env);
     expect(denied.status).toBe(0);
     const decision = JSON.parse(denied.stdout) as {
@@ -71,7 +77,11 @@ describe('plugin-policy.sh', () => {
       "const s = require('node:fs').readFileSync(0, 'utf8'); process.stdout.write(`${JSON.stringify({ echoed: s })}\\n`);\n",
     );
     const input = bashInput('echo "quoted $HOME $(whoami)"');
-    const run = runShim(input, { PATH: NODE_DIR, BS_PLUGIN_GUARD: '1', BS_POLICY_HOOK: stub });
+    const run = runShim(input, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+    });
     expect(run.status).toBe(0);
     expect((JSON.parse(run.stdout) as { echoed: string }).echoed).toBe(input);
   });
@@ -80,7 +90,7 @@ describe('plugin-policy.sh', () => {
     const bin = path.join(tmp, 'bs-policy-hook');
     writeFileSync(bin, '#!/bin/sh\nprintf \'{"from":"path-bin"}\\n\'\n');
     chmodSync(bin, 0o755);
-    const run = runShim(STATUS, { PATH: tmp, BS_PLUGIN_GUARD: '1' });
+    const run = runShim(STATUS, { PATH: `${tmp}:${SYS_BIN}`, BS_PLUGIN_GUARD: '1' });
     expect(run.status).toBe(0);
     expect(run.stdout.trim()).toBe('{"from":"path-bin"}');
   });
@@ -101,7 +111,11 @@ describe('plugin-policy.sh', () => {
   it('asks when the resolved hook exits without a decision', () => {
     const stub = path.join(tmp, 'broken-hook.js');
     writeFileSync(stub, 'process.exit(3);\n');
-    const run = runShim(STATUS, { PATH: NODE_DIR, BS_PLUGIN_GUARD: '1', BS_POLICY_HOOK: stub });
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+    });
     expect(run.status).toBe(0);
     const out = JSON.parse(run.stdout) as {
       hookSpecificOutput: { permissionDecision: string };
@@ -113,7 +127,7 @@ describe('plugin-policy.sh', () => {
     const marker = path.join(tmp, 'ran');
     const stub = path.join(tmp, 'sentinel-hook.js');
     writeFileSync(stub, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'x');\n`);
-    const run = runShim(STATUS, { PATH: NODE_DIR, BS_POLICY_HOOK: stub });
+    const run = runShim(STATUS, { PATH: `${NODE_DIR}:${SYS_BIN}`, BS_POLICY_HOOK: stub });
     expect(run.status).toBe(0);
     expect(run.stdout).toBe('');
     expect(existsSync(marker)).toBe(false);
@@ -126,7 +140,7 @@ describe('plugin-policy.sh', () => {
     const stub = path.join(tmp, 'named-hook.js');
     writeFileSync(stub, 'process.stdout.write(\'{"from":"named"}\\n\');\n');
     const run = runShim(STATUS, {
-      PATH: `${NODE_DIR}:${tmp}`,
+      PATH: `${NODE_DIR}:${tmp}:${SYS_BIN}`,
       BS_PLUGIN_GUARD: '1',
       BS_POLICY_HOOK: stub,
     });
@@ -137,10 +151,78 @@ describe('plugin-policy.sh', () => {
     const bin = path.join(tmp, 'bs-policy-hook');
     writeFileSync(bin, '#!/bin/sh\nexit 4\n');
     chmodSync(bin, 0o755);
-    const run = runShim(STATUS, { PATH: tmp, BS_PLUGIN_GUARD: '1' });
+    const run = runShim(STATUS, { PATH: `${tmp}:${SYS_BIN}`, BS_PLUGIN_GUARD: '1' });
     expect(run.status).toBe(0);
     const out = JSON.parse(run.stdout) as { hookSpecificOutput: { permissionDecision: string } };
     expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+  });
+});
+
+describe('plugin-policy.sh answering in time', () => {
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const slowStub = (): { stub: string; pidFile: string } => {
+    const stub = path.join(tmp, 'slow-hook.js');
+    const pidFile = path.join(tmp, 'slow.pid');
+    writeFileSync(
+      stub,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetTimeout(() => {}, 30000);\n`,
+    );
+    return { stub, pidFile };
+  };
+
+  it('the shim always answers in time: a hook that never answers gets an ask and is stopped', () => {
+    const { stub, pidFile } = slowStub();
+    const started = Date.now();
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+      BS_PLUGIN_GUARD_WATCHDOG: '1',
+    });
+    expect(Date.now() - started).toBeLessThan(4000);
+    expect(run.status).toBe(0);
+    const out = JSON.parse(run.stdout) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+    expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/in time/i);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    expect(pid).toBeGreaterThan(0);
+    expect(alive(pid)).toBe(false);
+  });
+
+  it('the shim always answers in time: the default limit sits inside the hook entry timeout', () => {
+    const { stub } = slowStub();
+    const started = Date.now();
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+    const out = JSON.parse(run.stdout) as { hookSpecificOutput: { permissionDecision: string } };
+    expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+  });
+
+  it('returns the hook answer promptly and does not wait out the limit when the hook is fast', () => {
+    const stub = path.join(tmp, 'fast-hook.js');
+    writeFileSync(stub, 'process.stdout.write(\'{"from":"fast"}\\n\');\n');
+    const started = Date.now();
+    const run = runShim(STATUS, {
+      PATH: `${NODE_DIR}:${SYS_BIN}`,
+      BS_PLUGIN_GUARD: '1',
+      BS_POLICY_HOOK: stub,
+      BS_PLUGIN_GUARD_WATCHDOG: '30',
+    });
+    expect(run.stdout.trim()).toBe('{"from":"fast"}');
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });
 
