@@ -37,11 +37,15 @@ export function getNote(db, id) {
   return withTags(db, db.prepare("SELECT * FROM notes WHERE id = ?").get(id));
 }
 
-export function createNote(db, { title, body = "", tags = [] }) {
+function assertTagsExist(db, tagIds) {
   const known = db.prepare("SELECT 1 FROM tags WHERE id = ?");
-  for (const tagId of tags) {
+  for (const tagId of tagIds) {
     if (!known.get(tagId)) throw new HttpError(404, `tag ${tagId} not found`);
   }
+}
+
+export function createNote(db, { title, body = "", tags = [] }) {
+  assertTagsExist(db, tags);
   const info = db.prepare("INSERT INTO notes (title, body) VALUES (?, ?)").run(title, body);
   const id = Number(info.lastInsertRowid);
   setTags(db, id, tags);
@@ -49,6 +53,7 @@ export function createNote(db, { title, body = "", tags = [] }) {
 }
 
 export function updateNote(db, id, { title, body = "", tags }) {
+  if (tags) assertTagsExist(db, tags);
   const info = db
     .prepare("UPDATE notes SET title = ?, body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
     .run(title, body, id);
