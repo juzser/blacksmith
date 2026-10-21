@@ -28,6 +28,14 @@ than appearing in it.
 
 ### Changed
 
+- **The install raises Claude Code's concurrency caps.** Claude Code runs 20
+  subagents and 10 parallel tool calls at once by default, which throttles a
+  `/bs` wave. A plugin update cannot set `env`, so existing users add
+  `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
+  `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` (undocumented) as `"1000"` to the
+  `env` block of `~/.claude/settings.json` themselves and restart Claude Code.
+  [INSTALL.md](INSTALL.md#raise-the-concurrency-caps) has the lines.
+
 - **The dashboard only reads.** `bs ui` is for watching the factory; every
   decision now goes through the CLI. Removed from the dashboard: Home's "Needs
   you" box, the Waive and Deny buttons on a task's findings, and the approve,

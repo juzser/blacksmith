@@ -14,6 +14,8 @@ Two inside a Claude Code session:
 ```
 
 Then `bs init` in the project you want it to work on, and you have `/bs`.
+One more step belongs here: [raise the concurrency caps](#raise-the-concurrency-caps)
+in `~/.claude/settings.json`, after a yes, or Claude Code throttles a wave.
 Both halves are required and they are different things —
 [Which install](#which-install) says why. Two optional mods come from the
 same marketplace: bs-mod is the live HUD, your epic's progress above the
@@ -184,6 +186,37 @@ declarations about the project, not about your laptop.
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
 against `.blacksmith/factory/policies/stack.yml`. It is the one step of Part 2
 that is yours; the rest of it builds a checkout you do not have.
+
+#### Raise the concurrency caps
+
+Claude Code caps how much one session runs at once: 20 subagents and 10 parallel
+tool calls in a message, by default. A `/bs` wave fans out past both, so the
+defaults throttle it. Two `env` settings raise them:
+
+- `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` is documented by Claude Code and
+  needs Claude Code v2.1.217 or later. Any positive integer is accepted.
+- `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` is undocumented: it is absent from
+  Claude Code's env-var reference and exists only in the binary, so it can
+  change without notice.
+
+A plugin cannot ship `env` (plugin settings honour only `agent` and
+`subagentStatusLine`), so the install asks. Merge these into the `env` block of
+`~/.claude/settings.json`, never replacing the file:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "1000",
+    "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY": "1000"
+  }
+}
+```
+
+This edits a file outside the clone, so under Part 0 propose the exact lines
+and wait for a yes. There is no "unlimited" value; 1000 is a ceiling, not a
+target, and real fan-out stays bounded by the claim graph and the machine. A
+team may instead commit the block to a project's `.claude/settings.json`.
+Restart Claude Code afterwards: a running session may not pick the change up.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of
@@ -564,6 +597,9 @@ claude --version
 
 Without it, the CLI and the gate still work — you simply cannot dispatch the
 agents that do the work.
+
+Then [raise the concurrency caps](#raise-the-concurrency-caps), the same
+consented `env` step a plugin install does, so a wave is not throttled.
 
 ### Step 7 — Link the `bs` command *(optional)*
 
