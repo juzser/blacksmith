@@ -1,4 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  appendFileSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import {
   REPO_ROOT,
@@ -122,9 +131,169 @@ export function ensureWritableRoadmap(): string {
   return ROADMAP_PATH;
 }
 
+/**
+ * Claude Code's two harness concurrency caps and the value `bs init` gives
+ * them. Claude Code reads them only from its own process env or a settings
+ * `env` block -- never from Blacksmith's `.env`, and a plugin cannot ship
+ * `env` -- so the only way to raise them without a manual step is to write
+ * them into settings the project owns. This is the single source: the tracked
+ * `.claude/settings.json` and INSTALL.md are tested against it.
+ */
+export const CONCURRENCY_CAPS: Readonly<Record<string, string>> = {
+  CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: '1000',
+  CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY: '1000',
+};
+
 export interface InitOptions {
   readonly workRoot?: string;
   readonly repoRoot?: string;
+  /** The project `bs init` runs in. Not the work root, which sits inside it. */
+  readonly projectDir?: string;
+  /** Read-only: Claude Code's user settings, consulted for caps already set. */
+  readonly userSettingsPath?: string;
+  /** The environment consulted for caps already set. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+export interface ClaudeCapsReport {
+  readonly settingsPath: string;
+  readonly status: 'written' | 'updated' | 'kept' | 'not-applicable' | 'unreadable';
+  /** Caps this run wrote. */
+  readonly added: readonly string[];
+  /** Caps already set somewhere, left exactly as they were. */
+  readonly kept: readonly string[];
+  readonly gitExclude: 'added' | 'already-ignored' | 'not-a-repo' | 'not-applicable';
+  /** True iff something was added: a running session does not see it. */
+  readonly restartNeeded: boolean;
+}
+
+/** A JSON object read from disk, or undefined when it is absent or not one. */
+function readJsonObject(file: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Absent or malformed: the caller decides what that means.
+  }
+  return undefined;
+}
+
+function envBlock(settings: Record<string, unknown> | undefined): Record<string, unknown> {
+  const env = settings?.env;
+  return env !== null && typeof env === 'object' && !Array.isArray(env)
+    ? (env as Record<string, unknown>)
+    : {};
+}
+
+function git(cwd: string, args: readonly string[]): string {
+  return execFileSync('git', [...args], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+/**
+ * Keep the local settings file out of git without touching a tracked
+ * `.gitignore`: `.git/info/exclude` is this clone's own and is never shared.
+ */
+function excludeFromGit(projectDir: string, file: string): ClaudeCapsReport['gitExclude'] {
+  try {
+    if (git(projectDir, ['rev-parse', '--is-inside-work-tree']).trim() !== 'true') {
+      return 'not-a-repo';
+    }
+  } catch {
+    return 'not-a-repo';
+  }
+  try {
+    git(projectDir, ['check-ignore', '-q', file]);
+    return 'already-ignored';
+  } catch {
+    // Exit 1 means not ignored; fall through and add it.
+  }
+  const exclude = path.resolve(
+    projectDir,
+    git(projectDir, ['rev-parse', '--git-path', 'info/exclude']).trim(),
+  );
+  const prefix = git(projectDir, ['rev-parse', '--show-prefix']).trim();
+  const rule = `/${prefix}${path.relative(projectDir, file).split(path.sep).join('/')}`;
+  const current = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+  mkdirSync(path.dirname(exclude), { recursive: true });
+  appendFileSync(exclude, `${current === '' || current.endsWith('\n') ? '' : '\n'}${rule}\n`);
+  return 'added';
+}
+
+/**
+ * Merge the concurrency caps into `<projectDir>/.claude/settings.local.json`.
+ *
+ * A cap already set anywhere Claude Code looks -- its env, the user settings,
+ * the project settings, or the local file -- is the operator's answer and is
+ * kept whatever its value: never overwritten, never lowered. A file that is
+ * not a JSON object is left alone and reported rather than failing init.
+ */
+function raiseConcurrencyCaps(
+  projectDir: string,
+  userSettingsPath: string,
+  env: Readonly<Record<string, string | undefined>>,
+  inPlace: boolean,
+): ClaudeCapsReport {
+  const settingsPath = path.join(projectDir, '.claude', 'settings.local.json');
+  // A clone carries the caps in its tracked .claude/settings.json.
+  if (inPlace) {
+    return {
+      settingsPath,
+      status: 'not-applicable',
+      added: [],
+      kept: [],
+      gitExclude: 'not-applicable',
+      restartNeeded: false,
+    };
+  }
+
+  const exists = existsSync(settingsPath);
+  const localSettings = exists ? readJsonObject(settingsPath) : {};
+  if (localSettings === undefined) {
+    return {
+      settingsPath,
+      status: 'unreadable',
+      added: [],
+      kept: [],
+      gitExclude: 'not-applicable',
+      restartNeeded: false,
+    };
+  }
+
+  const sources = [
+    env,
+    envBlock(readJsonObject(userSettingsPath)),
+    envBlock(readJsonObject(path.join(projectDir, '.claude', 'settings.json'))),
+    envBlock(localSettings),
+  ];
+  const added: string[] = [];
+  const kept: string[] = [];
+  for (const name of Object.keys(CONCURRENCY_CAPS)) {
+    (sources.some((source) => source[name] !== undefined) ? kept : added).push(name);
+  }
+
+  if (added.length > 0) {
+    const merged = { ...envBlock(localSettings) };
+    for (const name of added) merged[name] = CONCURRENCY_CAPS[name];
+    mkdirSync(path.dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, `${JSON.stringify({ ...localSettings, env: merged }, null, 2)}\n`);
+  }
+
+  return {
+    settingsPath,
+    status: added.length === 0 ? 'kept' : exists ? 'updated' : 'written',
+    added,
+    kept,
+    gitExclude: existsSync(settingsPath)
+      ? excludeFromGit(projectDir, settingsPath)
+      : 'not-applicable',
+    restartNeeded: added.length > 0,
+  };
 }
 
 export interface InitReport {
@@ -135,6 +304,7 @@ export interface InitReport {
   readonly directories: readonly string[];
   readonly files: readonly SeedResult[];
   readonly gitignore: 'written' | 'kept' | 'not-applicable';
+  readonly claudeCaps: ClaudeCapsReport;
 }
 
 /**
@@ -173,5 +343,14 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
     }
   }
 
-  return { workRoot, repoRoot, inPlace, directories: WORK_DIRS, files, gitignore };
+  const claudeDir = options.env?.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR;
+  const claudeCaps = raiseConcurrencyCaps(
+    options.projectDir ?? process.cwd(),
+    options.userSettingsPath ??
+      path.join(claudeDir ? claudeDir : path.join(homedir(), '.claude'), 'settings.json'),
+    options.env ?? process.env,
+    inPlace,
+  );
+
+  return { workRoot, repoRoot, inPlace, directories: WORK_DIRS, files, gitignore, claudeCaps };
 }

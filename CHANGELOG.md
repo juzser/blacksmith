@@ -28,12 +28,15 @@ than appearing in it.
 
 ### Changed
 
-- **The install raises Claude Code's concurrency caps.** Claude Code runs 20
+- **`bs init` raises Claude Code's concurrency caps.** Claude Code runs 20
   subagents and 10 parallel tool calls at once by default, which throttles a
-  `/bs` wave. A plugin update cannot set `env`, so existing users add
-  `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
-  `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` (undocumented) as `"1000"` to the
-  `env` block of `~/.claude/settings.json` themselves and restart Claude Code.
+  `/bs` wave. It reads `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
+  `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` (undocumented) only from its own env
+  or settings, so `bs init` now merges both as `"1000"` into the project's
+  `.claude/settings.local.json`, never overwriting a value already set and
+  keeping the file out of git. Existing installs re-run `bs init` in each
+  project (safe, idempotent) and restart Claude Code. Putting the lines in
+  `~/.claude/settings.json` instead is optional.
   [INSTALL.md](INSTALL.md#raise-the-concurrency-caps) has the lines.
 
 - **The dashboard only reads.** `bs ui` is for watching the factory; every

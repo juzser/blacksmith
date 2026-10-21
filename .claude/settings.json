@@ -1,4 +1,8 @@
 {
+  "env": {
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "1000",
+    "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY": "1000"
+  },
   "hooks": {
     "PreToolUse": [
       {

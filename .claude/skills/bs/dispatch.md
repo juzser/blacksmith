@@ -115,8 +115,8 @@ imposes no concurrency cap of its own — fan-out is bounded by the claim graph
 (`budgets.yml` header), and the fix for orchestrator context is splitting the
 epic across sessions, not throttling the wave. Claude Code's harness does cap
 it, at 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`) and 10 parallel
-tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`) by default, unless the
-install raised them; see
+tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`) by default, unless
+`bs init` raised them; see
 [INSTALL.md](../../../INSTALL.md#raise-the-concurrency-caps).
 
 ## Splitting an epic across sessions (P9-7)
