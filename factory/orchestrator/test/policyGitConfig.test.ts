@@ -651,3 +651,78 @@ describe('a redirection next to a quoted configuration value does not hide the v
     expect(allowed("GIT_PAGER='cat >x' git log")).toBe(true);
   });
 });
+
+// A redirection target is one shell word: unquoted characters and quoted spans
+// up to the next unquoted blank or operator. Whatever its shape, the whole
+// target is dropped and the words around it keep their meaning.
+const TARGET_SHAPES: ReadonlyArray<readonly [string, string]> = [
+  ['unquoted', '/tmp/x'],
+  ['quoted as a whole', "'/tmp/x'"],
+  ['quote in the middle', "/tmp/'x'/y"],
+  ['unquoted text after a closing quote', '"$T"/x'],
+  ['unquoted text before an opening quote', "out'a b'"],
+  ['mixed single and double quotes', `'a'"b c"'d'`],
+  ['an expansion', '$T/x'],
+  ['a quoted expansion', '"$T"'],
+];
+
+const TARGET_OPERATORS = ['>', '2>', '>>', '<'] as const;
+
+// The subcommand is written with a backslash after its first letter, so it is
+// read only once the words are located correctly.
+const SUBCOMMAND = 'p\\ush';
+const FORCED_VALUE = 'git pu\\sh -f origin main';
+
+const TARGET_CARRIERS: ReadonlyArray<
+  readonly [string, (redirection: string) => string, (redirection: string) => string]
+> = [
+  ['forced flag', (r) => `git ${r} ${SUBCOMMAND} -f origin main`, (r) => `git ${r} log --oneline`],
+  [
+    'mirror option',
+    (r) => `git ${r} ${SUBCOMMAND} --mirror origin`,
+    (r) => `git ${r} log --oneline`,
+  ],
+  [
+    'configuration value on the command line',
+    (r) => `git ${r} -c core.pager='${FORCED_VALUE}' log`,
+    (r) => `git ${r} -c core.pager=cat log`,
+  ],
+  [
+    'grep option value',
+    (r) => `git ${r} grep -O'${FORCED_VALUE}' x`,
+    (r) => `git ${r} grep -Ocat x`,
+  ],
+  [
+    'configuration value in a command-word path',
+    (r) => `${r} GIT_PAGER="$X" $G log`,
+    (r) => `${r} GIT_PAGER=cat git log`,
+  ],
+];
+
+describe('a redirection target of any shape is dropped as one word', () => {
+  describe.each(TARGET_CARRIERS)('%s', (_carrier, forced, readable) => {
+    describe.each(TARGET_SHAPES)('target: %s', (_shape, target) => {
+      it.each(TARGET_OPERATORS)('refuses the line with %s', (operator) => {
+        expect(refused(forced(`${operator}${target}`))).toBe(true);
+        expect(refused(forced(`${operator} ${target}`))).toBe(true);
+      });
+
+      it.each(TARGET_OPERATORS)('allows the readable counterpart with %s', (operator) => {
+        expect(allowed(readable(`${operator}${target}`))).toBe(true);
+        expect(allowed(readable(`${operator} ${target}`))).toBe(true);
+      });
+    });
+  });
+
+  it('refuses a forced update when the target is a quoted expansion followed by a tail', () => {
+    expect(refused(`git 2>"$T"/x ${SUBCOMMAND} -f origin main`)).toBe(true);
+  });
+
+  it('refuses a forced update when the target is quoted with an unquoted tail after it', () => {
+    expect(refused(`git >"out"x ${SUBCOMMAND} -f origin main`)).toBe(true);
+  });
+
+  it('reads a configuration value that follows a target with an unquoted tail', () => {
+    expect(refused(`git 2>"$T"/x -c core.pager='${FORCED_VALUE}' log`)).toBe(true);
+  });
+});

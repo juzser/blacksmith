@@ -1815,7 +1815,7 @@ function checkForcePushSubcommandWord(
   segment: string,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  const words = splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
+  const words = segmentWords(segment);
   const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
   if (gitIndex === -1) {
     // Defence in depth for `joinLineContinuations` missing a spelling of its
@@ -2079,7 +2079,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
-    const words = splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
+    const words = segmentWords(segment);
     const gitIndex = gitWordIndex(words);
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
@@ -2523,48 +2523,75 @@ function stripRedirections(command: string): string {
   return command.replace(REDIRECTION_RE, ' ');
 }
 
-/** A redirection operator at the end of a run of text, whose target is the quoted span that follows. */
-const TRAILING_REDIRECTION_RE = /(?:>>|>|<<<|<<-?|<>|<)\s*$/;
+/** A redirection operator, longest first, as it starts at a given position. */
+const REDIRECTION_OPERATOR_RE = /(?:>>|>|<<<|<<-?|<>|<)/y;
+
+/** A descriptor duplication after an operator (`2>&1`, `<&-`): no target word follows. */
+const DESCRIPTOR_DUPLICATION_RE = /&\d*-?/y;
+
+/** Characters that end a redirection target when they are not quoted or escaped. */
+const TARGET_END_RE = new RegExp(`[\\s${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}]`);
+
+/** The index just past the quoted span that starts at `start` (an unterminated span runs to the end). */
+function quotedSpanEnd(command: string, start: number): number {
+  const quote = command.charAt(start);
+  let end = start + 1;
+  while (end < command.length && command.charAt(end) !== quote) {
+    end += quote === '"' && command.charAt(end) === '\\' ? 2 : 1;
+  }
+  return Math.min(end + 1, command.length);
+}
 
 /**
- * `stripRedirections` for text that is split into words afterwards: quoted
- * spans are kept exactly as written, so a redirection written next to a
- * closing quote leaves that quote where it was and the words keep the shape
- * the shell gives them. A quoted redirection target is dropped with its
- * operator.
+ * `stripRedirections` for text that is split into words afterwards. Walks the
+ * segment once, quote-aware: quoted spans outside a redirection are kept
+ * exactly as written, so the words keep the shape the shell gives them. After
+ * a redirection operator (with its optional descriptor digits or `&`) the
+ * target is consumed as one whole shell word - unquoted characters and
+ * single-quoted, double-quoted and backslash-escaped spans up to the next
+ * unquoted blank or operator - and dropped with the operator.
  */
 function stripRedirectionsOutsideQuotes(command: string): string {
   let out = '';
-  let run = '';
-  const flush = () => {
-    out += stripRedirections(run);
-    run = '';
-  };
   let i = 0;
   while (i < command.length) {
     const c = command.charAt(i);
     if (c === '\\' && i + 1 < command.length) {
-      run += command.slice(i, i + 2);
+      out += command.slice(i, i + 2);
       i += 2;
-      continue;
-    }
-    if (c !== "'" && c !== '"') {
-      run += c;
+    } else if (c === "'" || c === '"') {
+      const end = quotedSpanEnd(command, i);
+      out += command.slice(i, end);
+      i = end;
+    } else if (c === '<' || c === '>') {
+      out = out.replace(/(?:&|\d+)$/, '');
+      REDIRECTION_OPERATOR_RE.lastIndex = i;
+      i += (REDIRECTION_OPERATOR_RE.exec(command) ?? [c])[0].length;
+      DESCRIPTOR_DUPLICATION_RE.lastIndex = i;
+      const duplication = DESCRIPTOR_DUPLICATION_RE.exec(command);
+      if (duplication) {
+        i += duplication[0].length;
+      } else {
+        while (i < command.length && /\s/.test(command.charAt(i))) i += 1;
+        while (i < command.length && !TARGET_END_RE.test(command.charAt(i))) {
+          const t = command.charAt(i);
+          if (t === '\\') i += 2;
+          else if (t === "'" || t === '"') i = quotedSpanEnd(command, i);
+          else i += 1;
+        }
+      }
+      out += ' ';
+    } else {
+      out += c;
       i += 1;
-      continue;
     }
-    let end = i + 1;
-    while (end < command.length && command.charAt(end) !== c) {
-      end += c === '"' && command.charAt(end) === '\\' ? 2 : 1;
-    }
-    const span = command.slice(i, end + 1);
-    const isTarget = TRAILING_REDIRECTION_RE.test(run);
-    flush();
-    out += isTarget ? ' ' : span;
-    i = end + 1;
   }
-  flush();
   return out;
+}
+
+/** The words of a segment with its redirections removed: the one definition of a segment's words and command word. */
+function segmentWords(segment: string): DequotedWord[] {
+  return splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
 }
 
 /**
