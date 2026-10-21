@@ -341,6 +341,22 @@ describe('a mention of a configuration variable the rule did not record as an as
     expect(refused('`which tool` "$GIT_PAGER"')).toBe(true);
   });
 
+  it('is counted after leading assignments when the command word cannot be read statically', () => {
+    expect(refused('GIT_EXTERNAL_DIFF=cat $CMD "$GIT_PAGER"')).toBe(true);
+  });
+
+  it('is counted on the dequoted text, so a quote pair or a backslash inside the name counts', () => {
+    expect(refused("echo GIT_PA''GER; git log")).toBe(true);
+    expect(refused('echo GIT_PA\\GER; git log')).toBe(true);
+    expect(refused('export GIT_PA\'\'GER=cat; echo "$GIT_PAGER"; git log')).toBe(true);
+    expect(refused('export GIT_PA\\GER=cat; echo "$GIT_PAGER"; git log')).toBe(true);
+  });
+
+  it('does not refuse readable declare -x and typeset -x assignments', () => {
+    expect(allowed('declare -x GIT_PAGER=cat; git log')).toBe(true);
+    expect(allowed('typeset -x GIT_PAGER=cat; git log')).toBe(true);
+  });
+
   it('is counted on a line that runs git through a path ending in /git', () => {
     expect(refused('echo "$GIT_PAGER"; /usr/bin/git log')).toBe(true);
   });
