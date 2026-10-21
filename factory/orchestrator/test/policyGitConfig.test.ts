@@ -562,3 +562,77 @@ describe('a recorded configuration value is judged on every way a line runs git'
     expect(allowed('export GIT_PAGER="$X"; echo hi')).toBe(true);
   });
 });
+
+// A redirection can sit next to a quote that holds a configuration value. The
+// words of a segment are located before any redirection is removed, so the
+// quote still closes where it was written and the value is read in each place.
+const REDIRECTIONS = ['>x', '2>x', '>>x', '<x', '<<<x'] as const;
+
+const REDIRECTION_CARRIERS: ReadonlyArray<readonly [string, (value: string) => string]> = [
+  ['pager variable on the git command', (value) => `GIT_PAGER=${value} git log`],
+  ['external-diff variable through env', (value) => `env GIT_EXTERNAL_DIFF=${value} git diff`],
+  ['-c value', (value) => `git -c core.pager=${value} log`],
+  [
+    'count/key/value triple',
+    (value) => `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=${value} git log`,
+  ],
+  ['grep -O', (value) => `git grep -O${value} x`],
+];
+
+// Where the redirection sits relative to the quote that holds the value.
+const REDIRECTION_PLACES: ReadonlyArray<
+  readonly [string, (quote: string, text: string, redirection: string) => string]
+> = [
+  ['glued before the closing quote', (q, text, r) => `${q}${text}${r}${q}`],
+  ['spaced before the closing quote', (q, text, r) => `${q}${text} ${r}${q}`],
+  ['after the closing quote', (q, text, r) => `${q}${text}${q} ${r}`],
+];
+
+const FORCED_TEXT = 'git pu\\sh -f origin main';
+
+describe('a redirection next to a quoted configuration value does not hide the value', () => {
+  describe.each(REDIRECTION_CARRIERS)('%s', (_carrier, build) => {
+    describe.each(REDIRECTION_PLACES)('%s', (_place, place) => {
+      it.each(REDIRECTIONS)('refuses a forced single-quoted value with %s', (redirection) => {
+        expect(refused(build(place("'", FORCED_TEXT, redirection)))).toBe(true);
+      });
+
+      it.each(REDIRECTIONS)('refuses a forced double-quoted value with %s', (redirection) => {
+        expect(refused(build(place('"', FORCED_TEXT, redirection)))).toBe(true);
+      });
+
+      it.each(REDIRECTIONS)('refuses an unreadable double-quoted value with %s', (redirection) => {
+        expect(refused(build(place('"', '$X', redirection)))).toBe(true);
+      });
+
+      it.each(REDIRECTIONS)('allows the readable counterpart with %s', (redirection) => {
+        expect(allowed(build(place("'", 'cat', redirection)))).toBe(true);
+        expect(allowed(build(place('"', 'cat', redirection)))).toBe(true);
+      });
+    });
+
+    it.each(REDIRECTIONS)('reads the value with %s as a separate word', (redirection) => {
+      expect(refused(`${build(`'${FORCED_TEXT}'`)} ${redirection}`)).toBe(true);
+      expect(refused(`${build(`"${FORCED_TEXT}"`)} ${redirection}`)).toBe(true);
+      expect(refused(`${build('"$X"')} ${redirection}`)).toBe(true);
+      expect(allowed(`${build('cat')} ${redirection}`)).toBe(true);
+    });
+  });
+
+  it('keeps the git word when the redirection target is quoted', () => {
+    expect(refused(`GIT_PAGER='${FORCED_TEXT}' >'out file' git log`)).toBe(true);
+    expect(refused(`GIT_PAGER="$X" >"out file" git log`)).toBe(true);
+    expect(allowed("GIT_PAGER=cat >'out file' git log")).toBe(true);
+  });
+
+  it('keeps the command word when the redirection target is quoted', () => {
+    expect(refused(`>'out file' GIT_PAGER="$X" $G log`)).toBe(true);
+    expect(refused(`<"in file" GIT_PAGER="$X" $G log`)).toBe(true);
+  });
+
+  it("reads a value spelled with $'...' or a line continuation next to a redirection", () => {
+    expect(refused(`GIT_PAGER=$'${FORCED_TEXT} >x' git log`)).toBe(true);
+    expect(refused("GIT_PAGER='git pu\\\nsh -f origin main >x' git log")).toBe(true);
+    expect(allowed("GIT_PAGER='cat >x' git log")).toBe(true);
+  });
+});

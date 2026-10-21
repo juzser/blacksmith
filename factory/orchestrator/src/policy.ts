@@ -1815,7 +1815,7 @@ function checkForcePushSubcommandWord(
   segment: string,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  const words = splitDequotedWords(stripRedirections(segment));
+  const words = splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
   const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
   if (gitIndex === -1) {
     // Defence in depth for `joinLineContinuations` missing a spelling of its
@@ -2079,7 +2079,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
-    const words = splitDequotedWords(stripRedirections(segment));
+    const words = splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
     const gitIndex = gitWordIndex(words);
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
@@ -2521,6 +2521,50 @@ const REDIRECTION_RE = new RegExp(
  */
 function stripRedirections(command: string): string {
   return command.replace(REDIRECTION_RE, ' ');
+}
+
+/** A redirection operator at the end of a run of text, whose target is the quoted span that follows. */
+const TRAILING_REDIRECTION_RE = /(?:>>|>|<<<|<<-?|<>|<)\s*$/;
+
+/**
+ * `stripRedirections` for text that is split into words afterwards: quoted
+ * spans are kept exactly as written, so a redirection written next to a
+ * closing quote leaves that quote where it was and the words keep the shape
+ * the shell gives them. A quoted redirection target is dropped with its
+ * operator.
+ */
+function stripRedirectionsOutsideQuotes(command: string): string {
+  let out = '';
+  let run = '';
+  const flush = () => {
+    out += stripRedirections(run);
+    run = '';
+  };
+  let i = 0;
+  while (i < command.length) {
+    const c = command.charAt(i);
+    if (c === '\\' && i + 1 < command.length) {
+      run += command.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (c !== "'" && c !== '"') {
+      run += c;
+      i += 1;
+      continue;
+    }
+    let end = i + 1;
+    while (end < command.length && command.charAt(end) !== c) {
+      end += c === '"' && command.charAt(end) === '\\' ? 2 : 1;
+    }
+    const span = command.slice(i, end + 1);
+    const isTarget = TRAILING_REDIRECTION_RE.test(run);
+    flush();
+    out += isTarget ? ' ' : span;
+    i = end + 1;
+  }
+  flush();
+  return out;
 }
 
 /**
