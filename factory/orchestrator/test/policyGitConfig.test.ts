@@ -444,4 +444,36 @@ describe('a separate-value global option is walked past', () => {
     expect(allowed('git --attr-source HEAD -c core.pager=cat log')).toBe(true);
     expect(allowed('git --attr-source HEAD grep -n foo')).toBe(true);
   });
+
+  it('reads -c and grep -O after --super-prefix <path> and after -C <dir>', () => {
+    expect(refused('git --super-prefix sub/ -c core.pager="$X" log')).toBe(true);
+    expect(refused('git -C /tmp/project-a -c core.pager="$X" log')).toBe(true);
+    expect(refused("git -C /tmp/project-a grep -O'git push -f origin main' x")).toBe(true);
+    expect(allowed('git -C /tmp/project-a -c core.pager=cat log')).toBe(true);
+  });
+});
+
+describe('a configuration value is read in each compound-command position', () => {
+  it('reads a leading assignment after && and inside a subshell', () => {
+    expect(refused("cd /tmp/project-a && GIT_PAGER='git push -f origin main' git log")).toBe(true);
+    expect(refused("(export GIT_PAGER='git push -f origin main'; git log)")).toBe(true);
+    expect(refused('cd /tmp/project-a && git -c core.pager="$P" log')).toBe(true);
+  });
+
+  it('carries an export across more than one segment to a later git', () => {
+    expect(refused("export GIT_PAGER='git push -f origin main'; echo hi; git log")).toBe(true);
+  });
+
+  it('reads the second of two git segments', () => {
+    expect(refused("git log; GIT_PAGER='git push -f origin main' git log")).toBe(true);
+    expect(allowed('git log; GIT_PAGER=cat git log')).toBe(true);
+  });
+
+  it('reads the last of several GIT_CONFIG_VALUE entries', () => {
+    expect(
+      refused(
+        "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x GIT_CONFIG_KEY_1=core.pager GIT_CONFIG_VALUE_1='git push -f origin main' git log",
+      ),
+    ).toBe(true);
+  });
 });
