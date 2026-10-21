@@ -255,28 +255,28 @@ describe('a readable configuration value goes through the same checks as a neste
   });
 });
 
-describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
-  it('refuses a single-quoted key=value entry that sets a forced push', () => {
+describe('GIT_CONFIG_PARAMETERS is refused whenever a command line names it', () => {
+  it('refuses GIT_CONFIG_PARAMETERS="\'core.pager=git push -f origin main\'" git log', () => {
     expect(refused(`GIT_CONFIG_PARAMETERS="'core.pager=git push -f origin main'" git log`)).toBe(
       true,
     );
   });
 
-  it("refuses a 'key'='value' entry that sets a forced push", () => {
+  it("refuses GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log", () => {
     expect(refused(`GIT_CONFIG_PARAMETERS="'core.pager'='git push -f origin main'" git log`)).toBe(
       true,
     );
   });
 
-  it('allows a single-quoted key=value entry that sets nothing forced', () => {
-    expect(allowed(`GIT_CONFIG_PARAMETERS="'color.ui=always'" git log`)).toBe(true);
+  it('refuses GIT_CONFIG_PARAMETERS="\'color.ui=always\'" git log', () => {
+    expect(refused(`GIT_CONFIG_PARAMETERS="'color.ui=always'" git log`)).toBe(true);
   });
 
-  it("allows a 'key'='value' entry that sets nothing forced", () => {
-    expect(allowed(`GIT_CONFIG_PARAMETERS="'color.ui'='always'" git log`)).toBe(true);
+  it("refuses GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log", () => {
+    expect(refused(`GIT_CONFIG_PARAMETERS="'color.ui'='always'" git log`)).toBe(true);
   });
 
-  it('refuses a two-entry value in which only the second entry sets a forced push', () => {
+  it('refuses a two-entry GIT_CONFIG_PARAMETERS value holding a forced push in the second entry', () => {
     expect(
       refused(
         `GIT_CONFIG_PARAMETERS="'color.ui'='always' 'core.pager=git push --force origin main'" git log`,
@@ -284,118 +284,96 @@ describe('GIT_CONFIG_PARAMETERS is read entry by entry', () => {
     ).toBe(true);
   });
 
-  it('refuses a two-entry value of mixed spellings in which only the first sets a forced push', () => {
-    expect(
-      refused(
-        `GIT_CONFIG_PARAMETERS="'core.pager'='git push -f origin main' 'color.ui=always'" git log`,
-      ),
-    ).toBe(true);
-  });
-
-  it('allows a two-entry value of mixed spellings that sets nothing forced', () => {
-    expect(allowed(`GIT_CONFIG_PARAMETERS="'color.ui'='always' 'core.pager=cat'" git log`)).toBe(
-      true,
-    );
-  });
-
-  it('refuses an entry whose value carries an escaped single quote and a forced push', () => {
-    expect(
-      refused(
-        `GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'core.pager=git push -f origin main'" git log`,
-      ),
-    ).toBe(true);
-  });
-
-  it('reads the dequoted form of an entry value', () => {
-    expect(
-      refused(`GIT_CONFIG_PARAMETERS="'core.pager=git p\\\\ush -f origin main'" git log`),
-    ).toBe(true);
-  });
-
-  it('keeps reading entries after an escaped single quote', () => {
-    expect(
-      refused(
-        `GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'core.pager=git p\\\\ush -f origin main'" git log`,
-      ),
-    ).toBe(true);
-  });
-
-  it('allows an entry that carries an escaped single quote and sets nothing forced', () => {
-    expect(allowed(`GIT_CONFIG_PARAMETERS="'user.name=a'\\\\''b' 'color.ui=always'" git log`)).toBe(
-      true,
-    );
-  });
-
-  it('refuses an entry that defines an alias', () => {
-    expect(refused(`GIT_CONFIG_PARAMETERS="'alias.p'='status'" git p`)).toBe(true);
-  });
-
-  it('refuses a value holding a parameter as unreadable', () => {
+  it('refuses GIT_CONFIG_PARAMETERS="$X" git log', () => {
     expect(refused('GIT_CONFIG_PARAMETERS="$X" git log')).toBe(true);
   });
 
-  it('refuses a value it cannot split into quoted entries', () => {
-    expect(refused('GIT_CONFIG_PARAMETERS=color.ui=always git log')).toBe(true);
+  it('refuses the variable exported by an earlier segment', () => {
+    expect(refused(`export GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`)).toBe(true);
+  });
+
+  it('refuses the variable set by declare -x and by typeset -x', () => {
+    expect(refused(`declare -x GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`)).toBe(true);
+    expect(refused(`typeset -x GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`)).toBe(true);
   });
 
   it('refuses a name-only export of the variable', () => {
     expect(refused('export GIT_CONFIG_PARAMETERS; git log')).toBe(true);
   });
+});
 
-  it('reads an exported value from an earlier segment', () => {
-    expect(
-      refused(`export GIT_CONFIG_PARAMETERS="'core.pager=git push -f origin main'"; git log`),
-    ).toBe(true);
-    expect(allowed(`export GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`)).toBe(true);
-  });
-
+describe('a mention of a configuration variable the rule did not record as an assignment', () => {
   it.each([
-    ['declare -x', ';'],
-    ['declare -x', '&&'],
-    ['typeset -x', ';'],
-    ['typeset -x', '&&'],
-    ['local -x', ';'],
-    ['readonly', '&&'],
-  ])('reads a value set by %s before a %s separator', (builtin, sep) => {
-    expect(
-      refused(`${builtin} GIT_CONFIG_PARAMETERS="'alias.l=push -f'" ${sep} git l origin main`),
-    ).toBe(true);
-    expect(
-      refused(`${builtin} GIT_CONFIG_PARAMETERS="'alias.l'='push'" ${sep} git l -f origin main`),
-    ).toBe(true);
-    expect(
-      refused(
-        `${builtin} GIT_CONFIG_PARAMETERS="'core.pager=git push -f origin main'" ${sep} git log`,
-      ),
-    ).toBe(true);
-    expect(allowed(`${builtin} GIT_CONFIG_PARAMETERS="'color.ui=always'" ${sep} git log`)).toBe(
-      true,
-    );
-  });
-
-  // A mention of a configuration variable that the assignment reader does not
-  // record as a readable value is refused as unreadable.
-  const V = 'GIT_CONFIG_PARAMETERS';
-  const A = `"'alias.l=push -f'"`;
-  it.each([
-    [`{ export ${V}=${A}; git l origin main; }`],
-    [`{ export ${V}=${A}; }; git l origin main`],
-    [`if true; then export ${V}=${A}; fi; git l origin main`],
-    [`for i in 1; do export ${V}=${A}; done; git l origin main`],
-    [`builtin export ${V}=${A}; git l origin main`],
-    [`command export ${V}=${A}; git l origin main`],
-    [`export ${V}+=${A}; git l origin main`],
-    [`${V}+=${A} git l origin main`],
-    [`set -a; read -r ${V} < file; git l origin main`],
-    [`set -a; printf -v ${V} '%s' ${A}; git l origin main`],
-    [`f(){ export ${V}=${A}; }; f; git l origin main`],
-    [`declare -n R=${V}; export R=${A}; git l origin main`],
-    ["{ export GIT_PAGER='git push -f origin main'; }; git log"],
-  ])('refuses a configuration variable set in a form the reader does not record: %s', (command) => {
+    ["declare -x GIT_PAGER='git push -f origin main'; git log"],
+    ["typeset -x GIT_PAGER='git push -f origin main'; git log"],
+    ["export GIT_PA''GER='git push -f origin main'; git log"],
+    ["export GIT_PA\\GER='git push -f origin main'; git log"],
+    ["read GIT_PAGER <<< 'git push -f origin main'; git log"],
+    ["printf -v GIT_PAGER %s 'git push -f origin main'; git log"],
+    ['echo "$GIT_PAGER"; git log'],
+  ])('is refused on a line that runs git: %s', (command) => {
     expect(refused(command)).toBe(true);
   });
 
-  it('allows a bare alias call when no configuration variable is set', () => {
+  it.each([
+    ['{ export GIT_PAGER=cat; }; git log'],
+    ['if true; then export GIT_PAGER=cat; fi; git log'],
+    ['for i in 1; do export GIT_PAGER=cat; done; git log'],
+    ['builtin export GIT_PAGER=cat; git log'],
+    ['command export GIT_PAGER=cat; git log'],
+    ['export GIT_PAGER+=cat; git log'],
+    ['GIT_PAGER+=cat git log'],
+    ['set -a; read -r GIT_PAGER < file; git log'],
+    ['set -a; printf -v GIT_PAGER %s cat; git log'],
+    ['f(){ export GIT_PAGER=cat; }; f; git log'],
+    ['declare -n R=GIT_PAGER; export R=cat; git log'],
+    ['git log GIT_PAGER=cat'],
+    ['git log GIT_EXTERNAL_DIFF'],
+    ['git log GIT_CONFIG_COUNT'],
+    ['git log GIT_CONFIG_KEY_0'],
+    ['git log GIT_CONFIG_VALUE_0'],
+  ])('is refused when it is not an assignment read by the rule: %s', (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  it('is counted on a line whose command word cannot be read statically', () => {
+    expect(refused('$CMD "$GIT_PAGER"')).toBe(true);
+    expect(refused('`which tool` "$GIT_PAGER"')).toBe(true);
+  });
+
+  it('is counted on a line that runs git through a path ending in /git', () => {
+    expect(refused('echo "$GIT_PAGER"; /usr/bin/git log')).toBe(true);
+  });
+
+  it('refuses nothing on a line that does not run git', () => {
+    expect(allowed('echo "$GIT_PAGER"')).toBe(true);
+    expect(allowed('printenv GIT_PAGER')).toBe(true);
+  });
+
+  it('does not refuse a recorded assignment spelled with a quote pair or a backslash', () => {
+    expect(allowed("export GIT_PA''GER=cat; git log")).toBe(true);
+    expect(allowed('export GIT_PA\\GER=cat; git log')).toBe(true);
+  });
+
+  it('does not refuse a git line that names no configuration variable', () => {
     expect(allowed('git l -f origin main')).toBe(true);
+  });
+});
+
+describe('local and readonly set a variable the rule reads', () => {
+  it('refuses a local declaration inside a function', () => {
+    expect(refused("f() { local GIT_PAGER='git push -f origin main'; git log; }; f")).toBe(true);
+  });
+
+  it('refuses a readonly declaration', () => {
+    expect(refused("readonly GIT_PAGER='git push -f origin main'; git log")).toBe(true);
+  });
+
+  it('allows a readonly declaration of a readable value', () => {
+    expect(allowed('readonly GIT_PAGER=cat; git log')).toBe(true);
+  });
+
+  it('allows a local declaration of a readable value', () => {
+    expect(allowed('local GIT_PAGER=cat; git log')).toBe(true);
   });
 });

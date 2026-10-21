@@ -1240,9 +1240,8 @@ function joinLineContinuations(command: string): string {
  *   (`-c alias.p=`, `-calias.p=`, `-c 'alias.p=...'`).
  * - `--config-env` naming an `alias.` key, whose value is the *name* of an
  *   environment variable read later — never visible on this line at all.
- * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list:
- *   its entries are read one by one by `checkGitConfigValues`, which refuses
- *   an `alias.` entry the same way.
+ * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list,
+ *   assigned or exported.
  * - A `GIT_CONFIG_KEY_<n>=` pair whose value is an `alias.` key, or is a
  *   shell variable (`$V`, `${V}`) or command substitution (`` `cmd` ``,
  *   `$(cmd)`) this scanner cannot resolve — read alongside a
@@ -1260,6 +1259,7 @@ function joinLineContinuations(command: string): string {
 function definesInlineGitAlias(segment: string): boolean {
   if (/(^|\s)-c\s*['"]?alias\./i.test(segment)) return true;
   if (/--config-env(=|\s+)['"]?alias\./i.test(segment)) return true;
+  if (/\bGIT_CONFIG_PARAMETERS\b/.test(segment)) return true;
   if (/\bGIT_CONFIG_KEY_\d+=(['"]?)(alias\.|\$|`)/i.test(segment)) return true;
   return false;
 }
@@ -1876,9 +1876,9 @@ function checkForcePushSubcommandWord(
 type EnvValue = string | null;
 
 const GIT_CONFIG_ENV_NAMES =
-  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+';
+  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+';
 const GIT_CONFIG_ENV_NAME_RE = new RegExp(`^(?:${GIT_CONFIG_ENV_NAMES})$`);
-/** Any mention of a configuration variable in a segment's text. */
+/** Any mention of a configuration variable in dequoted text. */
 const GIT_CONFIG_ENV_MENTION_RE = new RegExp(`\\b(?:${GIT_CONFIG_ENV_NAMES})\\b`, 'g');
 const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
 
@@ -1923,58 +1923,11 @@ function readAssignments(
 }
 
 /**
- * The entries of a `GIT_CONFIG_PARAMETERS` value, in both spellings git
- * writes, `'key=value'` and `'key'='value'`, separated by spaces, with git's
- * `'\''` escape for a single quote inside an entry. `null` when the text is
- * not a list of such entries.
- */
-function parseConfigParameters(text: string): Array<{ key: string; value: string }> | null {
-  const entries: Array<{ key: string; value: string }> = [];
-  let i = 0;
-  const readQuoted = (): string | null => {
-    if (text.charAt(i) !== "'") return null;
-    i += 1;
-    let out = '';
-    for (;;) {
-      const end = text.indexOf("'", i);
-      if (end === -1) return null;
-      out += text.slice(i, end);
-      i = end + 1;
-      if (!text.startsWith("\\''", i)) return out;
-      out += "'";
-      i += 3;
-    }
-  };
-  while (i < text.length) {
-    if (text.charAt(i) === ' ') {
-      i += 1;
-      continue;
-    }
-    const first = readQuoted();
-    if (first === null) return null;
-    if (text.charAt(i) === '=') {
-      i += 1;
-      const second = readQuoted();
-      if (second === null) return null;
-      entries.push({ key: first, value: second });
-      continue;
-    }
-    const eq = first.indexOf('=');
-    entries.push(
-      eq === -1
-        ? { key: first, value: '' }
-        : { key: first.slice(0, eq), value: first.slice(eq + 1) },
-    );
-  }
-  return entries;
-}
-
-/**
  * Reads every git configuration value that git runs as a command the same
  * way the rule reads that command line typed directly: `-c key=value` and
  * `--config-env=key=VAR` among the global options, the `-O` /
  * `--open-files-in-pager` option of `git grep`, and the environment of the
- * command (`GIT_PAGER`, `GIT_EXTERNAL_DIFF`, `GIT_CONFIG_PARAMETERS`,
+ * command (`GIT_PAGER`, `GIT_EXTERNAL_DIFF`,
  * `GIT_CONFIG_COUNT` / `_KEY_<n>` / `_VALUE_<n>`), whether set on the segment,
  * through `env`, or by an earlier segment. A readable value is checked as a
  * nested command line; a value holding a parameter, substitution or backtick
@@ -1992,15 +1945,7 @@ function checkGitConfigValues(
     value === null ? unreadable : checkForcePush(value, policy);
   for (const [name, value] of env) {
     if (!GIT_CONFIG_ENV_NAME_RE.test(name)) continue;
-    if (name === 'GIT_CONFIG_PARAMETERS') {
-      const entries = value === null ? null : parseConfigParameters(value);
-      if (entries === null) return unreadable;
-      for (const entry of entries) {
-        if (/^alias\./i.test(entry.key)) return violation(rule);
-        const found = checkValue(entry.value);
-        if (found) return found;
-      }
-    } else if (/^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) {
+    if (/^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) {
       if (value === null) return unreadable;
     } else {
       const found = checkValue(value);
@@ -2064,6 +2009,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   // hide a subcommand word inside.
   // Variables set by earlier segments, carried to the git segments after them.
   const carried = new Map<string, EnvValue>();
+  // Over the whole line: the configuration variables it mentions, the ones the
+  // assignment reader recorded, and whether the line runs git.
+  let mentions = 0;
+  let recorded = 0;
+  let runsGit = false;
   for (const segment of topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
@@ -2084,12 +2034,19 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
-    const recorded = readAssignments(leading, env, gitIndex === -1);
-    // A configuration variable named in the segment beyond the assignments
-    // read above is set in a form the rule does not read: unreadable.
-    if ((decoded.text.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length > recorded) {
-      return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
-    }
+    recorded += readAssignments(leading, env, gitIndex === -1);
+    // Mentions are counted on the dequoted text the assignments are read from,
+    // so a name spelled with an empty quote pair or a backslash counts the
+    // same on both sides.
+    const dequoted = splitDequotedWords(decoded.text)
+      .map((word) => word.text)
+      .join(' ');
+    mentions += (dequoted.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length;
+    const commandWord = words.find((word) => !ASSIGNMENT_WORD_RE.test(word.text));
+    runsGit =
+      runsGit ||
+      /\bgit\b/i.test(dequoted) ||
+      (commandWord !== undefined && hasUnreadableShellForm(commandWord.raw));
     if (gitIndex !== -1) {
       const configViolation = checkGitConfigValues(words, gitIndex, env, policy, rule);
       if (configViolation) return configViolation;
@@ -2127,6 +2084,9 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
       return violation(rule);
     }
   }
+  // On a line that runs git, a configuration variable named beyond the
+  // assignments read above is set in a form the rule does not read: refused.
+  if (runsGit && mentions > recorded) return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
   return null;
 }
 
