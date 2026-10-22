@@ -1,0 +1,29 @@
+{
+  "epic_id": "project-a",
+  "version": 1,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "project-a/task-1-widget",
+      "epic_id": "project-a",
+      "plan_version": 1,
+      "title": "Widget module",
+      "summary": "Build the widget.",
+      "objective": "Implement src/widget.ts exporting `makeWidget()`.",
+      "acceptance_criteria": ["makeWidget returns a widget", "Unicode: café ✓"],
+      "claims": ["src/widget.ts", "test/widget.test.ts"],
+      "budget": { "tokens": 120000, "diff_lines": 300 },
+      "case": "feature",
+      "task_status": "todo",
+      "agent_role": "coder"
+    },
+    {
+      "task_id": "project-a/task-1-widget",
+      "epic_id": "project-a",
+      "plan_version": 0,
+      "title": "Superseded copy",
+      "task_status": "superseded"
+    }
+  ],
+  "edges": []
+}
