@@ -84,7 +84,11 @@ function fakeSpawner(reply?: (c: Call) => Partial<SpawnResult> | undefined): {
     calls.push(c);
     const over = reply?.(c);
     let stdout = '';
-    if (cmd === 'node') stdout = `ok 1 - ${path.basename(args[args.length - 1] ?? '')}-case\n`;
+    if (cmd === 'node') {
+      const src = readFileSync(args[args.length - 1] ?? '', 'utf8');
+      const names = [...src.matchAll(/\b(?:test|it)\('([^']*)'/g)].map((m) => m[1]);
+      stdout = names.map((n, i) => `ok ${i + 1} - ${n}\n`).join('');
+    }
     if (cmd === 'git' && args[0] === 'rev-list') stdout = 'abc123\n';
     return { status: 0, stdout, stderr: '', ...over };
   };
@@ -243,6 +247,23 @@ describe('record', () => {
     writeTask('kind-a', { f2p: { 'a.test.js': PASSING, 'empty.test.js': NO_TEST } });
     const rec = await record(base(), deps(withFakeGit));
     expect(rec.check).toBe('unknown');
+  });
+
+  it('a passing report that does not match the names the check declares is recorded as unknown', async () => {
+    writeTask('kind-a', {});
+    const { spawn } = fakeSpawner((c) =>
+      c.cmd === 'node' ? { status: 0, stdout: 'ok 1 - any\n# pass 1\n' } : undefined,
+    );
+    const rec = await record(base(), deps(spawn));
+    expect(rec.check).toBe('unknown');
+  });
+
+  it('an extra passing line beside the declared names is recorded as unknown', async () => {
+    writeTask('kind-a', {});
+    const { spawn } = fakeSpawner((c) =>
+      c.cmd === 'node' ? { stdout: 'ok 1 - really runs\nok 2 - extra\n' } : undefined,
+    );
+    expect((await record(base(), deps(spawn))).check).toBe('unknown');
   });
 
   it('a skipped-only or todo-only check is recorded as unknown', async () => {

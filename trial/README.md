@@ -38,11 +38,7 @@ commit and appends one JSON line to the results file. The line has exactly
 these fields: task_kind, arm, check, tokens, wall_clock_ms, diff,
 interventions, cli_session_id, recorded_at, harness_version.
 
-- check is passed only when every hidden check file exits 0 and runs at least
-  one passing test. It is failed when any file fails, not-run when a check
-  directory is missing or holds no test file, and unknown when a check could
-  not be judged (it errored, or ran no test). Only passed means the work is
-  done.
+- check is one of four labels: passed, failed, not-run or unknown.
 - tokens is null when the session's transcript is not found. Otherwise it holds
   the spend and whether the reading was complete; an incomplete reading is a
   floor, not a total.

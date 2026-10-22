@@ -196,18 +196,36 @@ function testFiles(dir: string): string[] | null {
   return files.length === 0 ? null : files.map((n) => path.join(dir, n));
 }
 
-/** Passing tests in TAP output: an `ok` line that is not skipped, todo, or the file itself. */
-function passingTests(stdout: string, file: string): number {
-  let n = 0;
+/** Names of the passing tests in TAP output: `ok` lines that are not skipped, todo, or the file itself. */
+function passingNames(stdout: string, file: string): string[] {
+  const names: string[] = [];
   for (const line of stdout.split('\n')) {
     const m = /^\s*ok \d+ - (.*)$/.exec(line);
     if (m === null) continue;
     const name = m[1] ?? '';
     if (/#\s*(SKIP|TODO)\b/i.test(name)) continue;
     if (name === path.basename(file) || name === file) continue;
-    n += 1;
+    names.push(name);
   }
-  return n;
+  return names;
+}
+
+/** Names the check file declares with test(), it() or describe(). */
+function declaredNames(file: string): string[] {
+  const src = readFileSync(file, 'utf8');
+  const re = /\b(?:test|it|describe)\s*\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
+  return [...src.matchAll(re)].map((m) => m[2] ?? '');
+}
+
+/** The report is believed only when it lists exactly the declared names, each once passing. */
+function reportMatches(stdout: string, file: string): boolean {
+  const declared = declaredNames(file).sort();
+  const seen = passingNames(stdout, file).sort();
+  return (
+    declared.length > 0 &&
+    declared.length === seen.length &&
+    declared.every((n, i) => n === seen[i])
+  );
 }
 
 function runChecks(deps: HarnessDeps, task: string, dir: string): CheckResult {
@@ -224,7 +242,7 @@ function runChecks(deps: HarnessDeps, task: string, dir: string): CheckResult {
     const r = deps.spawn('node', ['--test', '--test-reporter=tap', file], { cwd: dir });
     if (r.error || r.status === null) unknown = true;
     else if (r.status !== 0) return 'failed';
-    else if (passingTests(r.stdout, file) === 0) unknown = true;
+    else if (!reportMatches(r.stdout, file)) unknown = true;
   }
   return unknown ? 'unknown' : 'passed';
 }
