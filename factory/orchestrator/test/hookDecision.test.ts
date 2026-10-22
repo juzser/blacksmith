@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { decideHookPayload } from '../src/hookDecision.js';
+import { formatBriefMarker } from '../src/briefMarker.js';
+import { decideHookPayload, dietDecision } from '../src/hookDecision.js';
 import { closeSandbox, openSandbox } from '../src/sandbox.js';
 import { runOrThrow } from './helpers/process.js';
 
@@ -468,5 +469,210 @@ describe('Agent dispatches (judge artifact line)', () => {
     expect(() => decideHookPayload(payload('Bash'), cwd, badLeases)).toThrow();
     expect(decideHookPayload(payload('Agent'), cwd, badLeases)).toBeNull();
     expect(decideHookPayload(payload('Task'), cwd, badLeases)).toBeNull();
+  });
+});
+
+// Epic bs-optimize criterion 6 (D4): the diet guards deny in every session and
+// read no session or operator identity, so no case below passes one.
+const marker = (role: string) => formatBriefMarker({ role, taskId: 'e/t', sessionId: 's' });
+const agent = (subagentType: unknown, prompt: unknown, tool = 'Agent') =>
+  JSON.stringify({
+    tool_name: tool,
+    tool_input: { subagent_type: subagentType, prompt },
+    cwd: '/',
+  });
+const dietReason = (raw: string) => reasonOf(decideHookPayload(raw, '/', undefined));
+
+describe('diet rule: marked brief to the wrong agent', () => {
+  it('denies general-purpose and names the rule and the expected type', () => {
+    const reason = dietReason(agent('general-purpose', `${marker('coder')}\nbody`)) ?? '';
+    expect(reason).toMatch(/marked for role `coder`/);
+    expect(reason).toMatch(/dispatch to the matching `bs-coder`/);
+    expect(reason).toMatch(/blacksmith:bs-coder/);
+  });
+
+  it('denies a different role, a missing type and the Task tool alike', () => {
+    expect(dietReason(agent('bs-tester', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('blacksmith:bs-tester', `${marker('coder')}\nx`))).toMatch(
+      /`bs-coder`/,
+    );
+    expect(dietReason(agent(undefined, `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('coder', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('other:bs-coder', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('general-purpose', `${marker('reviewer')}\nx`, 'Task'))).toMatch(
+      /`bs-reviewer`/,
+    );
+  });
+
+  it('allows both matching prefix forms', () => {
+    const prompt = `${marker('coder')}\nbody`;
+    expect(dietReason(agent('bs-coder', prompt))).toBeNull();
+    expect(dietReason(agent('blacksmith:bs-coder', prompt))).toBeNull();
+  });
+
+  it('falls through for unmarked prompts, a marker on line 2, in a fence, or an unknown role', () => {
+    for (const prompt of [
+      'plain brief',
+      `intro\n${marker('coder')}`,
+      `\`\`\`\n${marker('coder')}\n\`\`\``,
+      `${marker('wizard')}\nbody`,
+    ]) {
+      expect(dietReason(agent('general-purpose', prompt))).toBeNull();
+    }
+  });
+
+  it('leaves the judge-artifact rule as it was', () => {
+    expect(dietReason(agent('bs-reviewer', 'no line'))).toMatch(/Declared artifact/);
+    expect(
+      dietReason(agent('bs-reviewer', `${marker('reviewer')}\nDeclared artifact: /a/b`)),
+    ).toBeNull();
+    // A marked judge brief to the wrong type is the diet rule's, not the artifact rule's.
+    expect(dietReason(agent('general-purpose', `${marker('reviewer')}\nx`))).toMatch(
+      /`bs-reviewer`/,
+    );
+  });
+});
+
+describe('diet rule: foreground sleep (D4 verdict table)', () => {
+  const bash = (command: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ tool_name: 'Bash', tool_input: { command, ...extra }, cwd: '/' });
+  const deny: [string, string][] = [
+    ['sleep 2', '2'],
+    ['sleep 30', '30'],
+    ['sleep 2s', '2'],
+    ['sleep 1m', '60'],
+    ['sleep 1 1', '2'],
+    ['sleep 5 && x', '5'],
+    ['x; sleep 5', '5'],
+    ['x || sleep 5', '5'],
+    ['x\nsleep 5', '5'],
+    ['sleep 5 | cat', '5'],
+    ['until test -f x; do sleep 5; done', '5'],
+    ['while true; do sleep 5; done', '5'],
+    ['sleep 30 & wait', '30'],
+    ['timeout 30 sleep 30', '30'],
+    ['nohup sleep 30', '30'],
+    ['env X=1 sleep 30', '30'],
+    ['X=1 sleep 30', '30'],
+    ['command sleep 30', '30'],
+    ['time sleep 30', '30'],
+    ['exec sleep 30', '30'],
+    ['echo $(sleep 3)', '3'],
+    ['echo `sleep 3`', '3'],
+    ["bash -c 'sleep 30'", '30'],
+    ['sh -c "sleep 30"', '30'],
+    ["zsh -c 'sleep 30'", '30'],
+    ['sleep $N', 'unknown'],
+    ['sleep "$N"', 'unknown'],
+    ['sleep infinity', 'unknown'],
+  ];
+  it.each(deny)('denies %j', (command, duration) => {
+    const reason = dietReason(bash(command)) ?? '';
+    expect(reason).toMatch(/foreground `sleep`/);
+    expect(reason).toContain(duration === 'unknown' ? 'unknown' : `${duration} s`);
+    expect(reason).toMatch(/use a background task or the Monitor tool instead of `sleep`/);
+  });
+
+  const allow = [
+    'sleep 1',
+    'sleep 1.9',
+    'sleep 0.5',
+    'while true; do sleep 1; done',
+    'sleep 30 &',
+    'nohup sleep 30 &',
+    'x && sleep 30 &',
+    'sleep',
+    'echo "sleep 30"',
+    'grep sleep f',
+    "git commit -m 'sleep 30'",
+    'nosleep 30',
+    '# sleep 30',
+    'echo hi # sleep 30',
+    'cat <<EOF\nsleep 30\nEOF',
+    'cat <<-EOF\n\tsleep 30\n\tEOF\necho done',
+    './wait.sh',
+    'bash wait.sh',
+    'pnpm run x',
+    'ssh host sleep 30',
+    'docker run img sleep 30',
+    'xargs sleep',
+    'timeout 30 pnpm test',
+    'git status',
+  ];
+  it.each(allow)('allows %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  it('allows any sleep with run_in_background: true', () => {
+    expect(dietReason(bash('sleep 30', { run_in_background: true }))).toBeNull();
+    expect(dietReason(bash('sleep 30', { run_in_background: false }))).toMatch(/foreground/);
+  });
+
+  it('reports the longest offending sleep when several block', () => {
+    expect(dietReason(bash('sleep 1; sleep 10; sleep 4'))).toContain('10 s');
+  });
+});
+
+describe('diet rules fail open', () => {
+  const boom = () => {
+    throw new Error('boom');
+  };
+  const bashRaw = (command: unknown) =>
+    JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: '/' });
+
+  it("with throwing parsers, unrelated calls get today's decision", () => {
+    const deps = { parseBriefMarker: boom, findForegroundSleeps: boom };
+    expect(dietDecision(JSON.parse(bashRaw('git status')), deps)).toBeNull();
+    expect(dietDecision(JSON.parse(bashRaw('sleep 30')), deps)).toBeNull();
+    expect(
+      dietDecision(JSON.parse(agent('general-purpose', `${marker('coder')}\nx`)), deps),
+    ).toBeNull();
+    expect(decideHookPayload(bashRaw('git status'), '/', undefined, deps)).toEqual(
+      decideHookPayload(bashRaw('git status'), '/', undefined),
+    );
+    // The existing judge-artifact rule still runs when the marker parser throws.
+    expect(
+      reasonOf(decideHookPayload(agent('bs-reviewer', 'no line'), '/', undefined, deps)),
+    ).toMatch(/Declared artifact/);
+    expect(decideHookPayload(agent('general-purpose', 'plain'), '/', undefined, deps)).toBeNull();
+  });
+
+  it('never denies on malformed input', () => {
+    const bad = [
+      bashRaw(42),
+      bashRaw(null),
+      bashRaw(['sleep', '30']),
+      bashRaw(''),
+      bashRaw(`sleep 30 ${'x'.repeat(1_000_000)}`),
+      bashRaw(`echo '${'sleep 30 '.repeat(200_000)}`),
+      bashRaw('sleep 30; echo "unbalanced'),
+      bashRaw("sleep 30; echo 'unbalanced"),
+      bashRaw('sleep 30; echo $(unterminated'),
+      bashRaw('sleep 30; echo `unterminated'),
+      bashRaw('sleep 30; echo ${unterminated'),
+      agent('general-purpose', 42),
+      agent('general-purpose', ''),
+      agent(7, `${marker('coder')}\nx`),
+      agent('general-purpose', `${marker('coder')}${'x'.repeat(1_000_000)}`),
+    ];
+    for (const raw of bad) {
+      const reason = dietReason(raw) ?? '';
+      expect(reason).not.toMatch(/foreground `sleep`|marked for role/);
+    }
+  });
+
+  it('never throws out of dietDecision on odd payload shapes', () => {
+    const odd = [
+      null,
+      1,
+      'x',
+      [],
+      {},
+      { tool_name: 'Bash' },
+      { tool_name: 'Agent', tool_input: 3 },
+    ];
+    for (const payload of odd) {
+      expect(dietDecision(payload)).toBeNull();
+    }
   });
 });

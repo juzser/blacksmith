@@ -13,7 +13,8 @@
 // same function rather than a second copy of it.
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { roleOfAgentType } from './agentNames.js';
+import { agentNameFor, roleOfAgentType } from './agentNames.js';
+import { type BriefMarker, parseBriefMarker } from './briefMarker.js';
 import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
 import { JUDGE_ROLES } from './judgeRoles.js';
 import {
@@ -98,8 +99,15 @@ export function decideHookPayload(
   fallbackCwd: string,
   /** Where judge leases live; the live `state/sandboxes` unless a test points elsewhere. */
   leaseDir?: string,
+  /** Parsers for the diet rules; a test injects throwing ones. */
+  dietDeps?: DietDeps,
 ): HookDecisionOutput | null {
-  const payload = JSON.parse(raw) as {
+  const parsed: unknown = JSON.parse(raw);
+  // Diet rules (D4) run first and never throw: no match means the decision
+  // path below runs exactly as before.
+  const diet = dietDecision(parsed, dietDeps);
+  if (diet !== null) return diet;
+  const payload = parsed as {
     tool_name?: unknown;
     tool_input?: {
       command?: unknown;
@@ -523,4 +531,421 @@ function distinctLeases(
   if (session === null) return [target];
   if (target === null || target.worktreeDir === session.worktreeDir) return [session];
   return [session, target];
+}
+
+// ---------------------------------------------------------------------------
+// Diet rules (epic bs-optimize D4, decision 15). Both deny in every session,
+// the operator's own included: nothing below reads a session or operator
+// identity. A rule that cannot read its input, or throws, reports no match and
+// the existing decision path runs as before.
+// ---------------------------------------------------------------------------
+
+/** Parsers `dietDecision` calls; injectable so a test can force them to throw. */
+export interface DietDeps {
+  readonly parseBriefMarker?: (text: string) => BriefMarker | null;
+  /** Seconds of each foreground `sleep` of 2 s or more in a command (`Infinity` = unknown). */
+  readonly findForegroundSleeps?: (command: string) => number[];
+}
+
+const blocked = (reason: string): HookDecisionOutput => ({
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason: reason,
+  },
+});
+
+/**
+ * Serves epic bs-optimize criterion 6: denies a marked brief sent to any agent
+ * type but the marker role's `bs-<role>` / `blacksmith:bs-<role>`, and a
+ * foreground Bash `sleep` of 2 s or more. Returns `null` (no match) for
+ * everything else, for input it cannot read, and when a parser throws.
+ */
+export function dietDecision(payload: unknown, deps: DietDeps = {}): HookDecisionOutput | null {
+  try {
+    if (typeof payload !== 'object' || payload === null) return null;
+    const { tool_name: tool, tool_input: input } = payload as {
+      tool_name?: unknown;
+      tool_input?: unknown;
+    };
+    if (typeof input !== 'object' || input === null) return null;
+    if (tool === 'Agent' || tool === 'Task') return markedBriefDecision(input, deps);
+    if (tool === 'Bash') return foregroundSleepDecision(input, deps);
+  } catch {
+    // Fail open: the existing decision path decides.
+  }
+  return null;
+}
+
+function markedBriefDecision(input: object, deps: DietDeps): HookDecisionOutput | null {
+  const { prompt, subagent_type: type } = input as { prompt?: unknown; subagent_type?: unknown };
+  if (typeof prompt !== 'string' || (type !== undefined && typeof type !== 'string')) return null;
+  const marker = (deps.parseBriefMarker ?? parseBriefMarker)(prompt);
+  if (marker === null) return null;
+  const expected = agentNameFor(marker.role);
+  if (type === expected || type === `blacksmith:${expected}`) return null;
+  return blocked(
+    `Blocked: this brief is marked for role \`${marker.role}\`; typed agents only (got ` +
+      `${type === undefined ? 'no subagent_type' : `\`${type}\``}). Fix: dispatch to the matching ` +
+      `\`${expected}\` (or \`blacksmith:${expected}\`).`,
+  );
+}
+
+function foregroundSleepDecision(input: object, deps: DietDeps): HookDecisionOutput | null {
+  const { command, run_in_background: background } = input as {
+    command?: unknown;
+    run_in_background?: unknown;
+  };
+  if (typeof command !== 'string' || background === true) return null;
+  const sleeps = (deps.findForegroundSleeps ?? findForegroundSleeps)(command);
+  if (sleeps.length === 0) return null;
+  const longest = Math.max(...sleeps);
+  const length = Number.isFinite(longest) ? `${longest} s` : 'unknown length';
+  return blocked(
+    `Blocked: foreground \`sleep\` of ${length}. Fix: use a background task or the Monitor tool instead of \`sleep\`.`,
+  );
+}
+
+/** Longest command the sleep parser reads; a longer one is "cannot read", so no match. */
+const MAX_COMMAND_LENGTH = 65_536;
+const MAX_SHELL_DEPTH = 8;
+const MIN_BLOCKING_SECONDS = 2;
+
+/**
+ * Serves epic bs-optimize criterion 6 (D4 verdict table): the seconds of every
+ * foreground `sleep` of 2 s or more in `command`. Throws when the command
+ * cannot be read (unbalanced quotes, an unterminated substitution, oversized).
+ */
+export function findForegroundSleeps(command: string): number[] {
+  if (!command.includes('sleep')) return [];
+  if (command.length > MAX_COMMAND_LENGTH) throw new Error('command too long to read');
+  return foregroundSleepsIn(command, 0).filter((s) => s >= MIN_BLOCKING_SECONDS);
+}
+
+interface Word {
+  text: string;
+  dynamic: boolean;
+}
+interface SimpleCommand {
+  words: Word[];
+  background: boolean;
+}
+
+/** Sleeps (any length) of the simple commands in `src` that block the call. */
+function foregroundSleepsIn(src: string, depth: number): number[] {
+  if (depth > MAX_SHELL_DEPTH) throw new Error('shell nesting too deep');
+  const scanner = new ShellScanner(src, depth);
+  scanner.parseList(false);
+  const waits = scanner.commands.some((c) => c.words[0]?.text === 'wait');
+  const out: number[] = [];
+  for (const command of scanner.commands) {
+    // A backgrounded sleep blocks nothing, unless a `wait` joins it in the foreground.
+    if (command.background && !waits) continue;
+    out.push(...sleepsOf(command.words, depth));
+  }
+  return out;
+}
+
+const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const REDIRECT_FD_RE = /^\d+$/;
+const NUMBER_RE = /^(\d+\.?\d*|\.\d+)([smhd]?)$/;
+const UNIT_SECONDS: Record<string, number> = { '': 1, s: 1, m: 60, h: 3600, d: 86_400 };
+/** Words that start a command position without being the command. */
+const KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '{']);
+/** Wrappers that run the next command in the foreground; each may carry flags. */
+const WRAPPERS = new Set(['time', 'nohup', 'exec', 'command']);
+const SHELLS = new Set(['bash', 'sh', 'zsh']);
+
+/** Sleeps one simple command runs, wrappers and a `-c` script included. */
+function sleepsOf(words: readonly Word[], depth: number): number[] {
+  let i = 0;
+  for (;;) {
+    const word = words[i];
+    if (word === undefined) return [];
+    if (ASSIGNMENT_RE.test(word.text)) {
+      i++;
+      continue;
+    }
+    if (word.dynamic) return [];
+    const name = word.text.slice(word.text.lastIndexOf('/') + 1);
+    if (KEYWORDS.has(word.text)) {
+      i++;
+    } else if (WRAPPERS.has(name)) {
+      i++;
+      while (/^-[A-Za-z]*$/.test(words[i]?.text ?? '')) i++;
+    } else if (name === 'env') {
+      i++;
+      while (i < words.length) {
+        const text = words[i]?.text ?? '';
+        if (ASSIGNMENT_RE.test(text)) i++;
+        else if (/^(-u|-C|--unset|--chdir)$/.test(text)) i += 2;
+        else if (text.startsWith('-')) i++;
+        else break;
+      }
+    } else if (name === 'timeout') {
+      i++;
+      while ((words[i]?.text ?? '').startsWith('-')) {
+        i += /^(-s|-k|--signal|--kill-after)$/.test(words[i]?.text ?? '') ? 2 : 1;
+      }
+      i++; // the duration
+    } else if (SHELLS.has(name)) {
+      return shellScriptSleeps(words.slice(i + 1), depth);
+    } else if (name === 'sleep') {
+      return sleepDuration(words.slice(i + 1));
+    } else {
+      return [];
+    }
+  }
+}
+
+/** `bash -c '<script>'`, read one level of quoting deep; a script file is not read. */
+function shellScriptSleeps(args: readonly Word[], depth: number): number[] {
+  for (let j = 0; j < args.length; j++) {
+    const text = args[j]?.text ?? '';
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(text)) {
+      const script = args[j + 1];
+      return script === undefined || script.dynamic
+        ? []
+        : foregroundSleepsIn(script.text, depth + 1);
+    }
+    if (!text.startsWith('-')) return [];
+  }
+  return [];
+}
+
+/** The summed operands of one `sleep`, as a one-element list; empty if it blocks nothing. */
+function sleepDuration(operands: readonly Word[]): number[] {
+  if (operands.length === 0) return [];
+  if (operands.some((w) => w.dynamic || /^(infinity|inf)$/i.test(w.text)))
+    return [Number.POSITIVE_INFINITY];
+  let total = 0;
+  for (const { text } of operands) {
+    const match = NUMBER_RE.exec(text);
+    if (match === null) return []; // `sleep` rejects it at once
+    total += Number.parseFloat(match[1] as string) * (UNIT_SECONDS[match[2] as string] as number);
+  }
+  return [total];
+}
+
+/**
+ * One left-to-right pass over a command line, splitting it into simple
+ * commands. Linear in the input (no backtracking); `parseList` throws on input
+ * it cannot read. It tracks quotes, comments, substitutions, redirections and
+ * heredocs so that `sleep` as text is never mistaken for a command.
+ */
+class ShellScanner {
+  pos = 0;
+  readonly commands: SimpleCommand[] = [];
+
+  constructor(
+    private readonly src: string,
+    private readonly depth: number,
+  ) {}
+
+  /** Parses to the end, or (for a `$(`/`<(` body) through its closing `)`. */
+  parseList(untilParen: boolean): void {
+    const src = this.src;
+    let words: Word[] = [];
+    let word: Word | null = null;
+    let listStart = this.commands.length;
+    let parens = 0;
+    let skipNext = false;
+    let heredoc: { strip: boolean } | null = null;
+    const heredocs: { delimiter: string; strip: boolean }[] = [];
+
+    const endWord = () => {
+      if (word === null) return;
+      if (heredoc !== null) heredocs.push({ delimiter: word.text, strip: heredoc.strip });
+      else if (!skipNext) words.push(word);
+      heredoc = null;
+      skipNext = false;
+      word = null;
+    };
+    const endCommand = () => {
+      endWord();
+      if (words.length > 0) this.commands.push({ words, background: false });
+      words = [];
+    };
+    const current = (): Word => {
+      word ??= { text: '', dynamic: false };
+      return word;
+    };
+    const redirect = () => {
+      // A bare number just before the operator is the fd, not an argument.
+      if (word !== null && !word.dynamic && REDIRECT_FD_RE.test(word.text)) word = null;
+      else endWord();
+    };
+
+    while (this.pos < src.length) {
+      const c = src.charAt(this.pos);
+      if (c === ' ' || c === '\t') {
+        endWord();
+        this.pos++;
+      } else if (c === '\\') {
+        if (src.charAt(this.pos + 1) !== '\n') current().text += src.charAt(this.pos + 1);
+        this.pos += 2;
+      } else if (c === "'") {
+        const close = src.indexOf("'", this.pos + 1);
+        if (close === -1) throw new Error('unterminated single quote');
+        current().text += src.slice(this.pos + 1, close);
+        this.pos = close + 1;
+      } else if (c === '"') {
+        this.pos++;
+        this.doubleQuoted(current());
+      } else if (c === '$' || c === '`') {
+        this.expansion(current());
+      } else if (c === '#' && word === null) {
+        const eol = src.indexOf('\n', this.pos);
+        this.pos = eol === -1 ? src.length : eol;
+      } else if (c === '\n') {
+        endCommand();
+        listStart = this.commands.length;
+        this.pos++;
+        for (const { delimiter, strip } of heredocs.splice(0)) this.skipHeredoc(delimiter, strip);
+      } else if (c === ';') {
+        endCommand();
+        listStart = this.commands.length;
+        this.pos++;
+      } else if (c === '&' && src.charAt(this.pos + 1) === '&') {
+        endCommand();
+        this.pos += 2;
+      } else if (c === '&' && src.charAt(this.pos + 1) === '>') {
+        redirect();
+        skipNext = true;
+        this.pos += src.charAt(this.pos + 2) === '>' ? 3 : 2;
+      } else if (c === '&') {
+        endCommand();
+        for (let k = listStart; k < this.commands.length; k++) {
+          (this.commands[k] as SimpleCommand).background = true;
+        }
+        listStart = this.commands.length;
+        this.pos++;
+      } else if (c === '|') {
+        endCommand();
+        this.pos += src.charAt(this.pos + 1) === '|' || src.charAt(this.pos + 1) === '&' ? 2 : 1;
+      } else if ((c === '<' || c === '>') && src.charAt(this.pos + 1) === '(') {
+        this.pos += 2;
+        this.parseList(true);
+        current().dynamic = true;
+      } else if (c === '<' || c === '>') {
+        redirect();
+        let op = 1;
+        while (src.charAt(this.pos + op) === c) op++;
+        if (c === '<' && op === 2) {
+          const strip = src.charAt(this.pos + 2) === '-';
+          heredoc = { strip };
+          op += strip ? 1 : 0;
+        } else {
+          skipNext = true;
+          if (src.charAt(this.pos + op) === '&') op++;
+        }
+        this.pos += op;
+      } else if (c === '(') {
+        endCommand();
+        listStart = this.commands.length;
+        parens++;
+        this.pos++;
+      } else if (c === ')') {
+        endCommand();
+        listStart = this.commands.length;
+        this.pos++;
+        if (parens > 0) parens--;
+        else if (untilParen) return;
+      } else {
+        current().text += c;
+        this.pos++;
+      }
+    }
+    if (untilParen || parens > 0) throw new Error('unterminated substitution or group');
+    endCommand();
+  }
+
+  /** A `"` string, opening quote already consumed; expansions inside run. */
+  private doubleQuoted(into: Word): void {
+    const src = this.src;
+    while (this.pos < src.length) {
+      const c = src.charAt(this.pos);
+      if (c === '"') {
+        this.pos++;
+        return;
+      }
+      if (c === '\\') {
+        into.text += src.charAt(this.pos + 1);
+        this.pos += 2;
+      } else if (c === '$' || c === '`') {
+        this.expansion(into);
+      } else {
+        into.text += c;
+        this.pos++;
+      }
+    }
+    throw new Error('unterminated double quote');
+  }
+
+  /** A `$...` or backtick expansion at `pos`; substitutions are scanned for sleeps. */
+  private expansion(into: Word): void {
+    const src = this.src;
+    const next = src.charAt(this.pos + 1);
+    if (src.charAt(this.pos) === '`') {
+      let end = this.pos + 1;
+      while (end < src.length && src.charAt(end) !== '`') end += src.charAt(end) === '\\' ? 2 : 1;
+      if (end >= src.length) throw new Error('unterminated backtick');
+      this.scanInner(src.slice(this.pos + 1, end));
+      this.pos = end + 1;
+      into.dynamic = true;
+    } else if (next === '(' && src.charAt(this.pos + 2) === '(') {
+      let level = 0;
+      let end = this.pos + 1;
+      for (; end < src.length; end++) {
+        const ch = src.charAt(end);
+        if (ch === '(') level++;
+        else if (ch === ')' && --level === 0) break;
+      }
+      if (end >= src.length) throw new Error('unterminated arithmetic');
+      this.pos = end + 1;
+      into.dynamic = true;
+    } else if (next === '(') {
+      this.pos += 2;
+      this.parseList(true);
+      into.dynamic = true;
+    } else if (next === '{') {
+      const close = src.indexOf('}', this.pos);
+      if (close === -1) throw new Error('unterminated parameter expansion');
+      this.pos = close + 1;
+      into.dynamic = true;
+    } else if (next === "'") {
+      let end = this.pos + 2;
+      while (end < src.length && src.charAt(end) !== "'") end += src.charAt(end) === '\\' ? 2 : 1;
+      if (end >= src.length) throw new Error('unterminated $-quote');
+      into.text += src.slice(this.pos + 2, end);
+      this.pos = end + 1;
+    } else if (/[A-Za-z_@*#?$!0-9-]/.test(next)) {
+      this.pos += 2;
+      while (/[A-Za-z0-9_]/.test(src.charAt(this.pos)) && /[A-Za-z_]/.test(next)) this.pos++;
+      into.dynamic = true;
+    } else {
+      into.text += '$';
+      this.pos++;
+    }
+  }
+
+  /** Scans a backtick body; its commands join this scanner's list. */
+  private scanInner(body: string): void {
+    if (this.depth >= MAX_SHELL_DEPTH) throw new Error('shell nesting too deep');
+    const inner = new ShellScanner(body, this.depth + 1);
+    inner.parseList(false);
+    this.commands.push(...inner.commands);
+  }
+
+  /** Skips heredoc body lines through the delimiter line (EOF ends it too). */
+  private skipHeredoc(delimiter: string, strip: boolean): void {
+    const src = this.src;
+    while (this.pos < src.length) {
+      const eol = src.indexOf('\n', this.pos);
+      const end = eol === -1 ? src.length : eol;
+      const line = src.slice(this.pos, end);
+      this.pos = Math.min(end + 1, src.length);
+      if ((strip ? line.replace(/^\t+/, '') : line) === delimiter) return;
+    }
+  }
 }
