@@ -11,7 +11,7 @@ import {
   readHeavyLock,
   resolveHeavyLockDir,
 } from './heavyLock.js';
-import { detectDefaultBranch, type PorcelainEntry, parseWorktreePorcelain } from './worktree.js';
+import { type PorcelainEntry, parseWorktreePorcelain } from './worktree.js';
 
 export class CleanupError extends SmithError {}
 
@@ -116,8 +116,6 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     });
   }
 
-  const defaultBranch = detectDefaultBranch(projectDir);
-  const defaultTargets = [`refs/heads/${defaultBranch}`, `refs/remotes/origin/${defaultBranch}`];
   const wtRoot = path.join(path.dirname(projectDir), '.wt', path.basename(projectDir));
   const rootReal = (() => {
     try {
@@ -161,6 +159,27 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
       return false;
     }
   };
+
+  /**
+   * The default branch without the checked-out-branch fallback (epic criterion
+   * 14: the clone's HEAD never decides what is merged): the remote's symbolic
+   * default, else `main`, else `master`, else none.
+   */
+  const defaultBranch = ((): string | null => {
+    try {
+      const ref = g(projectDir, ['symbolic-ref', 'refs/remotes/origin/HEAD']);
+      const name = ref.replace(/^refs\/remotes\/origin\//, '');
+      if (name !== '' && name !== ref) return name;
+    } catch {
+      // no symbolic default ref — fall through
+    }
+    return ['main', 'master'].find((b) => refExists(`refs/heads/${b}`)) ?? null;
+  })();
+  const defaultTargets =
+    defaultBranch === null
+      ? []
+      : [`refs/heads/${defaultBranch}`, `refs/remotes/origin/${defaultBranch}`];
+  const noDefault = `no-default-branch: no default branch can be determined in ${projectDir}`;
 
   /** The reason an epic's items are kept, or null when the epic is finished. */
   const epicVerdict = (epic: string, prefix: string): string | null => {
@@ -258,6 +277,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     if (!refExists(`refs/heads/${branch}`)) return keep(base, `branch-missing: ${branch}`);
     const epicReason = epicVerdict(epic, prefix);
     if (epicReason !== null) return keep(base, epicReason);
+    if (defaultBranch === null) return keep(base, noDefault);
     const targets =
       task === 'integration'
         ? defaultTargets
@@ -296,6 +316,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     if (branch.includes(HARNESS_MARK)) return keep(base, HARNESS_MARK);
     const epicReason = epicVerdict(epic, prefix);
     if (epicReason !== null) return keep(base, epicReason);
+    if (defaultBranch === null) return keep(base, noDefault);
     const targets =
       task === 'integration'
         ? defaultTargets
@@ -343,28 +364,17 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     if (lock !== null) return keep(base, lock);
     const busy = activity(null, null, real);
     if (busy !== null) return keep(base, busy);
-    return o.platform === undefined && process.platform !== 'darwin'
-      ? {
-          item: {
+    const mac = (o.platform ?? process.platform) === 'darwin';
+    return {
+      item: mac
+        ? { ...base, action: 'trash', reason: 'orphan: not registered with git' }
+        : {
             ...base,
             action: 'manual',
             reason: 'orphan: not registered with git; remove it by hand',
           },
-          targets: [],
-        }
-      : (o.platform ?? process.platform) === 'darwin'
-        ? {
-            item: { ...base, action: 'trash', reason: 'orphan: not registered with git' },
-            targets: [],
-          }
-        : {
-            item: {
-              ...base,
-              action: 'manual',
-              reason: 'orphan: not registered with git; remove it by hand',
-            },
-            targets: [],
-          };
+      targets: [],
+    };
   };
 
   const porcelain = parseWorktreePorcelain(g(projectDir, ['worktree', 'list', '--porcelain']));

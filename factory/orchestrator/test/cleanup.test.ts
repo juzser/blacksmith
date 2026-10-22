@@ -627,6 +627,57 @@ describe('cleanup.ts', () => {
     });
   });
 
+  describe('default branch resolution', () => {
+    /** An unmerged task whose commit is contained only by the checked-out `feature`. */
+    function unmergedOnFeature(): string {
+      const wt = createTaskWorktree(projectDir, 'e1', 't1').worktreeDir;
+      commitIn(wt, 'wip.txt');
+      git(projectDir, ['checkout', '-q', '-b', 'feature']);
+      git(projectDir, ['merge', '-q', '--no-ff', '-m', 'wip', 'bs/e1/t1']);
+      return wt;
+    }
+
+    it('keeps the task when there is no remote and the clone sits on a branch containing it', async () => {
+      const wt = unmergedOnFeature();
+      git(projectDir, ['remote', 'remove', 'origin']);
+      const report = await runCleanup(opts({ apply: true }));
+      expect(item(report.items, 'bs/e1/t1')?.action).toBe('keep');
+      expect(existsSync(wt)).toBe(true);
+      expect(branchExists('bs/e1/t1')).toBe(true);
+    });
+
+    it('keeps the task when the remote has no symbolic default ref', async () => {
+      const wt = unmergedOnFeature();
+      git(projectDir, ['remote', 'set-head', 'origin', '-d']);
+      const report = await runCleanup(opts({ apply: true }));
+      expect(item(report.items, 'bs/e1/t1')?.action).toBe('keep');
+      expect(existsSync(wt)).toBe(true);
+      expect(branchExists('bs/e1/t1')).toBe(true);
+    });
+
+    it('keeps every merge-dependent item as no-default-branch when no default exists', async () => {
+      const wt = unmergedOnFeature();
+      git(projectDir, ['remote', 'remove', 'origin']);
+      git(projectDir, ['branch', '-m', 'main', 'trunk']);
+      git(projectDir, ['branch', 'bs/e1/loose', 'feature']);
+      const report = await runCleanup(opts({ apply: true }));
+      for (const b of ['bs/e1/t1', 'bs/e1/loose']) {
+        expect(item(report.items, b)?.action).toBe('keep');
+        expect(item(report.items, b)?.reason).toMatch(/^no-default-branch/);
+        expect(branchExists(b)).toBe(true);
+      }
+      expect(existsSync(wt)).toBe(true);
+    });
+
+    it('still removes a really merged task when origin/HEAD names the default', async () => {
+      const wt = mergedTask('t1');
+      git(projectDir, ['checkout', '-q', '-b', 'feature']);
+      await runCleanup(opts({ apply: true }));
+      expect(existsSync(wt)).toBe(false);
+      expect(branchExists('bs/e1/t1')).toBe(false);
+    });
+  });
+
   describe('edges', () => {
     it('reports nothing for a project with no .wt folder and no task branches', async () => {
       expect(await planOf()).toEqual([]);
