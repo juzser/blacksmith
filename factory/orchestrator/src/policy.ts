@@ -1995,9 +1995,11 @@ function readShellWords(
         const d = segment.charAt(i);
         let end = i + 1;
         if (d === '$' || d === '`') end = expansionEnd(segment, i, true, readBody);
-        else if (d === '\\') end = /^[^\n]$/.test(segment.charAt(i + 1)) ? i + 2 : -1;
+        else if (d === '\\') end = segment.charAt(i + 1) === '' ? -1 : i + 2;
         if (i >= segment.length || end === -1) return null;
-        add(segment.slice(i, end), segment.slice(d === '\\' ? i + 1 : i, end));
+        // A backslash-newline inside double quotes is removed, as the shell does.
+        const joined = d === '\\' && segment.charAt(i + 1) === '\n';
+        add(segment.slice(i, end), joined ? '' : segment.slice(d === '\\' ? i + 1 : i, end));
         i = end;
       }
       add('"', '');
@@ -2064,12 +2066,13 @@ function commandStart(words: readonly DequotedWord[]): number {
   return start;
 }
 
-/** The index of the segment's `git` word (or a path ending in `/git`), or -1; the one definition every caller uses. */
-function gitWordIndex(words: readonly DequotedWord[]): number {
+/** The indexes of every `git` word (or a path ending in `/git`) of the segment; the one definition every caller uses. */
+function gitWordIndexes(words: readonly DequotedWord[]): number[] {
   const start = commandStart(words);
-  return words.findIndex(
-    (word, index) =>
-      index >= start && !ASSIGNMENT_WORD_RE.test(word.text) && /(?:^|\/)git$/i.test(word.text),
+  return words.flatMap((word, index) =>
+    index >= start && !ASSIGNMENT_WORD_RE.test(word.text) && /(?:^|\/)git$/i.test(word.text)
+      ? [index]
+      : [],
   );
 }
 
@@ -2239,7 +2242,8 @@ function checkForcePush(
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
-    const gitIndex = gitWordIndex(words);
+    const gitIndexes = gitWordIndexes(words);
+    const gitIndex = gitIndexes[0] ?? -1;
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
     recorded += readAssignments(leading, env, gitIndex === -1);
@@ -2251,8 +2255,8 @@ function checkForcePush(
       runsGit ||
       /\bgit\b/i.test(dequoted) ||
       (commandWord !== undefined && hasUnreadableShellForm(commandWord.raw));
-    if (gitIndex !== -1) {
-      const configViolation = checkGitConfigValues(words, gitIndex, env, policy, rule);
+    for (const index of gitIndexes) {
+      const configViolation = checkGitConfigValues(words, index, env, policy, rule);
       if (configViolation) return configViolation;
     }
 

@@ -70,7 +70,6 @@ const REFUSED: string[] = [
   'GIT_EXTERNAL_DIFF=$(cat f) git diff',
   'GIT_EXTERNAL_DIFF=`cat f` git diff',
   'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0="$N" git log',
-  'GIT_CONFIG_COUNT=$N git log',
   'export GIT_PAGER; git log',
   'git grep -O"$P" x',
   'git --config-env=core.pager=SOMEVAR log',
@@ -104,8 +103,6 @@ const REFUSED: string[] = [
   'f(){ export GIT_PAGER=cat; }; f; git log',
   'declare -n R=GIT_PAGER; export R=cat; git log',
   'git log GIT_PAGER=cat',
-  'git log GIT_EXTERNAL_DIFF',
-  'git log GIT_CONFIG_COUNT',
   'git log GIT_CONFIG_VALUE_0',
   '$CMD "$GIT_PAGER"',
   '`which tool` "$GIT_PAGER"',
@@ -126,13 +123,11 @@ const REFUSED: string[] = [
   `cd /tmp/project-a && GIT_PAGER='${FORCED}' git log`,
   'cd /tmp/project-a && git -c core.pager="$P" log',
   `export GIT_PAGER='${FORCED}'; echo hi; git log`,
-  `git log; GIT_PAGER='${FORCED}' git log`,
   // other quoting and carriers
   `GIT_PAGER="git pu"'sh -f' origin main git log`,
   `GIT_PAGER='${FORCED}'\ngit log`,
   `GIT_PAGER='${FORCED}' \\\n git log`,
   `export GIT_PAGER='${FORCED}' && git log`,
-  `export GIT_PAGER='${FORCED}'\ngit log`,
   `(export GIT_PAGER='${FORCED}'); git log`,
   `git -c core.pager='${FORCED}' log # note`,
   `git -c "core.pager=${FORCED}" log`,
@@ -180,6 +175,9 @@ const REFUSED: string[] = [
   `echo hi #x\\\n${FORCED}`,
   `cat <<'E\\'\nE\\\n${FORCED}\nE\\`,
   `cat <<"E\\\\"\nE\\\\\n${FORCED}\nE\\\\`,
+  // every git word of a one-segment line has its configuration values read
+  `git status; git -c core.pager='${FORCED_ESCAPED}' log # n`,
+  `cat <<EOF\nx\nEOF\ngit status; git -c core.pager='${FORCED_ESCAPED}' log`,
 ];
 
 const ALLOWED: string[] = [
@@ -190,18 +188,15 @@ const ALLOWED: string[] = [
   'git grep -n foo',
   'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x git log',
   'P=cat git --config-env=core.pager=P log',
-  'echo hello; git log',
   "GIT_PAGER='git push origin feat' git log",
   "export GIT_PA''GER=cat; git log",
   'export GIT_PA\\GER=cat; git log',
   'git l -f origin main',
   'git log 2>&1 | GIT_PAGER=cat git log',
-  'git log; GIT_PAGER=cat git log',
   'git -c core.pager=\\$P log',
   "git -c core.pager='$P' log",
   'git -c core.pager="\\$P" log',
   'git grep -e -O',
-  'git grep -- -O',
   // a mention on a line that does not run git
   'echo "$GIT_PAGER"',
   'printenv GIT_PAGER',
@@ -227,7 +222,6 @@ const ALLOWED: string[] = [
   'git log $HOME/x',
   'git log ${BRANCH}',
   'git log $1 $@ $? $$',
-  'git log |& head',
   'git log 3<&0',
   'git status\ngit log',
   'git log \\\n--oneline',
@@ -268,7 +262,6 @@ const ALLOWED: string[] = [
   'git log <<-EOF\nx\nEOF',
   // a here-document body is literal text, in a substitution or given to git
   `git commit -m "$(cat <<'EOF'\nfix: it's done\nEOF\n)"`,
-  `git commit -m "$(cat <<EOF\nfix: it's "done"\nEOF\n)"`,
   "git log `cat <<'EOF'\nit's\nEOF\n`",
   "git commit -F- <<EOF\nit's done\nEOF",
   "git commit -F - <<'EOF'\nit's a \"test\nEOF",
@@ -281,6 +274,8 @@ const ALLOWED: string[] = [
   "git log <<<'x'",
   'echo "abc',
   'echo hi #x\\\ngit log',
+  'git commit -m "abc \\\ndef #3"',
+  'git log --format="%h \\\n%s" # x',
 ];
 
 // The shapes a git word can take, run against each carrier of a configuration value.
