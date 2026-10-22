@@ -1813,9 +1813,9 @@ function hasUnknownForcePushCommandWord(segment: string): boolean {
  */
 function checkForcePushSubcommandWord(
   segment: string,
+  words: readonly DequotedWord[],
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  const words = segmentWords(segment);
   const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
   if (gitIndex === -1) {
     // Defence in depth for `joinLineContinuations` missing a spelling of its
@@ -1872,6 +1872,104 @@ function checkForcePushSubcommandWord(
     return violation(rule, PLAIN_WORD_REASON);
   }
   return null;
+}
+
+const NOT_UNDERSTOOD_REASON =
+  'this git command uses shell syntax the guard does not read (a substitution, ANSI-C or locale quoting, a here-document or here-string, an unterminated quote, a continuation or an odd redirection) — write it out plainly';
+
+/** The end of the `$...` unit that starts at `start`, or -1 when it is not one the reader models. */
+function dollarEnd(text: string, start: number, quoted: boolean): number {
+  const next = text.charAt(start + 1);
+  if (next === '(' || next === "'" || (next === '"' && !quoted)) return -1;
+  if (next !== '{') return start + 1;
+  const close = text.indexOf('}', start);
+  return close === -1 || !/^[\w#?@*!$-]*$/.test(text.slice(start + 2, close)) ? -1 : close + 1;
+}
+
+/**
+ * The one reader of a segment's shell words. It models plain text, single
+ * quotes, double quotes without substitutions, one-character backslash
+ * escapes, blanks, the separators the rule splits on, and redirections whose
+ * target is one whole word (dropped, with its descriptor digits). It returns
+ * `null` for anything else — ANSI-C and locale quoting, `$( )`, backticks,
+ * `${ }` holding more than a name, process substitution, a here-document or
+ * here-string, a line continuation, an unterminated quote or a redirection
+ * without a target — and the caller then asks about the whole command.
+ */
+function readShellWords(segment: string): DequotedWord[] | null {
+  const words: DequotedWord[] = [];
+  let raw = '';
+  let text = '';
+  let inWord = false;
+  let dropNext = false;
+  const add = (rawPart: string, textPart: string) => {
+    raw += rawPart;
+    text += textPart;
+    inWord = true;
+  };
+  const flush = () => {
+    if (inWord && !dropNext) words.push({ raw, text });
+    if (inWord) dropNext = false;
+    raw = '';
+    text = '';
+    inWord = false;
+  };
+  let i = 0;
+  while (i < segment.length) {
+    const c = segment.charAt(i);
+    const next = segment.charAt(i + 1);
+    if (/[ \t]/.test(c)) {
+      flush();
+      i += 1;
+    } else if (/[\n;|&()<>]/.test(c)) {
+      if (dropNext && !inWord) return null;
+      if (c === '<' || c === '>') {
+        if (/^(?:<<|<\(|>\()/.test(segment.slice(i))) return null;
+        if (!dropNext && /^\d+$/.test(raw)) inWord = false;
+        flush();
+        i += /^(?:>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
+        dropNext = true;
+      } else {
+        flush();
+        i += 1;
+      }
+    } else if (c === "'") {
+      const end = segment.indexOf("'", i + 1);
+      if (end === -1) return null;
+      add(segment.slice(i, end + 1), segment.slice(i + 1, end));
+      i = end + 1;
+    } else if (c === '"') {
+      add('"', '');
+      i += 1;
+      while (segment.charAt(i) !== '"') {
+        const d = segment.charAt(i);
+        let end = i + 1;
+        if (d === '$') end = dollarEnd(segment, i, true);
+        else if (d === '\\') end = /^[^\n]$/.test(segment.charAt(i + 1)) ? i + 2 : -1;
+        if (i >= segment.length || d === '`' || end === -1) return null;
+        add(segment.slice(i, end), segment.slice(d === '\\' ? i + 1 : i, end));
+        i = end;
+      }
+      add('"', '');
+      i += 1;
+    } else if (c === '\\') {
+      if (i + 1 >= segment.length || next === '\n') return null;
+      add(c + next, next);
+      i += 2;
+    } else if (c === '`') {
+      return null;
+    } else if (c === '$') {
+      const end = dollarEnd(segment, i, false);
+      if (end === -1) return null;
+      add(segment.slice(i, end), segment.slice(i, end));
+      i = end;
+    } else {
+      add(c, c);
+      i += 1;
+    }
+  }
+  flush();
+  return dropNext ? null : words;
 }
 
 /** The value of a shell variable set on the command line, or `null` when its text cannot be read statically. */
@@ -2066,7 +2164,20 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   for (const segment of topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
-    const subcommandWordViolation = checkForcePushSubcommandWord(segment, rule);
+    // A segment the reader does not understand is asked about when it could
+    // involve git; otherwise only the unknown-command-word check applies.
+    const words = readShellWords(segment);
+    if (words === null) {
+      if (segment.replace(/['"\\]/g, '').match(/git/i)) {
+        return violation(rule, NOT_UNDERSTOOD_REASON);
+      }
+      if (hasUnknownForcePushCommandWord(stripRedirections(segment))) {
+        return violation(rule, UNKNOWN_COMMAND_WORD_REASON);
+      }
+      continue;
+    }
+
+    const subcommandWordViolation = checkForcePushSubcommandWord(segment, words, rule);
     if (subcommandWordViolation) return subcommandWordViolation;
 
     const decoded = decodeAnsiCQuoting(segment);
@@ -2079,7 +2190,6 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
 
-    const words = segmentWords(segment);
     const gitIndex = gitWordIndex(words);
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
@@ -2087,9 +2197,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // Mentions are counted on the dequoted text the assignments are read from,
     // so a name spelled with an empty quote pair or a backslash counts the
     // same on both sides.
-    const dequoted = splitDequotedWords(decoded.text)
-      .map((word) => word.text)
-      .join(' ');
+    const dequoted = words.map((word) => word.text).join(' ');
     mentions += (dequoted.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length;
     const commandWord = words[commandStart(words)];
     runsGit =
@@ -2522,78 +2630,6 @@ const REDIRECTION_RE = new RegExp(
 function stripRedirections(command: string): string {
   return command.replace(REDIRECTION_RE, ' ');
 }
-
-/** A redirection operator, longest first, as it starts at a given position. */
-const REDIRECTION_OPERATOR_RE = /(?:>>|>|<<<|<<-?|<>|<)/y;
-
-/** A descriptor duplication after an operator (`2>&1`, `<&-`): no target word follows. */
-const DESCRIPTOR_DUPLICATION_RE = /&\d*-?/y;
-
-/** Characters that end a redirection target when they are not quoted or escaped. */
-const TARGET_END_RE = new RegExp(`[\\s${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}]`);
-
-/** The index just past the quoted span that starts at `start` (an unterminated span runs to the end). */
-function quotedSpanEnd(command: string, start: number): number {
-  const quote = command.charAt(start);
-  let end = start + 1;
-  while (end < command.length && command.charAt(end) !== quote) {
-    end += quote === '"' && command.charAt(end) === '\\' ? 2 : 1;
-  }
-  return Math.min(end + 1, command.length);
-}
-
-/**
- * `stripRedirections` for text that is split into words afterwards. Walks the
- * segment once, quote-aware: quoted spans outside a redirection are kept
- * exactly as written, so the words keep the shape the shell gives them. After
- * a redirection operator (with its optional descriptor digits or `&`) the
- * target is consumed as one whole shell word - unquoted characters and
- * single-quoted, double-quoted and backslash-escaped spans up to the next
- * unquoted blank or operator - and dropped with the operator.
- */
-function stripRedirectionsOutsideQuotes(command: string): string {
-  let out = '';
-  let i = 0;
-  while (i < command.length) {
-    const c = command.charAt(i);
-    if (c === '\\' && i + 1 < command.length) {
-      out += command.slice(i, i + 2);
-      i += 2;
-    } else if (c === "'" || c === '"') {
-      const end = quotedSpanEnd(command, i);
-      out += command.slice(i, end);
-      i = end;
-    } else if (c === '<' || c === '>') {
-      out = out.replace(/(?:&|\d+)$/, '');
-      REDIRECTION_OPERATOR_RE.lastIndex = i;
-      i += (REDIRECTION_OPERATOR_RE.exec(command) ?? [c])[0].length;
-      DESCRIPTOR_DUPLICATION_RE.lastIndex = i;
-      const duplication = DESCRIPTOR_DUPLICATION_RE.exec(command);
-      if (duplication) {
-        i += duplication[0].length;
-      } else {
-        while (i < command.length && /\s/.test(command.charAt(i))) i += 1;
-        while (i < command.length && !TARGET_END_RE.test(command.charAt(i))) {
-          const t = command.charAt(i);
-          if (t === '\\') i += 2;
-          else if (t === "'" || t === '"') i = quotedSpanEnd(command, i);
-          else i += 1;
-        }
-      }
-      out += ' ';
-    } else {
-      out += c;
-      i += 1;
-    }
-  }
-  return out;
-}
-
-/** The words of a segment with its redirections removed: the one definition of a segment's words and command word. */
-function segmentWords(segment: string): DequotedWord[] {
-  return splitDequotedWords(stripRedirectionsOutsideQuotes(segment));
-}
-
 /**
  * The `git merge`/`git pull` commands in a chain, read for rule 3's exception:
  * plumbing removed, then split on the characters that actually separate two
@@ -3518,7 +3554,7 @@ export function evaluateCommand(
   // Outermost quoting wins, so the question is blanked before the message
   // payloads inside it are looked at: `policy check --command 'git commit -m
   // "…"'` is one inert span, not a commit with a message.
-  const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(command));
+  const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(joinLineContinuations(command)));
   const checks: Array<() => PolicyViolation | null> = [
     () => checkPushToProtected(scanned, branch, policy),
     () => checkForcePush(scanned, policy),

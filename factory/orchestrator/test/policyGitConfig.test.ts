@@ -566,9 +566,11 @@ describe('a recorded configuration value is judged on every way a line runs git'
     });
 
     // A declaration inside a function body is not read as an assignment, so
-    // the rule refuses it whatever the value (it is unsure).
+    // the rule refuses it whatever the value (it is unsure). A command word
+    // that is a substitution is not read by the shell-word reader, so it is
+    // asked about whatever the value.
     it.each(RUN_SHAPES)('reads a readable value: %s', (_run, command) => {
-      expect(allowed(build('cat', command))).toBe(form !== 'local');
+      expect(allowed(build('cat', command))).toBe(form !== 'local' && !command.includes('$('));
     });
   });
 
@@ -581,7 +583,7 @@ describe('a recorded configuration value is judged on every way a line runs git'
 // A redirection can sit next to a quote that holds a configuration value. The
 // words of a segment are located before any redirection is removed, so the
 // quote still closes where it was written and the value is read in each place.
-const REDIRECTIONS = ['>x', '2>x', '>>x', '<x', '<<<x'] as const;
+const REDIRECTIONS = ['>x', '2>x', '>>x', '<x'] as const;
 
 const REDIRECTION_CARRIERS: ReadonlyArray<readonly [string, (value: string) => string]> = [
   ['pager variable on the git command', (value) => `GIT_PAGER=${value} git log`],
@@ -724,5 +726,72 @@ describe('a redirection target of any shape is dropped as one word', () => {
 
   it('reads a configuration value that follows a target with an unquoted tail', () => {
     expect(refused(`git 2>"$T"/x -c core.pager='${FORCED_VALUE}' log`)).toBe(true);
+  });
+
+  it('refuses a redirection target spelled with ANSI-C quoting', () => {
+    expect(refused(`git >$'out file' ${SUBCOMMAND} -f origin main`)).toBe(true);
+    expect(refused(`git > $'out\\x20file' -c core.pager='${FORCED_VALUE}' log`)).toBe(true);
+    expect(refused(`GIT_PAGER="$X" >$'a b' git log`)).toBe(true);
+    expect(refused("GIT_PAGER=cat 2>$'a b' git log")).toBe(true);
+  });
+});
+
+// The shell-word reader models plain text, single and double quotes without
+// expansions, one-character backslash escapes, blanks, the separators the rule
+// splits on and redirections with a whole-word target. Anything else it does
+// not understand, and a command it does not understand is asked about.
+const NOT_UNDERSTOOD: ReadonlyArray<readonly [string, string]> = [
+  ['ANSI-C quoting', "git log $'a b'"],
+  ['locale quoting', 'git log $"msg"'],
+  ['command substitution', 'git log $(date)'],
+  ['backtick substitution', 'git log `date`'],
+  ['substitution inside double quotes', 'git log "$(date)"'],
+  ['backtick inside double quotes', 'git log "`date`"'],
+  ['arithmetic expansion', 'git log $((1 + 1))'],
+  ['parameter expansion with a blank', 'git log ${x:-a b}'],
+  ['unclosed parameter expansion', 'git log ${x'],
+  ['process substitution in', 'git log <(date)'],
+  ['process substitution out', 'git log >(cat)'],
+  ['here-document', 'git log <<EOF\nbody\nEOF'],
+  ['here-string', 'git log <<< x'],
+  ['unterminated single quote', "git log 'abc"],
+  ['unterminated double quote', 'git log "abc'],
+  ['trailing backslash', 'git log abc\\'],
+  ['redirection without a target', 'git log >'],
+  ['redirection followed by an operator', 'git log > >x'],
+  ['ANSI-C redirection target', "git log >$'x y'"],
+  ['substitution redirection target', 'git log > $(date)'],
+  ['assignment value with substitution', 'GIT_PAGER=cat git log $(date)'],
+  ['subshell with substitution', '(cd /tmp/project-a && git log $(date))'],
+  ['substitution as the command word', '$(which git) log'],
+];
+
+describe('a command the shell-word reader does not understand is asked about', () => {
+  it.each(NOT_UNDERSTOOD)('refuses %s', (_name, command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  it('does not ask about the same shapes on a line that does not involve git', () => {
+    expect(allowed('echo $(date)')).toBe(true);
+    expect(allowed("echo $'a b'")).toBe(true);
+    expect(allowed('echo "abc')).toBe(true);
+  });
+});
+
+describe('a redirection the shell-word reader models is not asked about', () => {
+  it.each([
+    ['git log 2>&1'],
+    ['git log >&2'],
+    ['git log 2>/dev/null | head -n 3'],
+    ["git log >'out file'"],
+    ['git log >"out file" --oneline'],
+    ['git log &>out'],
+    ['git log <in'],
+    ['git log >>out 2>&1'],
+    ['git log >|out'],
+    ['git log <&-'],
+    ['git log 2>&1 && git status'],
+  ])('allows %s', (command) => {
+    expect(allowed(command)).toBe(true);
   });
 });
