@@ -79,6 +79,9 @@ describe('lessons.md error_class backfill (bs-optimize AC2)', () => {
     expect(classOf.get('lesson-raised-31b13840f6c5')).toBe('contract.schema-violation');
     expect(classOf.get('lesson-raised-612b6c33c722')).toBe('execution.env-failure');
     expect(classOf.get('lesson-raised-26ace63a7a67')).toBe('coordination.deadlock');
+    expect(classOf.get('lesson-raised-8c05427c2840')).toBe('judgment.missed-finding');
+    expect(classOf.get('lesson-raised-9e3e3f16efec')).toBe('judgment.false-positive-finding');
+    expect(classOf.get('lesson-raised-18c6a8c89228')).toBe('judgment.false-positive-finding');
   });
 });
 
