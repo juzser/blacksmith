@@ -621,14 +621,21 @@ describe('evaluateCommand — rule 2: force-push', () => {
   });
 
   // Ordinary, non-alias inline config stays allowed: a plain key/value on
-  // `-c`, `--config-env` or `GIT_CONFIG_KEY_<n>` that never names `alias.`.
+  // `-c` or `GIT_CONFIG_KEY_<n>` that never names `alias.`.
   it.each([
     ['git -c user.name=agent push origin feat'],
     ['GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=agent git push origin feat'],
-    ['git --config-env=user.email=E push origin feat'],
   ])('allows %s — inline config that never names an alias', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
+  });
+
+  it('denies git --config-env=user.email=E push origin feat — the value is read from a variable the line does not set', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git --config-env=user.email=E push origin feat', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
   });
 
   it('denies --mirror, which force-pushes every ref', () => {
