@@ -2003,8 +2003,8 @@ function readShellWords(
       add('"', '');
       i += 1;
     } else if (c === '\\') {
-      if (i + 1 >= segment.length || next === '\n') return null;
-      add(c + next, next);
+      if (i + 1 >= segment.length) return null;
+      if (next !== '\n') add(c + next, next);
       i += 2;
     } else if (c === '$' || c === '`') {
       const end = expansionEnd(segment, i, false, readBody);
@@ -2185,6 +2185,7 @@ function checkForcePush(
   command: string,
   policy: GuardrailPolicy,
   depth = 0,
+  asWritten = false,
 ): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
   // Joined first, so every rule-2 layer below — the shell-wrapper check, the
@@ -2197,7 +2198,10 @@ function checkForcePush(
   let mentions = 0;
   let recorded = 0;
   let runsGit = false;
-  for (const segment of topLevelCommands(joinLineContinuations(command))) {
+  // A comment or here-document ends where the shell ends it, so a command
+  // holding either is also read once with its continuations as written.
+  if (asWritten && !(/\\\n/.test(command) && /<<|(^|[^$])#/.test(command))) return null;
+  for (const segment of asWritten ? [command] : topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
     // A segment the reader does not understand is asked about when it could involve git.
@@ -3670,7 +3674,7 @@ export function evaluateCommand(
   const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(joinLineContinuations(command)));
   const checks: Array<() => PolicyViolation | null> = [
     () => checkPushToProtected(scanned, branch, policy),
-    () => checkForcePush(scanned, policy),
+    () => checkForcePush(scanned, policy) ?? checkForcePush(command, policy, 0, true),
     () => checkMergeIntoProtected(scanned, branch, policy),
     () => checkDeployCommand(scanned, policy),
     () => checkHistoryRewriteOnProtected(scanned, branch, policy),

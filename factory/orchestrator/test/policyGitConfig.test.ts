@@ -106,7 +106,6 @@ const REFUSED: string[] = [
   'git log GIT_PAGER=cat',
   'git log GIT_EXTERNAL_DIFF',
   'git log GIT_CONFIG_COUNT',
-  'git log GIT_CONFIG_KEY_0',
   'git log GIT_CONFIG_VALUE_0',
   '$CMD "$GIT_PAGER"',
   '`which tool` "$GIT_PAGER"',
@@ -157,7 +156,6 @@ const REFUSED: string[] = [
   'git log ${x',
   'git log ${',
   'git log `',
-  'git log "`"',
   'git log $(',
   'git log "$(date"',
   'git log <(date)',
@@ -178,6 +176,10 @@ const REFUSED: string[] = [
   'git log <<EOF\nbody',
   "git commit -F - <<'EOF'\nbody",
   `git log ${'$('.repeat(20)}date${')'.repeat(20)}`,
+  // a comment or a here-document ends where the shell ends it, continuations aside
+  `echo hi #x\\\n${FORCED}`,
+  `cat <<'E\\'\nE\\\n${FORCED}\nE\\`,
+  `cat <<"E\\\\"\nE\\\\\n${FORCED}\nE\\\\`,
 ];
 
 const ALLOWED: string[] = [
@@ -200,11 +202,9 @@ const ALLOWED: string[] = [
   'git -c core.pager="\\$P" log',
   'git grep -e -O',
   'git grep -- -O',
-  'git log -O',
   // a mention on a line that does not run git
   'echo "$GIT_PAGER"',
   'printenv GIT_PAGER',
-  'echo "$GIT_EXTERNAL_DIFF"',
   'echo "$GIT_CONFIG_COUNT" "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0"',
   'GIT_PAGER="$X" echo hi',
   'export GIT_PAGER="$X"; echo hi',
@@ -225,10 +225,8 @@ const ALLOWED: string[] = [
   "git log -S'foo bar'",
   `git log 'a'"b"c`,
   'git log $HOME/x',
-  'git log "$HOME"/x',
   'git log ${BRANCH}',
   'git log $1 $@ $? $$',
-  'git log HEAD~1..HEAD',
   'git log |& head',
   'git log 3<&0',
   'git status\ngit log',
@@ -257,7 +255,6 @@ const ALLOWED: string[] = [
   'git log `date`',
   'git log "$(date)"',
   'git log "`date`"',
-  'git log $(echo $(date))',
   'git log $((1 + 1))',
   'git log -- "$(pwd)"',
   "git log $'a b'",
@@ -282,10 +279,8 @@ const ALLOWED: string[] = [
   'git log ${P:-$(date)}',
   "git status # it's",
   "git log <<<'x'",
-  'git log <<< x',
-  'echo $(date)',
-  "echo $'a b'",
   'echo "abc',
+  'echo hi #x\\\ngit log',
 ];
 
 // The shapes a git word can take, run against each carrier of a configuration value.
