@@ -246,3 +246,50 @@ describe('error_class migration', () => {
     expect(row.error_class).toBeNull();
   });
 });
+
+describe('error_class edge cases', () => {
+  it.each([
+    ['execution', 'no dot'],
+    ['', 'empty'],
+    ['nogroup.flaky-test', 'unknown group'],
+    ['execution.flaky-test.extra', 'three parts'],
+    ['other.', 'empty class'],
+  ])('refuses malformed or unknown class %j (%s) and writes nothing', async (bad) => {
+    const { sessionId, tip } = await seedSession();
+    await expect(
+      raiseLessonCandidate(
+        {
+          statement: 'A malformed class is refused before anything is logged.',
+          lessonType: 'rule',
+          lessonScope: 'stack-wide',
+          provenanceEventIds: [tip],
+          errorClass: bad,
+        },
+        { sessionId, planVersion: 1, causalParent: tip },
+        { stateDir },
+      ),
+    ).rejects.toThrow();
+    const logged = await readEvents(sessionId, { stateDir });
+    expect(logged.filter((e) => e.record.event_type === 'lesson-candidate-raised')).toHaveLength(0);
+  });
+
+  it('keeps the schema free of an inlined error_class enum and a taxonomy annotation', async () => {
+    const schema = JSON.parse(
+      await readFile(path.join(REPO_ROOT, 'factory/specs/schema/lesson.schema.json'), 'utf8'),
+    ) as { properties: Record<string, Record<string, unknown>> };
+    const prop = schema.properties.error_class;
+    expect(prop).toBeDefined();
+    expect(prop?.type).toBe('string');
+    expect(prop?.enum).toBeUndefined();
+  });
+
+  it('recompiling twice is a fixed point for a classed entry', async () => {
+    const { lessonId } = await raise(
+      'execution.flaky-test',
+      'Recompiling an unchanged store must not move a classed entry.',
+    );
+    const row = await storeRow(lessonId);
+    const first = compileLessons([toCompileInput(row)]);
+    expect(compileLessons([toCompileInput(row)], first)).toBe(first);
+  });
+});
