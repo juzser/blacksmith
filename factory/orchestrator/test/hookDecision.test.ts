@@ -603,6 +603,56 @@ describe('diet rule: foreground sleep (D4 verdict table)', () => {
     expect(dietReason(bash(command))).toBeNull();
   });
 
+  const groupAllow = [
+    '(sleep 30; echo done) &',
+    '{ sleep 30; } &',
+    '{ sleep 30; }&',
+    'while true; do sleep 5; done &',
+    'until test -f x; do sleep 5; done &',
+    'if true; then sleep 30; fi &',
+    'x; (sleep 30; echo done) &',
+    '((sleep 30) &) &',
+    'while true; do { sleep 5; } & done',
+    'x\n(sleep 30\necho done) &',
+  ];
+  it.each(groupAllow)('allows a backgrounded group %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  const groupDeny = [
+    '(sleep 30; echo done)',
+    '{ sleep 30; }',
+    'while true; do sleep 5; done',
+    '(sleep 30); echo x &',
+    '{ sleep 30; }; echo x &',
+    'while true; do sleep 5; done; echo x &',
+    '(sleep 30) && echo x &',
+    '(sleep 30) &&',
+    '(sleep 30) \\&',
+    "(sleep 30) '&'",
+    '(sleep 30) &> /dev/null',
+    '(sleep 30) |& cat',
+    '(sleep 30) >&2',
+    '(sleep 30) 2>&1',
+    '(sleep 30) x &',
+    '(sleep 30) $(echo) &',
+    '((sleep 30) ) ; echo &',
+    '(sleep 30; { echo; } &)',
+    '{ (sleep 30; } &)',
+    'while true; do sleep 5; fi &',
+    'cat <<EOF\nx\nEOF\n(sleep 30)',
+    '(sleep 30) # &',
+    'while a; do sleep 30; while b; do x; done & done',
+    'for i in 1; do sleep 30; done; (echo) &',
+  ];
+  it.each(groupDeny)('still denies the foreground group %j', (command) => {
+    expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep`/);
+  });
+
+  it('keeps a sleep before a backgrounded group in the foreground', () => {
+    expect(dietReason(bash('sleep 30; (echo x) &'))).toContain('30 s');
+  });
+
   it('allows any sleep with run_in_background: true', () => {
     expect(dietReason(bash('sleep 30', { run_in_background: true }))).toBeNull();
     expect(dietReason(bash('sleep 30', { run_in_background: false }))).toMatch(/foreground/);
