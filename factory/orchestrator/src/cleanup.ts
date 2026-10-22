@@ -187,7 +187,11 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     if (named.has(epic)) return `open-epic: ${epic} has events but no epic-closed event`;
     const integration = `${prefix}/${epic}/integration`;
     if (firstMerged(integration, defaultTargets) !== null) return null;
-    return `epic-unrecorded: no events for ${epic} and ${integration} is not landed in ${defaultBranch}`;
+    const landing =
+      defaultBranch === null
+        ? 'no default branch can be determined'
+        : `is not landed in ${defaultBranch}`;
+    return `epic-unrecorded: no events for ${epic} and ${integration} ${landing}`;
   };
 
   /** Rule 5: the heavy lock, when its cwd is inside `dir` and its pid is not dead. */

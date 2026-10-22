@@ -669,6 +669,31 @@ describe('cleanup.ts', () => {
       expect(existsSync(wt)).toBe(true);
     });
 
+    it('names the missing default branch, not "null", in an unrecorded-epic keep reason', async () => {
+      git(projectDir, ['remote', 'remove', 'origin']);
+      git(projectDir, ['branch', '-m', 'main', 'trunk']);
+      git(projectDir, ['branch', 'bs/e2/integration']);
+      const report = await planOf({ events: [] });
+      const reason = item(report, 'bs/e2/integration')?.reason ?? '';
+      expect(reason).toMatch(/^epic-unrecorded/);
+      expect(reason).not.toContain('null');
+      expect(reason).toContain('no default branch can be determined');
+    });
+
+    it('keeps naming the default branch in an unrecorded-epic keep reason when one exists', async () => {
+      git(projectDir, ['branch', 'bs/e2/integration']);
+      git(projectDir, ['checkout', '-q', 'bs/e2/integration']);
+      writeFileSync(path.join(projectDir, 'e2.txt'), 'x');
+      git(projectDir, ['add', 'e2.txt']);
+      git(projectDir, ['commit', '-q', '-m', 'unlanded']);
+      git(projectDir, ['checkout', '-q', 'main']);
+      const report = await planOf({ events: [] });
+      const reason = item(report, 'bs/e2/integration')?.reason ?? '';
+      expect(reason).toBe(
+        'epic-unrecorded: no events for e2 and bs/e2/integration is not landed in main',
+      );
+    });
+
     it('still removes a really merged task when origin/HEAD names the default', async () => {
       const wt = mergedTask('t1');
       git(projectDir, ['checkout', '-q', '-b', 'feature']);
