@@ -57,6 +57,23 @@ describe('escaped findings in other statuses', () => {
     });
   }
 
+  it('leaves uncounted empty for a counted and for a pending finding', async () => {
+    const counted = await effectiveness(scenario('confirmed'), { readTokens: none });
+    expect(counted.escapedDefects.count).toBe(1);
+    expect(counted.escapedDefects.uncounted).toEqual([]);
+    const pending = await effectiveness(scenario(), { readTokens: none });
+    expect(pending.escapedDefects.pending).toBe(1);
+    expect(pending.escapedDefects.uncounted).toEqual([]);
+  });
+
+  it('does not list a waived finding raised before the merge', async () => {
+    const events = scenario('confirmed', 'waived');
+    const [gate, merge, raised, ...rest] = events;
+    const early = [gate, raised, merge, ...rest] as StoredEvent[];
+    const r = await effectiveness(early, { readTokens: none });
+    expect(r.escapedDefects.uncounted).toEqual([]);
+  });
+
   it('keeps a refuted finding in excluded only', async () => {
     const r = await effectiveness(scenario('refuted'), { readTokens: none });
     expect(r.escapedDefects.excluded).toEqual(['w']);
