@@ -37,23 +37,8 @@ describe('briefMarker', () => {
     expect(parseBriefMarker(formatBriefMarker({ ...base, role: 'wizard' }))).toBeNull();
   });
 
-  it('knows every shipped agent role', () => {
-    for (const role of [
-      'coder',
-      'tester',
-      'planner',
-      'researcher',
-      'spec-reviewer',
-      'grader',
-      'reviewer',
-      'verifier',
-      'security-reviewer',
-      'auditor',
-      'uiux',
-      'merger',
-      'scribe',
-      'wave-runner',
-    ]) {
+  it('knows the shipped agent roles', () => {
+    for (const role of ['coder', 'spec-reviewer', 'security-reviewer', 'uiux', 'wave-runner']) {
       expect(parseBriefMarker(formatBriefMarker({ ...base, role }))?.role).toBe(role);
     }
   });

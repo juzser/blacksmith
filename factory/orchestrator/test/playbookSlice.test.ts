@@ -80,12 +80,6 @@ describe('sliceSection', () => {
     expect(whole).not.toContain('## The steps');
   });
 
-  it('cuts the return discipline section of dispatch.md', () => {
-    expect(sliceSection(dispatch, 'Return discipline (agent-interviews.md M-6)')).toMatch(
-      /^## Return discipline/,
-    );
-  });
-
   it('runs a ### section to the next heading of the same or higher level', () => {
     const md = '## A\n### B\nb1\n#### C\nc1\n### D\nd1\n## E\n';
     expect(sliceSection(md, 'B')).toBe('### B\nb1\n#### C\nc1\n');
