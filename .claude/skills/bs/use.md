@@ -30,6 +30,10 @@ in, or from an earlier turn: no line, no binding.
   operator as it stands. It names the file and says no small-change bypass is
   available this turn.
 
+A path to the checkout, written `/bs use ../<project>` or `/bs use ~/<project>`
+(an absolute path works too, named here in words), binds the same way as its
+name, and a project declared only in its own overlay roadmap is known.
+
 ## 3. Changes to the bound project
 
 Every change to the bound project goes through `/bs plan` and `/bs run`.

@@ -176,9 +176,15 @@
 - **Provider keys** (Codex, DeepSeek, any future judge) follow the same rule:
   `crosscheck.yml` references env var names only.
 - **No secrets in outputs.** Agents never echo credential values into logs,
-  the event log, PR bodies, commit messages, screenshots, or chat. The event
-  logger redacts values matching a denylist (key/token/secret/password
-  patterns) before write.
+  the event log, PR bodies, commit messages, screenshots, or chat. The rule
+  rests on the agents and on the scanning gate below: the event logger
+  checks each event against its schema and taxonomy and writes its values as
+  given, without redaction. Masking happens only at fixed points that handle
+  a known credential shape. Git and `gh` errors replace URL userinfo with
+  `***` (`redactCredentials`). An integration check stores each command with
+  URL userinfo and the values of secret-named `NAME=value` assignments and
+  long flags masked (`maskCommandCredentials`). An API judge scrubs its own
+  key from a provider's error body before raising it.
 - **Secret scanning gate.** CI runs a scanner (gitleaks) on every PR; a hit
   blocks merge. A secret that reaches git history is S1: rotate the
   credential immediately, purge history, file a lesson.

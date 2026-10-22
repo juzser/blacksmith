@@ -183,6 +183,20 @@ M-3).
   `bs agents sync`: it rewrites the template's `maxTurns:` line in place,
   a local edit left uncommitted by design, and `--reset` puts back the value
   committed at git HEAD. Still per role, never per task.
+- **Roles that wait keep a 1h prompt cache.** The wave-runner, coder and
+  tester sit idle for minutes between their own calls (test runs, dispatched
+  agents), so their templates set `experimental.cacheTtl: 1h` rather than let
+  the default 5-minute cache expire and be rewritten. Short-burst roles keep
+  the default, because a 1h write costs more than it saves there. The env
+  `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` and the `subagentPromptCacheTtl`
+  setting override the template.
+- **The harness caps concurrency; `bs init` raises it.** Claude Code runs at
+  most 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`) and 10 parallel
+  tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`, undocumented) by default.
+  A plugin cannot ship `env`, so `bs init` writes both into the project's
+  `.claude/settings.local.json`; the global `~/.claude/settings.json` route is
+  optional. See
+  [INSTALL.md](../../INSTALL.md#raise-the-concurrency-caps).
 
 ## dispatch topology (factory-wide, 2026-08-05)
 

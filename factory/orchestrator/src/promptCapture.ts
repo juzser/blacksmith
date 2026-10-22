@@ -6,7 +6,7 @@
  * `bs-prompt-hook --resolve`, so "is this cwd a store" has one answer. The
  * import graph is kept small on purpose: no db layer, no `cli.ts`.
  */
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { readEnv } from './env.js';
 import {
@@ -24,16 +24,16 @@ import {
   resolveWorkRoot,
   roadmapReadPath,
 } from './paths.js';
-import { factoryProjects } from './projects.js';
 import { isHarnessText } from './prompts.js';
 import {
   bindingInput,
   bypassInput,
   bypassRow,
-  knownProjectNames,
-  matchProject,
+  declaredAs,
   newestBinding,
+  overlayRoadmapAt,
   parseUseCommand,
+  resolveUseProject,
 } from './sessionBinding.js';
 import { gitTop, hasEvents, storeRootAt } from './storeRoot.js';
 
@@ -59,31 +59,6 @@ export interface ResolveCaptureInput {
   roadmapPath: string;
   /** The prompt's `/command` token, when it has one (M3 reads it). */
   command?: string;
-}
-
-const realOr = (p: string): string => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-};
-
-/** The checkout's own roadmap, read only after M1 and M2 miss (Q5b). */
-const overlayRoadmapAt = (top: string): string =>
-  path.join(top, '.blacksmith', 'factory', 'specs', 'roadmap.md');
-
-/** The name a roadmap gives the checkout at `top`, or undefined. Never throws. */
-function declaredAs(
-  top: string,
-  roadmapPath: string,
-  roots: readonly string[],
-): string | undefined {
-  const want = realOr(top);
-  const ref = factoryProjects({ roadmapPath, roots }).find(
-    (r) => !r.self && realOr(r.dir) === want,
-  );
-  return ref?.name;
 }
 
 /**
@@ -327,11 +302,21 @@ export async function capturePrompt(
   });
 
   // `/bs use <project>` for a known project binds the session, in the home log only and never by rule M3.
-  const useName = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt)?.name : null;
-  const wanted =
-    typeof useName === 'string'
-      ? matchProject(useName, knownProjectNames({ ...ctx, cwd }))
-      : undefined;
+  const use = mode === 'prompt' && store.rule !== 'M3' ? parseUseCommand(prompt) : null;
+  let wanted: string | undefined;
+  if (use !== null) {
+    try {
+      wanted = resolveUseProject(use.name, {
+        repoRoot: ctx.repoRoot,
+        cwd,
+        env: ctx.env,
+        isClone: ctx.isClone,
+        roadmapPath: ctx.roadmapPath,
+      }).matched;
+    } catch {
+      wanted = undefined;
+    }
+  }
   if (wanted !== undefined) {
     try {
       await appendWithin(

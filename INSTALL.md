@@ -20,6 +20,10 @@ same marketplace: bs-mod is the live HUD, your epic's progress above the
 prompt, and pr-mod lists the repo's open pull requests. Blacksmith runs the
 same without them.
 
+`bs init` also [raises Claude Code's concurrency caps](#raise-the-concurrency-caps)
+for the project, so a wide wave is not throttled. Restart Claude Code
+afterwards.
+
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
 command with an expected result and a failure branch — so the session can
@@ -134,7 +138,7 @@ The command used to be `smith`. `smith` and `smith-run` still work as
 deprecated aliases of `bs` and `bs-run`, each printing one notice to stderr,
 and will be removed in a future release.
 
-**Take `latest`** — `0.5.0`. `0.1.1` was the first release that knew it is a
+**Take `latest`** — `0.5.1`. `0.1.1` was the first release that knew it is a
 package.
 `0.1.0` has no `bs init`, ships no roadmap for `bs new` to read, and
 keeps state inside its own install directory, which the next `npm install`
@@ -184,6 +188,47 @@ declarations about the project, not about your laptop.
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
 against `.blacksmith/factory/policies/stack.yml`. It is the one step of Part 2
 that is yours; the rest of it builds a checkout you do not have.
+
+#### Raise the concurrency caps
+
+Claude Code caps how much one session runs at once: 20 subagents and 10 parallel
+tool calls in a message, by default. A wide `/bs` wave can fan out past both,
+and then the defaults throttle it. Two `env` settings raise them:
+
+- `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` is documented by Claude Code and
+  needs Claude Code v2.1.217 or later. Any positive integer is accepted.
+- `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` is undocumented: it is absent from
+  Claude Code's env-var reference and exists only in the binary, so it can
+  change without notice.
+
+A plugin cannot ship `env` (plugin settings honour only `agent` and
+`subagentStatusLine`), and Claude Code never reads Blacksmith's `.env`.
+
+`bs init` does this for you. It writes the two lines below into the project's
+`.claude/settings.local.json`, adds only what is not already set anywhere
+(Claude Code's environment, the user settings, the project settings, the local
+file), never overwrites or lowers a value, and keeps the file out of git via
+`.git/info/exclude`. Restart Claude Code after `bs init`: a running session
+does not pick the change up. A clone carries the same lines in its tracked
+`.claude/settings.json`.
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "1000",
+    "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY": "1000"
+  }
+}
+```
+
+There is no "unlimited" value; 1000 is a ceiling, not a target, and real
+fan-out stays bounded by the claim graph and the machine.
+
+Optionally, the same lines in the `env` block of `~/.claude/settings.json`
+cover every project at once. That file is outside the project, so under
+[Part 0](#part-0--rules-for-an-agent-running-this-file) propose the exact
+lines and wait for a yes, merge them without replacing the file, and restart
+Claude Code afterwards.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of
@@ -564,6 +609,10 @@ claude --version
 
 Without it, the CLI and the gate still work — you simply cannot dispatch the
 agents that do the work.
+
+A clone already carries the [concurrency caps](#raise-the-concurrency-caps) in
+its tracked `.claude/settings.json`; there is nothing to propose. Restart
+Claude Code if you changed them.
 
 ### Step 7 — Link the `bs` command *(optional)*
 

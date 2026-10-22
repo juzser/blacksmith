@@ -110,10 +110,14 @@ when nothing matches, and names any open finding it could not check at all
 A worker writes its full result to `state/results/<task-id>.json` and returns
 **only** `{status, severity_counts, artifact_path}`. Prose returns are what
 actually drown an orchestrator: a wave of 200 workers costs 200 short lines
-this way, and you re-read the artifact when you need detail. There is **no
-concurrency cap** — fan-out is bounded by the claim graph (`budgets.yml`
-header), and the fix for orchestrator context is splitting the epic across
-sessions, not throttling the wave.
+this way, and you re-read the artifact when you need detail. Blacksmith
+imposes no concurrency cap of its own — fan-out is bounded by the claim graph
+(`budgets.yml` header), and the fix for orchestrator context is splitting the
+epic across sessions, not throttling the wave. Claude Code's harness does cap
+it, at 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`) and 10 parallel
+tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`) by default, unless
+`bs init` raised them; see
+[INSTALL.md](../../../INSTALL.md#raise-the-concurrency-caps).
 
 ## Splitting an epic across sessions (P9-7)
 

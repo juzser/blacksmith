@@ -5,6 +5,8 @@ model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
 maxTurns: 150
+experimental:
+  cacheTtl: 1h
 ---
 
 # Coder

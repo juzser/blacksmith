@@ -162,6 +162,35 @@ describe('plugin payload', () => {
     expect(agents.length).toBeGreaterThanOrEqual(14);
   });
 
+  describe('agent prompt cache TTL', () => {
+    // Roles that sit idle for minutes between their own calls keep a 1h
+    // prompt cache; short-burst roles keep the default, where a 1h write
+    // costs more than it saves. Changing this list is a deliberate edit.
+    const ONE_HOUR_ROLES = ['wave-runner', 'coder', 'tester'];
+
+    function cacheTtlOf(file: string): unknown {
+      const text = readFileSync(path.join(root, 'agents', file), 'utf8');
+      const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (!match?.[1]) throw new Error(`${file} has no frontmatter block`);
+      const fm = parseYaml(match[1]) as { experimental?: { cacheTtl?: unknown } };
+      return fm.experimental?.cacheTtl;
+    }
+
+    for (const role of ONE_HOUR_ROLES) {
+      it(`${role} sets experimental.cacheTtl to the string "1h"`, () => {
+        expect(cacheTtlOf(templateFileFor(role))).toBe('1h');
+      });
+    }
+
+    it('no other bs-* template asks for a 1h cache', () => {
+      const others = readdirSync(path.join(root, 'agents')).filter(
+        (f) => /^bs-.*\.md$/.test(f) && !ONE_HOUR_ROLES.map(templateFileFor).includes(f),
+      );
+      expect(others.length).toBeGreaterThan(0);
+      for (const file of others) expect(cacheTtlOf(file), file).not.toBe('1h');
+    });
+  });
+
   describe('hooks/hooks.json', () => {
     type Group = {
       matcher?: string;
