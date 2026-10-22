@@ -108,7 +108,7 @@ nothing.
 
 - lesson_id: lesson-raised-8c05427c2840
 - agent_role: grader
-- error_class: judgment.false-positive-finding
+- error_class: judgment.missed-finding
 - statement: A check that silently borrows its tools from the inspector is measuring the inspector.
 
 ### lesson-dream-dogfood-demo-rpg-1-40: A judge's output contract fixes where the verdict sits as strictly as...
