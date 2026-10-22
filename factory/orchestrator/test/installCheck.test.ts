@@ -283,6 +283,22 @@ describe('concurrency-caps', () => {
     expect(c.detail).toContain(local);
   });
 
+  it('accepts JSON numbers and rejects other JSON types in a settings env block', () => {
+    const num = JSON.stringify({ env: { [SUB]: 64, [TOOL]: 32 } });
+    expect(caps_({ env: {}, readFile: files({ [user]: num }) }).status).toBe('ok');
+    const bool = JSON.stringify({ env: { [SUB]: true, [TOOL]: 32 } });
+    const c = caps_({ env: {}, readFile: files({ [user]: bool }) });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(SUB);
+  });
+
+  it('one variable low is enough to be unknown, and names only that one', () => {
+    const c = caps_({ env: caps('64', '10') });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(TOOL);
+    expect(c.detail).not.toContain(`${SUB} is`);
+  });
+
   it('echoes only the two variables it reads', () => {
     const c = caps_({
       env: {},
