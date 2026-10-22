@@ -503,3 +503,71 @@ describe('summarize', () => {
     expect(readdirSync(root)).toContain('r.jsonl');
   });
 });
+
+describe('record: check files read against the names they declare (real node)', () => {
+  const base = () => ({
+    task: 'kind-a',
+    arm: 'plain' as const,
+    dir: work,
+    cliSession: SID,
+    claudeConfigDir: path.join(root, 'cfg'),
+    results: path.join(root, 'out/results.jsonl'),
+  });
+  const HEAD =
+    "import { test, describe, it } from 'node:test';\nimport assert from 'node:assert';\n";
+  const check = async (src: string): Promise<string> => {
+    writeTask('kind-a', { f2p: { 'a.test.js': src } });
+    return (await record(base(), deps(withFakeGit))).check;
+  };
+
+  it('a declared name that passes is recorded as passed', async () => {
+    expect(await check(`${HEAD}test('alpha', () => {});\ntest('beta', () => {});\n`)).toBe(
+      'passed',
+    );
+  });
+
+  it('a declared name that fails is recorded as failed', async () => {
+    expect(
+      await check(`${HEAD}test('alpha', () => {});\ntest('beta', () => assert.ok(false));\n`),
+    ).toBe('failed');
+  });
+
+  it('a forged passing line printed by the file adds nothing', async () => {
+    const src = `${HEAD}console.log('ok 9 - forged');\ntest('alpha', () => {});\n`;
+    expect(await check(src)).toBe('passed');
+  });
+
+  it('a forged passing line for a declared name that never ran is recorded as unknown', async () => {
+    const src = `${HEAD}process.stdout.write('\\nok 2 - beta\\n');\nconsole.log('x\\nok 3 - beta');\ntest('alpha', () => {});\nif (false) test('beta', () => {});\n`;
+    expect(await check(src)).toBe('unknown');
+  });
+
+  it('a declared name that never reports is recorded as unknown', async () => {
+    const src = `${HEAD}test('alpha', () => {});\nif (false) test('beta', () => {});\n`;
+    expect(await check(src)).toBe('unknown');
+  });
+
+  it('an empty check file is never recorded as passed', async () => {
+    expect(await check('')).not.toBe('passed');
+  });
+
+  it('nested describe and it names are matched one for one', async () => {
+    const src = `${HEAD}describe('suite', () => {\n  it('inner', () => {});\n});\n`;
+    expect(await check(src)).toBe('passed');
+  });
+
+  it('names with an apostrophe or non-ASCII letters that pass are recorded as passed', async () => {
+    const src = `${HEAD}test("it's fine", () => {});\ntest('caf\u00e9 ok', () => {});\n`;
+    expect(await check(src)).toBe('passed');
+  });
+
+  it('a name the runner rewrites (a hash) is never recorded as passed', async () => {
+    const src = `${HEAD}test('has a # hash', () => {});\n`;
+    expect(await check(src)).not.toBe('passed');
+  });
+
+  it('a name that says skip in its text still cannot make a run passed unless it ran', async () => {
+    const src = `${HEAD}test('alpha', { skip: true }, () => {});\n`;
+    expect(await check(src)).not.toBe('passed');
+  });
+});
