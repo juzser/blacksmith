@@ -1183,7 +1183,20 @@ function joinLineContinuations(command: string): string {
   const joinEvery = (text: string): string => {
     let out = '';
     let k = 0;
+    // A quoted-delimiter here-document keeps its body literal, so its body lines are copied as written.
+    const pending: HereDoc[] = [];
     while (k < text.length) {
+      const atNewline = text[k] === '\n' && pending.length > 0;
+      if (atNewline && !pending.every((doc) => doc.quoted)) pending.length = 0;
+      else if (atNewline || text.startsWith('<<', k)) {
+        const next = hereDocStep(text, k, pending, []);
+        if (next === -1) return out + text.slice(k);
+        if (next !== k) {
+          out += text.slice(k, next);
+          k = next;
+          continue;
+        }
+      }
       if (text[k] === '\\') {
         if (text[k + 1] !== '\n') out += text.slice(k, k + 2);
         k += 2;
@@ -2033,6 +2046,8 @@ const GIT_CONFIG_ENV_NAMES =
 const GIT_CONFIG_ENV_NAME_RE = new RegExp(`^(?:${GIT_CONFIG_ENV_NAMES})$`);
 /** Any mention of a configuration variable in dequoted text. */
 const GIT_CONFIG_ENV_MENTION_RE = new RegExp(`\\b(?:${GIT_CONFIG_ENV_NAMES})\\b`, 'g');
+/** The key under which a declared variable name that cannot be read statically is recorded. */
+const COMPUTED_VARIABLE_NAME = ' computed variable name';
 const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
 
 /** Builtins whose following words name variables they set, like `export`. */
@@ -2079,7 +2094,9 @@ function gitWordIndexes(words: readonly DequotedWord[]): number[] {
 /** Whether any configuration variable the line has set holds a value that cannot be read statically. */
 function hasUnreadableConfigValue(env: ReadonlyMap<string, EnvValue>): boolean {
   for (const [name, value] of env) {
-    if (value === null && GIT_CONFIG_ENV_NAME_RE.test(name)) return true;
+    if (value === null && (GIT_CONFIG_ENV_NAME_RE.test(name) || name === COMPUTED_VARIABLE_NAME)) {
+      return true;
+    }
   }
   return false;
 }
@@ -2096,8 +2113,24 @@ function readAssignments(
   leadingOnly: boolean,
 ): number {
   let afterExport = false;
+  let namesFollow = false;
+  let inEnv = false;
+  let isPrintf = false;
+  let previous = '';
   let recorded = 0;
   for (const word of words) {
+    // A word that names the variable it sets, with a parameter or substitution in the name, cannot be read.
+    const nameField = word.raw.split('=')[0] ?? '';
+    const sets =
+      namesFollow || (isPrintf && previous === '-v') || (inEnv && word.raw.includes('='));
+    if (/^\d*[<>&]/.test(word.text)) namesFollow = false;
+    if (sets && !word.text.startsWith('-') && hasUnreadableShellForm(nameField)) {
+      env.set(COMPUTED_VARIABLE_NAME, null);
+    }
+    previous = word.text;
+    if (word.text === 'printf') isPrintf = true;
+    if (word.text === 'env') inEnv = true;
+    if (VARIABLE_DECLARING_BUILTIN_RE.test(word.text) || word.text === 'read') namesFollow = true;
     const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1] ?? null;
     const bareName = afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text) ? word.text : null;
     if (name !== null) {
@@ -2106,7 +2139,7 @@ function readAssignments(
       afterExport = true;
     } else if (bareName !== null) {
       env.set(bareName, null);
-    } else if (leadingOnly && word.text !== 'env' && !afterExport) {
+    } else if (leadingOnly && word.text !== 'env' && !afterExport && !namesFollow && !isPrintf) {
       break;
     }
     if (GIT_CONFIG_ENV_NAME_RE.test(name ?? bareName ?? '')) recorded += 1;

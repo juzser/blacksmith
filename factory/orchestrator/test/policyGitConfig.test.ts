@@ -178,6 +178,18 @@ const REFUSED: string[] = [
   // every git word of a one-segment line has its configuration values read
   `git status; git -c core.pager='${FORCED_ESCAPED}' log # n`,
   `cat <<EOF\nx\nEOF\ngit status; git -c core.pager='${FORCED_ESCAPED}' log`,
+  // a variable name holding a parameter or substitution cannot be read, on a line that runs git
+  `export \${X}_DIFF='${FORCED_ESCAPED}'; git diff`,
+  `declare -x \${X}_DIFF='${FORCED_ESCAPED}'; git diff`,
+  `readonly \${X}_DIFF='${FORCED_ESCAPED}'; git diff`,
+  `export -- \${X}_DIFF='${FORCED_ESCAPED}'; git diff`,
+  `printf -v \${X}_DIFF %s '${FORCED_ESCAPED}'; export \${X}_DIFF; git diff`,
+  `read \${X}_DIFF <<< '${FORCED_ESCAPED}'; export \${X}_DIFF; git diff`,
+  `env \${X}_DIFF='${FORCED_ESCAPED}' git diff`,
+  `export "$(echo NAME-half)_DIFF=${FORCED_ESCAPED}"; git diff`,
+  `export GIT_PA\${E}GER='${FORCED_ESCAPED}'; git log`,
+  `export GIT_PA$(echo)GER='${FORCED_ESCAPED}'; git log`,
+  'export $NAME; git log',
 ];
 
 const ALLOWED: string[] = [
@@ -276,6 +288,19 @@ const ALLOWED: string[] = [
   'echo hi #x\\\ngit log',
   'git commit -m "abc \\\ndef #3"',
   'git log --format="%h \\\n%s" # x',
+  // a quoted here-document delimiter keeps its body literal, a final backslash included
+  "cat <<'EOF' > f\na \\\nEOF\ngit add f",
+  'cat <<"EOF" > f\na \\\nEOF\ngit add f',
+  'cat <<\\EOF > f\na \\\nEOF\ngit add f',
+  // a declared name that is a plain literal, or a computed name on a line that runs no git
+  'export FOO=bar; git log',
+  'export FOO="$BAR"; git log',
+  'declare -x FOO="$(date)"; git log',
+  'read -r line; git log',
+  'printf -v out %s "$X"; git log',
+  'env FOO="$X" git log',
+  'export ${X}_DIFF=1; echo hi',
+  'export $NAME; echo hi',
 ];
 
 // The shapes a git word can take, run against each carrier of a configuration value.
