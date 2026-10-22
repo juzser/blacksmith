@@ -493,3 +493,39 @@ describe('a task the log is done writing to is not a task the wave is done with'
     expect(result.wave).toEqual([]);
   });
 });
+
+describe('computeNextWave — rolling admission (inFlight)', () => {
+  it("admits B while C is in flight once B's dependency is done", () => {
+    const plan = planOf(
+      [
+        { id: 'a', claims: ['src/a/**'], status: 'completed' },
+        { id: 'b', claims: ['src/b/**'] },
+        { id: 'c', claims: ['src/c/**'] },
+      ],
+      [edge('b', 'a')],
+    );
+    const result = computeNextWave({ plan, policy: POLICY, inFlight: new Set(['c']) });
+    expect(result.wave).toEqual(['b']);
+    expect(result.occupied).toEqual(['c']);
+  });
+
+  it('keeps B waiting while its dependency is itself in flight', () => {
+    const plan = planOf(
+      [
+        { id: 'a', claims: ['src/a/**'] },
+        { id: 'b', claims: ['src/b/**'] },
+      ],
+      [edge('b', 'a')],
+    );
+    const result = computeNextWave({ plan, policy: POLICY, inFlight: new Set(['a']) });
+    expect(result.wave).toEqual([]);
+    expect(result.deferred).toMatchObject([{ taskId: 'b', reason: 'dependency-pending' }]);
+  });
+
+  it("gives today's answer when inFlight is absent or empty", () => {
+    const plan = planOf([{ id: 'a', claims: ['src/a/**'] }]);
+    expect(computeNextWave({ plan, policy: POLICY })).toEqual(
+      computeNextWave({ plan, policy: POLICY, inFlight: new Set() }),
+    );
+  });
+});
