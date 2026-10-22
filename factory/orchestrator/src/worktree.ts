@@ -38,9 +38,10 @@ export function taskBranchExists(projectDir: string, epic: string, taskId: strin
 /**
  * Best-effort default-branch detection: origin/HEAD symbolic ref first (the
  * normal case after a clone), then whatever branch is currently checked out,
- * then the conventional main/master names.
+ * then the conventional main/master names. Exported for cleanup.ts (epic
+ * bs-optimize criterion 14).
  */
-function detectDefaultBranch(projectDir: string): string {
+export function detectDefaultBranch(projectDir: string): string {
   try {
     const ref = git(projectDir, ['symbolic-ref', 'refs/remotes/origin/HEAD']);
     const name = ref.replace(/^refs\/remotes\/origin\//, '');
@@ -285,29 +286,54 @@ export interface StaleWorktree {
   taskId: string;
 }
 
-interface PorcelainEntry {
+/** One block of `git worktree list --porcelain`. */
+export interface PorcelainEntry {
   worktree: string;
   branch: string | null;
+  /** A `locked` line, bare or with a reason; the reason is free text. */
+  locked: boolean;
+  lockedReason: string | null;
+  detached: boolean;
+  /** A `prunable` line, bare or with a reason: `git worktree prune` owns the entry. */
+  prunable: boolean;
+  prunableReason: string | null;
 }
 
-function parseWorktreePorcelain(output: string): PorcelainEntry[] {
+/**
+ * Parse `git worktree list --porcelain`, including the `locked`, `detached`
+ * and `prunable` lines. Exported for cleanup.ts (epic bs-optimize criterion 14).
+ */
+export function parseWorktreePorcelain(output: string): PorcelainEntry[] {
   const entries: PorcelainEntry[] = [];
-  let current: Partial<PorcelainEntry> | null = null;
+  let entry: PorcelainEntry | null = null;
 
   for (const line of output.split('\n')) {
     if (line.startsWith('worktree ')) {
-      if (current?.worktree)
-        entries.push({ worktree: current.worktree, branch: current.branch ?? null });
-      current = { worktree: line.slice('worktree '.length), branch: null };
-    } else if (line.startsWith('branch ') && current) {
-      current.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
-    } else if (line === '' && current?.worktree) {
-      entries.push({ worktree: current.worktree, branch: current.branch ?? null });
-      current = null;
+      if (entry) entries.push(entry);
+      entry = {
+        worktree: line.slice('worktree '.length),
+        branch: null,
+        locked: false,
+        lockedReason: null,
+        detached: false,
+        prunable: false,
+        prunableReason: null,
+      };
+    } else if (entry === null) {
+      // text before the first block
+    } else if (line.startsWith('branch ')) {
+      entry.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
+    } else if (line === 'detached') {
+      entry.detached = true;
+    } else if (line === 'locked' || line.startsWith('locked ')) {
+      entry.locked = true;
+      entry.lockedReason = line.slice('locked'.length).trim() || null;
+    } else if (line === 'prunable' || line.startsWith('prunable ')) {
+      entry.prunable = true;
+      entry.prunableReason = line.slice('prunable'.length).trim() || null;
     }
   }
-  if (current?.worktree)
-    entries.push({ worktree: current.worktree, branch: current.branch ?? null });
+  if (entry) entries.push(entry);
 
   return entries;
 }
