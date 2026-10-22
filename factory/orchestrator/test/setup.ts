@@ -7,6 +7,10 @@
 // ordinary failures. That is precisely how D-47 turned a wrong interpreter
 // into a day of diagnosing the wrong subsystem. Partial support is the trap;
 // refusing up front is the fix.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterAll } from 'vitest';
 import { assertRuntimeSupported } from '../src/runtime.js';
 
 assertRuntimeSupported();
@@ -32,3 +36,14 @@ process.env.SMITH_CROSSCHECK_OFFLINE = '1';
 // session, and a test about an unstamped log would pass or fail by where it
 // was launched from. Tests that want the stamp set it themselves.
 delete process.env.CLAUDE_CODE_SESSION_ID;
+
+// The heavy-test lock is per machine, so a gate another session holds would
+// make every test that runs a `test`-named check through `run` wait on it.
+// Each test file gets its own lock dir, and a token inherited from a gate
+// running this suite is dropped so nothing re-enters that outer lock.
+const heavyLockDir = mkdtempSync(path.join(tmpdir(), 'bs-heavy-lock-'));
+process.env.BS_HEAVY_LOCK_DIR = heavyLockDir;
+delete process.env.BS_HEAVY_LOCK_TOKEN;
+afterAll(() => {
+  rmSync(heavyLockDir, { recursive: true, force: true });
+});

@@ -7,9 +7,10 @@ import { SmithError } from './errors.js';
 import { type EventOpts, validateEventEnvelope } from './events.js';
 import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
+import { type HeavyLockOptions, withHeavyLock } from './heavyLock.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
-import { projectCommandEnv } from './testgate.js';
+import { heavyChildEnv } from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
 import { epicBranchPrefix, integrationBranchName } from './worktree.js';
 
@@ -141,6 +142,11 @@ export interface StepOptions {
    * nice-to-have. `queue run` always passes it.
    */
   events?: EventOpts & { ctx: TaskEventContext };
+  /**
+   * Lock knobs for tests (epic bs-optimize criterion 10): `queue run` passes
+   * none, so the suite waits on the real machine lock with the defaults.
+   */
+  heavyLock?: Pick<HeavyLockOptions, 'lockDir' | 'pollMs' | 'maxWaitMs' | 'isPidAlive'>;
 }
 
 /**
@@ -313,7 +319,7 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
   if (early) return early;
 
   const plan = planTestRun(task.worktreeDir, opts);
-  const testOutcome = runTestCmd(plan.cmd, task.worktreeDir);
+  const testOutcome = await runTestCmd(plan.cmd, task.worktreeDir, `queue-${task.taskId}`, opts);
   if (!testOutcome.passed) {
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
     await logBlocked(task.taskId, 'execution.test-failure', outputTail);
@@ -590,7 +596,12 @@ async function attemptCandidate(
   runGit(projectDir, ['worktree', 'add', '--detach', worktreeDir, candidate]);
   let testOutcome: { passed: boolean; output: string };
   try {
-    testOutcome = runTestCmd(opts.testCmd, worktreeDir);
+    testOutcome = await runTestCmd(
+      opts.testCmd,
+      worktreeDir,
+      `queue-batch-${(readyTasks[0] as QueueTask).taskId}`,
+      opts,
+    );
   } finally {
     // Always removed, including on error — this worktree exists only to run
     // one suite once and has no meaning once that suite has an answer.
@@ -1005,19 +1016,35 @@ function planTestRun(
   }
 }
 
-function runTestCmd(testCmd: string, cwd: string): { passed: boolean; output: string } {
-  try {
-    const output = execFileSync(testCmd, {
-      cwd,
-      shell: true,
-      encoding: 'utf8',
-      stdio: 'pipe',
-      env: projectCommandEnv(process.env),
-    });
-    return { passed: true, output };
-  } catch (err) {
-    const e = err as { stdout?: string; stderr?: string; message: string };
-    const output = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
-    return { passed: false, output };
-  }
+/**
+ * Run the suite under the machine-wide heavy lock (epic bs-optimize
+ * criterion 10). A `heavy.wait-timeout` rejection is deliberately not caught
+ * here: it is not a test failure and must propagate out of `step` /
+ * `batchStep`.
+ */
+export async function runTestCmd(
+  testCmd: string,
+  cwd: string,
+  label: string,
+  opts: Pick<StepOptions, 'heavyLock'> = {},
+): Promise<{ passed: boolean; output: string }> {
+  return withHeavyLock(
+    (lease) => {
+      try {
+        const output = execFileSync(testCmd, {
+          cwd,
+          shell: true,
+          encoding: 'utf8',
+          stdio: 'pipe',
+          env: heavyChildEnv(process.env, lease),
+        });
+        return { passed: true, output };
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string; message: string };
+        const output = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
+        return { passed: false, output };
+      }
+    },
+    { ...opts.heavyLock, label, cwd, env: process.env },
+  );
 }
