@@ -63,7 +63,7 @@ function expectAskInTime(env: NodeJS.ProcessEnv, pathValue: string): void {
 }
 
 describe('plugin-policy.sh limit override value', () => {
-  for (const value of ['.', '1.2.3', '-1', '1.', '.5']) {
+  for (const value of ['.', '1.2.3', '-1', '1.', '.5', '', '20; echo x']) {
     it(`the shim always answers in time: the override ${JSON.stringify(value)} uses the default`, () => {
       expectAskInTime({ BS_PLUGIN_GUARD_WATCHDOG: value }, `${NODE_DIR}:${SYS_BIN}`);
     });
