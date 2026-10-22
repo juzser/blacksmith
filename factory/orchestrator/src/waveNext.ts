@@ -36,6 +36,7 @@ import {
 } from './claims.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { livePlanTasks, type PlanFile, type TaskSpecRecord } from './plan.js';
+import { taskIdsMatch } from './taskId.js';
 import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
 
 /** The two statuses that mean "nothing has been dispatched for this yet". */
@@ -81,6 +82,13 @@ export interface NextWaveInput {
    * plan file — the event log. Overrides `task_status` where it has an entry.
    */
   statusById?: ReadonlyMap<string, string>;
+  /**
+   * Task ids the event log says are admitted and unfinished (`inFlightTasks`).
+   * They are occupied whatever `task_status` the plan file carries, because
+   * `plan ingest` resets a running task to `todo`. Absent means today's
+   * behaviour (bs-optimize epic criterion 9).
+   */
+  inFlight?: ReadonlySet<string>;
 }
 
 export interface NextWaveResult {
@@ -188,6 +196,11 @@ function describeCoupling(taskId: string, blocker: string, coupling: Coupling): 
         `and is already scheduled, so this one follows, or ${taskId} promises the file in keeps_exports and both run now.`;
 }
 
+function isInFlight(id: string, inFlight: ReadonlySet<string>): boolean {
+  for (const held of inFlight) if (taskIdsMatch(held, id)) return true;
+  return false;
+}
+
 export function computeNextWave(input: NextWaveInput): NextWaveResult {
   const { plan, policy } = input;
   const crossings = input.crossings ?? [];
@@ -201,6 +214,7 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
   for (const record of livePlanTasks(plan)) {
     const id = record.task_id;
     const status = input.statusById?.get(id) ?? String(record.task_status);
+    const running = input.inFlight !== undefined && isInFlight(id, input.inFlight);
     // *Done* here is the narrow question — the work ended well, so the
     // worktree is free. Its neighbour in taskStatus.ts, TERMINAL_TASK_STATUSES,
     // answers a different one — which rows the log refuses to overwrite — and
@@ -211,14 +225,14 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
     // both answers moved to the module that owns the dimension.
     // (`superseded` is in neither conversation: livePlanTasks drops an id
     // whose every record is superseded, so one never reaches this line.)
-    if (TERMINAL_OK_TASK_STATUSES.has(status)) {
+    if (!running && TERMINAL_OK_TASK_STATUSES.has(status)) {
       done.push(id);
       continue;
     }
     // Past this door claims are a real string[], for a candidate and for a
     // task merely holding ground — the wave is unanswerable either way.
     const task = readClaimList(proposedFrom(record));
-    if (CANDIDATE_TASK_STATUSES.has(status)) {
+    if (!running && CANDIDATE_TASK_STATUSES.has(status)) {
       candidates.push(task);
     } else {
       occupied.push(id);
