@@ -985,7 +985,6 @@ export function renderLessonBlock(
   role: string,
   scopes: readonly string[],
   lessons: readonly LessonRule[],
-  trailer = '',
 ): string {
   const header =
     `Compiled lessons for this dispatch (role: ${flatten(role)}; scopes: ${scopes.map(flatten).join(', ')}). ` +
@@ -996,14 +995,14 @@ export function renderLessonBlock(
     lessons.length === 0
       ? '_No approved lesson matches this dispatch._'
       : lessons.map(renderLessonLine).join('\n');
-  return [
-    LESSON_BLOCK_BEGIN,
-    header,
-    '',
-    body,
-    ...(trailer ? [trailer] : []),
-    LESSON_BLOCK_END,
-  ].join('\n');
+  return [LESSON_BLOCK_BEGIN, header, '', body, LESSON_BLOCK_END].join('\n');
+}
+
+/** Insert `trailer` on the line before the block's end marker; no trailer, no change. */
+function withTrailer(block: string, trailer: string): string {
+  if (!trailer) return block;
+  const at = block.lastIndexOf(LESSON_BLOCK_END);
+  return `${block.slice(0, at)}${trailer}\n${block.slice(at)}`;
 }
 
 /**
@@ -1190,7 +1189,7 @@ export function lessonsForDispatch(
     scopes,
     ...(opts.full || !filtered ? { lessons: selected } : {}),
     withheld,
-    text: renderLessonBlock(role, scopes, selected, trailer),
+    text: withTrailer(renderLessonBlock(role, scopes, selected), trailer),
     warnings,
   };
 }

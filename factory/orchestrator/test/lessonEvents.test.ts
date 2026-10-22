@@ -64,6 +64,29 @@ describe('readRecurrenceEvents', () => {
     ]);
   });
 
+  it('skips a listed session file that is gone by stat time and keeps reading the rest', async () => {
+    session('gone', [line('e1/a', '2026-10-20T00:00:00.000Z')]);
+    session('kept', [line('e1/b', '2026-10-20T00:00:00.000Z')]);
+    const stat = (file: string) => {
+      if (file.endsWith('gone.jsonl')) {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }
+      return statSync(file);
+    };
+    const events = await readRecurrenceEvents(dir, WINDOW, { stat });
+    expect(events.map((e) => (e.record.payload as { task_ref: string }).task_ref)).toEqual([
+      'e1/b',
+    ]);
+  });
+
+  it('rethrows a stat error that is not ENOENT', async () => {
+    session('a', [line('e1/a', '2026-10-20T00:00:00.000Z')]);
+    const stat = () => {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    };
+    await expect(readRecurrenceEvents(dir, WINDOW, { stat })).rejects.toThrow('EACCES');
+  });
+
   it('stats once per session file and reads once per in-window file', async () => {
     session('a', [], 1);
     session('b', [], 2);

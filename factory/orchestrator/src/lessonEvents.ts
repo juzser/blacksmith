@@ -19,7 +19,7 @@ export interface RecurrenceReaders {
  * A session file whose mtime is older than the window is never opened: every
  * `ts` is stamped at write time, so the file's mtime is never earlier than its
  * newest event (epic-spec D2). One `stat` per file, one read per in-window
- * file. A missing dir reads as [].
+ * file. A missing dir reads as []; a file that vanishes after listing is skipped.
  */
 export async function readRecurrenceEvents(
   stateDir: string,
@@ -31,7 +31,15 @@ export async function readRecurrenceEvents(
   const cutoff = now.getTime() - windowDays * DAY_MS;
   const kept: StoredEvent[] = [];
   for (const sessionId of listSessionIds(stateDir)) {
-    if (stat(path.join(stateDir, `${sessionId}.jsonl`)).mtimeMs < cutoff) continue;
+    let mtimeMs: number;
+    try {
+      mtimeMs = stat(path.join(stateDir, `${sessionId}.jsonl`)).mtimeMs;
+    } catch (err) {
+      // Listed, then gone before the stat: nothing to read from it.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
+    if (mtimeMs < cutoff) continue;
     for (const event of await read(sessionId, { stateDir })) {
       if (event.record.event_type === 'error-logged' && Date.parse(event.record.ts) >= cutoff) {
         kept.push(event);
