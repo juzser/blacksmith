@@ -173,17 +173,36 @@ export interface ClaudeCapsReport {
   readonly restartNeeded: boolean;
 }
 
-/** A JSON object read from disk, or undefined when it is absent or not one. */
-function readJsonObject(file: string): Record<string, unknown> | undefined {
+/** A JSON object parsed from text, or undefined when it is not one. */
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    const parsed: unknown = JSON.parse(text);
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
   } catch {
-    // Absent or malformed: the caller decides what that means.
+    // Malformed: the caller decides what that means.
   }
   return undefined;
+}
+
+/** A JSON object read from disk, or undefined when it is absent or not one. */
+function readJsonObject(file: string): Record<string, unknown> | undefined {
+  try {
+    return parseJsonObject(readFileSync(file, 'utf8'));
+  } catch {
+    return undefined; // Absent: the caller decides what that means.
+  }
+}
+
+/**
+ * The `env` block of a settings file's text, or undefined when the text is not
+ * a JSON object. Serves epic criterion 11 (the doctor's concurrency-caps
+ * check) with the same parser `bs init` uses.
+ */
+export function parseSettingsEnv(text: string): Record<string, unknown> | undefined {
+  const settings = parseJsonObject(text);
+  return settings === undefined ? undefined : envBlock(settings);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -12,7 +12,9 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
+import { CONCURRENCY_CAPS, defaultUserSettingsPath, parseSettingsEnv } from './workroot.js';
 
 export type CheckStatus = 'ok' | 'missing' | 'unknown';
 
@@ -38,6 +40,11 @@ export interface DoctorDeps {
   enginesNode: string | undefined;
   bsVersion: string | undefined;
   root: string;
+  /** The process environment. */
+  env: Readonly<Record<string, string | undefined>>;
+  home: string;
+  /** Reads a file as text; throws when it is absent. */
+  readFile: (file: string) => string;
   exists: (file: string) => boolean;
   run: (cmd: string, args: string[], timeoutMs: number) => RunResult;
 }
@@ -51,6 +58,10 @@ export const PLUGIN_INSTALL_COMMANDS = [
 
 /** Short on purpose: doctor must never hang on a stuck CLI. */
 const TIMEOUT_MS = 5000;
+
+/** Claude Code's own defaults; a cap must be above these to have been raised. */
+const DEFAULT_SUBAGENT_CAP = 20;
+const DEFAULT_TOOL_CALL_CAP = 10;
 
 const ok = (id: string, detail: string): Check => ({ id, status: 'ok', detail, fix: '' });
 
@@ -134,6 +145,71 @@ function dashboardCheck(deps: DoctorDeps): Check {
   };
 }
 
+/**
+ * Epic criterion 11: both concurrency caps are set above the harness defaults.
+ * Per variable the first source wins: process env, project settings.local.json,
+ * project settings.json, user settings. Reads files only.
+ */
+function capsCheck(deps: DoctorDeps): Check {
+  const fix =
+    'Re-run bs init in the project and restart Claude Code (it writes the caps); ' +
+    'or set both in the user settings env block (INSTALL.md "Raise the concurrency caps")';
+  const projectDir = process.cwd();
+  const files = [
+    path.join(projectDir, '.claude', 'settings.local.json'),
+    path.join(projectDir, '.claude', 'settings.json'),
+    defaultUserSettingsPath(deps.env, deps.home),
+  ];
+  const notes: string[] = [];
+  const blocks = files.map((file) => {
+    let text: string;
+    try {
+      text = deps.readFile(file);
+    } catch {
+      return undefined; // Absent: nothing to say.
+    }
+    const block = parseSettingsEnv(text);
+    if (block === undefined) notes.push(`skipped invalid JSON in ${file}`);
+    return block === undefined ? undefined : { file, block };
+  });
+  const problems: string[] = [];
+  const seen: string[] = [];
+  for (const name of Object.keys(CONCURRENCY_CAPS)) {
+    const floor = name.includes('SUBAGENTS') ? DEFAULT_SUBAGENT_CAP : DEFAULT_TOOL_CALL_CAP;
+    let value: unknown = deps.env[name];
+    let source = 'process env';
+    if (value === undefined) {
+      for (const b of blocks) {
+        if (b !== undefined && name in b.block) {
+          value = b.block[name];
+          source = b.file;
+          break;
+        }
+      }
+    }
+    if (value === undefined) {
+      problems.push(`${name} is not set`);
+      continue;
+    }
+    const text = typeof value === 'number' ? String(value) : value;
+    if (typeof text !== 'string' || !/^[0-9]+$/.test(text)) {
+      problems.push(`${name} is ${JSON.stringify(value)} (not an integer) in ${source}`);
+    } else if (Number(text) <= floor) {
+      problems.push(`${name} is ${text} in ${source} (needs above ${floor})`);
+    } else {
+      seen.push(`${name}=${text} (${source})`);
+    }
+  }
+  const tail = notes.length > 0 ? `; ${notes.join('; ')}` : '';
+  if (problems.length === 0) return ok('concurrency-caps', `${seen.join(', ')}${tail}`);
+  return {
+    id: 'concurrency-caps',
+    status: 'unknown',
+    detail: `${problems.join('; ')}${tail}`,
+    fix,
+  };
+}
+
 export function runChecks(deps: DoctorDeps): Check[] {
   return [
     nodeCheck(deps),
@@ -150,6 +226,7 @@ export function runChecks(deps: DoctorDeps): Check[] {
     claudeCheck(deps),
     pluginCheck(deps),
     dashboardCheck(deps),
+    capsCheck(deps),
   ];
 }
 
@@ -179,6 +256,9 @@ export function realDeps(root: string): DoctorDeps {
     enginesNode: pkg.engines?.node,
     bsVersion: pkg.version,
     root,
+    env: process.env,
+    home: homedir(),
+    readFile: (file) => readFileSync(file, 'utf8'),
     exists: existsSync,
     run: (cmd, args, timeoutMs) => {
       const res = spawnSync(cmd, args, { encoding: 'utf8', timeout: timeoutMs });
