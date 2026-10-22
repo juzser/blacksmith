@@ -1875,13 +1875,9 @@ function checkForcePushSubcommandWord(
 }
 
 const NOT_UNDERSTOOD_REASON =
-  'this git command uses shell syntax the guard does not read (locale quoting, process substitution, a here-string, an unterminated quote or here-document, a nesting too deep, a continuation or an odd redirection) — write it out plainly';
+  'this git command uses shell syntax the guard does not read (locale quoting, process substitution, an unterminated quote, expansion or here-document, a nesting too deep, a continuation or an odd redirection) — write it out plainly';
 
-/**
- * The end of the expansion that starts at `start` (a `$` or a backtick), or -1
- * when it is not one the reader models. The body of a substitution is handed
- * to `readBody`, which answers whether it could be read.
- */
+/** The end of the expansion starting at `start` (`$` or a backtick), or -1 when the reader does not model it. */
 function expansionEnd(
   text: string,
   start: number,
@@ -1897,28 +1893,40 @@ function expansionEnd(
   if (next === "'") return quoted ? -1 : findAnsiCQuoteEnd(text, start + 2) + 1 || -1;
   if (next === '"' && !quoted) return -1;
   if (next !== '{') return start + 1;
-  const close = text.indexOf('}', start);
-  return close === -1 || !/^[\w#?@*!$-]*$/.test(text.slice(start + 2, close)) ? -1 : close + 1;
+  // `${...}` with an operator or a subscript: read through to the closing brace.
+  let inDouble = false;
+  for (let i = start + 2; i < text.length; ) {
+    const c = text.charAt(i);
+    if (c === '}' && !inDouble) return i > start + 2 ? i + 1 : -1;
+    const step =
+      c === '$' || c === '`'
+        ? expansionEnd(text, i, true, readBody)
+        : c === "'" && !inDouble
+          ? (skipQuotedSpan(text, i) ?? -1)
+          : i + (c === '\\' ? 2 : 1);
+    if (step === -1) return -1;
+    inDouble = c === '"' ? !inDouble : inDouble;
+    i = step;
+  }
+  return -1;
 }
 
 /**
- * The one reader of a segment's shell words. It models plain text, single
- * quotes, double quotes, one-character backslash escapes, blanks, the
- * separators the rule splits on, ANSI-C quotes (decoded), command and backtick
- * substitutions and here-documents (their bodies handed to `readBody`, which
- * runs the same guard decision on them), and redirections whose target is one
- * whole word (dropped, with its descriptor digits). It returns `null` for
- * anything else — locale quoting, `${ }` holding more than a name, process
- * substitution, a here-string, a line continuation, an unterminated quote or
- * here-document, a body `readBody` refuses to read, or a redirection without
- * a target — and the caller then asks about the whole command.
+ * The one reader of a segment's shell words: plain text, quotes, escapes,
+ * separators, ANSI-C quotes, `${ }` expansions, command and backtick
+ * substitutions and here-documents (bodies handed to `readBody`), here-strings,
+ * comments, and redirections with one-word targets (dropped). It returns `null`
+ * for anything else (locale quoting, process substitution, an unterminated
+ * quote, expansion or here-document, a refused body, a redirection without a
+ * target) and the caller then asks about the whole command.
  */
 function readShellWords(
   segment: string,
   readBody: (body: string) => boolean,
 ): DequotedWord[] | null {
   const words: DequotedWord[] = [];
-  const pending: Array<{ delimiter: string; strip: boolean; quoted: boolean }> = [];
+  const pending: HereDoc[] = [];
+  const unquoted: string[] = [];
   let raw = '';
   let text = '';
   let inWord = false;
@@ -1945,25 +1953,6 @@ function readShellWords(
       add(piece, piece);
     });
   };
-  // Reads the bodies of the here-documents opened on the line that just ended,
-  // and returns where the text after them starts, or -1 when one never closes.
-  const readHereDocuments = (from: number): number => {
-    let pos = from;
-    for (const { delimiter, strip, quoted } of pending.splice(0)) {
-      const lines: string[] = [];
-      for (;;) {
-        if (pos >= segment.length) return -1;
-        const lineEnd = segment.indexOf('\n', pos);
-        const line = segment.slice(pos, lineEnd === -1 ? segment.length : lineEnd);
-        pos = lineEnd === -1 ? segment.length : lineEnd + 1;
-        if ((strip ? line.replace(/^\t+/, '') : line) === delimiter) break;
-        lines.push(line);
-      }
-      const bodies = quoted ? [] : extractSubstitutionBodies(lines.join('\n'));
-      if (bodies === null || !bodies.every(readBody)) return -1;
-    }
-    return pos;
-  };
   let i = 0;
   while (i < segment.length) {
     const c = segment.charAt(i);
@@ -1974,29 +1963,25 @@ function readShellWords(
     } else if (/[\n;|&()<>]/.test(c)) {
       if (dropNext && !inWord) return null;
       if (c === '<' || c === '>') {
-        if (/^(?:<<<|<\(|>\()/.test(segment.slice(i))) return null;
+        if (/^(?:<\(|>\()/.test(segment.slice(i))) return null;
         if (!dropNext && /^\d+$/.test(raw)) inWord = false;
         flush();
-        const hereDocument = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/.exec(
-          segment.slice(i),
-        );
-        if (segment.startsWith('<<', i)) {
-          if (hereDocument === null) return null;
-          const [opener, strip, single, double, bare] = hereDocument;
-          pending.push({
-            delimiter: single ?? double ?? bare ?? '',
-            strip: strip === '-',
-            quoted: bare === undefined || opener.includes('\\'),
-          });
-          i += opener.length;
+        const afterDoc = hereDocStep(segment, i, pending, []);
+        if (afterDoc !== i) {
+          i = afterDoc;
         } else {
-          i += /^(?:>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
+          i += /^(?:<<<|>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
           dropNext = true;
         }
       } else {
         flush();
-        i = c === '\n' && pending.length > 0 ? readHereDocuments(i + 1) : i + 1;
-        if (i === -1) return null;
+        const afterDoc = hereDocStep(segment, i, pending, unquoted);
+        if (afterDoc === -1) return null;
+        for (const text of unquoted.splice(0)) {
+          const bodies = extractSubstitutionBodies(text, true);
+          if (bodies === null || !bodies.every(readBody)) return null;
+        }
+        i = afterDoc === i ? i + 1 : afterDoc;
       }
     } else if (c === "'") {
       const end = segment.indexOf("'", i + 1);
@@ -2026,6 +2011,9 @@ function readShellWords(
       if (end === -1) return null;
       addExpansion(i, end);
       i = end;
+    } else if (c === '#' && !inWord) {
+      const end = segment.indexOf('\n', i);
+      i = end === -1 ? segment.length : end;
     } else {
       add(c, c);
       i += 1;
@@ -2054,11 +2042,7 @@ const GIT_CONFIG_UNREADABLE_REASON =
 /** `env` options that take the next word as their value. */
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
 
-/**
- * The index where a segment's command starts: past the leading `NAME=value`
- * words and the `env` prefix (its options, their values and its assignments),
- * none of which is a command word.
- */
+/** The index where a segment's command starts: past leading `NAME=value` words and the `env` prefix. */
 function commandStart(words: readonly DequotedWord[]): number {
   let start = 0;
   while (start < words.length) {
@@ -2080,11 +2064,7 @@ function commandStart(words: readonly DequotedWord[]): number {
   return start;
 }
 
-/**
- * The index of the git word of a segment, or -1 when it has none: `git` or a
- * path ending in `/git`, found from `commandStart` on. This is the one
- * definition every caller uses.
- */
+/** The index of the segment's `git` word (or a path ending in `/git`), or -1; the one definition every caller uses. */
 function gitWordIndex(words: readonly DequotedWord[]): number {
   const start = commandStart(words);
   return words.findIndex(
@@ -2103,12 +2083,8 @@ function hasUnreadableConfigValue(env: ReadonlyMap<string, EnvValue>): boolean {
 
 /**
  * Records the variables a run of words sets: `NAME=value` words and, after
- * `export` (or `declare`, `typeset`, `local`, `readonly`), a bare configuration
- * variable name (set from somewhere this line does not show, so unreadable).
- * With `leadingOnly` the scan stops at the first word that is neither one of
- * those builtins, `env` nor an assignment, which is how a
- * segment with no `git` word is read; otherwise every word is scanned, which
- * is how the words in front of a `git` word are read. Returns how many
+ * `export` and like builtins, a bare configuration variable name (unreadable).
+ * With `leadingOnly` the scan stops at the first other word. Returns how many
  * configuration variables it recorded.
  */
 function readAssignments(
@@ -2136,15 +2112,10 @@ function readAssignments(
 }
 
 /**
- * Reads every git configuration value that git runs as a command the same
- * way the rule reads that command line typed directly: `-c key=value` and
- * `--config-env=key=VAR` among the global options, the `-O` /
- * `--open-files-in-pager` option of `git grep`, and the environment of the
- * command (`GIT_PAGER`, `GIT_EXTERNAL_DIFF`,
- * `GIT_CONFIG_COUNT` / `_KEY_<n>` / `_VALUE_<n>`), whether set on the segment,
- * through `env`, or by an earlier segment. A readable value is checked as a
- * nested command line; a value holding a parameter, substitution or backtick
- * is refused whatever its key, so no list of keys is kept.
+ * Reads every git configuration value git runs as a command (`-c`,
+ * `--config-env`, `git grep -O`, and the `GIT_PAGER` / `GIT_EXTERNAL_DIFF` /
+ * `GIT_CONFIG_*` environment, however set) like a command line typed directly.
+ * A value holding a parameter, substitution or backtick is refused, whatever its key.
  */
 function checkGitConfigValues(
   words: readonly DequotedWord[],
@@ -2182,8 +2153,7 @@ function checkGitConfigValues(
     const eq = operand.indexOf('=');
     if (eq === -1) continue;
     const rest = operand.slice(eq + 1);
-    // A `--config-env` value is read from a named variable: the value is
-    // checked when this line sets it, and is unreadable when it does not.
+    // A `--config-env` value comes from a named variable: unreadable unless this line sets it.
     const found = checkValue(isConfigEnv ? (env.get(rest) ?? null) : rest);
     if (found) return found;
   }
@@ -2223,16 +2193,14 @@ function checkForcePush(
   // hide a subcommand word inside.
   // Variables set by earlier segments, carried to the git segments after them.
   const carried = new Map<string, EnvValue>();
-  // Over the whole line: the configuration variables it mentions, the ones the
-  // assignment reader recorded, and whether the line runs git.
+  // Over the whole line: configuration variables mentioned and recorded, and whether it runs git.
   let mentions = 0;
   let recorded = 0;
   let runsGit = false;
   for (const segment of topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
-    // A segment the reader does not understand is asked about when it could
-    // involve git; otherwise only the unknown-command-word check applies.
+    // A segment the reader does not understand is asked about when it could involve git.
     const nested: PolicyViolation[] = [];
     const words = readShellWords(segment, (body) => {
       if (depth >= MAX_SUBSTITUTION_DEPTH) {
@@ -2271,9 +2239,7 @@ function checkForcePush(
     const env = gitIndex === -1 ? carried : new Map(carried);
     const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
     recorded += readAssignments(leading, env, gitIndex === -1);
-    // Mentions are counted on the dequoted text the assignments are read from,
-    // so a name spelled with an empty quote pair or a backslash counts the
-    // same on both sides.
+    // Counted on the dequoted text the assignments are read from.
     const dequoted = words.map((word) => word.text).join(' ');
     mentions += (dequoted.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length;
     const commandWord = words[commandStart(words)];
@@ -2318,9 +2284,7 @@ function checkForcePush(
       return violation(rule);
     }
   }
-  // On a line that runs git, a configuration variable named beyond the
-  // assignments read above is set in a form the rule does not read, and a
-  // recorded value that cannot be read statically cannot be checked: refused.
+  // On a git line, a configuration variable named beyond the recorded assignments is refused.
   if (runsGit && (mentions > recorded || hasUnreadableConfigValue(carried))) {
     return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
   }
@@ -2908,6 +2872,48 @@ function skipQuotedSpan(text: string, start: number): number | null {
   return i < text.length ? i + 1 : null;
 }
 
+const HERE_DOC_OPENER_RE = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/;
+
+interface HereDoc {
+  delimiter: string;
+  strip: boolean;
+  quoted: boolean;
+}
+
+/**
+ * The here-document step the scanners share: a `<<` opener is recorded in
+ * `pending`; at the line's newline the bodies are skipped and unquoted ones
+ * pushed onto `unquoted`. Returns -1 for a body that never closes, `i` for neither.
+ */
+function hereDocStep(text: string, i: number, pending: HereDoc[], unquoted: string[]): number {
+  if (text.startsWith('<<', i) && text.charAt(i + 2) !== '<') {
+    const opener = HERE_DOC_OPENER_RE.exec(text.slice(i));
+    if (opener === null) return i;
+    const [all, strip, single, double, bare] = opener;
+    pending.push({
+      delimiter: single ?? double ?? bare ?? '',
+      strip: strip === '-',
+      quoted: bare === undefined || all.includes('\\'),
+    });
+    return i + all.length;
+  }
+  if (text.charAt(i) !== '\n' || pending.length === 0) return i;
+  let pos = i + 1;
+  for (const { delimiter, strip, quoted } of pending.splice(0)) {
+    const lines: string[] = [];
+    for (;;) {
+      if (pos >= text.length) return -1;
+      const lineEnd = text.indexOf('\n', pos);
+      const line = text.slice(pos, lineEnd === -1 ? text.length : lineEnd);
+      pos = lineEnd === -1 ? text.length : lineEnd + 1;
+      if ((strip ? line.replace(/^\t+/, '') : line) === delimiter) break;
+      lines.push(line);
+    }
+    if (!quoted) unquoted.push(lines.join('\n'));
+  }
+  return pos;
+}
+
 /**
  * The index of the `)` that balances the `(` just before `start` — or `null`
  * when the text ends first, the same "cannot delimit this with confidence"
@@ -2919,10 +2925,17 @@ function skipQuotedSpan(text: string, start: number): number | null {
 function findBalancedParenClose(text: string, start: number): number | null {
   let depth = 1;
   let i = start;
+  const pending: HereDoc[] = [];
   while (i < text.length) {
     const c = text[i];
     if (c === '\\' && i + 1 < text.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = hereDocStep(text, i, pending, []);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      i = afterDoc;
       continue;
     }
     if (c === "'" || c === '"') {
@@ -2956,10 +2969,17 @@ function findBalancedParenClose(text: string, start: number): number | null {
  */
 function findBacktickClose(text: string, start: number): number | null {
   let i = start;
+  const pending: HereDoc[] = [];
   while (i < text.length) {
     const c = text[i];
     if (c === '\\' && i + 1 < text.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = hereDocStep(text, i, pending, []);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      i = afterDoc;
       continue;
     }
     if (c === "'" || c === '"') {
@@ -3009,14 +3029,29 @@ function findBacktickClose(text: string, start: number): number | null {
  * confidence — an unterminated quote or an unbalanced paren — so the caller
  * reads that as "cannot prove this is safe", not "found nothing".
  */
-function extractSubstitutionBodies(segment: string): string[] | null {
+function extractSubstitutionBodies(segment: string, hereDocBody = false): string[] | null {
   const bodies: string[] = [];
+  const pending: HereDoc[] = [];
+  const unquoted: string[] = [];
   let i = 0;
-  let inDouble = false;
+  // The text of an unquoted here-document body reads like double-quoted text
+  // whose quotes are literal: only its substitutions are live.
+  let inDouble = hereDocBody;
   while (i < segment.length) {
     const c = segment[i];
     if (c === '\\' && i + 1 < segment.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = inDouble ? i : hereDocStep(segment, i, pending, unquoted);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      for (const text of unquoted.splice(0)) {
+        const inner = extractSubstitutionBodies(text, true);
+        if (inner === null) return null;
+        bodies.push(...inner);
+      }
+      i = afterDoc;
       continue;
     }
     if (!inDouble && c === "'") {
@@ -3025,7 +3060,7 @@ function extractSubstitutionBodies(segment: string): string[] | null {
       i = next;
       continue;
     }
-    if (c === '"') {
+    if (c === '"' && !hereDocBody) {
       inDouble = !inDouble;
       i += 1;
       continue;

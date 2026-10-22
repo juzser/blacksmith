@@ -2,12 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { evaluateCommand, loadGuardrailPolicy, type PolicyContext } from '../src/policy.js';
 
 // The force-push rule reads a command line carried by a git configuration
-// value (`-c`, `--config-env`, `GIT_CONFIG_*`, `GIT_PAGER`,
-// `GIT_EXTERNAL_DIFF`, `git grep -O`) the same way it reads that command line
-// typed directly. A readable value is checked as a nested command line; a
-// value the rule cannot read statically is refused whatever its key. One
-// shell-word reader serves every check: it reads inside a substitution, a
-// here-document and an ANSI-C quote, and asks about what it cannot read.
+// value (`-c`, `--config-env`, `GIT_CONFIG_*`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`,
+// `git grep -O`) like one typed directly; a value it cannot read statically
+// is refused whatever its key. One shell-word reader serves every check.
 
 const policy = loadGuardrailPolicy();
 
@@ -41,7 +38,6 @@ const REFUSED: string[] = [
   'git -c core.pager="sh -c \'git push -f origin main\'" log',
   `GIT_PAGER='${FORCED}' git log`,
   `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`,
-  `export GIT_PAGER='${FORCED}'; git log`,
   `GIT_PAGER='${FORCED}'; git log`,
   `${TRIPLE}='${FORCED}' git log`,
   `export ${TRIPLE}='${FORCED}'; git log`,
@@ -49,7 +45,6 @@ const REFUSED: string[] = [
   `GIT_CONFIG_VALUE_0='${FORCED}' GIT_CONFIG_COUNT=1 git log`,
   `GIT_CONFIG_VALUE_10='${FORCED}' git log`,
   `git grep -O'${FORCED}' x`,
-  `git grep -nO'${FORCED}' x`,
   `git grep x -O'${FORCED}'`,
   `git grep -O'git p\\ush -f origin main' x`,
   `git grep --open-files-in-pager='git push --force origin main' x`,
@@ -90,18 +85,13 @@ const REFUSED: string[] = [
   `GIT_CONFIG_PARAMETERS="'color.ui'='always' 'core.pager=git push --force origin main'" git log`,
   'GIT_CONFIG_PARAMETERS="$X" git log',
   `export GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`,
-  `declare -x GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`,
-  `typeset -x GIT_CONFIG_PARAMETERS="'color.ui=always'"; git log`,
   'export GIT_CONFIG_PARAMETERS; git log',
   // a mention that was not recorded as an assignment
-  `declare -x GIT_PAGER='${FORCED}'; git log`,
-  `typeset -x GIT_PAGER='${FORCED}'; git log`,
   `export GIT_PA''GER='${FORCED}'; git log`,
   `export GIT_PA\\GER='${FORCED}'; git log`,
   `read GIT_PAGER <<< '${FORCED}'; git log`,
   `printf -v GIT_PAGER %s '${FORCED}'; git log`,
   'echo "$GIT_PAGER"; git log',
-  'echo "$GIT_PAGER"; /usr/bin/git log',
   '{ export GIT_PAGER=cat; }; git log',
   'if true; then export GIT_PAGER=cat; fi; git log',
   'for i in 1; do export GIT_PAGER=cat; done; git log',
@@ -125,32 +115,16 @@ const REFUSED: string[] = [
   'echo GIT_PA\\GER; git log',
   `export GIT_PA''GER=cat; echo "$GIT_PAGER"; git log`,
   'export GIT_PA\\GER=cat; echo "$GIT_PAGER"; git log',
-  // local and readonly declarations
-  `f() { local GIT_PAGER='${FORCED}'; git log; }; f`,
-  `readonly GIT_PAGER='${FORCED}'; git log`,
   // a path-form git, a separate-value global option, compound positions
-  'GIT_PAGER="$X" /usr/bin/git log',
-  'export GIT_PAGER="$X"; /usr/bin/git log',
-  'GIT_EXTERNAL_DIFF=$(cat f) /usr/bin/git diff',
-  `GIT_PAGER='${FORCED}' /usr/bin/git log`,
   'env GIT_EXTERNAL_DIFF="$(cat f)" /usr/bin/git diff',
   `env GIT_PAGER='${FORCED}' ./git log`,
-  '/usr/bin/git -c core.pager="$X" log',
   './git -c core.pager="$X" log',
-  `/usr/bin/git -c core.pager='${FORCED}' log`,
-  '/usr/bin/git --config-env=core.pager=SOMEVAR log',
-  '/usr/bin/git grep -O"$X" x',
-  `/usr/bin/git grep -O'${FORCED}' x`,
   'git --attr-source HEAD -c core.pager="$X" log',
   'git --attr-source HEAD grep -O"$X" x',
-  'git --attr-source HEAD --config-env=core.pager=SOMEVAR log',
-  `git --attr-source HEAD -c core.pager='${FORCED}' log`,
-  'git --attr-source=HEAD -c core.pager="$X" log',
   'git --super-prefix sub/ -c core.pager="$X" log',
   'git -C /tmp/project-a -c core.pager="$X" log',
   `git -C /tmp/project-a grep -O'${FORCED}' x`,
   `cd /tmp/project-a && GIT_PAGER='${FORCED}' git log`,
-  `(export GIT_PAGER='${FORCED}'; git log)`,
   'cd /tmp/project-a && git -c core.pager="$P" log',
   `export GIT_PAGER='${FORCED}'; echo hi; git log`,
   `git log; GIT_PAGER='${FORCED}' git log`,
@@ -163,23 +137,11 @@ const REFUSED: string[] = [
   `(export GIT_PAGER='${FORCED}'); git log`,
   `git -c core.pager='${FORCED}' log # note`,
   `git -c "core.pager=${FORCED}" log`,
-  `git '-c' 'core.pager=${FORCED}' log`,
   `env -u X GIT_PAGER='${FORCED}' git log`,
-  `env -i GIT_PAGER='${FORCED}' git log`,
   `env GIT_PAGER='${FORCED}' command git log`,
-  `echo hi | GIT_PAGER='${FORCED}' git log`,
-  `git log | GIT_PAGER='${FORCED}' git log`,
   // a redirection target spelled with ANSI-C quoting hides nothing
-  `git >$'out file' p\\ush -f origin main`,
-  `git > $'out\\x20file' -c core.pager='${FORCED_ESCAPED}' log`,
-  `GIT_PAGER="$X" >$'a b' git log`,
   `GIT_PAGER=$'${FORCED_ESCAPED} >x' git log`,
   `GIT_PAGER='git pu\\\nsh -f origin main >x' git log`,
-  `>'out file' GIT_PAGER="$X" $G log`,
-  `<"in file" GIT_PAGER="$X" $G log`,
-  'git 2>"$T"/x p\\ush -f origin main',
-  'git >"out"x p\\ush -f origin main',
-  `git 2>"$T"/x -c core.pager='${FORCED_ESCAPED}' log`,
   // a substitution or here-document that runs a guarded command is caught
   `git log $(${FORCED})`,
   `git log "$(${FORCED})"`,
@@ -192,13 +154,7 @@ const REFUSED: string[] = [
   `echo "$(git log; ${FORCED})"`,
   // syntax the reader does not model is asked about
   'git log $"msg"',
-  'git log ${x:-a b}',
   'git log ${x',
-  'git log ${HOME:-x}',
-  'git log ${x%.*}',
-  'git log ${x/a/b}',
-  'git log ${x[0]}',
-  'git log "${x:-y}"',
   'git log ${',
   'git log `',
   'git log "`"',
@@ -206,7 +162,14 @@ const REFUSED: string[] = [
   'git log "$(date"',
   'git log <(date)',
   'git log >(cat)',
-  'git log <<< x',
+  // an expansion with an operator is still not a configuration value the rule can read
+  'git -c core.pager=${P:-cat} log',
+  'GIT_PAGER="${P:-cat}" git log',
+  // a guarded command inside an expansion operand or an unquoted body is caught
+  `git log \${P:-$(${FORCED})}`,
+  `git commit -F - <<EOF\nit's $(${FORCED})\nEOF`,
+  `git commit -m "$(cat <<EOF\n$(${FORCED})\nEOF\n)"`,
+  `git log "$(cat <<'EOF'\nit's\nEOF\n${FORCED})"`,
   "git log 'abc",
   'git log "abc',
   "git log $'abc",
@@ -220,17 +183,10 @@ const REFUSED: string[] = [
 const ALLOWED: string[] = [
   // readable configuration that runs nothing forced
   'git -c color.ui=always log',
-  'git -c core.pager=cat log',
-  'GIT_PAGER=cat git log',
-  'env GIT_PAGER=less git log',
   'git -c user.name=x commit -m y',
   'git log --oneline',
   'git grep -n foo',
-  'export GIT_PAGER=cat; git log',
-  'declare -x GIT_PAGER=cat; git log',
-  'typeset -x GIT_PAGER=cat; git log',
   'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x git log',
-  'git grep -Ocat foo',
   'P=cat git --config-env=core.pager=P log',
   'echo hello; git log',
   "GIT_PAGER='git push origin feat' git log",
@@ -253,13 +209,8 @@ const ALLOWED: string[] = [
   'GIT_PAGER="$X" echo hi',
   'export GIT_PAGER="$X"; echo hi',
   // a path-form git and a separate-value global option, readable
-  '/usr/bin/git -c core.pager=cat log',
-  'GIT_PAGER=cat /usr/bin/git log',
   'env GIT_PAGER=less ./git log',
-  '/usr/bin/git -c user.name=x commit -m y',
-  '/usr/bin/git grep -n foo',
   'git --attr-source HEAD -c core.pager=cat log',
-  'git --attr-source HEAD grep -n foo',
   'git -C /tmp/project-a -c core.pager=cat log',
   // plain quoting and operators
   `git commit -m "don't"`,
@@ -299,8 +250,6 @@ const ALLOWED: string[] = [
   'git log &>out',
   'git log <in',
   'git log >>out 2>&1',
-  "GIT_PAGER=cat >'out file' git log",
-  "GIT_PAGER=cat 2>$'a b' git log",
   // a substitution, here-document or ANSI-C quote that runs nothing guarded
   'git commit -m "release $(date +%F), never push origin main"',
   'git commit -m "release $(date +%F)"',
@@ -320,13 +269,26 @@ const ALLOWED: string[] = [
   'git commit -F - <<-EOF\n\trelease\n\tEOF',
   "git commit -F - <<'A' -m x\nbody\nA",
   'git log <<-EOF\nx\nEOF',
+  // a here-document body is literal text, in a substitution or given to git
+  `git commit -m "$(cat <<'EOF'\nfix: it's done\nEOF\n)"`,
+  `git commit -m "$(cat <<EOF\nfix: it's "done"\nEOF\n)"`,
+  "git log `cat <<'EOF'\nit's\nEOF\n`",
+  "git commit -F- <<EOF\nit's done\nEOF",
+  "git commit -F - <<'EOF'\nit's a \"test\nEOF",
+  // parameter expansions with operators or subscripts, a here-string, a comment
+  'git log ${x:-y}',
+  'git log ${x:-a b} ${HOME:-x} ${x[0]}',
+  'git log "${x%.c}" ${x%.*} ${x/a/b} "${arr[0]}" "${arr[@]}" "${x:-y}"',
+  'git log ${P:-$(date)}',
+  "git status # it's",
+  "git log <<<'x'",
+  'git log <<< x',
   'echo $(date)',
   "echo $'a b'",
   'echo "abc',
 ];
 
-// One table of the shapes a git word can take, run against each carrier of a
-// configuration value, so a shape read for one carrier is read for all.
+// The shapes a git word can take, run against each carrier of a configuration value.
 const GIT_SHAPES: ReadonlyArray<(args: string) => string> = [
   (args) => `git ${args}`,
   (args) => `/usr/bin/git ${args}`,
@@ -353,9 +315,7 @@ for (const shape of GIT_SHAPES) {
   }
 }
 
-// The ways a value gets recorded, run against each way a line runs git. A
-// declaration inside a function body is not read as an assignment, so it is
-// refused whatever the value.
+// The ways a value gets recorded, run against each way a line runs git; a `local` is always refused.
 const RECORDING_FORMS: ReadonlyArray<
   readonly [name: string, build: (v: string, run: string) => string]
 > = [
@@ -387,8 +347,7 @@ for (const [name, build] of RECORDING_FORMS) {
   }
 }
 
-// A redirection can sit next to a quote that holds a configuration value; the
-// quote still closes where it was written and the value is read in each place.
+// A redirection next to a quote holding a configuration value: the value is still read.
 const REDIRECTIONS = ['>x', '2>x', '>>x', '<x'];
 
 const REDIRECTION_CARRIERS: ReadonlyArray<(value: string) => string> = [
@@ -426,8 +385,7 @@ for (const carrier of REDIRECTION_CARRIERS) {
   }
 }
 
-// A redirection target is one shell word whatever its shape: the whole target
-// is dropped and the words around it keep their meaning.
+// A redirection target is one shell word whatever its shape.
 const TARGET_SHAPES = [
   '/tmp/x',
   "'/tmp/x'",
