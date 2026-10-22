@@ -141,6 +141,13 @@
       "when": 1792031861665,
       "tag": "0019_dispatches_scope_ts_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792645992069,
+      "tag": "0020_lessons_error_class",
+      "breakpoints": true
     }
   ]
 }

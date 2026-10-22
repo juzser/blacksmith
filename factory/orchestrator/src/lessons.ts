@@ -47,7 +47,7 @@ import {
   parseLessons,
   SECTION_HEADING,
 } from './severity.js';
-import { loadTaxonomy, validateTag } from './taxonomy.js';
+import { loadTaxonomy, validateErrorClass, validateTag } from './taxonomy.js';
 
 export class LessonsError extends SmithError {}
 
@@ -296,6 +296,8 @@ export interface CompiledLessonInput {
   agentRole?: string | null;
   /** taxonomy `case` — the selector a `case-type`-scoped entry is filtered by (D-129). */
   caseType?: string | null;
+  /** taxonomy `error` class (`group.class`) — bs-optimize epic criterion 1. */
+  errorClass?: string | null;
 }
 
 // Imported, not re-declared: the compile side and the parse side disagreeing
@@ -391,6 +393,10 @@ it is inert, not universal, and \`bs lessons for-dispatch\` reports it as
 such. \`bs lessons raise\` refuses to mint one; the entries that predate
 the selector (D-129) are the only ones that can still be in that state.
 
+An entry may also carry one \`error_class\` bullet: a \`group.class\` from the
+\`error\` groups of \`taxonomy.yml\` (\`other.unclassified\` when no specific class
+fits), naming the logged failure the lesson answers.
+
 Two kinds of entry are therefore injected at dispatch and still never
 escalate anything — by design, not by accident:
 
@@ -472,6 +478,7 @@ function renderEntry(lesson: CompiledLessonInput): string {
   if (lesson.claimPath) bullets.push(renderBulletLines('claim_path', lesson.claimPath));
   if (lesson.agentRole) bullets.push(renderBulletLines('agent_role', lesson.agentRole));
   if (lesson.caseType) bullets.push(renderBulletLines('case_type', lesson.caseType));
+  if (lesson.errorClass) bullets.push(renderBulletLines('error_class', lesson.errorClass));
   bullets.push(renderBulletLines('statement', lesson.statement));
   return `### ${headingFor(lesson)}\n\n${bullets.join('\n')}\n`;
 }
@@ -670,8 +677,20 @@ export function compileLessons(
   lessons: readonly CompiledLessonInput[],
   existingMarkdown?: string,
 ): string {
+  // A tracked lesson whose store row has no class keeps the one its file entry
+  // carries (bs-optimize epic criterion 1): the store never has to learn a
+  // class the file was given by hand. The store's own class always wins.
+  const fileClasses = new Map<string, string>();
+  if (existingMarkdown !== undefined) {
+    for (const rule of parseLessons(existingMarkdown)) {
+      if (rule.errorClass) fileClasses.set(rule.lessonId, rule.errorClass);
+    }
+  }
   const bySection = new Map<string, CompiledLessonInput[]>(VALID_SCOPES.map((s) => [s, []]));
-  for (const lesson of lessons) {
+  for (const tracked of lessons) {
+    const lesson = tracked.errorClass
+      ? tracked
+      : { ...tracked, errorClass: fileClasses.get(tracked.lessonId) ?? null };
     const bucket = bySection.get(lesson.lessonScope);
     if (bucket) bucket.push(lesson);
   }
@@ -1563,6 +1582,8 @@ export interface RaiseLessonInput {
   agentRole?: string;
   /** taxonomy `case`; required for `case-type` scope — see the check below (D-129). */
   caseType?: string;
+  /** taxonomy `error` class (`group.class`), e.g. `execution.flaky-test` — bs-optimize epic criterion 1. */
+  errorClass?: string;
   /** Overrides the statement-derived default id. */
   lessonId?: string;
 }
@@ -1677,6 +1698,19 @@ export async function raiseLessonCandidate(
   // an `agent_role: archivist` would compile into a section no dispatch reads.
   if (input.agentRole !== undefined) checkTag('agent', input.agentRole);
   if (input.caseType !== undefined) checkTag('case', input.caseType);
+  // error_class is a `group.class` pair read from taxonomy `error`, not a
+  // flat dimension, so it goes through validateErrorClass.
+  if (input.errorClass !== undefined) {
+    try {
+      validateErrorClass(taxonomy, input.errorClass);
+    } catch (err) {
+      throw new LessonsError(
+        'lessons.invalid-lesson-tag',
+        `error_class "${input.errorClass}" refused: ${err instanceof Error ? err.message : String(err)}`,
+        { dimension: 'error_class', value: input.errorClass },
+      );
+    }
+  }
 
   // The first of the two doors this rule guards (D-129/D-140) — see
   // SELECTOR_RULES for why each of the three is a refusal and not a warning.
@@ -1751,6 +1785,7 @@ export async function raiseLessonCandidate(
         ...(input.claimPath ? { claim_path: input.claimPath } : {}),
         ...(input.agentRole ? { agent_role: input.agentRole } : {}),
         ...(input.caseType ? { case_type: input.caseType } : {}),
+        ...(input.errorClass ? { error_class: input.errorClass } : {}),
         ...(contradictionOf ? { possible_contradiction_of: contradictionOf } : {}),
       },
     },

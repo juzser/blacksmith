@@ -1020,6 +1020,8 @@ export interface LessonFoldRow {
   /** D-129 selectors — the field the entry's scope is filtered by at dispatch. */
   agentRole: string | null;
   caseType: string | null;
+  /** bs-optimize: taxonomy `error` class (`group.class`), when the lesson was raised with one. */
+  errorClass: string | null;
 }
 
 interface LessonRaisedPayload {
@@ -1038,6 +1040,7 @@ interface LessonRaisedPayload {
   claim_path?: string;
   agent_role?: string;
   case_type?: string;
+  error_class?: string;
 }
 
 interface LessonStatusChangedPayload {
@@ -1097,6 +1100,7 @@ export function foldLessons(events: readonly StoredEvent[]): LessonFoldRow[] {
         claimPath: p.claim_path ?? null,
         agentRole: p.agent_role ?? null,
         caseType: p.case_type ?? null,
+        errorClass: p.error_class ?? null,
       });
     } else if (record.event_type === 'lesson-status-changed') {
       const p = record.payload as LessonStatusChangedPayload;
@@ -1821,6 +1825,7 @@ function projectLessons(handle: DbHandle, events: readonly StoredEvent[]): void 
           claimPath: lesson.claimPath,
           agentRole: lesson.agentRole,
           caseType: lesson.caseType,
+          errorClass: lesson.errorClass,
         })
         .run();
     }

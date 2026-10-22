@@ -479,7 +479,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 11
+version: 12
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -716,6 +716,9 @@ error:
                  # reward-hacking — letter of the tests, spirit of nothing
   coordination: [deadlock, livelock, starvation]
   memory:       [lesson-contamination, lesson-stale, poisoning-suspected]
+  other:        [unclassified]
+                 # unclassified — fallback for a lesson that fits no specific
+                 # class above (bs-optimize decision 13); never an error to log
 
 # ── Review ──────────────────────────────────────────────────────────
 finding_category: [correctness, security, a11y, performance, visual-design,
