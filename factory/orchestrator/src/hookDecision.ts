@@ -655,6 +655,15 @@ const KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'unt
 /** Wrappers that run the next command in the foreground; each may carry flags. */
 const WRAPPERS = new Set(['time', 'nohup', 'exec', 'command']);
 const SHELLS = new Set(['bash', 'sh', 'zsh']);
+/** First words that open a command group, and the first word that closes each. */
+const GROUP_PREFIX = new Set(['do', 'then', 'else', '!']);
+const GROUP_CLOSER: Record<string, string> = {
+  '{': '}',
+  while: 'done',
+  until: 'done',
+  for: 'done',
+  if: 'fi',
+};
 
 /** Sleeps one simple command runs, wrappers and a `-c` script included. */
 function sleepsOf(words: readonly Word[], depth: number): number[] {
@@ -749,6 +758,10 @@ class ShellScanner {
     let word: Word | null = null;
     let listStart = this.commands.length;
     let parens = 0;
+    // Open groups, innermost last; `closedGroup` is the start of the group that
+    // just closed, which a directly following `&` backgrounds as a whole.
+    const groups: { closer: string; start: number }[] = [];
+    let closedGroup: number | null = null;
     let skipNext = false;
     let heredoc: { strip: boolean } | null = null;
     const heredocs: { delimiter: string; strip: boolean }[] = [];
@@ -763,7 +776,20 @@ class ShellScanner {
     };
     const endCommand = () => {
       endWord();
-      if (words.length > 0) this.commands.push({ words, background: false });
+      if (words.length > 0) {
+        const first = words[0] as Word;
+        if (words.length === 1 && !first.dynamic && groups.at(-1)?.closer === first.text) {
+          closedGroup = (groups.pop() as { start: number }).start;
+        }
+        // Openers may follow `do`/`then`/`else`/`!` or each other (`do { `).
+        for (const w of words) {
+          if (w.dynamic) break;
+          const closer = Object.hasOwn(GROUP_CLOSER, w.text) ? GROUP_CLOSER[w.text] : undefined;
+          if (closer !== undefined) groups.push({ closer, start: this.commands.length });
+          else if (!GROUP_PREFIX.has(w.text)) break;
+        }
+        this.commands.push({ words, background: false });
+      }
       words = [];
     };
     const current = (): Word => {
@@ -778,6 +804,9 @@ class ShellScanner {
 
     while (this.pos < src.length) {
       const c = src.charAt(this.pos);
+      // Only whitespace keeps a just-closed group adjacent to a following `&`.
+      const justClosed = closedGroup;
+      if (c !== ' ' && c !== '\t') closedGroup = null;
       if (c === ' ' || c === '\t') {
         endWord();
         this.pos++;
@@ -815,7 +844,9 @@ class ShellScanner {
         this.pos += src.charAt(this.pos + 2) === '>' ? 3 : 2;
       } else if (c === '&') {
         endCommand();
-        for (let k = listStart; k < this.commands.length; k++) {
+        // A bare `(`/`{`/loop group is the unit `&` backgrounds, not its last list.
+        const from = closedGroup ?? justClosed ?? listStart;
+        for (let k = from; k < this.commands.length; k++) {
           (this.commands[k] as SimpleCommand).background = true;
         }
         listStart = this.commands.length;
@@ -843,14 +874,18 @@ class ShellScanner {
       } else if (c === '(') {
         endCommand();
         listStart = this.commands.length;
+        groups.push({ closer: ')', start: this.commands.length });
         parens++;
         this.pos++;
       } else if (c === ')') {
         endCommand();
         listStart = this.commands.length;
         this.pos++;
-        if (parens > 0) parens--;
-        else if (untilParen) return;
+        if (parens > 0) {
+          parens--;
+          if (groups.at(-1)?.closer === ')')
+            closedGroup = (groups.pop() as { start: number }).start;
+        } else if (untilParen) return;
       } else {
         current().text += c;
         this.pos++;
