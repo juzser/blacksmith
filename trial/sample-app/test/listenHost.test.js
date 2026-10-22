@@ -46,7 +46,7 @@ test("npm start binds loopback only and names the bound address", async () => {
     assert.ok(host === "::1" || host.startsWith("127."), `not loopback: ${host}`);
     assert.equal(Number(match[2]), port);
   } finally {
-    process.kill(pid);
+    if (child.exitCode === null && child.signalCode === null) process.kill(pid);
     rmSync(dir, { recursive: true, force: true });
   }
 });
