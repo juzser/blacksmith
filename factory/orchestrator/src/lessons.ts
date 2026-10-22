@@ -829,15 +829,20 @@ export interface DispatchLessonsOptions {
   caseType?: string;
   /**
    * `error-logged` events (lessonEvents.ts `readRecurrenceEvents`) the class
-   * rule counts. Omitted, selection runs against an empty store: only
-   * `agent-role` and `claim-path` lessons splice, and the rest are withheld.
+   * rule counts. Omitted, there is no recurrence filter: every approved lesson
+   * for the role splices, as before the class rule, and no withheld line is
+   * printed. `[]` is an empty store: only `agent-role` and `claim-path`
+   * lessons splice, and the rest are withheld with the trailing line.
    */
   events?: readonly StoredEvent[];
   /** The dispatch's epic: a class logged in it is a repeat. None means no repeat counts. */
   epicId?: string;
   /** The clock for the recurrence window; required whenever `events` is passed. */
   now?: Date;
-  /** Return the spliced `lessons` array too; omitted by default (epic criterion 4). */
+  /**
+   * Return the spliced `lessons` array too. Omitted by default once `events` is
+   * passed (epic criterion 4); callers that pass no `events` keep the array.
+   */
   full?: boolean;
   /** Return exactly this `group.class`'s approved lessons instead of the selection. */
   class?: string;
@@ -1093,6 +1098,7 @@ export function lessonsForDispatch(
       return UNCLASSIFIED;
     }
   };
+  const filtered = opts.events !== undefined;
   const recurs = (cls: string): boolean => {
     const count = counts.get(cls);
     if (!count) return false;
@@ -1138,7 +1144,7 @@ export function lessonsForDispatch(
     for (const lesson of lessonsForScope(scope, selectors, parsed)) {
       if (seen.has(lesson.lessonId)) continue;
       seen.add(lesson.lessonId);
-      if (UNGATED_SCOPES.includes(scope)) {
+      if (!filtered || UNGATED_SCOPES.includes(scope)) {
         selected.push(lesson);
         continue;
       }
@@ -1182,7 +1188,7 @@ export function lessonsForDispatch(
   return {
     role,
     scopes,
-    ...(opts.full ? { lessons: selected } : {}),
+    ...(opts.full || !filtered ? { lessons: selected } : {}),
     withheld,
     text: renderLessonBlock(role, scopes, selected, trailer),
     warnings,

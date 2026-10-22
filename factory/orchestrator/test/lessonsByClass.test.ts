@@ -113,6 +113,7 @@ describe('lessonsForDispatch by recurring class (epic criteria 3 and 4)', () => 
       lessonsPath,
       caseType: 'feature',
       now: NOW,
+      events: [],
       ...opts,
     });
   }
@@ -136,6 +137,27 @@ describe('lessonsForDispatch by recurring class (epic criteria 3 and 4)', () => 
     const r = run('coder', { full: true, events: [flaky('e1/a'), flaky('e1/b'), flaky('e2/c')] });
     expect(ids(r)).toEqual(['lesson-role', 'lesson-claim', 'lesson-case', 'lesson-flaky']);
     expect(r.text).not.toContain('Withheld lessons (class not recurring): execution.flaky-test');
+  });
+
+  it('splices every approved lesson for the role when no events option is passed, with no withheld line', () => {
+    const r = lessonsForDispatch('coder', ['src/a.ts'], {
+      agentsDir,
+      lessonsPath,
+      caseType: 'feature',
+      now: NOW,
+    });
+    expect(ids(r)).toEqual(
+      expect.arrayContaining(['lesson-role', 'lesson-claim', 'lesson-case', 'lesson-flaky']),
+    );
+    expect(r.withheld).toEqual([]);
+    expect(r.text).not.toContain('Withheld lessons');
+  });
+
+  it('withholds class lessons and prints the withheld line when events is an empty array', () => {
+    const r = run('coder', { full: true, events: [] });
+    expect(ids(r)).not.toContain('lesson-flaky');
+    expect(r.withheld.length).toBeGreaterThan(0);
+    expect(r.text).toContain('Withheld lessons (class not recurring)');
   });
 
   it('withholds a class with 2 tasks and names it, its count and the read command', () => {
