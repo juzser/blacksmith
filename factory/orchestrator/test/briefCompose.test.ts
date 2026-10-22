@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -273,6 +273,101 @@ describe('composeBrief (epic criterion 5, module half)', () => {
     expect(parseBriefMarker(text)?.taskId).toBe('project-a');
     expect(text).not.toContain('Token cap');
     expect(text).toContain('Open findings across this epic');
+  });
+});
+
+describe('composeBrief error codes and manifest depth', () => {
+  it('fails brief.template-unreadable for a role with no template', async () => {
+    expect(await codeOf(composeBrief({ ...base(), role: 'no-such-role' }))).toBe(
+      'brief.template-unreadable',
+    );
+  });
+
+  it('fails brief.epic-required for a bare task id or a taskless brief without an epicId', async () => {
+    const { planFile: _p, ...rest } = base();
+    expect(await codeOf(composeBrief({ ...rest, role: 'coder', taskId: 'task-1-widget' }))).toBe(
+      'brief.epic-required',
+    );
+    const { taskId: _t, worktree: _w, ...noTask } = base();
+    expect(await codeOf(composeBrief({ ...noTask, role: 'planner' }))).toBe('brief.epic-required');
+  });
+
+  it('fails brief.plan-not-found when specsDir holds no plan for the epic', async () => {
+    const { planFile: _p, ...rest } = base();
+    expect(await codeOf(composeBrief({ ...rest, role: 'coder' }))).toBe('brief.plan-not-found');
+  });
+
+  it('states the owned result fields in one envelope line', async () => {
+    const { text } = await composeBrief({ ...base(), role: 'coder' });
+    const lines = text.split('\n').filter((l) => l.startsWith('Result envelope:'));
+    expect(lines).toHaveLength(1);
+    for (const field of ORCHESTRATOR_OWNED_RESULT_FIELDS) {
+      expect(lines[0], field).toContain(field);
+    }
+  });
+
+  it('carries the return discipline as its own byte-exact section', async () => {
+    const want = sliceSection(await readFile(realDispatch, 'utf8'), RETURN_HEADING);
+    const { text, manifest } = await composeBrief({ ...base(), role: 'tester' });
+    expect(text).toContain(`\n\n${want}\n\nResult envelope:`);
+    expect(manifest.sections.return_discipline).toBe(Buffer.byteLength(want));
+  });
+
+  it('reports exact per-section bytes in text order, summing to the text', async () => {
+    const { text, manifest } = await composeBrief({ ...base(), role: 'coder' });
+    expect(Object.keys(manifest.sections)).toEqual([
+      'header',
+      'spec',
+      'claims',
+      'limits',
+      'epic_spec',
+      'lessons',
+      'findings',
+      'return_discipline',
+      'envelope',
+    ]);
+    const sum = Object.values(manifest.sections).reduce((a, b) => a + b, 0);
+    // sections are joined by a blank line and the text ends in one newline
+    expect(manifest.total_bytes).toBe(sum + 2 * (Object.keys(manifest.sections).length - 1) + 1);
+    expect(manifest.total_bytes).toBe(Buffer.byteLength(text));
+    expect(manifest.sections.limits).toBe(
+      Buffer.byteLength(
+        `Token cap: 120000\nDiff cap: 300 lines\nTurn budget: ${readTemplateMaxTurns(agentsDir, 'coder')}`,
+      ),
+    );
+  });
+
+  it('declares the artifact for uiux and brackets a judge with the fingerprint commands', async () => {
+    const artifactPath = artifactFor('uiux');
+    const { text } = await composeBrief({ ...base(), role: 'uiux', artifactPath });
+    expect(parseDeclaredArtifactLine(text)).toBe(artifactPath);
+    expect(text).toContain(`bs worktree fingerprint ${worktree} > ${artifactPath}.before.json`);
+    expect(text).toContain(`bs worktree verify ${worktree} --before ${artifactPath}.before.json`);
+    const coder = await composeBrief({ ...base(), role: 'coder' });
+    expect(coder.text).not.toContain('bs worktree fingerprint');
+  });
+
+  it('is deterministic for a judge brief and its manifest', async () => {
+    const o = { ...base(), role: 'grader', artifactPath: artifactFor('grader') };
+    const a = await composeBrief(o);
+    const b = await composeBrief(o);
+    expect(a).toEqual(b);
+  });
+
+  it('writes nothing but the manifest file into the tree it is given', async () => {
+    const before = (await readdir(dir, { recursive: true })).sort();
+    const manifestPath = path.join(dir, 'out', 'deep', 'manifest.json');
+    await composeBrief({ ...base(), role: 'coder', manifestPath });
+    const after = (await readdir(dir, { recursive: true })).sort();
+    const added = after.filter((f) => !before.includes(f));
+    expect(added).toEqual([
+      'out',
+      path.join('out', 'deep'),
+      path.join('out', 'deep', 'manifest.json'),
+    ]);
+    const plain = (await readdir(dir, { recursive: true })).sort();
+    await composeBrief({ ...base(), role: 'coder' });
+    expect((await readdir(dir, { recursive: true })).sort()).toEqual(plain);
   });
 });
 
