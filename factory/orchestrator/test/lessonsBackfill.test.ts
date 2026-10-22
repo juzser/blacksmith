@@ -81,3 +81,30 @@ describe('lessons.md error_class backfill (bs-optimize AC2)', () => {
     expect(classOf.get('lesson-raised-26ace63a7a67')).toBe('coordination.deadlock');
   });
 });
+
+describe('lessons.md backfill edge cases (bs-optimize AC2, tester)', () => {
+  it('entry order is unchanged: the fixture lists ids in file order', () => {
+    expect(entries.map((e) => e.lessonId)).toEqual(Object.keys(fixture));
+  });
+
+  it('every error_class bullet in the file belongs to an entry (no stray or schema-example bullets)', () => {
+    const bullets = markdown.split('\n').filter((l) => /^- error_class:/.test(l));
+    expect(bullets.length).toBe(entries.length);
+  });
+
+  it('no entry is left with an empty or whitespace-padded class value', () => {
+    for (const entry of entries) {
+      expect(entry.errorClass, entry.lessonId).toMatch(/^[a-z]+\.[a-z][a-z-]*$/);
+    }
+  });
+
+  it('other.unclassified stays the exception, not the default', () => {
+    const unclassified = entries.filter((e) => e.errorClass === 'other.unclassified');
+    expect(unclassified.length).toBeLessThan(entries.length / 4);
+  });
+
+  it('compile is idempotent: a second pass over the compiled file changes nothing', () => {
+    const once = compileLessons([], markdown);
+    expect(compileLessons([], once)).toBe(once);
+  });
+});
