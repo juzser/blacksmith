@@ -2655,23 +2655,18 @@ describe('evaluateCommand — a message payload the shell expands is not prose',
     expect(ruleIds(d)).toEqual([]);
   });
 
-  // The shell-word reader does not read a command substitution inside a git
-  // command, so rule 2 asks about it whatever the substitution runs; the same
-  // substitution on a line that does not involve git is still allowed.
-  it('asks about a substitution inside a git command, and allows it elsewhere', () => {
-    const git = evaluateCommand(
+  // Not a blanket ban on the syntax: an expansion is read, and read is all.
+  // What comes back is judged by the same six rules as any other command, so a
+  // substitution running something nobody guards stays allowed.
+  it('still allows a substitution that runs no guarded command', () => {
+    const d = evaluateCommand(
       ctx({
         command: 'git commit -m "release $(date +%F), never push origin main"',
         branch: 'feature-x',
       }),
       policy,
     );
-    expect(ruleIds(git)).toEqual(['force-push']);
-    const other = evaluateCommand(
-      ctx({ command: 'echo "release $(date +%F), never push origin main"', branch: 'feature-x' }),
-      policy,
-    );
-    expect(ruleIds(other)).toEqual([]);
+    expect(ruleIds(d)).toEqual([]);
   });
 });
 

@@ -1875,12 +1875,27 @@ function checkForcePushSubcommandWord(
 }
 
 const NOT_UNDERSTOOD_REASON =
-  'this git command uses shell syntax the guard does not read (a substitution, ANSI-C or locale quoting, a here-document or here-string, an unterminated quote, a continuation or an odd redirection) — write it out plainly';
+  'this git command uses shell syntax the guard does not read (locale quoting, process substitution, a here-string, an unterminated quote or here-document, a nesting too deep, a continuation or an odd redirection) — write it out plainly';
 
-/** The end of the `$...` unit that starts at `start`, or -1 when it is not one the reader models. */
-function dollarEnd(text: string, start: number, quoted: boolean): number {
+/**
+ * The end of the expansion that starts at `start` (a `$` or a backtick), or -1
+ * when it is not one the reader models. The body of a substitution is handed
+ * to `readBody`, which answers whether it could be read.
+ */
+function expansionEnd(
+  text: string,
+  start: number,
+  quoted: boolean,
+  readBody: (body: string) => boolean,
+): number {
   const next = text.charAt(start + 1);
-  if (next === '(' || next === "'" || (next === '"' && !quoted)) return -1;
+  const substitution = (close: number | null, bodyStart: number): number =>
+    close !== null && readBody(text.slice(bodyStart, close)) ? close + 1 : -1;
+  if (text.charAt(start) === '`')
+    return substitution(findBacktickClose(text, start + 1), start + 1);
+  if (next === '(') return substitution(findBalancedParenClose(text, start + 2), start + 2);
+  if (next === "'") return quoted ? -1 : findAnsiCQuoteEnd(text, start + 2) + 1 || -1;
+  if (next === '"' && !quoted) return -1;
   if (next !== '{') return start + 1;
   const close = text.indexOf('}', start);
   return close === -1 || !/^[\w#?@*!$-]*$/.test(text.slice(start + 2, close)) ? -1 : close + 1;
@@ -1888,16 +1903,22 @@ function dollarEnd(text: string, start: number, quoted: boolean): number {
 
 /**
  * The one reader of a segment's shell words. It models plain text, single
- * quotes, double quotes without substitutions, one-character backslash
- * escapes, blanks, the separators the rule splits on, and redirections whose
- * target is one whole word (dropped, with its descriptor digits). It returns
- * `null` for anything else — ANSI-C and locale quoting, `$( )`, backticks,
- * `${ }` holding more than a name, process substitution, a here-document or
- * here-string, a line continuation, an unterminated quote or a redirection
- * without a target — and the caller then asks about the whole command.
+ * quotes, double quotes, one-character backslash escapes, blanks, the
+ * separators the rule splits on, ANSI-C quotes (decoded), command and backtick
+ * substitutions and here-documents (their bodies handed to `readBody`, which
+ * runs the same guard decision on them), and redirections whose target is one
+ * whole word (dropped, with its descriptor digits). It returns `null` for
+ * anything else — locale quoting, `${ }` holding more than a name, process
+ * substitution, a here-string, a line continuation, an unterminated quote or
+ * here-document, a body `readBody` refuses to read, or a redirection without
+ * a target — and the caller then asks about the whole command.
  */
-function readShellWords(segment: string): DequotedWord[] | null {
+function readShellWords(
+  segment: string,
+  readBody: (body: string) => boolean,
+): DequotedWord[] | null {
   const words: DequotedWord[] = [];
+  const pending: Array<{ delimiter: string; strip: boolean; quoted: boolean }> = [];
   let raw = '';
   let text = '';
   let inWord = false;
@@ -1914,6 +1935,35 @@ function readShellWords(segment: string): DequotedWord[] | null {
     text = '';
     inWord = false;
   };
+  // An unquoted substitution is split at its blanks, so `$(git` reads as the
+  // word the pre-existing disguised-word fallback looks for.
+  const addExpansion = (start: number, end: number) => {
+    const span = segment.slice(start, end);
+    if (span.startsWith("$'")) return add(span, decodeAnsiCPayload(span.slice(2, -1)));
+    span.split(/\s+/).forEach((piece, index) => {
+      if (index > 0) flush();
+      add(piece, piece);
+    });
+  };
+  // Reads the bodies of the here-documents opened on the line that just ended,
+  // and returns where the text after them starts, or -1 when one never closes.
+  const readHereDocuments = (from: number): number => {
+    let pos = from;
+    for (const { delimiter, strip, quoted } of pending.splice(0)) {
+      const lines: string[] = [];
+      for (;;) {
+        if (pos >= segment.length) return -1;
+        const lineEnd = segment.indexOf('\n', pos);
+        const line = segment.slice(pos, lineEnd === -1 ? segment.length : lineEnd);
+        pos = lineEnd === -1 ? segment.length : lineEnd + 1;
+        if ((strip ? line.replace(/^\t+/, '') : line) === delimiter) break;
+        lines.push(line);
+      }
+      const bodies = quoted ? [] : extractSubstitutionBodies(lines.join('\n'));
+      if (bodies === null || !bodies.every(readBody)) return -1;
+    }
+    return pos;
+  };
   let i = 0;
   while (i < segment.length) {
     const c = segment.charAt(i);
@@ -1924,14 +1974,29 @@ function readShellWords(segment: string): DequotedWord[] | null {
     } else if (/[\n;|&()<>]/.test(c)) {
       if (dropNext && !inWord) return null;
       if (c === '<' || c === '>') {
-        if (/^(?:<<|<\(|>\()/.test(segment.slice(i))) return null;
+        if (/^(?:<<<|<\(|>\()/.test(segment.slice(i))) return null;
         if (!dropNext && /^\d+$/.test(raw)) inWord = false;
         flush();
-        i += /^(?:>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
-        dropNext = true;
+        const hereDocument = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/.exec(
+          segment.slice(i),
+        );
+        if (segment.startsWith('<<', i)) {
+          if (hereDocument === null) return null;
+          const [opener, strip, single, double, bare] = hereDocument;
+          pending.push({
+            delimiter: single ?? double ?? bare ?? '',
+            strip: strip === '-',
+            quoted: bare === undefined || opener.includes('\\'),
+          });
+          i += opener.length;
+        } else {
+          i += /^(?:>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
+          dropNext = true;
+        }
       } else {
         flush();
-        i += 1;
+        i = c === '\n' && pending.length > 0 ? readHereDocuments(i + 1) : i + 1;
+        if (i === -1) return null;
       }
     } else if (c === "'") {
       const end = segment.indexOf("'", i + 1);
@@ -1944,9 +2009,9 @@ function readShellWords(segment: string): DequotedWord[] | null {
       while (segment.charAt(i) !== '"') {
         const d = segment.charAt(i);
         let end = i + 1;
-        if (d === '$') end = dollarEnd(segment, i, true);
+        if (d === '$' || d === '`') end = expansionEnd(segment, i, true, readBody);
         else if (d === '\\') end = /^[^\n]$/.test(segment.charAt(i + 1)) ? i + 2 : -1;
-        if (i >= segment.length || d === '`' || end === -1) return null;
+        if (i >= segment.length || end === -1) return null;
         add(segment.slice(i, end), segment.slice(d === '\\' ? i + 1 : i, end));
         i = end;
       }
@@ -1956,12 +2021,10 @@ function readShellWords(segment: string): DequotedWord[] | null {
       if (i + 1 >= segment.length || next === '\n') return null;
       add(c + next, next);
       i += 2;
-    } else if (c === '`') {
-      return null;
-    } else if (c === '$') {
-      const end = dollarEnd(segment, i, false);
+    } else if (c === '$' || c === '`') {
+      const end = expansionEnd(segment, i, false, readBody);
       if (end === -1) return null;
-      add(segment.slice(i, end), segment.slice(i, end));
+      addExpansion(i, end);
       i = end;
     } else {
       add(c, c);
@@ -1969,7 +2032,7 @@ function readShellWords(segment: string): DequotedWord[] | null {
     }
   }
   flush();
-  return dropNext ? null : words;
+  return dropNext || pending.length > 0 ? null : words;
 }
 
 /** The value of a shell variable set on the command line, or `null` when its text cannot be read statically. */
@@ -2148,7 +2211,11 @@ function checkGitConfigValues(
  * gate, since there the gated word is only an argument; the checks below
  * still read it.
  */
-function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
+function checkForcePush(
+  command: string,
+  policy: GuardrailPolicy,
+  depth = 0,
+): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
   // Joined first, so every rule-2 layer below — the shell-wrapper check, the
   // subcommand-word gate, and the plain-word gate over the words after it —
@@ -2166,7 +2233,17 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
 
     // A segment the reader does not understand is asked about when it could
     // involve git; otherwise only the unknown-command-word check applies.
-    const words = readShellWords(segment);
+    const nested: PolicyViolation[] = [];
+    const words = readShellWords(segment, (body) => {
+      if (depth >= MAX_SUBSTITUTION_DEPTH) {
+        nested.push(violation(rule, NOT_UNDERSTOOD_REASON));
+        return false;
+      }
+      const found = checkForcePush(body, policy, depth + 1);
+      if (found) nested.push(found);
+      return true;
+    });
+    if (nested[0]) return nested[0];
     if (words === null) {
       if (segment.replace(/['"\\]/g, '').match(/git/i)) {
         return violation(rule, NOT_UNDERSTOOD_REASON);
@@ -2630,6 +2707,7 @@ const REDIRECTION_RE = new RegExp(
 function stripRedirections(command: string): string {
   return command.replace(REDIRECTION_RE, ' ');
 }
+
 /**
  * The `git merge`/`git pull` commands in a chain, read for rule 3's exception:
  * plumbing removed, then split on the characters that actually separate two
