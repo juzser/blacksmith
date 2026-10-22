@@ -85,4 +85,27 @@ describe('errorClassCounts', () => {
     expect(c?.tasks).toBe(2);
     expect([...(c?.epics ?? [])]).toEqual([['e9', 1]]);
   });
+
+  it('counts an event exactly on the 30-day boundary and drops one a millisecond older', () => {
+    const counts = errorClassCounts(
+      [
+        logged({ task_ref: 'e1/a' }, { ts: '2026-09-22T00:00:00.000Z' }),
+        logged({ task_ref: 'e1/b' }, { ts: '2026-09-21T23:59:59.999Z' }),
+      ],
+      WINDOW,
+    );
+    expect(counts.get('execution.flaky-test')?.tasks).toBe(1);
+  });
+
+  it('skips an event with an empty or non-string class, or an unparsable ts', () => {
+    const counts = errorClassCounts(
+      [
+        logged({ task_ref: 'e1/a', error: '' }),
+        logged({ task_ref: 'e1/b', error: 7 }),
+        logged({ task_ref: 'e1/c' }, { ts: 'not-a-date' }),
+      ],
+      WINDOW,
+    );
+    expect(counts.size).toBe(0);
+  });
 });
