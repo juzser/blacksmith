@@ -12,6 +12,7 @@ import {
   type CompiledLessonInput,
   checkNovelty,
   compileLessons,
+  type DispatchLessonsOptions,
   dream,
   effectiveNoveltyThreshold,
   extractDecisionCheckpoints,
@@ -20,10 +21,10 @@ import {
   LESSON_BLOCK_BEGIN,
   LESSON_BLOCK_END,
   type LessonSelectors,
-  lessonsForDispatch,
   lessonsForScope,
   oneWordEditCeiling,
   raiseLessonCandidate,
+  lessonsForDispatch as realLessonsForDispatch,
   renderLessonBlock,
   scopesForRole,
   shingles,
@@ -2246,6 +2247,7 @@ section that must never be parsed as one:
 - lesson_id: lesson-case-1
 - finding_category: process
 - case_type: infra
+- error_class: other.unclassified
 - statement: An infra epic states its rollback before its rollout.
 
 ## stack-wide
@@ -2255,6 +2257,7 @@ section that must never be parsed as one:
 - lesson_id: lesson-stack-1
 - finding_category: security
 - claim_path: **
+- error_class: other.unclassified
 - statement: Secrets live in env, never in the repo.
 
 ## security
@@ -2263,6 +2266,35 @@ _(none yet)_
 `;
 
 describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
+  // These cases predate selection by class; they read the spliced set, so ask for it.
+  const lessonsForDispatch = (
+    role: string,
+    claims: readonly string[],
+    opts: DispatchLessonsOptions = {},
+  ) => {
+    const result = realLessonsForDispatch(role, claims, { full: true, ...opts });
+    return { ...result, lessons: result.lessons ?? [] };
+  };
+  // One class-less-of-recurrence repeat in epic-1, so stack-wide and case-type fixtures splice.
+  const repeat = {
+    epicId: 'epic-1',
+    now: new Date('2026-10-22T00:00:00.000Z'),
+    events: [
+      {
+        event_id: 's:1',
+        record: {
+          session_id: 's',
+          actor: 'orchestrator',
+          event_type: 'error-logged',
+          plan_version: 1,
+          causal_parent: null,
+          ts: '2026-10-21T00:00:00.000Z',
+          payload: { error: 'other.unclassified', severity: 'S3-minor', task_ref: 'epic-1/t' },
+        },
+      },
+    ],
+  };
+
   let dir: string;
   let agentsDir: string;
   let lessonsPath: string;
@@ -2364,6 +2396,7 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
       agentsDir,
       lessonsPath,
       caseType: 'infra',
+      ...repeat,
     });
     expect(result.lessons.map((l) => l.lessonId)).toEqual(['lesson-stack-1', 'lesson-case-1']);
   });
@@ -2372,7 +2405,7 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
   // task has none. Dropping the case-type section is the honest answer, but a
   // silent drop is how a scope stops working without anyone noticing.
   it('drops case-type lessons and says so when the dispatch names no case (D-129)', () => {
-    const result = lessonsForDispatch('planner', [], { agentsDir, lessonsPath });
+    const result = lessonsForDispatch('planner', [], { agentsDir, lessonsPath, ...repeat });
     expect(result.lessons.map((l) => l.lessonId)).toEqual(['lesson-stack-1']);
     expect(result.warnings.join('\n')).toContain('case-type');
     expect(result.warnings.join('\n')).toContain('--task');
@@ -2404,6 +2437,7 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
       agentsDir,
       lessonsPath,
       caseType: 'bugfix',
+      ...repeat,
     });
     expect(result.lessons.map((l) => l.lessonId)).toEqual(['lesson-stack-1']);
     expect(result.warnings).toEqual([]);

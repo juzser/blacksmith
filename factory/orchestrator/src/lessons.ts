@@ -35,6 +35,12 @@ import { foldLessons, type LessonFoldRow } from './db/projector.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext } from './findings.js';
+import {
+  EPIC_REPEAT_MIN,
+  errorClassCounts,
+  RECUR_MIN_TASKS,
+  RECUR_WINDOW_DAYS,
+} from './lessonRecurrence.js';
 import { AGENTS_DIR, lessonsReadPath } from './paths.js';
 import {
   BULLET,
@@ -821,12 +827,43 @@ export interface DispatchLessonsOptions {
    * say which case this is, is the defect D-129 fixes.
    */
   caseType?: string;
+  /**
+   * `error-logged` events (lessonEvents.ts `readRecurrenceEvents`) the class
+   * rule counts. Omitted, there is no recurrence filter: every approved lesson
+   * for the role splices, as before the class rule, and no withheld line is
+   * printed. `[]` is an empty store: only `agent-role` and `claim-path`
+   * lessons splice, and the rest are withheld with the trailing line.
+   */
+  events?: readonly StoredEvent[];
+  /** The dispatch's epic: a class logged in it is a repeat. None means no repeat counts. */
+  epicId?: string;
+  /** The clock for the recurrence window; required whenever `events` is passed. */
+  now?: Date;
+  /**
+   * Return the spliced `lessons` array too. Omitted by default once `events` is
+   * passed (epic criterion 4); callers that pass no `events` keep the array.
+   */
+  full?: boolean;
+  /** Return exactly this `group.class`'s approved lessons instead of the selection. */
+  class?: string;
 }
+
+/** The class a lesson answers when its own is absent or no longer in taxonomy.yml. */
+const UNCLASSIFIED = 'other.unclassified';
+
+/** Scopes spliced unfiltered: already narrow, so the recurrence rule does not apply. */
+const UNGATED_SCOPES: readonly string[] = ['agent-role', 'claim-path'];
+
+/** The role whose brief withholds no lesson of any scope (quality first). */
+const WITHHOLD_NOTHING_ROLE = 'security-reviewer';
 
 export interface DispatchLessons {
   role: string;
   scopes: string[];
-  lessons: LessonRule[];
+  /** Present only when `full` (or `class`) was asked for; `text` always carries the block. */
+  lessons?: LessonRule[];
+  /** Lessons left out of `text` because their class has not recurred or repeated. */
+  withheld: { lesson_id: string; error_class: string }[];
   /** The block to splice into the role's dispatch prompt, verbatim. */
   text: string;
   /**
@@ -961,6 +998,13 @@ export function renderLessonBlock(
   return [LESSON_BLOCK_BEGIN, header, '', body, LESSON_BLOCK_END].join('\n');
 }
 
+/** Insert `trailer` on the line before the block's end marker; no trailer, no change. */
+function withTrailer(block: string, trailer: string): string {
+  if (!trailer) return block;
+  const at = block.lastIndexOf(LESSON_BLOCK_END);
+  return `${block.slice(0, at)}${trailer}\n${block.slice(at)}`;
+}
+
 /**
  * The host P9-2 asks for: at dispatch, read the compiled lessons.md, filter it
  * to the role's scopes (each selector scope additionally matched against this
@@ -972,6 +1016,10 @@ export function renderLessonBlock(
  * construction: `smith lessons compile` writes that file from approved rows
  * only, so there is no candidate here to filter out and no filter to get
  * wrong.
+ *
+ * Serves bs-optimize epic criteria 3 and 4: `stack-wide`, `case-type` and
+ * `security` lessons splice only when their class recurs store-wide or repeats
+ * in `epicId`; the rest are `withheld` and named in a trailing line.
  */
 export function lessonsForDispatch(
   role: string,
@@ -1009,8 +1057,53 @@ export function lessonsForDispatch(
   const parsed = parseLessons(markdown);
   const selectors: LessonSelectors = { claimPaths, role, caseType: opts.caseType ?? '' };
   const selected: LessonRule[] = [];
+  const withheld: DispatchLessons['withheld'] = [];
   const seen = new Set<string>();
   const warnings: string[] = [];
+
+  if (opts.events?.length && !opts.now) {
+    throw new LessonsError(
+      'lessons.events-need-now',
+      'lessonsForDispatch was given events but no `now`, so the recurrence window has no end.',
+      { role },
+    );
+  }
+  const counts = errorClassCounts(opts.events ?? [], {
+    now: opts.now ?? new Date(0),
+    windowDays: RECUR_WINDOW_DAYS,
+  });
+  const taxonomy = loadTaxonomy();
+  const classOf = (lesson: LessonRule, warn: boolean): string => {
+    const found = lesson.errorClass ?? '';
+    try {
+      validateErrorClass(taxonomy, found);
+      return found;
+    } catch {
+      if (warn) {
+        const what =
+          found === ''
+            ? 'no error_class'
+            : 'error_class ' + JSON.stringify(found) + ', which is not in taxonomy.yml';
+        warnings.push(
+          'Lesson ' +
+            lesson.lessonId +
+            ' carries ' +
+            what +
+            ', so it is read as ' +
+            UNCLASSIFIED +
+            '.',
+        );
+      }
+      return UNCLASSIFIED;
+    }
+  };
+  const filtered = opts.events !== undefined;
+  const recurs = (cls: string): boolean => {
+    const count = counts.get(cls);
+    if (!count) return false;
+    const inEpic = opts.epicId ? (count.epics.get(opts.epicId) ?? 0) : 0;
+    return count.tasks >= RECUR_MIN_TASKS || inEpic >= EPIC_REPEAT_MIN;
+  };
 
   // The same silence, one scope over: `.some()` over an empty claims list is
   // false, so a plan-less dispatch drops every claim-path entry. That is the
@@ -1033,11 +1126,30 @@ export function lessonsForDispatch(
     );
   }
 
+  // `class` reads one class's approved lessons, whatever their scope or recurrence.
+  if (opts.class !== undefined) {
+    const ofClass = parsed.filter((l) => classOf(l, false) === opts.class);
+    return {
+      role,
+      scopes,
+      lessons: ofClass,
+      withheld,
+      text: renderLessonBlock(role, scopes, ofClass),
+      warnings,
+    };
+  }
+
   for (const scope of scopes) {
     for (const lesson of lessonsForScope(scope, selectors, parsed)) {
       if (seen.has(lesson.lessonId)) continue;
       seen.add(lesson.lessonId);
-      selected.push(lesson);
+      if (!filtered || UNGATED_SCOPES.includes(scope)) {
+        selected.push(lesson);
+        continue;
+      }
+      const cls = classOf(lesson, true);
+      if (role === WITHHOLD_NOTHING_ROLE || recurs(cls)) selected.push(lesson);
+      else withheld.push({ lesson_id: lesson.lessonId, error_class: cls });
     }
   }
 
@@ -1054,11 +1166,30 @@ export function lessonsForDispatch(
     );
   }
 
+  const withheldClasses = [...new Set(withheld.map((w) => w.error_class))];
+  const trailer =
+    withheldClasses.length === 0
+      ? ''
+      : 'Withheld lessons (class not recurring): ' +
+        withheldClasses
+          .map(
+            (cls) =>
+              cls +
+              ' (' +
+              (counts.get(cls)?.tasks ?? 0) +
+              ' tasks, read with "bs lessons for-dispatch --class ' +
+              cls +
+              '")',
+          )
+          .join('; ') +
+        '.';
+
   return {
     role,
     scopes,
-    lessons: selected,
-    text: renderLessonBlock(role, scopes, selected),
+    ...(opts.full || !filtered ? { lessons: selected } : {}),
+    withheld,
+    text: withTrailer(renderLessonBlock(role, scopes, selected), trailer),
     warnings,
   };
 }
