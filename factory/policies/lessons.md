@@ -85,6 +85,10 @@ it is inert, not universal, and `bs lessons for-dispatch` reports it as
 such. `bs lessons raise` refuses to mint one; the entries that predate
 the selector (D-129) are the only ones that can still be in that state.
 
+An entry may also carry one `error_class` bullet: a `group.class` from the
+`error` groups of `taxonomy.yml` (`other.unclassified` when no specific class
+fits), naming the logged failure the lesson answers.
+
 Two kinds of entry are therefore injected at dispatch and still never
 escalate anything — by design, not by accident:
 

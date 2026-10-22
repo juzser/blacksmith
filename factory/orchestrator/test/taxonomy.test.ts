@@ -200,8 +200,9 @@ describe('loadTaxonomy (real repo file)', () => {
     // D13 step 3, which added `wave-runner` to agent; to 9 by `/bs audit`,
     // which added `auditor` to agent; to 10 by FD-21, which added `operator`
     // to agent so a person can be a finding's `found_by`; to 11 by
-    // factory-error-log task-4, which added `issue-reported` to gate_event.
-    expect(tx.version).toBe(11);
+    // factory-error-log task-4, which added `issue-reported` to gate_event; to
+    // 12 by bs-optimize task-1, which added the `other.unclassified` error class.
+    expect(tx.version).toBe(12);
     for (const dim of [
       'case',
       'origin',

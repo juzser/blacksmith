@@ -327,6 +327,9 @@ export const lessons = sqliteTable(
     // before the selectors existed.
     agentRole: text('agent_role'),
     caseType: text('case_type'),
+    // bs-optimize: one taxonomy `error` class (group.class); nullable, null on
+    // every lesson raised without one.
+    errorClass: text('error_class'),
   },
   (t) => [
     index('lessons_session_idx').on(t.sessionId),
