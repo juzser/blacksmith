@@ -108,24 +108,28 @@ nothing.
 
 - lesson_id: lesson-raised-8c05427c2840
 - agent_role: grader
+- error_class: judgment.false-positive-finding
 - statement: A check that silently borrows its tools from the inspector is measuring the inspector.
 
 ### lesson-dream-dogfood-demo-rpg-1-40: A judge's output contract fixes where the verdict sits as strictly as...
 
 - lesson_id: lesson-dream-dogfood-demo-rpg-1-40
 - agent_role: grader
+- error_class: contract.schema-violation
 - statement: A judge's output contract fixes where the verdict sits as strictly as what it says: a correct verdict at the wrong key is read as no verdict at all.
 
 ### lesson-raised-75658b0d107b: Write the declared artifact as a parseable skeleton before your secon...
 
 - lesson_id: lesson-raised-75658b0d107b
 - agent_role: spec-reviewer
+- error_class: economy.budget-exceeded
 - statement: Write the declared artifact as a parseable skeleton before your second turn ends and refine it in place; a turn cap that lands on an unwritten artifact discards the whole review, and 15 turns of reading is the usual way to reach it.
 
 ### lesson-raised-dd1d1b5bcf68: An acceptance criterion that probes a script running under 'set -e' m...
 
 - lesson_id: lesson-raised-dd1d1b5bcf68
 - agent_role: planner
+- error_class: spec.spec-ambiguity
 - statement: An acceptance criterion that probes a script running under 'set -e' must name the outer exit status it expects, never an echo the script prints afterwards: errexit ends the script at the first failing command, so a line printed after it is unreachable and the grader can only mark the wording, not the property.
 
 ### lesson-raised-3aaf982e84ac: A file-length delta criterion must state whether the doc comments att...
@@ -133,6 +137,7 @@ nothing.
 - lesson_id: lesson-raised-3aaf982e84ac
 - finding_category: correctness
 - agent_role: planner
+- error_class: spec.spec-ambiguity
 - statement: A file-length delta criterion must state whether the doc comments attached to the moved symbols move with them, and its window must be calibrated on that same choice; a window measured with comments included and silent about it fails a coder who leaves the comments behind.
 
 ### lesson-raised-d478f9d6ea0b: Name an extraction task's scope as a symbol list, not a line range, a...
@@ -140,12 +145,14 @@ nothing.
 - lesson_id: lesson-raised-d478f9d6ea0b
 - finding_category: correctness
 - agent_role: planner
+- error_class: spec.spec-ambiguity
 - statement: Name an extraction task's scope as a symbol list, not a line range, and derive its length window from the symbols that move; a window calibrated on a span that is wider than the enumerated symbols rewards the over-broad move and rejects the correct one, and a text-preserving destructure hides the difference from every other criterion.
 
 ### bs-audit-3-scribe-cites-event-ids: A PR body or timeline summary cites events by event id (<session>#<n>...
 
 - lesson_id: bs-audit-3-scribe-cites-event-ids
 - agent_role: scribe
+- error_class: judgment.hallucination
 - statement: A PR body or timeline summary cites events by event id (<session>#<n>, where n is the zero-based line index of the log), never by a line number of the log file, and states no number the event log does not carry: coverage percentages, turn caps, round reasons and provider counts included. The orchestrator checks every cited id against the log before the body is published.
 
 ## claim-path
@@ -154,48 +161,56 @@ nothing.
 
 - lesson_id: lesson-raised-3b5746704cfc
 - claim_path: **
+- error_class: execution.tool-failure
 - statement: A function that computes a filesystem path and hands it to a child process running with a different cwd must resolve it to absolute first.
 
 ### lesson-raised-8460b7c5cd04: A `**/name*/**` glob matches a directory, never a file of that name.
 
 - lesson_id: lesson-raised-8460b7c5cd04
 - claim_path: **
+- error_class: contract.claim-violation
 - statement: A `**/name*/**` glob matches a directory, never a file of that name.
 
 ### lesson-raised-a8ca3a355263: An identifier that is parsed rather than passed will eventually be pa...
 
 - lesson_id: lesson-raised-a8ca3a355263
 - claim_path: **
+- error_class: other.unclassified
 - statement: An identifier that is parsed rather than passed will eventually be parsed by two functions that disagree, and the disagreement surfaces at the join — the last step, and the most expensive place to find it.
 
 ### lesson-raised-fe5cf8b630fe: A wrapper that collapses a child's exit signal into an exit code has ...
 
 - lesson_id: lesson-raised-fe5cf8b630fe
 - claim_path: **
+- error_class: execution.tool-failure
 - statement: A wrapper that collapses a child's exit signal into an exit code has deleted the only evidence that distinguishes a crash from a failure, and every diagnosis downstream of it will be about the wrong subsystem.
 
 ### lesson-raised-7299eef43e7d: npm-packlist drops `.gitignore` and `.npmignore` unconditionally, eve...
 
 - lesson_id: lesson-raised-7299eef43e7d
 - claim_path: {package.json,factory/scaffold/**}
+- error_class: execution.tool-failure
 - statement: npm-packlist drops `.gitignore` and `.npmignore` unconditionally, even inside directories the `files` allowlist names; a scaffold that must ship one ships a template under another name (`.gitignore.tmpl`) and renames it on write.
 
 ### lesson-raised-699f909a6ab2: `npm pack --json` stdout carries the `prepare` script's echo before t...
 
 - lesson_id: lesson-raised-699f909a6ab2
 - claim_path: package.json
+- error_class: execution.tool-failure
 - statement: `npm pack --json` stdout carries the `prepare` script's echo before the JSON; parse from the first `[` or `{`, not the whole stream.
 
 ### lesson-raised-fee67ee36513: In a backtick `smith` span, the `docCommands` lint reads an unspaced ...
 
 - lesson_id: lesson-raised-fee67ee36513
 - claim_path: {docs,.claude}/**
+- error_class: execution.tool-failure
 - statement: In a backtick `smith` span, the `docCommands` lint reads an unspaced `|` as alternation between verbs and a spaced ` | ` as a shell pipe; write the one you mean.
 
 ### lesson-raised-96cb1b268004: `tsc` does not delete orphaned outputs; a deleted source leaves its `...
 
 - lesson_id: lesson-raised-96cb1b268004
 - claim_path: factory/orchestrator/dist/**
+- error_class: execution.tool-failure
 - statement: `tsc` does not delete orphaned outputs; a deleted source leaves its `dist/*.js` behind and the tarball ships it. Clean `dist/` before a pack.
 
 ### lesson-raised-f78f3641f4bd: A `files` allowlist is a claim about what the product is, true only o...
@@ -203,12 +218,14 @@ nothing.
 - lesson_id: lesson-raised-f78f3641f4bd
 - finding_category: correctness
 - claim_path: package.json
+- error_class: execution.test-failure
 - statement: A `files` allowlist is a claim about what the product is, true only once someone installs the tarball into an empty directory and runs it; a packaging change is not done until that install proof has run.
 
 ### lesson-raised-ccadfedf2299: A packaging guard reads each path constant's spelling from source tex...
 
 - lesson_id: lesson-raised-ccadfedf2299
 - claim_path: factory/orchestrator/test/packaging.test.ts
+- error_class: execution.test-failure
 - statement: A packaging guard reads each path constant's spelling from source text, not its runtime value, because under an install the roots resolve to places the test suite can never stand.
 
 ## case-type
@@ -220,108 +237,129 @@ _(none yet)_
 ### lesson-raised-53d48e95c31f: Measured spend is a floor, not a total; a check that treats it as a t...
 
 - lesson_id: lesson-raised-53d48e95c31f
+- error_class: economy.budget-exceeded
 - statement: Measured spend is a floor, not a total; a check that treats it as a total reports "under budget" most confidently on exactly the runs whose unrecorded half is what blew the budget.
 
 ### lesson-raised-8a3f8df1fc0e: A differential acceptance criterion must state what the failing outpu...
 
 - lesson_id: lesson-raised-8a3f8df1fc0e
+- error_class: spec.spec-ambiguity
 - statement: A differential acceptance criterion must state what the failing output says under the hypothesis and under the null; if the two are the same text, the criterion is vacuous.
 
 ### lesson-raised-cbdae7931913: A constraint stated only in a prompt is a request; if the plan writes...
 
 - lesson_id: lesson-raised-cbdae7931913
+- error_class: contract.constraint-decay
 - statement: A constraint stated only in a prompt is a request; if the plan writes it down like a limit, something has to be able to say no.
 
 ### lesson-raised-f6b72d19c070: When one stage verifies state A and the next ships state B, the pipel...
 
 - lesson_id: lesson-raised-f6b72d19c070
+- error_class: integration.stack-misorder
 - statement: When one stage verifies state A and the next ships state B, the pipeline is correct only by coincidence.
 
 ### lesson-raised-c60ff6d8cd89: A supervisor that cannot tell silence from assent will eventually mis...
 
 - lesson_id: lesson-raised-c60ff6d8cd89
+- error_class: other.unclassified
 - statement: A supervisor that cannot tell silence from assent will eventually mistake a corpse for a quorum.
 
 ### lesson-raised-c599f971488d: Never ask a component for a fact it has no instrument to measure; it ...
 
 - lesson_id: lesson-raised-c599f971488d
+- error_class: judgment.hallucination
 - statement: Never ask a component for a fact it has no instrument to measure; it will not refuse, it will estimate, and the estimate will look exactly like data.
 
 ### lesson-raised-e0befb1eb07f: A controlled vocabulary that is referenced but never shown is a vocab...
 
 - lesson_id: lesson-raised-e0befb1eb07f
+- error_class: spec.spec-gap
 - statement: A controlled vocabulary that is referenced but never shown is a vocabulary the writer will reinvent.
 
 ### lesson-raised-26ace63a7a67: Plan immutability is a promise to the builder, not to reality; a syst...
 
 - lesson_id: lesson-raised-26ace63a7a67
+- error_class: coordination.deadlock
 - statement: Plan immutability is a promise to the builder, not to reality; a system that can only blame the builder will deadlock the moment the plan is what is wrong.
 
 ### lesson-raised-4b7fa22305e5: Two features that each refuse to guess can still deadlock, because re...
 
 - lesson_id: lesson-raised-4b7fa22305e5
+- error_class: coordination.deadlock
 - statement: Two features that each refuse to guess can still deadlock, because refusing is not the same as agreeing on who decides; a system that mints work in one component and validates it in another must share one answer to "does this task exist", not two correct ones.
 
 ### lesson-dream-dogfood-demo-rpg-1-31: Producing a file and delivering it are separate acts: the artifact ch...
 
 - lesson_id: lesson-dream-dogfood-demo-rpg-1-31
+- error_class: contract.schema-violation
 - statement: Producing a file and delivering it are separate acts: the artifact check resolves every declared path under the task's artifact home, so a Result that names a file living only in the worktree is indistinguishable from one that produced nothing.
 
 ### lesson-dream-dogfood-demo-rpg-1-182: An acceptance criterion that has already been graded is a record of w...
 
 - lesson_id: lesson-dream-dogfood-demo-rpg-1-182
+- error_class: spec.spec-ambiguity
 - statement: An acceptance criterion that has already been graded is a record of what was checked, so a defect in its wording is corrected by an appended note, never by superseding the text the grader actually read.
 
 ### lesson-raised-7c35d8a04a94: A command that creates an obligation must be validated against the co...
 
 - lesson_id: lesson-raised-7c35d8a04a94
+- error_class: coordination.deadlock
 - statement: A command that creates an obligation must be validated against the command that discharges it for the same role, or accepting the registration is a deadlock rather than a contract.
 
 ### lesson-raised-5111dfe40703: Judges may run concurrently against one worktree only while all of th...
 
 - lesson_id: lesson-raised-5111dfe40703
+- error_class: contract.judge-mutation
 - statement: Judges may run concurrently against one worktree only while all of them are read-only; the moment any probe must write, the whole set must be serialized, because the isolation protocol is per-judge and assumes no overlap.
 
 ### lesson-raised-3bd5fc1b8057: A worktree verifier that compares before and after cannot see an edit...
 
 - lesson_id: lesson-raised-3bd5fc1b8057
+- error_class: contract.judge-mutation
 - statement: A worktree verifier that compares before and after cannot see an edit that was reverted in between, so a clean verdict is evidence about the endpoints and never evidence that a concurrent reader saw a clean tree.
 
 ### lesson-raised-039f35d42340: A result produced during a contaminated window may be readmitted only...
 
 - lesson_id: lesson-raised-039f35d42340
+- error_class: contract.judge-mutation
 - statement: A result produced during a contaminated window may be readmitted only if its evidence axis is disjoint from every mutated path and each claim is re-verified against committed git objects rather than the working tree.
 
 ### lesson-raised-576ea7016b55: A dispatch prompt that spells out schema field names becomes a second...
 
 - lesson_id: lesson-raised-576ea7016b55
+- error_class: contract.schema-violation
 - statement: A dispatch prompt that spells out schema field names becomes a second, drifting copy of the schema, and the agent will faithfully emit the names it was given rather than the ones the validator knows.
 
 ### lesson-raised-818285deeda6: A missing required field must fail at the boundary with an error that...
 
 - lesson_id: lesson-raised-818285deeda6
+- error_class: contract.schema-violation
 - statement: A missing required field must fail at the boundary with an error that names it; passed downstream it surfaces as an unhandled TypeError inside a helper that never knew which field was absent.
 
 ### lesson-raised-b8db8efe922d: An agent that owes a file should write it before refining it: the dec...
 
 - lesson_id: lesson-raised-b8db8efe922d
+- error_class: contract.schema-violation
 - statement: An agent that owes a file should write it before refining it: the declared-artifact check catches an agent that ended on an intention only after the tokens are spent, and if that agent could write to shared state, only after the damage has spread.
 
 ### lesson-raised-1da73f3f36ee: A dispatched agent's turn budget is set by the runtime, not by the di...
 
 - lesson_id: lesson-raised-1da73f3f36ee
 - agent_role: planner
+- error_class: economy.budget-exceeded
 - statement: A dispatched agent's turn budget is set by the runtime, not by the dispatch prompt: stating a larger number in the prompt does not raise it, so an agent that researches before it writes can spend an entire stint and return no artifact at all.
 
 ### lesson-raised-2fb53a40b114: Register an obligation only from the dispatches whose artifact the di...
 
 - lesson_id: lesson-raised-2fb53a40b114
 - finding_category: maintainability
+- error_class: coordination.deadlock
 - statement: Register an obligation only from the dispatches whose artifact the discharging reader can actually accept; a ledger that registers on any declared artifact but discharges on one artifact shape mints obligations the system can never close.
 
 ### lesson-raised-6a0d232d948d: An agent cut off by the turn cap after writing its placeholder artifa...
 
 - lesson_id: lesson-raised-6a0d232d948d
+- error_class: economy.budget-exceeded
 - statement: An agent cut off by the turn cap after writing its placeholder artifact returns a file that is schema-valid and materially unchanged, so a diff of the artifact reports the round as wasted at precisely the moment the round's work exists but is unspliced; the recoverable signal is the agent's own tool trace, and the recovery is to resume that agent, because re-dispatching discards work the diff could not see.
 
 ### lesson-raised-c941f4645adb: A rule asserted over text its author has not read will over-reject in...
@@ -329,384 +367,458 @@ _(none yet)_
 - lesson_id: lesson-raised-c941f4645adb
 - finding_category: correctness
 - agent_role: planner
+- error_class: spec.spec-conflict
 - statement: A rule asserted over text its author has not read will over-reject inside that text; if a criterion binds every construct in its task, the sweep of every construct is part of writing it, not a later check.
 
 ### lesson-raised-33474964213a: Once a document begins to discuss its own markers, counting a marker ...
 
 - lesson_id: lesson-raised-33474964213a
 - finding_category: correctness
+- error_class: judgment.false-positive-finding
 - statement: Once a document begins to discuss its own markers, counting a marker by its text stops measuring what the marker marks: prose quoting the marker is indistinguishable from the marker itself, so count by position — a real truncation marker terminates its string — and state which test the count used.
 
 ### lesson-raised-7670023e5f79: A document that measures itself must take the measurement after the e...
 
 - lesson_id: lesson-raised-7670023e5f79
 - finding_category: correctness
+- error_class: judgment.hallucination
 - statement: A document that measures itself must take the measurement after the edit that measurement is part of: a figure computed from the draft being read and written into the draft being produced describes the version it replaced, while reading as a present-tense fact about the version that carries it.
 
 ### lesson-raised-3b009dfb0e81: A turn-cap notification is evidence about the return channel only: it...
 
 - lesson_id: lesson-raised-3b009dfb0e81
+- error_class: judgment.hallucination
 - statement: A turn-cap notification is evidence about the return channel only: it says the agent stopped mid-turn, never that the agent wrote nothing. Stat and parse the declared artifact before recording that a dispatch produced no result.
 
 ### lesson-raised-1931b084725f: A negative claim built on a substring search is a claim about spellin...
 
 - lesson_id: lesson-raised-1931b084725f
+- error_class: judgment.missed-finding
 - statement: A negative claim built on a substring search is a claim about spelling, not about content, unless the search is robust to hyphenation, case and whitespace; the reviewer will report a count of zero and the document will say the thing in the next spelling over.
 
 ### lesson-raised-e89a7a73adbb: A scope sentence placed after the sentence it qualifies will be read ...
 
 - lesson_id: lesson-raised-e89a7a73adbb
+- error_class: spec.spec-ambiguity
 - statement: A scope sentence placed after the sentence it qualifies will be read as scoping the sentence before it; a reader who quotes the pair back will attach the scope to the wrong clause and the citation will look sourced.
 
 ### lesson-raised-e543bb1a5d0b: A claim-confinement check built on `git diff --name-only` must pass `...
 
 - lesson_id: lesson-raised-e543bb1a5d0b
 - finding_category: correctness
+- error_class: contract.claim-violation
 - statement: A claim-confinement check built on `git diff --name-only` must pass `--no-renames`: with rename detection on, a committed rename lists only its destination, so moving a file OUT of an unclaimed path INTO a claimed one reports nothing deleted and passes.
 
 ### lesson-raised-6ea1eb68b2bf: A revision that fixes a defect in one instrument must sweep every sib...
 
 - lesson_id: lesson-raised-6ea1eb68b2bf
 - finding_category: correctness
+- error_class: spec.spec-gap
 - statement: A revision that fixes a defect in one instrument must sweep every sibling instrument doing the same job: a plan that names the disease in one task and leaves the other task carrying it reads as a deliberate distinction rather than an oversight, and the second site never gets reviewed again.
 
 ### lesson-raised-9e3e3f16efec: A common-prefix plus common-suffix comparison can only ever detect ON...
 
 - lesson_id: lesson-raised-9e3e3f16efec
 - finding_category: correctness
+- error_class: judgment.false-positive-finding
 - statement: A common-prefix plus common-suffix comparison can only ever detect ONE insertion point, so it reports a legitimate multi-site append as a deletion or rewrite; the exact test for insert-only is whether the old string is a subsequence of the new one.
 
 ### lesson-raised-e24e9fb2785f: A confinement claim -- 'all of them are here', 'nothing else referenc...
 
 - lesson_id: lesson-raised-e24e9fb2785f
 - finding_category: correctness
+- error_class: contract.uncited-claim
 - statement: A confinement claim -- 'all of them are here', 'nothing else references this' -- is the one kind of review evidence a reader cannot falsify from the quoted text, so it must be measured independently before it is repeated to the next tier.
 
 ### lesson-raised-80aae5ddff34: A draft that has survived N rounds of text review has still never bee...
 
 - lesson_id: lesson-raised-80aae5ddff34
 - finding_category: correctness
+- error_class: contract.schema-violation
 - statement: A draft that has survived N rounds of text review has still never been mechanically validated unless someone actually ran the validator: reviewers grade prose and validators grade shape, and neither notices that the other never ran.
 
 ### lesson-raised-6fa07c6529b9: A correction that declares its reach as "wherever this document spell...
 
 - lesson_id: lesson-raised-6fa07c6529b9
 - finding_category: correctness
+- error_class: judgment.missed-finding
 - statement: A correction that declares its reach as "wherever this document spells X" and then enumerates the sites has created a count it must prove; enumerate by mechanical occurrence search, or the correction silently exempts the site it forgot.
 
 ### lesson-raised-c90b1840a097: Telling an agent to write early is not enough: the artifact contract ...
 
 - lesson_id: lesson-raised-c90b1840a097
 - finding_category: correctness
+- error_class: contract.schema-violation
 - statement: Telling an agent to write early is not enough: the artifact contract must mandate a minimum object count with explicit clean and not-reached sentinels, one write per question, so that a budget death leaves a readable partial instead of a file that cannot be told apart from a completed clean review.
 
 ### lesson-raised-1aabef29e2e1: A priority order stated in a resume prompt is as unenforceable as a t...
 
 - lesson_id: lesson-raised-1aabef29e2e1
 - finding_category: correctness
+- error_class: contract.constraint-decay
 - statement: A priority order stated in a resume prompt is as unenforceable as a turn budget: the agent will spend its whole stint on the first item it finds tractable. If the order matters, dispatch one question per resume, or measure the remaining questions yourself.
 
 ### lesson-raised-eb10cdf5761b: A claim about how many leaves a revision changed must be measured ove...
 
 - lesson_id: lesson-raised-eb10cdf5761b
 - finding_category: correctness
+- error_class: judgment.hallucination
 - statement: A claim about how many leaves a revision changed must be measured over every leaf including scalars: a strings-only walker undercounts by exactly the version-number bumps, which is the one change every revision makes.
 
 ### lesson-raised-18c6a8c89228: A zero-occurrence sweep is evidence only after the coordinate is conf...
 
 - lesson_id: lesson-raised-18c6a8c89228
 - finding_category: correctness
+- error_class: judgment.false-positive-finding
 - statement: A zero-occurrence sweep is evidence only after the coordinate is confirmed against the finding own location field: searching the wrong criterion returns a null that is indistinguishable from a real defect, and it will manufacture a false finding against correct text.
 
 ### lesson-raised-66bfd37ce01a: Never override the commit author with `git -c user.email=...`; the re...
 
 - lesson_id: lesson-raised-66bfd37ce01a
+- error_class: contract.constraint-decay
 - statement: Never override the commit author with `git -c user.email=...`; the repo's configured identity is the author, and a per-command override writes a commit under the wrong name that a rewrite has to undo.
 
 ### lesson-raised-962e5eed0b7b: A skill's `description:` frontmatter is system-prompt cost on every t...
 
 - lesson_id: lesson-raised-962e5eed0b7b
+- error_class: economy.context-overrun
 - statement: A skill's `description:` frontmatter is system-prompt cost on every turn; keep it to routing, not prose.
 
 ### lesson-raised-c11ee5a1819d: A truncated listing (`| head -N`) is not a measurement; count from th...
 
 - lesson_id: lesson-raised-c11ee5a1819d
+- error_class: judgment.hallucination
 - statement: A truncated listing (`| head -N`) is not a measurement; count from the full output or a counter before stating a number.
 
 ### lesson-raised-cf980af1e570: After a pipe, `$?` is the last stage's exit code; use `${pipestatus[n...
 
 - lesson_id: lesson-raised-cf980af1e570
+- error_class: execution.tool-failure
 - statement: After a pipe, `$?` is the last stage's exit code; use `${pipestatus[n]}` (zsh) and read it before any subshell, which discards it. The "unknown flag exits 0" observation was this.
 
 ### lesson-raised-fc0191ec66ae: `cd` inside a compound command re-scopes the rest of it, and the work...
 
 - lesson_id: lesson-raised-fc0191ec66ae
+- error_class: execution.tool-failure
 - statement: `cd` inside a compound command re-scopes the rest of it, and the working directory resets between tool calls; use absolute paths or `git -C <dir>` rather than relying on a prior `cd`.
 
 ### lesson-raised-0d7ff58845b2: `pnpm biome check` must run from the repo root; run from `factory/orc...
 
 - lesson_id: lesson-raised-0d7ff58845b2
+- error_class: execution.tool-failure
 - statement: `pnpm biome check` must run from the repo root; run from `factory/orchestrator` it checks a different file set and reports a different baseline.
 
 ### lesson-raised-720003607334: Resolve another branch's merge conflict in a throwaway worktree off `...
 
 - lesson_id: lesson-raised-720003607334
+- error_class: integration.merge-conflict-textual
 - statement: Resolve another branch's merge conflict in a throwaway worktree off `origin/<branch>` (`git worktree add --quiet <dir> -b <branch> origin/<ref>`), never by switching the current tree.
 
 ### lesson-raised-49b3f7dc407d: When both sides of a conflict appended to the same list (a CHANGELOG ...
 
 - lesson_id: lesson-raised-49b3f7dc407d
+- error_class: integration.merge-conflict-textual
 - statement: When both sides of a conflict appended to the same list (a CHANGELOG section, a `files` allowlist), the resolution is the union of both additions, not a pick of one side.
 
 ### lesson-raised-5b1e157a4b4d: A red `main` makes every PR's check meaningless; fix `main` first, th...
 
 - lesson_id: lesson-raised-5b1e157a4b4d
+- error_class: execution.regression
 - statement: A red `main` makes every PR's check meaningless; fix `main` first, then re-run the PR checks against it.
 
 ### lesson-raised-47c273e5949b: Every `.md` under the instruction surface is doc-linted, so a scope d...
 
 - lesson_id: lesson-raised-47c273e5949b
+- error_class: execution.test-failure
 - statement: Every `.md` under the instruction surface is doc-linted, so a scope doc that names a verb not yet built turns `main` red; declare it with a self-expiring `<!-- PLANNED-NAMESPACE: <ns> -->` marker rather than widening the lint's exclusion list.
 
 ### lesson-raised-6e713c40cfc7: `git stash` unstages a `git mv`; the rename comes back as a delete pl...
 
 - lesson_id: lesson-raised-6e713c40cfc7
+- error_class: execution.tool-failure
 - statement: `git stash` unstages a `git mv`; the rename comes back as a delete plus an untracked file, so re-stage the rename after `stash pop`.
 
 ### lesson-raised-9b485954d931: `rm -rf` is hook-blocked outside `workspaces/` and `state/`; remove a...
 
 - lesson_id: lesson-raised-9b485954d931
+- error_class: execution.tool-failure
 - statement: `rm -rf` is hook-blocked outside `workspaces/` and `state/`; remove a worktree with `git worktree remove --force` and a file with a targeted `rm`.
 
 ### lesson-raised-ffadc4019340: Verify a new guard by mutation, not by a green run: reintroduce each ...
 
 - lesson_id: lesson-raised-ffadc4019340
+- error_class: execution.test-failure
 - statement: Verify a new guard by mutation, not by a green run: reintroduce each defect it claims to catch and watch it fail by name before trusting the pass.
 
 ### lesson-raised-3c9f8b1c9d17: `npm publish` answering `404 ...
 
 - lesson_id: lesson-raised-3c9f8b1c9d17
+- error_class: execution.tool-failure
 - statement: `npm publish` answering `404 ... is not in this registry` for a scoped package is an authentication failure in disguise, not a missing package; check `npm whoami` before anything else.
 
 ### lesson-raised-43a115153ca8: npm's read path lags a first publish by roughly 45 seconds; confirm a...
 
 - lesson_id: lesson-raised-43a115153ca8
+- error_class: execution.tool-failure
 - statement: npm's read path lags a first publish by roughly 45 seconds; confirm a publish with `npm access list packages`, not `npm view`, before concluding it failed.
 
 ### lesson-raised-b223426aa4f6: `grep -r ...
 
 - lesson_id: lesson-raised-b223426aa4f6
+- error_class: execution.tool-failure
 - statement: `grep -r ... --include=...` with no path argument reads stdin and hangs the tool call forever; always pass an explicit root.
 
 ### lesson-raised-bc8c041f3a8c: A hand-maintained list inside a guard is the hole the guard was built...
 
 - lesson_id: lesson-raised-bc8c041f3a8c
+- error_class: execution.test-failure
 - statement: A hand-maintained list inside a guard is the hole the guard was built to close; derive the list from the source it checks (a `roots` array in `packaging.test.ts` did not name `ROADMAP_PATH`, so the guard passed the very gap it existed to catch).
 
 ### lesson-raised-04cd391ca791: A 404 from a scoped npm registry on a PUT is an authentication failur...
 
 - lesson_id: lesson-raised-04cd391ca791
+- error_class: execution.tool-failure
 - statement: A 404 from a scoped npm registry on a PUT is an authentication failure, not a missing package: the registry hides an existing scope from an unauthorised token instead of returning 401.
 
 ### lesson-raised-1804a19612db: npm two-factor authentication makes publishing an operator-run step: ...
 
 - lesson_id: lesson-raised-1804a19612db
+- error_class: execution.tool-failure
 - statement: npm two-factor authentication makes publishing an operator-run step: the OTP prompt cannot be satisfied by an agent, so a release runbook must hand the publish command to the operator rather than run it.
 
 ### lesson-raised-f39c1a53b31b: An npm packument carries `gitHead` for every published version, so th...
 
 - lesson_id: lesson-raised-f39c1a53b31b
+- error_class: other.unclassified
 - statement: An npm packument carries `gitHead` for every published version, so the commit a release was cut from can be read back from the registry without relying on a tag.
 
 ### lesson-raised-bac9a3bd3b81: The auto-mode classifier denies `smith plan ingest`, an `mv` of a pla...
 
 - lesson_id: lesson-raised-bac9a3bd3b81
+- error_class: execution.tool-failure
 - statement: The auto-mode classifier denies `smith plan ingest`, an `mv` of a plan file, and Bash reads of the skill playbooks under `.claude/skills/`; those steps need the operator or a different tool.
 
 ### lesson-raised-2528cf4e5f25: `smith wave check` requires the full event envelope and prints no eve...
 
 - lesson_id: lesson-raised-2528cf4e5f25
+- error_class: execution.tool-failure
 - statement: `smith wave check` requires the full event envelope and prints no event id, so the id of the event it wrote has to be read back from the session log.
 
 ### lesson-raised-ccacd8f42e4e: Cut a worktree from the current base: a worktree cut before N merges ...
 
 - lesson_id: lesson-raised-ccacd8f42e4e
+- error_class: integration.stack-misorder
 - statement: Cut a worktree from the current base: a worktree cut before N merges tests a tree nobody will ship, and a green suite on it says nothing about the tree that lands.
 
 ### lesson-raised-3a856caf80ac: An effort-floor scan is not a security-reviewer dispatch; the two ans...
 
 - lesson_id: lesson-raised-3a856caf80ac
+- error_class: other.unclassified
 - statement: An effort-floor scan is not a security-reviewer dispatch; the two answer different questions, and passing one does not discharge the other.
 
 ### lesson-raised-31b13840f6c5: An `error-logged` event requires `task_ref` in its payload; without i...
 
 - lesson_id: lesson-raised-31b13840f6c5
+- error_class: contract.schema-violation
 - statement: An `error-logged` event requires `task_ref` in its payload; without it the append is refused.
 
 ### lesson-raised-612b4017e024: zsh expands an unquoted `--include` glob before grep ever sees it, so...
 
 - lesson_id: lesson-raised-612b4017e024
+- error_class: execution.tool-failure
 - statement: zsh expands an unquoted `--include` glob before grep ever sees it, so the pattern must be quoted.
 
 ### lesson-raised-bf090949f8e9: The live plan is the `plan-v<n>.json` inside the epic worktree, not t...
 
 - lesson_id: lesson-raised-bf090949f8e9
+- error_class: other.unclassified
 - statement: The live plan is the `plan-v<n>.json` inside the epic worktree, not the copy of it in the clone.
 
 ### lesson-raised-5b592f5d0052: `smith queue run --project <dir>` checks out the integration branch i...
 
 - lesson_id: lesson-raised-5b592f5d0052
+- error_class: execution.tool-failure
 - statement: `smith queue run --project <dir>` checks out the integration branch in that directory, so it must never be pointed at the main clone.
 
 ### lesson-raised-9101d200fc02: The visible way to correct a false record in the event log is an oper...
 
 - lesson_id: lesson-raised-9101d200fc02
+- error_class: other.unclassified
 - statement: The visible way to correct a false record in the event log is an operator-note carrying a non-operator actor, never a rewrite of the event that was wrong.
 
 ### lesson-raised-612b6c33c722: A `subprocess.run` environment must inherit `PATH`; a wholly replaced...
 
 - lesson_id: lesson-raised-612b6c33c722
+- error_class: execution.env-failure
 - statement: A `subprocess.run` environment must inherit `PATH`; a wholly replaced env silently loses every tool the command needs.
 
 ### lesson-raised-babd51405588: The factory leaked `SMITH_*` environment variables into project comma...
 
 - lesson_id: lesson-raised-babd51405588
+- error_class: execution.env-failure
 - statement: The factory leaked `SMITH_*` environment variables into project commands on two separate call paths, so one fix at one call site did not close the leak.
 
 ### lesson-raised-2ab8ba0c5201: `smith event append` takes one inline JSON envelope and no envelope f...
 
 - lesson_id: lesson-raised-2ab8ba0c5201
+- error_class: execution.tool-failure
 - statement: `smith event append` takes one inline JSON envelope and no envelope flags, while `smith delegation check` takes its argument as a positional.
 
 ### lesson-raised-2b2a1e81e546: An orchestrator taking over a dead wave-runner's session must open it...
 
 - lesson_id: lesson-raised-2b2a1e81e546
+- error_class: other.unclassified
 - statement: An orchestrator taking over a dead wave-runner's session must open its own session with `--continues`, rather than writing into the dead one.
 
 ### lesson-raised-f6787a2c84c7: Every markdown file in the repo is scanned by the doc tests unless it...
 
 - lesson_id: lesson-raised-f6787a2c84c7
+- error_class: execution.test-failure
 - statement: Every markdown file in the repo is scanned by the doc tests unless it matches the record-of-the-past shape.
 
 ### lesson-raised-b5d795d4b6d3: Verify a research finding against the code before writing it into the...
 
 - lesson_id: lesson-raised-b5d795d4b6d3
+- error_class: judgment.hallucination
 - statement: Verify a research finding against the code before writing it into the roadmap.
 
 ### lesson-raised-27e836565b55: A reviewer finding can be right about the fact and wrong about the fi...
 
 - lesson_id: lesson-raised-27e836565b55
+- error_class: judgment.false-positive-finding
 - statement: A reviewer finding can be right about the fact and wrong about the fix, so the remedy has to be verified separately from the observation.
 
 ### lesson-raised-37f438433dfa: Prove a regression test discriminates by reverting the fix and watchi...
 
 - lesson_id: lesson-raised-37f438433dfa
+- error_class: execution.test-failure
 - statement: Prove a regression test discriminates by reverting the fix and watching the test fail; a green run on the already-fixed tree proves nothing.
 
 ### lesson-raised-80a2f7a7a5d5: Biome rejects `${VAR+set}` inside a JavaScript string.
 
 - lesson_id: lesson-raised-80a2f7a7a5d5
+- error_class: execution.tool-failure
 - statement: Biome rejects `${VAR+set}` inside a JavaScript string.
 
 ### lesson-raised-378453209c3b: A red check in a stored background output may predate the fix; compar...
 
 - lesson_id: lesson-raised-378453209c3b
+- error_class: execution.test-failure
 - statement: A red check in a stored background output may predate the fix; compare timestamps before believing it.
 
 ### lesson-raised-46dd036c0dd9: `gh pr merge --delete-branch` fails to delete the local branch while ...
 
 - lesson_id: lesson-raised-46dd036c0dd9
+- error_class: execution.tool-failure
 - statement: `gh pr merge --delete-branch` fails to delete the local branch while a worktree holds it, even though the merge and the remote branch deletion both succeeded; that error is not a failed merge.
 
 ### lesson-raised-e1d2d89d388f: A backticked dotted token in any instruction file is read as an error...
 
 - lesson_id: lesson-raised-e1d2d89d388f
+- error_class: execution.test-failure
 - statement: A backticked dotted token in any instruction file is read as an error code by the doc test.
 
 ### lesson-raised-3b940e498974: The event log's key is `event_type`, not `type`.
 
 - lesson_id: lesson-raised-3b940e498974
+- error_class: contract.schema-violation
 - statement: The event log's key is `event_type`, not `type`.
 
 ### lesson-raised-02785579f29c: A node script that imports a repo dependency must live inside that re...
 
 - lesson_id: lesson-raised-02785579f29c
+- error_class: execution.env-failure
 - statement: A node script that imports a repo dependency must live inside that repo, unless it uses `createRequire` rooted at the target's own manifest.
 
 ### lesson-raised-ead91bf35c28: Before proposing that the factory call a library, check whether it is...
 
 - lesson_id: lesson-raised-ead91bf35c28
+- error_class: execution.env-failure
 - statement: Before proposing that the factory call a library, check whether it is a devDependency: the published package ships `dist` plus its runtime dependencies only.
 
 ### lesson-raised-d54fac4e1d74: The auto-mode classifier denies `gh pr merge` when it is chained with...
 
 - lesson_id: lesson-raised-d54fac4e1d74
+- error_class: execution.tool-failure
 - statement: The auto-mode classifier denies `gh pr merge` when it is chained with another command; the bare form passes.
 
 ### lesson-raised-2c7a4d56b146: `gh pr checks --json state` returns `IN_PROGRESS` or `QUEUED`, never ...
 
 - lesson_id: lesson-raised-2c7a4d56b146
+- error_class: execution.tool-failure
 - statement: `gh pr checks --json state` returns `IN_PROGRESS` or `QUEUED`, never `PENDING`.
 
 ### lesson-raised-d62b53f459bf: About twenty test files read `factory/specs/roadmap.md`, not only the...
 
 - lesson_id: lesson-raised-d62b53f459bf
+- error_class: execution.regression
 - statement: About twenty test files read `factory/specs/roadmap.md`, not only the six doc tests, so a wording change there needs the full suite.
 
 ### lesson-raised-19254ec2a441: Do not publish a gate claim before the gate finishes: state what was ...
 
 - lesson_id: lesson-raised-19254ec2a441
+- error_class: judgment.hallucination
 - statement: Do not publish a gate claim before the gate finishes: state what was actually observed and name CI as the authority.
 
 ### lesson-raised-f2920a320b64: Never edit a file while a suite is running against it: the result the...
 
 - lesson_id: lesson-raised-f2920a320b64
+- error_class: execution.test-failure
 - statement: Never edit a file while a suite is running against it: the result then describes no single tree. Kill the run and restart it on the committed tree.
 
 ### lesson-raised-7eeb398fef59: Right after a push, `gh pr checks` reports that no checks were report...
 
 - lesson_id: lesson-raised-7eeb398fef59
+- error_class: execution.tool-failure
 - statement: Right after a push, `gh pr checks` reports that no checks were reported; a waiter must treat that as still-pending, not as finished.
 
 ### lesson-raised-5a731cdab38f: A verification command and the commit that depends on it must be one ...
 
 - lesson_id: lesson-raised-5a731cdab38f
+- error_class: execution.tool-failure
 - statement: A verification command and the commit that depends on it must be one `&&` chain, and its output must not be piped past the pass/fail line.
 
 ### lesson-raised-3a400ca69b5e: When two verbs are compared for cost, check when each one runs before...
 
 - lesson_id: lesson-raised-3a400ca69b5e
+- error_class: other.unclassified
 - statement: When two verbs are compared for cost, check when each one runs before concluding: the cheaper one may run after the very gate it was meant to save.
 
 ### lesson-raised-44a58c2a7c7a: When checking a length-delta criterion, classify every line in the mo...
 
 - lesson_id: lesson-raised-44a58c2a7c7a
 - finding_category: correctness
+- error_class: judgment.hallucination
 - statement: When checking a length-delta criterion, classify every line in the moved region as code, comment or blank and count them; never derive a line count by subtracting line numbers, because the span between two anchors includes whatever else lives there.
 
 ### lesson-raised-394329488a2d: SMITH_EPIC_CAP_TOKENS in the gitignored .env overrides the epic cap i...
 
 - lesson_id: lesson-raised-394329488a2d
+- error_class: economy.budget-exceeded
 - statement: SMITH_EPIC_CAP_TOKENS in the gitignored .env overrides the epic cap in budgets.yml, so the committed cap is not the enforced one; read budget alarm's capTokens and budgetEnvOverrides for the live cap, never budgets.yml.
 
 ### lesson-raised-add2171a83a1: On a plan whose tasks are all origin user, the plan-quorum triggers a...
 
 - lesson_id: lesson-raised-add2171a83a1
+- error_class: other.unclassified
 - statement: On a plan whose tasks are all origin user, the plan-quorum triggers are mechanically silent - trigger 1 sums declared budgets, not measured spend, and trigger 3's per-task arm only reads non-user origins - so the only live trigger is the orchestrator's own --confidence self-report; report it honestly below 0.8 when the draft needed repair rounds.
 
 ### lesson-raised-be27b49f1d19: budget alarm reports unverifiable when dispatches for roles without a...
 
 - lesson_id: lesson-raised-be27b49f1d19
+- error_class: economy.budget-exceeded
 - statement: budget alarm reports unverifiable when dispatches for roles without an attribution path (auditor, security-reviewer) are in the log, and the planner role has no per-role cap, so a planner overrun is only visible against the epic cap.
 
 ### bs-audit-3-gate-timeout-under-load: Size a test-gate check's timeout for a loaded machine, not a quiet on...
 
 - lesson_id: bs-audit-3-gate-timeout-under-load
+- error_class: execution.env-failure
 - statement: Size a test-gate check's timeout for a loaded machine, not a quiet one: a suite that runs in about 200 s bare can be killed at a 300 s default with no output while another build shares the CPUs. When a check dies at its timeout with no test output, read machine load before blaming the code, log it as an env failure, and raise that check's timeout_ms through the per-check override; never drop or narrow the check to get it under the limit.
 
 ### dispatch-brief-names-result-schema: Every judge or worker dispatch brief names the JSON Schema its result...
 
 - lesson_id: dispatch-brief-names-result-schema
+- error_class: contract.schema-violation
 - statement: Every judge or worker dispatch brief names the JSON Schema its result file must satisfy: the full result envelope (task_id, agent, provider, model_tier, token_usage), the verdict at .structured_output, and the schema's own keys; the orchestrator schema-checks the file as soon as the agent returns, before gate run.
 
 ## security
