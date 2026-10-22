@@ -1,8 +1,16 @@
+import { mkdtempSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { maskCommandCredentials, run, runCumulative } from '../src/testgate.js';
+import { readHeavyLock, withHeavyLock } from '../src/heavyLock.js';
+import {
+  heavyChildEnv,
+  isHeavyCheck,
+  maskCommandCredentials,
+  run,
+  runCumulative,
+} from '../src/testgate.js';
 
 function processAlive(pid: number): boolean {
   try {
@@ -76,7 +84,9 @@ describe('testgate.ts', () => {
   it('reports a passing command with exitCode 0', async () => {
     const result = await run([{ name: 'ok', cmd: 'true' }], { cwd });
     expect(result.pass).toBe(true);
-    expect(result.results).toEqual([{ name: 'ok', pass: true, exitCode: 0, tail: '' }]);
+    expect(result.results).toEqual([
+      { name: 'ok', pass: true, exitCode: 0, tail: '', lock_wait_ms: 0 },
+    ]);
   });
 
   it('reports a failing command with a non-zero exitCode', async () => {
@@ -267,7 +277,9 @@ describe('testgate.ts', () => {
     it('wraps the epic test command as a single named check', async () => {
       const result = await runCumulative('true', { cwd });
       expect(result.pass).toBe(true);
-      expect(result.results).toEqual([{ name: 'cumulative', pass: true, exitCode: 0, tail: '' }]);
+      expect(result.results).toMatchObject([
+        { name: 'cumulative', pass: true, exitCode: 0, tail: '' },
+      ]);
     });
 
     it('fails when the epic test command fails', async () => {
@@ -330,5 +342,170 @@ describe('testgate.ts maskCommandCredentials', () => {
     ]) {
       expect(maskCommandCredentials(cmd)).toBe(cmd);
     }
+  });
+});
+
+describe('testgate.ts heavy lock', () => {
+  let lockDir: string;
+  beforeEach(() => {
+    lockDir = mkdtempSync(path.join(tmpdir(), 'gate-heavy-'));
+  });
+  afterEach(async () => {
+    await rm(lockDir, { recursive: true, force: true });
+  });
+  const heavyLock = (): { lockDir: string; pollMs: number } => ({ lockDir, pollMs: 5 });
+
+  /** Hold the lock until `release()` is called; resolves once it is held. */
+  async function holder(): Promise<{ release: () => void; done: Promise<void> }> {
+    let release: () => void = () => undefined;
+    let held: () => void = () => undefined;
+    const heldP = new Promise<void>((r) => {
+      held = r;
+    });
+    const done = withHeavyLock(
+      () => {
+        held();
+        return new Promise<void>((r) => {
+          release = r;
+        });
+      },
+      { lockDir, label: 'other', cwd: '/x', pollMs: 5 },
+    );
+    await heldP;
+    return { release: () => release(), done };
+  }
+
+  it('isHeavyCheck: explicit flag wins, then the name rule', () => {
+    expect(isHeavyCheck({ name: 'lint', heavy: true })).toBe(true);
+    expect(isHeavyCheck({ name: 'test', heavy: false })).toBe(false);
+    for (const name of ['test', 'unit', 'coverage', 'test-server-coverage', 'e2e-phone']) {
+      expect(isHeavyCheck({ name })).toBe(true);
+    }
+    for (const name of ['lint', 'typecheck', 'typecheck:test']) {
+      expect(isHeavyCheck({ name })).toBe(false);
+    }
+  });
+
+  it('runs unmarked checks without waiting while another holder has the lock', async () => {
+    const h = await holder();
+    try {
+      const result = await run(
+        [
+          { name: 'lint', cmd: 'true' },
+          { name: 'typecheck', cmd: 'true' },
+        ],
+        { cwd: process.cwd(), heavyLock: heavyLock() },
+      );
+      expect(result.pass).toBe(true);
+      expect(result.results.map((r) => r.lock_wait_ms)).toEqual([0, 0]);
+    } finally {
+      h.release();
+      await h.done;
+    }
+  });
+
+  it('runs [lint, test] in order: lint at once, test waits for the release', async () => {
+    const h = await holder();
+    const order: string[] = [];
+    const running = run(
+      [
+        { name: 'lint', cmd: 'true' },
+        { name: 'test', cmd: 'true' },
+      ],
+      { cwd: process.cwd(), heavyLock: heavyLock() },
+    ).then((r) => {
+      order.push('run-done');
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 120));
+    expect(order).toEqual([]);
+    order.push('release');
+    h.release();
+    const result = await running;
+    await h.done;
+    expect(order).toEqual(['release', 'run-done']);
+    expect(result.results[0]?.lock_wait_ms).toBe(0);
+    expect(result.results[1]?.lock_wait_ms).toBeGreaterThan(50);
+    expect(result.pass).toBe(true);
+  });
+
+  it('does not count the lock wait against timeout_ms', async () => {
+    const h = await holder();
+    const running = run([{ name: 'test', cmd: 'true', timeout_ms: 100 }], {
+      cwd: process.cwd(),
+      heavyLock: heavyLock(),
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    h.release();
+    const result = await running;
+    await h.done;
+    expect(result.pass).toBe(true);
+    expect(result.results[0]?.lock_wait_ms).toBeGreaterThan(100);
+  });
+
+  it('fails the check with heavy.wait-timeout and the holder detail', async () => {
+    const h = await holder();
+    try {
+      const result = await run([{ name: 'test', cmd: 'true' }], {
+        cwd: process.cwd(),
+        heavyLock: { ...heavyLock(), maxWaitMs: 30 },
+      });
+      expect(result.pass).toBe(false);
+      expect(result.results[0]?.reason).toBe('heavy.wait-timeout');
+      expect(result.results[0]?.tail).toContain('other');
+      expect(result.results[0]?.tail).toContain(path.join(lockDir, 'heavy.lock'));
+    } finally {
+      h.release();
+      await h.done;
+    }
+  });
+
+  it('gives a heavy child the lease and strips every other BS_/SMITH_ variable', async () => {
+    process.env.BS_OTHER = '1';
+    process.env.SMITH_OTHER = '1';
+    try {
+      const out = path.join(lockDir, 'seen.txt');
+      const lockCopy = `${out}.lock`;
+      const result = await run(
+        [
+          {
+            name: 'test',
+            cmd: `printf '%s|%s|%s|%s' "$BS_HEAVY_LOCK_TOKEN" "$BS_HEAVY_LOCK_DIR" "$BS_OTHER" "$SMITH_OTHER" > '${out}'; cp '${path.join(lockDir, 'heavy.lock')}' '${lockCopy}'`,
+          },
+        ],
+        { cwd: process.cwd(), heavyLock: heavyLock() },
+      );
+      expect(result.pass).toBe(true);
+      const lock = JSON.parse(await readFile(lockCopy, 'utf8')) as { token: string };
+      expect(await readFile(out, 'utf8')).toBe(`${lock.token}|${lockDir}||`);
+      expect(await readHeavyLock(lockDir)).toBeUndefined();
+    } finally {
+      delete process.env.BS_OTHER;
+      delete process.env.SMITH_OTHER;
+    }
+  });
+
+  it('heavyChildEnv adds exactly the two lease variables to the stripped env', () => {
+    const env = heavyChildEnv(
+      { PATH: '/bin', BS_HOME: '/h', SMITH_X: '1', BS_HEAVY_LOCK_TOKEN: 'old' },
+      { token: 't', lockDir: '/d' },
+    );
+    expect(env).toEqual({ PATH: '/bin', BS_HEAVY_LOCK_TOKEN: 't', BS_HEAVY_LOCK_DIR: '/d' });
+  });
+
+  it('runs inside the suite on a temporary lock dir with no inherited token', () => {
+    expect(process.env.BS_HEAVY_LOCK_TOKEN).toBeUndefined();
+    const dir = process.env.BS_HEAVY_LOCK_DIR as string;
+    expect(path.resolve(dir).startsWith(path.resolve(tmpdir()))).toBe(true);
+  });
+
+  it('runCumulative takes the lock', async () => {
+    const out = path.join(lockDir, 'cum.lock');
+    const result = await runCumulative(`cp '${path.join(lockDir, 'heavy.lock')}' '${out}'`, {
+      cwd: process.cwd(),
+      heavyLock: heavyLock(),
+    });
+    expect(result.pass).toBe(true);
+    expect(JSON.parse(await readFile(out, 'utf8'))).toMatchObject({ pid: process.pid });
   });
 });
