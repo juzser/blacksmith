@@ -570,6 +570,63 @@ describe('cleanup.ts', () => {
     });
   });
 
+  describe('merge targets and failures', () => {
+    it('plans a legacy smith/ task worktree whose branch is merged', async () => {
+      const wt = path.join(wtRoot, 'e9-t1');
+      git(projectDir, ['worktree', 'add', '-q', '-b', 'smith/e9/t1', wt, 'main']);
+      commitIn(wt, 'legacy.txt');
+      git(projectDir, ['merge', '-q', '--ff-only', 'smith/e9/t1']);
+      const i = item(await planOf({ events: [closedEvent('e9')] }), 'smith/e9/t1');
+      expect(i).toMatchObject({ kind: 'worktree', action: 'remove' });
+      await runCleanup(opts({ apply: true, events: [closedEvent('e9')] }));
+      expect(existsSync(wt)).toBe(false);
+      expect(branchExists('smith/e9/t1')).toBe(false);
+    });
+
+    it('counts a branch landed only in origin/<default> as merged', async () => {
+      const wt = createTaskWorktree(projectDir, 'e1', 't1').worktreeDir;
+      commitIn(wt, 'remote.txt');
+      git(projectDir, ['push', '-q', 'origin', 'bs/e1/t1:main']);
+      git(projectDir, ['fetch', '-q', 'origin']);
+      expect(git(projectDir, ['branch', '--list', 'main', '--contains', 'bs/e1/t1']).trim()).toBe(
+        '',
+      );
+      const i = item(await planOf(), 'bs/e1/t1');
+      expect(i?.action).toBe('remove');
+      expect(i?.reason).toContain('origin/main');
+    });
+
+    it('counts a task merged only into its integration branch as merged', async () => {
+      const wt = createTaskWorktree(projectDir, 'e1', 't1').worktreeDir;
+      commitIn(wt, 'int-only.txt');
+      git(projectDir, ['update-ref', 'refs/heads/bs/e1/integration', 'refs/heads/bs/e1/t1']);
+      const i = item(await planOf(), 'bs/e1/t1');
+      expect(i?.action).toBe('remove');
+      expect(i?.reason).toContain('bs/e1/integration');
+      const integration = item(await planOf(), 'bs/e1/integration');
+      expect(integration?.action).toBe('keep');
+      expect(integration?.reason).toMatch(/^not-merged/);
+    });
+
+    it('reports a failing trash call as keep and leaves the directory in place', async () => {
+      const orphan = path.join(wtRoot, 'orphan');
+      mkdirSync(orphan, { recursive: true });
+      const report = await runCleanup(
+        opts({
+          apply: true,
+          trash: () => {
+            throw new Error('trash exploded');
+          },
+        }),
+      );
+      const d = report.items.find((i) => i.kind === 'directory');
+      expect(d?.action).toBe('keep');
+      expect(d?.reason).toMatch(/^trash-failed/);
+      expect(d?.reason).toContain('trash exploded');
+      expect(existsSync(orphan)).toBe(true);
+    });
+  });
+
   describe('edges', () => {
     it('reports nothing for a project with no .wt folder and no task branches', async () => {
       expect(await planOf()).toEqual([]);
