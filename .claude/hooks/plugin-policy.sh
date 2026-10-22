@@ -17,7 +17,7 @@
 # only: a background job, sleep, and kill of the PIDs this shim started) that
 # is shorter than the hook entry's timeout in hooks.json. If the hook has not
 # answered when the watchdog fires, it is stopped and an `ask` is returned.
-# BS_PLUGIN_GUARD_WATCHDOG (seconds, digits and dots only) shortens the limit
+# BS_PLUGIN_GUARD_WATCHDOG (seconds, digits or digits.digits) shortens the limit
 # for tests; the default is 3.
 
 [ "${BS_PLUGIN_GUARD:-}" = "1" ] || exit 0
@@ -31,7 +31,7 @@ NO_HOOK="Blacksmith's plugin guard is on (BS_PLUGIN_GUARD=1) but no policy hook 
 
 LIMIT=3
 case "${BS_PLUGIN_GUARD_WATCHDOG:-}" in
-  '' | *[!0-9.]*) ;;
+  '' | *[!0-9.]* | .* | *. | *.*.*) ;;
   *) LIMIT="$BS_PLUGIN_GUARD_WATCHDOG" ;;
 esac
 
@@ -70,10 +70,10 @@ HPID=$!
   sleep "$LIMIT" &
   SPID=$!
   trap 'kill "$SPID" 2>/dev/null; exit 0' TERM
-  if wait "$SPID"; then
-    : >"$WORK/fired"
-    kill -9 "$HPID" 2>/dev/null
-  fi
+  # A timer that ends for any reason other than the TERM above counts as fired.
+  wait "$SPID"
+  : >"$WORK/fired"
+  kill -9 "$HPID" 2>/dev/null
 ) &
 WPID=$!
 
