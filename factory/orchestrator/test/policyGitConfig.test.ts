@@ -748,7 +748,7 @@ const NOT_UNDERSTOOD: ReadonlyArray<readonly [string, string]> = [
   ['substitution inside double quotes', 'git log "$(date)"'],
   ['backtick inside double quotes', 'git log "`date`"'],
   ['arithmetic expansion', 'git log $((1 + 1))'],
-  ['parameter expansion with a blank', 'git log ${x:-a b}'],
+  ['parameter expansion with a blank', 'git log \u0024{x:-a b}'],
   ['unclosed parameter expansion', 'git log ${x'],
   ['process substitution in', 'git log <(date)'],
   ['process substitution out', 'git log >(cat)'],
@@ -775,6 +775,126 @@ describe('a command the shell-word reader does not understand is asked about', (
     expect(allowed('echo $(date)')).toBe(true);
     expect(allowed("echo $'a b'")).toBe(true);
     expect(allowed('echo "abc')).toBe(true);
+  });
+});
+
+// Further edges of the reader: plain commands the rule has always read stay
+// allowed, and an expansion the reader does not model is asked about.
+describe('the shell-word reader keeps plain quoting and operators readable', () => {
+  it.each([
+    ['git commit -m "don\'t"'],
+    ["git commit -m 'don'\\''t'"],
+    ['git commit -m "fix: a (b) c"'],
+    ['git commit -m "feat: \u0024{scope}"'],
+    ['git commit -m "cost \\$5"'],
+    ['git log --format="%an <%ae>"'],
+    ["git log --format='%an <%ae>'"],
+    ['git log --format=%an\\ \\<%ae\\>'],
+    ["git log --grep='a;b'"],
+    ["git log -S'foo bar'"],
+    ['git log \'a\'"b"c'],
+    ['git log "a\\"b"'],
+    ['git log "a # b"'],
+    ['git log a#b'],
+    ['git log $HOME/x'],
+    ['git log "$HOME"/x'],
+    ['git log \u0024{BRANCH}'],
+    ['git log $1 $@ $? $$'],
+    ['git log HEAD~1..HEAD'],
+    ['git log *.ts'],
+    ['git diff {a,b}'],
+    ['git log\ta'],
+    ['git log |& head'],
+    ['git log & git status'],
+    ['git log 3<&0'],
+    ['git log 10>out'],
+    ['git log 2>&1>/dev/null'],
+    ['git log >&-'],
+    ['git status\ngit log'],
+    ['git log \\\n--oneline'],
+    ['for f in a b; do git add $f; done'],
+    ['if git diff --quiet; then echo ok; fi'],
+    ['echo "it\'s"; git log'],
+    ['git log | xargs -I{} echo {}'],
+    ['git log --format=%H | while read h; do git show $h; done'],
+    ['(git log)'],
+    ['{ git log; }'],
+    ["git log -1 --date=format:'%Y-%m-%d'"],
+    ["git stash push -m 'wip'"],
+  ])('allows %s', (command) => {
+    expect(allowed(command)).toBe(true);
+  });
+
+  it('allows an escaped or single-quoted parameter in a -c value', () => {
+    expect(allowed('git -c core.pager=\\$P log')).toBe(true);
+    expect(allowed("git -c core.pager='$P' log")).toBe(true);
+    expect(allowed('git -c core.pager="\\$P" log')).toBe(true);
+  });
+
+  it('allows a grep -O look-alike that is not the pager option', () => {
+    expect(allowed('git grep -e -O')).toBe(true);
+    expect(allowed('git grep -- -O')).toBe(true);
+    expect(allowed('git log -O')).toBe(true);
+    expect(allowed('git log --open-files-in-pager=foo')).toBe(true);
+  });
+});
+
+describe('the shell-word reader asks about an expansion it does not model', () => {
+  it.each([
+    ['git log \u0024{HOME:-x}'],
+    ['git log \u0024{x%.*}'],
+    ['git log \u0024{x/a/b}'],
+    ['git log \u0024{x[0]}'],
+    ['git log "\u0024{x:-y}"'],
+    ['git log $((1))'],
+    ['git log ${'],
+    ['git log `'],
+    ['git log "`"'],
+    ['git log -- "$(pwd)"'],
+    ['git diff <(cat a)'],
+    ['git log <<<"x"'],
+    ['git log <<-EOF\nx\nEOF'],
+  ])('refuses %s', (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  it('refuses an unquoted parameter or substitution in a -c value', () => {
+    expect(refused('git -c core.pager=\u0024{P} log')).toBe(true);
+    expect(refused('git -c core.pager=$P log')).toBe(true);
+    expect(refused('git -c core.pager=a*b log')).toBe(true);
+    expect(refused('git -c core.pager=$((1)) log')).toBe(true);
+    expect(refused('git --config-env core.pager=P log')).toBe(true);
+  });
+});
+
+describe('a configuration value is read next to other quoting and carriers', () => {
+  it.each([
+    ['GIT_PAGER="git pu"\'sh -f\' origin main git log'],
+    ["GIT_PAGER='git push -f origin main'\ngit log"],
+    ["GIT_PAGER='git push -f origin main' \\\n git log"],
+    ["export GIT_PAGER='git push -f origin main' && git log"],
+    ["export GIT_PAGER='git push -f origin main'\ngit log"],
+    ["(export GIT_PAGER='git push -f origin main'); git log"],
+    ["git -c core.pager='git push -f origin main' log # note"],
+    ['git -c "core.pager=git push -f origin main" log'],
+    ["git '-c' 'core.pager=git push -f origin main' log"],
+    ["P='git push -f origin main'; export P; git --config-env=core.pager=P log"],
+    ["GIT_CONFIG_VALUE_0='git push -f origin main' GIT_CONFIG_COUNT=1 git log"],
+    ["GIT_CONFIG_VALUE_10='git push -f origin main' git log"],
+    ["git grep -nO'git push -f origin main' x"],
+    ["git grep x -O'git push -f origin main'"],
+    ["git grep --open-files-in-pager 'git push -f origin main' x"],
+    ["env -u X GIT_PAGER='git push -f origin main' git log"],
+    ["env -i GIT_PAGER='git push -f origin main' git log"],
+    ["env GIT_PAGER='git push -f origin main' command git log"],
+    ["echo hi | GIT_PAGER='git push -f origin main' git log"],
+    ["git log | GIT_PAGER='git push -f origin main' git log"],
+  ])('refuses %s', (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  it('allows a readable value after a pipe', () => {
+    expect(allowed('git log 2>&1 | GIT_PAGER=cat git log')).toBe(true);
   });
 });
 
