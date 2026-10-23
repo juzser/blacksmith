@@ -2208,6 +2208,94 @@ function checkGitConfigValues(
 }
 
 /**
+ * The top-level commands of `command`, each with whether it is fed by a pipe
+ * from an earlier command of the same pipeline that runs git.
+ */
+function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPipe: boolean }> {
+  const parts: Array<{ text: string; afterGitPipe: boolean }> = [];
+  let position = 0;
+  let afterPipe = false;
+  let pipelineRunsGit = false;
+  for (const text of topLevelCommands(command)) {
+    if (!afterPipe) pipelineRunsGit = false;
+    parts.push({ text, afterGitPipe: afterPipe && pipelineRunsGit });
+    pipelineRunsGit ||= /\bgit\b/i.test(text);
+    const end = position + text.length;
+    const pair = command.slice(end, end + 2);
+    afterPipe = pair.startsWith('|') && pair !== '||';
+    position = end + (pair === '&&' || pair === '||' ? 2 : 1);
+  }
+  return parts;
+}
+
+/** `xargs` options that take the next word as their value. */
+const XARGS_VALUE_OPTIONS = new Set([
+  '-I',
+  '-L',
+  '-n',
+  '-P',
+  '-s',
+  '-d',
+  '-E',
+  '-a',
+  '--arg-file',
+  '--delimiter',
+  '--eof',
+  '--max-args',
+  '--max-chars',
+  '--max-lines',
+  '--max-procs',
+  '--process-slot-var',
+]);
+
+const SHELL_INTERPRETER_RE = /^(?:sh|bash|zsh|dash|ksh)$/i;
+
+const XARGS_GIT_REASON =
+  'git run by xargs takes its subcommand and arguments from input, so the guard cannot tell what it runs — write the subcommand out plainly';
+const GIT_OUTPUT_TO_SHELL_REASON =
+  'git output is run by a shell here, so the guard cannot tell what it runs — write the commands out plainly';
+
+/**
+ * Reads the command a segment runs (past assignments, `env` and `xargs` with
+ * its options) the way the in-line form is read: `xargs git` with a
+ * subcommand that is missing, unreadable or force-gated; a shell interpreter
+ * that follows a pipe from git; `eval` of a substitution that runs git.
+ */
+function checkXargsGitAndShellInput(
+  words: readonly DequotedWord[],
+  afterGitPipe: boolean,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  let index = commandStart(words);
+  let viaXargs = false;
+  while (words[index]?.text === 'xargs') {
+    viaXargs = true;
+    index += 1;
+    while (index < words.length && (words[index]?.text ?? '').startsWith('-')) {
+      index += XARGS_VALUE_OPTIONS.has(words[index]?.text ?? '') ? 2 : 1;
+    }
+    index += commandStart(words.slice(index));
+  }
+  const name = (words[index]?.text ?? '').split('/').pop() ?? '';
+  if (afterGitPipe && SHELL_INTERPRETER_RE.test(name)) {
+    return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
+  }
+  if (name === 'eval') {
+    const runsGit = words
+      .slice(index + 1)
+      .some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
+    return runsGit ? violation(rule, GIT_OUTPUT_TO_SHELL_REASON) : null;
+  }
+  if (!viaXargs || name.toLowerCase() !== 'git') return null;
+  const subcommandIndex = gitSubcommandWord(words, index);
+  const subcommand = words[subcommandIndex]?.text.toLowerCase() ?? '';
+  if (!/^[a-z][a-z0-9-]*$/.test(subcommand) || FORCE_GATE_SUBCOMMANDS.includes(subcommand)) {
+    return violation(rule, XARGS_GIT_REASON);
+  }
+  return null;
+}
+
+/**
  * Rule 2's main defence: a plain-word gate, not a growing list of individual
  * shell tricks. In a segment that reaches `push`, `rebase`, `reset`,
  * `filter-branch`, `update-ref`, or `branch` when it forces or deletes a
@@ -2239,7 +2327,10 @@ function checkForcePush(
   // A comment or here-document ends where the shell ends it, so a command
   // holding either is also read once with its continuations as written.
   if (asWritten && !(/\\\n/.test(command) && /<<|(^|[^$])#/.test(command))) return null;
-  for (const segment of asWritten ? [command] : topLevelCommands(joinLineContinuations(command))) {
+  const parts = asWritten
+    ? [{ text: command, afterGitPipe: false }]
+    : segmentsWithGitPipe(joinLineContinuations(command));
+  for (const { text: segment, afterGitPipe } of parts) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
     // A segment the reader does not understand is asked about when it could involve git.
@@ -2263,6 +2354,9 @@ function checkForcePush(
       }
       continue;
     }
+
+    const runViolation = checkXargsGitAndShellInput(words, afterGitPipe, rule);
+    if (runViolation) return runViolation;
 
     const subcommandWordViolation = checkForcePushSubcommandWord(segment, words, rule);
     if (subcommandWordViolation) return subcommandWordViolation;
@@ -2351,7 +2445,12 @@ function checkForcePush(
  * let a force flag through.
  */
 function topLevelCommands(command: string): string[] {
-  if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return [command];
+  return splitTopLevelCommands(command) ?? [command];
+}
+
+/** `topLevelCommands`' split, or `null` when the line holds something it cannot read with confidence. */
+function splitTopLevelCommands(command: string): string[] | null {
+  if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return null;
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
   let start = 0;
@@ -2392,7 +2491,7 @@ function topLevelCommands(command: string): string[] {
     else if (c === '`') stack.push('bt');
     else if (c === '(') stack.push('paren');
     else if (c === ')') {
-      if (top !== 'paren') return [command];
+      if (top !== 'paren') return null;
       stack.pop();
     } else if (stack.length === 0) {
       const pair = command.slice(i, i + 2);
@@ -2405,7 +2504,7 @@ function topLevelCommands(command: string): string[] {
     }
     i += 1;
   }
-  if (stack.length > 0) return [command];
+  if (stack.length > 0) return null;
   segments.push(command.slice(start));
   return segments;
 }
@@ -2531,11 +2630,19 @@ function checkHistoryRewriteOnProtected(
   policy: GuardrailPolicy,
 ): PolicyViolation | null {
   if (!isProtectedForHistoryRewrite(branch, policy)) return null;
-  const rewrites =
-    isGitSubcommand(command, 'rebase') ||
-    /\bcommit\b.*--amend\b/i.test(command) ||
-    /\bfilter-(branch|repo)\b/i.test(command);
-  if (!rewrites) return null;
+  const rewrites = (text: string) =>
+    isGitSubcommand(text, 'rebase') ||
+    /\bcommit\b.*--amend\b/i.test(text) ||
+    /\bfilter-(branch|repo)\b/i.test(text);
+  // Each top-level command is read on its own, and a read-only git command
+  // (a search that names a rewrite word) is skipped. A line the splitter
+  // cannot read is matched as a whole.
+  const segments = splitTopLevelCommands(command);
+  const found =
+    segments === null
+      ? rewrites(command)
+      : segments.some((segment) => !isReadOnlyGitCommand(segment) && rewrites(segment));
+  if (!found) return null;
   const rule = requireRule(policy, 'history-rewrite-on-protected');
   return violation(rule, renderBranch(rule.reason, branch));
 }
