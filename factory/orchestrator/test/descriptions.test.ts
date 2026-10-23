@@ -104,3 +104,50 @@ describe('the README first screen', () => {
     expect(labelled || placeholder).toBe(true);
   });
 });
+
+describe('the quickstart', () => {
+  const quickstart = read('docs/guide/quickstart.md');
+  const fenced = [...quickstart.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1] as string);
+  const cli = read('factory/orchestrator/src/cli.ts');
+
+  it('links INSTALL.md for detail and runs bs doctor', () => {
+    expect(quickstart).toMatch(/\]\(\.\.\/\.\.\/INSTALL\.md\)/);
+    expect(fenced.join('\n')).toMatch(/^bs doctor$/m);
+  });
+
+  it('names only bs verbs the CLI dispatches', () => {
+    const verbs = fenced
+      .join('\n')
+      .split('\n')
+      .map((line) => /^bs\s+([a-z-]+)/.exec(line.trim())?.[1])
+      .filter((verb): verb is string => verb !== undefined);
+    expect(verbs.length).toBeGreaterThan(1);
+    for (const verb of verbs) expect(cli, verb).toContain(`namespace === '${verb}'`);
+  });
+});
+
+describe('the positioning proposal', () => {
+  const proposal = read('docs/positioning-proposal.md');
+
+  it('says it is a proposal and that nothing was applied', () => {
+    expect(proposal).toMatch(/proposal/i);
+    expect(proposal).toMatch(/Nothing in this file has been applied/);
+  });
+
+  it('holds no shell command that would change a GitHub setting', () => {
+    expect(proposal).not.toMatch(/^\s*(\$\s*)?gh\s+(repo|api)\b/m);
+  });
+});
+
+describe('the README below the first screen', () => {
+  it('keeps its sections and the one limit sentence that uses the word', () => {
+    for (const heading of ['Features', 'Install', 'Using it', 'Safety', 'Status', 'Docs'])
+      expect(readme, heading).toContain(`\n## ${heading}\n`);
+    expect(readme).toContain('No autonomous deploy or outbound sends');
+  });
+
+  it('keeps the logo and badges on the first screen', () => {
+    expect(firstScreen).toContain('black-smith.png');
+    expect(firstScreen).toContain('badge.svg');
+  });
+});
