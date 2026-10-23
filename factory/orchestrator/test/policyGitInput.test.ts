@@ -89,6 +89,15 @@ describe('force-push rule reads git commands that xargs runs and git output a sh
     expect(forcePushRefused('git ls-files | xargs -I{} git add {}')).toBe(false);
   });
 
+  it('reads the xargs replacement options the same way as -I', () => {
+    expect(forcePushRefused('echo x | xargs -I % git push')).toBe(true);
+    expect(forcePushRefused('echo x | xargs -J % git push')).toBe(true);
+    expect(forcePushRefused('echo x | xargs -S 100 -I % git push')).toBe(true);
+    expect(forcePushRefused('echo x | xargs -R 2 -I % git push')).toBe(true);
+    expect(forcePushRefused('git log | xargs -J % bash -c')).toBe(true);
+    expect(forcePushRefused('git ls-files | xargs -J % grep x %')).toBe(false);
+  });
+
   it('refuses a shell interpreter named by path or run through env after a git pipe', () => {
     expect(forcePushRefused('git log | /bin/bash')).toBe(true);
     expect(forcePushRefused('git log | env FOO=1 bash')).toBe(true);

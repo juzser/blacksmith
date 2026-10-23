@@ -2231,6 +2231,9 @@ function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPip
 /** `xargs` options that take the next word as their value. */
 const XARGS_VALUE_OPTIONS = new Set([
   '-I',
+  '-J',
+  '-R',
+  '-S',
   '-L',
   '-n',
   '-P',
