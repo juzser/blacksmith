@@ -111,6 +111,16 @@ pending proposals lets them sit invisible instead of surfacing them.
    resolving (`docs/standards/guardrails.md` "Deploy + outbound"). Print
    the digest to the operator regardless, whether or not the Slack send is
    approved.
+9. **Opt-in export.** Only when the operator asks for a file they can share,
+   run `bs report export --session <id> --digest <digest-file> --out
+   <file>` (add `--json` for the machine form). It reads this session's
+   events and the local transcripts, prints or writes a redacted copy of the
+   digest with token, escaped-defect, precision and per-task check numbers,
+   and sends nothing anywhere. The first line asks for a review: open the
+   file and read it before it goes anywhere. Whether to share it is the
+   operator's decision, never this session's; an incomplete token total
+   reads "at least <n>", and `bs stats effectiveness --session <id>` shows
+   the same numbers without writing a file.
 
 **Provider calibration note (Phase 8).** While any provider in
 `factory/policies/crosscheck.yml` is still `mode: shadow`, run
