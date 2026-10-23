@@ -68,4 +68,32 @@ describe('escaped issue reports per fingerprint', () => {
     const r = await count(issue('opened'), issue('commented'));
     expect(r.count).toBe(2);
   });
+
+  it('treats an empty fingerprint as absent', async () => {
+    const r = await count(issue('opened', ''), issue('commented', ''));
+    expect(r.count).toBe(2);
+  });
+
+  it('keeps the first report as the item for a repeated fingerprint', async () => {
+    const first = issue('opened', 'fp1');
+    const r = await count(first, issue('commented', 'fp1'));
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]?.eventId).toBe(first.event_id);
+  });
+
+  it('does not let a report outside the escape window use up its fingerprint', async () => {
+    const events = [
+      ev('gate-outcome', { outcome: 'pass' }, { task_id: 't1' }),
+      issue('opened', 'fp1'),
+      ev('wave-merged', { task_ids: ['t1'] }),
+      issue('commented', 'fp1'),
+    ];
+    const r = (await effectiveness(events, { readTokens: none })).escapedDefects;
+    expect(r.count).toBe(1);
+  });
+
+  it('does not let an unrecognised outcome use up its fingerprint', async () => {
+    const r = await count(issue('failed', 'fp1'), issue('opened', 'fp1'));
+    expect(r.count).toBe(1);
+  });
 });
