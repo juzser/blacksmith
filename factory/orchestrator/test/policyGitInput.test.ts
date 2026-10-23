@@ -75,6 +75,43 @@ describe('force-push rule reads git commands that xargs runs and git output a sh
   it('allows a non-git producer piped into a shell interpreter', () => {
     expect(forcePushRefused('echo ls | sh')).toBe(false);
   });
+
+  it('refuses xargs git whose subcommand is force-gated, with env or a path in front', () => {
+    expect(forcePushRefused('echo x | xargs git rebase main')).toBe(true);
+    expect(forcePushRefused('echo x | xargs env git push')).toBe(true);
+    expect(forcePushRefused('echo x | xargs /usr/bin/git push')).toBe(true);
+    expect(forcePushRefused('echo x | xargs --max-args 1 git push')).toBe(true);
+  });
+
+  it('allows xargs git with a plain read-only or non-gated subcommand', () => {
+    expect(forcePushRefused('git ls-files | xargs git status')).toBe(false);
+    expect(forcePushRefused('git ls-files | xargs -n 1 git log --oneline')).toBe(false);
+    expect(forcePushRefused('git ls-files | xargs -I{} git add {}')).toBe(false);
+  });
+
+  it('refuses a shell interpreter named by path or run through env after a git pipe', () => {
+    expect(forcePushRefused('git log | /bin/bash')).toBe(true);
+    expect(forcePushRefused('git log | env FOO=1 bash')).toBe(true);
+    expect(forcePushRefused('git log | xargs -n 1 sh')).toBe(true);
+    expect(forcePushRefused('git log | cat | sh')).toBe(true);
+  });
+
+  it('reads a shell interpreter only in the pipeline whose earlier command runs git', () => {
+    expect(forcePushRefused('git log | cat; echo ls | sh')).toBe(false);
+    expect(forcePushRefused('git log && sh')).toBe(false);
+    expect(forcePushRefused('git log || sh')).toBe(false);
+    expect(forcePushRefused('echo ls | cat | sh')).toBe(false);
+  });
+
+  it('refuses eval of a git substitution in either substitution form', () => {
+    expect(forcePushRefused('eval "`git log -1 --format=%B`"')).toBe(true);
+    expect(forcePushRefused('eval $(git show HEAD:x.sh)')).toBe(true);
+  });
+
+  it('allows eval of a substitution that does not run git', () => {
+    expect(forcePushRefused('eval "$(echo hello)"')).toBe(false);
+    expect(forcePushRefused('eval "$(ssh-agent -s)"')).toBe(false);
+  });
 });
 
 describe('history-rewrite rule reads each top-level command on its own', () => {
@@ -97,6 +134,23 @@ describe('history-rewrite rule reads each top-level command on its own', () => {
 
   it.each(STILL_REFUSED)('refuses %s on a protected branch', (command) => {
     expect(rewriteRefused(command)).toBe(true);
+  });
+
+  it('reads a read-only search next to a real rewrite on the same line', () => {
+    expect(rewriteRefused('git grep rebase || git commit --amend')).toBe(true);
+    expect(rewriteRefused('git grep rebase\ngit rebase main')).toBe(true);
+    expect(rewriteRefused('git log --grep=rebase | head -3; git filter-repo --path x')).toBe(true);
+    expect(rewriteRefused('git rebase main && git grep rebase')).toBe(true);
+  });
+
+  it('allows several read-only searches on one line on a protected branch', () => {
+    expect(rewriteRefused('git grep rebase && git log --grep=amend')).toBe(false);
+    expect(rewriteRefused('git grep rebase | head -3')).toBe(false);
+  });
+
+  it('does not apply the history-rewrite rule on an unprotected branch', () => {
+    const rules = decide('git rebase -i HEAD~2', 'feature').violations.map((v) => v.ruleId);
+    expect(rules).not.toContain('history-rewrite-on-protected');
   });
 
   it('keeps the whole-command reading when the line cannot be split', () => {
