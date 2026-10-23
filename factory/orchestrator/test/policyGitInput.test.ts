@@ -123,6 +123,55 @@ describe('force-push rule reads git commands that xargs runs and git output a sh
   });
 });
 
+describe('force-push rule reads a shell run with -c, behind a prefix word, or through env -S', () => {
+  const SHELL_RUN_REFUSED: string[] = [
+    'sh -c "$(git show HEAD:x.sh)"',
+    'bash -c "$(git log -1 --format=%B)"',
+    'bash -c "`git log -1 --format=%B`"',
+    'bash -ec "$(git show HEAD:x.sh)"',
+    'sh -xc "$(git show HEAD:x.sh)"',
+    '/bin/bash -c "$(git show HEAD:x.sh)"',
+    'git log | timeout 5 bash',
+    'git log | command bash',
+    'git log | sudo bash',
+    'git log | sudo -u example-user bash',
+    'git log | nice -n 5 sh',
+    'git log | nohup sh',
+    'git log | exec bash',
+    'git log | stdbuf -oL sh',
+    'git log | time bash',
+    'git log | timeout -s KILL 5 bash',
+    'git log | command timeout 5 bash',
+    'git log | env -S "bash -x"',
+    'git log | env --split-string="sh -e"',
+    'env -S "sh -c \'$(git show HEAD:x.sh)\'"',
+    'timeout 5 bash -c "$(git show HEAD:x.sh)"',
+  ];
+
+  const SHELL_RUN_ALLOWED: string[] = [
+    'bash -c "$(echo hello)"',
+    'bash -c "echo hello"',
+    'sh -c "$(ssh-agent -s)"',
+    'echo ls | timeout 5 bash',
+    'echo ls | command bash',
+    'git log | timeout 5 grep bash',
+    'git log | command grep x',
+    'git log | sudo less',
+    'timeout 5 bash -c "echo hello"',
+    'echo ls | env -S "bash -x"',
+  ];
+
+  it.each(SHELL_RUN_REFUSED)('refuses %s', (command) => {
+    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0]?.reason).toContain('run by a shell');
+  });
+
+  it.each(SHELL_RUN_ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
 describe('history-rewrite rule reads each top-level command on its own', () => {
   const READ_ONLY_ALLOWED = [
     'git grep rebase',
