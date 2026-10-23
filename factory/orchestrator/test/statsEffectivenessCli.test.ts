@@ -363,6 +363,50 @@ describe('bs stats effectiveness and bs report export (built binary)', () => {
     expect(md).toMatch(/proj-a\/task-2[^\n]*\| gate \| unknown \|/);
   });
 
+  it('reads the latest event per check and maps not-met, blocked and waiver-pending verdicts', () => {
+    const root = path.join(scratch, 'verdicts');
+    const stateDir = path.join(root, 'events');
+    seq = 0;
+    const t = (n: number) => ({ task_id: `proj-a/task-${n}` });
+    jsonl(path.join(stateDir, `${SESSION}.jsonl`), [
+      event('session-start', {}),
+      event('task-added', { title: 'Three' }, t(3)),
+      event('task-added', { title: 'Four' }, t(4)),
+      event('testgate-result', { pass: false, results: [] }, t(3)),
+      event('testgate-result', { pass: true, results: [] }, t(3)),
+      event('grader-verdict', { verdict: 'not-met' }, t(3)),
+      event('gate-outcome', { outcome: 'blocked' }, t(3)),
+      event('grader-verdict', { verdict: 'sideways' }, t(4)),
+      event('gate-outcome', { outcome: 'pass-with-waivers-pending' }, t(4)),
+    ]);
+    const args = [
+      'report',
+      'export',
+      '--session',
+      SESSION,
+      ...dirs(stateDir, path.join(root, 'c')),
+    ];
+    const json = JSON.parse(run([...args, '--json']).stdout);
+    const state = (task: string, check: string): string =>
+      json.checks.find((c: { task: string; check: string }) => c.task === task && c.check === check)
+        .state;
+    expect(state('proj-a/task-3', 'tests')).toBe('passed');
+    expect(state('proj-a/task-3', 'grader')).toBe('failed');
+    expect(state('proj-a/task-3', 'gate')).toBe('failed');
+    expect(state('proj-a/task-4', 'grader')).toBe('unknown');
+    expect(state('proj-a/task-4', 'gate')).toBe('passed');
+    expect(state('proj-a/task-4', 'tests')).toBe('not-run');
+  });
+
+  it('marks the lineage scope and refuses an unreadable --digest file', () => {
+    const lineage = JSON.parse(run(exportArgs(complete, ['--lineage', '--json'])).stdout);
+    expect(lineage.lineage).toBe(true);
+    expect(JSON.parse(run(exportArgs(complete, ['--json'])).stdout).lineage).toBe(false);
+    const missing = run(exportArgs(complete, ['--digest', path.join(complete.root, 'absent.md')]));
+    expect(missing.status).toBe(1);
+    expect(missing.stdout).not.toContain('Review this export');
+  });
+
   it('resolves the default config directory from CLAUDE_CONFIG_DIR, then the home directory', () => {
     const viaEnv = run(
       ['stats', 'effectiveness', '--session', SESSION, '--json', '--state-dir', complete.stateDir],
