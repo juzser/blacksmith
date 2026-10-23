@@ -249,12 +249,13 @@ export async function composeBrief(
   if (judgeTurn) add('artifact', formatDeclaredArtifactLine(opts.artifactPath as string));
 
   const text = `${sections.map(([, body]) => body).join('\n\n')}\n`;
-  // The lint reads exactly one `Turn budget:` in the whole prompt, spliced
-  // text included; a second occurrence would pass here and fail there.
+  // The lint reads one occurrence, or among several the single standalone
+  // line (ours); spliced text that adds a second standalone line would pass
+  // here and fail there, so refuse it.
   if (parseStatedTurns(text) !== turns) {
     throw new BriefError(
       'brief.turn-budget-ambiguous',
-      'The brief carries a second "Turn budget:" in spliced text, so the lint cannot read one number.',
+      'The brief carries another standalone "Turn budget:" line in spliced text, so the lint cannot read one number.',
       { role, taskId },
     );
   }

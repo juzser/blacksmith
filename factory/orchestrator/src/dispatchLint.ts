@@ -76,19 +76,25 @@ export interface DispatchLintInput {
 }
 
 const TURN_BUDGET_LINE = /Turn budget:[ \t]*(\S*)/g;
+const TURN_BUDGET_STANDALONE = /^Turn budget:[ \t]*(\S*)[ \t]*$/gm;
 
 /**
  * `Turn budget: <n>` in a dispatch prompt — mid-sentence or on its own
  * line, since a dispatch's leading line names the role and the budget in
- * one breath ("Role: coder. Turn budget: 40 ..."). Null for no occurrence,
- * more than one (two numbers is no number), or a value that is not a bare
+ * one breath ("Role: coder. Turn budget: 40 ..."). With exactly one
+ * occurrence that occurrence is the statement. With several (spliced plan
+ * text, lessons or findings may quote the label), the statement is the one
+ * standalone line — the whole line is the label and its value, as the brief
+ * composer writes it — and any other count of standalone lines is ambiguous.
+ * Null for no occurrence, an ambiguous prompt, or a value that is not a bare
  * non-negative integer — every one of those is "cannot state a turn count",
  * not "states zero".
  */
 export function parseStatedTurns(prompt: string): number | null {
   const matches = [...prompt.matchAll(TURN_BUDGET_LINE)];
-  if (matches.length !== 1) return null;
-  const raw = matches[0]?.[1] ?? '';
+  const chosen = matches.length > 1 ? [...prompt.matchAll(TURN_BUDGET_STANDALONE)] : matches;
+  if (chosen.length !== 1) return null;
+  const raw = chosen[0]?.[1] ?? '';
   return /^[0-9]+$/.test(raw) ? Number(raw) : null;
 }
 
