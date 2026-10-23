@@ -118,6 +118,29 @@ describe('installGuidance edge cases', () => {
   });
 });
 
+describe('installGuidance stack interview', () => {
+  function stackCommands(): string[] {
+    const block = fences(installDoc).find((f) => nonEmpty(f.lines).includes('bs stack show'));
+    expect(block, 'INSTALL.md has an install-path bs stack fence').toBeDefined();
+    return nonEmpty(block?.lines ?? []);
+  }
+
+  it('gives an installed package the bs stack commands INSTALL.md gives, between bs doctor and bs new', () => {
+    const out = initGuidance(false);
+    const cmds = stackCommands();
+    expect(cmds).toEqual(['bs stack show', 'bs stack check']);
+    for (const c of cmds) expect(out).toContain(c);
+    expect(out).toContain('stack.yml');
+    expect(out.indexOf('bs doctor')).toBeLessThan(out.indexOf('bs stack show'));
+    expect(out.indexOf('bs stack check')).toBeLessThan(out.indexOf('bs new'));
+  });
+
+  it('qualifies the installed stack file path with BS_HOME when it prints the directory', () => {
+    const out = initGuidance(false);
+    if (out.includes('.blacksmith/')) expect(out).toContain('$BS_HOME');
+  });
+});
+
 describe('bs init output streams', () => {
   let workRoot: string;
   beforeAll(async () => {
