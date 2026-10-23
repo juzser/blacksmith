@@ -194,9 +194,7 @@ describe('per-role judge caps', () => {
     const policy = loadBudgetPolicy(undefined, {}, 'medium');
     expect(roleCapTokens(policy, 'planner')).toBe(110_000);
     expect(roleCapTokens(policy, 'tester')).toBe(60_000);
-    for (const role of ['nobody']) {
-      expect(roleCapTokens(policy, role)).toBeNull();
-    }
+    expect(roleCapTokens(policy, 'nobody')).toBeNull();
     expect([...PRICED_ROLES].sort()).toEqual(Object.keys(policy.task).sort());
   });
 

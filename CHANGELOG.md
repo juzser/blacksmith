@@ -34,9 +34,15 @@ than appearing in it.
   double at huge), rounded up from the p90 of the final turn over past dogfood
   dispatches. `bs budget alarm` no longer reports an epic `unverifiable` just
   because it used one of them; each dispatch is projected at its cap. The
-  over-price threshold stays at the coder's 220,000. The wave-runner cap prices
-  its final turn, not its whole run, which spends far more, so it is a
-  projection price and not a bound. New knobs `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
+  over-price threshold stays at the coder's 220,000. Like every cap in
+  `budgets.yml` these are prices, not limits, so `under` means under on these
+  prices; the wave-runner's gap is the widest, its whole run spending more than
+  ten times its final turn. `bs wave check` and `bs daemon` add the same
+  prices, where before these dispatches added nothing, so an epic near its cap
+  can now be refused a wave or flagged `at-risk`: at small tier, 4 wave-runner,
+  2 scribe and 1 merger dispatches add 4 × 55,000 + 2 × 40,000 + 50,000 =
+  350,000, about 9% of the 4,000,000 epic cap. New knobs
+  `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
   `BS_TASK_MERGER_CAP_TOKENS` and `BS_TASK_SCRIBE_CAP_TOKENS`, each with
   `_SMALL`, `_MEDIUM` and `_HUGE` variants, in `.env.example`.
 
@@ -209,8 +215,7 @@ than appearing in it.
 
   *Budgets (#473).* A uiux dispatch is capped at 90k tokens at medium (45k
   small, 180k huge), with `BS_TASK_UIUX_CAP_TOKENS` in `.env.example`, so
-  `bs budget alarm` no longer lists uiux as uncapped. Merger, scribe and
-  wave-runner stay unpriced.
+  `bs budget alarm` no longer lists uiux as uncapped.
 
   *Plans, claims and delegation (#474, #471).* A dispatch for a task whose
   every plan record is superseded is refused with `cli.task-not-in-plan`,

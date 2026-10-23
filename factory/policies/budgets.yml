@@ -274,10 +274,12 @@ task:
   # larger than its final turn: p90 1.35M over the same dispatches, 2.18M since
   # 2026-10-19 (input + cache writes + output, each message counted once), and
   # that excludes the agents it dispatches, which are priced under their own
-  # roles. So the wave-runner cap is a projection price, not a bound on what a
-  # run spends. Nor is any cap here a bound at dispatch time: the `cli` harness
-  # passes `cap_tokens` to the runner as a per-turn budget, but the default
-  # in-process Agent dispatch carries none and does not stop at the cap.
+  # roles. Every cap here is a projection price, not a limit on what a dispatch
+  # spends, and the wave-runner's gap between its price and its whole run is the
+  # widest of any role. Nor does either harness stop a dispatch at its cap: the
+  # `cli` harness compares the turn's usage to `cap_tokens` only after the
+  # process exits and flags an overrun (`over_budget`), and the default
+  # in-process Agent dispatch carries no cap at all.
 
 pre_code_budget:
   # researcher + uiux together, before any code is written for the epic

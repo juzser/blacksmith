@@ -21,7 +21,10 @@
 //   * A crossing is a fact. If the tokens we can see already exceed the alarm,
 //     the tokens we cannot see do not un-exceed it. Report it, hole or no hole.
 //   * A non-crossing is a claim about the record, not about the world. "Under
-//     the alarm" is only honest when the *upper* bound is under it too.
+//     the alarm" is only reported when the projection is under it too, and the
+//     projection is priced, not measured: each unmeasured dispatch at its
+//     role's cap, a p90 of the final-turn total that a dispatch can exceed
+//     unseen. So `under` means under on these prices, not provably under.
 //
 // So the report carries two numbers per epic. `measuredTokens` is what the log
 // actually recorded. `projectedTokens` adds, for every dispatch the measured
@@ -63,7 +66,7 @@ import { bareTaskId, epicOfTaskId } from './taskId.js';
  * `at-risk` and `unverifiable` are facts about the record.
  */
 export type EpicBudgetStatus =
-  /** The upper bound is below the alarm. The only status that clears. */
+  /** The projection is below the alarm, on budgets.yml's prices. The only status that clears. */
   | 'under'
   /** Measured spend alone has reached `alarm_ratio × cap_tokens`. */
   | 'alarm'
@@ -383,7 +386,8 @@ function describe(
       );
     default:
       return (
-        `${head} The projected ceiling is under the alarm, so the real spend is too.` +
+        `${head} The projection is under the alarm: measured spend plus every unmeasured ` +
+        `dispatch at its role's cap.` +
         ` Measured spend remains a floor: judge tokens never reach a task result.`
       );
   }
