@@ -51,6 +51,17 @@ than appearing in it.
 
 ### Fixed
 
+- **The repo pins Node's October 2026 security release, and scaffolded CI
+  takes the newest Node 22.** `.nvmrc` now names `22.23.4` instead of the bare
+  major, so `nvm use` and this repo's CI run the release that fixes the ten
+  CVEs Node published on 2026-10-21, among them a Brotli out-of-bounds write
+  (CVE-2026-111497) and two TLS hostname-check bypasses. The CI template
+  `bs new` scaffolds keeps `node-version: 22` and now sets
+  `check-latest: true`: without it `setup-node` runs whatever 22.x the runner
+  image cached, which can trail a security release by days. The floor did not
+  move: Node 22 or newer. Existing clones run `nvm install` once; a project
+  scaffolded before this adds `check-latest: true` to its `setup-node` step.
+
 - **`/bs use` binds by path and knows a project declared only in its own
   overlay roadmap.** A path to the checkout, written `/bs use ../<project>` or
   `/bs use ~/<project>` (an absolute path works too), binds the same way as
