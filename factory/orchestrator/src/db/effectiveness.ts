@@ -200,6 +200,7 @@ function foldEscaped(
   const excluded: string[] = [];
   const uncounted: { findingId: string; status: string }[] = [];
   const seen = new Set<string>();
+  const reportedFingerprints = new Set<string>();
   events.forEach(({ event_id, record }, index) => {
     const payload = record.payload as Record<string, unknown>;
     if (record.event_type === 'finding-raised') {
@@ -226,6 +227,12 @@ function foldEscaped(
       if (taskId === null || (outcome !== 'opened' && outcome !== 'commented')) return;
       const w = windowFor(taskId, index);
       if (w === null) return;
+      // One recurring error is one defect: later reports on a fingerprint add no item.
+      const fingerprint = str(payload.fingerprint);
+      if (fingerprint !== null) {
+        if (reportedFingerprints.has(fingerprint)) return;
+        reportedFingerprints.add(fingerprint);
+      }
       items.push({
         kind: 'issue',
         state: 'counted',
