@@ -28,6 +28,24 @@ than appearing in it.
 
 ### Changed
 
+- **`wave-runner`, `merger` and `scribe` now carry token caps.** `budgets.yml`
+  prices them as judges, none of them ending in a `task-result-recorded`:
+  110,000, 100,000 and 80,000 tokens per dispatch at medium (half at small,
+  double at huge), rounded up from the p90 of the final turn over past dogfood
+  dispatches. `bs budget alarm` no longer reports an epic `unverifiable` just
+  because it used one of them; each dispatch is projected at its cap. The
+  over-price threshold stays at the coder's 220,000. Like every cap in
+  `budgets.yml` these are prices, not limits, so `under` means under on these
+  prices, and a wave-runner's whole run spends more than ten times its final
+  turn. `bs wave check` and `bs daemon` add the same
+  prices, where before these dispatches added nothing, so an epic near its cap
+  can now be refused a wave or flagged `at-risk`: at small tier, 4 wave-runner,
+  2 scribe and 1 merger dispatches add 4 × 55,000 + 2 × 40,000 + 50,000 =
+  350,000, about 9% of the 4,000,000 epic cap. New knobs
+  `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
+  `BS_TASK_MERGER_CAP_TOKENS` and `BS_TASK_SCRIBE_CAP_TOKENS`, each with
+  `_SMALL`, `_MEDIUM` and `_HUGE` variants, in `.env.example`.
+
 - **`bs init` raises Claude Code's concurrency caps.** Claude Code runs 20
   subagents and 10 parallel tool calls at once by default, which throttles a
   `/bs` wave. It reads `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
@@ -208,8 +226,7 @@ than appearing in it.
 
   *Budgets (#473).* A uiux dispatch is capped at 90k tokens at medium (45k
   small, 180k huge), with `BS_TASK_UIUX_CAP_TOKENS` in `.env.example`, so
-  `bs budget alarm` no longer lists uiux as uncapped. Merger, scribe and
-  wave-runner stay unpriced.
+  `bs budget alarm` no longer lists uiux as uncapped.
 
   *Plans, claims and delegation (#474, #471).* A dispatch for a task whose
   every plan record is superseded is refused with `cli.task-not-in-plan`,

@@ -92,8 +92,8 @@ quality KPI: same-mistake rate should trend to zero.
 - **Per-task caps (coder), medium tier: 220,000 tokens, ≤700 changed diff
   lines** (excluding lockfiles/generated files); half at small, double at
   huge. Every other priced role (tester, planner, researcher, the four judges,
-  security-reviewer, auditor) has its own per-tier token cap in
-  `budgets.yml`. Hitting either is not a failure —
+  security-reviewer, auditor, uiux, wave-runner, merger, scribe) has its own
+  per-tier token cap in `budgets.yml`. Hitting either is not a failure —
   the coder stops, reports what's done, and the task returns to the planner
   for re-scoping (`budget-exceeded`, no retry at the same scope).
 - **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
@@ -161,14 +161,14 @@ builder's half of the bill and calling it the whole.
 
 `projectedTokens` adds, for every dispatch whose tokens reached no result, the
 cap `budgets.yml` declares for that role. `projectedFrom` shows the breakdown
-so you can see which roles the ceiling is made of.
+so you can see which roles the projection is made of.
 
 That asymmetry decides the status, and it is worth understanding before you
 read one:
 
 | status | meaning |
 | --- | --- |
-| `under` | The *projected* ceiling is below the alarm, so the real spend is too. The only status that clears. |
+| `under` | The projection — measured spend plus each unmeasured dispatch priced at its role's cap — is below the alarm. The only status that clears. |
 | `alarm` | Measured spend alone has reached `alarm_ratio × cap_tokens`. Re-plan the remaining work to fit, or extend the cap yourself. |
 | `over-cap` | Measured spend alone has reached the cap. |
 | `at-risk` | Measured spend is under the alarm and the projection is not. |
@@ -176,19 +176,24 @@ read one:
 
 A crossing is reported even when the record has holes, because unrecorded spend
 can only make the bill bigger — a hole cannot un-cross a threshold. A
-*non*-crossing gets no such benefit: "under" is only honest when the upper bound
-is under too, which is why an epic with an unpriceable dispatch comes back
-`unverifiable` rather than clean.
+*non*-crossing gets no such benefit: it is only reported when the projection is
+under too, which is why an epic with an unpriceable dispatch comes back
+`unverifiable` rather than clean. And the projection is priced, not measured:
+each cap is rounded up from a p90 of a dispatch's final-turn total, so a
+dispatch can spend past it unseen — a role priced as a judge never records a
+result to check it against.
 
 ### What makes an epic unverifiable
 
 - **A role `budgets.yml` prices nowhere** (`rolesWithoutCap`). The policy prices
   `coder`, `tester`, `planner`, `researcher`, the four judges,
-  `security-reviewer`, `auditor` and `uiux`. It does not price `merger`,
-  `scribe` or `wave-runner`, all of which the factory dispatches. (A policy
-  file that still carries the pre-2026-09-29 shared `task.judges` bucket is
-  read as the cap for each judge it does not price by name.) Those dispatches are in neither number,
-  so the projection is not a ceiling.
+  `security-reviewer`, `auditor`, `uiux`, `wave-runner`, `merger` and
+  `scribe`. (A policy file that still carries the pre-2026-09-29 shared
+  `task.judges` bucket is read as the cap for each judge it does not price by
+  name.) A dispatch of any other role, or of one a custom policy leaves out, is
+  in neither number, so the projection has a hole. Every cap prices a
+  dispatch's final-turn total, and a wave-runner's whole run is more than ten
+  times its final turn.
 - **A dispatch no epic can be charged for** (`unattributedDispatches`). Its
   tokens are in nobody's total, so no epic's "under" is trustworthy.
 - **A task measured above the largest cap in the policy** (`tasksOverPrice`).
@@ -196,7 +201,7 @@ is under too, which is why an epic with an unpriceable dispatch comes back
   records an overrun without blocking on one — so a cap is a target, not a
   bound. Once a task in *this* epic has been measured spending more than the
   most the projection can charge, the epic's own log has falsified the price
-  list the ceiling is built from (D-188). `envkit-mcp-surface/task-2-path-guard`
+  list the projection is built from (D-188). `envkit-mcp-surface/task-2-path-guard`
   recorded one coder round at 1,484,000 tokens against a 150,000 coder cap.
 
 All three are reported rather than assumed free. Fixing the first two means
@@ -214,7 +219,7 @@ the one automated check meant to catch "this plan is too expensive" measures the
 smaller half of the bill. `at-risk` is the status for exactly that shape: the
 visible half reads clear while the whole bill does not.
 
-### What it reports on the dogfood log today
+### What it reported on the dogfood log, before security-reviewer was priced
 
 ```
 epic envkit-config-loader: 0 tokens measured across 0 of 5 task(s) (5 unmeasured),
@@ -238,7 +243,8 @@ not as near-zero spend.
   fold on an interval so an alarm reaches you without an open session
   ([`../runbooks/ops.md`](../../runbooks/ops.md)), but it does not dispatch and so
   cannot refuse the next wave either — acting on `alarm` is still your call.
-- The projection prices each unmeasured dispatch at its role's *cap*. That is an
-  upper bound by construction, so `at-risk` means "could cross", not "will".
+- The projection prices each unmeasured dispatch at its role's *cap*, a p90
+  rather than a maximum. So `at-risk` means "could cross", not "will", and
+  `under` means "under on these prices", not a guarantee.
 - Judge tokens are never recorded anywhere, at any budget. Until a dispatch
   harness writes them down, no number here is the real bill.

@@ -56,6 +56,9 @@ const BUDGET_DEFAULT: Record<string, (p: BudgetPolicy) => number | null> = {
   SMITH_TASK_SECURITY_REVIEWER_CAP_TOKENS: (p) => p.task['security-reviewer'].capTokens,
   SMITH_TASK_AUDITOR_CAP_TOKENS: (p) => p.task.auditor.capTokens,
   SMITH_TASK_UIUX_CAP_TOKENS: (p) => p.task.uiux.capTokens,
+  SMITH_TASK_WAVE_RUNNER_CAP_TOKENS: (p) => p.task['wave-runner'].capTokens,
+  SMITH_TASK_MERGER_CAP_TOKENS: (p) => p.task.merger.capTokens,
+  SMITH_TASK_SCRIBE_CAP_TOKENS: (p) => p.task.scribe.capTokens,
 };
 
 describe('.env.example names', () => {
