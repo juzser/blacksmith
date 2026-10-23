@@ -12,7 +12,10 @@ export function initGuidance(isClone: boolean): string {
       '/plugin marketplace add juzser/blacksmith',
       '/plugin install blacksmith@blacksmith',
       '  2. Check the install: bs doctor',
-      '  3. Start a project: bs new <project>',
+      '  3. Answer the stack interview (INSTALL.md Step 5) in your stack.yml, then read it back:',
+      '     bs stack show',
+      '     bs stack check',
+      '  4. Start a project: bs new <project>',
     );
   } else {
     lines.push('  1. Check the install: bs doctor', '  2. Start a project: bs new <project>');
