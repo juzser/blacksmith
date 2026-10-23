@@ -73,4 +73,64 @@ describe('effectiveness tokens for dispatched agents the reader returned no row 
     expect(r.tokens.byTask).toEqual({});
     expect(r.tokens.byRole).toEqual({});
   });
+
+  it('marks only the task incomplete for an unread agent with a task but no role', async () => {
+    const e = ev('dispatch_decision', {}, { task_id: 't2', agent_id: 'a5', cli_session_id: CLI });
+    const r = await effectiveness([e], {
+      readTokens: reading({ used: 0, complete: true, subagents: [] }),
+    });
+    expect(r.tokens.byTask.t2?.complete).toBe(false);
+    expect(r.tokens.byRole).toEqual({});
+    expect(r.tokens.unattributed.complete).toBe(true);
+  });
+
+  it('marks only the role incomplete for an unread agent with a role but no task', async () => {
+    const e = ev(
+      'dispatch_decision',
+      { agent_role: 'tester' },
+      { agent_id: 'a6', cli_session_id: CLI },
+    );
+    const r = await effectiveness([e], {
+      readTokens: reading({ used: 0, complete: true, subagents: [] }),
+    });
+    expect(r.tokens.byRole.tester?.complete).toBe(false);
+    expect(r.tokens.byTask).toEqual({});
+  });
+
+  it('leaves a task whose only agent was returned complete beside an incomplete sibling task', async () => {
+    const r = await effectiveness([dispatch('a1', 't1'), dispatch('a2', 't2')], {
+      readTokens: reading({ used: 100, complete: true, subagents: [row('a1')] }),
+    });
+    expect(r.tokens.byTask.t1?.complete).toBe(true);
+    expect(r.tokens.byTask.t2?.complete).toBe(false);
+  });
+
+  it('leaves a dispatch with no session id alone', async () => {
+    const bare = ev(
+      'dispatch_decision',
+      { agent_role: 'coder' },
+      { task_id: 't1', agent_id: 'a7' },
+    );
+    const r = await effectiveness([bare], {
+      readTokens: reading({ used: 0, complete: true, subagents: [] }),
+    });
+    expect(r.tokens.byTask).toEqual({});
+    expect(r.tokens.byRole).toEqual({});
+    expect(r.tokens.complete).toBe(true);
+  });
+
+  it('marks incomplete an agent unread across two sessions', async () => {
+    const other = ev(
+      'dispatch_decision',
+      { agent_role: 'coder' },
+      { task_id: 't1', agent_id: 'a2', cli_session_id: 'aaaaaaaa-2222-4333-8444-555555555555' },
+    );
+    const r = await effectiveness([dispatch('a1'), other], {
+      readTokens: async (cli) =>
+        cli === CLI
+          ? { used: 100, complete: true, subagents: [row('a1')] }
+          : { used: 0, complete: true, subagents: [] },
+    });
+    expect(r.tokens.byTask.t1).toEqual({ used: 100, complete: false, agentIds: ['a1'] });
+  });
 });
