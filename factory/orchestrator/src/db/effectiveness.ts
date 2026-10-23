@@ -57,6 +57,8 @@ export interface Effectiveness {
     items: EscapedItem[];
     /** Refuted findings that matched the escape window, kept out of the count. */
     excluded: string[];
+    /** Escape-window findings in any other status (waived, expired, amended, ...): listed, never counted. */
+    uncounted: { findingId: string; status: string }[];
   };
   precision: Record<string, Precision>;
 }
@@ -196,6 +198,7 @@ function foldEscaped(
 
   const items: EscapedItem[] = [];
   const excluded: string[] = [];
+  const uncounted: { findingId: string; status: string }[] = [];
   const seen = new Set<string>();
   events.forEach(({ event_id, record }, index) => {
     const payload = record.payload as Record<string, unknown>;
@@ -214,6 +217,8 @@ function foldEscaped(
         items.push({ ...base, state: 'pending', mergeEventId: w.merge, gateEventId: w.gate });
       } else if (status === 'refuted') {
         excluded.push(findingId);
+      } else {
+        uncounted.push({ findingId, status });
       }
     } else if (record.event_type === 'issue-reported') {
       const taskId = eventTaskId(record) ?? str(payload.task_ref);
@@ -236,6 +241,7 @@ function foldEscaped(
     pending: items.filter((i) => i.state === 'pending').length,
     items,
     excluded,
+    uncounted,
   };
 }
 
