@@ -141,6 +141,35 @@ describe('installGuidance stack interview', () => {
   });
 });
 
+describe('installGuidance stack interview placement', () => {
+  it('places the stack commands after the plugin install lines for an installed package', () => {
+    const out = initGuidance(false);
+    expect(out.indexOf('/plugin install')).toBeLessThan(out.indexOf('bs stack show'));
+  });
+
+  it('names each stack command once and in show-then-check order', () => {
+    const out = initGuidance(false);
+    expect(out.split('bs stack show')).toHaveLength(2);
+    expect(out.split('bs stack check')).toHaveLength(2);
+    expect(out.indexOf('bs stack show')).toBeLessThan(out.indexOf('bs stack check'));
+  });
+
+  it('gives a clone no stack step, since a clone follows INSTALL.md in order', () => {
+    const out = initGuidance(true);
+    expect(out).not.toContain('bs stack');
+    expect(out).not.toContain('stack.yml');
+  });
+
+  it('numbers the steps consecutively with bs new last in both modes', () => {
+    for (const isClone of [true, false]) {
+      const nums = [...initGuidance(isClone).matchAll(/^ {2}(\d+)\. /gm)].map((m) => Number(m[1]));
+      expect(nums).toEqual(nums.map((_, i) => i + 1));
+      const last = initGuidance(isClone).trimEnd().split('\n').pop() ?? '';
+      expect(last).toContain('bs new');
+    }
+  });
+});
+
 describe('bs init output streams', () => {
   let workRoot: string;
   beforeAll(async () => {
