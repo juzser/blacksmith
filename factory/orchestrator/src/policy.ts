@@ -2042,7 +2042,9 @@ function readShellWords(
 type EnvValue = string | null;
 
 const GIT_CONFIG_ENV_NAMES =
-  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+';
+  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+|' +
+  // The other variables git starts through the shell as command lines.
+  'PAGER|GIT_EDITOR|GIT_SEQUENCE_EDITOR|EDITOR|VISUAL|GIT_SSH_COMMAND|GIT_ASKPASS|SSH_ASKPASS';
 const GIT_CONFIG_ENV_NAME_RE = new RegExp(`^(?:${GIT_CONFIG_ENV_NAMES})$`);
 /** Any mention of a configuration variable in dequoted text. */
 const GIT_CONFIG_ENV_MENTION_RE = new RegExp(`\\b(?:${GIT_CONFIG_ENV_NAMES})\\b`, 'g');
