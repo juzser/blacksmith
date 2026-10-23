@@ -218,12 +218,34 @@ describe('composeBrief (epic criterion 5, module half)', () => {
     ).toBe('brief.artifact-required');
   });
 
-  it('fails when the spec entry makes the turn budget ambiguous', async () => {
+  it('composes a spec entry that quotes the turn budget label mid-line, verbatim', async () => {
     const plan = JSON.parse(await readFile(fixturePlan, 'utf8'));
-    plan.tasks[0].objective = 'State `Turn budget: N` somewhere.';
+    const quote = 'State `Turn budget: N` and again `Turn budget: M` here.';
+    plan.tasks[0].objective = quote;
     const planFile = path.join(dir, 'plan-v1.json');
     await writeFile(planFile, JSON.stringify(plan, null, 2));
-    expect(await codeOf(composeBrief({ ...base(), role: 'coder', planFile }))).toBe(
+    const { text } = await composeBrief({ ...base(), role: 'coder', planFile });
+    expect(text).toContain(JSON.stringify(quote).slice(1, -1));
+    const report = await lintDispatchPrompt({
+      prompt: text,
+      role: 'coder',
+      taskId: TASK,
+      sessionId,
+      agentsDir,
+      eventOpts: { stateDir },
+    });
+    expect(report.turns.status).toBe('ok');
+    expect(report.turns.stated).toBe(readTemplateMaxTurns(agentsDir, 'coder'));
+  });
+
+  it('fails when spliced text adds a second standalone turn budget line', async () => {
+    const doc = (await readFile(realDispatch, 'utf8')).replace(
+      `## ${RETURN_HEADING}\n`,
+      `## ${RETURN_HEADING}\n\nTurn budget: 3\n`,
+    );
+    const dispatchDoc = path.join(dir, 'extra-budget.md');
+    await writeFile(dispatchDoc, doc);
+    expect(await codeOf(composeBrief({ ...base(), role: 'coder', dispatchDoc }))).toBe(
       'brief.turn-budget-ambiguous',
     );
   });
