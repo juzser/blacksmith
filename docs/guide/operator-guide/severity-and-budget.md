@@ -92,8 +92,8 @@ quality KPI: same-mistake rate should trend to zero.
 - **Per-task caps (coder), medium tier: 220,000 tokens, ≤700 changed diff
   lines** (excluding lockfiles/generated files); half at small, double at
   huge. Every other priced role (tester, planner, researcher, the four judges,
-  security-reviewer, auditor) has its own per-tier token cap in
-  `budgets.yml`. Hitting either is not a failure —
+  security-reviewer, auditor, uiux, wave-runner, merger, scribe) has its own
+  per-tier token cap in `budgets.yml`. Hitting either is not a failure —
   the coder stops, reports what's done, and the task returns to the planner
   for re-scoping (`budget-exceeded`, no retry at the same scope).
 - **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
@@ -184,11 +184,13 @@ is under too, which is why an epic with an unpriceable dispatch comes back
 
 - **A role `budgets.yml` prices nowhere** (`rolesWithoutCap`). The policy prices
   `coder`, `tester`, `planner`, `researcher`, the four judges,
-  `security-reviewer`, `auditor` and `uiux`. It does not price `merger`,
-  `scribe` or `wave-runner`, all of which the factory dispatches. (A policy
-  file that still carries the pre-2026-09-29 shared `task.judges` bucket is
-  read as the cap for each judge it does not price by name.) Those dispatches are in neither number,
-  so the projection is not a ceiling.
+  `security-reviewer`, `auditor`, `uiux`, `wave-runner`, `merger` and
+  `scribe`. (A policy file that still carries the pre-2026-09-29 shared
+  `task.judges` bucket is read as the cap for each judge it does not price by
+  name.) A dispatch of any other role, or of one a custom policy leaves out, is
+  in neither number, so the projection is not a ceiling. The wave-runner cap
+  prices its final turn, not its whole run, so it is a projection price and not
+  a bound on what a run spends.
 - **A dispatch no epic can be charged for** (`unattributedDispatches`). Its
   tokens are in nobody's total, so no epic's "under" is trustworthy.
 - **A task measured above the largest cap in the policy** (`tasksOverPrice`).
@@ -214,7 +216,7 @@ the one automated check meant to catch "this plan is too expensive" measures the
 smaller half of the bill. `at-risk` is the status for exactly that shape: the
 visible half reads clear while the whole bill does not.
 
-### What it reports on the dogfood log today
+### What it reported on the dogfood log, before security-reviewer was priced
 
 ```
 epic envkit-config-loader: 0 tokens measured across 0 of 5 task(s) (5 unmeasured),

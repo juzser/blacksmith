@@ -90,6 +90,9 @@ describe('tier-scaled budgets', () => {
       'security-reviewer': { capTokens: 80_000 },
       auditor: { capTokens: 90_000 },
       uiux: { capTokens: 90_000 },
+      'wave-runner': { capTokens: 110_000 },
+      merger: { capTokens: 100_000 },
+      scribe: { capTokens: 80_000 },
     });
   });
 
@@ -174,11 +177,24 @@ describe('per-role judge caps', () => {
     expect(roleCapTokens(loadBudgetPolicy(undefined, {}, 'huge'), 'uiux')).toBe(180_000);
   });
 
+  it('prices wave-runner, merger and scribe, scaled by tier', () => {
+    const at = (tier: 'small' | 'medium' | 'huge') => loadBudgetPolicy(undefined, {}, tier);
+    for (const [role, medium] of [
+      ['wave-runner', 110_000],
+      ['merger', 100_000],
+      ['scribe', 80_000],
+    ] as const) {
+      expect(roleCapTokens(at('medium'), role)).toBe(medium);
+      expect(roleCapTokens(at('small'), role)).toBe(medium / 2);
+      expect(roleCapTokens(at('huge'), role)).toBe(medium * 2);
+    }
+  });
+
   it('prices planner and tester, and leaves the roles budgets.yml does not name unpriced', () => {
     const policy = loadBudgetPolicy(undefined, {}, 'medium');
     expect(roleCapTokens(policy, 'planner')).toBe(110_000);
     expect(roleCapTokens(policy, 'tester')).toBe(60_000);
-    for (const role of ['merger', 'scribe', 'wave-runner', 'nobody']) {
+    for (const role of ['nobody']) {
       expect(roleCapTokens(policy, role)).toBeNull();
     }
     expect([...PRICED_ROLES].sort()).toEqual(Object.keys(policy.task).sort());
@@ -382,6 +398,14 @@ describe('env overrides on top of budgets.yml', () => {
       ],
       ['SMITH_TASK_AUDITOR_CAP_TOKENS', '91000', (p) => p.task.auditor.capTokens, 91_000],
       ['SMITH_TASK_UIUX_CAP_TOKENS', '92000', (p) => p.task.uiux.capTokens, 92_000],
+      [
+        'SMITH_TASK_WAVE_RUNNER_CAP_TOKENS',
+        '112000',
+        (p) => p.task['wave-runner'].capTokens,
+        112_000,
+      ],
+      ['SMITH_TASK_MERGER_CAP_TOKENS', '102000', (p) => p.task.merger.capTokens, 102_000],
+      ['SMITH_TASK_SCRIBE_CAP_TOKENS', '82000', (p) => p.task.scribe.capTokens, 82_000],
     ];
     expect(cases.map(([name]) => name).sort()).toEqual([...BUDGET_ENV_VARS].sort());
     for (const [name, value, read, expected] of cases) {

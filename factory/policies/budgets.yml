@@ -252,18 +252,32 @@ task:
     cap_tokens: 90000        # p90 89k
   uiux:
     cap_tokens: 90000        # p90 89k (new, 2026-10-17, 355 dispatches)
+  wave-runner:
+    cap_tokens: 110000       # p90 101k
+  merger:
+    cap_tokens: 100000       # p90 91k
+  scribe:
+    cap_tokens: 80000        # p90 75k
   # The old shared `judges:` bucket is gone. A policy file that still carries
   # `judges: {cap_tokens: N}` has N read for spec-reviewer, reviewer, verifier
   # and grader wherever it does not name that role itself.
   #
-  # Not priced here, and dispatched anyway: merger, scribe, wave-runner.
-  # `bs budget alarm` cannot put a number on those dispatches, so an epic
-  # that used one is reported unverifiable rather than under — the omission is
-  # visible instead of free. Left unpriced on purpose until there is real spend
-  # data to size them from; inventing a cap would make the projection look
-  # complete without making it true. For wave-runner the final-turn size and
-  # the cumulative spend differ about tenfold (p90 100k against 1.17M,
-  # 2026-10-17), so neither is a sound basis for a cap yet.
+  # wave-runner, merger and scribe are priced as judges: `bs budget alarm`
+  # charges each of their dispatches its full cap, because none ends in a
+  # task-result-recorded. Sized 2026-10-23 on the same measure as the caps
+  # above (the Agent tool's reported total per dispatch, which tracks the size
+  # of the final turn) from subagent transcripts of dogfood epics, rounded up
+  # from the p90: wave-runner n=157 (2026-09-14..10-23) p90 101k, max 106k;
+  # merger n=9 (2026-09-18..10-14) p90 91k; scribe n=15 (2026-09-14..10-20)
+  # p90 75k. The merger and scribe samples are small, so re-size them once more
+  # dispatches are on record. A wave-runner's spend over its whole run is far
+  # larger than its final turn: p90 1.35M over the same dispatches, 2.18M since
+  # 2026-10-19 (input + cache writes + output, each message counted once), and
+  # that excludes the agents it dispatches, which are priced under their own
+  # roles. So the wave-runner cap is a projection price, not a bound on what a
+  # run spends. Nor is any cap here a bound at dispatch time: the `cli` harness
+  # passes `cap_tokens` to the runner as a per-turn budget, but the default
+  # in-process Agent dispatch carries none and does not stop at the cap.
 
 pre_code_budget:
   # researcher + uiux together, before any code is written for the epic

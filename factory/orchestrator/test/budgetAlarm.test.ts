@@ -5,7 +5,7 @@ import {
   readMeasuredSpend,
   readTokenUsage,
 } from '../src/budgetAlarm.js';
-import type { BudgetPolicy } from '../src/budgets.js';
+import { type BudgetPolicy, loadBudgetPolicy } from '../src/budgets.js';
 import type { StoredEvent } from '../src/events.js';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,9 @@ const POLICY: BudgetPolicy = {
     'security-reviewer': { capTokens: 80_000 },
     auditor: { capTokens: 90_000 },
     uiux: { capTokens: 90_000 },
+    'wave-runner': { capTokens: 110_000 },
+    merger: { capTokens: 100_000 },
+    scribe: { capTokens: 80_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],
@@ -380,22 +383,22 @@ describe('checkBudgetAlarm', () => {
   });
 
   it('is unverifiable when a dispatched role has no declared cap', () => {
-    // budgets.yml prices eleven roles. The factory also dispatches merger,
-    // scribe and wave-runner. A role the policy is silent about cannot be
-    // projected, and a projection with a hole in it is not an upper bound.
+    // budgets.yml prices fourteen roles. A role the policy is silent about
+    // cannot be projected, and a projection with a hole in it is not an upper
+    // bound.
     seq = 0;
     const report = checkBudgetAlarm(
-      [waveAdmitted('epic-1', ['task-1']), dispatch('merger', 'task-1')],
+      [waveAdmitted('epic-1', ['task-1']), dispatch('nobody', 'task-1')],
       POLICY,
       OPTS,
     );
     const epic = report.epics[0];
     expect(epic?.status).toBe('unverifiable');
-    expect(epic?.rolesWithoutCap).toEqual(['merger']);
+    expect(epic?.rolesWithoutCap).toEqual(['nobody']);
     expect(report.ok).toBe(false);
   });
 
-  it('prices a uiux dispatch at its cap and still lists merger, scribe and wave-runner as unpriced', () => {
+  it('prices a uiux dispatch at its cap', () => {
     seq = 0;
     const priced = checkBudgetAlarm(
       [waveAdmitted('epic-1', ['task-1']), dispatch('uiux', 'task-1')],
@@ -404,18 +407,52 @@ describe('checkBudgetAlarm', () => {
     );
     expect(priced.epics[0]?.rolesWithoutCap).toEqual([]);
     expect(priced.epics[0]?.projectedFrom).toEqual({ uiux: 90_000 });
+  });
+
+  it('prices wave-runner, merger and scribe dispatches at their caps, as judges', () => {
+    // None of the three ends in a task-result-recorded, so each dispatch is
+    // charged its full cap and the epic is no longer unverifiable for using one.
     seq = 0;
-    const unpriced = checkBudgetAlarm(
+    const report = checkBudgetAlarm(
       [
         waveAdmitted('epic-1', ['task-1']),
+        dispatch('coder', 'task-1'),
+        dispatch('wave-runner', 'task-1'),
         dispatch('merger', 'task-1'),
         dispatch('scribe', 'task-1'),
-        dispatch('wave-runner', 'task-1'),
       ],
       POLICY,
       OPTS,
     );
-    expect(unpriced.epics[0]?.rolesWithoutCap).toEqual(['merger', 'scribe', 'wave-runner']);
+    const epic = report.epics[0];
+    expect(epic?.rolesWithoutCap).toEqual([]);
+    expect(epic?.projectedFrom).toEqual({
+      coder: 150_000,
+      'wave-runner': 110_000,
+      merger: 100_000,
+      scribe: 80_000,
+    });
+  });
+
+  it('keeps the over-price threshold at the coder cap with the shipped policy', () => {
+    // The three new caps sit below coder's 220k, so they do not raise the
+    // largest price a measured task is judged against.
+    const shipped = loadBudgetPolicy(undefined, {}, 'medium');
+    seq = 0;
+    const atPrice = checkBudgetAlarm(
+      [waveAdmitted('epic-1', ['task-1']), result('task-1', 220_000)],
+      shipped,
+      OPTS,
+    );
+    expect(atPrice.epics[0]?.tasksOverPrice).toEqual([]);
+    seq = 0;
+    const over = checkBudgetAlarm(
+      [waveAdmitted('epic-1', ['task-1']), result('task-1', 220_001)],
+      shipped,
+      OPTS,
+    );
+    expect(over.epics[0]?.tasksOverPrice).toEqual(['task-1']);
+    expect(over.epics[0]?.detail).toContain('220,000');
   });
 
   it('prices a planner, tester, auditor or security-reviewer dispatch from its own cap', () => {

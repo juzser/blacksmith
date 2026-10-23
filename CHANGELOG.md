@@ -28,6 +28,18 @@ than appearing in it.
 
 ### Changed
 
+- **`wave-runner`, `merger` and `scribe` now carry token caps.** `budgets.yml`
+  prices them as judges, none of them ending in a `task-result-recorded`:
+  110,000, 100,000 and 80,000 tokens per dispatch at medium (half at small,
+  double at huge), rounded up from the p90 of the final turn over past dogfood
+  dispatches. `bs budget alarm` no longer reports an epic `unverifiable` just
+  because it used one of them; each dispatch is projected at its cap. The
+  over-price threshold stays at the coder's 220,000. The wave-runner cap prices
+  its final turn, not its whole run, which spends far more, so it is a
+  projection price and not a bound. New knobs `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
+  `BS_TASK_MERGER_CAP_TOKENS` and `BS_TASK_SCRIBE_CAP_TOKENS`, each with
+  `_SMALL`, `_MEDIUM` and `_HUGE` variants, in `.env.example`.
+
 - **`bs init` raises Claude Code's concurrency caps.** Claude Code runs 20
   subagents and 10 parallel tool calls at once by default, which throttles a
   `/bs` wave. It reads `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
