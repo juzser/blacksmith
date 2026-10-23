@@ -193,7 +193,7 @@ result to check it against.
   name.) A dispatch of any other role, or of one a custom policy leaves out, is
   in neither number, so the projection has a hole. Every cap prices a
   dispatch's final-turn total, and a wave-runner's whole run is more than ten
-  times its final turn — the widest gap of any role.
+  times its final turn.
 - **A dispatch no epic can be charged for** (`unattributedDispatches`). Its
   tokens are in nobody's total, so no epic's "under" is trustworthy.
 - **A task measured above the largest cap in the policy** (`tasksOverPrice`).

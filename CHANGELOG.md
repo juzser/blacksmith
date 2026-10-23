@@ -36,8 +36,8 @@ than appearing in it.
   because it used one of them; each dispatch is projected at its cap. The
   over-price threshold stays at the coder's 220,000. Like every cap in
   `budgets.yml` these are prices, not limits, so `under` means under on these
-  prices; the wave-runner's gap is the widest, its whole run spending more than
-  ten times its final turn. `bs wave check` and `bs daemon` add the same
+  prices, and a wave-runner's whole run spends more than ten times its final
+  turn. `bs wave check` and `bs daemon` add the same
   prices, where before these dispatches added nothing, so an epic near its cap
   can now be refused a wave or flagged `at-risk`: at small tier, 4 wave-runner,
   2 scribe and 1 merger dispatches add 4 × 55,000 + 2 × 40,000 + 50,000 =
