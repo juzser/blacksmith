@@ -304,6 +304,36 @@ describe('force-push rule reads a shell behind two prefix words, env options and
   });
 });
 
+describe('force-push rule reads xargs and eval after env -S and after prefix words', () => {
+  const REFUSED: string[] = [
+    'echo push | env -S foo xargs git',
+    'echo push | env -S foo xargs -I{} git {}',
+    'env -S foo eval "$(git show HEAD:x.sh)"',
+    'echo push | timeout 5 xargs git',
+    'echo push | sudo xargs -I{} git {}',
+    'echo push | nice -n 5 env FOO=1 xargs git',
+    'timeout 5 eval "$(git show HEAD:x.sh)"',
+    'command eval "$(git log -1 --format=%B)"',
+    'echo x | timeout 5 xargs sh -c "git push -f origin main"',
+  ];
+
+  const ALLOWED: string[] = [
+    'echo x | env -S foo xargs grep y',
+    'env -S foo eval "$(echo hi)"',
+    'echo x | timeout 5 xargs grep y',
+    'git ls-files | sudo xargs git status',
+    'timeout 5 eval "$(echo hi)"',
+  ];
+
+  it.each(REFUSED)('refuses %s', (command) => {
+    expect(forcePushRefused(command)).toBe(true);
+  });
+
+  it.each(ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
 describe('history-rewrite rule reads each top-level command on its own', () => {
   const READ_ONLY_ALLOWED = [
     'git grep rebase',
