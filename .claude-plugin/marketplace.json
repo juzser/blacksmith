@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "blacksmith",
-      "description": "The Blacksmith operator console: /bs plans an epic, drives a wave of agents through TDD, review and a merge queue, and audits a project on four axes. Needs the bs CLI from npm (@juzser/blacksmith).",
+      "description": "Plan a feature as signed spec contracts, build each in its own git worktree, put the result through review and verification gates, and merge through a queue into one pull request.",
       "author": {
         "name": "juzser"
       },
