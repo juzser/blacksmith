@@ -2258,7 +2258,7 @@ const XARGS_GIT_REASON =
 const GIT_OUTPUT_TO_SHELL_REASON =
   'git output is run by a shell here, so the guard cannot tell what it runs — write the commands out plainly';
 
-/** Words that run the command after them; a shell behind one of these is read as the shell itself. */
+/** Words that run the command after them; a shell behind one is read as the shell itself. */
 const COMMAND_PREFIX_WORDS = new Set([
   'timeout',
   'command',
@@ -2271,20 +2271,20 @@ const COMMAND_PREFIX_WORDS = new Set([
 ]);
 
 const PREFIX_OPERAND_RE = /^\d+(?:\.\d+)?[smhd]?$/;
-const SHELL_COMMAND_FLAG_RE = /^-[a-z]*c[a-z]*$/i;
+// A short option word holding the letter c; two linear tests, no backtracking on a long word.
+const isShellCommandFlag = (word: string): boolean => /^-[a-z]+$/i.test(word) && /c/i.test(word);
 
 const baseName = (word: string | undefined): string => (word ?? '').split('/').pop() ?? '';
 const isShellWord = (word: string | undefined): boolean =>
   SHELL_INTERPRETER_RE.test(baseName(word));
 
 /**
- * Where `env` is the command word (after assignments and other `env` words),
- * its `-S` / `--split-string` value holds a command line in one word; that
- * word is replaced by the words it holds, so the command it starts is read
- * like any other. An `-S` anywhere else (an `xargs` option) is left alone.
+ * Where `env` is the command word, its `-S` / `--split-string` value holds a
+ * command line in one word; that word is replaced by the words it holds. An
+ * `-S` anywhere else (an `xargs` option) is left alone.
  */
 function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly DequotedWord[] {
-  let out = words as DequotedWord[];
+  let out = words;
   let i = from;
   while (i < out.length) {
     const text = out[i]?.text ?? '';
@@ -2313,8 +2313,11 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
         }
         const raw = (separate ?? operand).raw;
         const pieces = value.split(/\s+/).filter(Boolean);
-        if (out === words) out = [...words];
-        out.splice(i, separate ? 2 : 1, ...pieces.map((piece) => ({ raw, text: piece })));
+        out = [
+          ...out.slice(0, i),
+          ...pieces.map((piece) => ({ raw, text: piece })),
+          ...out.slice(i + (separate ? 2 : 1)),
+        ];
       }
     }
   }
@@ -2322,12 +2325,10 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
 }
 
 /**
- * The command a segment runs once the words in `COMMAND_PREFIX_WORDS` and
- * `env` are read past, with their flags, the value after a flag, numbers,
- * durations and assignments. A shell interpreter ends the walk. After a prefix
- * word, any other word the walk cannot classify is not trusted to be the
- * command: the first shell interpreter later in the segment is taken as the
- * command instead. Without a prefix word the walk stays where it started.
+ * The command a segment runs once `COMMAND_PREFIX_WORDS` and `env` are read
+ * past, with their flags, flag values, numbers, durations and assignments.
+ * After a prefix word, a word the walk cannot classify is not trusted to be the
+ * command: the first shell interpreter later in the segment is taken instead.
  */
 function walkPrefixWords(
   start: readonly DequotedWord[],
@@ -2371,19 +2372,17 @@ function walkPrefixWords(
 }
 
 /**
- * Reads the command a segment runs (past assignments, `env` and `xargs` with
- * its options, and the prefix words in `COMMAND_PREFIX_WORDS`) the way the
- * in-line form is read: `xargs git` with a subcommand that is missing,
- * unreadable or force-gated; a shell interpreter that follows a pipe from
- * git; a shell run with `-c` on a substitution that runs git; `eval` of a
- * substitution that runs git.
+ * Reads the command a segment runs (past assignments, `env`, `xargs` with its
+ * options, and prefix words) the way the in-line form is read: `xargs git`
+ * with a missing, unreadable or force-gated subcommand; a shell after a pipe
+ * from git; a shell `-c` or `eval` on a substitution that runs git. The line
+ * is read with the `env -S` value split into words and as written.
  */
 function checkXargsGitAndShellInput(
   words: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  // The `env -S` value read as a command line, and the words after the option as written.
   return (
     readRunCommand(words, afterGitPipe, rule, splitEnvCommand) ??
     readRunCommand(words, afterGitPipe, rule, (all) => all)
@@ -2417,7 +2416,7 @@ function readRunCommand(
     if (afterGitPipe) return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
     const rest = words.slice(index + 1);
     const runsGitInCommand =
-      rest.some((word) => SHELL_COMMAND_FLAG_RE.test(word.text)) &&
+      rest.some((word) => isShellCommandFlag(word.text)) &&
       rest.some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
     if (runsGitInCommand) return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
   }

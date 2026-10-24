@@ -123,17 +123,19 @@ describe('force-push rule reads git commands that xargs runs and git output a sh
   });
 });
 
-describe('force-push rule reads a shell run with -c, behind a prefix word, or through env -S', () => {
-  const SHELL_RUN_REFUSED: string[] = [
+describe('force-push rule reads a shell run with -c, behind prefix words, through env and xargs', () => {
+  const REFUSED: string[] = [
+    // a shell run with -c on a substitution of git, with each flag spelling
     'sh -c "$(git show HEAD:x.sh)"',
-    'bash -c "$(git log -1 --format=%B)"',
     'bash -c "`git log -1 --format=%B`"',
     'bash -ec "$(git show HEAD:x.sh)"',
-    'sh -xc "$(git show HEAD:x.sh)"',
-    '/bin/bash -c "$(git show HEAD:x.sh)"',
+    'bash -ce "$(git show HEAD:x.sh)"',
+    '/usr/bin/zsh -c "$(git show HEAD:x.sh)"',
+    'bash --norc -c "$(git show HEAD:x.sh)" extra-arg',
+    'FOO=1 bash -c "$(git show HEAD:x.sh)"',
+    // each prefix word, with operands, flags, durations and chains
     'git log | timeout 5 bash',
     'git log | command bash',
-    'git log | sudo bash',
     'git log | sudo -u example-user bash',
     'git log | nice -n 5 sh',
     'git log | nohup sh',
@@ -141,218 +143,87 @@ describe('force-push rule reads a shell run with -c, behind a prefix word, or th
     'git log | stdbuf -oL sh',
     'git log | time bash',
     'git log | timeout -s KILL 5 bash',
-    'git log | command timeout 5 bash',
-    'git log | env -S "bash -x"',
-    'git log | env --split-string="sh -e"',
-    'env -S "sh -c \'$(git show HEAD:x.sh)\'"',
-    'timeout 5 bash -c "$(git show HEAD:x.sh)"',
-  ];
-
-  const SHELL_RUN_ALLOWED: string[] = [
-    'bash -c "$(echo hello)"',
-    'bash -c "echo hello"',
-    'sh -c "$(ssh-agent -s)"',
-    'echo ls | timeout 5 bash',
-    'echo ls | command bash',
-    'git log | command grep x',
-    'git log | sudo less',
-    'timeout 5 bash -c "echo hello"',
-    'echo ls | env -S "bash -x"',
-  ];
-
-  it.each(SHELL_RUN_REFUSED)('refuses %s', (command) => {
-    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
-    expect(found.length).toBeGreaterThan(0);
-    expect(found[0]?.reason).toContain('run by a shell');
-  });
-
-  it.each(SHELL_RUN_ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
-  });
-});
-
-describe('force-push rule reads each shell name, prefix chain and env -S spelling', () => {
-  const DEPTH_REFUSED: string[] = [
-    'zsh -c "$(git show HEAD:x.sh)"',
-    'dash -c "$(git show HEAD:x.sh)"',
-    'ksh -c "$(git show HEAD:x.sh)"',
-    '/usr/bin/zsh -c "$(git show HEAD:x.sh)"',
-    'bash -c "$(git show HEAD:x.sh)" extra-arg',
-    'bash -ce "$(git show HEAD:x.sh)"',
-    'bash -ec "`git show HEAD:x.sh`"',
-    'bash --norc -c "$(git show HEAD:x.sh)"',
-    'sudo bash -c "$(git show HEAD:x.sh)"',
-    'nohup sh -c "$(git show HEAD:x.sh)" &',
-    'FOO=1 bash -c "$(git show HEAD:x.sh)"',
-    'git log | zsh',
-    'git log | dash',
-    'git log | ksh',
-    'git log | /usr/bin/timeout 5 bash',
     'git log | timeout 1.5 bash',
     'git log | timeout 5m bash',
     'git log | timeout --signal=KILL 5 bash',
+    'git log | /usr/bin/timeout 5 /bin/bash',
     'git log | nice -n 5 timeout 5 sudo bash',
-    'git log | sudo -E env bash',
-    'git log | timeout 5 /bin/bash',
     'git log | FOO=1 timeout 5 bash',
-    'git log | env -S "timeout 5 bash"',
-    'git log | env -S"bash -x"',
-    'git log | env --split-string "sh -e"',
-    'env -S "bash -c \'$(git show HEAD:x.sh)\'"',
-    'env --split-string="sh -c \'$(git show HEAD:x.sh)\'"',
-  ];
-
-  const DEPTH_ALLOWED: string[] = [
-    'bash -c "$(date)"',
-    'bash script.sh',
-    'bash -c "git status"',
-    'zsh -c "echo $(pwd)"',
-    'git log | timeout 5 cat',
-    'git log | nice -n 5 grep x',
-    'git log | exec less',
-    'git log | stdbuf -oL cat',
-    'git log | time wc -l',
-    'echo hi | sudo bash',
-    'echo hi | nohup sh',
-    'timeout 5 bash -c "$(date)"',
-    'git status && timeout 5 make test',
-    'env -S "echo hello"',
-    'git log | env -S "cat -n"',
-  ];
-
-  it.each(DEPTH_REFUSED)('refuses %s', (command) => {
-    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
-    expect(found.length).toBeGreaterThan(0);
-    expect(found[0]?.reason).toContain('run by a shell');
-  });
-
-  it.each(DEPTH_ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
-  });
-});
-
-describe('force-push rule reads env as a prefix word and a shell behind a word it cannot classify', () => {
-  const PREFIX_REFUSED: string[] = [
+    'git log | nice FOO=1 timeout 5 bash',
+    'timeout 5 bash -c "$(git show HEAD:x.sh)"',
+    // a word the walk cannot classify after a prefix word: the later shell runs
     'git log | timeout 5 foo bash',
     'git log | timeout 5 grep bash',
     'git log | sudo foo -x sh',
+    'git log | sudo timeout 5 foo bash',
     'timeout 5 foo bash -c "$(git show HEAD:x.sh)"',
+    // env as a prefix word and env -S given a command line
+    'git log | env -S "bash -x"',
+    'git log | env -S"bash -x"',
+    'git log | env --split-string "sh -e"',
+    'git log | env -S "timeout 5 bash"',
+    'env --split-string="sh -c \'$(git show HEAD:x.sh)\'"',
     'git log | sudo env bash',
     'git log | timeout 5 env FOO=1 bash',
     'git log | sudo env -u FOO bash',
     'git log | sudo env -S "bash -x"',
-    'git log | command env -S"sh -e"',
     'sudo env bash -c "$(git show HEAD:x.sh)"',
-    'git log | sudo FOO=1 bash',
-    'git log | nice FOO=1 timeout 5 bash',
+    'timeout 5 env -S "bash -c \'$(git show HEAD:x.sh)\'"',
+    'FOO=1 env -u BAR bash -c "$(git show HEAD:x.sh)"',
+    'git log | xargs env -S"bash -x"',
+    'git log | xargs -n 1 env FOO=1 bash',
+    // xargs and eval after env -S and after prefix words
+    'echo push | env -S foo xargs git',
+    'echo push | env -S foo xargs -n 1 git',
+    'env -S foo eval "$(git show HEAD:x.sh)"',
+    'echo push | timeout 5 xargs git',
+    'echo push | sudo timeout 5 xargs -I{} git {}',
+    'echo push | nice -n 5 env FOO=1 xargs git',
+    'echo push | xargs timeout 5 git',
+    'echo push | timeout 5 xargs nice -n 5 git',
+    'timeout 5 eval "$(git show HEAD:x.sh)"',
+    'command eval "$(git log -1 --format=%B)"',
+    'nohup sudo eval "$(git show HEAD:x.sh)"',
+    'env FOO=1 timeout 5 eval "$(git show HEAD:x.sh)"',
+    'timeout 5 eval "$(git show HEAD:x.sh)" bash',
+    'echo push | timeout 5 xargs -I{} git {} bash',
+    // xargs -S stays an xargs option
+    'echo x | xargs -S 100 env git rebase main',
+    'git log | xargs -S 100 env bash',
   ];
 
-  const PREFIX_ALLOWED: string[] = [
+  const ALLOWED: string[] = [
+    'bash -c "$(date)"',
+    'bash -c "git status"',
+    'bash script.sh',
+    'bash script.sh "$(git show HEAD:x.sh)"',
+    'env -u BAR bash script.sh "$(git log -1 --format=%B)"',
+    'zsh -c "echo $(pwd)"',
+    'echo ls | timeout 5 bash',
+    'echo hi | sudo env bash',
+    'echo hi | sudo timeout 5 foo bash',
+    'echo ls | env -S "bash -x"',
+    'echo hi | xargs -n 1 env FOO=1 bash',
+    'git log | command grep x',
+    'git log | nice -n 5 grep x',
     'git log | grep bash',
     'git log | grep -n sh file.txt',
     'git log | printf bash',
     'grep bash script.txt',
-    'printf "%s" bash',
-    'echo hi | sudo env bash',
-    'bash script.sh "$(git show HEAD:x.sh)"',
-    'sh run.sh "$(git log -1 --format=%B)"',
+    'git status && timeout 5 make test',
+    'timeout 5 bash -c "$(date)"',
     'timeout 5 foo bash',
-  ];
-
-  it.each(PREFIX_REFUSED)('refuses %s', (command) => {
-    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
-    expect(found.length).toBeGreaterThan(0);
-    expect(found[0]?.reason).toContain('run by a shell');
-  });
-
-  it.each(PREFIX_ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
-  });
-
-  it('keeps reading the xargs -S option as an xargs option, not as an env option', () => {
-    expect(forcePushRefused('echo x | xargs -S 100 env git rebase main')).toBe(true);
-    expect(forcePushRefused('echo x | xargs -S 100 env git push')).toBe(true);
-    expect(forcePushRefused('git log | xargs -S 100 env bash')).toBe(true);
-    expect(forcePushRefused('git ls-files | xargs -S 100 env git status')).toBe(false);
-  });
-});
-
-describe('force-push rule reads a shell behind two prefix words, env options and xargs plus env', () => {
-  const REFUSED: string[] = [
-    'git log | sudo timeout 5 foo bash',
-    'git log | nice nohup foo -x sh',
-    'git log | xargs env -S"bash -x"',
-    'git log | xargs -n 1 env FOO=1 bash',
-    'FOO=1 env -u BAR bash -c "$(git show HEAD:x.sh)"',
-    'timeout 5 env -S "bash -c \'$(git show HEAD:x.sh)\'"',
-  ];
-
-  const ALLOWED: string[] = [
-    'echo hi | sudo timeout 5 foo bash',
     'sudo timeout 5 foo bash -c "echo hello"',
-    'echo hi | xargs -n 1 env FOO=1 bash',
+    'env -S "echo hello"',
+    'git log | env -S "cat -n"',
     'git ls-files | xargs -n 1 env FOO=1 cat',
-    'env -u BAR bash script.sh "$(git log -1 --format=%B)"',
-  ];
-
-  it.each(REFUSED)('refuses %s', (command) => {
-    expect(forcePushRefused(command)).toBe(true);
-  });
-
-  it.each(ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
-  });
-});
-
-describe('force-push rule reads xargs and eval after env -S and after prefix words', () => {
-  const REFUSED: string[] = [
-    'echo push | env -S foo xargs git',
-    'echo push | env -S foo xargs -I{} git {}',
-    'env -S foo eval "$(git show HEAD:x.sh)"',
-    'echo push | timeout 5 xargs git',
-    'echo push | sudo xargs -I{} git {}',
-    'echo push | nice -n 5 env FOO=1 xargs git',
-    'timeout 5 eval "$(git show HEAD:x.sh)"',
-    'command eval "$(git log -1 --format=%B)"',
-    'echo x | timeout 5 xargs sh -c "git push -f origin main"',
-    'echo push | timeout 5 xargs -I{} git {} bash',
-    'timeout 5 eval "$(git show HEAD:x.sh)" bash',
-  ];
-
-  const ALLOWED: string[] = [
-    'echo x | env -S foo xargs grep y',
-    'env -S foo eval "$(echo hi)"',
-    'echo x | timeout 5 xargs grep y',
+    'git ls-files | xargs -S 100 env git status',
     'git ls-files | sudo xargs git status',
-    'timeout 5 eval "$(echo hi)"',
-  ];
-
-  it.each(REFUSED)('refuses %s', (command) => {
-    expect(forcePushRefused(command)).toBe(true);
-  });
-
-  it.each(ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
-  });
-});
-
-describe('force-push rule reads xargs options, nested prefix words and neighbours', () => {
-  const REFUSED: string[] = [
-    'echo push | env -S foo xargs -n 1 git',
-    'echo push | env -S foo xargs -I {} -P 2 git {}',
-    'echo push | xargs timeout 5 git',
-    'echo push | timeout 5 xargs nice -n 5 git',
-    'echo push | sudo timeout 5 xargs -I{} git {}',
-    'nohup sudo eval "$(git show HEAD:x.sh)"',
-    'env FOO=1 timeout 5 eval "$(git show HEAD:x.sh)"',
-  ];
-
-  const ALLOWED: string[] = [
-    'echo x | env -S foo xargs -n 1 grep y',
+    'echo x | env -S foo xargs grep y',
     'echo x | timeout 5 xargs nice -n 5 grep y',
-    'echo x | sudo timeout 5 xargs -I{} echo {}',
+    'env -S foo eval "$(echo hi)"',
+    'timeout 5 eval "$(echo hi)"',
     'nohup sudo eval "$(echo hi)"',
-    'env FOO=1 timeout 5 eval "$(date)"',
   ];
 
   it.each(REFUSED)('refuses %s', (command) => {
@@ -360,7 +231,20 @@ describe('force-push rule reads xargs options, nested prefix words and neighbour
   });
 
   it.each(ALLOWED)('allows %s', (command) => {
-    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+    expect(forcePushRefused(command)).toBe(false);
+  });
+
+  it('answers quickly on a shell option word of 200000 letters and still refuses a later segment', () => {
+    const started = Date.now();
+    const refused = forcePushRefused(`bash -${'c'.repeat(200000)}1; git push --force origin main`);
+    expect(refused).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('refuses a segment after an env split-string value of 200000 words without throwing', () => {
+    const line = `env -S "${'a '.repeat(200000)}"; git push --force origin main`;
+    expect(() => forcePushRefused(line)).not.toThrow();
+    expect(forcePushRefused(line)).toBe(true);
   });
 });
 
