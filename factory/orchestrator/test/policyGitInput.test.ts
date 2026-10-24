@@ -336,6 +336,34 @@ describe('force-push rule reads xargs and eval after env -S and after prefix wor
   });
 });
 
+describe('force-push rule reads xargs options, nested prefix words and neighbours', () => {
+  const REFUSED: string[] = [
+    'echo push | env -S foo xargs -n 1 git',
+    'echo push | env -S foo xargs -I {} -P 2 git {}',
+    'echo push | xargs timeout 5 git',
+    'echo push | timeout 5 xargs nice -n 5 git',
+    'echo push | sudo timeout 5 xargs -I{} git {}',
+    'nohup sudo eval "$(git show HEAD:x.sh)"',
+    'env FOO=1 timeout 5 eval "$(git show HEAD:x.sh)"',
+  ];
+
+  const ALLOWED: string[] = [
+    'echo x | env -S foo xargs -n 1 grep y',
+    'echo x | timeout 5 xargs nice -n 5 grep y',
+    'echo x | sudo timeout 5 xargs -I{} echo {}',
+    'nohup sudo eval "$(echo hi)"',
+    'env FOO=1 timeout 5 eval "$(date)"',
+  ];
+
+  it.each(REFUSED)('refuses %s', (command) => {
+    expect(forcePushRefused(command)).toBe(true);
+  });
+
+  it.each(ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
 describe('history-rewrite rule reads each top-level command on its own', () => {
   const READ_ONLY_ALLOWED = [
     'git grep rebase',
