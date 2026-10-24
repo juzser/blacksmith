@@ -165,6 +165,7 @@ import {
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
   STATE_DB_PATH,
+  STATE_EVENTS_DIR,
   WORK_ROOT,
 } from './paths.js';
 import {
@@ -355,6 +356,16 @@ function readFindingsInputFile(filePath: string): RaiseFindingInput[] {
 function readChecksFile(filePath: string): CheckCommand[] {
   const checks = readJsonFile<CheckCommand[]>(filePath);
   for (const check of checks) {
+    // Epic bs-optimize criterion 10: `"heavy": "false"` is truthy in a loose
+    // reader, so anything but a boolean is refused rather than guessed at.
+    const heavy = (check as { heavy?: unknown }).heavy;
+    if (heavy !== undefined && typeof heavy !== 'boolean') {
+      throw new SmithError(
+        'gate.invalid-check-heavy',
+        `"${check.name}" in ${filePath} has heavy ${JSON.stringify(heavy)}; it must be true or false.`,
+        { name: check.name, heavy, file: filePath },
+      );
+    }
     const timeoutMs = check.timeout_ms;
     if (timeoutMs === undefined) continue;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_CHECK_TIMEOUT_MS) {
@@ -1415,6 +1426,16 @@ async function nextWaveInputFrom(
     // plan is the task's INITIAL status, and a plan read from disk hours
     // into a run still says `todo` about work that finished.
     statusById,
+    // Epic bs-optimize criterion 9: `plan ingest` resets a running task to
+    // `todo` in the plan file, so the log, not the file, says who is running.
+    ...(flags.session
+      ? {
+          inFlight: (await import('./admission.js')).inFlightTasks(events, {
+            epicId: planOnDisk.epic_id,
+            planVersion: planOnDisk.version,
+          }),
+        }
+      : {}),
   };
 }
 
@@ -1804,7 +1825,14 @@ async function main(): Promise<number> {
   // hold, and returns names, never values.
   loadDotEnv(DOTENV_PATH);
 
-  const { namespace, action, rest } = splitNamespaceAction(process.argv.slice(2));
+  // `heavy run ... -- <cmd...>`: the child's argv is cut off before parsing, or
+  // its own `--flags` would be refused as unknown ones of ours.
+  const rawArgv = process.argv.slice(2);
+  const dashDash = rawArgv[0] === 'heavy' ? rawArgv.indexOf('--') : -1;
+  const childArgv = dashDash >= 0 ? rawArgv.slice(dashDash + 1) : [];
+  const { namespace, action, rest } = splitNamespaceAction(
+    dashDash >= 0 ? rawArgv.slice(0, dashDash) : rawArgv,
+  );
   // Parse against what this command declares, not against "anything starting
   // with --" (D-131/D-132). A documented command gets a spec; an undocumented
   // one gets `undefined` and the old permissive parse, because its argv has to
@@ -2359,7 +2387,17 @@ async function main(): Promise<number> {
         logged.map((t) => t.taskId),
       ),
     );
-    if (flags.session) await refuseUnadmissibleTasks(plan, taskIds, flags);
+    if (flags.session) {
+      await refuseUnadmissibleTasks(plan, taskIds, flags);
+      // Epic bs-optimize criterion 9: a task the log says is running cannot
+      // join a second wave.
+      const { assertNotInFlight, inFlightTasks } = await import('./admission.js');
+      const inFlight = inFlightTasks(
+        await readLineageEvents(flags.session as string, eventOptsFromFlags(flags)),
+        { epicId: plan.epic_id, planVersion: plan.version },
+      );
+      for (const id of taskIds) assertNotInFlight(id, inFlight);
+    }
     // Neither register is narrowed on the way in. `?? []` used to stand here
     // and on the line above, and it fires on a missing claims field but not on
     // a claims field holding the wrong thing: a plan writing `"claims":
@@ -5123,6 +5161,7 @@ async function main(): Promise<number> {
         agentRole: flags['agent-role'],
         caseType: flags['case-type'],
         lessonId: flags['lesson-id'],
+        errorClass: flags['error-class'],
       },
       ctx,
       eventOpts,
@@ -5224,11 +5263,24 @@ async function main(): Promise<number> {
   if (namespace === 'lessons' && action === 'for-dispatch') {
     const { lessonsForDispatch } = await import('./lessons.js');
     const [role] = requirePositionals(positional, usageFor('lessons for-dispatch')) as [string];
+    // Epic bs-optimize criterion 4: always hand over the store's events, an
+    // empty store included, so the class-recurrence rule filters by default.
+    const { readRecurrenceEvents } = await import('./lessonEvents.js');
+    const { RECUR_WINDOW_DAYS } = await import('./lessonRecurrence.js');
+    const now = new Date();
     printJson(
       lessonsForDispatch(role, claimsForDispatch(flags), {
         ...(flags['agents-dir'] ? { agentsDir: flags['agents-dir'] } : {}),
         ...(flags.lessons ? { lessonsPath: flags.lessons } : {}),
         caseType: caseForDispatch(flags),
+        events: await readRecurrenceEvents(eventOptsFromFlags(flags).stateDir ?? STATE_EVENTS_DIR, {
+          now,
+          windowDays: RECUR_WINDOW_DAYS,
+        }),
+        now,
+        ...(flags.epic ? { epicId: flags.epic } : {}),
+        full: flags.full === 'true',
+        ...(flags.class ? { class: flags.class } : {}),
       }),
     );
     return 0;
@@ -5698,6 +5750,131 @@ async function main(): Promise<number> {
     } finally {
       handle.sqlite.close();
     }
+  }
+
+  // Epic bs-optimize criterion 5: compose a dispatch brief. Every decision is
+  // composeBrief's; this arm only reads the store and routes the output.
+  if (namespace === 'brief' && action === 'compose') {
+    const { composeBrief } = await import('./briefCompose.js');
+    const { readRecurrenceEvents } = await import('./lessonEvents.js');
+    const { RECUR_WINDOW_DAYS } = await import('./lessonRecurrence.js');
+    const eventOpts = eventOptsFromFlags(flags);
+    const now = new Date();
+    const out = flags.out;
+    const turnBudget = boundedIntFlag(flags, 'turns', { min: 1 });
+    const { text, manifest } = await composeBrief({
+      role: requireFlag(flags, 'role'),
+      sessionId: requireFlag(flags, 'session'),
+      ...(flags.task ? { taskId: flags.task } : {}),
+      ...(flags.epic ? { epicId: flags.epic } : {}),
+      ...(flags.plan ? { planFile: flags.plan } : {}),
+      ...(flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {}),
+      ...(flags.worktree ? { worktree: flags.worktree } : {}),
+      ...(flags.branch ? { branch: flags.branch } : {}),
+      ...(turnBudget !== undefined ? { turnBudget } : {}),
+      ...(flags.artifact ? { artifactPath: flags.artifact } : {}),
+      events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
+        now,
+        windowDays: RECUR_WINDOW_DAYS,
+      }),
+      now,
+      eventOpts,
+      ...(out ? { manifestPath: `${out}.manifest.json` } : {}),
+    });
+    if (out) {
+      writeFileSync(out, text);
+      printJson(manifest);
+    } else {
+      process.stdout.write(text);
+    }
+    return 0;
+  }
+
+  // Epic bs-optimize criterion 7: print one wave step or one dispatch section.
+  if (namespace === 'playbook' && action === 'slice') {
+    const { sliceSection, sliceWaveStep } = await import('./playbookSlice.js');
+    const [which] = requirePositionals(positional, usageFor('playbook slice')) as [string];
+    const skills = path.join(REPO_ROOT, '.claude', 'skills', 'bs');
+    if (which === 'wave') {
+      const step = boundedIntFlag(flags, 'step', { min: 1 }) ?? requireFlag(flags, 'step');
+      process.stdout.write(
+        `${sliceWaveStep(readFileSync(path.join(skills, 'wave.md'), 'utf8'), Number(step))}\n`,
+      );
+      return 0;
+    }
+    if (which === 'dispatch') {
+      const text = sliceSection(
+        readFileSync(path.join(skills, 'dispatch.md'), 'utf8'),
+        requireFlag(flags, 'section'),
+      );
+      process.stdout.write(`${text}\n`);
+      return 0;
+    }
+    throw new SmithError(
+      'cli.invalid-flag',
+      `playbook slice takes "wave" or "dispatch", not "${which}".`,
+      { which },
+    );
+  }
+
+  // Epic bs-optimize criterion 10: run a command under the machine-wide heavy
+  // lock. argv array, no shell; the child env is heavyChildEnv's alone.
+  if (namespace === 'heavy' && action === 'run') {
+    const { withHeavyLock } = await import('./heavyLock.js');
+    const { heavyChildEnv } = await import('./testgate.js');
+    if (childArgv.length === 0) {
+      throw new SmithError('cli.missing-flag', 'heavy run needs a command after "--".', {});
+    }
+    const [cmd, ...cmdArgs] = childArgv as [string, ...string[]];
+    const maxWaitMs = boundedIntFlag(flags, 'max-wait-ms', { min: 0 });
+    try {
+      return await withHeavyLock(
+        (lease) =>
+          new Promise<number>((resolve, reject) => {
+            const child = spawn(cmd, cmdArgs, {
+              env: heavyChildEnv(process.env, lease),
+              stdio: 'inherit',
+            });
+            child.on('error', reject);
+            child.on('close', (code, signal) => resolve(code ?? (signal ? 128 : 1)));
+          }),
+        {
+          label: requireFlag(flags, 'label'),
+          cwd: process.cwd(),
+          ...(maxWaitMs !== undefined ? { maxWaitMs } : {}),
+        },
+      );
+    } catch (err) {
+      if (!(err instanceof SmithError) || err.code !== 'heavy.wait-timeout') throw err;
+      printJson({ error: { code: err.code, message: err.message, details: err.details } });
+      return 75; // EX_TEMPFAIL: the lock is busy, try again
+    }
+  }
+
+  // Epic bs-optimize criterion 10: who holds the lock, or {}.
+  if (namespace === 'heavy' && action === 'status') {
+    const { readHeavyLock, resolveHeavyLockDir } = await import('./heavyLock.js');
+    printJson((await readHeavyLock(resolveHeavyLockDir(undefined))) ?? {});
+    return 0;
+  }
+
+  // Epic bs-optimize criterion 14: retire merged worktrees and branches. A dry
+  // run unless --apply.
+  if (namespace === 'cleanup') {
+    const { runCleanup } = await import('./cleanup.js');
+    const stateDir = eventOptsFromFlags(flags).stateDir ?? STATE_EVENTS_DIR;
+    const events: StoredEvent[] = [];
+    for (const id of listSessionIds(stateDir)) events.push(...(await readEvents(id, { stateDir })));
+    printJson(
+      await runCleanup({
+        projectDir: requireFlag(flags, 'project'),
+        ...(flags.epic ? { epicId: flags.epic } : {}),
+        apply: flags.apply === 'true',
+        now: Date.now(),
+        events,
+      }),
+    );
+    return 0;
   }
 
   // Unreachable while usage.ts and the branches above agree, because
