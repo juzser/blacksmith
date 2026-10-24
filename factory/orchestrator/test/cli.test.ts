@@ -3572,8 +3572,8 @@ describe('cli.ts (built binary)', () => {
     const dispatchResult = runCli([
       'lessons',
       'for-dispatch',
-      '--full',
       'scribe',
+      '--full',
       '--lessons',
       lessonsOut,
     ]);
@@ -4017,12 +4017,12 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
-      '--full',
       'coder',
       '--plan',
       planPath,
       '--task',
       'epic-1/task-1',
+      '--full',
       '--lessons',
       lessonsPath,
     ]);
@@ -4098,12 +4098,12 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
-      '--full',
       'coder',
       '--plan',
       planPath,
       '--task',
       'epic-1/task-1',
+      '--full',
       '--lessons',
       lessonsPath,
     ]);
@@ -4185,12 +4185,12 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
-      '--full',
       'planner',
       '--plan',
       planPath,
       '--task',
       'task-1',
+      '--full',
       '--lessons',
       lessonsPath,
     ]);
