@@ -2062,8 +2062,8 @@ const GIT_CONFIG_UNREADABLE_REASON =
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
 
 /** The index where a segment's command starts: past leading `NAME=value` words and the `env` prefix. */
-function commandStart(words: readonly DequotedWord[]): number {
-  let start = 0;
+function commandStart(words: readonly DequotedWord[], from = 0): number {
+  let start = from;
   while (start < words.length) {
     const text = words[start]?.text ?? '';
     if (ASSIGNMENT_WORD_RE.test(text)) {
@@ -2284,7 +2284,7 @@ const isShellWord = (word: string | undefined): boolean =>
  * like any other. An `-S` anywhere else (an `xargs` option) is left alone.
  */
 function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly DequotedWord[] {
-  const out = [...words];
+  let out = words as DequotedWord[];
   let i = from;
   while (i < out.length) {
     const text = out[i]?.text ?? '';
@@ -2313,6 +2313,7 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
         }
         const raw = (separate ?? operand).raw;
         const pieces = value.split(/\s+/).filter(Boolean);
+        if (out === words) out = [...words];
         out.splice(i, separate ? 2 : 1, ...pieces.map((piece) => ({ raw, text: piece })));
       }
     }
@@ -2331,6 +2332,7 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
 function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
+  split: typeof splitEnvCommand,
 ): { words: readonly DequotedWord[]; index: number } {
   let words = start;
   let index = from;
@@ -2338,8 +2340,8 @@ function walkPrefixWords(
   for (;;) {
     const text = words[index]?.text ?? '';
     if (text === 'env') {
-      words = splitEnvCommand(words, index);
-      index += commandStart(words.slice(index));
+      words = split(words, index);
+      index = commandStart(words, index);
     } else if (COMMAND_PREFIX_WORDS.has(baseName(text))) {
       index += 1;
       let afterFlag = false;
@@ -2356,7 +2358,12 @@ function walkPrefixWords(
     }
     sawPrefix = true;
   }
-  if (sawPrefix && index < words.length && !isShellWord(words[index]?.text)) {
+  if (
+    sawPrefix &&
+    index < words.length &&
+    !/^(?:xargs|eval)$/.test(words[index]?.text ?? '') &&
+    !isShellWord(words[index]?.text)
+  ) {
     const later = words.findIndex((word, at) => at > index && isShellWord(word.text));
     if (later !== -1) index = later;
   }
@@ -2372,28 +2379,43 @@ function walkPrefixWords(
  * substitution that runs git.
  */
 function checkXargsGitAndShellInput(
-  originalWords: readonly DequotedWord[],
+  words: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  let words = splitEnvCommand(originalWords, 0);
+  // The `env -S` value read as a command line, and the words after the option as written.
+  return (
+    readRunCommand(words, afterGitPipe, rule, splitEnvCommand) ??
+    readRunCommand(words, afterGitPipe, rule, (all) => all)
+  );
+}
+
+function readRunCommand(
+  originalWords: readonly DequotedWord[],
+  afterGitPipe: boolean,
+  rule: GuardrailRule,
+  split: typeof splitEnvCommand,
+): PolicyViolation | null {
+  let words = split(originalWords, 0);
   let index = commandStart(words);
   let viaXargs = false;
-  while (words[index]?.text === 'xargs') {
+  for (;;) {
+    const walked = walkPrefixWords(words, index, split);
+    words = walked.words;
+    index = walked.index;
+    if (words[index]?.text !== 'xargs') break;
     viaXargs = true;
     index += 1;
     while (index < words.length && (words[index]?.text ?? '').startsWith('-')) {
       index += XARGS_VALUE_OPTIONS.has(words[index]?.text ?? '') ? 2 : 1;
     }
-    words = splitEnvCommand(words, index);
-    index += commandStart(words.slice(index));
+    words = split(words, index);
+    index = commandStart(words, index);
   }
   const name = baseName(words[index]?.text);
-  const walked = walkPrefixWords(words, index);
-  words = walked.words;
-  if (isShellWord(words[walked.index]?.text)) {
+  if (isShellWord(name)) {
     if (afterGitPipe) return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
-    const rest = words.slice(walked.index + 1);
+    const rest = words.slice(index + 1);
     const runsGitInCommand =
       rest.some((word) => SHELL_COMMAND_FLAG_RE.test(word.text)) &&
       rest.some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
