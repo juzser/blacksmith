@@ -277,6 +277,33 @@ describe('force-push rule reads env as a prefix word and a shell behind a word i
   });
 });
 
+describe('force-push rule reads a shell behind two prefix words, env options and xargs plus env', () => {
+  const REFUSED: string[] = [
+    'git log | sudo timeout 5 foo bash',
+    'git log | nice nohup foo -x sh',
+    'git log | xargs env -S"bash -x"',
+    'git log | xargs -n 1 env FOO=1 bash',
+    'FOO=1 env -u BAR bash -c "$(git show HEAD:x.sh)"',
+    'timeout 5 env -S "bash -c \'$(git show HEAD:x.sh)\'"',
+  ];
+
+  const ALLOWED: string[] = [
+    'echo hi | sudo timeout 5 foo bash',
+    'sudo timeout 5 foo bash -c "echo hello"',
+    'echo hi | xargs -n 1 env FOO=1 bash',
+    'git ls-files | xargs -n 1 env FOO=1 cat',
+    'env -u BAR bash script.sh "$(git log -1 --format=%B)"',
+  ];
+
+  it.each(REFUSED)('refuses %s', (command) => {
+    expect(forcePushRefused(command)).toBe(true);
+  });
+
+  it.each(ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
 describe('history-rewrite rule reads each top-level command on its own', () => {
   const READ_ONLY_ALLOWED = [
     'git grep rebase',
