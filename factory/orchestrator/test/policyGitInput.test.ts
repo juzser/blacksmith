@@ -302,3 +302,44 @@ describe('history-rewrite rule reads each top-level command on its own', () => {
     expect(rewriteRefused('git log --grep=rebase; echo "x')).toBe(true);
   });
 });
+
+describe('force-push rule reads a command word it cannot spell out as possibly running git', () => {
+  const REFUSED = [
+    'G=git; $G show HEAD:run.sh | sh',
+    'G=git; $G log --format=%B | bash',
+    '$(echo git) show HEAD:run.sh | sh',
+    'G=git; echo x | $G show HEAD:run.sh | sh',
+    'G=git; echo "push --force origin main" | xargs $G',
+    'G=git; echo x | xargs -n 1 $G',
+    'echo x | xargs $(echo git) push',
+  ];
+  const ALLOWED = [
+    'G=git; $G log | head -3',
+    'G=git; $G log | grep fix',
+    'G=git; $G show HEAD:run.sh',
+    'cat script.txt | sh',
+    'echo hi | bash',
+    'echo x | xargs echo',
+    'echo x | xargs -n 1 grep y',
+    'G=git; $G log | xargs grep x',
+  ];
+
+  it.each(REFUSED)('refuses %s', (command) => {
+    expect(forcePushRefused(command)).toBe(true);
+  });
+
+  it.each(ALLOWED)('allows %s', (command) => {
+    expect(forcePushRefused(command)).toBe(false);
+  });
+
+  it('gives the unreadable-command-word reason after xargs and the shell-input reason for a pipe into a shell', () => {
+    const reasons = (command: string) =>
+      decide(command)
+        .violations.filter((v) => v.ruleId === 'force-push')
+        .map((v) => v.reason);
+    expect(reasons('G=git; echo x | xargs $G')[0]).toContain(
+      'the command word here is an unexpanded',
+    );
+    expect(reasons('G=git; $G show HEAD:run.sh | sh')[0]).toContain('git output is run by a shell');
+  });
+});
