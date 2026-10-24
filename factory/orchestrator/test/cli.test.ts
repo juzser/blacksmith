@@ -3569,7 +3569,14 @@ describe('cli.ts (built binary)', () => {
     // (P9-2). A gate-block checkpoint compiles as `stack-wide`, which the
     // scribe template declares, so this closes candidate -> approve ->
     // compile -> dispatch in one run.
-    const dispatchResult = runCli(['lessons', 'for-dispatch', 'scribe', '--lessons', lessonsOut]);
+    const dispatchResult = runCli([
+      'lessons',
+      'for-dispatch',
+      '--full',
+      'scribe',
+      '--lessons',
+      lessonsOut,
+    ]);
     expect(dispatchResult.status).toBe(0);
     const dispatch = JSON.parse(dispatchResult.stdout);
     expect(dispatch.role).toBe('scribe');
@@ -4010,6 +4017,7 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
+      '--full',
       'coder',
       '--plan',
       planPath,
@@ -4090,6 +4098,7 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
+      '--full',
       'coder',
       '--plan',
       planPath,
@@ -4176,6 +4185,7 @@ describe('cli.ts (built binary)', () => {
     const scoped = runCli([
       'lessons',
       'for-dispatch',
+      '--full',
       'planner',
       '--plan',
       planPath,

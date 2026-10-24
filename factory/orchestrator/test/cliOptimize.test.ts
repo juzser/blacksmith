@@ -416,6 +416,30 @@ describe('heavy run, heavy status and gate run (criterion 10, CLI half)', () => 
     expect(error.message).toContain('someone-else');
   });
 
+  it('refuses --max-wait-ms when it is negative or not an integer', () => {
+    const sb = sandbox();
+    for (const bad of ['-1', '1.5', 'abc']) {
+      const run = cli(
+        [
+          'heavy',
+          'run',
+          '--label',
+          't',
+          '--max-wait-ms',
+          bad,
+          '--',
+          'node',
+          '-e',
+          'process.exit(0)',
+        ],
+        sb,
+      );
+      expect(run.status, `--max-wait-ms ${bad}`).not.toBe(0);
+      expect(run.status).not.toBe(75);
+      expect(JSON.parse(run.stdout).error.code).toBe('cli.invalid-flag');
+    }
+  });
+
   it('heavy status prints the holder while a run holds the lock, and {} when free', () => {
     const sb = sandbox();
     expect(JSON.parse(cli(['heavy', 'status'], sb).stdout)).toEqual({});
