@@ -2207,6 +2207,13 @@ function checkGitConfigValues(
   return null;
 }
 
+/** True when the segment's command word holds an expansion or substitution the guard cannot spell out. */
+function hasUnreadableCommandWord(segment: string): boolean {
+  const words = readShellWords(segment, () => true);
+  const commandWord = words?.[commandStart(words)];
+  return commandWord !== undefined && hasUnreadableShellForm(commandWord.raw);
+}
+
 /**
  * The top-level commands of `command`, each with whether it is fed by a pipe
  * from an earlier command of the same pipeline that runs git.
@@ -2219,7 +2226,7 @@ function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPip
   for (const text of topLevelCommands(command)) {
     if (!afterPipe) pipelineRunsGit = false;
     parts.push({ text, afterGitPipe: afterPipe && pipelineRunsGit });
-    pipelineRunsGit ||= /\bgit\b/i.test(text);
+    pipelineRunsGit ||= /\bgit\b/i.test(text) || hasUnreadableCommandWord(text);
     const end = position + text.length;
     const pair = command.slice(end, end + 2);
     afterPipe = pair.startsWith('|') && pair !== '||';
@@ -2425,6 +2432,9 @@ function readRunCommand(
       .slice(index + 1)
       .some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
     return runsGit ? violation(rule, GIT_OUTPUT_TO_SHELL_REASON) : null;
+  }
+  if (viaXargs && hasUnreadableShellForm(words[index]?.raw ?? '')) {
+    return violation(rule, UNKNOWN_COMMAND_WORD_REASON);
   }
   if (!viaXargs || name.toLowerCase() !== 'git') return null;
   const subcommandIndex = gitSubcommandWord(words, index);
