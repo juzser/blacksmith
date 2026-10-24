@@ -2062,8 +2062,8 @@ const GIT_CONFIG_UNREADABLE_REASON =
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
 
 /** The index where a segment's command starts: past leading `NAME=value` words and the `env` prefix. */
-function commandStart(words: readonly DequotedWord[]): number {
-  let start = 0;
+function commandStart(words: readonly DequotedWord[], from = 0): number {
+  let start = from;
   while (start < words.length) {
     const text = words[start]?.text ?? '';
     if (ASSIGNMENT_WORD_RE.test(text)) {
@@ -2258,30 +2258,167 @@ const XARGS_GIT_REASON =
 const GIT_OUTPUT_TO_SHELL_REASON =
   'git output is run by a shell here, so the guard cannot tell what it runs — write the commands out plainly';
 
+/** Words that run the command after them; a shell behind one is read as the shell itself. */
+const COMMAND_PREFIX_WORDS = new Set([
+  'timeout',
+  'command',
+  'sudo',
+  'nice',
+  'nohup',
+  'exec',
+  'stdbuf',
+  'time',
+]);
+
+const PREFIX_OPERAND_RE = /^\d+(?:\.\d+)?[smhd]?$/;
+// A short option word holding the letter c; two linear tests, no backtracking on a long word.
+const isShellCommandFlag = (word: string): boolean => /^-[a-z]+$/i.test(word) && /c/i.test(word);
+
+const baseName = (word: string | undefined): string => (word ?? '').split('/').pop() ?? '';
+const isShellWord = (word: string | undefined): boolean =>
+  SHELL_INTERPRETER_RE.test(baseName(word));
+
 /**
- * Reads the command a segment runs (past assignments, `env` and `xargs` with
- * its options) the way the in-line form is read: `xargs git` with a
- * subcommand that is missing, unreadable or force-gated; a shell interpreter
- * that follows a pipe from git; `eval` of a substitution that runs git.
+ * Where `env` is the command word, its `-S` / `--split-string` value holds a
+ * command line in one word; that word is replaced by the words it holds. An
+ * `-S` anywhere else (an `xargs` option) is left alone.
+ */
+function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly DequotedWord[] {
+  let out = words;
+  let i = from;
+  while (i < out.length) {
+    const text = out[i]?.text ?? '';
+    if (ASSIGNMENT_WORD_RE.test(text)) {
+      i += 1;
+      continue;
+    }
+    if (text !== 'env') break;
+    i += 1;
+    while (i < out.length) {
+      const operand = out[i] as DequotedWord;
+      const t = operand.text;
+      if (ASSIGNMENT_WORD_RE.test(t)) i += 1;
+      else if (!t.startsWith('-')) break;
+      else {
+        const separate = t === '-S' || t === '--split-string' ? out[i + 1] : undefined;
+        const inline = t.startsWith('--split-string=')
+          ? t.slice('--split-string='.length)
+          : /^-S./.test(t)
+            ? t.slice(2)
+            : undefined;
+        const value = separate ? separate.text : inline;
+        if (value === undefined) {
+          i += ENV_VALUE_OPTIONS.has(t) ? 2 : 1;
+          continue;
+        }
+        const raw = (separate ?? operand).raw;
+        const pieces = value.split(/\s+/).filter(Boolean);
+        out = [
+          ...out.slice(0, i),
+          ...pieces.map((piece) => ({ raw, text: piece })),
+          ...out.slice(i + (separate ? 2 : 1)),
+        ];
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The command a segment runs once `COMMAND_PREFIX_WORDS` and `env` are read
+ * past, with their flags, flag values, numbers, durations and assignments.
+ * After a prefix word, a word the walk cannot classify is not trusted to be the
+ * command: the first shell interpreter later in the segment is taken instead.
+ */
+function walkPrefixWords(
+  start: readonly DequotedWord[],
+  from: number,
+  split: typeof splitEnvCommand,
+): { words: readonly DequotedWord[]; index: number } {
+  let words = start;
+  let index = from;
+  let sawPrefix = false;
+  for (;;) {
+    const text = words[index]?.text ?? '';
+    if (text === 'env') {
+      words = split(words, index);
+      index = commandStart(words, index);
+    } else if (COMMAND_PREFIX_WORDS.has(baseName(text))) {
+      index += 1;
+      let afterFlag = false;
+      while (index < words.length) {
+        const next = words[index]?.text ?? '';
+        if (isShellWord(next) || next === 'env' || COMMAND_PREFIX_WORDS.has(baseName(next))) break;
+        if (next.startsWith('-')) afterFlag = true;
+        else if (afterFlag) afterFlag = false;
+        else if (!PREFIX_OPERAND_RE.test(next) && !ASSIGNMENT_WORD_RE.test(next)) break;
+        index += 1;
+      }
+    } else {
+      break;
+    }
+    sawPrefix = true;
+  }
+  if (
+    sawPrefix &&
+    index < words.length &&
+    !/^(?:xargs|eval)$/.test(words[index]?.text ?? '') &&
+    !isShellWord(words[index]?.text)
+  ) {
+    const later = words.findIndex((word, at) => at > index && isShellWord(word.text));
+    if (later !== -1) index = later;
+  }
+  return { words, index };
+}
+
+/**
+ * Reads the command a segment runs (past assignments, `env`, `xargs` with its
+ * options, and prefix words) the way the in-line form is read: `xargs git`
+ * with a missing, unreadable or force-gated subcommand; a shell after a pipe
+ * from git; a shell `-c` or `eval` on a substitution that runs git. The line
+ * is read with the `env -S` value split into words and as written.
  */
 function checkXargsGitAndShellInput(
   words: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
 ): PolicyViolation | null {
+  return (
+    readRunCommand(words, afterGitPipe, rule, splitEnvCommand) ??
+    readRunCommand(words, afterGitPipe, rule, (all) => all)
+  );
+}
+
+function readRunCommand(
+  originalWords: readonly DequotedWord[],
+  afterGitPipe: boolean,
+  rule: GuardrailRule,
+  split: typeof splitEnvCommand,
+): PolicyViolation | null {
+  let words = split(originalWords, 0);
   let index = commandStart(words);
   let viaXargs = false;
-  while (words[index]?.text === 'xargs') {
+  for (;;) {
+    const walked = walkPrefixWords(words, index, split);
+    words = walked.words;
+    index = walked.index;
+    if (words[index]?.text !== 'xargs') break;
     viaXargs = true;
     index += 1;
     while (index < words.length && (words[index]?.text ?? '').startsWith('-')) {
       index += XARGS_VALUE_OPTIONS.has(words[index]?.text ?? '') ? 2 : 1;
     }
-    index += commandStart(words.slice(index));
+    words = split(words, index);
+    index = commandStart(words, index);
   }
-  const name = (words[index]?.text ?? '').split('/').pop() ?? '';
-  if (afterGitPipe && SHELL_INTERPRETER_RE.test(name)) {
-    return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
+  const name = baseName(words[index]?.text);
+  if (isShellWord(name)) {
+    if (afterGitPipe) return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
+    const rest = words.slice(index + 1);
+    const runsGitInCommand =
+      rest.some((word) => isShellCommandFlag(word.text)) &&
+      rest.some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
+    if (runsGitInCommand) return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
   }
   if (name === 'eval') {
     const runsGit = words
