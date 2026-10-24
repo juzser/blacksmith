@@ -315,6 +315,8 @@ describe('force-push rule reads xargs and eval after env -S and after prefix wor
     'timeout 5 eval "$(git show HEAD:x.sh)"',
     'command eval "$(git log -1 --format=%B)"',
     'echo x | timeout 5 xargs sh -c "git push -f origin main"',
+    'echo push | timeout 5 xargs -I{} git {} bash',
+    'timeout 5 eval "$(git show HEAD:x.sh)" bash',
   ];
 
   const ALLOWED: string[] = [
