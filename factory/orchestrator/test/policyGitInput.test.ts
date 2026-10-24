@@ -172,6 +172,66 @@ describe('force-push rule reads a shell run with -c, behind a prefix word, or th
   });
 });
 
+describe('force-push rule reads each shell name, prefix chain and env -S spelling', () => {
+  const DEPTH_REFUSED: string[] = [
+    'zsh -c "$(git show HEAD:x.sh)"',
+    'dash -c "$(git show HEAD:x.sh)"',
+    'ksh -c "$(git show HEAD:x.sh)"',
+    '/usr/bin/zsh -c "$(git show HEAD:x.sh)"',
+    'bash -c "$(git show HEAD:x.sh)" extra-arg',
+    'bash -ce "$(git show HEAD:x.sh)"',
+    'bash -ec "`git show HEAD:x.sh`"',
+    'bash --norc -c "$(git show HEAD:x.sh)"',
+    'sudo bash -c "$(git show HEAD:x.sh)"',
+    'nohup sh -c "$(git show HEAD:x.sh)" &',
+    'FOO=1 bash -c "$(git show HEAD:x.sh)"',
+    'git log | zsh',
+    'git log | dash',
+    'git log | ksh',
+    'git log | /usr/bin/timeout 5 bash',
+    'git log | timeout 1.5 bash',
+    'git log | timeout 5m bash',
+    'git log | timeout --signal=KILL 5 bash',
+    'git log | nice -n 5 timeout 5 sudo bash',
+    'git log | sudo -E env bash',
+    'git log | timeout 5 /bin/bash',
+    'git log | FOO=1 timeout 5 bash',
+    'git log | env -S "timeout 5 bash"',
+    'git log | env -S"bash -x"',
+    'git log | env --split-string "sh -e"',
+    'env -S "bash -c \'$(git show HEAD:x.sh)\'"',
+    'env --split-string="sh -c \'$(git show HEAD:x.sh)\'"',
+  ];
+
+  const DEPTH_ALLOWED: string[] = [
+    'bash -c "$(date)"',
+    'bash script.sh',
+    'bash -c "git status"',
+    'zsh -c "echo $(pwd)"',
+    'git log | timeout 5 cat',
+    'git log | nice -n 5 grep x',
+    'git log | exec less',
+    'git log | stdbuf -oL cat',
+    'git log | time wc -l',
+    'echo hi | sudo bash',
+    'echo hi | nohup sh',
+    'timeout 5 bash -c "$(date)"',
+    'git status && timeout 5 make test',
+    'env -S "echo hello"',
+    'git log | env -S "cat -n"',
+  ];
+
+  it.each(DEPTH_REFUSED)('refuses %s', (command) => {
+    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0]?.reason).toContain('run by a shell');
+  });
+
+  it.each(DEPTH_ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
 describe('history-rewrite rule reads each top-level command on its own', () => {
   const READ_ONLY_ALLOWED = [
     'git grep rebase',
