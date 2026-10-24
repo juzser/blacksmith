@@ -173,6 +173,21 @@ describe('installGuidance stack interview placement', () => {
   });
 });
 
+describe('installGuidance stack file location', () => {
+  it('names the install stack file with its BS_HOME qualifier on one line and runs the bs stack commands from the project', () => {
+    const lines = initGuidance(false).split('\n');
+    const at = lines.findIndex((l) => l.includes('.blacksmith/factory/policies/stack.yml'));
+    expect(at, 'a line names the install stack file path').toBeGreaterThan(-1);
+    expect(lines[at]).toContain('$BS_HOME');
+    const step = lines.slice(
+      at,
+      lines.findIndex((l, i) => i > at && /^ {2}\d+\. /.test(l)),
+    );
+    expect(step.join('\n')).toContain('from the project');
+    expect(lines[at]).toMatch(/^ {2}3\. /);
+  });
+});
+
 describe('bs init output streams', () => {
   let workRoot: string;
   beforeAll(async () => {
