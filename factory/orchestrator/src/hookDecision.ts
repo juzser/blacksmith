@@ -172,10 +172,25 @@ export function decideHookPayload(
   // `HEAD` is what a detached worktree's branch reads as — not a name a
   // protected-branch rule can ever match, and guardrails.md requires the
   // shortcut's target to sit on a named branch.
-  const places =
+  let places: ReturnType<typeof locate>[];
+  if (
     certain?.every((p) => p.branch !== '' && p.branch !== 'HEAD' && p.repoRoot !== null) === true
-      ? certain
-      : fallbackDirectories(command, cwd).map(locate);
+  ) {
+    places = certain;
+  } else {
+    const named = fallbackDirectories(command, cwd);
+    if (named === null) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason:
+            'BLOCKED: this command line names too many directories to judge; split it into smaller commands.',
+        },
+      };
+    }
+    places = named.map(locate);
+  }
   let reason: string | null = null;
   let firingRuleId: string | null = null;
   let firingDir: string | null = null;
@@ -351,20 +366,36 @@ function shortcutDirectories(command: string, cwd: string): string[] | null {
   return literalDirectories(target, cwd);
 }
 
-/** Every directory a command names, plus `cwd` — the fail-closed fallback. */
-function fallbackDirectories(command: string, cwd: string): string[] {
-  const dirs = [cwd];
+/**
+ * The most distinct directories one decision locates. Past it the command is
+ * refused, never judged on a prefix: each directory costs two git calls.
+ */
+const MAX_DISTINCT_DIRECTORIES = 64;
+
+/**
+ * Every directory a command names, plus `cwd` — the fail-closed fallback — or
+ * `null` when the line names more than `MAX_DISTINCT_DIRECTORIES` of them.
+ */
+function fallbackDirectories(command: string, cwd: string): string[] | null {
+  const dirs = new Set([cwd]);
+  const resolved = new Map<string, string[]>();
   for (const [, word = ''] of command.matchAll(TARGET_RE)) {
     // A relative hop is resolved against every directory found so far, so
     // `cd a && cd b` still reaches `a/b`: an extra candidate costs nothing
-    // but a possible denial, and a missed one is a hole.
+    // but a possible denial, and a missed one is a hole. Each (word, base)
+    // pair is resolved once, however often the line repeats it.
     for (const base of [...dirs]) {
-      for (const target of literalDirectories(word, base) ?? []) {
-        if (!dirs.includes(target)) dirs.push(target);
+      const key = `${base}\0${word}`;
+      let targets = resolved.get(key);
+      if (targets === undefined) {
+        targets = literalDirectories(word, base) ?? [];
+        resolved.set(key, targets);
       }
+      for (const target of targets) dirs.add(target);
+      if (dirs.size > MAX_DISTINCT_DIRECTORIES) return null;
     }
   }
-  return dirs;
+  return [...dirs];
 }
 
 /**

@@ -1183,7 +1183,20 @@ function joinLineContinuations(command: string): string {
   const joinEvery = (text: string): string => {
     let out = '';
     let k = 0;
+    // A quoted-delimiter here-document keeps its body literal, so its body lines are copied as written.
+    const pending: HereDoc[] = [];
     while (k < text.length) {
+      const atNewline = text[k] === '\n' && pending.length > 0;
+      if (atNewline && !pending.every((doc) => doc.quoted)) pending.length = 0;
+      else if (atNewline || text.startsWith('<<', k)) {
+        const next = hereDocStep(text, k, pending, []);
+        if (next === -1) return out + text.slice(k);
+        if (next !== k) {
+          out += text.slice(k, next);
+          k = next;
+          continue;
+        }
+      }
       if (text[k] === '\\') {
         if (text[k + 1] !== '\n') out += text.slice(k, k + 2);
         k += 2;
@@ -1571,6 +1584,8 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
   '--namespace',
   '--exec-path',
   '--config-env',
+  '--attr-source',
+  '--super-prefix',
 ]);
 
 /** The subcommand word of a `git` invocation found at `words[gitIndex]`, walking past global options the way `git` itself does. */
@@ -1811,9 +1826,9 @@ function hasUnknownForcePushCommandWord(segment: string): boolean {
  */
 function checkForcePushSubcommandWord(
   segment: string,
+  words: readonly DequotedWord[],
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  const words = splitDequotedWords(stripRedirections(segment));
   const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
   if (gitIndex === -1) {
     // Defence in depth for `joinLineContinuations` missing a spelling of its
@@ -1872,6 +1887,417 @@ function checkForcePushSubcommandWord(
   return null;
 }
 
+const NOT_UNDERSTOOD_REASON =
+  'this git command uses shell syntax the guard does not read (locale quoting, process substitution, an unterminated quote, expansion or here-document, a nesting too deep, a continuation or an odd redirection) — write it out plainly';
+
+/** The end of the expansion starting at `start` (`$` or a backtick), or -1 when the reader does not model it. */
+function expansionEnd(
+  text: string,
+  start: number,
+  quoted: boolean,
+  readBody: (body: string) => boolean,
+): number {
+  const next = text.charAt(start + 1);
+  const substitution = (close: number | null, bodyStart: number): number =>
+    close !== null && readBody(text.slice(bodyStart, close)) ? close + 1 : -1;
+  if (text.charAt(start) === '`')
+    return substitution(findBacktickClose(text, start + 1), start + 1);
+  if (next === '(') return substitution(findBalancedParenClose(text, start + 2), start + 2);
+  if (next === "'") return quoted ? -1 : findAnsiCQuoteEnd(text, start + 2) + 1 || -1;
+  if (next === '"' && !quoted) return -1;
+  if (next !== '{') return start + 1;
+  // `${...}` with an operator or a subscript: read through to the closing brace.
+  let inDouble = false;
+  for (let i = start + 2; i < text.length; ) {
+    const c = text.charAt(i);
+    if (c === '}' && !inDouble) return i > start + 2 ? i + 1 : -1;
+    const step =
+      c === '$' || c === '`'
+        ? expansionEnd(text, i, true, readBody)
+        : c === "'" && !inDouble
+          ? (skipQuotedSpan(text, i) ?? -1)
+          : i + (c === '\\' ? 2 : 1);
+    if (step === -1) return -1;
+    inDouble = c === '"' ? !inDouble : inDouble;
+    i = step;
+  }
+  return -1;
+}
+
+/**
+ * The one reader of a segment's shell words: plain text, quotes, escapes,
+ * separators, ANSI-C quotes, `${ }` expansions, command and backtick
+ * substitutions and here-documents (bodies handed to `readBody`), here-strings,
+ * comments, and redirections with one-word targets (dropped). It returns `null`
+ * for anything else (locale quoting, process substitution, an unterminated
+ * quote, expansion or here-document, a refused body, a redirection without a
+ * target) and the caller then asks about the whole command.
+ */
+function readShellWords(
+  segment: string,
+  readBody: (body: string) => boolean,
+): DequotedWord[] | null {
+  const words: DequotedWord[] = [];
+  const pending: HereDoc[] = [];
+  const unquoted: string[] = [];
+  let raw = '';
+  let text = '';
+  let inWord = false;
+  let dropNext = false;
+  const add = (rawPart: string, textPart: string) => {
+    raw += rawPart;
+    text += textPart;
+    inWord = true;
+  };
+  const flush = () => {
+    if (inWord && !dropNext) words.push({ raw, text });
+    if (inWord) dropNext = false;
+    raw = '';
+    text = '';
+    inWord = false;
+  };
+  // An unquoted substitution is split at its blanks, so `$(git` reads as the
+  // word the pre-existing disguised-word fallback looks for.
+  const addExpansion = (start: number, end: number) => {
+    const span = segment.slice(start, end);
+    if (span.startsWith("$'")) return add(span, decodeAnsiCPayload(span.slice(2, -1)));
+    span.split(/\s+/).forEach((piece, index) => {
+      if (index > 0) flush();
+      add(piece, piece);
+    });
+  };
+  let i = 0;
+  while (i < segment.length) {
+    const c = segment.charAt(i);
+    const next = segment.charAt(i + 1);
+    if (/[ \t]/.test(c)) {
+      flush();
+      i += 1;
+    } else if (/[\n;|&()<>]/.test(c)) {
+      if (dropNext && !inWord) return null;
+      if (c === '<' || c === '>') {
+        if (/^(?:<\(|>\()/.test(segment.slice(i))) return null;
+        if (!dropNext && /^\d+$/.test(raw)) inWord = false;
+        flush();
+        const afterDoc = hereDocStep(segment, i, pending, []);
+        if (afterDoc !== i) {
+          i = afterDoc;
+        } else {
+          i += /^(?:<<<|>>|>&|<&|<>|>\||.)/.exec(segment.slice(i))?.[0].length ?? 1;
+          dropNext = true;
+        }
+      } else {
+        flush();
+        const afterDoc = hereDocStep(segment, i, pending, unquoted);
+        if (afterDoc === -1) return null;
+        for (const text of unquoted.splice(0)) {
+          const bodies = extractSubstitutionBodies(text, true);
+          if (bodies === null || !bodies.every(readBody)) return null;
+        }
+        i = afterDoc === i ? i + 1 : afterDoc;
+      }
+    } else if (c === "'") {
+      const end = segment.indexOf("'", i + 1);
+      if (end === -1) return null;
+      add(segment.slice(i, end + 1), segment.slice(i + 1, end));
+      i = end + 1;
+    } else if (c === '"') {
+      add('"', '');
+      i += 1;
+      while (segment.charAt(i) !== '"') {
+        const d = segment.charAt(i);
+        let end = i + 1;
+        if (d === '$' || d === '`') end = expansionEnd(segment, i, true, readBody);
+        else if (d === '\\') end = segment.charAt(i + 1) === '' ? -1 : i + 2;
+        if (i >= segment.length || end === -1) return null;
+        // A backslash-newline inside double quotes is removed, as the shell does.
+        const joined = d === '\\' && segment.charAt(i + 1) === '\n';
+        add(segment.slice(i, end), joined ? '' : segment.slice(d === '\\' ? i + 1 : i, end));
+        i = end;
+      }
+      add('"', '');
+      i += 1;
+    } else if (c === '\\') {
+      if (i + 1 >= segment.length) return null;
+      if (next !== '\n') add(c + next, next);
+      i += 2;
+    } else if (c === '$' || c === '`') {
+      const end = expansionEnd(segment, i, false, readBody);
+      if (end === -1) return null;
+      addExpansion(i, end);
+      i = end;
+    } else if (c === '#' && !inWord) {
+      const end = segment.indexOf('\n', i);
+      i = end === -1 ? segment.length : end;
+    } else {
+      add(c, c);
+      i += 1;
+    }
+  }
+  flush();
+  return dropNext || pending.length > 0 ? null : words;
+}
+
+/** The value of a shell variable set on the command line, or `null` when its text cannot be read statically. */
+type EnvValue = string | null;
+
+const GIT_CONFIG_ENV_NAMES =
+  'GIT_PAGER|GIT_EXTERNAL_DIFF|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\\d+|GIT_CONFIG_VALUE_\\d+|' +
+  // The other variables git starts through the shell as command lines.
+  'PAGER|GIT_EDITOR|GIT_SEQUENCE_EDITOR|EDITOR|VISUAL|GIT_SSH_COMMAND|GIT_ASKPASS|SSH_ASKPASS';
+const GIT_CONFIG_ENV_NAME_RE = new RegExp(`^(?:${GIT_CONFIG_ENV_NAMES})$`);
+/** Any mention of a configuration variable in dequoted text. */
+const GIT_CONFIG_ENV_MENTION_RE = new RegExp(`\\b(?:${GIT_CONFIG_ENV_NAMES})\\b`, 'g');
+/** The key under which a declared variable name that cannot be read statically is recorded. */
+const COMPUTED_VARIABLE_NAME = ' computed variable name';
+const ASSIGNMENT_WORD_RE = /^([A-Za-z_]\w*)=/;
+
+/** Builtins whose following words name variables they set, like `export`. */
+const VARIABLE_DECLARING_BUILTIN_RE = /^(?:export|declare|typeset|local|readonly)$/;
+
+const GIT_CONFIG_UNREADABLE_REASON =
+  'a git configuration value here holds a parameter or substitution, so the guard cannot tell what git will run — write the value out plainly';
+
+/** `env` options that take the next word as their value. */
+const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
+
+/** The index where a segment's command starts: past leading `NAME=value` words and the `env` prefix. */
+function commandStart(words: readonly DequotedWord[]): number {
+  let start = 0;
+  while (start < words.length) {
+    const text = words[start]?.text ?? '';
+    if (ASSIGNMENT_WORD_RE.test(text)) {
+      start += 1;
+    } else if (text === 'env') {
+      start += 1;
+      while (start < words.length) {
+        const operand = words[start]?.text ?? '';
+        if (operand.startsWith('-')) start += ENV_VALUE_OPTIONS.has(operand) ? 2 : 1;
+        else if (ASSIGNMENT_WORD_RE.test(operand)) start += 1;
+        else break;
+      }
+    } else {
+      break;
+    }
+  }
+  return start;
+}
+
+/** The indexes of every `git` word (or a path ending in `/git`) of the segment; the one definition every caller uses. */
+function gitWordIndexes(words: readonly DequotedWord[]): number[] {
+  const start = commandStart(words);
+  return words.flatMap((word, index) =>
+    index >= start && !ASSIGNMENT_WORD_RE.test(word.text) && /(?:^|\/)git$/i.test(word.text)
+      ? [index]
+      : [],
+  );
+}
+
+/** Whether any configuration variable the line has set holds a value that cannot be read statically. */
+function hasUnreadableConfigValue(env: ReadonlyMap<string, EnvValue>): boolean {
+  for (const [name, value] of env) {
+    if (value === null && (GIT_CONFIG_ENV_NAME_RE.test(name) || name === COMPUTED_VARIABLE_NAME)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Records the variables a run of words sets: `NAME=value` words and, after
+ * `export` and like builtins, a bare configuration variable name (unreadable).
+ * With `leadingOnly` the scan stops at the first other word. Returns how many
+ * configuration variables it recorded.
+ */
+function readAssignments(
+  words: readonly DequotedWord[],
+  env: Map<string, EnvValue>,
+  leadingOnly: boolean,
+): number {
+  let afterExport = false;
+  let namesFollow = false;
+  let inEnv = false;
+  let isPrintf = false;
+  let previous = '';
+  let recorded = 0;
+  for (const word of words) {
+    // A word that names the variable it sets, with a parameter or substitution in the name, cannot be read.
+    const nameField = word.raw.split('=')[0] ?? '';
+    const sets =
+      namesFollow || (isPrintf && previous === '-v') || (inEnv && word.raw.includes('='));
+    if (/^\d*[<>&]/.test(word.text)) namesFollow = false;
+    if (sets && !word.text.startsWith('-') && hasUnreadableShellForm(nameField)) {
+      env.set(COMPUTED_VARIABLE_NAME, null);
+    }
+    previous = word.text;
+    if (word.text === 'printf') isPrintf = true;
+    if (word.text === 'env') inEnv = true;
+    if (VARIABLE_DECLARING_BUILTIN_RE.test(word.text) || word.text === 'read') namesFollow = true;
+    const name = ASSIGNMENT_WORD_RE.exec(word.text)?.[1] ?? null;
+    const bareName = afterExport && GIT_CONFIG_ENV_NAME_RE.test(word.text) ? word.text : null;
+    if (name !== null) {
+      env.set(name, hasUnreadableShellForm(word.raw) ? null : word.text.slice(name.length + 1));
+    } else if (VARIABLE_DECLARING_BUILTIN_RE.test(word.text)) {
+      afterExport = true;
+    } else if (bareName !== null) {
+      env.set(bareName, null);
+    } else if (leadingOnly && word.text !== 'env' && !afterExport && !namesFollow && !isPrintf) {
+      break;
+    }
+    if (GIT_CONFIG_ENV_NAME_RE.test(name ?? bareName ?? '')) recorded += 1;
+  }
+  return recorded;
+}
+
+/**
+ * Reads every git configuration value git runs as a command (`-c`,
+ * `--config-env`, `git grep -O`, and the `GIT_PAGER` / `GIT_EXTERNAL_DIFF` /
+ * `GIT_CONFIG_*` environment, however set) like a command line typed directly.
+ * A value holding a parameter, substitution or backtick is refused, whatever its key.
+ */
+function checkGitConfigValues(
+  words: readonly DequotedWord[],
+  gitIndex: number,
+  env: ReadonlyMap<string, EnvValue>,
+  policy: GuardrailPolicy,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  const unreadable = violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+  const checkValue = (value: EnvValue): PolicyViolation | null =>
+    value === null ? unreadable : checkForcePush(value, policy);
+  if (hasUnreadableConfigValue(env)) return unreadable;
+  for (const [name, value] of env) {
+    if (!GIT_CONFIG_ENV_NAME_RE.test(name) || /^GIT_CONFIG_(?:COUNT|KEY_)/.test(name)) continue;
+    const found = checkValue(value);
+    if (found) return found;
+  }
+  let i = gitIndex + 1;
+  for (; i < words.length; i += 1) {
+    const word = words[i];
+    if (word === undefined || !word.text.startsWith('-')) break;
+    const isConfigEnv = word.text.startsWith('--config-env');
+    if (!word.text.startsWith('-c') && !isConfigEnv) {
+      i += GIT_GLOBAL_VALUE_FLAGS.has(word.text) ? 1 : 0;
+      continue;
+    }
+    let operand = word.text.slice(isConfigEnv ? '--config-env'.length : 2).replace(/^=/, '');
+    if (operand === '') {
+      operand = words[i + 1]?.text ?? '';
+      if (hasUnreadableShellForm(words[i + 1]?.raw ?? '')) return unreadable;
+      i += 1;
+    } else if (hasUnreadableShellForm(word.raw)) {
+      return unreadable;
+    }
+    const eq = operand.indexOf('=');
+    if (eq === -1) continue;
+    const rest = operand.slice(eq + 1);
+    // A `--config-env` value comes from a named variable: unreadable unless this line sets it.
+    const found = checkValue(isConfigEnv ? (env.get(rest) ?? null) : rest);
+    if (found) return found;
+  }
+  const subcommand = words[i];
+  if (subcommand?.text !== 'grep') return null;
+  for (const arg of words.slice(i + 1)) {
+    if (!isGrepPagerOption(arg.text)) continue;
+    if (hasUnreadableShellForm(arg.raw)) return unreadable;
+    const marker = arg.text.startsWith('--') ? arg.text.indexOf('=') : arg.text.indexOf('O');
+    const found = marker === -1 ? null : checkValue(arg.text.slice(marker + 1));
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * The top-level commands of `command`, each with whether it is fed by a pipe
+ * from an earlier command of the same pipeline that runs git.
+ */
+function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPipe: boolean }> {
+  const parts: Array<{ text: string; afterGitPipe: boolean }> = [];
+  let position = 0;
+  let afterPipe = false;
+  let pipelineRunsGit = false;
+  for (const text of topLevelCommands(command)) {
+    if (!afterPipe) pipelineRunsGit = false;
+    parts.push({ text, afterGitPipe: afterPipe && pipelineRunsGit });
+    pipelineRunsGit ||= /\bgit\b/i.test(text);
+    const end = position + text.length;
+    const pair = command.slice(end, end + 2);
+    afterPipe = pair.startsWith('|') && pair !== '||';
+    position = end + (pair === '&&' || pair === '||' ? 2 : 1);
+  }
+  return parts;
+}
+
+/** `xargs` options that take the next word as their value. */
+const XARGS_VALUE_OPTIONS = new Set([
+  '-I',
+  '-J',
+  '-R',
+  '-S',
+  '-L',
+  '-n',
+  '-P',
+  '-s',
+  '-d',
+  '-E',
+  '-a',
+  '--arg-file',
+  '--delimiter',
+  '--eof',
+  '--max-args',
+  '--max-chars',
+  '--max-lines',
+  '--max-procs',
+  '--process-slot-var',
+]);
+
+const SHELL_INTERPRETER_RE = /^(?:sh|bash|zsh|dash|ksh)$/i;
+
+const XARGS_GIT_REASON =
+  'git run by xargs takes its subcommand and arguments from input, so the guard cannot tell what it runs — write the subcommand out plainly';
+const GIT_OUTPUT_TO_SHELL_REASON =
+  'git output is run by a shell here, so the guard cannot tell what it runs — write the commands out plainly';
+
+/**
+ * Reads the command a segment runs (past assignments, `env` and `xargs` with
+ * its options) the way the in-line form is read: `xargs git` with a
+ * subcommand that is missing, unreadable or force-gated; a shell interpreter
+ * that follows a pipe from git; `eval` of a substitution that runs git.
+ */
+function checkXargsGitAndShellInput(
+  words: readonly DequotedWord[],
+  afterGitPipe: boolean,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  let index = commandStart(words);
+  let viaXargs = false;
+  while (words[index]?.text === 'xargs') {
+    viaXargs = true;
+    index += 1;
+    while (index < words.length && (words[index]?.text ?? '').startsWith('-')) {
+      index += XARGS_VALUE_OPTIONS.has(words[index]?.text ?? '') ? 2 : 1;
+    }
+    index += commandStart(words.slice(index));
+  }
+  const name = (words[index]?.text ?? '').split('/').pop() ?? '';
+  if (afterGitPipe && SHELL_INTERPRETER_RE.test(name)) {
+    return violation(rule, GIT_OUTPUT_TO_SHELL_REASON);
+  }
+  if (name === 'eval') {
+    const runsGit = words
+      .slice(index + 1)
+      .some((word) => /\$\(|`/.test(word.raw) && /\bgit\b/i.test(word.raw));
+    return runsGit ? violation(rule, GIT_OUTPUT_TO_SHELL_REASON) : null;
+  }
+  if (!viaXargs || name.toLowerCase() !== 'git') return null;
+  const subcommandIndex = gitSubcommandWord(words, index);
+  const subcommand = words[subcommandIndex]?.text.toLowerCase() ?? '';
+  if (!/^[a-z][a-z0-9-]*$/.test(subcommand) || FORCE_GATE_SUBCOMMANDS.includes(subcommand)) {
+    return violation(rule, XARGS_GIT_REASON);
+  }
+  return null;
+}
+
 /**
  * Rule 2's main defence: a plain-word gate, not a growing list of individual
  * shell tricks. In a segment that reaches `push`, `rebase`, `reset`,
@@ -1884,16 +2310,58 @@ function checkForcePushSubcommandWord(
  * gate, since there the gated word is only an argument; the checks below
  * still read it.
  */
-function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
+function checkForcePush(
+  command: string,
+  policy: GuardrailPolicy,
+  depth = 0,
+  asWritten = false,
+): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
   // Joined first, so every rule-2 layer below — the shell-wrapper check, the
   // subcommand-word gate, and the plain-word gate over the words after it —
   // reads the command the way bash will run it, with no continuation left to
   // hide a subcommand word inside.
-  for (const segment of topLevelCommands(joinLineContinuations(command))) {
+  // Variables set by earlier segments, carried to the git segments after them.
+  const carried = new Map<string, EnvValue>();
+  // Over the whole line: configuration variables mentioned and recorded, and whether it runs git.
+  let mentions = 0;
+  let recorded = 0;
+  let runsGit = false;
+  // A comment or here-document ends where the shell ends it, so a command
+  // holding either is also read once with its continuations as written.
+  if (asWritten && !(/\\\n/.test(command) && /<<|(^|[^$])#/.test(command))) return null;
+  const parts = asWritten
+    ? [{ text: command, afterGitPipe: false }]
+    : segmentsWithGitPipe(joinLineContinuations(command));
+  for (const { text: segment, afterGitPipe } of parts) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
-    const subcommandWordViolation = checkForcePushSubcommandWord(segment, rule);
+    // A segment the reader does not understand is asked about when it could involve git.
+    const nested: PolicyViolation[] = [];
+    const words = readShellWords(segment, (body) => {
+      if (depth >= MAX_SUBSTITUTION_DEPTH) {
+        nested.push(violation(rule, NOT_UNDERSTOOD_REASON));
+        return false;
+      }
+      const found = checkForcePush(body, policy, depth + 1);
+      if (found) nested.push(found);
+      return true;
+    });
+    if (nested[0]) return nested[0];
+    if (words === null) {
+      if (segment.replace(/['"\\]/g, '').match(/git/i)) {
+        return violation(rule, NOT_UNDERSTOOD_REASON);
+      }
+      if (hasUnknownForcePushCommandWord(stripRedirections(segment))) {
+        return violation(rule, UNKNOWN_COMMAND_WORD_REASON);
+      }
+      continue;
+    }
+
+    const runViolation = checkXargsGitAndShellInput(words, afterGitPipe, rule);
+    if (runViolation) return runViolation;
+
+    const subcommandWordViolation = checkForcePushSubcommandWord(segment, words, rule);
     if (subcommandWordViolation) return subcommandWordViolation;
 
     const decoded = decodeAnsiCQuoting(segment);
@@ -1905,6 +2373,24 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
       continue;
     }
     if (definesInlineGitAlias(decoded.text)) return violation(rule);
+
+    const gitIndexes = gitWordIndexes(words);
+    const gitIndex = gitIndexes[0] ?? -1;
+    const env = gitIndex === -1 ? carried : new Map(carried);
+    const leading = gitIndex === -1 ? words : words.slice(0, gitIndex);
+    recorded += readAssignments(leading, env, gitIndex === -1);
+    // Counted on the dequoted text the assignments are read from.
+    const dequoted = words.map((word) => word.text).join(' ');
+    mentions += (dequoted.match(GIT_CONFIG_ENV_MENTION_RE) ?? []).length;
+    const commandWord = words[commandStart(words)];
+    runsGit =
+      runsGit ||
+      /\bgit\b/i.test(dequoted) ||
+      (commandWord !== undefined && hasUnreadableShellForm(commandWord.raw));
+    for (const index of gitIndexes) {
+      const configViolation = checkGitConfigValues(words, index, env, policy, rule);
+      if (configViolation) return configViolation;
+    }
 
     // Subcommand detection reads the decoded text, so a subcommand word
     // hidden inside a `$'...'` span (`$'\x70ush'`) is still found. But a
@@ -1938,6 +2424,10 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
       return violation(rule);
     }
   }
+  // On a git line, a configuration variable named beyond the recorded assignments is refused.
+  if (runsGit && (mentions > recorded || hasUnreadableConfigValue(carried))) {
+    return violation(rule, GIT_CONFIG_UNREADABLE_REASON);
+  }
   return null;
 }
 
@@ -1958,7 +2448,12 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
  * let a force flag through.
  */
 function topLevelCommands(command: string): string[] {
-  if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return [command];
+  return splitTopLevelCommands(command) ?? [command];
+}
+
+/** `topLevelCommands`' split, or `null` when the line holds something it cannot read with confidence. */
+function splitTopLevelCommands(command: string): string[] | null {
+  if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return null;
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
   let start = 0;
@@ -1999,7 +2494,7 @@ function topLevelCommands(command: string): string[] {
     else if (c === '`') stack.push('bt');
     else if (c === '(') stack.push('paren');
     else if (c === ')') {
-      if (top !== 'paren') return [command];
+      if (top !== 'paren') return null;
       stack.pop();
     } else if (stack.length === 0) {
       const pair = command.slice(i, i + 2);
@@ -2012,7 +2507,7 @@ function topLevelCommands(command: string): string[] {
     }
     i += 1;
   }
-  if (stack.length > 0) return [command];
+  if (stack.length > 0) return null;
   segments.push(command.slice(start));
   return segments;
 }
@@ -2138,11 +2633,19 @@ function checkHistoryRewriteOnProtected(
   policy: GuardrailPolicy,
 ): PolicyViolation | null {
   if (!isProtectedForHistoryRewrite(branch, policy)) return null;
-  const rewrites =
-    isGitSubcommand(command, 'rebase') ||
-    /\bcommit\b.*--amend\b/i.test(command) ||
-    /\bfilter-(branch|repo)\b/i.test(command);
-  if (!rewrites) return null;
+  const rewrites = (text: string) =>
+    isGitSubcommand(text, 'rebase') ||
+    /\bcommit\b.*--amend\b/i.test(text) ||
+    /\bfilter-(branch|repo)\b/i.test(text);
+  // Each top-level command is read on its own, and a read-only git command
+  // (a search that names a rewrite word) is skipped. A line the splitter
+  // cannot read is matched as a whole.
+  const segments = splitTopLevelCommands(command);
+  const found =
+    segments === null
+      ? rewrites(command)
+      : segments.some((segment) => !isReadOnlyGitCommand(segment) && rewrites(segment));
+  if (!found) return null;
   const rule = requireRule(policy, 'history-rewrite-on-protected');
   return violation(rule, renderBranch(rule.reason, branch));
 }
@@ -2522,6 +3025,48 @@ function skipQuotedSpan(text: string, start: number): number | null {
   return i < text.length ? i + 1 : null;
 }
 
+const HERE_DOC_OPENER_RE = /^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/;
+
+interface HereDoc {
+  delimiter: string;
+  strip: boolean;
+  quoted: boolean;
+}
+
+/**
+ * The here-document step the scanners share: a `<<` opener is recorded in
+ * `pending`; at the line's newline the bodies are skipped and unquoted ones
+ * pushed onto `unquoted`. Returns -1 for a body that never closes, `i` for neither.
+ */
+function hereDocStep(text: string, i: number, pending: HereDoc[], unquoted: string[]): number {
+  if (text.startsWith('<<', i) && text.charAt(i + 2) !== '<') {
+    const opener = HERE_DOC_OPENER_RE.exec(text.slice(i));
+    if (opener === null) return i;
+    const [all, strip, single, double, bare] = opener;
+    pending.push({
+      delimiter: single ?? double ?? bare ?? '',
+      strip: strip === '-',
+      quoted: bare === undefined || all.includes('\\'),
+    });
+    return i + all.length;
+  }
+  if (text.charAt(i) !== '\n' || pending.length === 0) return i;
+  let pos = i + 1;
+  for (const { delimiter, strip, quoted } of pending.splice(0)) {
+    const lines: string[] = [];
+    for (;;) {
+      if (pos >= text.length) return -1;
+      const lineEnd = text.indexOf('\n', pos);
+      const line = text.slice(pos, lineEnd === -1 ? text.length : lineEnd);
+      pos = lineEnd === -1 ? text.length : lineEnd + 1;
+      if ((strip ? line.replace(/^\t+/, '') : line) === delimiter) break;
+      lines.push(line);
+    }
+    if (!quoted) unquoted.push(lines.join('\n'));
+  }
+  return pos;
+}
+
 /**
  * The index of the `)` that balances the `(` just before `start` — or `null`
  * when the text ends first, the same "cannot delimit this with confidence"
@@ -2533,10 +3078,17 @@ function skipQuotedSpan(text: string, start: number): number | null {
 function findBalancedParenClose(text: string, start: number): number | null {
   let depth = 1;
   let i = start;
+  const pending: HereDoc[] = [];
   while (i < text.length) {
     const c = text[i];
     if (c === '\\' && i + 1 < text.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = hereDocStep(text, i, pending, []);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      i = afterDoc;
       continue;
     }
     if (c === "'" || c === '"') {
@@ -2570,10 +3122,17 @@ function findBalancedParenClose(text: string, start: number): number | null {
  */
 function findBacktickClose(text: string, start: number): number | null {
   let i = start;
+  const pending: HereDoc[] = [];
   while (i < text.length) {
     const c = text[i];
     if (c === '\\' && i + 1 < text.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = hereDocStep(text, i, pending, []);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      i = afterDoc;
       continue;
     }
     if (c === "'" || c === '"') {
@@ -2623,14 +3182,29 @@ function findBacktickClose(text: string, start: number): number | null {
  * confidence — an unterminated quote or an unbalanced paren — so the caller
  * reads that as "cannot prove this is safe", not "found nothing".
  */
-function extractSubstitutionBodies(segment: string): string[] | null {
+function extractSubstitutionBodies(segment: string, hereDocBody = false): string[] | null {
   const bodies: string[] = [];
+  const pending: HereDoc[] = [];
+  const unquoted: string[] = [];
   let i = 0;
-  let inDouble = false;
+  // The text of an unquoted here-document body reads like double-quoted text
+  // whose quotes are literal: only its substitutions are live.
+  let inDouble = hereDocBody;
   while (i < segment.length) {
     const c = segment[i];
     if (c === '\\' && i + 1 < segment.length) {
       i += 2;
+      continue;
+    }
+    const afterDoc = inDouble ? i : hereDocStep(segment, i, pending, unquoted);
+    if (afterDoc !== i) {
+      if (afterDoc === -1) return null;
+      for (const text of unquoted.splice(0)) {
+        const inner = extractSubstitutionBodies(text, true);
+        if (inner === null) return null;
+        bodies.push(...inner);
+      }
+      i = afterDoc;
       continue;
     }
     if (!inDouble && c === "'") {
@@ -2639,7 +3213,7 @@ function extractSubstitutionBodies(segment: string): string[] | null {
       i = next;
       continue;
     }
-    if (c === '"') {
+    if (c === '"' && !hereDocBody) {
       inDouble = !inDouble;
       i += 1;
       continue;
@@ -3246,10 +3820,10 @@ export function evaluateCommand(
   // Outermost quoting wins, so the question is blanked before the message
   // payloads inside it are looked at: `policy check --command 'git commit -m
   // "…"'` is one inert span, not a commit with a message.
-  const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(command));
+  const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(joinLineContinuations(command)));
   const checks: Array<() => PolicyViolation | null> = [
     () => checkPushToProtected(scanned, branch, policy),
-    () => checkForcePush(scanned, policy),
+    () => checkForcePush(scanned, policy) ?? checkForcePush(command, policy, 0, true),
     () => checkMergeIntoProtected(scanned, branch, policy),
     () => checkDeployCommand(scanned, policy),
     () => checkHistoryRewriteOnProtected(scanned, branch, policy),

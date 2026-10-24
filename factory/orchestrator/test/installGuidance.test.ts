@@ -118,6 +118,58 @@ describe('installGuidance edge cases', () => {
   });
 });
 
+describe('installGuidance stack interview', () => {
+  function stackCommands(): string[] {
+    const block = fences(installDoc).find((f) => nonEmpty(f.lines).includes('bs stack show'));
+    expect(block, 'INSTALL.md has an install-path bs stack fence').toBeDefined();
+    return nonEmpty(block?.lines ?? []);
+  }
+
+  it('gives an installed package the bs stack commands INSTALL.md gives, between bs doctor and bs new', () => {
+    const out = initGuidance(false);
+    const cmds = stackCommands();
+    expect(cmds).toEqual(['bs stack show', 'bs stack check']);
+    for (const c of cmds) expect(out).toContain(c);
+    expect(out).toContain('stack.yml');
+    expect(out.indexOf('bs doctor')).toBeLessThan(out.indexOf('bs stack show'));
+    expect(out.indexOf('bs stack check')).toBeLessThan(out.indexOf('bs new'));
+  });
+
+  it('qualifies the installed stack file path with BS_HOME when it prints the directory', () => {
+    const out = initGuidance(false);
+    if (out.includes('.blacksmith/')) expect(out).toContain('$BS_HOME');
+  });
+});
+
+describe('installGuidance stack interview placement', () => {
+  it('places the stack commands after the plugin install lines for an installed package', () => {
+    const out = initGuidance(false);
+    expect(out.indexOf('/plugin install')).toBeLessThan(out.indexOf('bs stack show'));
+  });
+
+  it('names each stack command once and in show-then-check order', () => {
+    const out = initGuidance(false);
+    expect(out.split('bs stack show')).toHaveLength(2);
+    expect(out.split('bs stack check')).toHaveLength(2);
+    expect(out.indexOf('bs stack show')).toBeLessThan(out.indexOf('bs stack check'));
+  });
+
+  it('gives a clone no stack step, since a clone follows INSTALL.md in order', () => {
+    const out = initGuidance(true);
+    expect(out).not.toContain('bs stack');
+    expect(out).not.toContain('stack.yml');
+  });
+
+  it('numbers the steps consecutively with bs new last in both modes', () => {
+    for (const isClone of [true, false]) {
+      const nums = [...initGuidance(isClone).matchAll(/^ {2}(\d+)\. /gm)].map((m) => Number(m[1]));
+      expect(nums).toEqual(nums.map((_, i) => i + 1));
+      const last = initGuidance(isClone).trimEnd().split('\n').pop() ?? '';
+      expect(last).toContain('bs new');
+    }
+  });
+});
+
 describe('bs init output streams', () => {
   let workRoot: string;
   beforeAll(async () => {

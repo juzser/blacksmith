@@ -57,6 +57,8 @@ export interface Effectiveness {
     items: EscapedItem[];
     /** Refuted findings that matched the escape window, kept out of the count. */
     excluded: string[];
+    /** Escape-window findings in any other status (waived, expired, amended, ...): listed, never counted. */
+    uncounted: { findingId: string; status: string }[];
   };
   precision: Record<string, Precision>;
 }
@@ -90,7 +92,7 @@ async function foldTokens(
   events: readonly StoredEvent[],
   readTokens: ReadTokens,
 ): Promise<Effectiveness['tokens']> {
-  const owner = new Map<string, { task: string | null; role: string | null }>();
+  const owner = new Map<string, { task: string | null; role: string | null; read: boolean }>();
   const sessions: string[] = [];
   for (const { record } of events) {
     if (record.cli_session_id && !sessions.includes(record.cli_session_id)) {
@@ -101,6 +103,7 @@ async function foldTokens(
     owner.set(record.agent_id, {
       task: eventTaskId(record),
       role: str((record.payload as Record<string, unknown>).agent_role),
+      read: Boolean(record.cli_session_id),
     });
   }
 
@@ -112,11 +115,13 @@ async function foldTokens(
     agentIds: [] as string[],
     sessionIds: [] as string[],
   };
+  const counted = new Set<string>();
   for (const cli of sessions) {
     const s = await readTokens(cli);
     let subTotal = 0;
     for (const a of s.subagents) {
       subTotal += a.used;
+      counted.add(a.agentId);
       const who = owner.get(a.agentId);
       const targets: TokenTotal[] = [];
       if (who?.task) targets.push(bucket(byTask, who.task));
@@ -133,6 +138,18 @@ async function foldTokens(
     unattributed.used += Math.max(0, s.used - subTotal);
     unattributed.sessionIds.push(cli);
     if (!s.complete) unattributed.complete = false;
+  }
+
+  // A dispatched agent whose session was read but which has no row spent an
+  // unknown amount: its task and role totals are a floor. A dispatch with no
+  // session id was never put to a reader.
+  for (const [agentId, who] of owner) {
+    if (counted.has(agentId) || !who.read) continue;
+    const targets: TokenTotal[] = [];
+    if (who.task) targets.push(bucket(byTask, who.task));
+    if (who.role) targets.push(bucket(byRole, who.role));
+    if (targets.length === 0) targets.push(unattributed);
+    for (const t of targets) t.complete = false;
   }
 
   const resultEventIds = { measured: [] as string[], unmeasured: [] as string[] };
@@ -196,7 +213,9 @@ function foldEscaped(
 
   const items: EscapedItem[] = [];
   const excluded: string[] = [];
+  const uncounted: { findingId: string; status: string }[] = [];
   const seen = new Set<string>();
+  const reportedFingerprints = new Set<string>();
   events.forEach(({ event_id, record }, index) => {
     const payload = record.payload as Record<string, unknown>;
     if (record.event_type === 'finding-raised') {
@@ -214,6 +233,8 @@ function foldEscaped(
         items.push({ ...base, state: 'pending', mergeEventId: w.merge, gateEventId: w.gate });
       } else if (status === 'refuted') {
         excluded.push(findingId);
+      } else {
+        uncounted.push({ findingId, status });
       }
     } else if (record.event_type === 'issue-reported') {
       const taskId = eventTaskId(record) ?? str(payload.task_ref);
@@ -221,6 +242,12 @@ function foldEscaped(
       if (taskId === null || (outcome !== 'opened' && outcome !== 'commented')) return;
       const w = windowFor(taskId, index);
       if (w === null) return;
+      // One recurring error is one defect: later reports on a fingerprint add no item.
+      const fingerprint = str(payload.fingerprint);
+      if (fingerprint !== null) {
+        if (reportedFingerprints.has(fingerprint)) return;
+        reportedFingerprints.add(fingerprint);
+      }
       items.push({
         kind: 'issue',
         state: 'counted',
@@ -236,6 +263,7 @@ function foldEscaped(
     pending: items.filter((i) => i.state === 'pending').length,
     items,
     excluded,
+    uncounted,
   };
 }
 
