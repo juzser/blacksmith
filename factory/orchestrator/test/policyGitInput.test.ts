@@ -236,6 +236,13 @@ describe('force-push rule reads a shell run with -c, behind prefix words, throug
     expect(forcePushRefused(command)).toBe(false);
   });
 
+  it('reads xargs git behind a prefix word even when a shell word follows later in the segment', () => {
+    expect(forcePushRefused('echo x | timeout 5 xargs git push bash')).toBe(true);
+    expect(forcePushRefused('echo x | sudo xargs git rebase main sh')).toBe(true);
+    expect(forcePushRefused('echo x | nice -n 5 xargs -n 1 git push zsh')).toBe(true);
+    expect(forcePushRefused('echo x | timeout 5 xargs git status bash')).toBe(false);
+  });
+
   it('answers quickly on a shell option word of 200000 letters and still refuses a later segment', () => {
     const started = Date.now();
     const refused = forcePushRefused(`bash -${'c'.repeat(200000)}1; git push --force origin main`);
