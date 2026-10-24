@@ -196,6 +196,8 @@ describe('force-push rule reads a shell run with -c, behind prefix words, throug
     'bash -c "$(date)"',
     'bash -c "git status"',
     'bash script.sh',
+    'bash -x "$(git show HEAD:x.sh)"',
+    'git log | xargs -S env -S "bash -x"',
     'bash script.sh "$(git show HEAD:x.sh)"',
     'env -u BAR bash script.sh "$(git log -1 --format=%B)"',
     'zsh -c "echo $(pwd)"',
