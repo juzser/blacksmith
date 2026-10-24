@@ -154,7 +154,6 @@ describe('force-push rule reads a shell run with -c, behind a prefix word, or th
     'sh -c "$(ssh-agent -s)"',
     'echo ls | timeout 5 bash',
     'echo ls | command bash',
-    'git log | timeout 5 grep bash',
     'git log | command grep x',
     'git log | sudo less',
     'timeout 5 bash -c "echo hello"',
@@ -229,6 +228,52 @@ describe('force-push rule reads each shell name, prefix chain and env -S spellin
 
   it.each(DEPTH_ALLOWED)('allows %s', (command) => {
     expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+});
+
+describe('force-push rule reads env as a prefix word and a shell behind a word it cannot classify', () => {
+  const PREFIX_REFUSED: string[] = [
+    'git log | timeout 5 foo bash',
+    'git log | timeout 5 grep bash',
+    'git log | sudo foo -x sh',
+    'timeout 5 foo bash -c "$(git show HEAD:x.sh)"',
+    'git log | sudo env bash',
+    'git log | timeout 5 env FOO=1 bash',
+    'git log | sudo env -u FOO bash',
+    'git log | sudo env -S "bash -x"',
+    'git log | command env -S"sh -e"',
+    'sudo env bash -c "$(git show HEAD:x.sh)"',
+    'git log | sudo FOO=1 bash',
+    'git log | nice FOO=1 timeout 5 bash',
+  ];
+
+  const PREFIX_ALLOWED: string[] = [
+    'git log | grep bash',
+    'git log | grep -n sh file.txt',
+    'git log | printf bash',
+    'grep bash script.txt',
+    'printf "%s" bash',
+    'echo hi | sudo env bash',
+    'bash script.sh "$(git show HEAD:x.sh)"',
+    'sh run.sh "$(git log -1 --format=%B)"',
+    'timeout 5 foo bash',
+  ];
+
+  it.each(PREFIX_REFUSED)('refuses %s', (command) => {
+    const found = decide(command).violations.filter((v) => v.ruleId === 'force-push');
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0]?.reason).toContain('run by a shell');
+  });
+
+  it.each(PREFIX_ALLOWED)('allows %s', (command) => {
+    expect(decide(command).violations.filter((v) => v.ruleId === 'force-push')).toEqual([]);
+  });
+
+  it('keeps reading the xargs -S option as an xargs option, not as an env option', () => {
+    expect(forcePushRefused('echo x | xargs -S 100 env git rebase main')).toBe(true);
+    expect(forcePushRefused('echo x | xargs -S 100 env git push')).toBe(true);
+    expect(forcePushRefused('git log | xargs -S 100 env bash')).toBe(true);
+    expect(forcePushRefused('git ls-files | xargs -S 100 env git status')).toBe(false);
   });
 });
 
