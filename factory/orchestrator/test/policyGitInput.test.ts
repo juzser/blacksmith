@@ -375,10 +375,10 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
     'sudo -E foo bar eval "$(git show HEAD:x.sh)"',
     'echo push | sudo -u example-user xargs git',
     // a nested env split-string value holding a quoted command
-    "echo push | env -S \"env -S 'xargs git'\"",
-    "echo push | env -S 'env -S \"xargs git push\"'",
-    "git log | env -S \"env -S 'bash -x'\"",
-    "env -S \"env -S 'eval \\\"\\$(git show HEAD:x.sh)\\\"'\"",
+    'echo push | env -S "env -S \'xargs git\'"',
+    'echo push | env -S \'env -S "xargs git push"\'',
+    'git log | env -S "env -S \'bash -x\'"',
+    'env -S "env -S \'eval \\"\\$(git show HEAD:x.sh)\\"\'"',
     // a split-string value of 200000 pieces holding a refused segment
     `echo push | env -S "xargs git push ${'a '.repeat(200000)}"`,
   ];
@@ -391,7 +391,7 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
     'sudo -E eval "$(echo hi)"',
     'sudo -u example-user ls',
     'git log | sudo -E grep x',
-    "echo x | env -S \"env -S 'xargs grep y'\"",
+    'echo x | env -S "env -S \'xargs grep y\'"',
   ];
 
   it.each(REFUSED)('refuses %s', (command) => {
@@ -412,8 +412,7 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
 
   // The guard reads this many split-string options in one segment.
   const SPLIT_LIMIT = 64;
-  const chain = (levels: number) =>
-    `echo x | env -S "${'-S'.repeat(levels - 1)}xargs grep y"`;
+  const chain = (levels: number) => `echo x | env -S "${'-S'.repeat(levels - 1)}xargs grep y"`;
 
   it('reads a chain of split-string options at the limit and refuses one past it with its reason', () => {
     expect(decide(chain(SPLIT_LIMIT)).violations).toEqual([]);
