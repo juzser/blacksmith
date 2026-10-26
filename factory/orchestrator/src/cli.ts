@@ -264,7 +264,7 @@ import {
   type WaveBudgetCheck,
 } from './waveBudget.js';
 import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.js';
-import { initWorkRoot } from './workroot.js';
+import { claudeSettingsOutOfDate, initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
   epicBranchPrefix,
@@ -2188,6 +2188,11 @@ async function main(): Promise<number> {
     // file inside node_modules survives exactly until the first upgrade.
     const report = initWorkRoot(flags['work-root'] ? { workRoot: flags['work-root'] } : {});
     printJson(report);
+    // Prose for a human; the JSON above is what callers parse.
+    for (const warning of report.claudeWindow.warnings) process.stderr.write(`bs: ${warning}\n`);
+    if (report.claudeCaps.restartNeeded || report.claudeWindow.restartNeeded) {
+      process.stderr.write('bs: restart Claude Code for the new settings to take effect\n');
+    }
     // A default that did not ship is a packaging defect, not an operator
     // error: report it as red rather than leaving them to notice later that
     // the questionnaire they were told to answer is not there.
@@ -3096,6 +3101,16 @@ async function main(): Promise<number> {
     // Every other write verb takes `--session` and `--causal-parent` and can
     // therefore assume a log. This is the one that cannot, so it is the one
     // command in the CLI whose whole argument list is what it is about.
+    // One stderr line, never stdout (callers parse it) and never a failure.
+    try {
+      if (claudeSettingsOutOfDate(WORK_ROOT)) {
+        process.stderr.write(
+          'bs: Claude Code settings for this project are out of date — run `bs init` here, then restart Claude Code\n',
+        );
+      }
+    } catch {
+      // A hint is never worth failing the command.
+    }
     printJson(
       await startSession(sessionId, {
         ...eventOptsFromFlags(flags),

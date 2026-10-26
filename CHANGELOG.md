@@ -57,6 +57,23 @@ than appearing in it.
   `~/.claude/settings.json` instead is optional.
   [INSTALL.md](INSTALL.md#raise-the-concurrency-caps) has the lines.
 
+- **`bs init` sets Claude Code's `autoCompactWindow`.** The 60% compaction rule
+  was prompt-level, and on a 1M-token model Claude Code compacts much later.
+  `bs init` now writes `autoCompactWindow` (`auto_compact_ratio` × 1,000,000 +
+  33,000, which is 633000 today; Claude Code compacts 33,000 tokens before the
+  end of the window, so a 1M model compacts at 60%) into the project's
+  git-excluded `.claude/settings.local.json`, plus 153000
+  (`auto_compact_ratio` × 200,000 + 33,000) under `modelSettings` for each of
+  the eight retired 200k-window models, which the top-level value would
+  otherwise leave compacting near 83%. Everything is written only when nothing
+  sets it, all keys together: it skips, with a warning, if
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is set,
+  or any top-level or per-model `autoCompactWindow` exists. A record in
+  `state/claude-settings.json` lets a later run update only what it wrote, and
+  `bs session start` prints a stderr hint when the record is missing or old.
+  Existing installs re-run `bs init` in each project and restart Claude Code.
+  [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
+
 - **The dashboard only reads.** `bs ui` is for watching the factory; every
   decision now goes through the CLI. Removed from the dashboard: Home's "Needs
   you" box, the Waive and Deny buttons on a task's findings, and the approve,

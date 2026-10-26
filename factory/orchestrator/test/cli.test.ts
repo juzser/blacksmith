@@ -27,6 +27,7 @@ import { resolveRepoAtDir } from '../src/gh.js';
 import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
 import { factoryProjects } from '../src/projects.js';
 import { SPEC_REVIEW_EVENT } from '../src/spec.js';
+import { CLAUDE_SETTINGS_REVISION } from '../src/workroot.js';
 import { assertExited, git, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
@@ -16334,6 +16335,9 @@ describe('cli.ts (built binary)', () => {
 // neither is visible to a test of `initWorkRoot`, which never sees argv.
 // ---------------------------------------------------------------------------
 
+// The window is already set, so these runs leave the repo's own local settings alone.
+const NO_WINDOW = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' };
+
 describe('smith init (built binary)', () => {
   let root: string;
 
@@ -16347,7 +16351,7 @@ describe('smith init (built binary)', () => {
 
   it('prepares a work root, and says what it did to every file', () => {
     const workRoot = path.join(root, 'first');
-    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    const { stdout, status } = runCli(['init', '--work-root', workRoot], NO_WINDOW);
     expect(status).toBe(0);
 
     const report = JSON.parse(stdout);
@@ -16369,17 +16373,17 @@ describe('smith init (built binary)', () => {
 
   it('is idempotent, and keeps an answer the operator already typed', () => {
     const workRoot = path.join(root, 'second');
-    expect(runCli(['init', '--work-root', workRoot]).status).toBe(0);
+    expect(runCli(['init', '--work-root', workRoot], NO_WINDOW).status).toBe(0);
 
     const answered = (
-      JSON.parse(runCli(['init', '--work-root', workRoot]).stdout).files as {
+      JSON.parse(runCli(['init', '--work-root', workRoot], NO_WINDOW).stdout).files as {
         personal: string;
       }[]
     ).find((file) => file.personal.endsWith('stack.yml'));
     expect(answered).toBeDefined();
     writeFileSync((answered as { personal: string }).personal, 'language: rust\n', 'utf8');
 
-    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    const { stdout, status } = runCli(['init', '--work-root', workRoot], NO_WINDOW);
     expect(status).toBe(0);
     const report = JSON.parse(stdout);
     expect(report.gitignore).toBe('kept');
@@ -16389,6 +16393,53 @@ describe('smith init (built binary)', () => {
     expect(readFileSync((answered as { personal: string }).personal, 'utf8')).toBe(
       'language: rust\n',
     );
+  });
+
+  describe('Claude Code settings hint on session start', () => {
+    const HINT = 'Claude Code settings for this project are out of date';
+    // BS_HOME moves the work root, so the record read is this test's own.
+    const start = (home: string, id: string) =>
+      runCli(['session', 'start', id, '--state-dir', path.join(home, 'events')], {
+        BS_HOME: home,
+      });
+
+    it('prints one stderr line when there is no record, and leaves stdout as the receipt', () => {
+      const home = path.join(root, 'hint-none');
+      const { stdout, stderr, status } = start(home, `hint-none-${Date.now()}`);
+
+      expect(status).toBe(0);
+      expect(stderr.split('\n').filter((line) => line.includes(HINT))).toHaveLength(1);
+      expect(stderr).toContain('run `bs init`');
+      expect(JSON.parse(stdout).record.event_type).toBe('session-start');
+    });
+
+    it('prints nothing once the record is current, and again when it is older', () => {
+      const home = path.join(root, 'hint-current');
+      mkdirSync(path.join(home, 'state'), { recursive: true });
+      const recordFile = path.join(home, 'state', 'claude-settings.json');
+      writeFileSync(
+        recordFile,
+        JSON.stringify({ projectDir: root, revision: CLAUDE_SETTINGS_REVISION, written: {} }),
+      );
+      expect(start(home, `hint-cur-${Date.now()}`).stderr).not.toContain(HINT);
+
+      writeFileSync(
+        recordFile,
+        JSON.stringify({ projectDir: root, revision: CLAUDE_SETTINGS_REVISION - 1, written: {} }),
+      );
+      expect(start(home, `hint-old-${Date.now()}`).stderr).toContain(HINT);
+    });
+
+    it('init reports the window outcome and writes the record', () => {
+      const home = path.join(root, 'hint-init');
+      const { stdout } = runCli(['init', '--work-root', home], {
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000',
+      });
+
+      const report = JSON.parse(stdout);
+      expect(report.claudeWindow.status).toBe('skipped');
+      expect(existsSync(path.join(home, 'state', 'claude-settings.json'))).toBe(true);
+    });
   });
 
   it('is listed in the usage table it is dispatched from', () => {

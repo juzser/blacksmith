@@ -293,7 +293,14 @@ M-3).
   (architecture §7). Anything that must survive a compaction is an event or a
   result artifact. The window is working memory; the log is memory.
 - Enforcement is prompt-level today (baked into `.claude/agents/*`);
-  it becomes mechanical with the phase-9 loop daemon.
+  it becomes mechanical with the phase-9 loop daemon. The harness now enforces
+  the window itself: `bs init` writes Claude Code's `autoCompactWindow` (the
+  60% ratio × the window + 33,000, with a per-model value for the old 200k
+  models) into the project's local settings, so Claude Code compacts at 60%
+  of the window. It is add-if-absent; see
+  [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). The
+  prompt-level rule still governs what the setting cannot: judges and the
+  merger narrow and never compact, and `max_compactions_per_task`.
 
 ## cross-check (phase 8)
 

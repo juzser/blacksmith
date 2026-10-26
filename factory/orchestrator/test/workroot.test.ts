@@ -202,7 +202,8 @@ describe('initWorkRoot concurrency caps', () => {
       repoRoot: REPO_ROOT,
       projectDir: project,
       userSettingsPath: userSettings,
-      env: {},
+      // These cases are about the caps; the window has its own suite.
+      env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' },
       ...extra,
     }).claudeCaps;
   const readJson = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
@@ -268,7 +269,7 @@ describe('initWorkRoot concurrency caps', () => {
   });
 
   it('keeps a cap set in the consulted env', () => {
-    const caps = init({ env: { [CAP_A]: '7' } });
+    const caps = init({ env: { [CAP_A]: '7', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' } });
 
     expect(caps.added).toEqual([CAP_B]);
     expect(caps.kept).toEqual([CAP_A]);
@@ -329,7 +330,7 @@ describe('initWorkRoot concurrency caps', () => {
         repoRoot: REPO_ROOT,
         projectDir: plain,
         userSettingsPath: userSettings,
-        env: {},
+        env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' },
       }).claudeCaps;
 
       expect(caps.status).toBe('written');
