@@ -68,13 +68,16 @@ than appearing in it.
   otherwise leave compacting near 83%. The nine keys stand or fall together:
   `bs init` owns only the keys its record proves it wrote while their value is
   unchanged, and any other window value, wherever it sits (even one equal to
-  the recommendation), is yours and blocks all nine, with one warning, and `bs init` removes its own lines (including
-  when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
-  is set). A record in the project's `.claude/bs-settings-record.json`
-  (git-excluded; deleting it makes bs treat its old lines as yours) is what
-  tells its keys from yours, and `bs session start` prints a stderr hint when the
-  project's entry is missing or old, or when your value is overridden by
-  bs's local lines until you re-run `bs init`. Deleting bs's lines is not an
+  the recommendation), is yours and blocks all nine, with one warning. It
+  removes its own lines then (including when
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is
+  set), and stays silent when your own values already are the full recommended
+  layout. The record is the project's `.claude/bs-settings-record.json`
+  (git-excluded; deleting it makes bs treat its old lines as yours); it is
+  what tells its keys from yours. `bs session start` prints a stderr hint,
+  naming the directory to run `bs init` in, when the settings are out of
+  date, when your value is overridden by bs's local lines, or when bs's
+  lines are unused or stacked on top of yours. Deleting bs's lines is not an
   opt-out (set a value such as `"auto"` instead).
   Existing installs re-run `bs init` in each project and restart Claude Code.
   [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.

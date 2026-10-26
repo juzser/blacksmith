@@ -8,6 +8,7 @@ import { REPO_ROOT } from '../src/paths.js';
 import {
   CLAUDE_SETTINGS_REVISION,
   CONCURRENCY_CAPS,
+  claudeSettingsAdvice,
   claudeSettingsHint,
   findProjectRoot,
   initWorkRoot,
@@ -888,6 +889,30 @@ describe('initWorkRoot auto-compact window', () => {
     expect(init().status).toBe('failed');
   });
 
+  describe('keeping the record out of git', () => {
+    it('reports the exclude outcome when the record is created, and not on a run that changes nothing', () => {
+      const first = run().claudeWindow;
+      expect(first.recordGitExclude).toBe('added');
+      expect(git(project, 'check-ignore', '-q', recordFile())).toBe('');
+
+      expect(run().claudeWindow.recordGitExclude).toBeUndefined();
+    });
+
+    it('warns when the record is tracked by git, so no exclude can apply', () => {
+      git(project, 'config', 'user.email', 'a@b.c');
+      git(project, 'config', 'user.name', 'n');
+      run();
+      git(project, 'add', '-f', recordFile());
+      git(project, 'commit', '-q', '-m', 'track the record');
+      putEntry({ ...record(), revision: 0 });
+
+      const window = run().claudeWindow;
+
+      expect(window.recordGitExclude).toBe('tracked');
+      expect(window.warnings.some((w) => w.includes('tracked by git'))).toBe(true);
+    });
+  });
+
   describe('the check behind the session-start hint', () => {
     it('is out of date with no record, current after init, and old once the revision moves', () => {
       expect(hint()).toBe('out-of-date');
@@ -1014,6 +1039,89 @@ describe('initWorkRoot auto-compact window', () => {
         git(project, 'worktree', 'add', '-q', '-b', 'side', tree);
 
         expect(findProjectRoot(tree)).toBe(realpathSync(project));
+      });
+
+      describe('names the directory that holds the record', () => {
+        const opts = () => ({ userSettingsPath: userSettings, env: {} });
+        const stale = (at: string) =>
+          put(settingsRecordPath(at), JSON.stringify({ revision: 0, written: {} }));
+
+        it('a monorepo package initialised below the git root names the package', () => {
+          const app = path.join(project, 'packages', 'app');
+          mkdirSync(path.join(app, 'src'), { recursive: true });
+          run({ projectDir: app, workRoot: path.join(app, '.blacksmith') });
+
+          expect(claudeSettingsAdvice(path.join(app, 'src'), opts())).toBeUndefined();
+          stale(app);
+          for (const at of [app, path.join(app, 'src')]) {
+            expect(claudeSettingsAdvice(at, opts())).toEqual({
+              hint: 'out-of-date',
+              dir: realpathSync(app),
+            });
+          }
+        });
+
+        it('a submodule of an initialised superproject is quiet and names the superproject', () => {
+          run();
+          const sub = path.join(project, 'sub');
+          mkdirSync(sub);
+          put(path.join(sub, '.git'), 'gitdir: ../.git/modules/sub\n');
+
+          expect(claudeSettingsAdvice(sub, opts())).toBeUndefined();
+          stale(project);
+          expect(claudeSettingsAdvice(sub, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(project),
+          });
+        });
+
+        it('a nested plain repository inside an initialised project is quiet too', () => {
+          run();
+          const nested = path.join(project, 'vendor', 'lib');
+          mkdirSync(nested, { recursive: true });
+          git(nested, 'init', '-q');
+
+          expect(claudeSettingsAdvice(nested, opts())).toBeUndefined();
+        });
+
+        it('a subdirectory of an initialised project outside git is quiet and names the project', () => {
+          const plain = path.join(dir, 'plain');
+          const src = path.join(plain, 'src');
+          mkdirSync(src, { recursive: true });
+          run({ projectDir: plain, workRoot: path.join(plain, '.blacksmith') });
+
+          expect(claudeSettingsAdvice(src, opts())).toBeUndefined();
+          stale(plain);
+          expect(claudeSettingsAdvice(src, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(plain),
+          });
+        });
+
+        it('with no record anywhere it names the git root, not the subdirectory', () => {
+          const sub = path.join(project, 'packages', 'a');
+          mkdirSync(sub, { recursive: true });
+
+          expect(claudeSettingsAdvice(sub, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(project),
+          });
+        });
+
+        it('names the main worktree when only it holds the record', () => {
+          git(project, 'config', 'user.email', 'a@b.c');
+          git(project, 'config', 'user.name', 'n');
+          git(project, 'commit', '-q', '--allow-empty', '-m', 'x');
+          run();
+          stale(project);
+          const tree = path.join(dir, 'tree');
+          git(project, 'worktree', 'add', '-q', '-b', 'side', tree);
+
+          expect(claudeSettingsAdvice(tree, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(project),
+          });
+        });
       });
 
       it('uses the directory itself outside git', () => {

@@ -180,6 +180,8 @@ export interface ClaudeWindowReport {
   readonly settingsPath: string;
   /** Where bs records what it wrote, so a later run can tell its keys from the user's. */
   readonly recordPath: string;
+  /** What keeping the record out of git came to; absent when the record was not touched. */
+  readonly recordGitExclude?: ClaudeCapsReport['gitExclude'];
   readonly status:
     | 'written'
     | 'updated'
@@ -711,19 +713,53 @@ const projectSettingsFile = (projectDir: string): string =>
  */
 export function claudeSettingsHint(
   cwd: string,
-  options: {
-    readonly userSettingsPath?: string;
-    readonly env?: Readonly<Record<string, string | undefined>>;
-  } = {},
-): 'out-of-date' | 'overridden' | 'unused' | 'stacked' | undefined {
-  const dir = [path.resolve(cwd), findProjectRoot(cwd)].find(
+  options: HintOptions = {},
+): SettingsHint | undefined {
+  return claudeSettingsAdvice(cwd, options)?.hint;
+}
+
+export type SettingsHint = 'out-of-date' | 'overridden' | 'unused' | 'stacked';
+interface HintOptions {
+  readonly userSettingsPath?: string;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** The directory itself and every ancestor, nearest first. */
+function ancestors(dir: string): string[] {
+  const out: string[] = [];
+  for (let at = dir; ; at = path.dirname(at)) {
+    out.push(at);
+    if (path.dirname(at) === at) return out;
+  }
+}
+
+/**
+ * Like {@link claudeSettingsHint}, with the directory `bs init` has to run in.
+ * That is where the record actually lives: the nearest directory above `cwd`
+ * (then above the main worktree of a linked one) that holds one, so a monorepo
+ * package, a submodule or a subdirectory of a project outside git is named
+ * correctly. With no record anywhere it is the project root. Stat calls only.
+ */
+export function claudeSettingsAdvice(
+  cwd: string,
+  options: HintOptions = {},
+): { readonly hint: SettingsHint; readonly dir: string } | undefined {
+  const root = findProjectRoot(cwd);
+  const dir = [...ancestors(physicalDir(cwd)), ...ancestors(root)].find(
     (candidate) => readSettingsRecord(candidate) !== undefined,
   );
   const entry = dir === undefined ? undefined : readSettingsRecord(dir);
-  if (dir === undefined || entry === undefined || entry.revision < CLAUDE_SETTINGS_REVISION) {
-    return 'out-of-date';
-  }
+  if (dir === undefined || entry === undefined) return { hint: 'out-of-date', dir: root };
+  if (entry.revision < CLAUDE_SETTINGS_REVISION) return { hint: 'out-of-date', dir };
+  const hint = hintFor(dir, entry, options);
+  return hint === undefined ? undefined : { hint, dir };
+}
 
+function hintFor(
+  dir: string,
+  entry: SettingsRecord,
+  options: HintOptions,
+): Exclude<SettingsHint, 'out-of-date'> | undefined {
   const env = options.env ?? process.env;
   const local = readJsonObject(localSettingsPath(dir));
   if (local === undefined) return undefined;
@@ -960,6 +996,7 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
   // could not derive a value keeps the old revision so the `bs session start`
   // hint keeps asking for `bs init`.
   let warnings = claudeWindow.warnings;
+  let recordGitExclude: ClaudeCapsReport['gitExclude'] | undefined;
   if (claudeWindow.status !== 'unreadable' && claudeWindow.status !== 'failed') {
     const advance = claudeWindow.status !== 'unavailable';
     const record = `${JSON.stringify(
@@ -972,8 +1009,17 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
       if (!existsSync(recordPath) || readFileSync(recordPath, 'utf8') !== record) {
         mkdirSync(path.dirname(recordPath), { recursive: true });
         writeFileSync(recordPath, record);
+        // Only a record that was created or changed needs keeping out of git.
+        recordGitExclude = excludeFromGit(projectDir, recordPath);
+        if (recordGitExclude === 'failed' || recordGitExclude === 'tracked') {
+          warnings = [
+            ...warnings,
+            recordGitExclude === 'tracked'
+              ? `${recordPath} is tracked by git, so it cannot be excluded; untrack it with \`git rm --cached\``
+              : `could not keep ${recordPath} out of git; add it to .git/info/exclude yourself`,
+          ];
+        }
       }
-      excludeFromGit(projectDir, recordPath);
     } catch {
       warnings = [...warnings, `could not save ${recordPath}; bs will ask for \`bs init\` again`];
     }
@@ -987,6 +1033,10 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
     files,
     gitignore,
     claudeCaps,
-    claudeWindow: { ...claudeWindow, warnings },
+    claudeWindow: {
+      ...claudeWindow,
+      warnings,
+      ...(recordGitExclude === undefined ? {} : { recordGitExclude }),
+    },
   };
 }

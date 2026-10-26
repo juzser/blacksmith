@@ -135,4 +135,40 @@ describe('compact window docs', () => {
     expect(read('CHANGELOG.md')).toContain('#compact-earlier-on-1m-models');
     expect(read('docs/standards/agent-constraints.md')).toContain('#compact-earlier-on-1m-models');
   });
+
+  describe('round-three wording and width', () => {
+    const changelog = read('CHANGELOG.md');
+    const entryAt = changelog.indexOf('- **`bs init` sets Claude Code');
+    const entry = changelog.slice(entryAt, changelog.indexOf('\n\n', entryAt));
+    const constraints = read('docs/standards/agent-constraints.md');
+    const bulletAt = constraints.indexOf('- Enforcement is split.');
+    const bullet = constraints.slice(bulletAt, constraints.indexOf('\n\n', bulletAt));
+
+    it('the new lines stay within 80 columns', () => {
+      for (const [name, text] of [
+        ['CHANGELOG entry', entry],
+        ['INSTALL section', section],
+        ['agent-constraints bullet', bullet],
+      ] as const) {
+        for (const line of text.split('\n')) {
+          expect(line.length, `${name}: ${line}`).toBeLessThanOrEqual(80);
+        }
+      }
+    });
+
+    it('the changelog names the record file and all three hint cases', () => {
+      const flat = entry.replace(/\s+/g, ' ');
+      expect(flat).not.toContain("project's entry is missing or old");
+      expect(flat).toContain('.claude/bs-settings-record.json');
+      expect(flat).toMatch(/out of date/);
+      expect(flat).toMatch(/overridden/);
+      expect(flat).toMatch(/unused or stacked/);
+    });
+
+    it('both docs say init stays silent when your values already are the full layout', () => {
+      const silent = /stays silent when your own values already are the full recommended layout/;
+      expect(entry.replace(/\s+/g, ' ')).toMatch(silent);
+      expect(section.replace(/\s+/g, ' ')).toMatch(silent);
+    });
+  });
 });

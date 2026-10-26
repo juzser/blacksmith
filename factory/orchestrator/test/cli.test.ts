@@ -16486,6 +16486,22 @@ describe('smith init (built binary)', () => {
       expect(start(home, `hint-old-${Date.now()}`).stderr).toContain(HINT);
     });
 
+    it('names the package that holds the record and says to remove, then restart', () => {
+      const home = path.join(root, 'hint-package');
+      const sandbox = sandboxOf(home);
+      const app = path.join(sandbox.project, 'packages', 'app');
+      mkdirSync(path.join(app, '.claude'), { recursive: true });
+      mkdirSync(path.join(app, 'src'));
+      writeFileSync(
+        path.join(app, '.claude', 'bs-settings-record.json'),
+        JSON.stringify({ revision: CLAUDE_SETTINGS_REVISION - 1, written: {} }),
+      );
+
+      const { stderr } = start(home, `hint-pkg-${Date.now()}`, path.join(app, 'src'));
+
+      expect(stderr).toContain(`run \`bs init\` in ${realpathSync(app)}, then restart Claude Code`);
+    });
+
     it('is off by default in the shared helper, whatever the project holds', () => {
       const home = path.join(root, 'hint-off');
       const sandbox = sandboxOf(home);

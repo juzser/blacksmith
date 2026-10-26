@@ -276,7 +276,9 @@ yours blocks all nine. When blocked, `bs init` removes its own lines from
 `.claude/settings.local.json` (it would otherwise beat your value) and warns
 once, naming your value or values. A key `bs init` wrote that you then edited
 is yours too: it is kept and it blocks. A fresh project and a re-run in the
-same state therefore end the same way.
+same state therefore end the same way. Where blocking would be pointless,
+`bs init` stays silent when your own values already are the full recommended
+layout (below): there is nothing to remove or warn about.
 
 The recommended layout, for when you set the window yourself, is the full set:
 
@@ -318,9 +320,9 @@ every earlier one. These count as yours, and block `bs init`:
   `modelSettings` (any model id), in the user, project or local settings.
 
 For the environment variables, an empty value counts as unset (in a settings
-file an empty string is a value, and it is yours). Values are compared as JSON: the string
-`"633000"` is not the number 633000, so it is yours. One variable set in both
-places gets one warning, naming the settings file.
+file an empty string is a value, and it is yours). Values are compared as JSON:
+the string `"633000"` is not the number 633000, so it is yours. One variable set
+in both places gets one warning, naming the settings file.
 
 **Do not combine a percentage with a window.** `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
 applies on top of the window: the threshold is

@@ -292,14 +292,14 @@ M-3).
 - **Durable state goes to the event log, not the context window**
   (architecture §7). Anything that must survive a compaction is an event or a
   result artifact. The window is working memory; the log is memory.
-- Enforcement is split. `bs init` makes the harness enforce when to compact:
-  it writes Claude Code's `autoCompactWindow` (the 60% ratio × the window +
-  33,000, with a per-model value for the old 200k models) into the project's
-  local settings, so a model whose window the setting reaches compacts at 60%
-  of it. A 4.x model with the `[1m]` add-on takes the 200k value and compacts
-  at 120k, about 12% of 1M. It yields to any value you set, once you re-run `bs init`; see
-  [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). Everything else
-  stays prompt-level (baked into `.claude/agents/*`) until the phase-9 loop
+- Enforcement is split. `bs init` makes the harness enforce when to compact: it
+  writes Claude Code's `autoCompactWindow` (the 60% ratio × the window + 33,000,
+  with a per-model value for the old 200k models) into the project's local
+  settings, so a model whose window the setting reaches compacts at 60% of it. A
+  4.x model with the `[1m]` add-on takes the 200k value and compacts at 120k,
+  about 12% of 1M. It yields to any value you set, once you re-run `bs init`;
+  see [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). Everything
+  else stays prompt-level (baked into `.claude/agents/*`) until the phase-9 loop
   daemon makes it mechanical: judges and the merger narrow and never compact,
   and `max_compactions_per_task`.
 
