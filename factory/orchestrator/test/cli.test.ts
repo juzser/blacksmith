@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -48,6 +49,7 @@ function runCli(
   args: string[],
   envOverrides?: Record<string, string>,
   stdin?: string,
+  cwd?: string,
 ): { stdout: string; stderr: string; status: number } {
   // The CLI loads the repo-root `.env` (src/cli.ts's `loadDotEnv`) and fills
   // in any budget var not already set in the child's env. An operator `.env`
@@ -61,6 +63,7 @@ function runCli(
   const run = runProcess('node', [CLI_PATH, ...args], {
     env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
     ...(stdin === undefined ? {} : { input: stdin }),
+    ...(cwd === undefined ? {} : { cwd }),
   });
   assertExited(run, `smith ${args.join(' ')}`);
   return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
@@ -16335,8 +16338,25 @@ describe('cli.ts (built binary)', () => {
 // neither is visible to a test of `initWorkRoot`, which never sees argv.
 // ---------------------------------------------------------------------------
 
-// The window is already set, so these runs leave the repo's own local settings alone.
-const NO_WINDOW = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' };
+// `bs init` writes into the project it runs in and reads the user's Claude
+// settings, so each run gets a temp project (its cwd) and an isolated HOME and
+// CLAUDE_CONFIG_DIR: no test here touches the checkout's own
+// `.claude/settings.local.json` or the real `~/.claude/settings.json`.
+function sandboxFor(base: string): { project: string; env: Record<string, string> } {
+  const project = path.join(base, 'project');
+  const home = path.join(base, 'home');
+  mkdirSync(project, { recursive: true });
+  mkdirSync(home, { recursive: true });
+  return {
+    project,
+    env: {
+      HOME: home,
+      CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '',
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '',
+    },
+  };
+}
 
 describe('smith init (built binary)', () => {
   let root: string;
@@ -16349,9 +16369,20 @@ describe('smith init (built binary)', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  // The sandbox (project + isolated HOME) sits beside the work root it serves.
+  const initIn = (workRoot: string, extraEnv: Record<string, string> = {}) => {
+    const sandbox = sandboxFor(`${workRoot}-sandbox`);
+    return runCli(
+      ['init', '--work-root', workRoot],
+      { ...sandbox.env, ...extraEnv },
+      undefined,
+      sandbox.project,
+    );
+  };
+
   it('prepares a work root, and says what it did to every file', () => {
     const workRoot = path.join(root, 'first');
-    const { stdout, status } = runCli(['init', '--work-root', workRoot], NO_WINDOW);
+    const { stdout, status } = initIn(workRoot);
     expect(status).toBe(0);
 
     const report = JSON.parse(stdout);
@@ -16373,17 +16404,17 @@ describe('smith init (built binary)', () => {
 
   it('is idempotent, and keeps an answer the operator already typed', () => {
     const workRoot = path.join(root, 'second');
-    expect(runCli(['init', '--work-root', workRoot], NO_WINDOW).status).toBe(0);
+    expect(initIn(workRoot).status).toBe(0);
 
     const answered = (
-      JSON.parse(runCli(['init', '--work-root', workRoot], NO_WINDOW).stdout).files as {
+      JSON.parse(initIn(workRoot).stdout).files as {
         personal: string;
       }[]
     ).find((file) => file.personal.endsWith('stack.yml'));
     expect(answered).toBeDefined();
     writeFileSync((answered as { personal: string }).personal, 'language: rust\n', 'utf8');
 
-    const { stdout, status } = runCli(['init', '--work-root', workRoot], NO_WINDOW);
+    const { stdout, status } = initIn(workRoot);
     expect(status).toBe(0);
     const report = JSON.parse(stdout);
     expect(report.gitignore).toBe('kept');
@@ -16397,11 +16428,29 @@ describe('smith init (built binary)', () => {
 
   describe('Claude Code settings hint on session start', () => {
     const HINT = 'Claude Code settings for this project are out of date';
-    // BS_HOME moves the work root, so the record read is this test's own.
-    const start = (home: string, id: string) =>
-      runCli(['session', 'start', id, '--state-dir', path.join(home, 'events')], {
-        BS_HOME: home,
-      });
+    const sandboxes = new Map<string, ReturnType<typeof sandboxFor>>();
+    // BS_HOME moves the work root, so the record read is this test's own; the
+    // cwd is a temp project and HOME an empty dir, so nothing real is read.
+    const start = (home: string, id: string) => {
+      const sandbox = sandboxFor(`${home}-sandbox`);
+      sandboxes.set(home, sandbox);
+      return runCli(
+        ['session', 'start', id, '--state-dir', path.join(home, 'events')],
+        { ...sandbox.env, BS_HOME: home },
+        undefined,
+        sandbox.project,
+      );
+    };
+    const recordFor = (home: string, revision: number, written: Record<string, unknown> = {}) => {
+      const sandbox = sandboxes.get(home) ?? sandboxFor(`${home}-sandbox`);
+      sandboxes.set(home, sandbox);
+      mkdirSync(path.join(home, 'state'), { recursive: true });
+      writeFileSync(
+        path.join(home, 'state', 'claude-settings.json'),
+        JSON.stringify({ projects: { [realpathSync(sandbox.project)]: { revision, written } } }),
+      );
+      return sandbox;
+    };
 
     it('prints one stderr line when there is no record, and leaves stdout as the receipt', () => {
       const home = path.join(root, 'hint-none');
@@ -16413,32 +16462,75 @@ describe('smith init (built binary)', () => {
       expect(JSON.parse(stdout).record.event_type).toBe('session-start');
     });
 
-    it('prints nothing once the record is current, and again when it is older', () => {
+    it('prints nothing once this project is current, and again when it is older', () => {
       const home = path.join(root, 'hint-current');
-      mkdirSync(path.join(home, 'state'), { recursive: true });
-      const recordFile = path.join(home, 'state', 'claude-settings.json');
-      writeFileSync(
-        recordFile,
-        JSON.stringify({ projectDir: root, revision: CLAUDE_SETTINGS_REVISION, written: {} }),
-      );
+      recordFor(home, CLAUDE_SETTINGS_REVISION);
       expect(start(home, `hint-cur-${Date.now()}`).stderr).not.toContain(HINT);
 
-      writeFileSync(
-        recordFile,
-        JSON.stringify({ projectDir: root, revision: CLAUDE_SETTINGS_REVISION - 1, written: {} }),
-      );
+      recordFor(home, CLAUDE_SETTINGS_REVISION - 1);
       expect(start(home, `hint-old-${Date.now()}`).stderr).toContain(HINT);
     });
 
-    it('init reports the window outcome and writes the record', () => {
+    it('says the user setting is overridden while bs lines and a user value coexist', () => {
+      const home = path.join(root, 'hint-overridden');
+      const sandbox = recordFor(home, CLAUDE_SETTINGS_REVISION, { autoCompactWindow: 633000 });
+      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
+      writeFileSync(
+        path.join(sandbox.project, '.claude', 'settings.local.json'),
+        JSON.stringify({ autoCompactWindow: 633000 }),
+      );
+      mkdirSync(path.join(sandbox.env.HOME as string, '.claude'), { recursive: true });
+      writeFileSync(
+        path.join(sandbox.env.HOME as string, '.claude', 'settings.json'),
+        JSON.stringify({ autoCompactWindow: 800000 }),
+      );
+
+      const { stdout, stderr, status } = start(home, `hint-over-${Date.now()}`);
+
+      expect(status).toBe(0);
+      expect(stderr).toContain('overridden');
+      expect(stderr).not.toContain(HINT);
+      expect(JSON.parse(stdout).record.event_type).toBe('session-start');
+    });
+
+    it('init reports the window outcome and writes the record, in the temp project only', () => {
       const home = path.join(root, 'hint-init');
-      const { stdout } = runCli(['init', '--work-root', home], {
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000',
-      });
+      const { stdout } = initIn(home, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' });
 
       const report = JSON.parse(stdout);
       expect(report.claudeWindow.status).toBe('skipped');
+      expect(report.claudeWindow.settingsPath).toBe(
+        path.join(
+          realpathSync(path.join(`${home}-sandbox`, 'project')),
+          '.claude',
+          'settings.local.json',
+        ),
+      );
       expect(existsSync(path.join(home, 'state', 'claude-settings.json'))).toBe(true);
+    });
+
+    it('init says on stderr when it could not write the window, and keeps the hint alive', () => {
+      const home = path.join(root, 'hint-failed');
+      const sandbox = sandboxFor(`${home}-sandbox`);
+      writeFileSync(path.join(sandbox.project, '.claude'), 'not a directory');
+
+      const result = initIn(home);
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toMatch(/could not write autoCompactWindow/);
+      expect(start(home, `hint-failed-${Date.now()}`).stderr).toContain(HINT);
+    });
+
+    it('init says on stderr when the local settings are not a JSON object', () => {
+      const home = path.join(root, 'hint-unreadable');
+      const sandbox = sandboxFor(`${home}-sandbox`);
+      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
+      writeFileSync(path.join(sandbox.project, '.claude', 'settings.local.json'), '[]');
+
+      const result = initIn(home);
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toMatch(/is not a JSON object/);
     });
   });
 

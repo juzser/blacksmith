@@ -16,11 +16,10 @@ describe('compact window docs', () => {
   const next = rest.search(/\n#{1,4} |\n\*\*A clone/);
   const section = rest.slice(0, next === -1 ? undefined : next);
 
-  it('INSTALL.md has a section covering the window, add-if-absent and the clamp', () => {
+  it('INSTALL.md has a section covering the window and the clamp', () => {
     expect(start).toBeGreaterThan(-1);
     expect(section).toContain('autoCompactWindow');
     expect(section).toContain('settings.local.json');
-    expect(section).toMatch(/add-if-absent/i);
     expect(section).toContain('633000');
     expect(section).toContain('33,000');
     expect(section).toMatch(/100000/);
@@ -31,19 +30,56 @@ describe('compact window docs', () => {
     expect(section).toMatch(/restart/i);
   });
 
-  it('INSTALL.md covers the 200k models, the JSON layout, the opt-out and the PCT warning', async () => {
-    const { OLD_WINDOW_MODELS } = await import('../src/workroot.js');
+  it('INSTALL.md covers the 200k models, the full JSON layout, the opt-out and the PCT warning', () => {
     expect(section).toContain('153000');
     expect(section).toContain('[1m]');
     expect(section).toContain('"auto"');
     expect(section).toContain('/autocompact');
-    expect(section).toContain('367k');
-    for (const id of ['claude-opus-4-6', 'claude-sonnet-4-0', 'claude-haiku-4-5']) {
-      expect(OLD_WINDOW_MODELS).toContain(id);
-    }
+    expect(section).toContain('368k');
+    expect(section).not.toContain('367k');
+    expect(section).toContain('about 12% of 1M');
     const block = /```json\n([\s\S]*?)```/.exec(section);
     const parsed = JSON.parse(block?.[1] ?? '{}');
-    expect(parsed.modelSettings['<model-id>'].autoCompactWindow).toBe(153000);
+    expect(parsed.autoCompactWindow).toBe(633000);
+    // The doc lists the eight ids itself, each at 153000.
+    const documented = Object.keys(parsed.modelSettings).sort();
+    expect(documented).toEqual(
+      [
+        'claude-haiku-4-5',
+        'claude-opus-4-0',
+        'claude-opus-4-1',
+        'claude-opus-4-5',
+        'claude-opus-4-6',
+        'claude-sonnet-4-0',
+        'claude-sonnet-4-5',
+        'claude-sonnet-4-6',
+      ].sort(),
+    );
+    for (const id of documented) {
+      expect(parsed.modelSettings[id].autoCompactWindow).toBe(153000);
+    }
+  });
+
+  it('INSTALL.md and the changelog state the all-or-nothing ownership rule', () => {
+    expect(section).toMatch(/stand or fall together/);
+    expect(section).toMatch(/owns only the keys its record proves it wrote/);
+    expect(section).toMatch(/removes its own lines/);
+    expect(section).toMatch(/Deleting bs's\s+lines is not an opt-out/);
+    expect(section).toContain('the environment `bs init` runs in');
+    expect(read('CHANGELOG.md')).toMatch(/stand or fall together/);
+    expect(read('CHANGELOG.md')).toMatch(/Deleting bs's lines is not an\s+opt-out/);
+  });
+
+  it('the clone docs say bs init runs there too', () => {
+    const row = install.split('\n').find((l) => l.startsWith('| Upgrading')) ?? '';
+    expect(row).toMatch(/`git pull`, build, run `bs init` once in the clone, restart Claude Code/);
+    expect(install).not.toContain('has nothing to do here');
+  });
+
+  it('the agent constraints no longer contradict themselves about enforcement', () => {
+    const constraints = read('docs/standards/agent-constraints.md');
+    expect(constraints).not.toContain('prompt-level today');
+    expect(constraints).toContain('about 12% of 1M');
   });
 
   it('the README no longer claims bs init writes nothing outside .blacksmith', () => {

@@ -65,12 +65,16 @@ than appearing in it.
   git-excluded `.claude/settings.local.json`, plus 153000
   (`auto_compact_ratio` × 200,000 + 33,000) under `modelSettings` for each of
   the eight retired 200k-window models, which the top-level value would
-  otherwise leave compacting near 83%. Everything is written only when nothing
-  sets it, all keys together: it skips, with a warning, if
-  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is set,
-  or any top-level or per-model `autoCompactWindow` exists. A record in
-  `state/claude-settings.json` lets a later run update only what it wrote, and
-  `bs session start` prints a stderr hint when the record is missing or old.
+  otherwise leave compacting near 83%. The nine keys stand or fall together:
+  `bs init` owns only the keys its record proves it wrote while their value is
+  unchanged, and any other window value, wherever it sits, is yours and blocks
+  all nine, with one warning, and `bs init` removes its own lines (including
+  when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
+  is set). A record per project in `state/claude-settings.json` is what tells
+  its keys from yours, and `bs session start` prints a stderr hint when the
+  project's entry is missing or old, or when your value is overridden by
+  bs's local lines until you re-run `bs init`. Deleting bs's lines is not an
+  opt-out (set a value such as `"auto"` instead).
   Existing installs re-run `bs init` in each project and restart Claude Code.
   [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
 

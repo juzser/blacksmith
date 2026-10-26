@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -189,7 +190,7 @@ export interface ClaudeWindowReport {
   /** The recommended `autoCompactWindow`; undefined when the policy gave none. */
   readonly value: number | undefined;
   /** The recommended per-model value for the old 200k models. */
-  readonly modelValue?: number | undefined;
+  readonly modelValue: number | undefined;
   /** Why no value could be derived from the policy. */
   readonly reason: string | undefined;
   /** A user value that differs from the recommendation, or a record that could not be saved. */
@@ -413,8 +414,7 @@ export const CLAUDE_SETTINGS_REVISION = 1;
 /** Key -> value bs wrote into the local settings: `autoCompactWindow`, `env.<NAME>`. */
 type SettingsWritten = Record<string, string | number>;
 
-interface SettingsRecord {
-  readonly projectDir: string;
+interface ProjectEntry {
   readonly revision: number;
   readonly written: SettingsWritten;
 }
@@ -422,33 +422,37 @@ interface SettingsRecord {
 /**
  * What bs wrote, kept in the work root's `state/` (this machine's) rather than
  * in a Claude settings file, which must not carry keys Claude Code does not
- * know. It is what tells a value bs wrote from one the user chose.
+ * know. It is what tells a value bs wrote from one the user chose. One entry
+ * per physical project dir, because a work root can serve several projects.
  */
 export function settingsRecordPath(workRoot: string): string {
   return path.join(workRoot, 'state', 'claude-settings.json');
 }
 
-function readSettingsRecord(workRoot: string): SettingsRecord | undefined {
-  const parsed = readJsonObject(settingsRecordPath(workRoot));
-  if (
-    parsed === undefined ||
-    typeof parsed.projectDir !== 'string' ||
-    typeof parsed.revision !== 'number' ||
-    !isObject(parsed.written)
-  ) {
-    return undefined;
+/** A symlinked or relative spelling of one project is still one entry. */
+function physicalDir(dir: string): string {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
   }
-  return {
-    projectDir: parsed.projectDir,
-    revision: parsed.revision,
-    written: parsed.written as SettingsWritten,
-  };
 }
 
-/** One small file read: true when this work root has no record or an older one. */
-export function claudeSettingsOutOfDate(workRoot: string): boolean {
-  const record = readSettingsRecord(workRoot);
-  return record === undefined || record.revision < CLAUDE_SETTINGS_REVISION;
+/** Every project's raw entry; entries of other projects are carried over untouched. */
+function readRecordProjects(workRoot: string): Record<string, unknown> {
+  const parsed = readJsonObject(settingsRecordPath(workRoot));
+  return parsed !== undefined && isObject(parsed.projects) ? parsed.projects : {};
+}
+
+function readProjectEntry(
+  projects: Record<string, unknown>,
+  projectKey: string,
+): ProjectEntry | undefined {
+  const raw = projects[projectKey];
+  if (!isObject(raw) || typeof raw.revision !== 'number' || !isObject(raw.written)) {
+    return undefined;
+  }
+  return { revision: raw.revision, written: raw.written as SettingsWritten };
 }
 
 const WINDOW_ENV = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW';
@@ -478,8 +482,8 @@ export const OLD_WINDOW_MODELS: readonly string[] = [
   'claude-haiku-4-5',
 ];
 
-const MODEL_KEY_SUFFIX = 'autoCompactWindow';
-const modelRecordKey = (id: string): string => `modelSettings.${id}.${MODEL_KEY_SUFFIX}`;
+const TOP_RECORD_KEY = 'autoCompactWindow';
+const modelRecordKey = (id: string): string => `modelSettings.${id}.autoCompactWindow`;
 
 /**
  * `context_window.auto_compact_ratio` of a 1M window (and of a 200k window for
@@ -516,72 +520,31 @@ function recommendedWindow(
   return { value, modelValue };
 }
 
-interface WindowSetting {
-  readonly where: string;
-  readonly value: unknown;
-  /** Warn whatever the value: it conflicts with any window bs would write. */
-  readonly always?: boolean;
-}
-
-/**
- * Every place in one settings file that sets the window or the percentage on
- * top of it. `ignoreModels` are model ids whose entry is judged separately
- * (the ones bs writes in the local file).
- */
-function windowSettings(
-  file: string,
-  settings: Record<string, unknown> | undefined,
-  topLevel: boolean,
-  ignoreModels: readonly string[] = [],
-): WindowSetting[] {
-  const found: WindowSetting[] = [];
-  if (settings === undefined) return found;
-  const fromEnv = envBlock(settings)[WINDOW_ENV];
-  if (fromEnv !== undefined) found.push({ where: `${file} env.${WINDOW_ENV}`, value: fromEnv });
-  const pct = envBlock(settings)[PCT_ENV];
-  if (pct !== undefined) {
-    found.push({ where: `${file} env.${PCT_ENV}`, value: pct, always: true });
-  }
-  if (topLevel && settings.autoCompactWindow !== undefined) {
-    found.push({ where: `${file} autoCompactWindow`, value: settings.autoCompactWindow });
-  }
-  if (isObject(settings.modelSettings)) {
-    for (const [model, entry] of Object.entries(settings.modelSettings)) {
-      if (ignoreModels.includes(model)) continue;
-      if (isObject(entry) && entry.autoCompactWindow !== undefined) {
-        found.push({
-          where: `${file} modelSettings.${model}.autoCompactWindow`,
-          value: entry.autoCompactWindow,
-        });
-      }
-    }
-  }
-  return found;
-}
-
 /** One key bs may write into the local file: the top-level one, or a model's. */
 interface WindowKey {
   readonly recordKey: string;
-  readonly label: string;
   readonly value: number;
   readonly read: (local: Record<string, unknown>) => unknown;
   readonly write: (local: Record<string, unknown>) => void;
+  /** Take bs's line out; an emptied model entry goes, its sibling keys stay. */
+  readonly remove: (local: Record<string, unknown>) => void;
 }
 
 function windowKeys(value: number, modelValue: number): WindowKey[] {
   const top: WindowKey = {
-    recordKey: 'autoCompactWindow',
-    label: 'autoCompactWindow',
+    recordKey: TOP_RECORD_KEY,
     value,
     read: (local) => local.autoCompactWindow,
     write: (local) => {
       local.autoCompactWindow = value;
     },
+    remove: (local) => {
+      delete local.autoCompactWindow;
+    },
   };
   const perModel = OLD_WINDOW_MODELS.map(
     (id): WindowKey => ({
       recordKey: modelRecordKey(id),
-      label: modelRecordKey(id),
       value: modelValue,
       read: (local) => {
         const entry = isObject(local.modelSettings) ? local.modelSettings[id] : undefined;
@@ -593,21 +556,148 @@ function windowKeys(value: number, modelValue: number): WindowKey[] {
         models[id] = { ...(isObject(entry) ? entry : {}), autoCompactWindow: modelValue };
         local.modelSettings = models;
       },
+      remove: (local) => {
+        if (!isObject(local.modelSettings)) return;
+        const models = { ...local.modelSettings };
+        const { autoCompactWindow: _own, ...rest } = isObject(models[id]) ? models[id] : {};
+        if (Object.keys(rest).length > 0) models[id] = rest;
+        else delete models[id];
+        if (Object.keys(models).length > 0) local.modelSettings = models;
+        else delete local.modelSettings;
+      },
     }),
   );
   return [top, ...perModel];
 }
 
+interface WindowSetting {
+  readonly where: string;
+  readonly value: unknown;
+  /** Warn whatever the value: it conflicts with any window bs would write. */
+  readonly always?: boolean;
+}
+
+/** An environment value counts only when non-empty, as `BS_HOME` does. */
+const isSet = (value: unknown): boolean => value !== undefined && value !== '';
+
 /**
- * Add `autoCompactWindow` (top level, plus one entry for each old 200k model)
- * to `<projectDir>/.claude/settings.local.json`.
+ * Every window value that is the user's, wherever it sits: the two window
+ * variables (the process env or a settings `env` block), and a top-level or
+ * per-model `autoCompactWindow` in the user and project settings. In the local
+ * file a value is the user's unless `owns` says bs wrote it.
+ *
+ * One entry per variable: a settings file is named in preference to the
+ * process env, because that is where the user can change it.
+ */
+function userWindowValues(
+  files: { readonly user: string; readonly project: string; readonly local: string },
+  localSettings: Record<string, unknown>,
+  env: Readonly<Record<string, string | undefined>>,
+  owns: (recordKey: string, value: unknown) => boolean,
+): WindowSetting[] {
+  const sources: Array<{ file: string; settings: Record<string, unknown> | undefined }> = [
+    { file: files.user, settings: readJsonObject(files.user) },
+    { file: files.project, settings: readJsonObject(files.project) },
+    { file: files.local, settings: localSettings },
+  ];
+  const found: WindowSetting[] = [];
+  for (const name of [WINDOW_ENV, PCT_ENV]) {
+    const always = name === PCT_ENV;
+    const inFile = sources.find((source) => isSet(envBlock(source.settings)[name]));
+    if (inFile !== undefined) {
+      found.push({
+        where: `${inFile.file} env.${name}`,
+        value: envBlock(inFile.settings)[name],
+        always,
+      });
+    } else if (isSet(env[name])) {
+      found.push({ where: `the environment ${name}`, value: env[name], always });
+    }
+  }
+  for (const { file, settings } of sources) {
+    if (settings === undefined) continue;
+    const isLocal = file === files.local;
+    const top = settings.autoCompactWindow;
+    if (top !== undefined && !(isLocal && owns(TOP_RECORD_KEY, top))) {
+      found.push({ where: `${file} autoCompactWindow`, value: top });
+    }
+    if (!isObject(settings.modelSettings)) continue;
+    for (const [model, entry] of Object.entries(settings.modelSettings)) {
+      if (!isObject(entry) || entry.autoCompactWindow === undefined) continue;
+      if (isLocal && owns(modelRecordKey(model), entry.autoCompactWindow)) continue;
+      found.push({
+        where: `${file} modelSettings.${model}.autoCompactWindow`,
+        value: entry.autoCompactWindow,
+      });
+    }
+  }
+  return found;
+}
+
+/** A user value that already is one of bs's own values needs no word. */
+const worthAWarning = (setting: WindowSetting, value: number, modelValue: number): boolean =>
+  setting.always === true || (setting.value !== value && setting.value !== modelValue);
+
+const localSettingsPath = (projectDir: string): string =>
+  path.join(projectDir, '.claude', 'settings.local.json');
+const projectSettingsFile = (projectDir: string): string =>
+  path.join(projectDir, '.claude', 'settings.json');
+
+/**
+ * What `bs session start` should say about this project's Claude Code
+ * settings: `out-of-date` when `bs init` has not run here at this revision,
+ * `overridden` when a user value exists elsewhere while bs's own lines are
+ * still in the local file (they beat the user's), else undefined. A few small
+ * file reads; the caller never lets it fail.
+ */
+export function claudeSettingsHint(
+  workRoot: string,
+  projectDir: string,
+  options: {
+    readonly userSettingsPath?: string;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+  } = {},
+): 'out-of-date' | 'overridden' | undefined {
+  const entry = readProjectEntry(readRecordProjects(workRoot), physicalDir(projectDir));
+  if (entry === undefined || entry.revision < CLAUDE_SETTINGS_REVISION) return 'out-of-date';
+
+  const env = options.env ?? process.env;
+  const dir = path.resolve(projectDir);
+  const local = readJsonObject(localSettingsPath(dir));
+  if (local === undefined) return undefined;
+  const keys = windowKeys(0, 0);
+  const stillThere = keys.some(
+    (key) =>
+      entry.written[key.recordKey] !== undefined &&
+      key.read(local) === entry.written[key.recordKey],
+  );
+  if (!stillThere) return undefined;
+
+  const userSettingsPath = options.userSettingsPath ?? defaultUserSettingsPath(env, homedir());
+  const top = entry.written[TOP_RECORD_KEY];
+  const model = entry.written[modelRecordKey(OLD_WINDOW_MODELS[0] as string)];
+  const theirs = userWindowValues(
+    { user: userSettingsPath, project: projectSettingsFile(dir), local: localSettingsPath(dir) },
+    local,
+    env,
+    (recordKey, value) => entry.written[recordKey] === value,
+  );
+  return theirs.some((setting) => worthAWarning(setting, Number(top), Number(model)))
+    ? 'overridden'
+    : undefined;
+}
+
+/**
+ * Put `autoCompactWindow` (top level, plus one entry for each old 200k model)
+ * into `<projectDir>/.claude/settings.local.json`, or take bs's lines out.
  *
  * Claude Code lets a later settings file's top-level value wipe the per-model
  * values of every earlier one, and a per-model value in a later file beat an
- * earlier top-level one, so bs writes only when nothing anywhere sets the
- * window, and all its keys together. A value the user set is never rewritten;
- * one bs wrote earlier (per the record) follows the policy and is never
- * counted as the user's.
+ * earlier top-level one, so the nine keys stand or fall together. bs owns only
+ * the keys it wrote (per the record) and still unchanged, or a value that
+ * already equals what it would write; any other window value, wherever it is,
+ * is the user's and blocks the whole set. A blocked set is not left in place
+ * (the local file would beat the user's value): bs removes its own lines.
  */
 function setCompactWindow(
   projectDir: string,
@@ -616,9 +706,9 @@ function setCompactWindow(
   env: Readonly<Record<string, string | undefined>>,
   recordPath: string,
   written: SettingsWritten,
+  existedBefore: boolean,
 ): ClaudeWindowReport {
-  const settingsPath = path.join(projectDir, '.claude', 'settings.local.json');
-  const projectSettingsPath = path.join(projectDir, '.claude', 'settings.json');
+  const settingsPath = localSettingsPath(projectDir);
   const base = { settingsPath, recordPath, warnings: [] as string[] };
 
   const recommended = recommendedWindow(repoRoot);
@@ -627,6 +717,7 @@ function setCompactWindow(
       ...base,
       status: 'unavailable',
       value: undefined,
+      modelValue: undefined,
       reason: recommended.reason,
       gitExclude: 'not-applicable',
       restartNeeded: false,
@@ -640,90 +731,74 @@ function setCompactWindow(
     ...base,
     status,
     value,
+    modelValue,
     reason: undefined,
     gitExclude: 'not-applicable',
     restartNeeded: false,
     ...extra,
   });
 
-  const exists = existsSync(settingsPath);
-  const local = exists ? readJsonObject(settingsPath) : {};
+  const local = existsSync(settingsPath) ? readJsonObject(settingsPath) : {};
   if (local === undefined) return outcome('unreadable');
 
-  const others: WindowSetting[] = [
-    ...(env[WINDOW_ENV] !== undefined
-      ? [{ where: `the environment ${WINDOW_ENV}`, value: env[WINDOW_ENV] }]
-      : []),
-    ...(env[PCT_ENV] !== undefined
-      ? [{ where: `the environment ${PCT_ENV}`, value: env[PCT_ENV], always: true }]
-      : []),
-    ...windowSettings(userSettingsPath, readJsonObject(userSettingsPath), true),
-    ...windowSettings(projectSettingsPath, readJsonObject(projectSettingsPath), true),
-    ...windowSettings(settingsPath, local, false, OLD_WINDOW_MODELS),
-  ];
-  const warn = (found: readonly WindowSetting[], recommendedValue: number): string[] =>
-    found
-      .filter((setting) => setting.always || String(setting.value) !== String(recommendedValue))
-      .map(
-        (setting) =>
-          `${setting.where} is set to ${JSON.stringify(setting.value)}; bs recommends autoCompactWindow ${recommendedValue} and leaves autoCompactWindow as is`,
-      );
-
   const keys = windowKeys(value, modelValue);
-  const topKey = keys[0] as WindowKey;
-  // The user's own top-level value in the local file also blocks the per-model
-  // entries: they would override it for those models.
-  const topOwn = topKey.read(local);
-  const topUserOwned =
-    topOwn !== undefined && topOwn !== value && written[topKey.recordKey] !== topOwn;
-  const blocked = others.length > 0;
+  const wanted = new Map(keys.map((key) => [key.recordKey, key.value]));
+  const owns = (recordKey: string, current: unknown): boolean =>
+    wanted.has(recordKey) && (current === wanted.get(recordKey) || written[recordKey] === current);
+  const theirs = userWindowValues(
+    { user: userSettingsPath, project: projectSettingsFile(projectDir), local: settingsPath },
+    local,
+    env,
+    owns,
+  );
 
-  const toWrite: WindowKey[] = [];
-  const warnings: string[] = [];
-  let present = 0;
-  let skippedAny = false;
-  if (blocked) warnings.push(...warn(others, value));
-  for (const key of keys) {
-    const own = key.read(local);
-    if (own === undefined) {
-      if (blocked || (key !== topKey && topUserOwned)) skippedAny = true;
-      else toWrite.push(key);
-    } else if (own === key.value) {
-      // Already what we would write: adopt it so a later revision can move it.
-      written[key.recordKey] = key.value;
-      present += 1;
-    } else if (written[key.recordKey] === own && !blocked) {
-      toWrite.push(key);
-      present += 1;
-    } else {
-      warnings.push(...warn([{ where: `${settingsPath} ${key.label}`, value: own }], key.value));
-      present += 1;
+  let next: Record<string, unknown>;
+  let changed: WindowKey[];
+  let warnings: string[] = [];
+  let status: ClaudeWindowReport['status'];
+  if (theirs.length > 0) {
+    changed = keys.filter((key) => {
+      const own = key.read(local);
+      return own !== undefined && owns(key.recordKey, own);
+    });
+    next = { ...local };
+    for (const key of changed) key.remove(next);
+    const shown =
+      changed.length > 0 ? theirs : theirs.filter((s) => worthAWarning(s, value, modelValue));
+    if (shown.length > 0) {
+      warnings = [
+        `${shown.map((s) => `${s.where} is ${JSON.stringify(s.value)}`).join('; ')}; bs leaves autoCompactWindow to you${
+          changed.length > 0
+            ? " and removed its own lines from the project's settings.local.json"
+            : ''
+        }. Recommended layout: autoCompactWindow ${value} and modelSettings.<id>.autoCompactWindow ${modelValue} for each of ${OLD_WINDOW_MODELS.join(', ')}, together in the file where your value lives and without ${PCT_ENV}; or remove your value and run \`bs init\` again`,
+      ];
     }
+    status = 'skipped';
+    for (const key of keys) delete written[key.recordKey];
+  } else {
+    changed = keys.filter((key) => key.read(local) !== key.value);
+    next = { ...local };
+    for (const key of changed) key.write(next);
+    for (const key of keys) written[key.recordKey] = key.value;
+    status = changed.length === 0 ? 'kept' : existedBefore ? 'updated' : 'written';
   }
 
-  let status: ClaudeWindowReport['status'] = 'kept';
-  if (toWrite.length > 0) status = exists ? 'updated' : 'written';
-  else if (present === 0 && skippedAny) status = 'skipped';
-
-  if (toWrite.length > 0) {
-    const next: Record<string, unknown> = { ...local };
-    for (const key of toWrite) key.write(next);
+  if (changed.length > 0) {
     try {
       mkdirSync(path.dirname(settingsPath), { recursive: true });
       writeFileSync(settingsPath, `${JSON.stringify(next, null, 2)}\n`);
     } catch {
       return outcome('failed');
     }
-    for (const key of toWrite) written[key.recordKey] = key.value;
   }
 
   return outcome(status, {
-    modelValue,
     warnings,
     gitExclude: existsSync(settingsPath)
       ? excludeFromGit(projectDir, settingsPath)
       : 'not-applicable',
-    restartNeeded: toWrite.length > 0,
+    restartNeeded: changed.length > 0,
   });
 }
 
@@ -778,10 +853,14 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
   const env = options.env ?? process.env;
   const projectDir = path.resolve(options.projectDir ?? process.cwd());
   const userSettingsPath = options.userSettingsPath ?? defaultUserSettingsPath(env, homedir());
-  // A record made for another project dir says nothing about this one.
-  const previous = readSettingsRecord(workRoot);
-  const written: SettingsWritten =
-    previous?.projectDir === projectDir ? { ...previous.written } : {};
+  // One entry per project: another project's entry says nothing about this one
+  // and is carried over untouched.
+  const projectKey = physicalDir(projectDir);
+  const projects = readRecordProjects(workRoot);
+  const previous = readProjectEntry(projects, projectKey);
+  const written: SettingsWritten = previous === undefined ? {} : { ...previous.written };
+  // The caps step creates the file, so "new" has to be read before it runs.
+  const existedBefore = existsSync(localSettingsPath(projectDir));
   const claudeCaps = raiseConcurrencyCaps(projectDir, userSettingsPath, env, inPlace, written);
   const recordPath = settingsRecordPath(workRoot);
   const claudeWindow = setCompactWindow(
@@ -791,10 +870,18 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
     env,
     recordPath,
     written,
+    existedBefore,
   );
 
+  // A run that could not do its job leaves the revision alone, so the
+  // `bs session start` hint keeps asking for `bs init`.
+  const advance = !['unreadable', 'failed', 'unavailable'].includes(claudeWindow.status);
+  const entry: ProjectEntry = {
+    revision: advance ? CLAUDE_SETTINGS_REVISION : (previous?.revision ?? 0),
+    written,
+  };
   // Rewritten only when it differs, so a run with nothing to change changes no file.
-  const record = `${JSON.stringify({ projectDir, revision: CLAUDE_SETTINGS_REVISION, written }, null, 2)}\n`;
+  const record = `${JSON.stringify({ projects: { ...projects, [projectKey]: entry } }, null, 2)}\n`;
   let warnings = claudeWindow.warnings;
   try {
     if (!existsSync(recordPath) || readFileSync(recordPath, 'utf8') !== record) {

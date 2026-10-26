@@ -21,8 +21,9 @@ prompt, and pr-mod lists the repo's open pull requests. Blacksmith runs the
 same without them.
 
 `bs init` also [raises Claude Code's concurrency caps](#raise-the-concurrency-caps)
-for the project, so a wide wave is not throttled. Restart Claude Code
-afterwards.
+for the project, so a wide wave is not throttled, and sets the
+[compact window](#compact-earlier-on-1m-models) so a long session compacts at
+the policy's 60%. Restart Claude Code afterwards.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -119,7 +120,7 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | Command | the block at the top of this file | Part 2 below |
 | You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
-| Upgrading | `npm i -g @juzser/blacksmith@latest`, then re-run `bs init` in each project and restart Claude Code, then `claude plugin marketplace update blacksmith`; an installed mod moves only when its manifest `version` changes, at a release, so then run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) and start a new session | `git pull`; a mod loaded with `--plugin-dir` is the checkout's copy |
+| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart Claude Code once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code; a mod loaded with `--plugin-dir` is the checkout's copy |
 | Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
 Take the install unless you are hacking on Blacksmith itself.
@@ -184,8 +185,8 @@ package, where an upgrade is supposed to reach it.
 after an upgrade is safe and does nothing. The one exception is the Claude Code
 settings it writes (the [caps](#raise-the-concurrency-caps) and the
 [compact window](#compact-earlier-on-1m-models)): it records what it wrote and
-updates those keys only while they still equal the record. Commit `.blacksmith/factory/` if
-your team shares the project: the roadmap and the stack answers are
+updates those keys only while they still equal the record. Commit
+`.blacksmith/factory/` if your team shares the project: the roadmap and the stack answers are
 declarations about the project, not about your laptop.
 
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
@@ -265,55 +266,80 @@ existing entry without dropping its other keys, such as `effortLevel`. The
 list is closed: newer models have a 1M window and inherit the top-level value.
 The keys are written all together with the top-level one or not at all.
 
-If `bs init` skipped because you already have values (below), the recommended
-layout is a top-level 633000 plus 153000 for each 200k model, in your own
-`~/.claude/settings.json`:
+**All or nothing, and who owns what.** The nine keys (the top-level one and
+the eight per-model ones) stand or fall together, whatever the history. `bs
+init` owns only the keys its record proves it wrote, while their value is
+unchanged; any other window value, wherever it sits, is yours, and one of
+yours blocks all nine. When blocked, `bs init` removes its own lines from
+`.claude/settings.local.json` (it would otherwise beat your value) and warns
+once, naming your value or values. A key `bs init` wrote that you then edited
+is yours too: it is kept and it blocks. A fresh project and a re-run in the
+same state therefore end the same way.
+
+The recommended layout, for when you set the window yourself, is the full set:
 
 ```json
 {
+  "autoCompactWindow": 633000,
   "modelSettings": {
-    "<model-id>": { "autoCompactWindow": 153000 }
+    "claude-opus-4-6": { "autoCompactWindow": 153000 },
+    "claude-opus-4-5": { "autoCompactWindow": 153000 },
+    "claude-opus-4-1": { "autoCompactWindow": 153000 },
+    "claude-opus-4-0": { "autoCompactWindow": 153000 },
+    "claude-sonnet-4-6": { "autoCompactWindow": 153000 },
+    "claude-sonnet-4-5": { "autoCompactWindow": 153000 },
+    "claude-sonnet-4-0": { "autoCompactWindow": 153000 },
+    "claude-haiku-4-5": { "autoCompactWindow": 153000 }
   }
 }
 ```
 
+Either remove your own value and run `bs init` again, or put this whole layout
+in the file where your value lives, without `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`.
+Do not rely on `~/.claude/settings.json` alone: a top-level
+`autoCompactWindow` in the project or local settings wipes the per-model
+values of the user file.
+
 The key ignores a `[1m]` suffix, so a 4.x model with the 1M add-on gets 153000
-as well (about 15% of 1M). To give such a session a larger window, set your own
-`modelSettings.<id>.autoCompactWindow` for that model; `bs init` then keeps your
-value, warns that it differs, and leaves the others alone.
+as well and compacts at 120k, about 12% of 1M. To give such a session a larger
+window, set your own `modelSettings.<id>.autoCompactWindow` for that model and
+re-run `bs init`, which then removes its lines and leaves yours.
 
-**Add-if-absent, and why.** Claude Code merges settings user, then project,
-then local, and a later file's top-level `autoCompactWindow` wipes the
-per-model values of every earlier one. So `bs init` writes only when nothing
-sets the window anywhere, and it skips, with a warning naming the file, the
-value it found and the recommended value, when any of these is set:
+**Why all nine.** Claude Code merges settings user, then project, then local,
+and a later file's top-level `autoCompactWindow` wipes the per-model values of
+every earlier one. These count as yours, and block `bs init`:
 
-- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in Claude Code's environment or in the
-  `env` block of any settings file;
+- `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the environment `bs init` runs in, or in
+  the `env` block of any settings file;
 - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in either place (next paragraph);
 - a top-level `autoCompactWindow`, or an `autoCompactWindow` under
-  `modelSettings`, in the user, project or local settings.
+  `modelSettings` (any model id), in the user, project or local settings.
 
-Keys that `bs init` wrote itself, which the record below proves, never count as
-yours on a later run.
+An empty value counts as unset. Values are compared as JSON: the string
+`"633000"` is not the number 633000, so it is yours. One variable set in both
+places gets one warning, naming the settings file.
 
 **Do not combine a percentage with a window.** `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
 applies on top of the window: the threshold is
 `min(floor((window - 20000) × pct / 100), window - 33000)`. With 60% and a
-633000 window that fires near 367k, far earlier than intended. Use one or the
-other.
+633000 window that fires near 368k (`min(floor(613000 × 0.6), 600000)`
+= 367800), far earlier than intended. Use one or the other.
 
-**Opting out.** Set your own value anywhere, `"auto"` included, and `bs init`
-keeps it: it never lowers, raises or rewrites a value you set. `/autocompact`
-changes it for one session only.
+**Opting out.** Set a value, `"auto"` included, then re-run `bs init`: it
+removes its lines and leaves yours. Until you re-run it, bs's local lines win
+over a value set elsewhere, and `bs session start` reminds you. Deleting bs's
+lines is not an opt-out: the next `bs init` writes them back. `/autocompact`
+changes the window for one session only.
 
-**Re-running and upgrading.** `bs init` records what it wrote in
-`state/claude-settings.json` in the work root. A later run updates a key still
-equal to the record (the policy ratio changed), keeps one you edited and warns
-if it differs from the recommendation, and changes no file when there is
-nothing to change. After upgrading the package, re-run `bs init` in each
-project, then restart Claude Code: a running session does not pick the change
-up. `bs session start` prints one line on stderr until you do.
+**Re-running and upgrading.** `bs init` records what it wrote, one entry per
+project directory, in `state/claude-settings.json` in the work root; running it
+in one project never touches another's entry. A later run updates a key still
+equal to the record (the policy ratio changed), and changes no file when there
+is nothing to change. If it could not read the settings, could not write them,
+or the policy gave no value, it says so on stderr and the record stays old, so
+the reminder keeps coming. After upgrading the package, re-run `bs init` in
+each project, then restart Claude Code: a running session does not pick the
+change up. `bs session start` prints one line on stderr until you do.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of
@@ -445,9 +471,11 @@ live inside the checkout — `factory/orchestrator/src/paths.ts` resolves both
 relative to the repo root — while the projects it builds land *beside* the
 clone, with their worktrees beside them. So put the clone somewhere you're
 happy to keep it, in a directory you're happy to see projects appear in.
-`bs init` has nothing to do here and says so: in a clone the work root and
-the package are one directory, which is what makes the two installs one
-codebase.
+In a clone the work root and the package are one directory, which is what
+makes the two installs one codebase, so `bs init` has no files to seed here.
+It still writes the Claude Code settings (the caps and the compact window)
+into the project it runs in: run it once in the clone, and again after a
+`git pull` that changes them, then restart Claude Code.
 
 ---
 
