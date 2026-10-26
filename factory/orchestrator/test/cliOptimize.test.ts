@@ -294,6 +294,96 @@ describe('brief compose (criterion 5, CLI half)', () => {
   });
 });
 
+// ---- --state-dir beats STATE_EVENTS_DIR (eventOptsFromFlags) -------------------
+
+describe('--state-dir on lessons for-dispatch and brief compose', () => {
+  const task = (id: string) => ({
+    task_id: id,
+    epic_id: 'epic-1',
+    plan_version: 1,
+    title: 'Orchestrator touch',
+    summary: 'Touch the orchestrator.',
+    objective: 'Touch the orchestrator.',
+    output_schema_ref: 'result.schema.json',
+    acceptance_criteria: ['it works'],
+    claims: ['factory/orchestrator/src/**'],
+    budget: { tokens: 1000, diff_lines: 100 },
+    contract: { functional_clauses: ['do it'], nonfunctional_clauses: [] },
+    case: 'feature',
+    origin: 'user',
+    task_status: 'todo',
+    agent_role: 'coder',
+  });
+  const withheldIds = (withheld: { lesson_id: string }[]) => withheld.map((w) => w.lesson_id);
+
+  it('reads a class recurring only in the --state-dir store, ahead of the BS_HOME store', () => {
+    const planPath = path.join(scratch, 'state-dir-plan.json');
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task('epic-1/task-1')],
+        edges: [],
+      }),
+    );
+    const dispatch = (sb: Sandbox, more: string[]) =>
+      JSON.parse(
+        cli(
+          ['lessons', 'for-dispatch', 'coder', '--plan', planPath, '--task', 'task-1', ...more],
+          sb,
+        ).stdout,
+      );
+    const home = sandbox();
+    const target = dispatch(home, []).withheld[0] as { lesson_id: string; error_class: string };
+
+    const other = sandbox();
+    startSession(other, 'sess-sd');
+    errorLogged(other, 'sess-sd', 'p-a/task-1', target.error_class);
+    errorLogged(other, 'sess-sd', 'p-b/task-2', target.error_class);
+    errorLogged(other, 'sess-sd', 'p-c/task-3', target.error_class);
+
+    expect(withheldIds(dispatch(home, []).withheld)).toContain(target.lesson_id);
+    expect(withheldIds(dispatch(home, ['--state-dir', other.eventsDir]).withheld)).not.toContain(
+      target.lesson_id,
+    );
+
+    const compose = (stateArgs: string[]) => {
+      const run = cli(
+        [
+          'brief',
+          'compose',
+          '--role',
+          'coder',
+          '--session',
+          'sess-sd',
+          '--plan',
+          planPath,
+          '--task',
+          'epic-1/task-1',
+          '--worktree',
+          path.join(scratch, 'wt', 'task-1-widget'),
+          '--out',
+          path.join(scratch, 'state-dir-brief', `${stateArgs.length}.md`),
+          ...stateArgs,
+        ],
+        home,
+      );
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      return JSON.parse(
+        readFileSync(
+          path.join(scratch, 'state-dir-brief', `${stateArgs.length}.md.manifest.json`),
+          'utf8',
+        ),
+      ).lessons_withheld as { lesson_id: string }[];
+    };
+    startSession(home, 'sess-sd');
+    expect(withheldIds(compose([]))).toContain(target.lesson_id);
+    expect(withheldIds(compose(['--state-dir', other.eventsDir]))).not.toContain(target.lesson_id);
+  });
+});
+
 // ---- criterion 7: playbook slice ---------------------------------------------
 
 describe('playbook slice (criterion 7, CLI half)', () => {

@@ -65,6 +65,36 @@ function runCli(
   return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
 }
 
+/**
+ * Setup for `lessons for-dispatch` tests (bs-optimize epic criterion 4): a
+ * fresh temporary event store whose `error-logged` events put `errorClass` on
+ * three distinct tasks, so the selection reads that class as recurring. With
+ * no `errorClass` the store is empty. Returns the directory for `--state-dir`.
+ */
+function dispatchStore(parent: string, name: string, errorClass?: string): string {
+  const dir = path.join(parent, name);
+  mkdirSync(dir, { recursive: true });
+  if (errorClass === undefined) return dir;
+  const session = `${name}-sess`;
+  const base = { session_id: session, plan_version: 1, causal_parent: null };
+  const events = [
+    { ...base, actor: 'user', event_type: 'session-start', payload: {} },
+    ...['p-a/task-1', 'p-b/task-2', 'p-c/task-3'].map((task) => ({
+      ...base,
+      actor: 'orchestrator',
+      event_type: 'error-logged',
+      task_id: task,
+      causal_parent: `${session}#0`,
+      payload: { error: errorClass, severity: 'S3-minor', task_ref: task },
+    })),
+  ];
+  for (const event of events) {
+    const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', dir]);
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+  }
+  return dir;
+}
+
 describe('cli.ts (built binary)', () => {
   let scratchDir: string;
 
@@ -3574,6 +3604,8 @@ describe('cli.ts (built binary)', () => {
       'for-dispatch',
       'scribe',
       '--full',
+      '--state-dir',
+      dispatchStore(scratchDir, 'dispatch-store-dream', 'other.unclassified'),
       '--lessons',
       lessonsOut,
     ]);
@@ -4023,6 +4055,8 @@ describe('cli.ts (built binary)', () => {
       '--task',
       'epic-1/task-1',
       '--full',
+      '--state-dir',
+      dispatchStore(scratchDir, 'dispatch-store-scoped'),
       '--lessons',
       lessonsPath,
     ]);
@@ -4104,6 +4138,8 @@ describe('cli.ts (built binary)', () => {
       '--task',
       'epic-1/task-1',
       '--full',
+      '--state-dir',
+      dispatchStore(scratchDir, 'dispatch-store-live'),
       '--lessons',
       lessonsPath,
     ]);
@@ -4191,6 +4227,8 @@ describe('cli.ts (built binary)', () => {
       '--task',
       'task-1',
       '--full',
+      '--state-dir',
+      dispatchStore(scratchDir, 'dispatch-store-case', 'other.unclassified'),
       '--lessons',
       lessonsPath,
     ]);
