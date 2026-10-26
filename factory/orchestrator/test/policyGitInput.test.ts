@@ -380,7 +380,7 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
     'git log | env -S "env -S \'bash -x\'"',
     'env -S "env -S \'eval \\"\\$(git show HEAD:x.sh)\\"\'"',
     // a split-string value is also read word by word as written
-    'git log | env -S \'nice " bash\'',
+    "git log | env -S 'nice \" bash'",
     "git log | env -S 'sudo \\ bash'",
     'git log | env -S "nice \'x bash"',
     // a split-string value of 200000 pieces holding a refused segment

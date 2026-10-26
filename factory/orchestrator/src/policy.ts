@@ -2291,42 +2291,33 @@ const ENV_SPLIT_LIMIT_REASON =
   'an env split-string here nests more options than the guard reads — write the command out plainly';
 type EnvSplitBudget = { left: number; exceeded: boolean };
 
-const PLAIN_RUN = /[^\s"'\\]+/y;
+const splitOnSpace = (value: string): string[] => value.split(/\s+/).filter(Boolean);
+const VALUE_RUNS: Record<string, RegExp> = { '': /[^\s"'\\]+/y, "'": /[^']+/y, '"': /[^"\\]+/y };
 
 /** The words of a split-string value, reading single quotes, double quotes and backslashes. */
 function splitValueWords(value: string): string[] {
   const pieces: string[] = [];
-  let current = '';
-  let started = false;
+  let current: string | null = null;
   let quote = '';
   for (let at = 0; at < value.length; at += 1) {
-    const ch = value[at] as string;
-    PLAIN_RUN.lastIndex = at;
-    const run = quote ? null : PLAIN_RUN.exec(value);
-    if (run) {
-      current += run[0];
-      started = true;
-      at += run[0].length - 1;
-    } else if (quote) {
-      if (ch === quote) quote = '';
-      else if (ch === '\\' && quote === '"' && at + 1 < value.length) current += value[++at];
-      else current += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-      started = true;
-    } else if (ch === '\\' && at + 1 < value.length) {
-      current += value[++at];
-      started = true;
-    } else if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
-      if (started) pieces.push(current);
-      current = '';
-      started = false;
-    } else {
-      current += ch;
-      started = true;
+    const runs = VALUE_RUNS[quote] as RegExp;
+    runs.lastIndex = at;
+    let ch = runs.exec(value)?.[0] ?? (value[at] as string);
+    at += ch.length - 1;
+    if (quote ? ch === quote : ch === '"' || ch === "'") {
+      quote = quote ? '' : ch;
+      current ??= '';
+      continue;
     }
+    if (ch === '\\' && quote !== "'" && at + 1 < value.length) ch = value[++at] as string;
+    else if (!quote && /\s/.test(ch)) {
+      if (current !== null) pieces.push(current);
+      current = null;
+      continue;
+    }
+    current = (current ?? '') + ch;
   }
-  if (started) pieces.push(current);
+  if (current !== null) pieces.push(current);
   return pieces;
 }
 
@@ -2339,6 +2330,7 @@ function splitEnvCommand(
   words: readonly DequotedWord[],
   from: number,
   budget: EnvSplitBudget,
+  read: (value: string) => string[],
 ): readonly DequotedWord[] {
   let out = words;
   let i = from;
@@ -2375,7 +2367,7 @@ function splitEnvCommand(
         }
         budget.left -= 1;
         const raw = (separate ?? operand).raw;
-        const pieces = splitValueWords(value).map((piece) => ({ raw, text: piece }));
+        const pieces = read(value).map((piece) => ({ raw, text: piece }));
         out = out.slice(0, i).concat(pieces, out.slice(i + used));
       }
     }
@@ -2450,24 +2442,27 @@ function walkPrefixWords(
  * options, and prefix words) the way the in-line form is read: `xargs git`
  * with a missing, unreadable or force-gated subcommand; a shell after a pipe
  * from git; a shell `-c` or `eval` on a substitution that runs git. The line
- * is read with the `env -S` value split into words and as written.
+ * is read with the `env -S` value split into words (by its quotes, and by
+ * whitespace alone) and as written; each of those both stopping at the first
+ * `xargs` or `eval` and walking on to a later shell word.
  */
 function checkXargsGitAndShellInput(
   words: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
-  const splitEnv: SplitWords = (all, from) => splitEnvCommand(all, from, budget);
-  const asWritten: SplitWords = (all) => all;
-  // Read twice: stopping at the first xargs or eval, and walking on to a later shell word.
-  return (
-    readRunCommand(words, afterGitPipe, rule, splitEnv, false) ??
-    (budget.exceeded ? violation(rule, ENV_SPLIT_LIMIT_REASON) : null) ??
-    readRunCommand(words, afterGitPipe, rule, asWritten, false) ??
-    readRunCommand(words, afterGitPipe, rule, splitEnv, true) ??
-    readRunCommand(words, afterGitPipe, rule, asWritten, true)
-  );
+  let exceeded = false;
+  for (const shellOnly of [false, true]) {
+    for (const read of [splitValueWords, splitOnSpace, null]) {
+      const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
+      const split: SplitWords = (all, from) =>
+        read ? splitEnvCommand(all, from, budget, read) : all;
+      const found = readRunCommand(words, afterGitPipe, rule, split, shellOnly);
+      if (found) return found;
+      exceeded ||= budget.exceeded;
+    }
+  }
+  return exceeded ? violation(rule, ENV_SPLIT_LIMIT_REASON) : null;
 }
 
 function readRunCommand(
