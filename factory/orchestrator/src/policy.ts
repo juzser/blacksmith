@@ -2285,12 +2285,53 @@ const baseName = (word: string | undefined): string => (word ?? '').split('/').p
 const isShellWord = (word: string | undefined): boolean =>
   SHELL_INTERPRETER_RE.test(baseName(word));
 
+/** How many split-string options the guard reads in one segment; a segment past it is refused. */
+const ENV_SPLIT_LIMIT = 64;
+const ENV_SPLIT_LIMIT_REASON =
+  'an env split-string here nests more options than the guard reads — write the command out plainly';
+type EnvSplitBudget = { left: number; exceeded: boolean };
+
+const splitOnSpace = (value: string): string[] => value.split(/\s+/).filter(Boolean);
+const VALUE_RUNS: Record<string, RegExp> = { '': /[^\s"'\\]+/y, "'": /[^']+/y, '"': /[^"\\]+/y };
+
+/** The words of a split-string value, reading single quotes, double quotes and backslashes. */
+function splitValueWords(value: string): string[] {
+  const pieces: string[] = [];
+  let current: string | null = null;
+  let quote = '';
+  for (let at = 0; at < value.length; at += 1) {
+    const runs = VALUE_RUNS[quote] as RegExp;
+    runs.lastIndex = at;
+    let ch = runs.exec(value)?.[0] ?? (value[at] as string);
+    at += ch.length - 1;
+    if (quote ? ch === quote : ch === '"' || ch === "'") {
+      quote = quote ? '' : ch;
+      current ??= '';
+      continue;
+    }
+    if (ch === '\\' && quote !== "'" && at + 1 < value.length) ch = value[++at] as string;
+    else if (!quote && /\s/.test(ch)) {
+      if (current !== null) pieces.push(current);
+      current = null;
+      continue;
+    }
+    current = (current ?? '') + ch;
+  }
+  if (current !== null) pieces.push(current);
+  return pieces;
+}
+
 /**
  * Where `env` is the command word, its `-S` / `--split-string` value holds a
  * command line in one word; that word is replaced by the words it holds. An
  * `-S` anywhere else (an `xargs` option) is left alone.
  */
-function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly DequotedWord[] {
+function splitEnvCommand(
+  words: readonly DequotedWord[],
+  from: number,
+  budget: EnvSplitBudget,
+  read: (value: string) => string[],
+): readonly DequotedWord[] {
   let out = words;
   let i = from;
   while (i < out.length) {
@@ -2318,13 +2359,16 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
           i += ENV_VALUE_OPTIONS.has(t) ? 2 : 1;
           continue;
         }
+        const used = separate ? 2 : 1;
+        if (budget.left === 0) {
+          budget.exceeded = true;
+          i += used;
+          continue;
+        }
+        budget.left -= 1;
         const raw = (separate ?? operand).raw;
-        const pieces = value.split(/\s+/).filter(Boolean);
-        out = [
-          ...out.slice(0, i),
-          ...pieces.map((piece) => ({ raw, text: piece })),
-          ...out.slice(i + (separate ? 2 : 1)),
-        ];
+        const pieces = read(value).map((piece) => ({ raw, text: piece }));
+        out = out.slice(0, i).concat(pieces, out.slice(i + used));
       }
     }
   }
@@ -2334,13 +2378,18 @@ function splitEnvCommand(words: readonly DequotedWord[], from: number): readonly
 /**
  * The command a segment runs once `COMMAND_PREFIX_WORDS` and `env` are read
  * past, with their flags, flag values, numbers, durations and assignments.
- * After a prefix word, a word the walk cannot classify is not trusted to be the
- * command: the first shell interpreter later in the segment is taken instead.
+ * A flag after a prefix word may take the next word as its value, but never
+ * `xargs`, `eval` or a shell. A word the walk cannot classify is not trusted to
+ * be the command: the first of those later in the segment is taken instead.
  */
+type SplitWords = (words: readonly DequotedWord[], from: number) => readonly DequotedWord[];
+const isInputRunner = (word: string | undefined): boolean => word === 'xargs' || word === 'eval';
+
 function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
-  split: typeof splitEnvCommand,
+  split: SplitWords,
+  shellOnly: boolean,
 ): { words: readonly DequotedWord[]; index: number } {
   let words = start;
   let index = from;
@@ -2355,7 +2404,14 @@ function walkPrefixWords(
       let afterFlag = false;
       while (index < words.length) {
         const next = words[index]?.text ?? '';
-        if (isShellWord(next) || next === 'env' || COMMAND_PREFIX_WORDS.has(baseName(next))) break;
+        if (
+          isShellWord(next) ||
+          (!shellOnly && isInputRunner(next)) ||
+          next === 'env' ||
+          COMMAND_PREFIX_WORDS.has(baseName(next))
+        ) {
+          break;
+        }
         if (next.startsWith('-')) afterFlag = true;
         else if (afterFlag) afterFlag = false;
         else if (!PREFIX_OPERAND_RE.test(next) && !ASSIGNMENT_WORD_RE.test(next)) break;
@@ -2369,10 +2425,13 @@ function walkPrefixWords(
   if (
     sawPrefix &&
     index < words.length &&
-    !/^(?:xargs|eval)$/.test(words[index]?.text ?? '') &&
+    !isInputRunner(words[index]?.text) &&
     !isShellWord(words[index]?.text)
   ) {
-    const later = words.findIndex((word, at) => at > index && isShellWord(word.text));
+    const later = words.findIndex(
+      (word, at) =>
+        at > index && (isShellWord(word.text) || (!shellOnly && isInputRunner(word.text))),
+    );
     if (later !== -1) index = later;
   }
   return { words, index };
@@ -2383,30 +2442,41 @@ function walkPrefixWords(
  * options, and prefix words) the way the in-line form is read: `xargs git`
  * with a missing, unreadable or force-gated subcommand; a shell after a pipe
  * from git; a shell `-c` or `eval` on a substitution that runs git. The line
- * is read with the `env -S` value split into words and as written.
+ * is read with the `env -S` value split into words (by its quotes, and by
+ * whitespace alone) and as written; each of those both stopping at the first
+ * `xargs` or `eval` and walking on to a later shell word.
  */
 function checkXargsGitAndShellInput(
   words: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
 ): PolicyViolation | null {
-  return (
-    readRunCommand(words, afterGitPipe, rule, splitEnvCommand) ??
-    readRunCommand(words, afterGitPipe, rule, (all) => all)
-  );
+  let exceeded = false;
+  for (const shellOnly of [false, true]) {
+    for (const read of [splitValueWords, splitOnSpace, null]) {
+      const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
+      const split: SplitWords = (all, from) =>
+        read ? splitEnvCommand(all, from, budget, read) : all;
+      const found = readRunCommand(words, afterGitPipe, rule, split, shellOnly);
+      if (found) return found;
+      exceeded ||= budget.exceeded;
+    }
+  }
+  return exceeded ? violation(rule, ENV_SPLIT_LIMIT_REASON) : null;
 }
 
 function readRunCommand(
   originalWords: readonly DequotedWord[],
   afterGitPipe: boolean,
   rule: GuardrailRule,
-  split: typeof splitEnvCommand,
+  split: SplitWords,
+  shellOnly: boolean,
 ): PolicyViolation | null {
   let words = split(originalWords, 0);
   let index = commandStart(words);
   let viaXargs = false;
   for (;;) {
-    const walked = walkPrefixWords(words, index, split);
+    const walked = walkPrefixWords(words, index, split, shellOnly);
     words = walked.words;
     index = walked.index;
     if (words[index]?.text !== 'xargs') break;

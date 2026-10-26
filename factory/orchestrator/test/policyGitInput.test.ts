@@ -343,3 +343,101 @@ describe('force-push rule reads a command word it cannot spell out as possibly r
     expect(reasons('G=git; $G show HEAD:run.sh | sh')[0]).toContain('git output is run by a shell');
   });
 });
+
+describe('force-push rule reads xargs, eval and a shell behind prefix words and their options', () => {
+  const PREFIX_WORDS = ['timeout', 'command', 'sudo', 'nice', 'nohup', 'exec', 'stdbuf', 'time'];
+  const reasonsOf = (command: string) =>
+    decide(command)
+      .violations.filter((v) => v.ruleId === 'force-push')
+      .map((v) => v.reason);
+
+  it.each(PREFIX_WORDS)('refuses xargs git and eval of a git substitution behind %s', (word) => {
+    expect(forcePushRefused(`echo push | ${word} xargs git`)).toBe(true);
+    expect(forcePushRefused(`${word} eval "$(git show HEAD:x.sh)"`)).toBe(true);
+  });
+
+  const REFUSED = [
+    // a flag with no value, or with its value attached, does not take the next word
+    'echo push | sudo -E xargs git',
+    'echo push | time -p xargs git',
+    'echo push | sudo -- xargs git',
+    'echo push | nice -- xargs git',
+    'echo push | timeout -- 5 xargs git',
+    'echo push | stdbuf -oL xargs git',
+    'sudo -E eval "$(git show HEAD:x.sh)"',
+    'time -p eval "$(git show HEAD:x.sh)"',
+    'nice -- eval "$(git show HEAD:x.sh)"',
+    'stdbuf -oL eval "$(git show HEAD:x.sh)"',
+    'git log | sudo -E bash',
+    'git log | time -p sh',
+    // a flag the walk cannot classify: a later xargs or eval is still read
+    'echo push | sudo -E foo bar xargs git',
+    'sudo -E foo bar eval "$(git show HEAD:x.sh)"',
+    'echo push | sudo -u example-user xargs git',
+    // a nested env split-string value holding a quoted command
+    'echo push | env -S "env -S \'xargs git\'"',
+    'echo push | env -S \'env -S "xargs git push"\'',
+    'git log | env -S "env -S \'bash -x\'"',
+    'env -S "env -S \'eval \\"\\$(git show HEAD:x.sh)\\"\'"',
+    // a split-string value is also read word by word as written
+    "git log | env -S 'nice \" bash'",
+    "git log | env -S 'sudo \\ bash'",
+    'git log | env -S "nice \'x bash"',
+    // a split-string value of 200000 pieces holding a refused segment
+    `echo push | env -S "xargs git push ${'a '.repeat(200000)}"`,
+  ];
+
+  const ALLOWED = [
+    'echo push | sudo -E xargs grep y',
+    'git ls-files | sudo -E xargs git status',
+    'echo x | stdbuf -o L xargs grep y',
+    'echo x | time -p xargs grep y',
+    'sudo -E eval "$(echo hi)"',
+    'sudo -u example-user ls',
+    'git log | sudo -E grep x',
+    'echo x | env -S "env -S \'xargs grep y\'"',
+  ];
+
+  it.each(REFUSED)('refuses %s', (command) => {
+    expect(() => forcePushRefused(command)).not.toThrow();
+    expect(forcePushRefused(command)).toBe(true);
+  });
+
+  it.each(ALLOWED)('allows %s', (command) => {
+    expect(forcePushRefused(command)).toBe(false);
+  });
+
+  it('gives the xargs reason and the shell-input reason for the lines it refuses', () => {
+    expect(reasonsOf('echo push | sudo -E xargs git')[0]).toContain('git run by xargs');
+    expect(reasonsOf('sudo -E eval "$(git show HEAD:x.sh)"')[0]).toContain(
+      'git output is run by a shell',
+    );
+  });
+
+  // The guard reads this many split-string options in one segment.
+  const SPLIT_LIMIT = 64;
+  const chain = (levels: number) => `echo x | env -S "${'-S'.repeat(levels - 1)}xargs grep y"`;
+
+  it('reads a chain of split-string options at the limit and refuses one past it with its reason', () => {
+    expect(decide(chain(SPLIT_LIMIT)).violations).toEqual([]);
+    const past = reasonsOf(chain(SPLIT_LIMIT + 1));
+    expect(past).toHaveLength(1);
+    expect(past[0]).toContain('nests more options than the guard reads');
+  });
+
+  // A later shell word is read even when an xargs word comes first.
+  const SUBST = '"$(git show HEAD:x.sh)"';
+  const shellLines = [
+    `sudo -p xargs -p ls bash -c ${SUBST}`,
+    'git log | nice foo xargs ls sh',
+    ...['nice', 'sudo', 'nohup', 'nice -n 5'].flatMap((prefix) =>
+      ['xargs ls', 'xargs ls xargs ls'].flatMap((runner) =>
+        ['sh', 'bash'].map((shell) => `echo x | ${prefix} foo ${runner} ${shell} -c ${SUBST}`),
+      ),
+    ),
+  ];
+
+  it.each(shellLines)('refuses a shell run on git output after an xargs word: %s', (command) => {
+    expect(reasonsOf(command)[0]).toContain('git output is run by a shell');
+  });
+});
