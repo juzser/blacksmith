@@ -61,7 +61,18 @@ function runCli(
   // them in.
   const blankBudgetEnv = Object.fromEntries(ALL_BUDGET_ENV_NAMES.map((name) => [name, '']));
   const run = runProcess('node', [CLI_PATH, ...args], {
-    env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
+    // The `session start` settings hint reads the project's and the user's
+    // Claude settings, which a test must never do: BS_NO_SETTINGS_HINT=1 (a
+    // test and CI switch, not a user setting) turns it off, and
+    // CLAUDE_CONFIG_DIR names a directory that does not exist so no real
+    // ~/.claude is read. The hint tests switch it back on and sandbox their own.
+    env: {
+      ...process.env,
+      BS_NO_SETTINGS_HINT: '1',
+      CLAUDE_CONFIG_DIR: path.join(tmpdir(), 'smith-cli-tests-no-claude-config'),
+      ...blankBudgetEnv,
+      ...envOverrides,
+    },
     ...(stdin === undefined ? {} : { input: stdin }),
     ...(cwd === undefined ? {} : { cwd }),
   });
@@ -16429,25 +16440,29 @@ describe('smith init (built binary)', () => {
   describe('Claude Code settings hint on session start', () => {
     const HINT = 'Claude Code settings for this project are out of date';
     const sandboxes = new Map<string, ReturnType<typeof sandboxFor>>();
-    // BS_HOME moves the work root, so the record read is this test's own; the
-    // cwd is a temp project and HOME an empty dir, so nothing real is read.
-    const start = (home: string, id: string) => {
-      const sandbox = sandboxFor(`${home}-sandbox`);
-      sandboxes.set(home, sandbox);
-      return runCli(
-        ['session', 'start', id, '--state-dir', path.join(home, 'events')],
-        { ...sandbox.env, BS_HOME: home },
-        undefined,
-        sandbox.project,
-      );
-    };
-    const recordFor = (home: string, revision: number, written: Record<string, unknown> = {}) => {
+    const sandboxOf = (home: string) => {
       const sandbox = sandboxes.get(home) ?? sandboxFor(`${home}-sandbox`);
       sandboxes.set(home, sandbox);
-      mkdirSync(path.join(home, 'state'), { recursive: true });
+      return sandbox;
+    };
+    // The hint is switched on explicitly (the helper switches it off), in a temp
+    // project with an isolated HOME, so nothing real is read.
+    const start = (home: string, id: string, cwd?: string) => {
+      const sandbox = sandboxOf(home);
+      return runCli(
+        ['session', 'start', id, '--state-dir', path.join(home, 'events')],
+        { ...sandbox.env, BS_HOME: home, BS_NO_SETTINGS_HINT: '' },
+        undefined,
+        cwd ?? sandbox.project,
+      );
+    };
+    // The record sits in the project's own .claude/, as bs init leaves it.
+    const recordFor = (home: string, revision: number, written: Record<string, unknown> = {}) => {
+      const sandbox = sandboxOf(home);
+      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
       writeFileSync(
-        path.join(home, 'state', 'claude-settings.json'),
-        JSON.stringify({ projects: { [realpathSync(sandbox.project)]: { revision, written } } }),
+        path.join(sandbox.project, '.claude', 'bs-settings-record.json'),
+        JSON.stringify({ revision, written }),
       );
       return sandbox;
     };
@@ -16458,7 +16473,7 @@ describe('smith init (built binary)', () => {
 
       expect(status).toBe(0);
       expect(stderr.split('\n').filter((line) => line.includes(HINT))).toHaveLength(1);
-      expect(stderr).toContain('run `bs init`');
+      expect(stderr).toContain('run `bs init` in');
       expect(JSON.parse(stdout).record.event_type).toBe('session-start');
     });
 
@@ -16471,10 +16486,37 @@ describe('smith init (built binary)', () => {
       expect(start(home, `hint-old-${Date.now()}`).stderr).toContain(HINT);
     });
 
+    it('is off by default in the shared helper, whatever the project holds', () => {
+      const home = path.join(root, 'hint-off');
+      const sandbox = sandboxOf(home);
+
+      const { stderr } = runCli(
+        ['session', 'start', `hint-off-${Date.now()}`, '--state-dir', path.join(home, 'events')],
+        { ...sandbox.env, BS_HOME: home },
+        undefined,
+        sandbox.project,
+      );
+
+      expect(stderr).not.toContain(HINT);
+    });
+
+    it('stays quiet in a subdirectory of an initialised project, and names the root otherwise', () => {
+      const home = path.join(root, 'hint-subdir');
+      const sandbox = recordFor(home, CLAUDE_SETTINGS_REVISION);
+      mkdirSync(path.join(sandbox.project, '.git'));
+      const sub = path.join(sandbox.project, 'packages', 'a');
+      mkdirSync(sub, { recursive: true });
+      expect(start(home, `hint-sub-${Date.now()}`, sub).stderr).not.toContain(HINT);
+
+      recordFor(home, CLAUDE_SETTINGS_REVISION - 1);
+      const { stderr } = start(home, `hint-sub2-${Date.now()}`, sub);
+      expect(stderr).toContain(HINT);
+      expect(stderr).toContain(`run \`bs init\` in ${realpathSync(sandbox.project)}`);
+    });
+
     it('says the user setting is overridden while bs lines and a user value coexist', () => {
       const home = path.join(root, 'hint-overridden');
       const sandbox = recordFor(home, CLAUDE_SETTINGS_REVISION, { autoCompactWindow: 633000 });
-      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
       writeFileSync(
         path.join(sandbox.project, '.claude', 'settings.local.json'),
         JSON.stringify({ autoCompactWindow: 633000 }),
@@ -16506,7 +16548,10 @@ describe('smith init (built binary)', () => {
           'settings.local.json',
         ),
       );
-      expect(existsSync(path.join(home, 'state', 'claude-settings.json'))).toBe(true);
+      expect(
+        existsSync(path.join(`${home}-sandbox`, 'project', '.claude', 'bs-settings-record.json')),
+      ).toBe(true);
+      expect(existsSync(path.join(home, 'state', 'claude-settings.json'))).toBe(false);
     });
 
     it('init says on stderr when it could not write the window, and keeps the hint alive', () => {

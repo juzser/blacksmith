@@ -264,7 +264,7 @@ import {
   type WaveBudgetCheck,
 } from './waveBudget.js';
 import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.js';
-import { claudeSettingsHint, initWorkRoot } from './workroot.js';
+import { claudeSettingsHint, findProjectRoot, initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
   epicBranchPrefix,
@@ -3112,14 +3112,28 @@ async function main(): Promise<number> {
     const [sessionId] = requirePositionals(positional, usageFor('session start')) as [string];
     // One stderr line, never stdout (callers parse it) and never a failure.
     try {
-      const hint = claudeSettingsHint(WORK_ROOT, process.cwd());
+      // BS_NO_SETTINGS_HINT switches the hint off. It is a switch for tests and
+      // CI, which must not read the checkout's or the machine's settings; it is
+      // not a user setting.
+      const hint =
+        process.env.BS_NO_SETTINGS_HINT === '1' ? undefined : claudeSettingsHint(process.cwd());
+      const root = findProjectRoot(process.cwd());
+      const advice = `run \`bs init\` in ${root}, then restart Claude Code`;
       if (hint === 'out-of-date') {
         process.stderr.write(
-          'bs: Claude Code settings for this project are out of date — run `bs init` here, then restart Claude Code\n',
+          `bs: Claude Code settings for this project are out of date — ${advice}\n`,
         );
       } else if (hint === 'overridden') {
         process.stderr.write(
-          'bs: your own autoCompactWindow or window variable is overridden by the lines bs wrote in .claude/settings.local.json — run `bs init` here to remove them, then restart Claude Code\n',
+          `bs: your own autoCompactWindow in a settings file is overridden by the lines bs wrote in .claude/settings.local.json — ${advice}, which removes them\n`,
+        );
+      } else if (hint === 'unused') {
+        process.stderr.write(
+          `bs: CLAUDE_CODE_AUTO_COMPACT_WINDOW beats every settings file, so the autoCompactWindow lines bs wrote in .claude/settings.local.json are unused — ${advice}, which removes them\n`,
+        );
+      } else if (hint === 'stacked') {
+        process.stderr.write(
+          `bs: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE stacks on the autoCompactWindow bs wrote in .claude/settings.local.json — ${advice}, which removes it\n`,
         );
       }
     } catch {

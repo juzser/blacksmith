@@ -67,11 +67,12 @@ than appearing in it.
   the eight retired 200k-window models, which the top-level value would
   otherwise leave compacting near 83%. The nine keys stand or fall together:
   `bs init` owns only the keys its record proves it wrote while their value is
-  unchanged, and any other window value, wherever it sits, is yours and blocks
-  all nine, with one warning, and `bs init` removes its own lines (including
+  unchanged, and any other window value, wherever it sits (even one equal to
+  the recommendation), is yours and blocks all nine, with one warning, and `bs init` removes its own lines (including
   when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
-  is set). A record per project in `state/claude-settings.json` is what tells
-  its keys from yours, and `bs session start` prints a stderr hint when the
+  is set). A record in the project's `.claude/bs-settings-record.json`
+  (git-excluded; deleting it makes bs treat its old lines as yours) is what
+  tells its keys from yours, and `bs session start` prints a stderr hint when the
   project's entry is missing or old, or when your value is overridden by
   bs's local lines until you re-run `bs init`. Deleting bs's lines is not an
   opt-out (set a value such as `"auto"` instead).

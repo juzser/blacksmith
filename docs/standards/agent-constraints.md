@@ -297,7 +297,7 @@ M-3).
   33,000, with a per-model value for the old 200k models) into the project's
   local settings, so a model whose window the setting reaches compacts at 60%
   of it. A 4.x model with the `[1m]` add-on takes the 200k value and compacts
-  at 120k, about 12% of 1M. It yields to any value you set; see
+  at 120k, about 12% of 1M. It yields to any value you set, once you re-run `bs init`; see
   [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). Everything else
   stays prompt-level (baked into `.claude/agents/*`) until the phase-9 loop
   daemon makes it mechanical: judges and the merger narrow and never compact,

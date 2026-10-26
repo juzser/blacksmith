@@ -185,9 +185,10 @@ package, where an upgrade is supposed to reach it.
 after an upgrade is safe and does nothing. The one exception is the Claude Code
 settings it writes (the [caps](#raise-the-concurrency-caps) and the
 [compact window](#compact-earlier-on-1m-models)): it records what it wrote and
-updates those keys only while they still equal the record. Commit
-`.blacksmith/factory/` if your team shares the project: the roadmap and the stack answers are
-declarations about the project, not about your laptop.
+updates those keys only while they still equal the record, and removes its own
+keys when you set yours. Commit `.blacksmith/factory/` if your team shares the
+project: the roadmap and the stack answers are declarations about the project,
+not about your laptop.
 
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
 against `.blacksmith/factory/policies/stack.yml`. It is the one step of Part 2
@@ -269,7 +270,8 @@ The keys are written all together with the top-level one or not at all.
 **All or nothing, and who owns what.** The nine keys (the top-level one and
 the eight per-model ones) stand or fall together, whatever the history. `bs
 init` owns only the keys its record proves it wrote, while their value is
-unchanged; any other window value, wherever it sits, is yours, and one of
+unchanged; any other window value, wherever it sits, is yours (even one that
+happens to equal the recommendation, which `bs init` never adopts), and one of
 yours blocks all nine. When blocked, `bs init` removes its own lines from
 `.claude/settings.local.json` (it would otherwise beat your value) and warns
 once, naming your value or values. A key `bs init` wrote that you then edited
@@ -315,7 +317,8 @@ every earlier one. These count as yours, and block `bs init`:
 - a top-level `autoCompactWindow`, or an `autoCompactWindow` under
   `modelSettings` (any model id), in the user, project or local settings.
 
-An empty value counts as unset. Values are compared as JSON: the string
+For the environment variables, an empty value counts as unset (in a settings
+file an empty string is a value, and it is yours). Values are compared as JSON: the string
 `"633000"` is not the number 633000, so it is yours. One variable set in both
 places gets one warning, naming the settings file.
 
@@ -327,19 +330,28 @@ applies on top of the window: the threshold is
 
 **Opting out.** Set a value, `"auto"` included, then re-run `bs init`: it
 removes its lines and leaves yours. Until you re-run it, bs's local lines win
-over a value set elsewhere, and `bs session start` reminds you. Deleting bs's
-lines is not an opt-out: the next `bs init` writes them back. `/autocompact`
-changes the window for one session only.
+over a window value in another settings file, and `bs session start` reminds
+you. They do not win over `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which beats every
+settings file, so there bs's lines are merely unused; and
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` stacks on bs's window rather than replacing
+it. Deleting bs's lines is not an opt-out: the next `bs init` writes them back.
+`/autocompact` changes the window for one session only.
 
-**Re-running and upgrading.** `bs init` records what it wrote, one entry per
-project directory, in `state/claude-settings.json` in the work root; running it
-in one project never touches another's entry. A later run updates a key still
+**Re-running and upgrading.** `bs init` records what it wrote in
+`.claude/bs-settings-record.json` of the project (git-excluded like
+`settings.local.json`, and not a settings file, so Claude Code does not load
+it); the record's location is what ties it to the project, so running `bs init`
+in one project never touches another's, and deleting `state/` does not lose it.
+Deleting the record itself makes bs treat its old lines as yours: to reset,
+delete those lines and re-run `bs init`. A later run updates a key still
 equal to the record (the policy ratio changed), and changes no file when there
 is nothing to change. If it could not read the settings, could not write them,
 or the policy gave no value, it says so on stderr and the record stays old, so
 the reminder keeps coming. After upgrading the package, re-run `bs init` in
 each project, then restart Claude Code: a running session does not pick the
-change up. `bs session start` prints one line on stderr until you do.
+change up. `bs session start` prints one line on stderr until you do, naming
+the project root to run `bs init` in; it stays quiet in a subdirectory or a
+linked worktree of a project that is already initialised.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of

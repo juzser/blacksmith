@@ -9,6 +9,7 @@ import {
   CLAUDE_SETTINGS_REVISION,
   CONCURRENCY_CAPS,
   claudeSettingsHint,
+  findProjectRoot,
   initWorkRoot,
   OLD_WINDOW_MODELS,
   settingsRecordPath,
@@ -61,21 +62,17 @@ describe('initWorkRoot auto-compact window', () => {
     mkdirSync(path.dirname(file), { recursive: true });
     writeFileSync(file, text, 'utf8');
   };
-  // The record keeps one entry per physical project dir.
-  const entryOf = (dirOfProject: string) =>
-    readJson(settingsRecordPath(workRoot)).projects[realpathSync(dirOfProject)];
+  // The record sits beside the settings it describes, in the project's own .claude/.
+  const recordFile = (dirOfProject: string = project) => settingsRecordPath(dirOfProject);
+  const entryOf = (dirOfProject: string) => readJson(recordFile(dirOfProject));
   const record = () => entryOf(project);
   const withoutEnv = (settings: Record<string, unknown>) => {
     const { env: _caps, ...rest } = settings;
     return rest;
   };
-  const putEntry = (entry: Record<string, unknown>) =>
-    put(
-      settingsRecordPath(workRoot),
-      JSON.stringify({ projects: { [realpathSync(project)]: entry } }),
-    );
+  const putEntry = (entry: Record<string, unknown>) => put(recordFile(), JSON.stringify(entry));
   const hint = (extra: Record<string, unknown> = {}) =>
-    claudeSettingsHint(workRoot, project, { userSettingsPath: userSettings, env: {}, ...extra });
+    claudeSettingsHint(project, { userSettingsPath: userSettings, env: {}, ...extra });
   // A policy tree holding only budgets.yml, for a ratio other than the shipped one.
   const policyWith = (budgets: string): string => {
     const root = path.join(dir, 'policy');
@@ -372,8 +369,16 @@ describe('initWorkRoot auto-compact window', () => {
     },
   );
 
-  it('does not warn about a foreign value that already equals the recommendation', () => {
-    put(userSettings, JSON.stringify({ autoCompactWindow: 633000 }));
+  it('does not warn about a foreign full layout that already equals the recommendation', () => {
+    put(
+      userSettings,
+      JSON.stringify({
+        autoCompactWindow: 633000,
+        modelSettings: Object.fromEntries(
+          OLD_WINDOW_MODELS.map((id) => [id, { autoCompactWindow: 153000 }]),
+        ),
+      }),
+    );
 
     const window = init();
 
@@ -385,7 +390,7 @@ describe('initWorkRoot auto-compact window', () => {
   it('is idempotent: a second run changes no file and needs no restart', () => {
     run();
     const settings = readFileSync(local, 'utf8');
-    const rec = readFileSync(settingsRecordPath(workRoot), 'utf8');
+    const rec = readFileSync(recordFile(), 'utf8');
 
     const again = run();
 
@@ -394,25 +399,42 @@ describe('initWorkRoot auto-compact window', () => {
     expect(again.claudeWindow.warnings).toEqual([]);
     expect(again.claudeCaps.restartNeeded).toBe(false);
     expect(readFileSync(local, 'utf8')).toBe(settings);
-    expect(readFileSync(settingsRecordPath(workRoot), 'utf8')).toBe(rec);
+    expect(readFileSync(recordFile(), 'utf8')).toBe(rec);
   });
 
-  it('records, per physical project dir, the revision and every key it wrote, caps included', () => {
+  it('records the revision and every key it wrote, caps included, in the project .claude/', () => {
     run();
 
-    expect(readJson(settingsRecordPath(workRoot))).toEqual({
-      projects: {
-        [realpathSync(project)]: {
-          revision: CLAUDE_SETTINGS_REVISION,
-          written: {
-            [`env.${CAP_A}`]: '1000',
-            [`env.${CAP_B}`]: '1000',
-            autoCompactWindow: 633000,
-            ...perModelRecord(153000),
-          },
-        },
+    expect(recordFile()).toBe(path.join(project, '.claude', 'bs-settings-record.json'));
+    expect(readJson(recordFile())).toEqual({
+      revision: CLAUDE_SETTINGS_REVISION,
+      written: {
+        [`env.${CAP_A}`]: '1000',
+        [`env.${CAP_B}`]: '1000',
+        autoCompactWindow: 633000,
+        ...perModelRecord(153000),
       },
     });
+    expect(existsSync(path.join(workRoot, 'state', 'claude-settings.json'))).toBe(false);
+  });
+
+  it('git-excludes the record like the local settings file', () => {
+    run();
+
+    expect(() =>
+      git(project, 'check-ignore', '-q', '.claude/bs-settings-record.json'),
+    ).not.toThrow();
+  });
+
+  it('survives deleting state/: the record is not in the work root', () => {
+    run();
+    const rec = readFileSync(recordFile(), 'utf8');
+    execFileSync('rm', ['-rf', path.join(workRoot, 'state')]);
+
+    const again = run();
+
+    expect(readFileSync(recordFile(), 'utf8')).toBe(rec);
+    expect(again.claudeWindow.status).toBe('kept');
   });
 
   it('reports a fresh project as written, although the caps step created the file first', () => {
@@ -422,7 +444,7 @@ describe('initWorkRoot auto-compact window', () => {
     expect(result.claudeWindow.status).toBe('written');
   });
 
-  it('keeps one record entry per project: init in B leaves the entry of A as it was', () => {
+  it('keeps one record per project: init in B leaves the record of A as it was', () => {
     const other = path.join(dir, 'other');
     mkdirSync(other);
     run();
@@ -432,6 +454,7 @@ describe('initWorkRoot auto-compact window', () => {
 
     expect(entryOf(project)).toEqual(before);
     expect(entryOf(other).written.autoCompactWindow).toBe(533000);
+    expect(existsSync(recordFile(other))).toBe(true);
     expect(readJson(path.join(other, '.claude', 'settings.local.json')).autoCompactWindow).toBe(
       533000,
     );
@@ -621,30 +644,82 @@ describe('initWorkRoot auto-compact window', () => {
       expect(readJson(local).autoCompactWindow).toBe(633000);
     });
 
-    it('adopts a pre-existing value equal to the current one, silently', () => {
-      put(local, JSON.stringify({ autoCompactWindow: 633000, modelSettings: perModel(153000) }));
+    it("never adopts window keys: the user's own full layout, with no record, is theirs and stays (probe5 R1c)", () => {
+      const layout = { autoCompactWindow: 633000, modelSettings: perModel(153000) };
+      put(local, JSON.stringify(layout));
 
       const window = init();
 
-      expect(window.status).toBe('kept');
+      expect(window.status).toBe('skipped');
       expect(window.warnings).toEqual([]);
       expect(window.restartNeeded).toBe(false);
-      expect(record().written.autoCompactWindow).toBe(633000);
+      expect(readJson(local)).toEqual(layout);
+      expect(record().written.autoCompactWindow).toBeUndefined();
     });
 
-    it('ignores the entry of another project dir', () => {
+    it("keeps the user's full layout through a second run too", () => {
+      const layout = { autoCompactWindow: 633000, modelSettings: perModel(153000) };
+      put(local, JSON.stringify(layout));
+      init();
+
+      expect(init().status).toBe('skipped');
+      expect(readJson(local)).toEqual(layout);
+    });
+
+    it('keeps one top-level value equal to the recommendation and warns: the layout is incomplete (probe4 R1)', () => {
+      put(local, JSON.stringify({ autoCompactWindow: 633000 }));
+
+      const window = init();
+
+      expect(window.status).toBe('skipped');
+      expect(readJson(local)).toEqual({ autoCompactWindow: 633000 });
+      expect(window.warnings).toHaveLength(1);
+    });
+
+    it('keeps a per-model value equal to the recommendation, with no record (probe4 R1b)', () => {
+      const own = { modelSettings: { 'claude-opus-4-6': { autoCompactWindow: 153000 } } };
+      put(local, JSON.stringify(own));
+
+      const window = init();
+
+      expect(window.status).toBe('skipped');
+      expect(readJson(local)).toEqual(own);
+      expect(window.warnings).toHaveLength(1);
+    });
+
+    it("stays silent when the user's full layout sits in the user settings, and removes only bs lines", () => {
       run();
-      const all = readJson(settingsRecordPath(workRoot));
       put(
-        settingsRecordPath(workRoot),
-        JSON.stringify({ projects: { '/elsewhere': all.projects[realpathSync(project)] } }),
+        userSettings,
+        JSON.stringify({ autoCompactWindow: 633000, modelSettings: perModel(153000) }),
       );
 
       const window = init();
 
-      // No entry here: the values equal to today's are adopted, and none is warned about.
-      expect(window.status).toBe('kept');
+      expect(window.status).toBe('skipped');
       expect(window.warnings).toEqual([]);
+      expect(readJson(local).autoCompactWindow).toBeUndefined();
+    });
+
+    it("does not read another project's record: with no record here, values equal to today's are the user's", () => {
+      const other = path.join(dir, 'other');
+      mkdirSync(other);
+      run({ projectDir: other });
+      put(local, JSON.stringify({ autoCompactWindow: 633000, modelSettings: perModel(153000) }));
+
+      const window = init();
+
+      expect(window.status).toBe('skipped');
+      expect(readJson(local).autoCompactWindow).toBe(633000);
+    });
+
+    it("treats bs lines as the user's once the record is deleted, never removing them", () => {
+      run();
+      execFileSync('rm', [recordFile()]);
+
+      const window = init();
+
+      expect(window.status).toBe('skipped');
       expect(readJson(local).autoCompactWindow).toBe(633000);
     });
 
@@ -711,6 +786,21 @@ describe('initWorkRoot auto-compact window', () => {
       expect(window.warnings[0]?.match(new RegExp(WINDOW_ENV, 'g'))).toHaveLength(1);
     });
 
+    it('says the window variable beats every settings file, so bs lines would go unused', () => {
+      const window = init({ env: { [WINDOW_ENV]: '300000' } });
+
+      expect(window.warnings).toHaveLength(1);
+      expect(window.warnings[0]).toMatch(/beats every settings file/);
+      expect(window.warnings[0]).not.toMatch(/overridden/);
+    });
+
+    it('says the percentage variable stacks on the window', () => {
+      const window = init({ env: { [PCT_ENV]: '50' } });
+
+      expect(window.warnings).toHaveLength(1);
+      expect(window.warnings[0]).toMatch(/stacks on/);
+    });
+
     it('treats an empty value as unset, in the process env and in a settings env block', () => {
       put(userSettings, JSON.stringify({ env: { [PCT_ENV]: '' } }));
 
@@ -728,14 +818,43 @@ describe('initWorkRoot auto-compact window', () => {
       const window = init();
 
       expect(window.status).toBe('unreadable');
+      expect(existsSync(recordFile())).toBe(false);
       expect(hint()).toBe('out-of-date');
     });
 
-    it('does not advance the record when the write fails', () => {
+    it('does not create a record when the write fails (.claude is a file)', () => {
       put(path.join(project, '.claude'), 'not a dir');
 
       expect(init().status).toBe('failed');
+      expect(existsSync(recordFile())).toBe(false);
       expect(hint()).toBe('out-of-date');
+    });
+
+    it('leaves an existing record exactly as it was after a failed run', () => {
+      run();
+      const rec = readFileSync(recordFile(), 'utf8');
+      execFileSync('rm', ['-f', local]);
+      put(local, '{oops');
+
+      expect(init({ repoRoot: policyWith(ratio(0.5)) }).status).toBe('unreadable');
+
+      expect(readFileSync(recordFile(), 'utf8')).toBe(rec);
+    });
+
+    it('leaves an existing record as it was when the retract write fails', () => {
+      run();
+      put(userSettings, JSON.stringify({ autoCompactWindow: 800000 }));
+      const rec = readFileSync(recordFile(), 'utf8');
+      execFileSync('chmod', ['444', local]);
+      try {
+        const window = init();
+        // Root can write a read-only file; only assert when the write really failed.
+        if (window.status === 'failed') {
+          expect(readFileSync(recordFile(), 'utf8')).toBe(rec);
+        }
+      } finally {
+        execFileSync('chmod', ['644', local]);
+      }
     });
 
     it('does not advance the record when no value can be derived', () => {
@@ -745,9 +864,7 @@ describe('initWorkRoot auto-compact window', () => {
 
     it('keeps an older revision as it was after a failed run', () => {
       run();
-      const all = readJson(settingsRecordPath(workRoot));
-      all.projects[realpathSync(project)].revision = 0;
-      put(settingsRecordPath(workRoot), JSON.stringify(all));
+      putEntry({ ...record(), revision: 0 });
       put(local, '{oops');
 
       init();
@@ -772,32 +889,29 @@ describe('initWorkRoot auto-compact window', () => {
   });
 
   describe('the check behind the session-start hint', () => {
-    it('is out of date with no entry, current after init, and old once the revision moves', () => {
-      mkdirSync(path.join(workRoot, 'state'), { recursive: true });
+    it('is out of date with no record, current after init, and old once the revision moves', () => {
       expect(hint()).toBe('out-of-date');
 
       run();
       expect(hint()).toBeUndefined();
 
-      const all = readJson(settingsRecordPath(workRoot));
-      all.projects[realpathSync(project)].revision = 0;
-      put(settingsRecordPath(workRoot), JSON.stringify(all));
+      putEntry({ ...record(), revision: 0 });
       expect(hint()).toBe('out-of-date');
     });
 
-    it('looks up the entry of the given project, not another one in the same work root', () => {
+    it('looks at the record of the given project, not another one', () => {
       const other = path.join(dir, 'other');
       mkdirSync(other);
       run({ projectDir: other });
 
       expect(hint()).toBe('out-of-date');
-      expect(claudeSettingsHint(workRoot, other, { userSettingsPath: userSettings, env: {} })).toBe(
+      expect(claudeSettingsHint(other, { userSettingsPath: userSettings, env: {} })).toBe(
         undefined,
       );
     });
 
     it('treats an unparsable record as out of date', () => {
-      put(settingsRecordPath(workRoot), '{nope');
+      put(recordFile(), '{nope');
 
       expect(hint()).toBe('out-of-date');
     });
@@ -814,11 +928,100 @@ describe('initWorkRoot auto-compact window', () => {
       expect(hint()).toBeUndefined();
     });
 
-    it('says overridden for a window variable in the environment it is given', () => {
+    it.each([
+      ['a top-level value equal to the old-model value', { autoCompactWindow: 153000 }],
+      [
+        'a value for a 1M model equal to the old-model value',
+        { modelSettings: { 'claude-opus-5-5': { autoCompactWindow: 153000 } } },
+      ],
+      [
+        'an old model at the 1M value',
+        { modelSettings: { 'claude-opus-4-6': { autoCompactWindow: 633000 } } },
+      ],
+    ])('compares per key, so %s still counts as overridden', (_name, userValue) => {
+      run();
+      put(userSettings, JSON.stringify(userValue));
+
+      expect(hint()).toBe('overridden');
+    });
+
+    it('stays quiet for user values equal to what bs wrote, key by key', () => {
+      run();
+      put(
+        userSettings,
+        JSON.stringify({ autoCompactWindow: 633000, modelSettings: perModel(153000) }),
+      );
+
+      expect(hint()).toBeUndefined();
+    });
+
+    it('says unused for a window variable, which beats every settings file', () => {
       run();
 
-      expect(hint({ env: { [WINDOW_ENV]: '700000' } })).toBe('overridden');
+      expect(hint({ env: { [WINDOW_ENV]: '700000' } })).toBe('unused');
       expect(hint({ env: { [WINDOW_ENV]: '' } })).toBeUndefined();
+    });
+
+    it('says stacked for the percentage variable, which stacks on the window', () => {
+      run();
+
+      expect(hint({ env: { [PCT_ENV]: '50' } })).toBe('stacked');
+    });
+
+    describe('from a subdirectory or a linked worktree', () => {
+      it('is quiet in a subdirectory of an initialised project', () => {
+        run();
+        const sub = path.join(project, 'packages', 'a');
+        mkdirSync(sub, { recursive: true });
+
+        expect(
+          claudeSettingsHint(sub, { userSettingsPath: userSettings, env: {} }),
+        ).toBeUndefined();
+      });
+
+      it('is quiet in a linked worktree of an initialised project', () => {
+        git(project, 'config', 'user.email', 'a@b.c');
+        git(project, 'config', 'user.name', 'n');
+        git(project, 'commit', '-q', '--allow-empty', '-m', 'x');
+        run();
+        const tree = path.join(dir, 'tree');
+        git(project, 'worktree', 'add', '-q', '-b', 'side', tree);
+        const inside = path.join(tree, 'deep');
+        mkdirSync(inside);
+
+        for (const at of [tree, inside]) {
+          expect(
+            claudeSettingsHint(at, { userSettingsPath: userSettings, env: {} }),
+          ).toBeUndefined();
+        }
+      });
+
+      it('asks for init when the project was never initialised, naming the root', () => {
+        const sub = path.join(project, 'packages', 'a');
+        mkdirSync(sub, { recursive: true });
+
+        expect(claudeSettingsHint(sub, { userSettingsPath: userSettings, env: {} })).toBe(
+          'out-of-date',
+        );
+        expect(findProjectRoot(sub)).toBe(realpathSync(project));
+      });
+
+      it('resolves the main worktree from a linked worktree', () => {
+        git(project, 'config', 'user.email', 'a@b.c');
+        git(project, 'config', 'user.name', 'n');
+        git(project, 'commit', '-q', '--allow-empty', '-m', 'x');
+        const tree = path.join(dir, 'tree');
+        git(project, 'worktree', 'add', '-q', '-b', 'side', tree);
+
+        expect(findProjectRoot(tree)).toBe(realpathSync(project));
+      });
+
+      it('uses the directory itself outside git', () => {
+        const bare = path.join(dir, 'plain');
+        mkdirSync(bare);
+
+        expect(findProjectRoot(bare)).toBe(realpathSync(bare));
+      });
     });
   });
 });

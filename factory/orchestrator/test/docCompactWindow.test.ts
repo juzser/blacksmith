@@ -66,8 +66,39 @@ describe('compact window docs', () => {
     expect(section).toMatch(/removes its own lines/);
     expect(section).toMatch(/Deleting bs's\s+lines is not an opt-out/);
     expect(section).toContain('the environment `bs init` runs in');
+    expect(section).toMatch(/never adopts/);
     expect(read('CHANGELOG.md')).toMatch(/stand or fall together/);
     expect(read('CHANGELOG.md')).toMatch(/Deleting bs's lines is not an\s+opt-out/);
+  });
+
+  it('the docs place the record in the project and say what deleting it means', () => {
+    expect(section).toContain('.claude/bs-settings-record.json');
+    expect(section).toMatch(/treat its old lines as yours/);
+    expect(section).toMatch(/delete\s+those lines and re-run `bs init`/);
+    expect(section).not.toContain('claude-settings.json');
+    const changelog = read('CHANGELOG.md');
+    expect(changelog).toContain('.claude/bs-settings-record.json');
+    expect(changelog).not.toContain('state/claude-settings.json');
+  });
+
+  it('the docs say what the env variables do against bs lines, and that empty is env-only', () => {
+    expect(section).toMatch(/beats every\s+settings file, so there bs's lines are merely unused/);
+    expect(section).toMatch(/stacks on bs's window/);
+    expect(section).toMatch(/For the environment variables, an empty value counts as unset/);
+  });
+
+  it('the init-never-overwrites paragraph says init removes its own keys when you set yours', () => {
+    const at = install.indexOf('`init` never overwrites a file you have already edited');
+    expect(install.slice(at, at + 700)).toMatch(/removes its own\s+keys when you set yours/);
+    for (const line of install.slice(at, at + 700).split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it('the agent constraints say the yield holds once bs init is re-run', () => {
+    expect(read('docs/standards/agent-constraints.md')).toMatch(
+      /yields to any value you set, once you re-run `bs init`/,
+    );
   });
 
   it('the clone docs say bs init runs there too', () => {
