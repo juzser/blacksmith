@@ -564,3 +564,31 @@ describe('force-push rule reads the pipe structure, prefix words and xargs names
     },
   );
 });
+
+describe('force-push rule reads a short-option bundle by what the prefix word takes', () => {
+  const reasonOf = (command: string) =>
+    decide(command).violations.find((v) => v.ruleId === 'force-push')?.reason ?? '';
+  const BUNDLES = ['-Eu', '-Hu', '-nu'];
+  // Each line is read the way the same line with `sudo -u example-user` is read.
+  const WRAPS: Array<[string, (line: string) => string]> = [
+    ['direct', (line) => line],
+    ['timeout', (line) => `timeout 5 ${line}`],
+    ['comment', (line) => `${line} # note`],
+    ['head', (line) => `${line} | head -3`],
+  ];
+  const LINES: Array<[string, string]> = [
+    ['echo x | xargs sudo %s git', 'git run by xargs'],
+    ['G=git; echo x | xargs sudo %s $G', 'the command word here is an unexpanded'],
+  ];
+
+  // sudo takes the next word as the user, so a later xargs word is still read.
+  it.each(BUNDLES)('reads xargs behind sudo %s and a user', (bundle) => {
+    for (const [name, wrap] of WRAPS) {
+      for (const [line, reason] of LINES) {
+        const got = reasonOf(wrap(line.replace('%s', `${bundle} example-user`)));
+        expect(got).toBe(reasonOf(wrap(line.replace('%s', '-u example-user'))));
+        if (name !== 'comment') expect(got).toContain(reason);
+      }
+    }
+  });
+});

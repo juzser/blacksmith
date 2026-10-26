@@ -2440,9 +2440,11 @@ function walkPrefixWords(
         ) {
           break;
         }
-        // A short option with its value attached (`-oL`) takes no word after it.
-        if (next.startsWith('-')) afterFlag = next.startsWith('--') || next.length <= 2;
-        else if (afterFlag) afterFlag = false;
+        // Only stdbuf's short option can carry its value attached (`-oL`); behind the
+        // other prefix words a short-option bundle takes the next word as its value.
+        if (next.startsWith('-')) {
+          afterFlag = next.startsWith('--') || next.length <= 2 || baseName(text) !== 'stdbuf';
+        } else if (afterFlag) afterFlag = false;
         else if (!PREFIX_OPERAND_RE.test(next) && !ASSIGNMENT_WORD_RE.test(next)) break;
         index += 1;
       }
