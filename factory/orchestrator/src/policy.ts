@@ -2397,6 +2397,7 @@ function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
   split: SplitWords,
+  shellOnly: boolean,
 ): { words: readonly DequotedWord[]; index: number } {
   let words = start;
   let index = from;
@@ -2413,7 +2414,7 @@ function walkPrefixWords(
         const next = words[index]?.text ?? '';
         if (
           isShellWord(next) ||
-          isInputRunner(next) ||
+          (!shellOnly && isInputRunner(next)) ||
           next === 'env' ||
           COMMAND_PREFIX_WORDS.has(baseName(next))
         ) {
@@ -2436,7 +2437,8 @@ function walkPrefixWords(
     !isShellWord(words[index]?.text)
   ) {
     const later = words.findIndex(
-      (word, at) => at > index && (isShellWord(word.text) || isInputRunner(word.text)),
+      (word, at) =>
+        at > index && (isShellWord(word.text) || (!shellOnly && isInputRunner(word.text))),
     );
     if (later !== -1) index = later;
   }
@@ -2456,10 +2458,15 @@ function checkXargsGitAndShellInput(
   rule: GuardrailRule,
 ): PolicyViolation | null {
   const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
+  const splitEnv: SplitWords = (all, from) => splitEnvCommand(all, from, budget);
+  const asWritten: SplitWords = (all) => all;
+  // Read twice: stopping at the first xargs or eval, and walking on to a later shell word.
   return (
-    readRunCommand(words, afterGitPipe, rule, (all, from) => splitEnvCommand(all, from, budget)) ??
+    readRunCommand(words, afterGitPipe, rule, splitEnv, false) ??
     (budget.exceeded ? violation(rule, ENV_SPLIT_LIMIT_REASON) : null) ??
-    readRunCommand(words, afterGitPipe, rule, (all) => all)
+    readRunCommand(words, afterGitPipe, rule, asWritten, false) ??
+    readRunCommand(words, afterGitPipe, rule, splitEnv, true) ??
+    readRunCommand(words, afterGitPipe, rule, asWritten, true)
   );
 }
 
@@ -2468,12 +2475,13 @@ function readRunCommand(
   afterGitPipe: boolean,
   rule: GuardrailRule,
   split: SplitWords,
+  shellOnly: boolean,
 ): PolicyViolation | null {
   let words = split(originalWords, 0);
   let index = commandStart(words);
   let viaXargs = false;
   for (;;) {
-    const walked = walkPrefixWords(words, index, split);
+    const walked = walkPrefixWords(words, index, split, shellOnly);
     words = walked.words;
     index = walked.index;
     if (words[index]?.text !== 'xargs') break;
