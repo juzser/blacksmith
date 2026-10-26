@@ -1431,7 +1431,13 @@ function hasUnsafeWord(text: string): boolean {
 }
 
 const EVAL_RE = /\beval\b/;
-const SHELL_C_WRAPPER_RE = /\b(sh|bash|zsh|env)\b[^;&|]*-c\b/;
+const SHELL_INTERPRETER_WORD_RE = /\b(?:sh|bash|zsh|env)\b/;
+/** True when a `;`, `&` or `|`-free run holds an interpreter word with `-c` after it; read run by run, in one pass. */
+const hasShellCWrapper = (segment: string): boolean =>
+  segment.split(/[;&|]/).some((run) => {
+    const found = SHELL_INTERPRETER_WORD_RE.exec(run);
+    return found !== null && /-c\b/.test(run.slice(found.index + found[0].length));
+  });
 const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
 
 /**
@@ -1448,7 +1454,7 @@ const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
  * already do, instead of a fourth copy of the same two lines.
  */
 function dequoteShellWrappedSegment(segment: string): string | null {
-  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
+  if (!EVAL_RE.test(segment) && !hasShellCWrapper(segment)) return null;
   // A line continuation is dropped outright, not just its backslash — rule
   // 6's callers (`hasUnknownRemovalCommandWord`, `shellWrappedRmPayload`)
   // reach this on a segment `joinLineContinuations` never ran over, so a
@@ -2210,7 +2216,15 @@ function checkGitConfigValues(
 /** True when the segment's command word holds an expansion or substitution the guard cannot spell out. */
 function hasUnreadableCommandWord(segment: string): boolean {
   const words = readShellWords(segment, () => true);
-  const commandWord = words?.[commandStart(words)];
+  if (words === null) return false;
+  // The command word is read past a leading `!`, prefix words and an `env -S` value.
+  const budget: EnvSplitBudget = { left: ENV_SPLIT_LIMIT, exceeded: false };
+  const split: SplitWords = (all, from) => splitEnvCommand(all, from, budget, splitValueWords);
+  const read = split(words, 0);
+  let start = commandStart(read);
+  while (read[start]?.text === '!') start += 1;
+  const walked = walkPrefixWords(read, start, split, true);
+  const commandWord = walked.words[walked.first];
   return commandWord !== undefined && hasUnreadableShellForm(commandWord.raw);
 }
 
@@ -2218,12 +2232,15 @@ function hasUnreadableCommandWord(segment: string): boolean {
  * The top-level commands of `command`, each with whether it is fed by a pipe
  * from an earlier command of the same pipeline that runs git.
  */
-function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPipe: boolean }> {
+function segmentsWithGitPipe(
+  command: string,
+  texts: readonly string[] = topLevelCommands(command),
+): Array<{ text: string; afterGitPipe: boolean }> {
   const parts: Array<{ text: string; afterGitPipe: boolean }> = [];
   let position = 0;
   let afterPipe = false;
   let pipelineRunsGit = false;
-  for (const text of topLevelCommands(command)) {
+  for (const text of texts) {
     if (!afterPipe) pipelineRunsGit = false;
     parts.push({ text, afterGitPipe: afterPipe && pipelineRunsGit });
     pipelineRunsGit ||= /\bgit\b/i.test(text) || hasUnreadableCommandWord(text);
@@ -2234,6 +2251,9 @@ function segmentsWithGitPipe(command: string): Array<{ text: string; afterGitPip
   }
   return parts;
 }
+
+/** Where a line ends one command and starts the next, read without regard to quotes. */
+const ROUGH_SEPARATOR_RE = /\|\||&&|;|\n|(?<!>)\|/;
 
 /** `xargs` options that take the next word as their value. */
 const XARGS_VALUE_OPTIONS = new Set([
@@ -2275,6 +2295,7 @@ const COMMAND_PREFIX_WORDS = new Set([
   'exec',
   'stdbuf',
   'time',
+  'builtin',
 ]);
 
 const PREFIX_OPERAND_RE = /^\d+(?:\.\d+)?[smhd]?$/;
@@ -2291,7 +2312,8 @@ const ENV_SPLIT_LIMIT_REASON =
   'an env split-string here nests more options than the guard reads — write the command out plainly';
 type EnvSplitBudget = { left: number; exceeded: boolean };
 
-const splitOnSpace = (value: string): string[] => value.split(/\s+/).filter(Boolean);
+// A backslash-underscore outside quotes ends a word in an `env -S` value, as whitespace does.
+const splitOnSpace = (value: string): string[] => value.split(/(?:\s|\\_)+/).filter(Boolean);
 const VALUE_RUNS: Record<string, RegExp> = { '': /[^\s"'\\]+/y, "'": /[^']+/y, '"': /[^"\\]+/y };
 
 /** The words of a split-string value, reading single quotes, double quotes and backslashes. */
@@ -2307,6 +2329,12 @@ function splitValueWords(value: string): string[] {
     if (quote ? ch === quote : ch === '"' || ch === "'") {
       quote = quote ? '' : ch;
       current ??= '';
+      continue;
+    }
+    if (!quote && ch === '\\' && value[at + 1] === '_') {
+      at += 1;
+      if (current !== null) pieces.push(current);
+      current = null;
       continue;
     }
     if (ch === '\\' && quote !== "'" && at + 1 < value.length) ch = value[++at] as string;
@@ -2362,8 +2390,7 @@ function splitEnvCommand(
         const used = separate ? 2 : 1;
         if (budget.left === 0) {
           budget.exceeded = true;
-          i += used;
-          continue;
+          return out;
         }
         budget.left -= 1;
         const raw = (separate ?? operand).raw;
@@ -2383,14 +2410,15 @@ function splitEnvCommand(
  * be the command: the first of those later in the segment is taken instead.
  */
 type SplitWords = (words: readonly DequotedWord[], from: number) => readonly DequotedWord[];
-const isInputRunner = (word: string | undefined): boolean => word === 'xargs' || word === 'eval';
+const isInputRunner = (word: string | undefined): boolean =>
+  baseName(word) === 'xargs' || word === 'eval';
 
 function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
   split: SplitWords,
   shellOnly: boolean,
-): { words: readonly DequotedWord[]; index: number } {
+): { words: readonly DequotedWord[]; index: number; first: number } {
   let words = start;
   let index = from;
   let sawPrefix = false;
@@ -2412,8 +2440,11 @@ function walkPrefixWords(
         ) {
           break;
         }
-        if (next.startsWith('-')) afterFlag = true;
-        else if (afterFlag) afterFlag = false;
+        // Only stdbuf's short option can carry its value attached (`-oL`); behind the
+        // other prefix words a short-option bundle takes the next word as its value.
+        if (next.startsWith('-')) {
+          afterFlag = next.startsWith('--') || next.length <= 2 || baseName(text) !== 'stdbuf';
+        } else if (afterFlag) afterFlag = false;
         else if (!PREFIX_OPERAND_RE.test(next) && !ASSIGNMENT_WORD_RE.test(next)) break;
         index += 1;
       }
@@ -2422,19 +2453,22 @@ function walkPrefixWords(
     }
     sawPrefix = true;
   }
+  const first = index;
   if (
     sawPrefix &&
     index < words.length &&
     !isInputRunner(words[index]?.text) &&
     !isShellWord(words[index]?.text)
   ) {
-    const later = words.findIndex(
-      (word, at) =>
-        at > index && (isShellWord(word.text) || (!shellOnly && isInputRunner(word.text))),
-    );
-    if (later !== -1) index = later;
+    for (let at = index + 1; at < words.length; at += 1) {
+      const word = (words[at] as DequotedWord).text;
+      if (isShellWord(word) || (!shellOnly && isInputRunner(word))) {
+        index = at;
+        break;
+      }
+    }
   }
-  return { words, index };
+  return { words, index, first };
 }
 
 /**
@@ -2479,7 +2513,7 @@ function readRunCommand(
     const walked = walkPrefixWords(words, index, split, shellOnly);
     words = walked.words;
     index = walked.index;
-    if (words[index]?.text !== 'xargs') break;
+    if (baseName(words[index]?.text) !== 'xargs') break;
     viaXargs = true;
     index += 1;
     while (index < words.length && (words[index]?.text ?? '').startsWith('-')) {
@@ -2550,6 +2584,21 @@ function checkForcePush(
   const parts = asWritten
     ? [{ text: command, afterGitPipe: false }]
     : segmentsWithGitPipe(joinLineContinuations(command));
+  if (!asWritten) {
+    // A line the top-level split cannot read is also read at every pipe and separator, for
+    // the shell-input and xargs checks only.
+    const joined = joinLineContinuations(command);
+    if (splitTopLevelCommands(joined) === null) {
+      for (const { text, afterGitPipe } of segmentsWithGitPipe(
+        joined,
+        joined.split(ROUGH_SEPARATOR_RE),
+      )) {
+        const words = readShellWords(text, () => true);
+        const found = words && checkXargsGitAndShellInput(words, afterGitPipe, rule);
+        if (found) return found;
+      }
+    }
+  }
   for (const { text: segment, afterGitPipe } of parts) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
