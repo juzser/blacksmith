@@ -420,4 +420,20 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
     expect(past).toHaveLength(1);
     expect(past[0]).toContain('nests more options than the guard reads');
   });
+
+  // A later shell word is read even when an xargs word comes first.
+  const SUBST = '"$(git show HEAD:x.sh)"';
+  const shellLines = [
+    `sudo -p xargs -p ls bash -c ${SUBST}`,
+    'git log | nice foo xargs ls sh',
+    ...['nice', 'sudo', 'nohup', 'nice -n 5'].flatMap((prefix) =>
+      ['xargs ls', 'xargs ls xargs ls'].flatMap((runner) =>
+        ['sh', 'bash'].map((shell) => `echo x | ${prefix} foo ${runner} ${shell} -c ${SUBST}`),
+      ),
+    ),
+  ];
+
+  it.each(shellLines)('refuses a shell run on git output after an xargs word: %s', (command) => {
+    expect(reasonsOf(command)[0]).toContain('git output is run by a shell');
+  });
 });
