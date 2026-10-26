@@ -441,3 +441,126 @@ describe('force-push rule reads xargs, eval and a shell behind prefix words and 
     expect(reasonsOf(command)[0]).toContain('git output is run by a shell');
   });
 });
+
+describe('force-push rule reads the pipe structure, prefix words and xargs names of longer lines', () => {
+  const reasonsOf = (command: string) =>
+    decide(command)
+      .violations.filter((v) => v.ruleId === 'force-push')
+      .map((v) => v.reason);
+  const SHELL = 'git output is run by a shell';
+  const UNEXPANDED = 'the command word here is an unexpanded';
+  const XARGS = 'git run by xargs';
+  const expectReason = (command: string, reason: string) => {
+    expect(reasonsOf(command)[0]).toContain(reason);
+  };
+
+  // The guard reads the pipe structure of lines that hold expansions, comments, here-documents or ANSI-C quoting.
+  const STRUCTURE_SHELL = [
+    'G=git; $G show HEAD:run.sh | sh # note',
+    'G=git; ${G} show HEAD:run.sh | sh',
+    'G=git; ${G} show HEAD:run.sh | sh # note',
+    'X=1; echo ${X}; G=git; $G show HEAD:run.sh | sh',
+    'echo ${X} && G=git; $G show HEAD:run.sh | sh',
+    "echo $'a'; G=git; $G show HEAD:run.sh | sh",
+    'cat <<EOF > /dev/null\nbody\nEOF\nG=git; $G show HEAD:run.sh | sh',
+    'git log --format=%s | sh # note',
+    'echo ${X}; git log --format=%s | bash',
+  ];
+  const STRUCTURE_UNEXPANDED = [
+    'G=git; echo x | xargs ${G}',
+    'G=git; echo x | xargs $G # note',
+    'echo ${X}; G=git; echo x | xargs $G',
+    "echo $'a'; G=git; echo x | xargs $G",
+    'cat <<EOF > /dev/null\nbody\nEOF\nG=git; echo x | xargs $G',
+  ];
+  const STRUCTURE_ALLOWED = [
+    'echo ${X} # note',
+    'echo ls | sh # note',
+    'G=git; $G log | head -3 # note',
+    'echo ${X}; git log | grep fix',
+    'echo ${X} | xargs echo',
+    "echo $'a' | sh",
+    'git log | grep ${X}',
+    'cat <<EOF > /dev/null\nbody\nEOF\necho ls | sh',
+  ];
+
+  it.each(STRUCTURE_SHELL)('gives the shell-input reason for %j', (command) => {
+    expectReason(command, SHELL);
+  });
+  it.each(STRUCTURE_UNEXPANDED)('gives the unreadable-command-word reason for %j', (command) => {
+    expectReason(command, UNEXPANDED);
+  });
+  it.each(STRUCTURE_ALLOWED)('keeps allowing %j', (command) => {
+    expect(forcePushRefused(command)).toBe(false);
+  });
+
+  // An unreadable command word behind a prefix word, or inside an env split-string, in a producer.
+  const PRODUCER_PREFIXES = ['command', 'exec', 'time', 'nice', 'nohup', 'sudo', 'timeout 5', '!'];
+  it.each(PRODUCER_PREFIXES)(
+    'counts an unreadable command word behind %s as a producer',
+    (word) => {
+      expectReason(`G=git; ${word} $G show HEAD:run.sh | sh`, SHELL);
+      expectReason(`G=git; echo x | ${word} $G show HEAD:run.sh | sh`, SHELL);
+      expect(forcePushRefused(`G=git; ${word} $G log | head -3`)).toBe(false);
+      expect(forcePushRefused(`${word} echo hi | sh`)).toBe(false);
+    },
+  );
+  it('counts an env split-string that starts with a variable as a producer', () => {
+    expectReason('G=git; env -S "$G show HEAD:run.sh" | sh', SHELL);
+    expect(forcePushRefused('G=git; env -S "$G log" | head -3')).toBe(false);
+  });
+
+  // A prefix option with its value attached does not take the next word as a value.
+  it('gives the unreadable-command-word reason for an unexpanded word after xargs and stdbuf -oL', () => {
+    expectReason('G=git; echo x | xargs stdbuf -oL $G', UNEXPANDED);
+  });
+  it('gives the xargs reason for the tool name after xargs and stdbuf -oL', () => {
+    expectReason('echo x | xargs stdbuf -oL git', XARGS);
+  });
+  it('keeps allowing a plain command after xargs and stdbuf with its option value', () => {
+    expect(forcePushRefused('echo x | xargs stdbuf -oL grep y')).toBe(false);
+    expect(forcePushRefused('echo x | xargs stdbuf -o L grep y')).toBe(false);
+  });
+
+  // The env split-string reader treats a backslash-underscore outside quotes as a word break.
+  it.each(["'sh\\_-s'", "'bash\\_-s'", "'nice\\_bash'", "'timeout\\_5\\_sh'"])(
+    'reads the env -S value %s as separate words',
+    (value) => {
+      expectReason(`git log --format=%s | env -S ${value}`, SHELL);
+    },
+  );
+  it('keeps a backslash-underscore inside single quotes as written', () => {
+    expect(forcePushRefused("git log --format=%s | env -S 'a\\_b'")).toBe(false);
+  });
+
+  // xargs is read by its base name.
+  it.each(['/usr/bin/xargs', './xargs'])('refuses %s running the tool', (runner) => {
+    expectReason(`cat args.txt | ${runner} git`, XARGS);
+    expectReason(`cat args.txt | timeout 5 ${runner} git`, XARGS);
+    expect(forcePushRefused(`git ls-files | ${runner} git status`)).toBe(false);
+    expect(forcePushRefused(`echo x | ${runner} grep y`)).toBe(false);
+  });
+
+  // builtin is read as a prefix word.
+  it('reads eval behind builtin like eval alone', () => {
+    expectReason('builtin eval "$(git log -1 --format=%B)"', SHELL);
+    expectReason('builtin command eval "$(git log -1 --format=%B)"', SHELL);
+    expect(forcePushRefused('builtin eval "$(echo hi)"')).toBe(false);
+    expect(forcePushRefused('builtin echo hi')).toBe(false);
+  });
+
+  // The env split-string reader and the prefix-word walk read long lines in one pass.
+  it('decides a long chain of env split-strings with the limit reason', () => {
+    const past = reasonsOf(`echo x | ${'env -S nice '.repeat(4000)}true`);
+    expect(past).toHaveLength(1);
+    expect(past[0]).toContain('nests more options than the guard reads');
+  });
+  it.each(['time', 'nice', 'nice -n 1', 'sudo'])(
+    'decides many xargs words behind %s without a refusal',
+    (prefix) => {
+      expect(forcePushRefused(`git log | ${'xargs '.concat(prefix, ' a ').repeat(5000)}ls`)).toBe(
+        false,
+      );
+    },
+  );
+});
