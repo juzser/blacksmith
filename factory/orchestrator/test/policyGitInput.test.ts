@@ -659,6 +659,10 @@ describe('force-push rule reads the word after a prefix-word option as a value a
     expect(decide(options(OPTION_LIMIT)).violations).toEqual([]);
     expect(reasonOf(options(OPTION_LIMIT + 1))).toContain(PAST);
   });
+  it('reads the command word behind the last option read twice', () => {
+    const line = `echo x | xargs ${'nice -n5 '.repeat(OPTION_LIMIT)}git`;
+    expect(reasonOf(line)).toContain(XARGS);
+  });
   it.each(['nice -n5', 'command -p', 'time -p'])('decides a long line of %s options', (option) => {
     const line = `echo x | ${`xargs ${option} a `.repeat(5000)}ls`;
     expect(reasonOf(line)).toContain(PAST);
