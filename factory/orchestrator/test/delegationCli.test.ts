@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertExited, runProcess } from './helpers/process.js';
+import { assertExited, cliTestEnv, runProcess } from './helpers/process.js';
 
 // ---------------------------------------------------------------------------
 // D13 step 3 -- the wiring, not the rule.
@@ -51,7 +51,9 @@ describe('smith delegation check (D13 step 3)', () => {
   });
 
   function smith(args: string[]): Run {
-    const run = runProcess('node', [CLI_PATH, ...args, '--state-dir', stateDir]);
+    const run = runProcess('node', [CLI_PATH, ...args, '--state-dir', stateDir], {
+      env: cliTestEnv(),
+    });
     assertExited(run, `smith ${args.join(' ')}`);
     return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
   }
