@@ -457,6 +457,37 @@ describe('bs stats effectiveness and bs report export (built binary)', () => {
       expect(md).toMatch(/epic-a\/task-1[^\n]*\| tests \| passed \|/);
       expect(md).toMatch(/epic-b\/task-1[^\n]*\| tests \| failed \|/);
     });
+
+    it('reports the id first seen and lets the latest event of either form decide', () => {
+      seq = 0;
+      const { json, md } = exportFor('first-seen', [
+        event('session-start', {}),
+        event('testgate-result', { pass: true, results: [] }, { task_id: 'epic-a/task-2' }),
+        event('task-added', { title: 'Two' }, { task_id: 'task-2' }),
+        event('testgate-result', { pass: false, results: [] }, { task_id: 'task-2' }),
+      ]);
+      const rows: Row[] = json.checks;
+      expect(rows).toHaveLength(3);
+      expect(new Set(rows.map((r) => r.task))).toEqual(new Set(['epic-a/task-2']));
+      expect(rows.every((r) => r.title === 'Two')).toBe(true);
+      expect(rows.find((r) => r.check === 'tests')?.state).toBe('failed');
+      expect(md).toMatch(/epic-a\/task-2[^\n]*\| tests \| failed \|/);
+    });
+
+    it('lists a task whose events all carry the qualified form under that id', () => {
+      seq = 0;
+      const { json, md } = exportFor('qualified-only', [
+        event('session-start', {}),
+        event('task-added', { title: 'Three' }, { task_id: 'epic-a/task-3' }),
+        event('grader-verdict', { verdict: 'met' }, { task_id: 'epic-a/task-3' }),
+      ]);
+      const rows: Row[] = json.checks;
+      expect(rows).toHaveLength(3);
+      expect(new Set(rows.map((r) => r.task))).toEqual(new Set(['epic-a/task-3']));
+      expect(rows.find((r) => r.check === 'grader')?.state).toBe('passed');
+      expect(rows.find((r) => r.check === 'tests')?.state).toBe('not-run');
+      expect(md).toMatch(/epic-a\/task-3[^\n]*\| grader \| passed \|/);
+    });
   });
 
   it('marks the lineage scope and refuses an unreadable --digest file', () => {
