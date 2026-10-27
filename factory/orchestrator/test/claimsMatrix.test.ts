@@ -240,6 +240,85 @@ describe('the claim extraction, shown on a fixture first screen', () => {
   });
 });
 
+describe('the claim extraction, further units on a second fixture', () => {
+  const second = [
+    '# Blacksmith',
+    '',
+    '![logo](logo.png)',
+    '[![badge](badge.svg)](https://example.test)',
+    '### A sub heading',
+    '',
+    '1. Numbered item',
+    '   with an indented continuation',
+    '2) Second numbered item',
+    '+ Plus bullet',
+    '',
+    '| Left | Right |',
+    '|:--|--:|',
+    '| a \\| b | c |',
+    '',
+    '[One](#one) · [Two](#two)',
+    '',
+    'Alpha<br>beta<br/>gamma<br />delta. Next sentence follows.',
+    '',
+    '```',
+    '$ npm install',
+    '$ npm test',
+    '```',
+    '',
+    '```',
+    '/plugin install example',
+    '```',
+    '',
+    '```text',
+    'Tagged prose block',
+    '```',
+    '',
+    '```',
+    'npm install',
+    'then some prose',
+    '```',
+  ].join('\n');
+
+  it('cuts the second fixture into exactly its claims', () => {
+    expect(extractClaims(second)).toEqual([
+      'Numbered item with an indented continuation',
+      'Second numbered item',
+      'Plus bullet',
+      'a | b | c',
+      'Alpha beta gamma delta.',
+      'Next sentence follows.',
+      'Tagged prose block',
+      'npm install then some prose',
+    ]);
+  });
+
+  it('returns no claim when the text has no Blacksmith heading', () => {
+    expect(extractClaims('# Other\n\nSome text here.')).toEqual([]);
+  });
+
+  it('reads an escaped pipe in a matrix cell as a pipe when comparing', () => {
+    const matrix = ['| Claim | S | B | L |', '|---|---|---|---|', '| a \\| b | s | `x` | l |'];
+    expect(unquotedClaims(['a | b'], matrix.join('\n'))).toEqual([]);
+    expect(unquotedClaims(['a'], matrix.join('\n'))).toEqual(['a']);
+  });
+
+  it('reads no path from a row with no backticked span', () => {
+    const matrix = ['| Claim | S | B | L |', '|---|---|---|---|', '| a | s | plain | l |'];
+    expect(namedPaths(matrix.join('\n'))[0]?.paths).toEqual([]);
+  });
+
+  it('reports a named path that is absent from the working tree', () => {
+    const matrix = [
+      '| Claim | S | B | L |',
+      '|---|---|---|---|',
+      '| a | s | `no/such/file.md` | l |',
+    ];
+    const [named] = namedPaths(matrix.join('\n'))[0]?.paths ?? [];
+    expect(existsSync(path.join(REPO_ROOT, named as string))).toBe(false);
+  });
+});
+
 describe('the claims matrix', () => {
   const read = (rel: string): string => readFileSync(path.join(REPO_ROOT, rel), 'utf8');
   const matrix = (): string => read('docs/claims-matrix.md');
@@ -275,6 +354,20 @@ describe('the claims matrix', () => {
     const all = Object.values(descriptions).map(normalise);
     expect(unquotedClaims(all, matrix())).toEqual([]);
   });
+
+  it.each(Object.keys(descriptions))(
+    'fails and names the description when its row is missing: %s',
+    (where) => {
+      const text = normalise(descriptions[where as keyof typeof descriptions]);
+      const without = matrix()
+        .split('\n')
+        .filter(
+          (line) => !(line.trim().startsWith('|') && quotedClaims(`| h |\n${line}`).has(text)),
+        )
+        .join('\n');
+      expect(unquotedClaims(Object.values(descriptions).map(normalise), without)).toContain(text);
+    },
+  );
 
   it('names at least one path in every row, and each path exists in the working tree', () => {
     const rows = namedPaths(matrix());
