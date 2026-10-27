@@ -890,12 +890,25 @@ describe('initWorkRoot auto-compact window', () => {
   });
 
   describe('keeping the record out of git', () => {
-    it('reports the exclude outcome when the record is created, and not on a run that changes nothing', () => {
-      const first = run().claudeWindow;
-      expect(first.recordGitExclude).toBe('added');
+    it('reports the exclude outcome on every run, including one that changes nothing', () => {
+      expect(run().claudeWindow.recordGitExclude).toBe('added');
       expect(git(project, 'check-ignore', '-q', recordFile())).toBe('');
 
-      expect(run().claudeWindow.recordGitExclude).toBeUndefined();
+      expect(run().claudeWindow.recordGitExclude).toBe('already-ignored');
+    });
+
+    it('catches a project that became a repository after the first run', () => {
+      const plain = path.join(dir, 'later');
+      mkdirSync(plain);
+      const opts = { projectDir: plain, workRoot: path.join(plain, '.blacksmith') };
+      run(opts);
+      git(plain, 'init', '-q');
+
+      run(opts);
+
+      expect(git(plain, 'status', '--porcelain', '--untracked-files=all')).not.toContain(
+        'bs-settings-record',
+      );
     });
 
     it('warns when the record is tracked by git, so no exclude can apply', () => {
@@ -910,6 +923,16 @@ describe('initWorkRoot auto-compact window', () => {
 
       expect(window.recordGitExclude).toBe('tracked');
       expect(window.warnings.some((w) => w.includes('tracked by git'))).toBe(true);
+    });
+
+    it('repeats the tracked warning on a run that changes nothing', () => {
+      git(project, 'config', 'user.email', 'a@b.c');
+      git(project, 'config', 'user.name', 'n');
+      run();
+      git(project, 'add', '-f', recordFile());
+      git(project, 'commit', '-q', '-m', 'track the record');
+
+      expect(run().claudeWindow.warnings.some((w) => w.includes('tracked by git'))).toBe(true);
     });
   });
 
@@ -1075,13 +1098,51 @@ describe('initWorkRoot auto-compact window', () => {
           });
         });
 
-        it('a nested plain repository inside an initialised project is quiet too', () => {
+        it('a nested plain repository is its own project and names itself', () => {
           run();
           const nested = path.join(project, 'vendor', 'lib');
           mkdirSync(nested, { recursive: true });
           git(nested, 'init', '-q');
 
-          expect(claudeSettingsAdvice(nested, opts())).toBeUndefined();
+          expect(claudeSettingsAdvice(nested, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(nested),
+          });
+        });
+
+        it('a record in the home directory never answers for a project below it', () => {
+          const home = path.join(dir, 'home');
+          const proj = path.join(home, 'code', 'proj');
+          mkdirSync(proj, { recursive: true });
+          git(proj, 'init', '-q');
+          put(settingsRecordPath(home), JSON.stringify({ revision: 99, written: {} }));
+
+          expect(claudeSettingsAdvice(proj, { ...opts(), home })).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(proj),
+          });
+          const plain = path.join(home, 'notes');
+          mkdirSync(plain);
+          expect(claudeSettingsAdvice(plain, { ...opts(), home })?.dir).toBe(realpathSync(plain));
+        });
+
+        it('a linked worktree under an initialised ancestor still follows its main worktree', () => {
+          git(project, 'config', 'user.email', 'a@b.c');
+          git(project, 'config', 'user.name', 'n');
+          git(project, 'commit', '-q', '--allow-empty', '-m', 'x');
+          const holder = path.join(dir, 'holder');
+          mkdirSync(holder);
+          put(settingsRecordPath(holder), JSON.stringify({ revision: 99, written: {} }));
+          const tree = path.join(holder, 'wts', 'feat');
+          git(project, 'worktree', 'add', '-q', '-b', 'side', tree);
+
+          expect(claudeSettingsAdvice(tree, opts())).toEqual({
+            hint: 'out-of-date',
+            dir: realpathSync(project),
+          });
+          run();
+          stale(project);
+          expect(claudeSettingsAdvice(tree, opts())?.dir).toBe(realpathSync(project));
         });
 
         it('a subdirectory of an initialised project outside git is quiet and names the project', () => {

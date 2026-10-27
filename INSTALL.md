@@ -276,9 +276,9 @@ yours blocks all nine. When blocked, `bs init` removes its own lines from
 `.claude/settings.local.json` (it would otherwise beat your value) and warns
 once, naming your value or values. A key `bs init` wrote that you then edited
 is yours too: it is kept and it blocks. A fresh project and a re-run in the
-same state therefore end the same way. Where blocking would be pointless,
-`bs init` stays silent when your own values already are the full recommended
-layout (below): there is nothing to remove or warn about.
+same state therefore end the same way. `bs init` still blocks, but it stays
+silent when your own values already are the full recommended layout (below):
+there is nothing to warn about.
 
 The recommended layout, for when you set the window yourself, is the full set:
 
@@ -352,8 +352,11 @@ or the policy gave no value, it says so on stderr and the record stays old, so
 the reminder keeps coming. After upgrading the package, re-run `bs init` in
 each project, then restart Claude Code: a running session does not pick the
 change up. `bs session start` prints one line on stderr until you do, naming
-the project root to run `bs init` in; it stays quiet in a subdirectory or a
-linked worktree of a project that is already initialised.
+the directory that holds the record to run `bs init` in, or the git root when
+there is none. It stays quiet in a subdirectory or a linked worktree of a
+project that is already initialised, and looks no further than that
+repository (a submodule goes on to its superproject), never at your home
+directory or above it.
 
 **A clone does not need the plugin.** A checkout already has both halves, and
 adding the plugin there is not free: the session then lists two of

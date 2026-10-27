@@ -707,9 +707,8 @@ const projectSettingsFile = (projectDir: string): string =>
  * in the local file, `overridden` (a user value in a settings file, which bs's
  * lines beat), `unused` (the window variable, which beats bs's lines) or
  * `stacked` (the percentage variable, which stacks on bs's window); else
- * undefined. The record is looked up in the directory itself, then in the
- * project root (so a subdirectory or a linked worktree is quiet). A few small
- * file reads; the caller never lets it fail.
+ * undefined. The record is looked up as {@link recordCandidates} says. A few
+ * small file reads; the caller never lets it fail.
  */
 export function claudeSettingsHint(
   cwd: string,
@@ -720,32 +719,69 @@ export function claudeSettingsHint(
 
 export type SettingsHint = 'out-of-date' | 'overridden' | 'unused' | 'stacked';
 interface HintOptions {
+  /** Where the home directory is; the record search never reaches it. */
+  readonly home?: string;
   readonly userSettingsPath?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
-/** The directory itself and every ancestor, nearest first. */
-function ancestors(dir: string): string[] {
+/**
+ * The directories whose record can speak for `cwd`, nearest first. The walk
+ * goes up from the physical cwd and stops at the first directory holding `.git`
+ * (after checking that directory itself), so a project never answers for a
+ * repository nested in it. A submodule carries on from its superproject, under
+ * the same rule; a linked worktree adds its main worktree root, and nothing
+ * above it. Outside git the walk never looks at the home directory or above it,
+ * and never at `/`. Only `.git` files are read, no `git` is spawned.
+ */
+function recordCandidates(start: string, home: string, depth = 0): string[] {
   const out: string[] = [];
-  for (let at = dir; ; at = path.dirname(at)) {
-    out.push(at);
-    if (path.dirname(at) === at) return out;
+  let dir = start;
+  for (;;) {
+    const parent = path.dirname(dir);
+    if (dir === home || parent === dir) return out; // home, or `/`, is never a project
+    out.push(dir);
+    const dotGit = path.join(dir, '.git');
+    let content: string | undefined;
+    try {
+      if (!statSync(dotGit).isDirectory()) content = readFileSync(dotGit, 'utf8');
+      else return out;
+    } catch {
+      dir = parent;
+      continue;
+    }
+    const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(content ?? '')?.[1];
+    if (gitdir === undefined) return out;
+    const target = path.resolve(dir, gitdir);
+    const worktrees = path.dirname(target);
+    const common = path.dirname(worktrees);
+    if (path.basename(worktrees) === 'worktrees' && path.basename(common) === '.git') {
+      return [...out, path.dirname(common)];
+    }
+    const modules = target.split(path.sep).lastIndexOf('modules');
+    const parts = target.split(path.sep);
+    if (modules > 0 && parts[modules - 1] === '.git' && depth < 8) {
+      const superRoot = parts.slice(0, modules - 1).join(path.sep) || path.sep;
+      return [...out, ...recordCandidates(superRoot, home, depth + 1)];
+    }
+    return out;
   }
 }
 
 /**
  * Like {@link claudeSettingsHint}, with the directory `bs init` has to run in.
- * That is where the record actually lives: the nearest directory above `cwd`
- * (then above the main worktree of a linked one) that holds one, so a monorepo
- * package, a submodule or a subdirectory of a project outside git is named
- * correctly. With no record anywhere it is the project root. Stat calls only.
+ * That is where the record actually lives: the nearest directory of
+ * {@link recordCandidates} that holds one, so a monorepo package, a submodule
+ * or a subdirectory of a project outside git is named correctly. With no
+ * record it is the project root. A few small file reads, no `git` spawn.
  */
 export function claudeSettingsAdvice(
   cwd: string,
   options: HintOptions = {},
 ): { readonly hint: SettingsHint; readonly dir: string } | undefined {
   const root = findProjectRoot(cwd);
-  const dir = [...ancestors(physicalDir(cwd)), ...ancestors(root)].find(
+  const home = physicalDir(options.home ?? homedir());
+  const dir = recordCandidates(physicalDir(cwd), home).find(
     (candidate) => readSettingsRecord(candidate) !== undefined,
   );
   const entry = dir === undefined ? undefined : readSettingsRecord(dir);
@@ -1009,16 +1045,17 @@ export function initWorkRoot(options: InitOptions = {}): InitReport {
       if (!existsSync(recordPath) || readFileSync(recordPath, 'utf8') !== record) {
         mkdirSync(path.dirname(recordPath), { recursive: true });
         writeFileSync(recordPath, record);
-        // Only a record that was created or changed needs keeping out of git.
-        recordGitExclude = excludeFromGit(projectDir, recordPath);
-        if (recordGitExclude === 'failed' || recordGitExclude === 'tracked') {
-          warnings = [
-            ...warnings,
-            recordGitExclude === 'tracked'
-              ? `${recordPath} is tracked by git, so it cannot be excluded; untrack it with \`git rm --cached\``
-              : `could not keep ${recordPath} out of git; add it to .git/info/exclude yourself`,
-          ];
-        }
+      }
+      // Kept out of git on every run, like settings.local.json: a project that
+      // became a repository since the last run is caught here.
+      recordGitExclude = excludeFromGit(projectDir, recordPath);
+      if (recordGitExclude === 'failed' || recordGitExclude === 'tracked') {
+        warnings = [
+          ...warnings,
+          recordGitExclude === 'tracked'
+            ? `${recordPath} is tracked by git, so it cannot be excluded; untrack it with \`git rm --cached\``
+            : `could not keep ${recordPath} out of git; add it to .git/info/exclude yourself`,
+        ];
       }
     } catch {
       warnings = [...warnings, `could not save ${recordPath}; bs will ask for \`bs init\` again`];

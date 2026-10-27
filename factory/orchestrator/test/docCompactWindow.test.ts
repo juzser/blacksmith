@@ -97,7 +97,7 @@ describe('compact window docs', () => {
 
   it('the agent constraints say the yield holds once bs init is re-run', () => {
     expect(read('docs/standards/agent-constraints.md')).toMatch(
-      /yields to any value you set, once you re-run `bs init`/,
+      /yields to any value you set, once\s+you\s+re-run\s+`bs init`/,
     );
   });
 
@@ -169,6 +169,20 @@ describe('compact window docs', () => {
       const silent = /stays silent when your own values already are the full recommended layout/;
       expect(entry.replace(/\s+/g, ' ')).toMatch(silent);
       expect(section.replace(/\s+/g, ' ')).toMatch(silent);
+    });
+
+    it('the reminder is described as naming the record directory, not always the root', () => {
+      const flat = section.replace(/\s+/g, ' ');
+      expect(flat).toMatch(/naming the directory that holds the record/);
+      expect(flat).toMatch(/or the git root when there is none/);
+      expect(flat).not.toContain('Where blocking would be pointless');
+      expect(flat).toMatch(/still blocks, but it stays silent/);
+    });
+
+    it('the agent constraints bullet fits 80 columns even counting bytes', () => {
+      for (const line of bullet.split('\n')) {
+        expect(Buffer.byteLength(line), line).toBeLessThanOrEqual(80);
+      }
     });
   });
 });
