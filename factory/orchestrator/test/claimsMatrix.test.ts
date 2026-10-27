@@ -273,6 +273,14 @@ describe('the claim extraction, further units on a second fixture', () => {
     '',
     'Alpha<br>beta<br/>gamma<br />delta. Next sentence follows.',
     '',
+    'See the [guide](docs/guide.md) first.',
+    '',
+    '<pre>Single line pre.</pre>',
+    '',
+    '```sh',
+    'echo hello world',
+    '```',
+    '',
     '```',
     '$ npm install',
     '$ npm test',
@@ -304,6 +312,8 @@ describe('the claim extraction, further units on a second fixture', () => {
       'Alpha one. Beta two.',
       'Alpha beta gamma delta.',
       'Next sentence follows.',
+      'See the guide first.',
+      'Single line pre.',
       'Tagged prose block',
       'npm install then some prose',
     ]);
@@ -311,6 +321,21 @@ describe('the claim extraction, further units on a second fixture', () => {
 
   it('returns no claim when the text has no Blacksmith heading', () => {
     expect(extractClaims('# Other\n\nSome text here.')).toEqual([]);
+  });
+
+  it('starts the first screen at the exact Blacksmith heading line', () => {
+    expect(
+      extractClaims('# Blacksmith plugins\n\nWrong one.\n\n# Blacksmith\n\nRight one.'),
+    ).toEqual(['Right one.']);
+  });
+
+  it('compares a matrix cell after the same normalisation as the claim', () => {
+    const matrix = [
+      '| Claim | S | B | L |',
+      '|---|---|---|---|',
+      '| **Bold** [link](docs/a.md)<br />tail | s | `x` | l |',
+    ];
+    expect(unquotedClaims(['Bold link tail'], matrix.join('\n'))).toEqual([]);
   });
 
   it('reads an escaped pipe in a matrix cell as a pipe when comparing', () => {
