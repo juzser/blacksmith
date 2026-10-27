@@ -424,7 +424,7 @@ describe('the claims matrix', () => {
       'Both halves are required',
       'It reports what is present and what is missing',
       'That creates .blacksmith/ beside your code',
-      'It writes nothing anywhere else',
+      'It also merges Claude Code settings',
       '/bs plan drafts spec contracts',
       '/bs run admits a wave',
       'The dashboard: an optional, read-only view',

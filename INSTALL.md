@@ -163,7 +163,8 @@ body read only when its verb runs. This repository is its own marketplace, and
 the plugin it lists is the same `.claude/` directory a clone uses — one source
 in the repository, nothing exported and nothing to keep in step.
 
-`init` creates `.blacksmith/` beside your code and nothing else:
+`init` creates `.blacksmith/` beside your code; the Claude Code settings it
+also writes are listed under [the caps](#raise-the-concurrency-caps):
 
 ```
 .blacksmith/
