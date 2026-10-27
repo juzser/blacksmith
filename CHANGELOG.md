@@ -136,7 +136,7 @@ than appearing in it.
   In a pipeline that feeds a shell, an earlier segment whose command word is an
   unexpanded parameter or substitution counts as possibly running git, and after
   `xargs` an unreadable command word is refused. A very long option word or
-  env split-string value is judged in milliseconds instead of minutes, and a
+  env split-string value is judged in linear time, and a
   line naming more than 64 distinct directories is refused with a message to
   split it into smaller commands.
 

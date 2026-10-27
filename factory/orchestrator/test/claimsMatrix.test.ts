@@ -371,6 +371,11 @@ describe('the claims matrix', () => {
     manifest.plugins.find((one) => one.name === name)?.description ?? '';
   const descriptions = {
     'package.json': (JSON.parse(read('package.json')) as { description: string }).description,
+    'the marketplace top level': (
+      JSON.parse(read('.claude-plugin/marketplace.json')) as {
+        description: string;
+      }
+    ).description,
     'the blacksmith marketplace entry': described('blacksmith'),
     'the bs-mod marketplace entry': described('bs-mod'),
     'the pr-mod marketplace entry': described('pr-mod'),
@@ -409,6 +414,63 @@ describe('the claims matrix', () => {
       expect(unquotedClaims(Object.values(descriptions).map(normalise), without)).toContain(text);
     },
   );
+
+  // The guide claims are the ones the matrix chose to quote; each key below
+  // opens one of them. A key with no row for its source fails by name, and a
+  // row whose text the guide no longer holds fails the same way.
+  const guideClaims = {
+    quickstart: [
+      'Every command below is one the CLI ships',
+      'Both halves are required',
+      'It reports what is present and what is missing',
+      'That creates .blacksmith/ beside your code',
+      'It writes nothing anywhere else',
+      '/bs plan drafts spec contracts',
+      '/bs run admits a wave',
+      'The dashboard: an optional, read-only view',
+    ],
+    'plugin-guard': [
+      'A clone of this repository enforces',
+      'A plugin install does not, by default',
+      'The plugin guard is an opt-in way',
+      'When it is on, every Bash, Write',
+      'A call that breaks a rule is denied',
+      'If the guard is on but cannot reach the hook',
+      'Set BS_PLUGIN_GUARD=1',
+      'The hook is found in this order',
+      'Setting the switch through an env entry',
+      'A test keeps this block equal',
+    ],
+  };
+  const rowsOf = (text: string, source: string): string[] =>
+    tableBodyRows(text)
+      .filter((cells) => cells[1]?.trim() === source)
+      .map((cells) => normalise(cells[0] ?? ''));
+  const guides = Object.entries(guideClaims).flatMap(([source, keys]) =>
+    keys.map((key) => [source, key] as const),
+  );
+
+  it.each(guides)('has a %s row for the claim opening "%s"', (source, key) => {
+    const row = rowsOf(matrix(), source).find((claim) => claim.startsWith(key));
+    expect(row, `a ${source} row opening: ${key}`).toBeDefined();
+    expect(normalise(read(`docs/guide/${source}.md`)), `${source} holds: ${row}`).toContain(
+      row as string,
+    );
+  });
+
+  it('has no guide row beyond the claims pinned above', () => {
+    for (const [source, keys] of Object.entries(guideClaims))
+      expect(rowsOf(matrix(), source)).toHaveLength(keys.length);
+  });
+
+  it('fails and names the claim when a guide row is removed', () => {
+    const [source, key] = guides[0] as (typeof guides)[number];
+    const without = matrix()
+      .split('\n')
+      .filter((line) => !normalise(line.replace(/^\|/, '')).startsWith(key))
+      .join('\n');
+    expect(rowsOf(without, source).find((claim) => claim.startsWith(key))).toBeUndefined();
+  });
 
   it('names at least one path in every row, and each path exists in the working tree', () => {
     const rows = namedPaths(matrix());
