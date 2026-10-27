@@ -44,9 +44,12 @@ That creates `.blacksmith/` beside your code: the event log, your epic plans, a
 roadmap and a `stack.yml` to answer. It also merges Claude Code settings into
 `.claude/settings.local.json`, keeps a record of the keys it wrote in
 `.claude/bs-settings-record.json`, and adds a line for each of those two files
-to `.git/info/exclude`. A key already set is kept, a settings file that is not a
-JSON object is left alone (and then no record is written), and the exclude line
-is skipped outside a git repository and for a file git already ignores or tracks.
+to `.git/info/exclude`. A cap already set is kept; when you have set `autoCompactWindow` in any
+settings source, bs writes none of its window keys and removes the window lines
+it wrote earlier; when no recommended window can be read, no window is written.
+A settings file that is not a JSON object is left alone (and then no record is
+written), and the exclude line is skipped outside a git repository and for a
+file git already ignores or tracks.
 
 ## 4. Your first epic
 
