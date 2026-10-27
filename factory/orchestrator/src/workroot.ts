@@ -492,9 +492,10 @@ const WINDOW_MIN = 100_000;
 const WINDOW_MAX = 1_000_000;
 // The window of the retired-generation models listed in OLD_WINDOW_MODELS.
 const OLD_WINDOW = 200_000;
-// Claude Code fires compaction at window minus 33000 (a 20000-token output
-// reserve plus a 13000-token buffer), so adding it back makes a model compact
-// at exactly the policy ratio of its own window.
+// Claude Code fires compaction at window minus 33000: an output reserve of
+// min(max output, 20000), which is 20000 for every current model, plus a
+// 13000-token buffer. Adding it back makes a model compact at exactly the
+// policy ratio of its own window.
 const COMPACT_HEADROOM = 33_000;
 // A closed set of retired-generation models with a 200k window, by Claude
 // Code's canonical keys. They need their own value because the top-level one

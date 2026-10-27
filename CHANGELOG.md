@@ -61,8 +61,9 @@ than appearing in it.
   was prompt-level, and on a 1M-token model Claude Code compacts much later.
   `bs init` now writes `autoCompactWindow` (`auto_compact_ratio` × 1,000,000 +
   33,000, which is 633000 today; Claude Code compacts 33,000 tokens before the
-  end of the window, so a 1M model compacts at 60%) into the project's
-  git-excluded `.claude/settings.local.json`, plus 153000
+  end of the window, so a 1M model compacts at 60% in a session started after
+  the keys are written) into the project's git-excluded
+  `.claude/settings.local.json`, plus 153000
   (`auto_compact_ratio` × 200,000 + 33,000) under `modelSettings` for each of
   the eight retired 200k-window models, which the top-level value would
   otherwise leave compacting near 83%. The nine keys stand or fall together:
@@ -79,7 +80,9 @@ than appearing in it.
   date, when your value is overridden by bs's local lines, or when bs's
   lines are unused or stacked on top of yours. Deleting bs's lines is not an
   opt-out (set a value such as `"auto"` instead).
-  Existing installs re-run `bs init` in each project and restart Claude Code.
+  Existing installs re-run `bs init` in each project and restart every
+  running Claude Code session: a running session and its subagents keep
+  their old window.
   [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
 
 - **The dashboard only reads.** `bs ui` is for watching the factory; every

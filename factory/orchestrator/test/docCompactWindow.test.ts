@@ -185,4 +185,77 @@ describe('compact window docs', () => {
       }
     });
   });
+
+  // Claude Code reads the window once, when a session starts, and a subagent
+  // takes its parent session's value; `/autocompact <value>` writes the user
+  // settings file. The docs must not promise otherwise.
+  describe('a running session keeps its window', () => {
+    const flat = (text: string): string => text.replace(/\s+/g, ' ');
+    const sectionFlat = flat(section);
+    const topAt = install.indexOf('`bs init` also [raises');
+    const top = install.slice(topAt, install.indexOf('\n\n', topAt));
+    const changelog = read('CHANGELOG.md');
+    const entryAt = changelog.indexOf('- **`bs init` sets Claude Code');
+    const entry = flat(changelog.slice(entryAt, changelog.indexOf('\n\n', entryAt)));
+    const constraints = read('docs/standards/agent-constraints.md');
+    const bulletAt = constraints.indexOf('- Enforcement is split.');
+    const bullet = flat(constraints.slice(bulletAt, constraints.indexOf('\n\n', bulletAt)));
+
+    it('INSTALL.md says /autocompact saves to the user settings, so the value is yours', () => {
+      expect(install).not.toMatch(/for one\s+session\s+only/);
+      expect(sectionFlat).toMatch(
+        /`\/autocompact <value>` saves that value for the session's current model in `~\/\.claude\/settings\.json`/,
+      );
+      expect(sectionFlat).toMatch(
+        /so it is yours from then on and blocks `bs init` like any other value of yours/,
+      );
+    });
+
+    it('the INSTALL section limits the 60% claim to a session started after the keys are written', () => {
+      expect(sectionFlat).toMatch(/holds for a session started after the keys are written/);
+      expect(sectionFlat).toMatch(/Claude Code reads the window when a session starts/);
+      expect(sectionFlat).toMatch(/every subagent takes its parent session's value/);
+      expect(sectionFlat).toMatch(
+        /a session already running, and every subagent it starts, keeps its old window until it is restarted/,
+      );
+    });
+
+    it('the INSTALL upgrade paragraph restarts every running session, subagents included', () => {
+      expect(sectionFlat).toMatch(/then restart every running Claude Code session/);
+      expect(sectionFlat).toMatch(/its subagents inherit the old window too/);
+      expect(sectionFlat).not.toMatch(/then restart Claude Code: a running session/);
+    });
+
+    it('the INSTALL top block restarts every running session and says why', () => {
+      const topFlat = flat(top);
+      expect(topFlat).toMatch(/Restart every running Claude Code session afterwards/);
+      expect(topFlat).toMatch(
+        /a running session and its subagents keep the window they started with/,
+      );
+      const from = top.indexOf('Restart every running');
+      for (const line of top.slice(top.lastIndexOf('\n', from) + 1).split('\n')) {
+        expect(line.length, line).toBeLessThanOrEqual(80);
+      }
+    });
+
+    it('the changelog entry qualifies the 60% claim and restarts every running session', () => {
+      expect(entry).toMatch(/in a session started after the keys are written/);
+      expect(entry).toMatch(/a running session and its subagents keep their old window/);
+      expect(entry).toMatch(/restart every running Claude Code session/);
+    });
+
+    it('the agent constraints bullet says a running session and its subagents keep the old window', () => {
+      expect(bullet).toMatch(
+        /A session reads the window when it starts and its subagents inherit it, so a session started before the keys existed keeps its old window, subagents included, until restarted/,
+      );
+    });
+
+    it('the reserve is the model output capped at 20,000 tokens, in the doc and the code comment', () => {
+      expect(sectionFlat).toMatch(/the model's maximum output capped at 20,000 tokens/);
+      expect(sectionFlat).toMatch(/20,000 for every current model/);
+      expect(sectionFlat).not.toContain('a 20,000-token output reserve');
+      const source = flat(read('factory/orchestrator/src/workroot.ts'));
+      expect(source).toMatch(/min\(max output, 20000\), which is 20000 for every current model/);
+    });
+  });
 });
