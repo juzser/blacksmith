@@ -24,7 +24,7 @@ import { appendEvent, type EventRecord, readEvents, startSession } from '../src/
 import type { EventContext } from '../src/findings.js';
 import { SPECS_ACTIVE_DIR } from '../src/paths.js';
 import type { PlanFile, TaskSpecRecord } from '../src/plan.js';
-import { assertExited, git, runProcess } from './helpers/process.js';
+import { assertExited, cliTestEnv, git, runProcess } from './helpers/process.js';
 
 // ---------------------------------------------------------------------------
 // `audit.test.ts` pins the store: fold, suppression, clustering, ranking. This
@@ -882,7 +882,7 @@ describe('the audit verbs through the built binary', () => {
   let envelope: string[];
 
   function smith(...args: string[]): { status: number | null; json: unknown; stderr: string } {
-    const run = runProcess('node', [CLI_PATH, ...args]);
+    const run = runProcess('node', [CLI_PATH, ...args], { env: cliTestEnv() });
     assertExited(run, `smith ${args.slice(0, 2).join(' ')}`);
     let json: unknown;
     try {

@@ -498,8 +498,8 @@ function resolveSchema(
 
 function capTokensFor(role: string, budgets: BudgetPolicy): number | null {
   // budgets.yml prices each role on its own line, sized for the policy's
-  // effort tier. A role it prices nowhere (merger, scribe, wave-runner)
-  // gets null, which says so rather than inventing a number nobody set.
+  // effort tier. A role it prices nowhere gets null, which says so rather
+  // than inventing a number nobody set.
   return roleCapTokens(budgets, role);
 }
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { run, runCumulative } from '../src/testgate.js';
+import { maskCommandCredentials, run, runCumulative } from '../src/testgate.js';
 
 function processAlive(pid: number): boolean {
   try {
@@ -274,5 +274,61 @@ describe('testgate.ts', () => {
       const result = await runCumulative('false', { cwd });
       expect(result.pass).toBe(false);
     });
+  });
+});
+
+// A declared check command is stored beside its result, and that record goes to
+// the event log, the CLI's JSON and an external judge provider. A project may
+// state env inside the command string (projectCommandEnv's doc says so), so the
+// value of anything that looks like a credential is masked before it is stored.
+describe('testgate.ts maskCommandCredentials', () => {
+  it('masks the password in a URL, keeping the rest of the command', () => {
+    expect(maskCommandCredentials('DATABASE_URL=postgres://ci:pw@db/app pnpm test')).toBe(
+      'DATABASE_URL=postgres://ci:***@db/app pnpm test',
+    );
+  });
+
+  it('masks the value of a sensitive env assignment, unquoted or quoted', () => {
+    expect(maskCommandCredentials('API_TOKEN=abc123 npm run e2e')).toBe(
+      'API_TOKEN=*** npm run e2e',
+    );
+    expect(maskCommandCredentials(`SECRET_KEY='a b c' npm test`)).toBe('SECRET_KEY=*** npm test');
+    expect(maskCommandCredentials('DB_PASSWORD="p w" npm test')).toBe('DB_PASSWORD=*** npm test');
+    expect(maskCommandCredentials('export github_auth=xyz && npm test')).toBe(
+      'export github_auth=*** && npm test',
+    );
+    expect(maskCommandCredentials('CI=1 PGPWD=x NODE_ENV=test npm test')).toBe(
+      'CI=1 PGPWD=*** NODE_ENV=test npm test',
+    );
+  });
+
+  it('masks the value of a sensitive long flag, in both forms', () => {
+    expect(maskCommandCredentials('npm run e2e -- --token=abc123')).toBe(
+      'npm run e2e -- --token=***',
+    );
+    expect(maskCommandCredentials('deploy --password abc123 --dry-run')).toBe(
+      'deploy --password *** --dry-run',
+    );
+    expect(maskCommandCredentials('cli --api-key "a b" --record')).toBe(
+      'cli --api-key *** --record',
+    );
+  });
+
+  it('never takes a following flag or shell operator as the value of a bare flag', () => {
+    expect(maskCommandCredentials('pnpm test --no-auth && pnpm lint')).toBe(
+      'pnpm test --no-auth && pnpm lint',
+    );
+    expect(maskCommandCredentials('cli --auth --verbose')).toBe('cli --auth --verbose');
+  });
+
+  it('leaves a command with nothing sensitive in it exactly as written', () => {
+    for (const cmd of [
+      'pnpm test',
+      'npm run build -- --filter x',
+      'NODE_ENV=test vitest run --reporter=verbose',
+      'echo hi && true',
+    ]) {
+      expect(maskCommandCredentials(cmd)).toBe(cmd);
+    }
   });
 });

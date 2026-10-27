@@ -5,6 +5,8 @@ model: sonnet
 effort: medium
 tools: Read, Write, Bash, Grep, Glob, Agent(bs-coder, bs-tester, bs-grader, bs-reviewer, bs-verifier, bs-security-reviewer, bs-uiux, bs-researcher, bs-merger, bs-scribe)
 maxTurns: 150
+experimental:
+  cacheTtl: 1h
 ---
 
 # Wave runner

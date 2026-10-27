@@ -195,8 +195,13 @@ and [`docs/guide/mods.md`](docs/guide/mods.md) has what each needs:
 
 Then `bs init` in the project you want it to work on. That creates
 `.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
-a `stack.yml` to answer — and writes nothing anywhere else; `BS_HOME` moves
-that root if you want one home for several projects. You now have `/bs`.
+a `stack.yml` to answer. Outside it, `bs init` adds only Claude Code settings,
+to the project's git-excluded `.claude/settings.local.json` and only where you
+have not set them yourself: the
+[concurrency caps](INSTALL.md#raise-the-concurrency-caps) and the
+[compact window](INSTALL.md#compact-earlier-on-1m-models). `BS_HOME` moves the
+`.blacksmith/` root if you want one home for several projects. You now have
+`/bs`; restart Claude Code once so it reads those settings.
 
 **Both halves are required.** The package
 ([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
@@ -436,7 +441,7 @@ runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
-The CLI is on npm as `@juzser/blacksmith`, at `0.5.0`. Two binaries are
+The CLI is on npm as `@juzser/blacksmith`, at `0.5.1`. Two binaries are
 the ones you run: `bs`, and `bs-run` (since `0.2.0`), which runs a rendered
 turn on a `cli` harness such as Codex. `bs-prompt-hook` is the lean hook
 entry that records operator prompts. `smith` and `smith-run` remain as

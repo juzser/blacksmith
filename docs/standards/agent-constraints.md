@@ -183,6 +183,20 @@ M-3).
   `bs agents sync`: it rewrites the template's `maxTurns:` line in place,
   a local edit left uncommitted by design, and `--reset` puts back the value
   committed at git HEAD. Still per role, never per task.
+- **Roles that wait keep a 1h prompt cache.** The wave-runner, coder and
+  tester sit idle for minutes between their own calls (test runs, dispatched
+  agents), so their templates set `experimental.cacheTtl: 1h` rather than let
+  the default 5-minute cache expire and be rewritten. Short-burst roles keep
+  the default, because a 1h write costs more than it saves there. The env
+  `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` and the `subagentPromptCacheTtl`
+  setting override the template.
+- **The harness caps concurrency; `bs init` raises it.** Claude Code runs at
+  most 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`) and 10 parallel
+  tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`, undocumented) by default.
+  A plugin cannot ship `env`, so `bs init` writes both into the project's
+  `.claude/settings.local.json`; the global `~/.claude/settings.json` route is
+  optional. See
+  [INSTALL.md](../../INSTALL.md#raise-the-concurrency-caps).
 
 ## dispatch topology (factory-wide, 2026-08-05)
 
@@ -278,8 +292,17 @@ M-3).
 - **Durable state goes to the event log, not the context window**
   (architecture §7). Anything that must survive a compaction is an event or a
   result artifact. The window is working memory; the log is memory.
-- Enforcement is prompt-level today (baked into `.claude/agents/*`);
-  it becomes mechanical with the phase-9 loop daemon.
+- Enforcement is split. `bs init` makes the harness enforce when to compact: it
+  writes Claude Code's `autoCompactWindow` (the 60% ratio × the window +
+  33,000, with a per-model value for the old 200k models) into the project's
+  local settings, so a model whose window the setting reaches compacts at 60%
+  of it. A 4.x model with the `[1m]` add-on takes the 200k value and compacts
+  at 120k, about 12% of 1M. It yields to any value you set, once you
+  re-run `bs init`; see
+  [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). Everything
+  else stays prompt-level (baked into `.claude/agents/*`) until the phase-9
+  loop daemon makes it mechanical: judges and the merger narrow and never
+  compact, and `max_compactions_per_task`.
 
 ## cross-check (phase 8)
 

@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -27,6 +28,7 @@ import { resolveRepoAtDir } from '../src/gh.js';
 import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
 import { factoryProjects } from '../src/projects.js';
 import { SPEC_REVIEW_EVENT } from '../src/spec.js';
+import { CLAUDE_SETTINGS_REVISION } from '../src/workroot.js';
 import { assertExited, git, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
@@ -47,6 +49,7 @@ function runCli(
   args: string[],
   envOverrides?: Record<string, string>,
   stdin?: string,
+  cwd?: string,
 ): { stdout: string; stderr: string; status: number } {
   // The CLI loads the repo-root `.env` (src/cli.ts's `loadDotEnv`) and fills
   // in any budget var not already set in the child's env. An operator `.env`
@@ -58,8 +61,20 @@ function runCli(
   // them in.
   const blankBudgetEnv = Object.fromEntries(ALL_BUDGET_ENV_NAMES.map((name) => [name, '']));
   const run = runProcess('node', [CLI_PATH, ...args], {
-    env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
+    // The `session start` settings hint reads the project's and the user's
+    // Claude settings, which a test must never do: BS_NO_SETTINGS_HINT=1 (a
+    // test and CI switch, not a user setting) turns it off, and
+    // CLAUDE_CONFIG_DIR names a directory that does not exist so no real
+    // ~/.claude is read. The hint tests switch it back on and sandbox their own.
+    env: {
+      ...process.env,
+      BS_NO_SETTINGS_HINT: '1',
+      CLAUDE_CONFIG_DIR: path.join(tmpdir(), 'smith-cli-tests-no-claude-config'),
+      ...blankBudgetEnv,
+      ...envOverrides,
+    },
     ...(stdin === undefined ? {} : { input: stdin }),
+    ...(cwd === undefined ? {} : { cwd }),
   });
   assertExited(run, `smith ${args.join(' ')}`);
   return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
@@ -16334,6 +16349,26 @@ describe('cli.ts (built binary)', () => {
 // neither is visible to a test of `initWorkRoot`, which never sees argv.
 // ---------------------------------------------------------------------------
 
+// `bs init` writes into the project it runs in and reads the user's Claude
+// settings, so each run gets a temp project (its cwd) and an isolated HOME and
+// CLAUDE_CONFIG_DIR: no test here touches the checkout's own
+// `.claude/settings.local.json` or the real `~/.claude/settings.json`.
+function sandboxFor(base: string): { project: string; env: Record<string, string> } {
+  const project = path.join(base, 'project');
+  const home = path.join(base, 'home');
+  mkdirSync(project, { recursive: true });
+  mkdirSync(home, { recursive: true });
+  return {
+    project,
+    env: {
+      HOME: home,
+      CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '',
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '',
+    },
+  };
+}
+
 describe('smith init (built binary)', () => {
   let root: string;
 
@@ -16345,9 +16380,20 @@ describe('smith init (built binary)', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  // The sandbox (project + isolated HOME) sits beside the work root it serves.
+  const initIn = (workRoot: string, extraEnv: Record<string, string> = {}) => {
+    const sandbox = sandboxFor(`${workRoot}-sandbox`);
+    return runCli(
+      ['init', '--work-root', workRoot],
+      { ...sandbox.env, ...extraEnv },
+      undefined,
+      sandbox.project,
+    );
+  };
+
   it('prepares a work root, and says what it did to every file', () => {
     const workRoot = path.join(root, 'first');
-    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    const { stdout, status } = initIn(workRoot);
     expect(status).toBe(0);
 
     const report = JSON.parse(stdout);
@@ -16369,17 +16415,17 @@ describe('smith init (built binary)', () => {
 
   it('is idempotent, and keeps an answer the operator already typed', () => {
     const workRoot = path.join(root, 'second');
-    expect(runCli(['init', '--work-root', workRoot]).status).toBe(0);
+    expect(initIn(workRoot).status).toBe(0);
 
     const answered = (
-      JSON.parse(runCli(['init', '--work-root', workRoot]).stdout).files as {
+      JSON.parse(initIn(workRoot).stdout).files as {
         personal: string;
       }[]
     ).find((file) => file.personal.endsWith('stack.yml'));
     expect(answered).toBeDefined();
     writeFileSync((answered as { personal: string }).personal, 'language: rust\n', 'utf8');
 
-    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    const { stdout, status } = initIn(workRoot);
     expect(status).toBe(0);
     const report = JSON.parse(stdout);
     expect(report.gitignore).toBe('kept');
@@ -16389,6 +16435,164 @@ describe('smith init (built binary)', () => {
     expect(readFileSync((answered as { personal: string }).personal, 'utf8')).toBe(
       'language: rust\n',
     );
+  });
+
+  describe('Claude Code settings hint on session start', () => {
+    const HINT = 'Claude Code settings for this project are out of date';
+    const sandboxes = new Map<string, ReturnType<typeof sandboxFor>>();
+    const sandboxOf = (home: string) => {
+      const sandbox = sandboxes.get(home) ?? sandboxFor(`${home}-sandbox`);
+      sandboxes.set(home, sandbox);
+      return sandbox;
+    };
+    // The hint is switched on explicitly (the helper switches it off), in a temp
+    // project with an isolated HOME, so nothing real is read.
+    const start = (home: string, id: string, cwd?: string) => {
+      const sandbox = sandboxOf(home);
+      return runCli(
+        ['session', 'start', id, '--state-dir', path.join(home, 'events')],
+        { ...sandbox.env, BS_HOME: home, BS_NO_SETTINGS_HINT: '' },
+        undefined,
+        cwd ?? sandbox.project,
+      );
+    };
+    // The record sits in the project's own .claude/, as bs init leaves it.
+    const recordFor = (home: string, revision: number, written: Record<string, unknown> = {}) => {
+      const sandbox = sandboxOf(home);
+      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
+      writeFileSync(
+        path.join(sandbox.project, '.claude', 'bs-settings-record.json'),
+        JSON.stringify({ revision, written }),
+      );
+      return sandbox;
+    };
+
+    it('prints one stderr line when there is no record, and leaves stdout as the receipt', () => {
+      const home = path.join(root, 'hint-none');
+      const { stdout, stderr, status } = start(home, `hint-none-${Date.now()}`);
+
+      expect(status).toBe(0);
+      expect(stderr.split('\n').filter((line) => line.includes(HINT))).toHaveLength(1);
+      expect(stderr).toContain('run `bs init` in');
+      expect(JSON.parse(stdout).record.event_type).toBe('session-start');
+    });
+
+    it('prints nothing once this project is current, and again when it is older', () => {
+      const home = path.join(root, 'hint-current');
+      recordFor(home, CLAUDE_SETTINGS_REVISION);
+      expect(start(home, `hint-cur-${Date.now()}`).stderr).not.toContain(HINT);
+
+      recordFor(home, CLAUDE_SETTINGS_REVISION - 1);
+      expect(start(home, `hint-old-${Date.now()}`).stderr).toContain(HINT);
+    });
+
+    it('names the package that holds the record and says to remove, then restart', () => {
+      const home = path.join(root, 'hint-package');
+      const sandbox = sandboxOf(home);
+      const app = path.join(sandbox.project, 'packages', 'app');
+      mkdirSync(path.join(app, '.claude'), { recursive: true });
+      mkdirSync(path.join(app, 'src'));
+      writeFileSync(
+        path.join(app, '.claude', 'bs-settings-record.json'),
+        JSON.stringify({ revision: CLAUDE_SETTINGS_REVISION - 1, written: {} }),
+      );
+
+      const { stderr } = start(home, `hint-pkg-${Date.now()}`, path.join(app, 'src'));
+
+      expect(stderr).toContain(`run \`bs init\` in ${realpathSync(app)}, then restart Claude Code`);
+    });
+
+    it('is off by default in the shared helper, whatever the project holds', () => {
+      const home = path.join(root, 'hint-off');
+      const sandbox = sandboxOf(home);
+
+      const { stderr } = runCli(
+        ['session', 'start', `hint-off-${Date.now()}`, '--state-dir', path.join(home, 'events')],
+        { ...sandbox.env, BS_HOME: home },
+        undefined,
+        sandbox.project,
+      );
+
+      expect(stderr).not.toContain(HINT);
+    });
+
+    it('stays quiet in a subdirectory of an initialised project, and names the root otherwise', () => {
+      const home = path.join(root, 'hint-subdir');
+      const sandbox = recordFor(home, CLAUDE_SETTINGS_REVISION);
+      mkdirSync(path.join(sandbox.project, '.git'));
+      const sub = path.join(sandbox.project, 'packages', 'a');
+      mkdirSync(sub, { recursive: true });
+      expect(start(home, `hint-sub-${Date.now()}`, sub).stderr).not.toContain(HINT);
+
+      recordFor(home, CLAUDE_SETTINGS_REVISION - 1);
+      const { stderr } = start(home, `hint-sub2-${Date.now()}`, sub);
+      expect(stderr).toContain(HINT);
+      expect(stderr).toContain(`run \`bs init\` in ${realpathSync(sandbox.project)}`);
+    });
+
+    it('says the user setting is overridden while bs lines and a user value coexist', () => {
+      const home = path.join(root, 'hint-overridden');
+      const sandbox = recordFor(home, CLAUDE_SETTINGS_REVISION, { autoCompactWindow: 633000 });
+      writeFileSync(
+        path.join(sandbox.project, '.claude', 'settings.local.json'),
+        JSON.stringify({ autoCompactWindow: 633000 }),
+      );
+      mkdirSync(path.join(sandbox.env.HOME as string, '.claude'), { recursive: true });
+      writeFileSync(
+        path.join(sandbox.env.HOME as string, '.claude', 'settings.json'),
+        JSON.stringify({ autoCompactWindow: 800000 }),
+      );
+
+      const { stdout, stderr, status } = start(home, `hint-over-${Date.now()}`);
+
+      expect(status).toBe(0);
+      expect(stderr).toContain('overridden');
+      expect(stderr).not.toContain(HINT);
+      expect(JSON.parse(stdout).record.event_type).toBe('session-start');
+    });
+
+    it('init reports the window outcome and writes the record, in the temp project only', () => {
+      const home = path.join(root, 'hint-init');
+      const { stdout } = initIn(home, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '700000' });
+
+      const report = JSON.parse(stdout);
+      expect(report.claudeWindow.status).toBe('skipped');
+      expect(report.claudeWindow.settingsPath).toBe(
+        path.join(
+          realpathSync(path.join(`${home}-sandbox`, 'project')),
+          '.claude',
+          'settings.local.json',
+        ),
+      );
+      expect(
+        existsSync(path.join(`${home}-sandbox`, 'project', '.claude', 'bs-settings-record.json')),
+      ).toBe(true);
+      expect(existsSync(path.join(home, 'state', 'claude-settings.json'))).toBe(false);
+    });
+
+    it('init says on stderr when it could not write the window, and keeps the hint alive', () => {
+      const home = path.join(root, 'hint-failed');
+      const sandbox = sandboxFor(`${home}-sandbox`);
+      writeFileSync(path.join(sandbox.project, '.claude'), 'not a directory');
+
+      const result = initIn(home);
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toMatch(/could not write autoCompactWindow/);
+      expect(start(home, `hint-failed-${Date.now()}`).stderr).toContain(HINT);
+    });
+
+    it('init says on stderr when the local settings are not a JSON object', () => {
+      const home = path.join(root, 'hint-unreadable');
+      const sandbox = sandboxFor(`${home}-sandbox`);
+      mkdirSync(path.join(sandbox.project, '.claude'), { recursive: true });
+      writeFileSync(path.join(sandbox.project, '.claude', 'settings.local.json'), '[]');
+
+      const result = initIn(home);
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toMatch(/is not a JSON object/);
+    });
   });
 
   it('is listed in the usage table it is dispatched from', () => {

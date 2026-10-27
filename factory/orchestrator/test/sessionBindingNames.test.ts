@@ -46,18 +46,26 @@ const EDITED = [
   'CLAUDE.md',
   'AGENTS.md',
   'docs/guide/dashboard.md',
+  'CHANGELOG.md',
 ];
 
 const USE_ARGS = new Set(['project-a', 'project-b', '<project>', 'nothing-here']);
 const PROJECT_VALUES = new Set(['project-a', 'project-b', '<project>']);
 
+/** A bare argument must be allowed; a path needs `.`, `..` or `~` segments before an allowed last one. */
+const useArgOk = (value: string): boolean => {
+  const segments = value.split('/');
+  const last = segments.pop() as string;
+  return USE_ARGS.has(last) && segments.every((s) => ['.', '..', '~'].includes(s));
+};
+
 type Hit = { line: number; value: string };
 
 const lineOf = (text: string, index: number): number => text.slice(0, index).split('\n').length;
 
-/** The token after `/bs use` and spaces. */
+/** The token after `/bs use` and spaces, path characters included. */
 function useArguments(text: string): Hit[] {
-  return [...text.matchAll(/\/bs use[ ]+([A-Za-z0-9<>_.-]+)/g)].map((m) => ({
+  return [...text.matchAll(/\/bs use[ ]+([A-Za-z0-9<>_.~/-]+)/g)].map((m) => ({
     line: lineOf(text, m.index ?? 0),
     value: m[1] as string,
   }));
@@ -80,11 +88,11 @@ function projectValues(text: string): Hit[] {
 function collect(
   files: Record<string, string>,
   reader: (text: string) => Hit[],
-  allowed: Set<string>,
+  allowed: (value: string) => boolean,
 ): string[] {
   return Object.entries(files).flatMap(([file, text]) =>
     reader(text)
-      .filter((h) => !allowed.has(h.value))
+      .filter((h) => !allowed(h.value))
       .map((h) => `${file}:${h.line} ${h.value}`),
   );
 }
@@ -103,11 +111,11 @@ describe('project names in the files the bs-use plan adds or edits', () => {
   });
 
   it('every `/bs use` argument is a placeholder or the unknown name', () => {
-    expect(collect(read([...ADDED, ...EDITED]), useArguments, USE_ARGS)).toEqual([]);
+    expect(collect(read([...ADDED, ...EDITED]), useArguments, useArgOk)).toEqual([]);
   });
 
   it('every project value in an added file is a placeholder', () => {
-    expect(collect(read(ADDED), projectValues, PROJECT_VALUES)).toEqual([]);
+    expect(collect(read(ADDED), projectValues, (v) => PROJECT_VALUES.has(v))).toEqual([]);
   });
 
   it('positive control: the readers find what they should and skip what they should', () => {
@@ -124,12 +132,48 @@ describe('project names in the files the bs-use plan adds or edits', () => {
     ]).toEqual(['<project>']);
   });
 
+  it('a path argument passes only as dot or tilde segments before an allowed name', () => {
+    const flagged = (text: string) => collect({ 'f.md': text }, useArguments, useArgOk);
+    for (const ok of [
+      '/bs use ../project-a',
+      '/bs use ~/project-b',
+      '/bs use ./<project>',
+      '/bs use ~/<project>',
+      '/bs use ../nothing-here',
+    ]) {
+      expect(flagged(ok)).toEqual([]);
+    }
+    expect(flagged('/bs use ../bad-one')).toEqual(['f.md:1 ../bad-one']);
+    expect(flagged('/bs use /abs/bad-two')).toEqual(['f.md:1 /abs/bad-two']);
+    expect(flagged('/bs use ../<dir>')).toEqual(['f.md:1 ../<dir>']);
+    expect(flagged('/bs use ../project-b/')).toEqual(['f.md:1 ../project-b/']);
+  });
+
+  it('path edge cases: leading slash, empty or non-dot segments, bare dots', () => {
+    const flagged = (text: string) => collect({ 'f.md': text }, useArguments, useArgOk);
+    for (const ok of ['/bs use project-a', '/bs use ./../project-a', '/bs use ~/../project-b']) {
+      expect(flagged(ok)).toEqual([]);
+    }
+    for (const bad of [
+      '/project-a',
+      '../dir-x/project-a',
+      '~/dir-x/<project>',
+      '..',
+      '~/',
+      '../',
+      'bad-one',
+    ]) {
+      expect(flagged(`/bs use ${bad}`)).toEqual([`f.md:1 ${bad}`]);
+    }
+    expect(flagged('/bs use ../project-a and /bs use ../bad-one')).toEqual(['f.md:1 ../bad-one']);
+  });
+
   it('the collector names every bad site across files, not only the first', () => {
     const files = {
       'one.md': 'ok\n/bs use bad-one',
       'two.md': '/bs use project-a\n\n/bs use bad-two',
     };
-    expect(collect(files, useArguments, USE_ARGS)).toEqual([
+    expect(collect(files, useArguments, useArgOk)).toEqual([
       'one.md:2 bad-one',
       'two.md:3 bad-two',
     ]);

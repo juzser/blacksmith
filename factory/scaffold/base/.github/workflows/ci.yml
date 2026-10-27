@@ -19,6 +19,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          # Without it setup-node takes whatever 22.x the runner image cached,
+          # which can trail a Node security release by days. A template cannot
+          # pin the patch itself: every project it scaffolds would keep that
+          # patch long after it went stale.
+          check-latest: true
           cache: pnpm
       # --frozen-lockfile is safe here: the install runs before the first
       # commit, so pnpm-lock.yaml is already in it.

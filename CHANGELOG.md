@@ -28,6 +28,60 @@ than appearing in it.
 
 ### Changed
 
+- **`wave-runner`, `merger` and `scribe` now carry token caps.** `budgets.yml`
+  prices them as judges, none of them ending in a `task-result-recorded`:
+  110,000, 100,000 and 80,000 tokens per dispatch at medium (half at small,
+  double at huge), rounded up from the p90 of the final turn over past dogfood
+  dispatches. `bs budget alarm` no longer reports an epic `unverifiable` just
+  because it used one of them; each dispatch is projected at its cap. The
+  over-price threshold stays at the coder's 220,000. Like every cap in
+  `budgets.yml` these are prices, not limits, so `under` means under on these
+  prices, and a wave-runner's whole run spends more than ten times its final
+  turn. `bs wave check` and `bs daemon` add the same
+  prices, where before these dispatches added nothing, so an epic near its cap
+  can now be refused a wave or flagged `at-risk`: at small tier, 4 wave-runner,
+  2 scribe and 1 merger dispatches add 4 × 55,000 + 2 × 40,000 + 50,000 =
+  350,000, about 9% of the 4,000,000 epic cap. New knobs
+  `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
+  `BS_TASK_MERGER_CAP_TOKENS` and `BS_TASK_SCRIBE_CAP_TOKENS`, each with
+  `_SMALL`, `_MEDIUM` and `_HUGE` variants, in `.env.example`.
+
+- **`bs init` raises Claude Code's concurrency caps.** Claude Code runs 20
+  subagents and 10 parallel tool calls at once by default, which throttles a
+  `/bs` wave. It reads `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
+  `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` (undocumented) only from its own env
+  or settings, so `bs init` now merges both as `"1000"` into the project's
+  `.claude/settings.local.json`, never overwriting a value already set and
+  keeping the file out of git. Existing installs re-run `bs init` in each
+  project (safe, idempotent) and restart Claude Code. Putting the lines in
+  `~/.claude/settings.json` instead is optional.
+  [INSTALL.md](INSTALL.md#raise-the-concurrency-caps) has the lines.
+
+- **`bs init` sets Claude Code's `autoCompactWindow`.** The 60% compaction rule
+  was prompt-level, and on a 1M-token model Claude Code compacts much later.
+  `bs init` now writes `autoCompactWindow` (`auto_compact_ratio` × 1,000,000 +
+  33,000, which is 633000 today; Claude Code compacts 33,000 tokens before the
+  end of the window, so a 1M model compacts at 60%) into the project's
+  git-excluded `.claude/settings.local.json`, plus 153000
+  (`auto_compact_ratio` × 200,000 + 33,000) under `modelSettings` for each of
+  the eight retired 200k-window models, which the top-level value would
+  otherwise leave compacting near 83%. The nine keys stand or fall together:
+  `bs init` owns only the keys its record proves it wrote while their value is
+  unchanged, and any other window value, wherever it sits (even one equal to
+  the recommendation), is yours and blocks all nine, with one warning. It
+  removes its own lines then (including when
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is
+  set), and stays silent when your own values already are the full recommended
+  layout. The record is the project's `.claude/bs-settings-record.json`
+  (git-excluded; deleting it makes bs treat its old lines as yours); it is
+  what tells its keys from yours. `bs session start` prints a stderr hint,
+  naming the directory to run `bs init` in, when the settings are out of
+  date, when your value is overridden by bs's local lines, or when bs's
+  lines are unused or stacked on top of yours. Deleting bs's lines is not an
+  opt-out (set a value such as `"auto"` instead).
+  Existing installs re-run `bs init` in each project and restart Claude Code.
+  [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
+
 - **The dashboard only reads.** `bs ui` is for watching the factory; every
   decision now goes through the CLI. Removed from the dashboard: Home's "Needs
   you" box, the Waive and Deny buttons on a task's findings, and the approve,
@@ -39,6 +93,43 @@ than appearing in it.
   and `GET /api/inbox` is gone.
 
 ### Fixed
+
+- **The repo pins Node's October 2026 security release, and scaffolded CI
+  takes the newest Node 22.** `.nvmrc` now names `22.23.4` instead of the bare
+  major, so `nvm use` and this repo's CI run the release that fixes the ten
+  CVEs Node published on 2026-10-21, among them a Brotli out-of-bounds write
+  (CVE-2026-111497) and two TLS hostname-check bypasses. The CI template
+  `bs new` scaffolds keeps `node-version: 22` and now sets
+  `check-latest: true`: without it `setup-node` runs whatever 22.x the runner
+  image cached, which can trail a security release by days. The floor did not
+  move: Node 22 or newer. Existing clones run `nvm install` once; a project
+  scaffolded before this adds `check-latest: true` to its `setup-node` step.
+
+- **`/bs use` binds by path and knows a project declared only in its own
+  overlay roadmap.** A path to the checkout, written `/bs use ../<project>` or
+  `/bs use ~/<project>` (an absolute path works too), binds the same way as
+  the project's name, and a project that only its own overlay roadmap declares
+  is no longer answered as unknown. The names scan reads such a path argument.
+
+- **The guardrails describe where secrets are masked.** The "No secrets in
+  outputs" rule in `docs/standards/guardrails.md` said the event logger
+  redacts values matching a denylist before write. It does not: it checks
+  each event against its schema and taxonomy and writes its values as given.
+  The rule now says it rests on the agents and on the gitleaks gate, and
+  names the points that do mask a known credential shape: URL userinfo in
+  git and `gh` errors, stored integration-check commands, and an API judge's
+  own key in a provider's error body.
+
+- **The verdict judge sees what the integration check ran, and that a skipped
+  closing review was not due.** The judge prompt listed each integration
+  command by name and exit code only, so `unit: passed (exit 0)` was refuted
+  as "no test command is shown". The `integration-check` record now stores
+  each check's command, with credential values masked, and the prompt reads
+  `` unit (`npm test`): passed (exit 0) ``. A record written before this
+  change has no command and still shows the name. Command output (`tail`) is
+  still never sent. Separately, an epic whose effort tier skips the closing
+  spec review on an unamended v1 plan used to show "no closing spec review on
+  record"; the prompt now says the review was not due.
 
 - **Read-only git searches for a word such as `push` are no longer refused.**
   The force-push rule refused a read-only git command that only searched for
@@ -156,6 +247,75 @@ than appearing in it.
 
 ### Added
 
+- **0.5.1 — `/bs use` binds a session to one project, and the dashboard
+  only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Eleven
+  entries above this one and one below landed after 0.5.0 and ship in it:
+  the read-only dashboard (#459) under *Changed*; under *Fixed*, `/bs use`
+  by path (#485),
+  where secrets are masked (#484), the verdict judge's evidence (#482), the
+  guard's git-search and line-continuation fixes with `cleared_follow_ups`
+  on the close record (#476), `claims impact` on star re-exports (#475),
+  finished tasks an amendment keeps and `bs task reinstate` (#457, #461), and
+  the dashboard fixes (#444–#452, #456, written up by #458); and Home's four
+  facts (#460, #462) below. This entry does not repeat them.
+
+  *`/bs use` (#472, #473, #474).* `/bs use <project>` binds a Claude Code
+  session to one project. The prompt-capture hook records the binding as a
+  `session-bound` event and, on every later prompt, reminds the session that
+  changes to that project go through `/bs plan` and `/bs run`. A very small
+  change may skip them once, after the operator says yes to a "Small change"
+  question, recorded as `pipeline-bypass-approved`; the limits (one file, ten
+  changed lines) live in the new `factory/policies/session-binding.yml`, and
+  a copy under the work root overrides them. Only the hook writes either
+  record: `bs event append` refuses both. Nothing blocks. The playbook is
+  `.claude/skills/bs/use.md`, and the dashboard shows the bound project on
+  the live-session card and the timeline.
+
+  *Budgets (#473).* A uiux dispatch is capped at 90k tokens at medium (45k
+  small, 180k huge), with `BS_TASK_UIUX_CAP_TOKENS` in `.env.example`, so
+  `bs budget alarm` no longer lists uiux as uncapped.
+
+  *Plans, claims and delegation (#474, #471).* A dispatch for a task whose
+  every plan record is superseded is refused with `cli.task-not-in-plan`,
+  `delegation check` finds a dispatch's session when a sibling wave opened
+  it, and `epic goal-check` and the epic gate credit a task an earlier plan
+  version held and the log reports finished. The guard reads a quoted
+  trailing `$` as plain text (#474). Amendments and `bs task reinstate` read
+  a task's finished state from the event log (#471).
+
+  *bs-audit-4 (#463, #464, #471).* A self-audit after 0.5.0 became an epic
+  of 14 accepted findings: the dashboard reads through indexes and time
+  windows instead of loading every event, every `/api` route gets the
+  request check, payloads and exports nothing reads are gone, and pr-mod
+  fences pull request text in its fix prompts.
+
+  *The dashboard.* Home's Agents running counts every live CLI session's
+  main agent and running subagents at any depth; a completed, handed-back or
+  killed subagent stops counting (#465). Screenshot baselines of retired
+  routes are dropped (#455).
+
+  *Docs (#441, #453, #454).* The policy comments name the `bs-<role>` agent
+  files (#441), and the README and guides say what the package, plugin and
+  clone carry, which dashboard pages read other stores, and where an
+  install's `stack.yml` lives (#453, #454).
+
+  *Packaging and migrations.* The npm package carries the CLI side of all
+  of the above: the binding capture, the claims, plan and guard fixes, the
+  new `session-binding.yml` policy, the `use.md` playbook and both
+  migrations. Bins, `files`, `engines` and runtime dependencies are
+  unchanged; the Dependabot bumps (#466–#470: `@types/node`, vite,
+  `@vitejs/plugin-vue`, vue-router, `@playwright/test`, hono, `@lucide/vue`)
+  are dev dependencies. Two migrations add indexes only and apply when the
+  store next opens: `0018_events_raw_scope_ts_idx` (events by session and by
+  task, with time) and `0019_dispatches_scope_ts_idx` (dispatches by time,
+  project and session) (#471). To upgrade an install, run
+  `npm i -g @juzser/blacksmith@latest` and `claude plugin marketplace update
+  blacksmith`, then `claude plugin update blacksmith` (the `/bs` playbooks
+  and the `bs-spec-reviewer` agent changed) and, where installed,
+  `claude plugin update pr-mod@blacksmith`, and start a new session. bs-mod
+  changes only its version; `claude plugin update bs-mod@blacksmith` is
+  optional. The INSTALL.md floors (Node 22, git 2.38) did not move.
+
 - **`bs stats effectiveness` reports what the factory spent and caught.** It
   reads tokens per task and per role (spend it cannot attribute is reported
   separately), escaped defects after a merge on a passing gate, and finding
@@ -211,13 +371,15 @@ than appearing in it.
   `docs/claims-matrix.md` lists each first-screen claim with what backs it.
 
 - **Home opens with four facts.** Under the page header, four read-only
-  tiles read Active sessions, Agents running, Budget used and Tasks done. All
-  four describe one set: the live CLI sessions linked to a running epic.
+  tiles read Active sessions, Agents running, Budget used and Tasks done.
+  Active sessions, Budget used and Tasks done describe one set: the live CLI
+  sessions linked to a running epic.
   Budget used is the tokens those sessions and their subagents used, read
   from the session transcripts with cache reads left out, and Tasks done reads
-  "13 of 25"; each epic counts once, even when two sessions run it. Agents running
-  counts a session's subagents and the factory agents on its epics once
-  each, and leaves out subagents nested inside another subagent. The strip follows
+  "13 of 25"; each epic counts once, even when two sessions run it. Agents
+  running reads every live CLI session, linked or not: its main agent plus
+  every running subagent at any depth, lifted to its epics' working factory
+  agents where those are more (#465). The strip follows
   the project filter, reads "Not known" when session data could not be read,
   and forms a 2×2 grid on a phone.
 
