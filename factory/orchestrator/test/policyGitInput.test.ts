@@ -583,12 +583,84 @@ describe('force-push rule reads a short-option bundle by what the prefix word ta
 
   // sudo takes the next word as the user, so a later xargs word is still read.
   it.each(BUNDLES)('reads xargs behind sudo %s and a user', (bundle) => {
-    for (const [name, wrap] of WRAPS) {
+    for (const [, wrap] of WRAPS) {
       for (const [line, reason] of LINES) {
         const got = reasonOf(wrap(line.replace('%s', `${bundle} example-user`)));
         expect(got).toBe(reasonOf(wrap(line.replace('%s', '-u example-user'))));
-        if (name !== 'comment') expect(got).toContain(reason);
+        expect(got).toContain(reason);
       }
     }
+  });
+});
+
+describe('force-push rule reads the word after a prefix-word option as a value and as the command word', () => {
+  const reasonOf = (command: string) =>
+    decide(command).violations.find((v) => v.ruleId === 'force-push')?.reason ?? '';
+  const XARGS = 'git run by xargs';
+  const UNEXPANDED = 'the command word here is an unexpanded';
+  const SHELL = 'git output is run by a shell';
+  const SUBST = '"$(git show HEAD:x.sh)"';
+  const WRAPS: Array<(line: string) => string> = [
+    (line) => line,
+    (line) => `timeout 5 ${line}`,
+    (line) => `${line} # note`,
+    (line) => `${line} | head -3`,
+  ];
+
+  // The word after an option is the command word in the second reading.
+  it.each(['nice -n5', 'command -p', 'time -p'])('reads the command word behind %s', (option) => {
+    for (const wrap of WRAPS) {
+      expect(reasonOf(wrap(`echo x | xargs ${option} git`))).toContain(XARGS);
+      expect(reasonOf(wrap(`G=git; echo x | xargs ${option} $G`))).toContain(UNEXPANDED);
+    }
+  });
+
+  // That word is read as it is with no option in front.
+  const COMMAND_WORDS: Array<[string, string]> = [
+    ['git', XARGS],
+    ['$G', UNEXPANDED],
+    ['xargs git', XARGS],
+    ['env git', XARGS],
+    ['sudo git', XARGS],
+    ['xargs sudo git', XARGS],
+    [`eval ${SUBST}`, SHELL],
+    [`bash -c ${SUBST}`, SHELL],
+  ];
+  it.each(COMMAND_WORDS)('reads %s behind an option like the same words alone', (words, reason) => {
+    expect(reasonOf(`G=git; echo x | xargs nice -n5 ${words}`)).toContain(reason);
+    expect(reasonOf(`G=git; echo x | xargs command -p ${words}`)).toContain(reason);
+  });
+  it('keeps allowing a plain command behind an option', () => {
+    for (const option of ['nice -n5', 'command -p', 'time -p', 'nice -n 5']) {
+      expect(forcePushRefused(`echo x | xargs ${option} grep y`)).toBe(false);
+      expect(forcePushRefused(`git ls-files | xargs ${option} git status`)).toBe(false);
+    }
+  });
+
+  // An option with no entry in the guard, and an option that takes no value, in front of a word and the tool.
+  const PINNED: Array<[string, string]> = [
+    ['echo x | xargs sudo --user example-user git push', XARGS],
+    ['echo x | xargs time --output example-file git push', XARGS],
+    ['echo x | xargs sudo -h example-host git push', XARGS],
+    ['echo x | xargs nohup -z example-word git push', XARGS],
+    [`nice -n5 eval ${SUBST}`, SHELL],
+    [`command -p eval ${SUBST}`, SHELL],
+    [`time -p eval ${SUBST}`, SHELL],
+  ];
+  it.each(PINNED)('keeps refusing %s', (command, reason) => {
+    expect(reasonOf(command)).toContain(reason);
+  });
+
+  // The options read twice in one segment are counted; a segment past the count is refused with a reason.
+  const OPTION_LIMIT = 16;
+  const options = (count: number) => `echo x | xargs ${'nice -n5 '.repeat(count)}a`;
+  const PAST = 'more options follow prefix words';
+  it('reads options twice up to the limit and refuses a segment past it with its reason', () => {
+    expect(decide(options(OPTION_LIMIT)).violations).toEqual([]);
+    expect(reasonOf(options(OPTION_LIMIT + 1))).toContain(PAST);
+  });
+  it.each(['nice -n5', 'command -p', 'time -p'])('decides a long line of %s options', (option) => {
+    const line = `echo x | ${`xargs ${option} a `.repeat(5000)}ls`;
+    expect(reasonOf(line)).toContain(PAST);
   });
 });

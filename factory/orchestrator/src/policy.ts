@@ -2413,11 +2413,23 @@ type SplitWords = (words: readonly DequotedWord[], from: number) => readonly Deq
 const isInputRunner = (word: string | undefined): boolean =>
   baseName(word) === 'xargs' || word === 'eval';
 
+/**
+ * Behind a prefix word the word after an option is read as the option's value
+ * and as the command word. A walk with `at` set to -1 lists the option words
+ * (`options`, at most one past the limit); a walk with `at` set to one of them
+ * starts the command right after that option.
+ */
+const OPTION_READ_LIMIT = 16;
+const OPTION_READ_LIMIT_REASON =
+  'more options follow prefix words here than the guard reads — write the command out plainly';
+type OptionBranch = { at: number; options: number[] };
+
 function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
   split: SplitWords,
   shellOnly: boolean,
+  branch?: OptionBranch,
 ): { words: readonly DequotedWord[]; index: number; first: number } {
   let words = start;
   let index = from;
@@ -2443,6 +2455,14 @@ function walkPrefixWords(
         // Only stdbuf's short option can carry its value attached (`-oL`); behind the
         // other prefix words a short-option bundle takes the next word as its value.
         if (next.startsWith('-')) {
+          if (branch?.at === index) {
+            index += 1;
+            break;
+          }
+          const after = words[index + 1]?.text;
+          if (branch && after !== undefined && !PREFIX_OPERAND_RE.test(after)) {
+            if (branch.options.length <= OPTION_READ_LIMIT) branch.options.push(index);
+          }
           afterFlag = next.startsWith('--') || next.length <= 2 || baseName(text) !== 'stdbuf';
         } else if (afterFlag) afterFlag = false;
         else if (!PREFIX_OPERAND_RE.test(next) && !ASSIGNMENT_WORD_RE.test(next)) break;
@@ -2486,17 +2506,29 @@ function checkXargsGitAndShellInput(
   rule: GuardrailRule,
 ): PolicyViolation | null {
   let exceeded = false;
+  let optionsExceeded = false;
   for (const shellOnly of [false, true]) {
     for (const read of [splitValueWords, splitOnSpace, null]) {
-      const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
-      const split: SplitWords = (all, from) =>
-        read ? splitEnvCommand(all, from, budget, read) : all;
-      const found = readRunCommand(words, afterGitPipe, rule, split, shellOnly);
+      const run = (branch: OptionBranch) => {
+        const budget = { left: ENV_SPLIT_LIMIT, exceeded: false };
+        const split: SplitWords = (all, from) =>
+          read ? splitEnvCommand(all, from, budget, read) : all;
+        const found = readRunCommand(words, afterGitPipe, rule, split, shellOnly, branch);
+        exceeded ||= budget.exceeded;
+        return found;
+      };
+      const listing: OptionBranch = { at: -1, options: [] };
+      const found = run(listing);
       if (found) return found;
-      exceeded ||= budget.exceeded;
+      optionsExceeded ||= listing.options.length > OPTION_READ_LIMIT;
+      for (const at of listing.options.slice(0, OPTION_READ_LIMIT)) {
+        const second = run({ at, options: [] });
+        if (second) return second;
+      }
     }
   }
-  return exceeded ? violation(rule, ENV_SPLIT_LIMIT_REASON) : null;
+  if (exceeded) return violation(rule, ENV_SPLIT_LIMIT_REASON);
+  return optionsExceeded ? violation(rule, OPTION_READ_LIMIT_REASON) : null;
 }
 
 function readRunCommand(
@@ -2505,12 +2537,13 @@ function readRunCommand(
   rule: GuardrailRule,
   split: SplitWords,
   shellOnly: boolean,
+  branch: OptionBranch,
 ): PolicyViolation | null {
   let words = split(originalWords, 0);
   let index = commandStart(words);
   let viaXargs = false;
   for (;;) {
-    const walked = walkPrefixWords(words, index, split, shellOnly);
+    const walked = walkPrefixWords(words, index, split, shellOnly, branch);
     words = walked.words;
     index = walked.index;
     if (baseName(words[index]?.text) !== 'xargs') break;
