@@ -398,6 +398,67 @@ describe('bs stats effectiveness and bs report export (built binary)', () => {
     expect(state('proj-a/task-4', 'tests')).toBe('not-run');
   });
 
+  describe('task ids written bare and epic-qualified', () => {
+    const exportFor = (name: string, lines: unknown[]) => {
+      const root = path.join(scratch, name);
+      const stateDir = path.join(root, 'events');
+      jsonl(path.join(stateDir, `${SESSION}.jsonl`), lines);
+      const args = [
+        'report',
+        'export',
+        '--session',
+        SESSION,
+        ...dirs(stateDir, path.join(root, 'c')),
+      ];
+      return {
+        json: JSON.parse(run([...args, '--json']).stdout),
+        md: run(args).stdout,
+      };
+    };
+    type Row = { task: string; title: string | null; check: string; state: string };
+
+    it('lists a bare id and its qualified form as one task with the title and the check states', () => {
+      seq = 0;
+      const { json, md } = exportFor('mixed-ids', [
+        event('session-start', {}),
+        event('task-added', { title: 'One' }, { task_id: 'task-1' }),
+        event('testgate-result', { pass: false, results: [] }, { task_id: 'epic-a/task-1' }),
+        event('testgate-result', { pass: true, results: [] }, { task_id: 'task-1' }),
+        event('gate-outcome', { outcome: 'blocked' }, { task_id: 'epic-a/task-1' }),
+      ]);
+      const rows: Row[] = json.checks;
+      expect(rows).toHaveLength(3);
+      expect(new Set(rows.map((r) => r.task))).toEqual(new Set(['task-1']));
+      expect(rows.every((r) => r.title === 'One')).toBe(true);
+      const state = (check: string) => rows.find((r) => r.check === check)?.state;
+      expect(state('tests')).toBe('passed');
+      expect(state('grader')).toBe('not-run');
+      expect(state('gate')).toBe('failed');
+      expect(md).toMatch(/task-1[^\n]*\| tests \| passed \|/);
+      expect(md).toMatch(/task-1[^\n]*\| gate \| failed \|/);
+      expect(md).not.toContain('epic-a/task-1');
+    });
+
+    it('keeps two qualified ids from different epics as two tasks', () => {
+      seq = 0;
+      const { json, md } = exportFor('two-epics', [
+        event('session-start', {}),
+        event('task-added', { title: 'A' }, { task_id: 'epic-a/task-1' }),
+        event('task-added', { title: 'B' }, { task_id: 'epic-b/task-1' }),
+        event('testgate-result', { pass: true, results: [] }, { task_id: 'epic-a/task-1' }),
+        event('testgate-result', { pass: false, results: [] }, { task_id: 'epic-b/task-1' }),
+      ]);
+      const rows: Row[] = json.checks;
+      expect(new Set(rows.map((r) => r.task))).toEqual(new Set(['epic-a/task-1', 'epic-b/task-1']));
+      const state = (task: string) =>
+        rows.find((r) => r.task === task && r.check === 'tests')?.state;
+      expect(state('epic-a/task-1')).toBe('passed');
+      expect(state('epic-b/task-1')).toBe('failed');
+      expect(md).toMatch(/epic-a\/task-1[^\n]*\| tests \| passed \|/);
+      expect(md).toMatch(/epic-b\/task-1[^\n]*\| tests \| failed \|/);
+    });
+  });
+
   it('marks the lineage scope and refuses an unreadable --digest file', () => {
     const lineage = JSON.parse(run(exportArgs(complete, ['--lineage', '--json'])).stdout);
     expect(lineage.lineage).toBe(true);
