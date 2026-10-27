@@ -240,7 +240,7 @@ import {
   unadmissibleTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
-import { epicOfTaskId } from './taskId.js';
+import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
@@ -1478,7 +1478,8 @@ function checkStateOf(
   read: (payload: Record<string, unknown>) => CheckStateName,
 ): CheckStateName {
   const last = events.filter(
-    ({ record }) => record.event_type === eventType && eventTaskId(record) === taskId,
+    ({ record }) =>
+      record.event_type === eventType && taskIdsMatch(eventTaskId(record) ?? undefined, taskId),
   );
   const latest = last[last.length - 1];
   if (latest === undefined) return 'not-run';
@@ -1565,8 +1566,10 @@ function buildExportModel(
   const taskIds: string[] = [];
   const checkTypes = new Set(CHECKS.map((c) => c.eventType));
   for (const { record } of events) {
-    const id = eventTaskId(record);
-    if (id === null) continue;
+    const seen = eventTaskId(record);
+    if (seen === null) continue;
+    // A bare id and its qualified form are one row, under the id first seen.
+    const id = taskIds.find((t) => taskIdsMatch(t, seen)) ?? seen;
     if (record.event_type === 'task-added') {
       const title = (record.payload as Record<string, unknown>).title;
       if (typeof title === 'string' && !titles.has(id)) titles.set(id, title);
