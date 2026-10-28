@@ -307,6 +307,76 @@ describe('queue landing is serialised and compare-and-swap', () => {
     });
   }
 
+  describe('the hold is released on every exit of a step', () => {
+    const lockFile = (): string => path.join(lockDir, 'heavy.lock');
+
+    it('after merged, tests-failed and integration-moved', async () => {
+      const ok = makeTask('task-ok', 'a.txt', 'a-edited\n');
+      const red = makeTask('task-red', 'b.txt', 'b-edited\n');
+      const moving = makeTask('task-moving', 'c.txt', 'c-edited\n');
+      const knobs = { lockDir, pollMs: 2, isPidAlive: () => true };
+
+      expect(
+        (await step(ok, { projectDir, epic: EPIC, testCmd: 'true', heavyLock: knobs })).outcome,
+      ).toBe('merged');
+      expect(existsSync(lockFile())).toBe(false);
+
+      expect(
+        (await step(red, { projectDir, epic: EPIC, testCmd: 'false', heavyLock: knobs })).outcome,
+      ).toBe('tests-failed');
+      expect(existsSync(lockFile())).toBe(false);
+
+      const side = script('side.sh', [
+        `cd '${projectDir}'`,
+        `export GIT_INDEX_FILE='${path.join(outDir, 'side.index')}'`,
+        `git read-tree refs/heads/${INTEGRATION}`,
+        `c=$(git commit-tree $(git write-tree) -p refs/heads/${INTEGRATION} -m outside)`,
+        `git update-ref refs/heads/${INTEGRATION} $c`,
+      ]);
+      const out = await step(moving, {
+        projectDir,
+        epic: EPIC,
+        testCmd: `sh '${side}'`,
+        heavyLock: knobs,
+      });
+      expect(out.outcome).toBe('integration-moved');
+      expect(existsSync(lockFile())).toBe(false);
+    });
+
+    it('after a rebase-conflict that throws nothing', async () => {
+      const task = makeTask('task-1', 'a.txt', 'from-task\n');
+      const holderDir = path.join(root, 'holder');
+      git(projectDir, ['worktree', 'add', '-q', holderDir, INTEGRATION]);
+      writeFileSync(path.join(holderDir, 'a.txt'), 'from-outside\n');
+      git(holderDir, ['commit', '-q', '-am', 'outside conflicting']);
+      const out = await step(task, {
+        projectDir,
+        epic: EPIC,
+        testCmd: 'true',
+        heavyLock: lockKnobs(),
+      });
+      expect(out.outcome).toBe('rebase-conflict');
+      expect(existsSync(lockFile())).toBe(false);
+    });
+
+    it('a step that times out on the lock leaves a foreign hold untouched', async () => {
+      const task = makeTask('task-1', 'a.txt', 'a-edited\n');
+      const held = holdLock(lockDir);
+      const before = git(projectDir, ['rev-parse', INTEGRATION]);
+      await expect(
+        step(task, {
+          projectDir,
+          epic: EPIC,
+          testCmd: 'true',
+          heavyLock: { ...lockKnobs(), maxWaitMs: 20 },
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+      expect(readFileSync(lockFile(), 'utf8')).toContain('test-owned-token');
+      expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(before);
+      held.release();
+    });
+  });
+
   describe('git hooks the queue starts under its hold', () => {
     let holderDir: string;
 
