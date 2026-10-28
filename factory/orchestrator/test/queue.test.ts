@@ -265,8 +265,9 @@ describe('step', () => {
 
   // The rebase leaves the task branch on top of integration, so a conflict at
   // merge time means integration moved underneath the queue; here the test
-  // command moves it. The merge must fail loudly and land nothing.
-  it('throws on a tree-less merge conflict and leaves the integration ref alone', async () => {
+  // command moves it. A head that moved wins over the conflict: the queue
+  // reports it and lands nothing, instead of attempting a merge that throws.
+  it('reports integration-moved, not a merge-tree throw, when the head moved and also conflicts', async () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
@@ -287,18 +288,14 @@ describe('step', () => {
       ].join('\n'),
     );
 
-    let movedTo = '';
-    await expect(
-      step(
-        { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
-        { projectDir, epic: 'epic-1', testCmd: `sh ${JSON.stringify(script)}` },
-      ).finally(() => {
-        movedTo = git(projectDir, ['rev-parse', integration]);
-      }),
-    ).rejects.toThrow(/git merge-tree[\s\S]*a\.txt/);
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: `sh ${JSON.stringify(script)}` },
+    );
 
+    expect(result).toEqual({ outcome: 'integration-moved', taskId: 'task-1' });
+    const movedTo = git(projectDir, ['rev-parse', integration]);
     expect(git(projectDir, ['log', '-1', '--format=%s', movedTo])).toBe('side');
-    expect(git(projectDir, ['rev-parse', integration])).toBe(movedTo);
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toContain('smith-merge-');
   });
 
@@ -1684,6 +1681,30 @@ describe('merge queue heavy lock', () => {
     }
     expect(existsSync(rec.marker)).toBe(false);
     expect(JSON.stringify(await logged())).not.toContain('execution.test-failure');
+  });
+
+  it('step that times out on the lock runs no rebase: the task branch stays where it was', async () => {
+    const task = makeTask('task-1', 'a.txt');
+    // Integration moves ahead, so a rebase would rewrite the task branch.
+    const holderDir = path.join(root, 'holder');
+    git(projectDir, ['worktree', 'add', '-q', holderDir, 'bs/epic-1/integration']);
+    git(holderDir, ['commit', '-q', '--allow-empty', '-m', 'integration ahead']);
+    const branchBefore = git(projectDir, ['rev-parse', task.branch]);
+    const h = await otherHolder();
+    try {
+      await expect(
+        step(task, {
+          projectDir,
+          epic: 'epic-1',
+          testCmd: 'true',
+          heavyLock: lockOpts({ maxWaitMs: 30 }),
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+    } finally {
+      h.release();
+      await h.done;
+    }
+    expect(git(projectDir, ['rev-parse', task.branch])).toBe(branchBefore);
   });
 
   it('batchStep rejects with heavy.wait-timeout and leaves no candidate worktree', async () => {
