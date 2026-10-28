@@ -679,7 +679,6 @@ function foregroundSleepsIn(src: string, depth: number): number[] {
 
 const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const REDIRECT_FD_RE = /^\d+$/;
-const NUMBER_RE = /^(\d+\.?\d*|\.\d+)([smhd]?)$/;
 const UNIT_SECONDS: Record<string, number> = { '': 1, s: 1, m: 60, h: 3600, d: 86_400 };
 /** Words that start a command position without being the command. */
 const KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '{']);
@@ -756,15 +755,102 @@ function shellScriptSleeps(args: readonly Word[], depth: number): number[] {
 /** The summed operands of one `sleep`, as a one-element list; empty if it blocks nothing. */
 function sleepDuration(operands: readonly Word[]): number[] {
   if (operands.length === 0) return [];
-  if (operands.some((w) => w.dynamic || /^(infinity|inf)$/i.test(w.text)))
-    return [Number.POSITIVE_INFINITY];
   let total = 0;
-  for (const { text } of operands) {
-    const match = NUMBER_RE.exec(text);
-    if (match === null) return []; // `sleep` rejects it at once
-    total += Number.parseFloat(match[1] as string) * (UNIT_SECONDS[match[2] as string] as number);
+  for (const { text, dynamic } of operands) {
+    // An operand that cannot be read has an unknown length, like a variable.
+    total += dynamic
+      ? Number.POSITIVE_INFINITY
+      : (operandSeconds(text) ?? Number.POSITIVE_INFINITY);
   }
   return [total];
+}
+
+const isDigit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
+/** Value of a hex digit, or -1 for anything else (including undefined). */
+function hexValue(c: string | undefined): number {
+  if (c === undefined || c.length !== 1) return -1;
+  const code = c.toLowerCase().charCodeAt(0);
+  if (code >= 48 && code <= 57) return code - 48;
+  return code >= 97 && code <= 102 ? code - 87 : -1;
+}
+
+/** True when a hex mantissa starts at `i`: a digit, or `.` and a digit. */
+function isHexStart(text: string, i: number): boolean {
+  return hexValue(text[i]) >= 0 || (text[i] === '.' && hexValue(text[i + 1]) >= 0);
+}
+
+/**
+ * An exponent (`marker`, optional sign, at least one digit) at `i`, or null.
+ * The value saturates at +-1e6, far past any double's range, so a long digit
+ * run neither overflows nor costs more than one pass.
+ */
+function readExponent(
+  text: string,
+  i: number,
+  marker: 'e' | 'p',
+): { value: number; end: number } | null {
+  if (text[i]?.toLowerCase() !== marker) return null;
+  let j = i + 1;
+  const negative = text[j] === '-';
+  if (negative || text[j] === '+') j++;
+  if (!isDigit(text[j])) return null;
+  let value = 0;
+  for (; isDigit(text[j]); j++) value = Math.min(value * 10 + (text.charCodeAt(j) - 48), 1_000_000);
+  return { value: negative ? -value : value, end: j };
+}
+
+/**
+ * Seconds in one `sleep` operand, read as strtod reads a number (optional `+`,
+ * decimal with fraction and exponent, `0x` hex with fraction and binary
+ * exponent, `inf`/`infinity`) greedily, then at most one unit suffix `s`, `m`,
+ * `h` or `d`. Null when the operand is not exactly that. A single left-to-right
+ * scan: no backtracking, so a long operand costs time linear in its length.
+ */
+function operandSeconds(text: string): number | null {
+  let i = text[0] === '+' ? 1 : 0;
+  let value: number;
+  const lower = text.slice(i, i + 8).toLowerCase();
+  if (lower === 'infinity' || lower.startsWith('inf')) {
+    value = Number.POSITIVE_INFINITY;
+    i += lower === 'infinity' ? 8 : 3;
+  } else if (
+    text[i] === '0' &&
+    (text[i + 1] === 'x' || text[i + 1] === 'X') &&
+    isHexStart(text, i + 2)
+  ) {
+    i += 2;
+    let mantissa = 0;
+    let scale = 0;
+    for (; hexValue(text[i]) >= 0; i++) mantissa = mantissa * 16 + hexValue(text[i]);
+    if (text[i] === '.') {
+      i++;
+      for (; hexValue(text[i]) >= 0; i++) {
+        mantissa = mantissa * 16 + hexValue(text[i]);
+        scale += 4;
+      }
+    }
+    const exponent = readExponent(text, i, 'p');
+    if (exponent !== null) i = exponent.end;
+    const power = (exponent?.value ?? 0) - scale;
+    value = mantissa === 0 ? 0 : mantissa * 2 ** power;
+    if (Number.isNaN(value)) value = Number.POSITIVE_INFINITY;
+  } else {
+    const start = i;
+    let digits = 0;
+    for (; isDigit(text[i]); i++) digits++;
+    if (text[i] === '.') {
+      i++;
+      for (; isDigit(text[i]); i++) digits++;
+    }
+    if (digits === 0) return null;
+    const exponent = readExponent(text, i, 'e');
+    if (exponent !== null) i = exponent.end;
+    value = Number(text.slice(start, i));
+  }
+  const unit = text.slice(i);
+  const factor = UNIT_SECONDS[unit];
+  if (unit.length > 1 || factor === undefined) return null;
+  return value * factor;
 }
 
 /**

@@ -661,6 +661,84 @@ describe('diet rule: foreground sleep (D4 verdict table)', () => {
   it('reports the longest offending sleep when several block', () => {
     expect(dietReason(bash('sleep 1; sleep 10; sleep 4'))).toContain('10 s');
   });
+
+  // Operands are read the way strtod reads them (finding f-bs-optimize/integration-1e75d554).
+  const strtodDeny: [string, string][] = [
+    ['sleep 1e3', '1000 s'],
+    ['sleep 0x10', '16 s'],
+    ['sleep 2e0', '2 s'],
+    ['sleep 2E0', '2 s'],
+    ['sleep +5', '5 s'],
+    ['sleep 1e1m', '600 s'],
+    ['sleep 5e-1m', '30 s'],
+    ['sleep 0x1d', '29 s'],
+    ['sleep 1 0x1', '2 s'],
+    ['sleep 5.', '5 s'],
+    ['sleep .5e1', '5 s'],
+    ['timeout 30 sleep 1e3', '1000 s'],
+  ];
+  it.each(strtodDeny)('denies the strtod operand in %j', (command, duration) => {
+    const reason = dietReason(bash(command)) ?? '';
+    expect(reason).toMatch(/foreground `sleep`/);
+    expect(reason).toContain(`of ${duration}`);
+  });
+
+  it.each([
+    'sleep 1e0',
+    'sleep 0x1',
+    'sleep 5e-1',
+    'sleep 1e-3',
+    'sleep 0x1p0',
+    'sleep .5',
+    'sleep 1.',
+    'sleep 1e3 &',
+    'timeout 1e3 pnpm test',
+  ])('allows the short or background operand in %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  it('allows sleep 1e3 with run_in_background: true', () => {
+    expect(dietReason(bash('sleep 1e3', { run_in_background: true }))).toBeNull();
+  });
+
+  it.each(['sleep abc', 'sleep 1x', 'sleep nan', 'sleep .', 'sleep 1,5'])(
+    'denies the unreadable operand in %j as unknown length',
+    (command) => {
+      const reason = dietReason(bash(command)) ?? '';
+      expect(reason).toMatch(/foreground `sleep`/);
+      expect(reason).toContain('unknown');
+    },
+  );
+
+  it('keeps a sleep with no operand allowed', () => {
+    expect(dietReason(bash('sleep'))).toBeNull();
+  });
+
+  describe('near the command length cap', () => {
+    const run = (operand: string) => {
+      const started = performance.now();
+      const reason = dietReason(bash(`sleep ${operand}`)) ?? '';
+      return { reason, ms: performance.now() - started };
+    };
+    it('reads a 65000-digit number', () => {
+      const { reason, ms } = run('9'.repeat(65_000));
+      expect(reason).toMatch(/foreground `sleep` of /);
+      expect(ms).toBeLessThan(200);
+    });
+    it.each([
+      ['digits then x', `${'9'.repeat(64_999)}x`],
+      ['1 then e repeated', `1${'e'.repeat(64_999)}`],
+      ['0x then p repeated', `0x${'p'.repeat(64_998)}`],
+    ])('denies %s as unknown length', (_name, operand) => {
+      const { reason, ms } = run(operand);
+      expect(reason).toMatch(/foreground `sleep` of unknown length/);
+      expect(ms).toBeLessThan(200);
+    });
+    it('gives a 1 MB command no deny', () => {
+      const raw = JSON.parse(bash(`sleep 30 ${'9'.repeat(1_000_000)}`));
+      expect(dietDecision(raw)).toBeNull();
+    });
+  });
 });
 
 describe('diet rules fail open', () => {
