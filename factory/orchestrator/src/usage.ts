@@ -831,7 +831,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'playbook slice',
     positionals: '<wave|dispatch>',
-    flags: '[--step <n>] [--section <heading>]',
+    flags: '[--step <n> | --section <heading>]',
     summary: 'Print one numbered wave step or one dispatch section.',
   },
   {

@@ -5844,10 +5844,23 @@ async function main(): Promise<number> {
     const [which] = requirePositionals(positional, usageFor('playbook slice')) as [string];
     const skills = path.join(REPO_ROOT, '.claude', 'skills', 'bs');
     if (which === 'wave') {
+      const waveText = readFileSync(path.join(skills, 'wave.md'), 'utf8');
+      const hasStep = flags.step !== undefined;
+      const hasSection = flags.section !== undefined;
+      const exactlyOne =
+        'playbook slice wave takes exactly one of --step <n> or --section <heading>.';
+      if (hasStep && hasSection) {
+        throw new SmithError('cli.invalid-flag', exactlyOne, { flags: ['step', 'section'] });
+      }
+      if (!hasStep && !hasSection) {
+        throw new SmithError('cli.missing-flag', exactlyOne, { flags: ['step', 'section'] });
+      }
+      if (hasSection) {
+        process.stdout.write(`${sliceSection(waveText, requireFlag(flags, 'section'))}\n`);
+        return 0;
+      }
       const step = boundedIntFlag(flags, 'step', { min: 1 }) ?? requireFlag(flags, 'step');
-      process.stdout.write(
-        `${sliceWaveStep(readFileSync(path.join(skills, 'wave.md'), 'utf8'), Number(step))}\n`,
-      );
+      process.stdout.write(`${sliceWaveStep(waveText, Number(step))}\n`);
       return 0;
     }
     if (which === 'dispatch') {
@@ -5868,30 +5881,18 @@ async function main(): Promise<number> {
   // Epic bs-optimize criterion 10: run a command under the machine-wide heavy
   // lock. argv array, no shell; the child env is heavyChildEnv's alone.
   if (namespace === 'heavy' && action === 'run') {
-    const { withHeavyLock } = await import('./heavyLock.js');
-    const { heavyChildEnv } = await import('./testgate.js');
+    const { runUnderHeavyLock } = await import('./heavyRun.js');
     if (childArgv.length === 0) {
       throw new SmithError('cli.missing-flag', 'heavy run needs a command after "--".', {});
     }
     const [cmd, ...cmdArgs] = childArgv as [string, ...string[]];
     const maxWaitMs = boundedIntFlag(flags, 'max-wait-ms', { min: 0 });
     try {
-      return await withHeavyLock(
-        (lease) =>
-          new Promise<number>((resolve, reject) => {
-            const child = spawn(cmd, cmdArgs, {
-              env: heavyChildEnv(process.env, lease),
-              stdio: 'inherit',
-            });
-            child.on('error', reject);
-            child.on('close', (code, signal) => resolve(code ?? (signal ? 128 : 1)));
-          }),
-        {
-          label: requireFlag(flags, 'label'),
-          cwd: process.cwd(),
-          ...(maxWaitMs !== undefined ? { maxWaitMs } : {}),
-        },
-      );
+      return await runUnderHeavyLock(cmd, cmdArgs, {
+        label: requireFlag(flags, 'label'),
+        cwd: process.cwd(),
+        ...(maxWaitMs !== undefined ? { maxWaitMs } : {}),
+      });
     } catch (err) {
       if (!(err instanceof SmithError) || err.code !== 'heavy.wait-timeout') throw err;
       printJson({ error: { code: err.code, message: err.message, details: err.details } });

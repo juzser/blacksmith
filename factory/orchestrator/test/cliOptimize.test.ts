@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -404,6 +405,45 @@ describe('playbook slice (criterion 7, CLI half)', () => {
   });
 });
 
+describe('playbook slice wave --section (follow-up ce3a9e04)', () => {
+  it('prints the named wave.md section, and refuses both flags or neither naming both', () => {
+    const sb = sandbox();
+    const ok = cli(['playbook', 'slice', 'wave', '--section', 'Run the whole wave at once'], sb);
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    expect(ok.stdout.startsWith('## Run the whole wave at once')).toBe(true);
+    const both = cli(
+      ['playbook', 'slice', 'wave', '--step', '2', '--section', 'Run the whole wave at once'],
+      sb,
+    );
+    const neither = cli(['playbook', 'slice', 'wave'], sb);
+    for (const run of [both, neither]) {
+      expect(run.status).not.toBe(0);
+      const error = JSON.parse(run.stdout).error;
+      expect(['cli.invalid-flag', 'cli.missing-flag']).toContain(error.code);
+      expect(error.message).toContain('--step');
+      expect(error.message).toContain('--section');
+    }
+  });
+
+  it('every documented `playbook slice wave --section "..."` invocation runs and prints its heading', () => {
+    const sb = sandbox();
+    const docs = ['.claude/agents/bs-wave-runner.md', '.claude/skills/bs/wave.md'];
+    const headings: string[] = [];
+    for (const doc of docs) {
+      const text = readFileSync(path.join(REPO_ROOT, doc), 'utf8');
+      for (const m of text.matchAll(/playbook slice wave --section\s+"([^"]+)"/g)) {
+        headings.push(m[1] as string);
+      }
+    }
+    expect(headings.length, 'the docs name no wave --section invocation').toBeGreaterThan(0);
+    for (const heading of headings) {
+      const run = cli(['playbook', 'slice', 'wave', '--section', heading], sb);
+      expect(run.status, `--section ${heading}: ${run.stdout}${run.stderr}`).toBe(0);
+      expect(run.stdout.startsWith(`## ${heading}`), heading).toBe(true);
+    }
+  });
+});
+
 // ---- criterion 9: in-flight admission ----------------------------------------
 
 describe('wave next / wave check after plan ingest (criterion 9, CLI half)', () => {
@@ -606,6 +646,75 @@ describe('heavy run, heavy status and gate run (criterion 10, CLI half)', () => 
     );
     expect(run.status).toBe(1);
     expect(errorOf(run.stdout)).toBe('gate.invalid-check-heavy');
+  });
+});
+
+describe('heavy run signals (follow-up 0cda4bb8)', () => {
+  it('exits 128 + the signal number when the child is killed by a signal', () => {
+    const sb = sandbox();
+    for (const [sig, code] of [
+      ['SIGKILL', 137],
+      ['SIGTERM', 143],
+    ] as const) {
+      const run = cli(
+        ['heavy', 'run', '--label', 't', '--', 'node', '-e', `process.kill(process.pid,'${sig}')`],
+        sb,
+      );
+      expect(run.status, sig).toBe(code);
+    }
+    const three = cli(['heavy', 'run', '--label', 't', '--', 'node', '-e', 'process.exit(3)'], sb);
+    expect(three.status).toBe(3);
+  });
+
+  it('forwards SIGTERM to the child, keeps the lock until it exits, then frees it', async () => {
+    const sb = sandbox();
+    const marker = path.join(scratch, `term-marker-${counter++}`);
+    const ready = path.join(scratch, `ready-marker-${counter++}`);
+    const gotTerm = path.join(scratch, `got-term-marker-${counter++}`);
+    const go = path.join(scratch, `go-marker-${counter++}`);
+    // On SIGTERM the child records it, then drains until the test releases it, so
+    // the "lock still held" probe never races a fixed timer.
+    const childSrc = `const fs=require('fs');process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(gotTerm)},'x');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(go)})){clearInterval(t);fs.writeFileSync(${JSON.stringify(marker)},'x');process.exit(7)}},20)});fs.writeFileSync(${JSON.stringify(ready)},'x');setInterval(()=>{},1000)`;
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      BS_HOME: sb.home,
+      BS_HEAVY_LOCK_DIR: sb.locks,
+    };
+    delete env.BS_HEAVY_LOCK_TOKEN;
+    const hr = spawn(
+      'node',
+      [CLI_PATH, 'heavy', 'run', '--label', 't', '--', 'node', '-e', childSrc],
+      { env, stdio: 'ignore' },
+    );
+    const exited = new Promise<number | null>((resolve) => hr.on('close', (c) => resolve(c)));
+    try {
+      for (let i = 0; i < 200 && !existsSync(ready); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(existsSync(ready)).toBe(true);
+      hr.kill('SIGTERM');
+      for (let i = 0; i < 200 && !existsSync(gotTerm); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(existsSync(gotTerm)).toBe(true);
+      // The child got the signal and is still draining: the lock must still be held.
+      const busy = cli(
+        ['heavy', 'run', '--label', 'u', '--max-wait-ms', '0', '--', 'node', '-e', ''],
+        sb,
+      );
+      expect(busy.status).toBe(75);
+      writeFileSync(go, 'x');
+      expect(await exited).toBe(7);
+    } finally {
+      writeFileSync(go, 'x'); // never leave the child draining
+      if (hr.exitCode === null && hr.signalCode === null) hr.kill('SIGKILL');
+    }
+    expect(existsSync(marker)).toBe(true);
+    const after = cli(
+      ['heavy', 'run', '--label', 'u', '--max-wait-ms', '0', '--', 'node', '-e', 'process.exit(0)'],
+      sb,
+    );
+    expect(after.status).toBe(0);
   });
 });
 
