@@ -5900,6 +5900,20 @@ async function main(): Promise<number> {
     }
   }
 
+  // Finding f-bs-optimize/integration-dcc5330f: wait, in a call that fits the
+  // Bash tool's timeout, for a background `heavy run` to end its out file with
+  // `EXIT=<n>`. Read-only; `done`, not the exit code, says whether to call again.
+  if (namespace === 'heavy' && action === 'wait') {
+    const { DEFAULT_WAIT_MS, MAX_WAIT_MS, heavyWait } = await import('./heavyWait.js');
+    const result = await heavyWait({
+      file: requireFlag(flags, 'file'),
+      maxWaitMs:
+        boundedIntFlag(flags, 'max-wait-ms', { min: 0, max: MAX_WAIT_MS }) ?? DEFAULT_WAIT_MS,
+    });
+    printJson(result);
+    return result.done ? result.exit : 124;
+  }
+
   // Epic bs-optimize criterion 10: who holds the lock, or {}.
   if (namespace === 'heavy' && action === 'status') {
     const { readHeavyLock, resolveHeavyLockDir } = await import('./heavyLock.js');
