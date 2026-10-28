@@ -521,5 +521,41 @@ describe('queue landing is serialised and compare-and-swap', () => {
         rmSync(lock, { force: true });
       }
     });
+
+    it('batchStep still reads a head that really moved as integration-moved when a stale lock is also present', async () => {
+      const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+      const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+      const s = makeTask('task-s', 'c.txt', 'c-edited\n');
+      const batchLock = path.join(root, 'batch-locks');
+      const held = holdLock(batchLock);
+      const pb = probe();
+      const batch = batchStep([a, b], {
+        projectDir,
+        epic: EPIC,
+        testCmd: 'true',
+        heavyLock: { lockDir: batchLock, pollMs: 2, isPidAlive: pb.isPidAlive },
+      });
+      await pb.probed;
+      const landed = await step(s, {
+        projectDir,
+        epic: EPIC,
+        testCmd: 'true',
+        heavyLock: { lockDir: path.join(root, 'step-locks'), pollMs: 2, isPidAlive: () => true },
+      });
+      expect(landed.outcome).toBe('merged');
+      const afterStep = git(projectDir, ['rev-parse', INTEGRATION]);
+      const lock = staleLock();
+      try {
+        held.release();
+        const result = await batch;
+        expect(result.outcomes.map((o) => o.outcome)).toEqual([
+          'integration-moved',
+          'integration-moved',
+        ]);
+        expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(afterStep);
+      } finally {
+        rmSync(lock, { force: true });
+      }
+    });
   });
 });
