@@ -95,3 +95,75 @@ describe('sliceSection', () => {
     expect(codeOf(() => sliceSection('## A\n```\n## A\n```\n', 'A'))).toBeUndefined();
   });
 });
+
+function errorOf(fn: () => unknown): PlaybookError {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof PlaybookError) return error;
+    throw error;
+  }
+  throw new Error('expected a PlaybookError');
+}
+
+describe('sliceSection by name (finding aae952a5, module half)', () => {
+  it('takes a heading without its trailing parenthetical, against the real dispatch.md', () => {
+    const cut = sliceSection(dispatch, 'Round counting and escalation');
+    expect(cut.split('\n')[0]).toBe('## Round counting and escalation (agent-interviews.md N-4)');
+    expect(cut).toBe(
+      sliceSection(dispatch, 'Round counting and escalation (agent-interviews.md N-4)'),
+    );
+  });
+
+  it('lets an exact heading win over a name match', () => {
+    const md = '## A\nexact\n## A (x)\nnamed\n';
+    expect(sliceSection(md, 'A')).toBe('## A\nexact\n');
+    expect(sliceSection(md, 'A (x)')).toBe('## A (x)\nnamed\n');
+  });
+
+  it('refuses two name matches, naming both full headings', () => {
+    const md = '## B (x)\none\n### B (y)\ntwo\n';
+    const err = errorOf(() => sliceSection(md, 'B'));
+    expect(err.code).toBe('playbook.ambiguous-section');
+    expect(JSON.stringify(err.details)).toContain('## B (x)');
+    expect(JSON.stringify(err.details)).toContain('### B (y)');
+  });
+
+  it('reads a hard-wrapped, padded name like the one-line name', () => {
+    expect(sliceSection(dispatch, 'Round counting\n  and escalation')).toBe(
+      sliceSection(dispatch, 'Round counting and escalation'),
+    );
+    expect(sliceSection(dispatch, '  Round   counting and escalation \n')).toBe(
+      sliceSection(dispatch, 'Round counting and escalation'),
+    );
+  });
+
+  it('lists the playbook headings, outside fences and in order, on an unknown name', () => {
+    const md = '# T\n## A\n```\n## Fake\n```\n### B (x)\n#### C\n## D\n';
+    const err = errorOf(() => sliceSection(md, 'Nope'));
+    expect(err.code).toBe('playbook.unknown-section');
+    expect(err.details).toEqual({ heading: 'Nope', sections: ['## A', '### B (x)', '## D'] });
+  });
+
+  it('lists every dispatch.md section when a name is unknown', () => {
+    const err = errorOf(() => sliceSection(dispatch, 'Dispatch contract'));
+    const sections = (err.details as { sections: string[] }).sections;
+    expect(sections).toContain('## Round counting and escalation (agent-interviews.md N-4)');
+    expect(sections).toContain('## The task id goes on the event, not in the payload');
+    expect(sections.every((s) => /^#{2,3} /.test(s))).toBe(true);
+    expect(sections.filter((s) => s.startsWith('## ')).length).toBeGreaterThan(10);
+  });
+
+  it('never matches a heading inside a fence, or by prefix or substring', () => {
+    expect(codeOf(() => sliceSection('## A (x)\n```\n## B (y)\n```\n', 'B'))).toBe(
+      'playbook.unknown-section',
+    );
+    expect(codeOf(() => sliceSection('## Alpha beta (x)\n', 'Alpha'))).toBe(
+      'playbook.unknown-section',
+    );
+    expect(codeOf(() => sliceSection('## Alpha (x) (y)\n', 'Alpha (x)'))).toBeUndefined();
+    expect(codeOf(() => sliceSection('## Alpha (x) (y)\n', 'Alpha'))).toBe(
+      'playbook.unknown-section',
+    );
+  });
+});

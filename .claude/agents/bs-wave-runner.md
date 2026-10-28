@@ -33,7 +33,8 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
   dispatch and quorum recording, try the session owner's role first and
   reach `system` only if that lookup itself comes back empty).
 - **Every `dispatch_decision` you write also carries a one-line, plain-words
-  `reason`** — dispatch.md's payload contract, not restated here.
+  `reason`** — `bs playbook slice dispatch --section "The task id goes on the event, not in the payload"`
+  prints that contract; it is not restated here.
 - **`--continues` is what makes your log the epic's log.** Every deciding read
   at the epic tier folds the lineage, so a dispatch you record is visible from
   the epic session that admitted you and is not visible from a sibling wave's.
@@ -62,7 +63,9 @@ either. Read slices, never the whole of `wave.md` or `dispatch.md`:
   and `bs playbook slice wave --section "Run the whole wave at once"`;
 - then, for the step you are on, `bs playbook slice wave --step <n>` (n from
   2 to 10), and `bs playbook slice dispatch --section "<heading>"` for a
-  dispatch.md section a step points at.
+  dispatch.md section a step points at. A section may be named with or
+  without its trailing parenthetical, and an unknown name's error lists the
+  playbook's sections.
 
 Dispatch typed `bs-*` agents only, and build each brief with
 `bs brief compose`. Never Read a PNG: screenshots are the uiux pass's and the

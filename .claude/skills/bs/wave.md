@@ -157,8 +157,9 @@ one thing this playbook never asks you to.
      against. It is listed as a knob so the answer is asked for rather than
      assumed, not because a tier can turn it off.
    - A returned brief goes through `bs research check --brief <path>`
-     before it is attached to a task spec ("Fetched and quoted text goes into
-     a prompt fenced" above). Exit 1 sends it back; on exit 0, carry
+     before it is attached to a task spec (dispatch.md's "Fetched and quoted
+     text goes into a prompt fenced, never raw", read with `bs playbook slice
+     dispatch --section "Fetched and quoted text goes into a prompt fenced, never raw"`). Exit 1 sends it back; on exit 0, carry
      `recommendation.provenance` into the coder's prompt so the task knows
      whether its research rests on this repo or on a fetched page. Any raw
      fetched text you quote alongside it is wrapped with `bs prompt wrap`.
@@ -177,14 +178,14 @@ one thing this playbook never asks you to.
    `wave check` is the step-1 gate that certified, before any dispatch, that
    these tasks could run together; `wave audit` reads the log back after
    dispatch and says whether they did.
-   It is a read, so it costs nothing against "No lockstep barrier" above and
-   waits for no task. Read the `verdict` field (`WAVE_VERDICTS`,
+   It is a read, so it costs nothing against "No lockstep barrier" above, a
+   rule of "Run the whole wave at once", and waits for no task. Read the `verdict` field (`WAVE_VERDICTS`,
    `waveConcurrency.ts`), not only the exit code — `partial` also exits 0:
    - `serialized` or `partial` — the wave is not running the width it was
      admitted at, and steps 5–7 have not gone out yet, so it can still be
      fixed: dispatch every remaining phase of this wave as one message of
-     parallel calls, per "One message, many dispatches" above, and record
-     the verdict as an operator-visible event — `error-logged` with error
+     parallel calls, per "One message, many dispatches" above, a rule of
+     "Run the whole wave at once", and record the verdict as an operator-visible event — `error-logged` with error
      `contract.constraint-decay` (`taxonomy.yml`): the wave-runner stopped
      honoring that section's standing constraint.
    - `unobserved` — the log holds no dispatch for any task this wave
@@ -244,7 +245,8 @@ one thing this playbook never asks you to.
    once and a failed criterion is the coder's bounce, not a re-grade. Its result file is an **input to
    step 7**, not a note to the operator: pass it as `--grader` or the rubric
    gates nothing (D-34). A round-2 `fail` re-scopes via dispatch.md's "Round
-   counting and escalation", not a round 3 on this id.
+   counting and escalation", not a round 3 on this id (`bs playbook slice
+   dispatch --section "Round counting and escalation"`).
    - **The judges go out in one message, after the tester.** When the tester
      has returned (and the uiux visual pass, when step 5 ran one), the grader, the
      **`bs-reviewer`** (`.claude/agents/bs-reviewer.md`, step 7 says what its
@@ -323,16 +325,17 @@ one thing this playbook never asks you to.
    - **`bs-security-reviewer`** goes out in step 6's message, and only when its
      conditional triggers fire — never per-task by default. Ask, do not recall:
      `bs security triggers --task <spec.json>` and dispatch iff
-     `dispatchSecurityReviewer` is true ("Dispatching the security-reviewer"
-     above).
+     `dispatchSecurityReviewer` is true (dispatch.md's "Dispatching the
+     security-reviewer", read with `bs playbook slice dispatch --section "Dispatching the security-reviewer"`).
    - Every judge dispatched in steps 5–7 — uiux visual pass, grader,
      reviewer, verifier, security-reviewer — is bracketed by
      `bs worktree fingerprint` / `bs worktree verify`
-     ("Fingerprint the worktree around every judge" above). Exit 1 discards
+     (dispatch.md's "Fingerprint the worktree around every judge", read with
+     `bs playbook slice dispatch --section "Fingerprint the worktree around every judge"`). Exit 1 discards
      that judge's result; it does not become a finding against the coder.
    - Each of those is also bracketed by `bs judge dispatch` /
-     `bs judge report` ("Declare each judge's artifact before you dispatch
-     it" above); paste `judge dispatch`'s `expected_line` inline in the
+     `bs judge report` (dispatch.md's "Declare each judge's artifact before you
+     dispatch it", read with `bs playbook slice dispatch --section "Declare each judge's artifact before you dispatch it"`); paste `judge dispatch`'s `expected_line` inline in the
      judge's prompt, or the `Agent` call is refused. `bs judge outstanding --task <task-id>` exits 1 while any
      judge still owes its file — re-poke it and report before running the
      gate, because the gate now refuses to score with a non-empty outstanding
@@ -353,7 +356,10 @@ one thing this playbook never asks you to.
    --task <task-id> --session <id>` (dispatch.md says what it emits and what
    it needs). It carries the compiled lessons block for that role (D2
    selection) and, for a worktree dispatch, the open-findings block for that
-   task — both under "Dispatch contract" above — and every brief it writes
+   task — dispatch.md's "Splice the compiled lessons into every prompt" and
+   "Splice the open findings into every worktree dispatch", read with `bs
+   playbook slice dispatch --section "Splice the compiled lessons into every prompt"` and `bs playbook slice
+   dispatch --section "Splice the open findings into every worktree dispatch"` — and every brief it writes
    passes `bs dispatch lint`. Each dispatch is a `dispatch_decision` event with
    a `causal_parent` chaining back to the prompt/decision that caused it
    (architecture §7) — this is the timeline, not optional bookkeeping. Send
@@ -365,7 +371,8 @@ one thing this playbook never asks you to.
    `escalation_ladder`); after 3, escalate to the operator. Never skip a
    rung, never loop past one. Count the rounds from this task's
    `dispatch_decision` events, not from the agent's own account of itself
-   — see "Round counting and escalation" above. Then have the log check
+   — see dispatch.md's "Round counting and escalation", read with `bs playbook
+   slice dispatch --section "Round counting and escalation"`. Then have the log check
    you: `bs escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
    Slice: `bs playbook slice wave --step 9`.
