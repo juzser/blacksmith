@@ -1,0 +1,270 @@
+{
+  "epic_id": "bs-review",
+  "version": 6,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-review/task-1-guard-git-config-env",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "project": "black-smith",
+      "title": "Force-push rule reads git configuration values",
+      "summary": "The force-push rule reads a command named in a git configuration value (-c, --config-env, GIT_CONFIG_*, GIT_PAGER, GIT_EXTERNAL_DIFF, -O) the same way it reads the in-line form.",
+      "objective": "Make `checkForcePush` in factory/orchestrator/src/policy.ts read a command line carried by a git configuration value the same way it reads that command line typed directly. Today an inline `alias.` definition is refused by `definesInlineGitAlias`; extend the same reading to every configuration value that git runs as a command: a `-c key=value` or `--config-env=key=VAR` on the git command, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, and the `-O<cmd>` / `--open-files-in-pager=<cmd>` option of `git grep`. Each value is read whether it is set on the git command itself, in an earlier `export` or assignment segment of the same command line, or through `env`. A readable value is dequoted and checked by the same force-push checks a `sh -c` payload goes through; a value the rule cannot read statically is refused the way an unreadable inline alias is, whatever its key.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Each of these is refused with the force-push violation: `git -c core.pager='git push --force origin main' log`; `git -c diff.external='git push -f origin main' diff`; `GIT_PAGER='git push -f origin main' git log`; `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`; `export GIT_PAGER='git push -f origin main'; git log`; `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='git push -f origin main' git log`; `git grep -O'git push -f origin main' x`; `git grep --open-files-in-pager='git push --force origin main' x`.",
+        "A configuration value the rule cannot read statically is refused, whatever its key: `git -c core.pager=\"$P\" log`, `git -c user.name=\"$NAME\" commit -m y`, `export GIT_PAGER=\"$P\"; git log`, `GIT_EXTERNAL_DIFF=$(cat f) git diff`, a backtick value, and `git --config-env=core.pager=SOMEVAR log`.",
+        "Each of these is still allowed: `git -c color.ui=always log`, `git -c core.pager=cat log`, `GIT_PAGER=cat git log`, `env GIT_PAGER=less git log`, `git -c user.name=x commit -m y`, `git log --oneline`, `git grep -n foo`.",
+        "`GIT_CONFIG_PARAMETERS` is read entry by entry, each entry by the same rule as a `-c key=value`, in both entry spellings git writes: the single-quoted `'key=value'` and the `'key'='value'` form that git 2.31 and later writes, with several entries in one value separated by spaces and the two spellings mixed. Each case is its own named test in policyGitConfig.test.ts: `GIT_CONFIG_PARAMETERS=\"'core.pager=git push -f origin main'\" git log` and `GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log` are each refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git log` and `GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log` are each allowed; `GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager=git push --force origin main'\" git log`, a two-entry value in which only the second entry changes what git runs, is refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"$X\" git log` is refused as unreadable.",
+        "Every existing test in factory/orchestrator/test/policy.test.ts and policyHookEntry.test.ts passes unchanged.",
+        "Each new branch of the rule is proven by mutation: the result names, per branch, the test that fails when that branch is disabled.",
+        "The rule reads every value of every carrier the objective names and needs no list of configuration keys: an unreadable value is refused whatever its key, and a readable value is judged on the command line it sets. So `git -c user.name=x commit -m y` is allowed and `git -c user.name=\"$NAME\" commit -m y` is refused by the same reading, with no key named in the rule."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Extend the per-segment force-push check so the value of every git configuration carrier named in the objective is dequoted and checked as a nested command line by the same checks a `sh -c` payload receives (including `isUnknownForcePushShape` and the `+refspec` check).",
+          "Assignments in an earlier top-level segment of the same command line (`export NAME=value`, `NAME=value;`) are carried forward to the later git segment; `env NAME=value git ...` and `NAME=value git ...` are read on the segment itself.",
+          "A value containing an unexpanded parameter, a command substitution or a backtick, on any configuration key, and any `--config-env` whose value comes from a named environment variable, makes the segment a violation, matching how `definesInlineGitAlias` treats an unreadable alias. The key does not change this: the rule holds no list of keys.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitConfig.test.ts and drive `checkForcePush` (and the public policy entry the hook uses) with literal command strings."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check (disable it, run the new test file, see a named test fail, restore) and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-1b-guard-git-config-env",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "project": "black-smith",
+      "title": "Force-push rule reads git configuration values",
+      "summary": "The force-push rule reads a command named in a git configuration value (-c, --config-env, GIT_CONFIG_*, GIT_PAGER, GIT_EXTERNAL_DIFF, -O) the same way it reads the in-line form.",
+      "objective": "Make `checkForcePush` in factory/orchestrator/src/policy.ts read a command line carried by a git configuration value the same way it reads that command line typed directly. Today an inline `alias.` definition is refused by `definesInlineGitAlias`; extend the same reading to every configuration value that git runs as a command: a `-c key=value` or `--config-env=key=VAR` on the git command, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, and the `-O<cmd>` / `--open-files-in-pager=<cmd>` option of `git grep`. Each value is read whether it is set on the git command itself, in an earlier `export` or assignment segment of the same command line, or through `env`. A readable value is dequoted and checked by the same force-push checks a `sh -c` payload goes through; a value the rule cannot read statically is refused the way an unreadable inline alias is, whatever its key.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Each of these is refused with the force-push violation: `git -c core.pager='git push --force origin main' log`; `git -c diff.external='git push -f origin main' diff`; `GIT_PAGER='git push -f origin main' git log`; `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`; `export GIT_PAGER='git push -f origin main'; git log`; `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='git push -f origin main' git log`; `git grep -O'git push -f origin main' x`; `git grep --open-files-in-pager='git push --force origin main' x`.",
+        "A configuration value the rule cannot read statically is refused, whatever its key: `git -c core.pager=\"$P\" log`, `git -c user.name=\"$NAME\" commit -m y`, `export GIT_PAGER=\"$P\"; git log`, `GIT_EXTERNAL_DIFF=$(cat f) git diff`, a backtick value, and `git --config-env=core.pager=SOMEVAR log`.",
+        "Each of these is still allowed: `git -c color.ui=always log`, `git -c core.pager=cat log`, `GIT_PAGER=cat git log`, `env GIT_PAGER=less git log`, `git -c user.name=x commit -m y`, `git log --oneline`, `git grep -n foo`.",
+        "`GIT_CONFIG_PARAMETERS` is read entry by entry, each entry by the same rule as a `-c key=value`, in both entry spellings git writes: the single-quoted `'key=value'` and the `'key'='value'` form that git 2.31 and later writes, with several entries in one value separated by spaces and the two spellings mixed. Each case is its own named test in policyGitConfig.test.ts: `GIT_CONFIG_PARAMETERS=\"'core.pager=git push -f origin main'\" git log` and `GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log` are each refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git log` and `GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log` are each allowed; `GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager=git push --force origin main'\" git log`, a two-entry value in which only the second entry changes what git runs, is refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"$X\" git log` is refused as unreadable.",
+        "Every existing test in factory/orchestrator/test/policy.test.ts and policyHookEntry.test.ts passes unchanged, with one named exception: the existing case `git --config-env=user.email=E push origin feat` in the policy.test.ts table titled 'allows %s — inline config that never names an alias' moves to a refused case, because criterion 2 refuses a `--config-env` value read from a named environment variable whatever its key. The two other cases of that table stay allowed, and no other line of policy.test.ts changes.",
+        "Each new branch of the rule is proven by mutation: the result names, per branch, the test that fails when that branch is disabled.",
+        "The rule reads every value of every carrier the objective names and needs no list of configuration keys: an unreadable value is refused whatever its key, and a readable value is judged on the command line it sets. So `git -c user.name=x commit -m y` is allowed and `git -c user.name=\"$NAME\" commit -m y` is refused by the same reading, with no key named in the rule."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policy.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Extend the per-segment force-push check so the value of every git configuration carrier named in the objective is dequoted and checked as a nested command line by the same checks a `sh -c` payload receives (including `isUnknownForcePushShape` and the `+refspec` check).",
+          "Assignments in an earlier top-level segment of the same command line (`export NAME=value`, `NAME=value;`) are carried forward to the later git segment; `env NAME=value git ...` and `NAME=value git ...` are read on the segment itself.",
+          "A value containing an unexpanded parameter, a command substitution or a backtick, on any configuration key, and any `--config-env` whose value comes from a named environment variable, makes the segment a violation, matching how `definesInlineGitAlias` treats an unreadable alias. The key does not change this: the rule holds no list of keys.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitConfig.test.ts and drive `checkForcePush` (and the public policy entry the hook uses) with literal command strings.",
+          "In factory/orchestrator/test/policy.test.ts, move only the case `git --config-env=user.email=E push origin feat` out of the 'allows %s — inline config that never names an alias' table into a test that expects it refused (the unreadable-value refusal of criterion 2), and update that table's comment so it names `-c` and `GIT_CONFIG_KEY_<n>` only. Change no other line of policy.test.ts.",
+          "This task's branch is cut from the HEAD of bs/bs-review/task-1-guard-git-config-env, so the work already committed there is the starting point: keep it, and make the criterion 2 and criterion 5 changes on top of it."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check (disable it, run the new test file, see a named test fail, restore) and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/followup-a3017f92",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "objective": "Fix: The prefix-word reader looks only for a shell interpreter behind timeout, command, sudo, nice, nohup, exec, stdbuf or time; xargs running the tool, and eval of a substitution of the tool, behind the same words are still not read.",
+      "output_schema_ref": "result.schema.json",
+      "acceptance_criteria": [
+        "Added by the event log; superseded by plan v4."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policy.test.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 1,
+        "diff_lines": 1
+      },
+      "contract": {
+        "functional_clauses": [
+          "Added by the event log; superseded by plan v4."
+        ],
+        "nonfunctional_clauses": []
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "superseded",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/followup-23ad2576",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "objective": "Fix: When the line holds a construct the top-level splitter does not model (a ${...} expansion, a trailing comment, a here-document or an ANSI-C quoted span), the whole line is read as one segment, so the new unreadable-command-word counting in segmentsWithGitPipe and the xargs read never see the pipe structure and the two lines the fix targets are allowed again.",
+      "output_schema_ref": "result.schema.json",
+      "acceptance_criteria": [
+        "Added by the event log; superseded by plan v5."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policy.test.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 1,
+        "diff_lines": 1
+      },
+      "contract": {
+        "functional_clauses": [
+          "Added by the event log; superseded by plan v5."
+        ],
+        "nonfunctional_clauses": []
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "superseded",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/followup-ffc44bdd",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "objective": "Fix: In walkPrefixWords a flag that takes no value (nice -n5, command -p, time -p) still makes the next word its value, so an unexpanded command word right after it is not read as the command word.",
+      "output_schema_ref": "result.schema.json",
+      "acceptance_criteria": [
+        "Added by the event log; superseded by plan v6."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policy.test.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 1,
+        "diff_lines": 1
+      },
+      "contract": {
+        "functional_clauses": [
+          "Added by the event log; superseded by plan v6."
+        ],
+        "nonfunctional_clauses": []
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "superseded",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/followup-ffc44bddb",
+      "epic_id": "bs-review",
+      "plan_version": 6,
+      "project": "black-smith",
+      "title": "Guard reads the word after a prefix-word option both as its value and as the command word",
+      "summary": "Behind a prefix word, the force-push guard reads the word after an option word two ways, as that option's value and as the command word, and keeps the stricter decision, with a small cap on how many option words are read twice. Successor of bs-review/followup-ffc44bdd, cut fresh from integration.",
+      "objective": "Through evaluateCommand, the force-push guard reads the word after every option word behind a prefix word both as that option's value and as the command word, keeps the stricter of the two decisions, never reads a line more loosely than the integration base f274943c does, and reads long lines in roughly linear time.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policy.test.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 200
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ],
+      "acceptance_criteria": [
+        "Behind each prefix word the guard knows (timeout, command, sudo, nice, nohup, exec, stdbuf, time, builtin), the word after an option word is read two ways: as that option's value, the reading f274943c makes, and as the command word. The line gets the stricter of the two decisions. So echo x | xargs nice -n5 git, echo x | xargs command -p git and echo x | xargs time -p git are refused with the xargs reason, and the same three lines with an unexpanded command word in place of the tool's name are refused with the unreadable-command-word reason, each directly, behind timeout 5, with a trailing comment and piped to head.",
+        "In the command-word reading the word after the option starts the command and is read the way f274943c reads a command start: the tool's name, an unexpanded command word, xargs, eval, a shell word, env and a further prefix word are each read as they are with no option in front.",
+        "No decision is looser than on f274943c: a line whose decision changes against f274943c only becomes stricter, and the result names every such line under changed_decisions. A committed test pins, each with its decision on f274943c, the shapes the predecessor's judges measured as looser: an option the guard has no entry for (long or short, such as sudo --user, time --output, sudo -h, nohup -z) followed by a word and then the tool with a force-gated subcommand, and a no-value or attached-value option followed by eval and a substitution of the tool.",
+        "The two readings stay roughly linear in the line's length: a small fixed cap on the option words read two ways in one segment, past which the line is refused with a reason (as the env split-string limit is). On the long-line shapes of the predecessor's timing script, plus xargs nice -n5, xargs command -p and xargs time -p shapes, each decision takes under about 1 s, measured with a scratch script outside the repository and quoted before and after in the result; no committed test asserts a wall-clock bound.",
+        "The comment variant of the test 'reads xargs behind sudo %s and a user' in policyGitInput.test.ts asserts the reason as its other three variants do; removing that skip is the one edit to an existing test case this task makes.",
+        "Every other existing test in policy.test.ts, policyGitConfig.test.ts, policyGitInput.test.ts, policyGitRunVariables.test.ts and the hookDecision*.test.ts files passes unchanged; task-2's read-only git searches on a protected branch stay allowed; every export of policy.ts keeps its name and signature.",
+        "TDD: the new tests are written first and run on the untouched f274943c head, with each outcome quoted (the new refusal cases are allowed there, the pinning cases of the third criterion hold there); then implement and quote the passes; the tester's mutation proof names the code each new case depends on.",
+        "The branch diff against f274943c, tests included, stays under about 200 lines, or within a size the operator accepted in their own words."
+      ],
+      "contract": {
+        "functional_clauses": [
+          "This task's branch is cut from bs/bs-review/integration at f274943c; nothing from bs/bs-review/followup-ffc44bdd is carried over, and the only code change is the two-reading rule for the word after a prefix-word option, its cap, and the tests that pin them.",
+          "New tests live in factory/orchestrator/test/policyGitInput.test.ts; policy.test.ts and policyGitConfig.test.ts are claimed so they may be read and must pass unchanged.",
+          "The new tests mirror the assertions of the existing describe blocks in policyGitInput.test.ts: the same decision, the same reason shape, the same decide helper."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Run in full, in the foreground: `pnpm run build`, root `pnpm run test` (the whole suite), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm exec biome check .` and `scripts/check.sh`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line: the session's own guard reads Bash command text and evaluates such a line as the command it names.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the guard gains, in neutral terms. Do not describe an earlier version as defective and do not frame any example as getting through the guard. Test inputs may hold literal commands.",
+          "No other project's name and no absolute home-directory path in any committed file, test fixture included; fixtures use placeholder paths and temp directories.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md, README.md or anything under docs/: the epic's Unreleased entry on what the guard reads in pipes, xargs options and long lines covers this change, and the claims-matrix test reads those files. Put one user-facing sentence about this change under `notes` in the result.",
+          "A security review runs on this branch once its tests are green, whatever `security triggers` answers: every guard change gets one."
+        ]
+      }
+    }
+  ],
+  "edges": [],
+  "project": "black-smith",
+  "effort": "medium"
+}
