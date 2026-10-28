@@ -714,6 +714,164 @@ describe('diet rule: foreground sleep (D4 verdict table)', () => {
     expect(dietReason(bash('sleep'))).toBeNull();
   });
 
+  describe('strtod operand edge cases (tester depth)', () => {
+    it.each([
+      ['sleep 0x1.8p1', '3 s'],
+      ['sleep 0x.8p2', '2 s'],
+      ['sleep 0x1p1', '2 s'],
+      ['sleep 0X1P3', '8 s'],
+      ['sleep 0x10s', '16 s'],
+      ['sleep 0x10m', '960 s'],
+      ['sleep 0x1h', '3600 s'],
+      ['sleep 0x1d', '29 s'],
+      ['sleep 1e0h', '3600 s'],
+      ['sleep 1e0d', '86400 s'],
+      ['sleep 1e1s', '10 s'],
+      ['sleep 1E+1', '10 s'],
+      ['sleep 2e+0', '2 s'],
+      ['sleep 0.5e1', '5 s'],
+      ['sleep 5 5', '10 s'],
+      ['sleep 1e1 1e1', '20 s'],
+      ['sleep 0.5 1.5', '2 s'],
+      ['sleep 1 0x1p0', '2 s'],
+      ['sleep 1m 1e0m', '120 s'],
+      ['env X=1 sleep 1e3', '1000 s'],
+      ['nohup sleep 0x10', '16 s'],
+      ['time sleep 1e3', '1000 s'],
+      ["bash -c 'sleep 1e3'", '1000 s'],
+      ['x && sleep 1e3', '1000 s'],
+      ['sleep 1e3 | cat', '1000 s'],
+      ['sleep 1e3 & wait', '1000 s'],
+      ['until test -f x; do sleep 1e1; done', '10 s'],
+    ])('denies %j naming %s', (command, duration) => {
+      const reason = dietReason(bash(command)) ?? '';
+      expect(reason).toMatch(/foreground `sleep`/);
+      expect(reason).toContain(`of ${duration}`);
+    });
+
+    it.each([
+      'sleep inf',
+      'sleep INF',
+      'sleep Inf',
+      'sleep infinity',
+      'sleep INFINITY',
+      'sleep iNfInItY',
+      'sleep +inf',
+      'sleep infs',
+      'sleep infinityd',
+      'sleep 1e999',
+      'sleep 0x1p99999',
+      'sleep 1e1000000000000000000000',
+    ])('denies the unbounded operand in %j', (command) => {
+      expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep` of /);
+    });
+
+    it.each([
+      'sleep 1e',
+      'sleep 1e+',
+      'sleep 1e-',
+      'sleep 1E',
+      'sleep 0x',
+      'sleep 0X',
+      'sleep 0xp1',
+      'sleep 0x.',
+      'sleep 0xg',
+      'sleep 0x1g',
+      'sleep 0x1p',
+      'sleep 0x1p+',
+      'sleep 0x1.p',
+      'sleep -5',
+      'sleep -1e3',
+      'sleep ++5',
+      'sleep +-5',
+      'sleep +',
+      'sleep 5ss',
+      'sleep 5sm',
+      'sleep 5x',
+      'sleep 1e3x',
+      'sleep 1e3ss',
+      'sleep 0x10ss',
+      'sleep 0x10x',
+      'sleep 1e3e3',
+      'sleep 1p1',
+      'sleep 1.5.5',
+      'sleep 1e5.5',
+      'sleep 1_0',
+      'sleep infin',
+      'sleep infinit',
+      'sleep infinityy',
+      'sleep infx',
+      'sleep NaN',
+      'sleep 5 s',
+      'sleep 0.5 abc',
+      'sleep 0.1 1x',
+      'sleep 0.1 0x',
+      "sleep ''",
+      'sleep constructor',
+      'sleep 5toString',
+    ])('denies the unreadable operand in %j as unknown length', (command) => {
+      expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep` of unknown length/);
+    });
+
+    it.each([
+      'sleep 0x1.8',
+      'sleep 0x.8',
+      'sleep 0x1p-1',
+      'sleep 0x8p-4',
+      'sleep 0x1P-1',
+      'sleep 1e-3m',
+      'sleep 0.5e0',
+      'sleep 0e5',
+      'sleep 0x0p9',
+      'sleep 0x0',
+      'sleep 0',
+      'sleep 0s',
+      'sleep +0',
+      'sleep 1e-1000',
+      'sleep 0.5 0.5',
+      'sleep 1e-1 1e-1',
+      'sleep 0x1p-1 0x1p-1s',
+      'sleep 1.9',
+      'sleep 1.9s',
+      'sleep 1e0 &',
+      'sleep 0x10 &',
+      'sleep inf &',
+      'sleep abc &',
+      'nohup sleep 1e3 &',
+    ])('allows the short or backgrounded operand in %j', (command) => {
+      expect(dietReason(bash(command))).toBeNull();
+    });
+
+    it.each(['sleep 0x10', 'sleep inf', 'sleep abc', 'sleep 5 5'])(
+      'allows %j with run_in_background: true',
+      (command) => {
+        expect(dietReason(bash(command, { run_in_background: true }))).toBeNull();
+      },
+    );
+
+    it.each(['sleep 1e3 "', "sleep 1e3 '", 'sleep 1e3 $(', 'sleep 0x10 `'])(
+      'keeps the failure rule for the unreadable command %j',
+      (command) => {
+        expect(dietReason(bash(command))).toBeNull();
+      },
+    );
+
+    it('does not read a quoted or substituted operand as a number', () => {
+      expect(dietReason(bash('sleep "$X"')) ?? '').toContain('unknown');
+      expect(dietReason(bash('sleep $(echo 1)')) ?? '').toContain('unknown');
+    });
+
+    it('keeps timeout operands out of the sleep sum', () => {
+      expect(dietReason(bash('timeout 0x10 pnpm test'))).toBeNull();
+      expect(dietReason(bash('timeout 1e3 sleep 0.5'))).toBeNull();
+      expect(dietReason(bash('timeout 1e3 sleep 1e1')) ?? '').toContain('of 10 s');
+    });
+
+    it('sums an unreadable and a readable operand to unknown length', () => {
+      expect(dietReason(bash('sleep 1e3 abc')) ?? '').toContain('unknown');
+    });
+  });
+
   describe('near the command length cap', () => {
     const run = (operand: string) => {
       const started = performance.now();
