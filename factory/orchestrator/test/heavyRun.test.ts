@@ -1,8 +1,8 @@
+import { ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runUnderHeavyLock } from '../src/heavyRun.js';
 
@@ -71,7 +71,11 @@ describe('runUnderHeavyLock', () => {
 
   it('maps a signal-killed child to 128 + the signal number', async () => {
     const kill = (sig: string) =>
-      runUnderHeavyLock(process.execPath, ['-e', `process.kill(process.pid, '${sig}')`], lockOpts());
+      runUnderHeavyLock(
+        process.execPath,
+        ['-e', `process.kill(process.pid, '${sig}')`],
+        lockOpts(),
+      );
     expect(await kill('SIGKILL')).toBe(137);
     expect(await kill('SIGTERM')).toBe(143);
   });
@@ -152,6 +156,8 @@ describe('runUnderHeavyLock', () => {
   it('frees the lock after the child exits, for the next run', async () => {
     await runUnderHeavyLock(process.execPath, ['-e', ''], lockOpts());
     expect(existsSync(lockFile())).toBe(false);
-    expect(await runUnderHeavyLock(process.execPath, ['-e', 'process.exit(5)'], lockOpts())).toBe(5);
+    expect(await runUnderHeavyLock(process.execPath, ['-e', 'process.exit(5)'], lockOpts())).toBe(
+      5,
+    );
   });
 });
