@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -478,6 +478,84 @@ describe('queue landing is serialised and compare-and-swap', () => {
       expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(afterStep);
       expect(git(projectDir, ['show', `${INTEGRATION}:a.txt`])).toBe('a');
       expect(git(projectDir, ['show', `${INTEGRATION}:b.txt`])).toBe('b');
+    });
+  });
+
+  describe('an update-ref failure with the head unchanged', () => {
+    function staleLock(): string {
+      const lock = path.join(projectDir, '.git', 'refs', 'heads', `${INTEGRATION}.lock`);
+      writeFileSync(lock, '');
+      return lock;
+    }
+
+    it('step rethrows the original git error, logs nothing and leaves the ref (tree-less)', async () => {
+      const task = makeTask('task-1', 'a.txt', 'a-edited\n');
+      const events = await makeEvents();
+      const before = git(projectDir, ['rev-parse', INTEGRATION]);
+      const lock = staleLock();
+      try {
+        await expect(
+          step(task, { projectDir, epic: EPIC, testCmd: 'true', events, heavyLock: lockKnobs() }),
+        ).rejects.toThrow(/\.lock/);
+        expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(before);
+        const log = await logged();
+        expect(
+          log.some((e) => e.type === 'error-logged' && e.payload.error === 'execution.env-failure'),
+        ).toBe(false);
+      } finally {
+        rmSync(lock, { force: true });
+      }
+    });
+
+    it('batchStep rethrows the original git error instead of marking tasks integration-moved', async () => {
+      const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+      const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+      const before = git(projectDir, ['rev-parse', INTEGRATION]);
+      const lock = staleLock();
+      try {
+        await expect(
+          batchStep([a, b], { projectDir, epic: EPIC, testCmd: 'true', heavyLock: lockKnobs() }),
+        ).rejects.toThrow(/\.lock/);
+        expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(before);
+      } finally {
+        rmSync(lock, { force: true });
+      }
+    });
+
+    it('batchStep still reads a head that really moved as integration-moved when a stale lock is also present', async () => {
+      const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+      const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+      const s = makeTask('task-s', 'c.txt', 'c-edited\n');
+      const batchLock = path.join(root, 'batch-locks');
+      const held = holdLock(batchLock);
+      const pb = probe();
+      const batch = batchStep([a, b], {
+        projectDir,
+        epic: EPIC,
+        testCmd: 'true',
+        heavyLock: { lockDir: batchLock, pollMs: 2, isPidAlive: pb.isPidAlive },
+      });
+      await pb.probed;
+      const landed = await step(s, {
+        projectDir,
+        epic: EPIC,
+        testCmd: 'true',
+        heavyLock: { lockDir: path.join(root, 'step-locks'), pollMs: 2, isPidAlive: () => true },
+      });
+      expect(landed.outcome).toBe('merged');
+      const afterStep = git(projectDir, ['rev-parse', INTEGRATION]);
+      const lock = staleLock();
+      try {
+        held.release();
+        const result = await batch;
+        expect(result.outcomes.map((o) => o.outcome)).toEqual([
+          'integration-moved',
+          'integration-moved',
+        ]);
+        expect(git(projectDir, ['rev-parse', INTEGRATION])).toBe(afterStep);
+      } finally {
+        rmSync(lock, { force: true });
+      }
     });
   });
 });
