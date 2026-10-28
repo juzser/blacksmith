@@ -189,6 +189,51 @@ describe('criterion 15: the TaskStop rule', () => {
   });
 });
 
+/** The blank-line-delimited paragraph that holds `TaskStop`, flattened. */
+const taskStopParagraph = (text: string): string =>
+  flat(text.split(/\n\s*\n/).find((p) => p.includes('TaskStop') && /EXIT=/.test(p)) ?? '');
+
+/** Epic criterion 15: the five clauses of the TaskStop rule, in order, in one paragraph. */
+const TASKSTOP_CLAUSES: RegExp[] = [
+  /Use TaskStop on [^.]*own still-running background tasks and idle subagents/,
+  /only once every output file the task was told to write ends with an `EXIT=<n>` line/,
+  /does not hold the heavy lock \(`bs heavy status` names no holder whose label or cwd is that task's;/,
+  /otherwise leave it running and say so/,
+  /Never stop a task this session did not start\./,
+];
+
+describe('criterion 15: the TaskStop rule, clause by clause in one paragraph', () => {
+  it.each([
+    ['run.md', run],
+    ['wave.md', wave],
+    ['bs-wave-runner.md', waveRunner],
+  ] as [string, string][])('%s carries every clause in order', (_n, text) => {
+    const para = taskStopParagraph(text);
+    expect(para, 'a paragraph with TaskStop and EXIT=').not.toBe('');
+    let at = -1;
+    for (const clause of TASKSTOP_CLAUSES) {
+      const m = clause.exec(para);
+      expect(m, String(clause)).not.toBeNull();
+      expect(m?.index ?? -1, String(clause)).toBeGreaterThan(at);
+      at = m?.index ?? -1;
+    }
+  });
+
+  it('wave.md has the rule inside the step 10 cut (wave end)', () => {
+    expect(taskStopParagraph(sliceWaveStep(wave, 10))).not.toBe('');
+  });
+});
+
+describe('criterion 7: the wave-runner is never told to Read a PNG or a whole playbook', () => {
+  it('has no imperative Read of a png, wave.md, dispatch.md or run.md', () => {
+    const doc = flat(waveRunner);
+    expect(doc).not.toMatch(/\bRead (the )?(`?[\w./-]*\.png`?|`?(wave|dispatch|run)\.md`?)/);
+    for (const sentence of doc.split(/(?<=\.) /).filter((s) => /\bpng\b/i.test(s))) {
+      expect(sentence, sentence).toMatch(/never|not|path/i);
+    }
+  });
+});
+
 describe('criterion 15: run.md cleanup step and rolling admission', () => {
   const at17 = run.search(/^17\. /m);
   const at18 = run.search(/^18\. /m);
