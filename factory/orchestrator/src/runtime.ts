@@ -36,8 +36,9 @@ export function currentRuntime(): RuntimeInfo {
 }
 
 export function nodeMajor(version: string): number | null {
-  // Tolerates a bare major so the same parser reads `.nvmrc` ("22") and
-  // `process.version` ("v22.23.1") — one definition of "the pinned major".
+  // Tolerates a bare major ("22") as well as a full version, so the same
+  // parser reads `.nvmrc` ("22.23.4") and `process.version` ("v22.23.4") —
+  // one definition of "the pinned major".
   const match = /^v?(\d+)(?:\.|$)/.exec(version.trim());
   if (match === null) return null;
   const major = Number(match[1]);
@@ -45,7 +46,7 @@ export function nodeMajor(version: string): number | null {
 }
 
 const REMEDY =
-  'Run `nvm use` (the repo pins the major in .nvmrc) or install Node ' +
+  'Run `nvm use` (the repo pins its Node version in .nvmrc) or install Node ' +
   `${MIN_NODE_MAJOR}+, then reinstall dependencies.`;
 
 const WHY =

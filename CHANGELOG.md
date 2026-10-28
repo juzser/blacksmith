@@ -28,6 +28,24 @@ than appearing in it.
 
 ### Changed
 
+- **`wave-runner`, `merger` and `scribe` now carry token caps.** `budgets.yml`
+  prices them as judges, none of them ending in a `task-result-recorded`:
+  110,000, 100,000 and 80,000 tokens per dispatch at medium (half at small,
+  double at huge), rounded up from the p90 of the final turn over past dogfood
+  dispatches. `bs budget alarm` no longer reports an epic `unverifiable` just
+  because it used one of them; each dispatch is projected at its cap. The
+  over-price threshold stays at the coder's 220,000. Like every cap in
+  `budgets.yml` these are prices, not limits, so `under` means under on these
+  prices, and a wave-runner's whole run spends more than ten times its final
+  turn. `bs wave check` and `bs daemon` add the same
+  prices, where before these dispatches added nothing, so an epic near its cap
+  can now be refused a wave or flagged `at-risk`: at small tier, 4 wave-runner,
+  2 scribe and 1 merger dispatches add 4 × 55,000 + 2 × 40,000 + 50,000 =
+  350,000, about 9% of the 4,000,000 epic cap. New knobs
+  `BS_TASK_WAVE_RUNNER_CAP_TOKENS`,
+  `BS_TASK_MERGER_CAP_TOKENS` and `BS_TASK_SCRIBE_CAP_TOKENS`, each with
+  `_SMALL`, `_MEDIUM` and `_HUGE` variants, in `.env.example`.
+
 - **`bs init` raises Claude Code's concurrency caps.** Claude Code runs 20
   subagents and 10 parallel tool calls at once by default, which throttles a
   `/bs` wave. It reads `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` and
@@ -38,6 +56,34 @@ than appearing in it.
   project (safe, idempotent) and restart Claude Code. Putting the lines in
   `~/.claude/settings.json` instead is optional.
   [INSTALL.md](INSTALL.md#raise-the-concurrency-caps) has the lines.
+
+- **`bs init` sets Claude Code's `autoCompactWindow`.** The 60% compaction rule
+  was prompt-level, and on a 1M-token model Claude Code compacts much later.
+  `bs init` now writes `autoCompactWindow` (`auto_compact_ratio` × 1,000,000 +
+  33,000, which is 633000 today; Claude Code compacts 33,000 tokens before the
+  end of the window, so a 1M model compacts at 60% in a session started after
+  the keys are written) into the project's git-excluded
+  `.claude/settings.local.json`, plus 153000
+  (`auto_compact_ratio` × 200,000 + 33,000) under `modelSettings` for each of
+  the eight retired 200k-window models, which the top-level value would
+  otherwise leave compacting near 83%. The nine keys stand or fall together:
+  `bs init` owns only the keys its record proves it wrote while their value is
+  unchanged, and any other window value, wherever it sits (even one equal to
+  the recommendation), is yours and blocks all nine, with one warning. It
+  removes its own lines then (including when
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is
+  set), and stays silent when your own values already are the full recommended
+  layout. The record is the project's `.claude/bs-settings-record.json`
+  (git-excluded; deleting it makes bs treat its old lines as yours); it is
+  what tells its keys from yours. `bs session start` prints a stderr hint,
+  naming the directory to run `bs init` in, when the settings are out of
+  date, when your value is overridden by bs's local lines, or when bs's
+  lines are unused or stacked on top of yours. Deleting bs's lines is not an
+  opt-out (set a value such as `"auto"` instead).
+  Existing installs re-run `bs init` in each project and restart every
+  running Claude Code session: a running session and its subagents keep
+  their old window.
+  [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
 
 - **The dashboard only reads.** `bs ui` is for watching the factory; every
   decision now goes through the CLI. Removed from the dashboard: Home's "Needs
@@ -50,6 +96,17 @@ than appearing in it.
   and `GET /api/inbox` is gone.
 
 ### Fixed
+
+- **The repo pins Node's October 2026 security release, and scaffolded CI
+  takes the newest Node 22.** `.nvmrc` now names `22.23.4` instead of the bare
+  major, so `nvm use` and this repo's CI run the release that fixes the ten
+  CVEs Node published on 2026-10-21, among them a Brotli out-of-bounds write
+  (CVE-2026-111497) and two TLS hostname-check bypasses. The CI template
+  `bs new` scaffolds keeps `node-version: 22` and now sets
+  `check-latest: true`: without it `setup-node` runs whatever 22.x the runner
+  image cached, which can trail a security release by days. The floor did not
+  move: Node 22 or newer. Existing clones run `nvm install` once; a project
+  scaffolded before this adds `check-latest: true` to its `setup-node` step.
 
 - **`/bs use` binds by path and knows a project declared only in its own
   overlay roadmap.** A path to the checkout, written `/bs use ../<project>` or
@@ -159,6 +216,28 @@ than appearing in it.
   A "Needs you" row title on a phone is 14px, the focus ring sits 2px off the
   control, and a number no longer wraps apart from its unit (#456).
 
+- **The force-push guard reads a command named inside a git configuration
+  value.** `git -c key=value`, `--config-env`, `GIT_CONFIG_COUNT`/`KEY`/`VALUE`,
+  `GIT_PAGER`, `GIT_EXTERNAL_DIFF` and `git grep -O` are read the same way as a
+  command typed directly. A configuration value or variable name the guard
+  cannot read statically (a parameter, substitution or backtick) is refused, as
+  is the configuration-parameters variable by name. Ordinary uses stay allowed:
+  `git -c color.ui=always log`, `GIT_PAGER=cat git log`, and a quoted-delimiter
+  here-document followed by a git command.
+
+- **The force-push guard reads more pipes, `xargs` options and long lines.**
+  The BSD `xargs` replacement options `-J`, `-R` and `-S` are read like `-I`.
+  In a pipeline that feeds a shell, an earlier segment whose command word is an
+  unexpanded parameter or substitution counts as possibly running git, and after
+  `xargs` an unreadable command word is refused. A very long option word or
+  env split-string value is judged in linear time, and a
+  line naming more than 64 distinct directories is refused with a message to
+  split it into smaller commands.
+
+- **`bs delegation check` no longer reports a resumed wave-runner as
+  unanswered.** A dispatch carrying `continuation_of` is answered by the session
+  it opened, else by the original dispatch's session.
+
 ### Removed
 
 - **Operator-private project specs and local paths.** The tracked tree no
@@ -197,8 +276,7 @@ than appearing in it.
 
   *Budgets (#473).* A uiux dispatch is capped at 90k tokens at medium (45k
   small, 180k huge), with `BS_TASK_UIUX_CAP_TOKENS` in `.env.example`, so
-  `bs budget alarm` no longer lists uiux as uncapped. Merger, scribe and
-  wave-runner stay unpriced.
+  `bs budget alarm` no longer lists uiux as uncapped.
 
   *Plans, claims and delegation (#474, #471).* A dispatch for a task whose
   every plan record is superseded is refused with `cli.task-not-in-plan`,
@@ -240,6 +318,60 @@ than appearing in it.
   `claude plugin update pr-mod@blacksmith`, and start a new session. bs-mod
   changes only its version; `claude plugin update bs-mod@blacksmith` is
   optional. The INSTALL.md floors (Node 22, git 2.38) did not move.
+
+- **`bs stats effectiveness` reports what the factory spent and caught.** It
+  reads tokens per task and per role (spend it cannot attribute is reported
+  separately), escaped defects after a merge on a passing gate, and finding
+  precision per reviewing role. Output is words or JSON. A total that could not
+  be read in full reads "at least <n>", and a number nothing measured reads NOT
+  MEASURED, never 0. A recurring error counts once as one escaped defect. Token
+  spend has one definition (input, cache creation and output, no cache reads,
+  repeated responses counted once), shared with the dashboard's Budget.
+
+- **`bs report export` writes an opt-in report you can read before sharing.**
+  Markdown or JSON, to stdout or one named file, starting with a review notice,
+  with home and temp paths redacted and each task's checks shown as passed,
+  failed, not run or unknown. It sends nothing anywhere. `/bs report` gains an
+  export step.
+
+- **A trial kit for comparing plain Claude Code with Blacksmith.**
+  `docs/trial/methodology.md` describes five task kinds, the metrics recorded
+  and what a single run can and cannot show; `docs/trial/results.md` is a
+  template where every number reads NOT MEASURED until you run the trial.
+  `trial/` holds a dependency-free sample notes app (loopback only, bodies over
+  1 MiB answered with 413, unknown tag ids answered with 404), the task corpus
+  with hidden checks and a self-check script, and a recording harness that
+  records a check as passed only when the passing report lists exactly the
+  tests the check file declares. None of it is in the npm package.
+
+- **`bs doctor [--json]` checks the install in one command.** It checks Node,
+  pnpm, git, the `bs` version, the `claude` CLI, the Blacksmith plugin and the
+  built dashboard files. Each is ok, missing or unknown, with a one-line fix;
+  output it cannot parse is unknown, never ok. It exits non-zero when anything
+  is missing and installs nothing.
+
+- **`bs init` prints next steps.** On stderr, so its JSON on stdout is
+  unchanged: run `bs doctor`, then `bs new`; an installed package also gets the
+  plugin lines and a stack interview step. When the dashboard is not built, an
+  installed package is told to reinstall with `npm i -g @juzser/blacksmith`
+  rather than pointed at a pnpm script it lacks.
+
+- **The npm package ships the dashboard.** `ui/dist` and `ui/server/dist` are
+  built at pack time and `hono` and `@hono/node-server` are regular
+  dependencies, so `bs ui` works after an npm install.
+
+- **An opt-in plugin guard.** With `BS_PLUGIN_GUARD=1` the plugin runs the
+  policy hook and always answers before its time limit: a slow or hung hook
+  stops the command and asks you to approve it. A limit override accepts only
+  digits or digits.digits, else the 3 s default.
+
+- **A new README first screen and quickstart.** The README opens with the
+  tagline, one description sentence and a table comparing each workflow step
+  with plain Claude Code, with no numbers (the demo reads NOT MEASURED). The
+  same description is used in the npm package, plugin manifest and marketplace,
+  and "autonomous" is gone from them. `docs/guide/quickstart.md` walks from
+  install through `bs doctor` and `bs init` to a first `/bs new` and `/bs run`;
+  `docs/claims-matrix.md` lists each first-screen claim with what backs it.
 
 - **Home opens with four facts.** Under the page header, four read-only
   tiles read Active sessions, Agents running, Budget used and Tasks done.

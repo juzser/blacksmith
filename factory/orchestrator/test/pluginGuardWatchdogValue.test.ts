@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -50,15 +58,18 @@ function expectAskInTime(env: NodeJS.ProcessEnv, pathValue: string): void {
     env: { PATH: pathValue, BS_PLUGIN_GUARD: '1', BS_POLICY_HOOK: stub, ...env },
   });
   const elapsed = Date.now() - started;
-  const pid = Number(readFileSync(pidFile, 'utf8'));
+  // A timer that fails at once can stop the hook before node runs its first
+  // line, so no pid is written. The shim waits on the hook before it answers,
+  // so an answer in time already shows the hook has ended.
+  const pid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : null;
   try {
     expect(run.status).toBe(0);
     expect(elapsed).toBeLessThan(6000);
     const out = JSON.parse(run.stdout) as { hookSpecificOutput: { permissionDecision: string } };
     expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
-    expect(alive(pid)).toBe(false);
+    if (pid !== null) expect(alive(pid)).toBe(false);
   } finally {
-    if (alive(pid)) process.kill(pid, 'SIGKILL');
+    if (pid !== null && alive(pid)) process.kill(pid, 'SIGKILL');
   }
 }
 

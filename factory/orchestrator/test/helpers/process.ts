@@ -7,6 +7,8 @@
 // signal is carried through and `assertExited` turns it into a sentence. The
 // same reasoning covers a child that never spawned (`spawnError` below).
 import { spawn, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 export interface ProcessRun {
   stdout: string;
@@ -215,5 +217,21 @@ export function startProcess(file: string, args: string[], opts: RunOpts = {}): 
         clearTimeout(hard);
       }
     },
+  };
+}
+
+/**
+ * The environment for a test that runs the real CLI. `bs session start` prints
+ * a hint read from the project's and the user's Claude settings; a test must
+ * never read those, so BS_NO_SETTINGS_HINT=1 (a switch for tests and CI, not a
+ * user setting) turns it off and CLAUDE_CONFIG_DIR names a directory that does
+ * not exist. The settings-hint tests in cli.test.ts switch it back on.
+ */
+export function cliTestEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    BS_NO_SETTINGS_HINT: '1',
+    CLAUDE_CONFIG_DIR: path.join(tmpdir(), 'smith-cli-tests-no-claude-config'),
+    ...extra,
   };
 }

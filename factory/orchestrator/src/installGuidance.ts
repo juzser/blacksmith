@@ -12,7 +12,7 @@ export function initGuidance(isClone: boolean): string {
       '/plugin marketplace add juzser/blacksmith',
       '/plugin install blacksmith@blacksmith',
       '  2. Check the install: bs doctor',
-      '  3. Answer the stack interview (INSTALL.md Step 5) in your stack.yml, then read it back:',
+      '  3. Answer the stack interview (INSTALL.md Step 5) in .blacksmith/factory/policies/stack.yml (under $BS_HOME if you set one), the copy bs init made, then read it back from the project:',
       '     bs stack show',
       '     bs stack check',
       '  4. Start a project: bs new <project>',

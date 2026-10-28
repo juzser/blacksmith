@@ -4,7 +4,9 @@
 
 # Blacksmith
 
-**An autonomous agent factory.**
+**From feature request to reviewable PR — with an AI engineering workflow.**
+
+Plan a feature as signed spec contracts, build each in its own git worktree, put the result through review and verification gates, and merge through a queue into one pull request.
 
 You co-plan the spec. It decomposes, codes, tests, reviews, refutes itself —<br />
 and hands you exactly one pull request.
@@ -26,6 +28,18 @@ goal → contracts you sign → one worktree per contract, run in parallel
 <sub>Two touchpoints. Everything between them runs unattended.</sub>
 
 </div>
+
+**Compared with plain Claude Code**
+
+| Step | Plain Claude Code | Blacksmith |
+|---|---|---|
+| Spec | You describe the work in chat | A planner drafts spec contracts, a spec-reviewer challenges them, and they are frozen when you sign |
+| Plan | One session holds the plan in its context | Tasks with disjoint path claims, admitted in waves, each in its own git worktree |
+| Review | The author checks its own work | A fresh-context reviewer that never saw the coder's session |
+| Verification | You run the tests and read the diff | Schema check, tests and coverage evidence, then a verifier whose only job is to refute the reviewer |
+| Merge | You merge what the session produced | A serial merge queue into one integration branch and one pull request that you merge |
+
+Demo: NOT MEASURED. No single-run recording is published yet.
 
 ## Why Blacksmith
 
@@ -156,6 +170,7 @@ Say **"install Blacksmith"** to a Claude Code session and it does the whole
 thing: [`INSTALL.md`](INSTALL.md) is an executable runbook, and it stops to ask
 before anything that touches your machine.
 
+The [quickstart](docs/guide/quickstart.md) walks from install to a first epic.
 By hand it is one command in a shell:
 
 ```bash
@@ -180,8 +195,14 @@ and [`docs/guide/mods.md`](docs/guide/mods.md) has what each needs:
 
 Then `bs init` in the project you want it to work on. That creates
 `.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
-a `stack.yml` to answer — and writes nothing anywhere else; `BS_HOME` moves
-that root if you want one home for several projects. You now have `/bs`.
+a `stack.yml` to answer. Outside it, `bs init` adds only Claude Code settings,
+to the project's git-excluded `.claude/settings.local.json` and only where you
+have not set them yourself: the
+[concurrency caps](INSTALL.md#raise-the-concurrency-caps) and the
+[compact window](INSTALL.md#compact-earlier-on-1m-models). `BS_HOME` moves the
+`.blacksmith/` root if you want one home for several projects. You now have
+`/bs`; restart every running Claude Code session once so it reads those
+settings.
 
 **Both halves are required.** The package
 ([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the

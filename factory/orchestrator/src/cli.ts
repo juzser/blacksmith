@@ -241,7 +241,7 @@ import {
   unadmissibleTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
-import { epicOfTaskId } from './taskId.js';
+import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
@@ -271,7 +271,7 @@ import {
   type WaveBudgetCheck,
 } from './waveBudget.js';
 import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.js';
-import { initWorkRoot } from './workroot.js';
+import { claudeSettingsAdvice, initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
   epicBranchPrefix,
@@ -1499,7 +1499,8 @@ function checkStateOf(
   read: (payload: Record<string, unknown>) => CheckStateName,
 ): CheckStateName {
   const last = events.filter(
-    ({ record }) => record.event_type === eventType && eventTaskId(record) === taskId,
+    ({ record }) =>
+      record.event_type === eventType && taskIdsMatch(eventTaskId(record) ?? undefined, taskId),
   );
   const latest = last[last.length - 1];
   if (latest === undefined) return 'not-run';
@@ -1586,8 +1587,10 @@ function buildExportModel(
   const taskIds: string[] = [];
   const checkTypes = new Set(CHECKS.map((c) => c.eventType));
   for (const { record } of events) {
-    const id = eventTaskId(record);
-    if (id === null) continue;
+    const seen = eventTaskId(record);
+    if (seen === null) continue;
+    // A bare id and its qualified form are one row, under the id first seen.
+    const id = taskIds.find((t) => taskIdsMatch(t, seen)) ?? seen;
     if (record.event_type === 'task-added') {
       const title = (record.payload as Record<string, unknown>).title;
       if (typeof title === 'string' && !titles.has(id)) titles.set(id, title);
@@ -2590,6 +2593,23 @@ async function main(): Promise<number> {
     // file inside node_modules survives exactly until the first upgrade.
     const report = initWorkRoot(flags['work-root'] ? { workRoot: flags['work-root'] } : {});
     printJson(report);
+    // Prose for a human; the JSON above is what callers parse.
+    for (const warning of report.claudeWindow.warnings) process.stderr.write(`bs: ${warning}\n`);
+    const window = report.claudeWindow;
+    if (window.status === 'unavailable') {
+      process.stderr.write(
+        `bs: no autoCompactWindow written: ${window.reason ?? 'no policy value'}\n`,
+      );
+    } else if (window.status === 'unreadable') {
+      process.stderr.write(
+        `bs: ${window.settingsPath} is not a JSON object; autoCompactWindow left alone\n`,
+      );
+    } else if (window.status === 'failed') {
+      process.stderr.write(`bs: could not write autoCompactWindow to ${window.settingsPath}\n`);
+    }
+    if (report.claudeCaps.restartNeeded || report.claudeWindow.restartNeeded) {
+      process.stderr.write('bs: restart Claude Code for the new settings to take effect\n');
+    }
     // Guidance goes to stderr so init's stdout stays the JSON report alone.
     process.stderr.write(initGuidance(IS_CLONE));
     // A default that did not ship is a packaging defect, not an operator
@@ -3505,6 +3525,34 @@ async function main(): Promise<number> {
 
   if (namespace === 'session' && action === 'start') {
     const [sessionId] = requirePositionals(positional, usageFor('session start')) as [string];
+    // One stderr line, never stdout (callers parse it) and never a failure.
+    try {
+      // BS_NO_SETTINGS_HINT switches the hint off. It is a switch for tests and
+      // CI, which must not read the checkout's or the machine's settings; it is
+      // not a user setting.
+      const advised =
+        process.env.BS_NO_SETTINGS_HINT === '1' ? undefined : claudeSettingsAdvice(process.cwd());
+      const advice = `run \`bs init\` in ${advised?.dir}`;
+      if (advised?.hint === 'out-of-date') {
+        process.stderr.write(
+          `bs: Claude Code settings for this project are out of date — ${advice}, then restart Claude Code\n`,
+        );
+      } else if (advised?.hint === 'overridden') {
+        process.stderr.write(
+          `bs: your own autoCompactWindow in a settings file is overridden by the lines bs wrote in .claude/settings.local.json — ${advice} to remove them, then restart Claude Code\n`,
+        );
+      } else if (advised?.hint === 'unused') {
+        process.stderr.write(
+          `bs: CLAUDE_CODE_AUTO_COMPACT_WINDOW beats every settings file, so the autoCompactWindow lines bs wrote in .claude/settings.local.json are unused — ${advice} to remove them, then restart Claude Code\n`,
+        );
+      } else if (advised?.hint === 'stacked') {
+        process.stderr.write(
+          `bs: CLAUDE_AUTOCOMPACT_PCT_OVERRIDE stacks on the autoCompactWindow bs wrote in .claude/settings.local.json — ${advice} to remove it, then restart Claude Code\n`,
+        );
+      }
+    } catch {
+      // A hint is never worth failing the command.
+    }
     // Every other write verb takes `--session` and `--causal-parent` and can
     // therefore assume a log. This is the one that cannot, so it is the one
     // command in the CLI whose whole argument list is what it is about.

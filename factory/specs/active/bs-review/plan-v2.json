@@ -1,0 +1,716 @@
+{
+  "epic_id": "bs-review",
+  "version": 2,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-review/task-1-guard-git-config-env",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Force-push rule reads git configuration values",
+      "summary": "The force-push rule reads a command named in a git configuration value (-c, --config-env, GIT_CONFIG_*, GIT_PAGER, GIT_EXTERNAL_DIFF, -O) the same way it reads the in-line form.",
+      "objective": "Make `checkForcePush` in factory/orchestrator/src/policy.ts read a command line carried by a git configuration value the same way it reads that command line typed directly. Today an inline `alias.` definition is refused by `definesInlineGitAlias`; extend the same reading to every configuration value that git runs as a command: a `-c key=value` or `--config-env=key=VAR` on the git command, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, and the `-O<cmd>` / `--open-files-in-pager=<cmd>` option of `git grep`. Each value is read whether it is set on the git command itself, in an earlier `export` or assignment segment of the same command line, or through `env`. A readable value is dequoted and checked by the same force-push checks a `sh -c` payload goes through; a value the rule cannot read statically is refused the way an unreadable inline alias is, whatever its key.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Each of these is refused with the force-push violation: `git -c core.pager='git push --force origin main' log`; `git -c diff.external='git push -f origin main' diff`; `GIT_PAGER='git push -f origin main' git log`; `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`; `export GIT_PAGER='git push -f origin main'; git log`; `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='git push -f origin main' git log`; `git grep -O'git push -f origin main' x`; `git grep --open-files-in-pager='git push --force origin main' x`.",
+        "A configuration value the rule cannot read statically is refused, whatever its key: `git -c core.pager=\"$P\" log`, `git -c user.name=\"$NAME\" commit -m y`, `export GIT_PAGER=\"$P\"; git log`, `GIT_EXTERNAL_DIFF=$(cat f) git diff`, a backtick value, and `git --config-env=core.pager=SOMEVAR log`.",
+        "Each of these is still allowed: `git -c color.ui=always log`, `git -c core.pager=cat log`, `GIT_PAGER=cat git log`, `env GIT_PAGER=less git log`, `git -c user.name=x commit -m y`, `git log --oneline`, `git grep -n foo`.",
+        "`GIT_CONFIG_PARAMETERS` is read entry by entry, each entry by the same rule as a `-c key=value`, in both entry spellings git writes: the single-quoted `'key=value'` and the `'key'='value'` form that git 2.31 and later writes, with several entries in one value separated by spaces and the two spellings mixed. Each case is its own named test in policyGitConfig.test.ts: `GIT_CONFIG_PARAMETERS=\"'core.pager=git push -f origin main'\" git log` and `GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log` are each refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git log` and `GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log` are each allowed; `GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager=git push --force origin main'\" git log`, a two-entry value in which only the second entry changes what git runs, is refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"$X\" git log` is refused as unreadable.",
+        "Every existing test in factory/orchestrator/test/policy.test.ts and policyHookEntry.test.ts passes unchanged.",
+        "Each new branch of the rule is proven by mutation: the result names, per branch, the test that fails when that branch is disabled.",
+        "The rule reads every value of every carrier the objective names and needs no list of configuration keys: an unreadable value is refused whatever its key, and a readable value is judged on the command line it sets. So `git -c user.name=x commit -m y` is allowed and `git -c user.name=\"$NAME\" commit -m y` is refused by the same reading, with no key named in the rule."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Extend the per-segment force-push check so the value of every git configuration carrier named in the objective is dequoted and checked as a nested command line by the same checks a `sh -c` payload receives (including `isUnknownForcePushShape` and the `+refspec` check).",
+          "Assignments in an earlier top-level segment of the same command line (`export NAME=value`, `NAME=value;`) are carried forward to the later git segment; `env NAME=value git ...` and `NAME=value git ...` are read on the segment itself.",
+          "A value containing an unexpanded parameter, a command substitution or a backtick, on any configuration key, and any `--config-env` whose value comes from a named environment variable, makes the segment a violation, matching how `definesInlineGitAlias` treats an unreadable alias. The key does not change this: the rule holds no list of keys.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitConfig.test.ts and drive `checkForcePush` (and the public policy entry the hook uses) with literal command strings."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check (disable it, run the new test file, see a named test fail, restore) and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Force-push rule reads xargs and shell pipes; history-rewrite rule reads per command",
+      "summary": "git arguments supplied through xargs and git output piped into a shell are read like their in-line forms; a read-only git search naming a rewrite word is allowed on a protected branch.",
+      "objective": "Two behaviours in factory/orchestrator/src/policy.ts. (1) The force-push rule reads a git command whose arguments come from xargs, and git output that a shell interpreter runs, the same way it reads the in-line form: `xargs git ...` with a subcommand that is missing, unreadable, or one of the force-gated subcommands is refused; git output piped into `sh`/`bash`/`zsh`/`dash`/`ksh` (directly, via `xargs` or via `env`), `eval \"$(git ...)\"` and `source <(git ...)` are refused. (2) The history-rewrite rule (`checkHistoryRewriteOnProtected`) reads each top-level command on its own and does not refuse a segment that `isReadOnlyGitCommand` accepts, so a read-only search such as `git grep rebase` on a protected branch is allowed while a real rewrite elsewhere on the line is still refused.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Refused by the force-push rule: `echo --force | xargs git push origin main`; `printf 'push -f origin main' | xargs git`; `xargs -I{} git {} < cmds.txt`; `git log --format=%s | sh`; `git show HEAD:run.sh | bash`; `git log | xargs sh -c 'git push -f origin main'`; `git log | env bash`; `eval \"$(git log -1 --format=%B)\"`; `source <(git show HEAD:x.sh)`.",
+        "Allowed: `git ls-files | xargs grep x`; `git ls-files -z | xargs -0 git add`; `git diff --name-only | xargs git log --oneline --`; `git log | less`; `git diff | cat`; `git log | grep x`; `xargs echo < list.txt`.",
+        "With a protected branch checked out, these are allowed by the history-rewrite rule: `git grep rebase`; `git grep -n filter-branch -- docs/`; `git log --grep='commit --amend'`.",
+        "With a protected branch checked out, these are still refused: `git rebase -i HEAD~2`; `git commit --amend`; `git grep rebase && git rebase main`; `git grep rebase; git rebase main`; `git filter-repo --path x`.",
+        "A command line the segment splitter cannot read keeps today's whole-command reading for the history-rewrite rule (it errs toward refusal).",
+        "Every existing test in policy.test.ts, policyHookEntry.test.ts and task-1's policyGitConfig.test.ts passes unchanged; each new branch is proven by mutation and the result names the failing test per branch."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "In the force-push per-segment check, recognise `xargs` (with its own options, including `-I`, `-0`, `-n`) whose command is `git`, and refuse when the git subcommand is absent from the literal words, unreadable, or one of FORCE_GATE_SUBCOMMANDS; read-only and non-gated subcommands stay allowed.",
+          "Refuse a pipeline where a segment after a `|` whose earlier segment runs git is a shell interpreter (sh, bash, zsh, dash, ksh), directly or through `xargs` or `env`; also refuse `eval` of a command substitution that runs git and `source`/`.` of a process substitution that runs git.",
+          "Change `checkHistoryRewriteOnProtected` to evaluate the rewrite predicates per `topLevelCommands` segment and skip a segment `isReadOnlyGitCommand` accepts; when the splitter returns the whole line as one unreadable segment, keep today's whole-command match.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitInput.test.ts."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-5-effectiveness-fold",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Effectiveness fold: tokens per task and role, escaped defects, finding precision",
+      "summary": "A pure fold over the event log plus transcript totals that yields tokens per task and per role, escaped defects after merge, and precision per finding role.",
+      "objective": "Create factory/orchestrator/src/db/effectiveness.ts, a fold over a session's (or lineage's) events that computes three metric groups. (1) Tokens per task and per role: transcript-measured through task-4's reader over the CLI session ids stamped on the events (`cli_session_id`); a sub-agent is attributed to a task when a dispatch_decision's top-level `agent_id` equals its agent id; tokens that match no dispatch are reported as unattributed and never spread; result `token_usage` counts (measured vs unmeasured results) are reported alongside. (2) Escaped defects: a finding-raised or issue-reported event that names a task after that task's wave-merged event, for a task whose latest gate-outcome before the merge was a pass (`pass` or `pass-with-waivers-pending`), counted when its folded status is confirmed or fix-*, pending when still raised, excluded when refuted. (3) Precision per `found_by` role: confirmed / (confirmed + refuted + waived) with the three counts, using the existing findings fold; null when the role raised no decided finding.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Fixture-log tests cover each metric: per-task and per-role token sums with an unattributed bucket; `complete:false` propagates from any partial transcript to every total it feeds.",
+        "Escaped defects: a finding raised after wave-merged for a task whose latest pre-merge gate-outcome passed counts when confirmed or fix-pending/fix-landed, appears as pending when raised, and is excluded when refuted; a finding raised before the merge, or on a task with no passing gate-outcome, is not an escaped defect.",
+        "Precision: a role with 3 confirmed, 1 refuted, 0 waived reads 0.75 with counts {confirmed:3, refuted:1, waived:0}; a role with no decided findings reads null, not 0.",
+        "The fold takes its transcript reader as an injected function so tests never touch a real config directory.",
+        "No edit to factory/orchestrator/src/db/queries.ts or findings.ts; their tests pass unchanged."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/effectiveness.ts",
+        "factory/orchestrator/test/effectiveness.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Export a pure function (for example `effectiveness(events, {readTokens})`) returning `{tokens: {byTask, byRole, unattributed, complete, resultsMeasured, resultsUnmeasured}, escapedDefects: {count, pending, items}, precision: {<role>: {value, confirmed, refuted, waived}}}`.",
+          "Reuse the findings status fold in findings.ts and the event readers already used by stats; do not re-derive finding status.",
+          "Report every count with the ids it came from so the export (task-6/7) can show evidence without re-reading events."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Do not edit db/queries.ts, findings.ts or cli.ts.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "`bs stats effectiveness` and the opt-in `bs report export`",
+      "summary": "Wire the effectiveness fold into `bs stats effectiveness` (plain words and JSON) and add `bs report export`, which writes a redacted Markdown file or stdout and never publishes.",
+      "objective": "Add two CLI verbs in factory/orchestrator/src/cli.ts with their usage entries in usage.ts. `bs stats effectiveness --session <id> | --lineage <id> [--claude-config-dir <dir>] [--json]` prints the task-5 metrics (tokens per task and per role with the unattributed bucket and completeness, escaped defects, precision per role). `bs report export --session <id> [--lineage] [--digest <file>] [--out <file>] [--json]` renders, through task-6, a redacted Markdown export (or, with `--json`, the same content as JSON) of the report digest and the effectiveness metrics, with per-task check states (tests = latest testgate-result, grader = latest grader-verdict, gate = latest gate-outcome; missing = not run, unreadable = unknown). The export writes only to stdout or the named file. Add the opt-in export step to .claude/skills/bs/report.md.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "`bs stats effectiveness --json` on a fixture log prints the task-5 shape; the human form prints the same numbers in plain words with `NOT MEASURED` for null values and \"at least\" for incomplete token totals.",
+        "`bs report export --out <file>` writes the Markdown export, and with `--json` the same content as JSON; without --out it prints to stdout; it makes no network call and writes no other file. Neither form contains a home-directory or temp path, or a user name, in any of task-6's path forms, checked against an independent pattern list written in statsEffectivenessCli.test.ts (one pattern per task-6 form, not the redactor's own detector), nor any transcript text: a sentinel planted in a fixture transcript's message text is absent from both forms. Other absolute paths (for example `/api/tasks`, `/usr/bin/git`) name no user and are kept as written: that is a decision, not an omission, and a test plants `/usr/bin/git` in a fixture finding summary and asserts it appears unchanged in both forms.",
+        "An incomplete token total reads the same in every form: when the reader returns `complete:false`, the human `bs stats effectiveness` form, the Markdown export and the JSON export all carry the label \"at least <n>\", and the JSON export also carries `complete: false` on that total. A test pins the Markdown and the JSON form against the human form's label on the same fixture.",
+        "Free text that flows into the export is redacted by task-6's rule, not dropped: a test plants a home-path sentinel (`/Users/example-sentinel/repo/a.ts` and `C:\\Users\\example-sentinel\\repo`) in a finding summary and in the `--digest` text, and asserts that in both the Markdown and the JSON form the name `example-sentinel` never appears and `<home>` stands where each path's home prefix stood.",
+        "Per-task check states in the export distinguish passed, failed, not run and unknown, each covered by a fixture.",
+        "Every existing `bs stats <lens>` and `bs report` JSON output is unchanged for the existing fixtures (existing tests pass unchanged); any shape change is an added field only.",
+        "usage.ts lists both verbs so docCommands.test.ts resolves them; report.md describes the export as opt-in and says the operator decides whether to share the file.",
+        "The default Claude config directory is resolved from `CLAUDE_CONFIG_DIR` or the home directory at run time only; tests always pass `--claude-config-dir`.",
+        "Both export forms open with a notice telling the reader to check the export before sharing it: the Markdown form's first line is exactly `> Review this export before you share it.`, and the JSON form's first top-level key is `notice`, whose value is exactly `Review this export before you share it.`. A test pins both on the same fixture: the Markdown first line, and the JSON `notice` value and its place as the first key."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/statsEffectivenessCli.test.ts",
+        ".claude/skills/bs/report.md"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 660
+      },
+      "contract": {
+        "functional_clauses": [
+          "Add `stats effectiveness` beside the existing stats lenses and `report export` (with `--json`) as a new verb, both in COMMANDS/usage.ts with flags documented.",
+          "Build the export from task-5's fold and task-6's renderers; the CLI layer does selection and I/O only.",
+          "Every free-text string the export carries (finding summaries, digest text, task titles) goes through task-6's redactor with `homeDir` set to the running user's home directory; the redactor hides home-directory and temp paths and the user names in them (task-6's forms), and other absolute paths stay as written. The JSON form is built from the same redacted data as the Markdown form, and both carry the notice line.",
+          "New CLI tests live in factory/orchestrator/test/statsEffectivenessCli.test.ts and run the built CLI or the command handler against fixture logs in a temp dir."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of cli.ts and usage.ts; existing stats and report JSON shapes only gain fields.",
+          "Never publish: no gh, no network, no upload; the only writes are stdout and --out.",
+          "No other project's name, no client code and no real home-directory path in any committed file, test fixture included. Path fixtures spell every home form with a placeholder user name (`example-user`, `example-sentinel`) and pass a placeholder home such as `/opt/example-home`; never a real user name or a real home path.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-9-trial-task-corpus",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Trial task corpus: five task kinds with hidden checks",
+      "summary": "Five trial tasks (REST endpoint, large refactor, multi-file bug, FE+BE feature, DB schema change), each with one prompt for both arms, a start state and a hidden grading check.",
+      "objective": "Create trial/tasks/ with one directory per task kind: rest-endpoint, large-refactor, multi-file-bug, fe-be-feature, db-schema-change. Each holds a manifest.json (kind, title, prompt file, `start_state`: the name of a unified-diff patch file in the task directory or null, `fail_to_pass` and `pass_to_pass`: the task-relative paths of the two check subdirectories, `check/fail_to_pass` and `check/pass_to_pass`, expected touched areas), a prompt.md given verbatim to both arms, an optional start state, which is a unified diff applied with `git apply` to a temp copy of trial/sample-app or nothing at all (the multi-file bug is planted by its patch), and a hidden check directory of node:test files in two subdirectories: `check/fail_to_pass/` holds the tests that fail on the start state and must pass after the task, and `check/pass_to_pass/` holds the tests that pass before and must still pass. One test is one file holding one top-level `test()`; it is run on its own with `node --test <file>`, the prepared copy as working directory, and its exit code is its result (0 is a pass). The file is the unit the self-check and task-10's harness report on.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Five task directories exist, one per kind, each with manifest.json, prompt.md and a check directory holding the two subdirectories `check/fail_to_pass/` and `check/pass_to_pass/`, each with at least one test file; manifests validate against a small schema file in trial/tasks/, which requires both `fail_to_pass` and `pass_to_pass` (task-relative directory paths), and every manifest sets them to `check/fail_to_pass` and `check/pass_to_pass`.",
+        "For each task, a self-check script in trial/tasks/ copies trial/sample-app to a temp directory and, when the manifest's `start_state` names a patch file, applies that unified diff there with `git apply`; a patch that does not apply cleanly fails the script, and a null `start_state` uses the copy as is. No other start-state form (a script, an overlay directory) is accepted. The script takes the two check directories from the manifest's `fail_to_pass` and `pass_to_pass` fields (never a hard-coded path), runs each test file in them on the start state, and prints one pass/fail line per test, naming the task and the file. It exits non-zero when any fail_to_pass test passes on the start state, when any pass_to_pass test fails on it, or when a directory the manifest names is missing or holds no test file; on the real corpus it exits 0.",
+        "Prompts describe the wanted behaviour only; they do not mention Blacksmith, plain Claude Code, the hidden checks or their file names.",
+        "The large-refactor task's check verifies behaviour is unchanged and a structural target is met (for example a module split) without pinning exact file contents.",
+        "The fe-be-feature task's hidden check verifies the front end headlessly with node:test and opens no browser: it either starts the app on an ephemeral port and asserts on the HTML/JS the app serves, or imports a pure front-end module (one that touches no DOM when imported) and tests its functions. It needs no browser, DOM library or other dependency.",
+        "`bash scripts/check.sh` passes: the doc guards walk every tracked Markdown file, so each prompt.md and any README this task adds is held to them."
+      ],
+      "claims": [
+        "trial/tasks/**"
+      ],
+      "budget": {
+        "tokens": 180000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Write the corpus and its self-check script under trial/tasks/ only; read trial/sample-app but do not edit it.",
+          "Hidden checks use node:test and node built-ins only."
+        ],
+        "nonfunctional_clauses": [
+          "Run the corpus self-check script and report, per task, the FAIL_TO_PASS and PASS_TO_PASS results on the start state.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Every Markdown file this task adds falls under the repo's doc guards (docCommands.test.ts, docErrorCodes.test.ts and their siblings walk every tracked Markdown file): a backticked dotted name that is not a filename is read as an error code and must be one the code raises, and a named `bs`/`smith` command must exist in usage.ts. Write such a name without backticks, or leave it out.",
+          "Node built-ins only; no npm dependency.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-10-trial-recording-harness",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Trial recording harness: prepare, record, summarize",
+      "summary": "A harness that prepares a trial workspace and prompt, records one run's check result, transcript tokens and diff as a JSONL line, and summarizes runs with NOT MEASURED for every missing value.",
+      "objective": "Create the trial harness. Logic in factory/orchestrator/src/trial/harness.ts (tested under the root suite), a thin entry trial/harness/trial.mjs that imports the built module, and trial/README.md. Verbs: `prepare --task <kind> --arm plain|blacksmith --dir <empty dir>` copies trial/sample-app, applies the start state (the task's unified diff with `git apply` when the manifest names one, nothing when `start_state` is null), runs `git init` with one commit, and prints the prompt and the command the operator runs; it never launches claude. `record --task <kind> --arm <arm> --dir <dir> --cli-session <id> [--claude-config-dir] [--interventions <n>] --results <file.jsonl>` runs the hidden check, reads tokens through task-4's reader, computes diff stats against the start commit, and appends one record. `summarize --results <file>` prints a Markdown table per kind and arm with `NOT MEASURED` for every missing cell. A record has exactly: task_kind, arm, check (passed|failed|not-run|unknown), tokens ({used, complete} or null), wall_clock_ms (or null), diff {files, added, removed}, interventions (or null), cli_session_id, recorded_at, harness_version.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Root-suite tests drive prepare, record and summarize against temp dirs and fixture transcripts; prepare never spawns claude (asserted by an injected spawner). A case gives `record` a fixture manifest whose `fail_to_pass` and `pass_to_pass` name non-default directories and asserts the harness runs the files in exactly those directories; one failing fail_to_pass file, or one failing pass_to_pass file, each stores `check: failed`.",
+        "A record with no transcript found stores tokens null and summarize prints NOT MEASURED; a check that could not run stores `not-run`, an errored check `unknown`; neither is ever `passed`.",
+        "summarize never computes a mean or a ratio from fewer than one recorded run per cell and labels every cell with its run count; with one run it says single run.",
+        "The record field set matches the plan's list exactly, pinned by a test.",
+        "trial/README.md explains the three verbs, says running the trial (and its spend) is the operator's decision, and contains no measured number.",
+        "wall_clock_ms is the span between the first and last timestamp of the run's main transcript when it is found, else null; interventions comes only from the operator's --interventions flag, else null. Neither is ever estimated.",
+        "`bash scripts/check.sh` passes: the doc guards walk every tracked Markdown file, so trial/README.md is held to them."
+      ],
+      "claims": [
+        "factory/orchestrator/src/trial/harness.ts",
+        "factory/orchestrator/test/trialHarness.test.ts",
+        "trial/harness/**",
+        "trial/README.md"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Implement the three verbs in harness.ts with injected filesystem, clock, spawner and token reader; trial.mjs only parses argv and calls them.",
+          "Use task-4's transcript reader for tokens; do not re-implement token counting.",
+          "Read task manifests from trial/tasks/<kind>/manifest.json as written by task-9, and take the hidden check's two directories from the manifest's `fail_to_pass` and `pass_to_pass` fields, never from a hard-coded path. `record` runs each test file in both directories with `node --test <file>`, the prepared copy as working directory, and stores `check: passed` only when every file in both exits 0, `failed` when any exits non-zero, and `not-run` when a directory the manifest names is missing or holds no test file. Do not edit trial/tasks/ or trial/sample-app/."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Every Markdown file this task adds falls under the repo's doc guards (docCommands.test.ts, docErrorCodes.test.ts and their siblings walk every tracked Markdown file): a backticked dotted name that is not a filename is read as an error code and must be one the code raises, and a named `bs`/`smith` command must exist in usage.ts. Write such a name without backticks, or leave it out.",
+          "Never start a claude process, never call the network, never publish results.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-11-trial-methodology-doc",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Trial methodology and results template",
+      "summary": "docs/trial/methodology.md (arms, task kinds, metrics, threats to validity) and docs/trial/results.md with every number NOT MEASURED.",
+      "objective": "Write docs/trial/methodology.md and docs/trial/results.md for the plain-Claude-Code vs Blacksmith trial. The methodology states the question, the two arms and how each is run with an identical prompt, the five task kinds and their FAIL_TO_PASS / PASS_TO_PASS checks, the metrics (check outcome, transcript tokens by the task-4 definition, wall clock, diff size, operator interventions; for the Blacksmith arm also the effectiveness metrics), the record fields, what a single run can and cannot show, threats to validity, and that this trial is not the roadmap's agent-bench benchmark (no epochs, no repeats, no error bars). results.md is a template whose every number is NOT MEASURED.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Every numeric cell in docs/trial/results.md reads NOT MEASURED; neither doc contains a measured or estimated number about Blacksmith's effect.",
+        "methodology.md names the five task kinds as they appear in trial/tasks/, the two arms, every record field, and the token definition (no cache reads, dedupe by message id + request id).",
+        "methodology.md states that running the trial and its spend are the operator's decision and that results from one run per cell are labelled single-run.",
+        "methodology.md has a section on the overlap with agent-bench and what is left to it.",
+        "The docs name only `bs`/`smith` commands that exist in usage.ts at this task's base; `bash scripts/check.sh` passes.",
+        "A new test trialDocs.test.ts pins that every metric cell in docs/trial/results.md reads NOT MEASURED and that methodology.md names exactly the task kinds present under trial/tasks/."
+      ],
+      "claims": [
+        "docs/trial/**",
+        "factory/orchestrator/test/trialDocs.test.ts"
+      ],
+      "budget": {
+        "tokens": 140000,
+        "diff_lines": 400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Write the two docs under docs/trial/ only.",
+          "Link to trial/README.md and trial/tasks/ by repo-relative path."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write trialDocs.test.ts first and watch it fail on the missing docs.",
+          "Before hand-back run, in the foreground and in full: `pnpm run test` (the whole suite), `pnpm run typecheck:test` and `pnpm exec biome check .`.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Also run root `pnpm run test` (docCommands and doc guards run there).",
+          "No unmeasured claim: every statement about outcomes is phrased as what the trial will measure.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-14-plugin-guard-opt-in",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Opt-in policy guard for plugin installs",
+      "summary": "The plugin carries a PreToolUse policy hook that is inert unless BS_PLUGIN_GUARD=1, plus a doc with the deny rules to copy, so a plugin install can enforce the same rules as a clone.",
+      "objective": "Give a plugin install an opt-in way to enforce Blacksmith's policy. Add a PreToolUse entry to .claude/hooks/hooks.json (matcher Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task) running a new .claude/hooks/plugin-policy.sh. The shim exits 0 with no output unless `BS_PLUGIN_GUARD=1`; when on, it runs `$BS_POLICY_HOOK` if set, else `bs-policy-hook` from PATH, and if neither exists it returns an `ask` decision with a message naming the fix. Add the `bs-policy-hook` bin to package.json pointing at factory/orchestrator/dist/policyHook.js. Write docs/guide/plugin-guard.md: what the guard enforces, the one switch, how to turn it on, and the deny rules to paste into a project's settings, whose block must equal the deny list in .claude/settings.json (pinned by a test). Default behaviour of a plugin install is unchanged.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "With BS_PLUGIN_GUARD unset or not `1`, the shim exits 0 and prints nothing for every tool input (tested with an empty PATH, like the existing inert-wrapper test).",
+        "With BS_PLUGIN_GUARD=1 and BS_POLICY_HOOK pointing at the built policyHook.js, a force push to main is denied and `git status` is allowed, through the shim, in a test.",
+        "With BS_PLUGIN_GUARD=1 and no hook found, the shim emits an `ask` decision whose message names `bs-policy-hook` and BS_POLICY_HOOK.",
+        "pluginManifest.test.ts pins the full hook set: UserPromptSubmit and PostToolUse(AskUserQuestion) as today plus exactly one PreToolUse entry running plugin-policy.sh; the existing pin that the plugin never references guard.sh or judge-stop.sh still holds; every hook keeps a timeout of at most 5 seconds and no async flag.",
+        "packaging.test.ts covers the new `bs-policy-hook` bin and its target file, and the shim is inside the shipped plugin source.",
+        "docs/guide/plugin-guard.md's deny block equals the .claude/settings.json deny list (test); the doc claims only behaviour a test covers, and says plainly whether a settings-file `env` entry is a tested way to set the switch.",
+        "No file under factory/policies/ changes."
+      ],
+      "claims": [
+        ".claude/hooks/hooks.json",
+        ".claude/hooks/plugin-policy.sh",
+        "package.json",
+        "factory/orchestrator/test/packaging.test.ts",
+        "factory/orchestrator/test/pluginManifest.test.ts",
+        "factory/orchestrator/test/pluginGuard.test.ts",
+        "docs/guide/plugin-guard.md"
+      ],
+      "budget": {
+        "tokens": 180000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "The shim is POSIX sh, reads the hook input from stdin and passes it unchanged to the resolved hook.",
+          "Edit only `bin` in package.json.",
+          "Do not edit .claude/settings.json or .claude/hooks/guard.sh; read the settings deny list in the test."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Off by default: no behaviour change for any install that does not set BS_PLUGIN_GUARD=1.",
+          "The shim never runs a command from its input and never evaluates a variable it did not set; quote every expansion.",
+          "Security-sensitive: the reviewer pass must include the security reviewer.",
+          "Do not edit anything under factory/policies/.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-15-readme-quickstart-descriptions",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "README first screen, quickstart and one description",
+      "summary": "New README first screen with the agreed tagline and a workflow table vs plain Claude Code, a quickstart guide, one description across package and plugin manifests, and a proposal doc for listings.",
+      "objective": "Rewrite the README's first screen to open with the exact tagline \"From feature request to reviewable PR — with an AI engineering workflow.\", drop the word \"autonomous\", and add a table of workflow differences vs plain Claude Code (what each does at spec, plan, review, verification and merge; no numbers). Write docs/guide/quickstart.md: install, `bs doctor`, `bs init`, a first `/bs new` and `/bs run`, where to look next. Put one description string in package.json `description` (and drop the \"autonomous\" keyword), in .claude-plugin/marketplace.json for the blacksmith entry with matching wording for bs-mod and pr-mod, in .claude/.claude-plugin/plugin.json, and in the README. Write docs/positioning-proposal.md proposing GitHub About text, topics and plugin-hub listings, for the operator to apply. A demo appears only from a real run labelled single-run; otherwise the README shows a NOT MEASURED placeholder.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "The first text line under the `# Blacksmith` heading is exactly the tagline \"From feature request to reviewable PR — with an AI engineering workflow.\" (emphasis markup around it allowed), replacing today's \"An autonomous agent factory.\" line; the logo and badges stay.",
+        "The word \"autonomous\" appears in no description string, no package keyword and nowhere on the README first screen; a sentence further down that uses it to state a limit (today's README \"No autonomous deploy or outbound sends\") may stay.",
+        "A new test descriptions.test.ts pins one description string: package.json `description`, the `blacksmith` entry in .claude-plugin/marketplace.json, .claude/.claude-plugin/plugin.json `description`, and the README sentence directly under the tagline are equal. The bs-mod and pr-mod entries keep their own subject, use no \"autonomous\", and make no claim the claims matrix cannot back.",
+        "The comparison table describes workflow steps only and contains no number; any demo is labelled single-run with its run id, else the README shows a NOT MEASURED placeholder.",
+        "docs/guide/quickstart.md uses only commands that exist (docCommands.test.ts resolves them) including `bs doctor`, and links INSTALL.md for detail.",
+        "docs/positioning-proposal.md is a proposal only; no GitHub setting, topic or listing is changed by this task.",
+        "`bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "README.md",
+        "docs/guide/quickstart.md",
+        "docs/positioning-proposal.md",
+        "package.json",
+        ".claude-plugin/marketplace.json",
+        ".claude/.claude-plugin/plugin.json",
+        "factory/orchestrator/test/descriptions.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Edit only `description` and `keywords` in package.json, and only description fields in the two manifests.",
+          "Keep every README section below the first screen and every link the doc guards check; move, do not delete, content that leaves the first screen."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "No unmeasured claim: every capability named on the first screen is one the claims matrix (task-16) can back with code or a test.",
+          "Never publish and never change a GitHub setting.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-16-claims-matrix-and-changelog",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Claims matrix and the epic's changelog entries",
+      "summary": "docs/claims-matrix.md maps every public claim to the code or test that backs it and its limits; unbacked claims are reworded or removed; CHANGELOG Unreleased gets the epic's entries.",
+      "objective": "Write docs/claims-matrix.md: one row per claim made in README.md, package.json, the marketplace and plugin manifests, docs/guide/quickstart.md and docs/guide/plugin-guard.md, each with the code path or test that backs it and its stated limits. A claim no code or test backs is reworded to what is backed or removed, in the file that makes it. Then write the CHANGELOG.md Unreleased entries for every user-visible change in this epic, from the `notes` of tasks 1-15 and 17, with neutral wording for the policy changes (behaviour only).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "factory/orchestrator/test/claimsMatrix.test.ts extracts every claim on the README first screen (from the `# Blacksmith` heading to the first `## ` heading) and every description string: package.json `description`, the descriptions of the `blacksmith`, `bs-mod` and `pr-mod` entries in .claude-plugin/marketplace.json, and .claude/.claude-plugin/plugin.json `description`; each description string is one claim. The README first screen is cut into claims by this rule, which works on structure only and names no README words, so a rewrite of the first screen is cut the same way: (a) a table: each body row is one claim, its cells trimmed and joined by ` | ` (the leading and trailing pipes dropped); the header row and the separator row (only `|`, `-`, `:` and spaces) are not claims, and a `\\|` in a matrix cell reads as `|`; (b) each bullet or numbered item (a line opening `- `, `* ` or `+ `, or digits followed by `. ` or `) `, after optional indent) is one claim, its indented continuation lines included; (c) a paragraph, a run of consecutive non-blank lines that belongs to no other unit, has each `<br>`, `<br/>` or `<br />` read as whitespace, is normalised, and is split into sentences by the regex `(?<=[.!?])\\s+(?=[A-Z\"(])`; each sentence is one claim; (d) a `<pre>` block, or a fenced block (a line opening with three backticks to the next such line) that is not a command fence, is one claim for the whole block, its lines joined by single spaces; a command fence is one whose info string is `bash`, `sh`, `shell`, `zsh` or `console`, or whose every non-empty line starts with `$`, `/`, `bs `, `npm `, `pnpm `, `npx `, `git ` or `claude `, and it is not a claim; (e) text inside `<sub>` is read as paragraph text by (c), so it is split into sentences the same way. Headings are not claims, nor are image and badge lines, a paragraph made only of in-page anchor links and separator characters, or a unit that the normalisation leaves empty. The check fails, naming the text, when any claim has no row in docs/claims-matrix.md quoting it verbatim, compared after one normalisation applied to both sides (HTML tags and Markdown emphasis and link markup stripped, whitespace collapsed). The extraction must return at least one claim from the README first screen and from each of the five description strings, so an empty extraction fails rather than passes. The claims in docs/guide/quickstart.md and docs/guide/plugin-guard.md also have rows; those rows, like every other row, name a file path or test that exists at this task's base, and the same test checks that each named path exists.",
+        "The check is shown to discriminate, unit by unit, on a fixture README first screen and a fixture matrix in claimsMatrix.test.ts. The fixture first screen holds a table (a header row, a separator row and one body row), a bullet, a paragraph of two sentences with a `<br />` between them, a two-line `<pre>` block, an untagged fenced prose block, a `bash` command fence and a `<sub>` line, and the fixture matrix quotes every claim the rule cuts from it, so the full fixture passes. One case per unit removes that unit's row from the fixture matrix (the table body row, the bullet, the second sentence of the split paragraph, the `<pre>` block, the fenced prose block, the `<sub>` sentence) and asserts the check fails and names that claim. A further case pins the extraction's output for the fixture, showing that the header and separator rows and the command fence yield no claim and that the two-sentence paragraph yields two. On the real README, manifests and matrix the check passes.",
+        "Each claim with no backing is reworded or removed and listed in the matrix's changes section with what it said before.",
+        "CHANGELOG.md Unreleased has entries for: stats effectiveness, report export, trial kit, bs doctor and init guidance, shipped dashboard, opt-in plugin guard, delegation continuation, the two policy-rule changes, and the docs rewrite.",
+        "The policy-rule entries describe behaviour neutrally (\"reads a command named in a git configuration value the same way as ...\"), use no adversarial framing, and do not describe an earlier version as defective.",
+        "descriptions.test.ts still pins one description; `bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "docs/claims-matrix.md",
+        "README.md",
+        "package.json",
+        ".claude-plugin/marketplace.json",
+        ".claude/.claude-plugin/plugin.json",
+        "docs/guide/quickstart.md",
+        "docs/guide/plugin-guard.md",
+        "factory/orchestrator/test/descriptions.test.ts",
+        "factory/orchestrator/test/claimsMatrix.test.ts",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 680
+      },
+      "contract": {
+        "functional_clauses": [
+          "Build the matrix from the files at this task's base; do not add new capabilities or claims.",
+          "The extraction, the normalisation and the path check live in claimsMatrix.test.ts and read README.md, package.json and both manifests at run time, so a later edit to any of them is checked against the matrix too.",
+          "Edit only description and keywords in package.json and the manifests, and only claim sentences elsewhere.",
+          "Write the CHANGELOG entries under the existing Unreleased heading in the file's existing style."
+        ],
+        "nonfunctional_clauses": [
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-17-init-next-steps-and-messages",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Next steps after `bs init` and a clearer unbuilt-dashboard message",
+      "summary": "Init guidance on stderr only, a `ui.not-built` message that tells an installed package from a clone, and a `bs doctor` preflight line in the /bs skill.",
+      "objective": "Create factory/orchestrator/src/installGuidance.ts with two pure functions that take the clone-or-installed distinction as a parameter (cli.ts passes `IS_CLONE` from paths.ts): the next-step guidance printed after `bs init`, and the `ui.not-built` message. In cli.ts, write the guidance to stderr after init's existing JSON report, so init's stdout, exit code and files written stay the same; build the `ui.not-built` error's message from the second function so an installed package (not a clone) says what to do, with the error code and its cause unchanged. Add one preflight line to the body of .claude/skills/bs/SKILL.md that runs `bs doctor` (task-13's verb) when the CLI or the plugin looks missing.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "A test in installGuidance.test.ts runs `bs init` on a temp work root and asserts that stdout is exactly the init report as the existing JSON printer serializes it, with nothing added (the whole stdout string compared with that serialization, so a guidance line on stdout fails it), and that the exit code and the files written are the ones the init report lists for that work root; the guidance appears on stderr and names `bs doctor` and the next command.",
+        "The guidance function is covered for a clone and for an installed package (`isClone` true and false): both name `bs doctor`; the installed-package form also gives the plugin step INSTALL.md gives, which is the `/plugin` lines of the first untagged fenced block in INSTALL.md, today `/plugin marketplace add juzser/blacksmith` and `/plugin install blacksmith@blacksmith`. The test reads INSTALL.md at run time and extracts the block by position. A fence opens on a line at column 0 made of exactly three backticks followed by an info string or by nothing, and closes on the next column-0 line of exactly three backticks; an indented fence does not count. The first fence with no info string is the plugin block. The test asserts that the block is not empty and every non-empty line in it starts with `/plugin `, and that the installed-package guidance holds those lines as consecutive lines, each equal to the doc's, in the doc's order. A change to those lines in INSTALL.md fails the test until the guidance follows.",
+        "The `ui.not-built` message comes from one pure function given the expected server entry path and `isClone`: from a clone it still names `pnpm build:server`; from an installed package it names no pnpm script (an installed package has none to run) and gives the install command INSTALL.md gives for the package, which is the single line of the first `bash` fenced block in INSTALL.md (the first fence, by the rule in the criterion above, whose info string is exactly `bash`), today `npm i -g @juzser/blacksmith`. The test extracts that block by position, asserts it holds exactly one non-empty line, and asserts the installed-package message contains that line exactly, so a change to it in INSTALL.md fails the test until the message follows. The error code stays `ui.not-built`; existing tests pass unchanged.",
+        "SKILL.md gains one preflight line in its body: when a `bs` command is not found or the plugin looks missing, run `bs doctor` and act on the fix lines it prints. docCommands.test.ts resolves `bs doctor` there; `bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "factory/orchestrator/src/installGuidance.ts",
+        "factory/orchestrator/test/installGuidance.test.ts",
+        "factory/orchestrator/src/cli.ts",
+        ".claude/skills/bs/SKILL.md"
+      ],
+      "budget": {
+        "tokens": 120000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "installGuidance.ts holds pure functions whose inputs (clone or installed, the expected server entry path) are parameters; cli.ts passes `IS_CLONE` and only writes the strings.",
+          "Guidance after init is written to stderr; no change to init's stdout, exit code or files written.",
+          "The `ui.not-built` error keeps its code and its cause; only its message text comes from the new function.",
+          "Do not touch installCheck.ts, `bs doctor`, usage.ts or INSTALL.md: task-13 owns them. Read INSTALL.md only to quote it."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of cli.ts.",
+          "Leave the `description:` frontmatter of SKILL.md as it is: the preflight line goes in the body. Write no backticked dotted name in it other than an error code the code raises.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-1b-guard-git-config-env",
+      "epic_id": "bs-review",
+      "plan_version": 2,
+      "project": "black-smith",
+      "title": "Force-push rule reads git configuration values",
+      "summary": "The force-push rule reads a command named in a git configuration value (-c, --config-env, GIT_CONFIG_*, GIT_PAGER, GIT_EXTERNAL_DIFF, -O) the same way it reads the in-line form.",
+      "objective": "Make `checkForcePush` in factory/orchestrator/src/policy.ts read a command line carried by a git configuration value the same way it reads that command line typed directly. Today an inline `alias.` definition is refused by `definesInlineGitAlias`; extend the same reading to every configuration value that git runs as a command: a `-c key=value` or `--config-env=key=VAR` on the git command, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, and the `-O<cmd>` / `--open-files-in-pager=<cmd>` option of `git grep`. Each value is read whether it is set on the git command itself, in an earlier `export` or assignment segment of the same command line, or through `env`. A readable value is dequoted and checked by the same force-push checks a `sh -c` payload goes through; a value the rule cannot read statically is refused the way an unreadable inline alias is, whatever its key.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Each of these is refused with the force-push violation: `git -c core.pager='git push --force origin main' log`; `git -c diff.external='git push -f origin main' diff`; `GIT_PAGER='git push -f origin main' git log`; `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`; `export GIT_PAGER='git push -f origin main'; git log`; `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='git push -f origin main' git log`; `git grep -O'git push -f origin main' x`; `git grep --open-files-in-pager='git push --force origin main' x`.",
+        "A configuration value the rule cannot read statically is refused, whatever its key: `git -c core.pager=\"$P\" log`, `git -c user.name=\"$NAME\" commit -m y`, `export GIT_PAGER=\"$P\"; git log`, `GIT_EXTERNAL_DIFF=$(cat f) git diff`, a backtick value, and `git --config-env=core.pager=SOMEVAR log`.",
+        "Each of these is still allowed: `git -c color.ui=always log`, `git -c core.pager=cat log`, `GIT_PAGER=cat git log`, `env GIT_PAGER=less git log`, `git -c user.name=x commit -m y`, `git log --oneline`, `git grep -n foo`.",
+        "`GIT_CONFIG_PARAMETERS` is read entry by entry, each entry by the same rule as a `-c key=value`, in both entry spellings git writes: the single-quoted `'key=value'` and the `'key'='value'` form that git 2.31 and later writes, with several entries in one value separated by spaces and the two spellings mixed. Each case is its own named test in policyGitConfig.test.ts: `GIT_CONFIG_PARAMETERS=\"'core.pager=git push -f origin main'\" git log` and `GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log` are each refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git log` and `GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log` are each allowed; `GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager=git push --force origin main'\" git log`, a two-entry value in which only the second entry changes what git runs, is refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"$X\" git log` is refused as unreadable.",
+        "Every existing test in factory/orchestrator/test/policy.test.ts and policyHookEntry.test.ts passes unchanged, with one named exception: the existing case `git --config-env=user.email=E push origin feat` in the policy.test.ts table titled 'allows %s — inline config that never names an alias' moves to a refused case, because criterion 2 refuses a `--config-env` value read from a named environment variable whatever its key. The two other cases of that table stay allowed, and no other line of policy.test.ts changes.",
+        "Each new branch of the rule is proven by mutation: the result names, per branch, the test that fails when that branch is disabled.",
+        "The rule reads every value of every carrier the objective names and needs no list of configuration keys: an unreadable value is refused whatever its key, and a readable value is judged on the command line it sets. So `git -c user.name=x commit -m y` is allowed and `git -c user.name=\"$NAME\" commit -m y` is refused by the same reading, with no key named in the rule."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts",
+        "factory/orchestrator/test/policy.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Extend the per-segment force-push check so the value of every git configuration carrier named in the objective is dequoted and checked as a nested command line by the same checks a `sh -c` payload receives (including `isUnknownForcePushShape` and the `+refspec` check).",
+          "Assignments in an earlier top-level segment of the same command line (`export NAME=value`, `NAME=value;`) are carried forward to the later git segment; `env NAME=value git ...` and `NAME=value git ...` are read on the segment itself.",
+          "A value containing an unexpanded parameter, a command substitution or a backtick, on any configuration key, and any `--config-env` whose value comes from a named environment variable, makes the segment a violation, matching how `definesInlineGitAlias` treats an unreadable alias. The key does not change this: the rule holds no list of keys.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitConfig.test.ts and drive `checkForcePush` (and the public policy entry the hook uses) with literal command strings.",
+          "In factory/orchestrator/test/policy.test.ts, move only the case `git --config-env=user.email=E push origin feat` out of the 'allows %s — inline config that never names an alias' table into a test that expects it refused (the unreadable-value refusal of criterion 2), and update that table's comment so it names `-c` and `GIT_CONFIG_KEY_<n>` only. Change no other line of policy.test.ts.",
+          "This task's branch is cut from the HEAD of bs/bs-review/task-1-guard-git-config-env, so the work already committed there is the starting point: keep it, and make the criterion 2 and criterion 5 changes on top of it."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check (disable it, run the new test file, see a named test fail, restore) and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "dependsOn": "bs-review/task-1b-guard-git-config-env",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "dependsOn": "bs-review/task-5-effectiveness-fold",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "dependsOn": "bs-review/task-17-init-next-steps-and-messages",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-10-trial-recording-harness",
+      "dependsOn": "bs-review/task-9-trial-task-corpus",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-11-trial-methodology-doc",
+      "dependsOn": "bs-review/task-5-effectiveness-fold",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-11-trial-methodology-doc",
+      "dependsOn": "bs-review/task-9-trial-task-corpus",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-11-trial-methodology-doc",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-17-init-next-steps-and-messages",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-14-plugin-guard-opt-in",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-15-readme-quickstart-descriptions",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-10-trial-recording-harness",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "black-smith",
+  "effort": "medium"
+}

@@ -1,6 +1,13 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertExited, describeExit, runOrThrow, runProcess } from './helpers/process.js';
+import {
+  assertExited,
+  cliTestEnv,
+  describeExit,
+  runOrThrow,
+  runProcess,
+} from './helpers/process.js';
 
 // A path that cannot exist, so execFileSync fails to spawn rather than
 // running something that exits non-zero.
@@ -91,5 +98,23 @@ describe('assertExited', () => {
     expect(() =>
       assertExited(runProcess(process.execPath, ['-e', 'process.exit(1)']), 'probe'),
     ).not.toThrow();
+  });
+});
+
+describe('cliTestEnv', () => {
+  it('switches the settings hint off and points Claude Code at a nonexistent config dir', () => {
+    const env = cliTestEnv({ BS_HOME: 'x' });
+    expect(env.BS_NO_SETTINGS_HINT).toBe('1');
+    expect(env.BS_HOME).toBe('x');
+    expect(path.isAbsolute(env.CLAUDE_CONFIG_DIR ?? '')).toBe(true);
+    expect(() => readdirSync(env.CLAUDE_CONFIG_DIR ?? '')).toThrow();
+  });
+
+  it('is used by every test file that spawns `session start`', () => {
+    const files = ['waveTier', 'auditCli', 'delegationCli'].map((f) => `${f}.test.ts`);
+    for (const f of files) {
+      const text = readFileSync(path.join(import.meta.dirname, f), 'utf8');
+      expect(text, f).toContain('cliTestEnv(');
+    }
   });
 });

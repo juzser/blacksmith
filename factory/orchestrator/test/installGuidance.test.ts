@@ -135,9 +135,12 @@ describe('installGuidance stack interview', () => {
     expect(out.indexOf('bs stack check')).toBeLessThan(out.indexOf('bs new'));
   });
 
-  it('qualifies the installed stack file path with BS_HOME when it prints the directory', () => {
-    const out = initGuidance(false);
-    if (out.includes('.blacksmith/')) expect(out).toContain('$BS_HOME');
+  it('names the stack file and qualifies every line that prints the .blacksmith/ directory with BS_HOME', () => {
+    const lines = initGuidance(false).split('\n');
+    expect(lines.some((l) => l.includes('stack.yml'))).toBe(true);
+    for (const l of lines.filter((x) => x.includes('.blacksmith/'))) {
+      expect(l, `unqualified .blacksmith/ path: ${l}`).toContain('$BS_HOME');
+    }
   });
 });
 
@@ -167,6 +170,21 @@ describe('installGuidance stack interview placement', () => {
       const last = initGuidance(isClone).trimEnd().split('\n').pop() ?? '';
       expect(last).toContain('bs new');
     }
+  });
+});
+
+describe('installGuidance stack file location', () => {
+  it('names the install stack file with its BS_HOME qualifier on one line and runs the bs stack commands from the project', () => {
+    const lines = initGuidance(false).split('\n');
+    const at = lines.findIndex((l) => l.includes('.blacksmith/factory/policies/stack.yml'));
+    expect(at, 'a line names the install stack file path').toBeGreaterThan(-1);
+    expect(lines[at]).toContain('$BS_HOME');
+    const step = lines.slice(
+      at,
+      lines.findIndex((l, i) => i > at && /^ {2}\d+\. /.test(l)),
+    );
+    expect(step.join('\n')).toContain('from the project');
+    expect(lines[at]).toMatch(/^ {2}3\. /);
   });
 });
 

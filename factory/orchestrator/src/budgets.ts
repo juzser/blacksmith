@@ -42,9 +42,9 @@ export interface CoderBudgetPolicy extends RoleBudgetPolicy {
 }
 
 /**
- * The roles budgets.yml prices, one cap each. Every other role the factory
- * dispatches (merger, scribe, wave-runner) has no cap, and
- * src/budgetAlarm.ts reports a dispatch of one as a hole rather than as free.
+ * The roles budgets.yml prices, one cap each. A role outside this list has no
+ * cap, and src/budgetAlarm.ts reports a dispatch of one as a hole rather than
+ * as free.
  */
 export const PRICED_ROLES = [
   'coder',
@@ -58,6 +58,9 @@ export const PRICED_ROLES = [
   'security-reviewer',
   'auditor',
   'uiux',
+  'wave-runner',
+  'merger',
+  'scribe',
 ] as const;
 
 export type PricedRole = (typeof PRICED_ROLES)[number];
@@ -161,6 +164,9 @@ const DEFAULT_TASK_CAP_TOKENS: Readonly<Record<PricedRole, number>> = Object.fre
   'security-reviewer': 80_000,
   auditor: 90_000,
   uiux: 90_000,
+  'wave-runner': 110_000,
+  merger: 100_000,
+  scribe: 80_000,
 });
 const DEFAULT_TASK_TIER_SCALE: Readonly<Record<EffortTier, number>> = Object.freeze({
   small: 0.5,
