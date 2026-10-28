@@ -103,9 +103,10 @@ runs on the machine. A full-suite or e2e command — the project's `test_unit` o
 `test_e2e` from `bs stack show`, a full-suite gate command your brief names, or
 a check marked heavy — starts in the background (Bash `run_in_background: true`)
 and is waited for in the foreground. Before every start, in a foreground call,
-make a new empty output file outside the worktree, in the directory your own
-result goes to (never `state/artifacts/`, which holds declared evidence):
-mktemp <results-dir>/<task-id>-<role>-XXXXXX
+make a new empty output file outside the worktree, in `state/results/` under
+`<work-root>` (the workRoot `bs init` printed), where your own result goes, never
+`state/artifacts/`, which holds declared evidence:
+mktemp <work-root>/state/results/<task-id>-<role>-XXXXXX
 It prints `<out>`; use that path and no other, so nothing carries over between
 runs. Start (the bare `--` ends the options; the `printf` puts the exit code on
 a line of its own):

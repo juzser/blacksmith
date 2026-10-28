@@ -393,7 +393,7 @@ describe('the fragment’s commands, run for real', () => {
     const line = fragmentLine('mktemp', {
       'task-id': 'epic-task',
       role: 'coder',
-      'results-dir': results,
+      'work-root': dir,
     });
     const mint = () => runOrThrow('sh', ['-c', line]).stdout.trim();
     const a = mint();
@@ -418,7 +418,7 @@ describe('the hooks allow the fragment’s three commands', () => {
 
   function commands(repo: string) {
     const results = path.join(repo, 'state', 'results');
-    const vars = { 'task-id': 'epic-task', role: 'coder', 'results-dir': results };
+    const vars = { 'task-id': 'epic-task', role: 'coder', 'work-root': repo };
     const mktemp = fragmentLine('mktemp', vars);
     const out = path.join(results, 'epic-task-coder-AbCdEf');
     const start = fragmentLine('bs heavy run', { ...vars, cmd: 'pnpm run test', out });

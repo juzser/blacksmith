@@ -377,9 +377,9 @@ describe('criteria 12 and 5: the heavy-run fragment', () => {
     );
   });
 
-  it('makes <out> with a foreground mktemp under the results directory, not state/artifacts', () => {
+  it('makes <out> with a foreground mktemp under state/results, not state/artifacts', () => {
     const body = flat(fragment());
-    expect(body).toContain('mktemp <results-dir>/<task-id>-<role>-XXXXXX');
+    expect(body).toContain('mktemp <work-root>/state/results/<task-id>-<role>-XXXXXX');
     expect(body).toMatch(/before every start/i);
     expect(body).toMatch(/foreground call/i);
     expect(body).toMatch(/outside the worktree/i);
