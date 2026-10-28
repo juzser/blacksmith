@@ -201,7 +201,8 @@ have not set them yourself: the
 [concurrency caps](INSTALL.md#raise-the-concurrency-caps) and the
 [compact window](INSTALL.md#compact-earlier-on-1m-models). `BS_HOME` moves the
 `.blacksmith/` root if you want one home for several projects. You now have
-`/bs`; restart Claude Code once so it reads those settings.
+`/bs`; restart every running Claude Code session once so it reads those
+settings.
 
 **Both halves are required.** The package
 ([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
