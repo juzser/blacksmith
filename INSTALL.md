@@ -121,7 +121,7 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | Command | the block at the top of this file | Part 2 below |
 | You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
-| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart Claude Code once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code; a mod loaded with `--plugin-dir` is the checkout's copy |
+| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart every running Claude Code session once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code (every running session); a mod loaded with `--plugin-dir` is the checkout's copy |
 | Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
 Take the install unless you are hacking on Blacksmith itself.
@@ -257,9 +257,11 @@ inherits the value with no new entry. All of this holds for a session started
 after the keys are written: Claude Code reads the window when a session starts,
 and every subagent takes its parent session's value, so a session already
 running, and every subagent it starts, keeps its old window until it is
-restarted. The result is more, shorter windows than Claude Code's default; that
-is the 60% policy, intended. If the policy is unreadable or the value falls
-outside 100000-1000000, nothing is written and `bs init` says why.
+restarted. Running `/autocompact` in it also makes it re-read the settings, but
+that saves a value of yours (see Opting out, below). The result is more,
+shorter windows than Claude Code's default; that is the 60% policy, intended.
+If the policy is unreadable or the value falls outside 100000-1000000, nothing
+is written and `bs init` says why.
 
 **Models with a smaller window.** The value is clamped: a model with a smaller
 window gets the smaller of its window and 633000. The 200k models (Opus 4.0 to
@@ -344,7 +346,8 @@ settings file, so there bs's lines are merely unused; and
 it. Deleting bs's lines is not an opt-out: the next `bs init` writes them back.
 `/autocompact <value>` saves that value for the session's current model in
 `~/.claude/settings.json`, so it is yours from then on and blocks `bs init`
-like any other value of yours.
+like any other value of yours. Accepting Claude Code's own offer to change the
+window saves a value the same way.
 
 **Re-running and upgrading.** `bs init` records what it wrote in
 `.claude/bs-settings-record.json` of the project (git-excluded like

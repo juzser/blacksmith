@@ -297,7 +297,7 @@ M-3).
   33,000, with a per-model value for the old 200k models) into the project's
   local settings, so a model whose window the setting reaches compacts at 60%
   of it. A session reads the window when it starts and its subagents inherit
-  it, so a session started before the keys existed keeps its old window,
+  it, so a session started before the keys were written keeps its old window,
   subagents included, until restarted.
   A 4.x model with the `[1m]` add-on takes the 200k value and compacts
   at 120k, about 12% of 1M. It yields to any value you set, once you

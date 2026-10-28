@@ -209,6 +209,9 @@ describe('compact window docs', () => {
       expect(sectionFlat).toMatch(
         /so it is yours from then on and blocks `bs init` like any other value of yours/,
       );
+      expect(sectionFlat).toMatch(
+        /Accepting Claude Code's own offer to change the window saves a value the same way/,
+      );
     });
 
     it('the INSTALL section limits the 60% claim to a session started after the keys are written', () => {
@@ -217,6 +220,9 @@ describe('compact window docs', () => {
       expect(sectionFlat).toMatch(/every subagent takes its parent session's value/);
       expect(sectionFlat).toMatch(
         /a session already running, and every subagent it starts, keeps its old window until it is restarted/,
+      );
+      expect(sectionFlat).toMatch(
+        /Running `\/autocompact` in it also makes it re-read the settings, but that saves a value of yours/,
       );
     });
 
@@ -246,8 +252,30 @@ describe('compact window docs', () => {
 
     it('the agent constraints bullet says a running session and its subagents keep the old window', () => {
       expect(bullet).toMatch(
-        /A session reads the window when it starts and its subagents inherit it, so a session started before the keys existed keeps its old window, subagents included, until restarted/,
+        /A session reads the window when it starts and its subagents inherit it, so a session started before the keys were written keeps its old window, subagents included, until restarted/,
       );
+      expect(bullet).not.toContain('keys existed');
+    });
+
+    it('the Upgrading row restarts every running session in both columns', () => {
+      const row = install.split('\n').find((l) => l.startsWith('| Upgrading')) ?? '';
+      const [installed, clone] = row.split(' | ').slice(1, 3);
+      expect(installed).toMatch(/and restart every running Claude Code session once;/);
+      expect(installed).toMatch(/before that restart/);
+      expect(clone).toMatch(/restart Claude Code \(every running session\);/);
+    });
+
+    it('the README restarts every running session after bs init', () => {
+      const readme = read('README.md');
+      expect(flat(readme)).toMatch(
+        /restart every running Claude Code session once so it reads those settings/,
+      );
+      expect(flat(readme)).not.toMatch(/restart Claude Code once so it reads those settings/);
+      const at = readme.indexOf('restart every running Claude Code session once');
+      const para = readme.slice(readme.lastIndexOf('\n\n', at), readme.indexOf('\n\n', at));
+      for (const line of para.split('\n').filter((l) => !l.includes(']('))) {
+        expect(line.length, line).toBeLessThanOrEqual(80);
+      }
     });
 
     it('the reserve is the model output capped at 20,000 tokens, in the doc and the code comment', () => {
