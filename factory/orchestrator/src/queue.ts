@@ -7,7 +7,7 @@ import { SmithError } from './errors.js';
 import { type EventOpts, validateEventEnvelope } from './events.js';
 import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
-import { type HeavyLockOptions, withHeavyLock } from './heavyLock.js';
+import { type HeavyLease, type HeavyLockOptions, withHeavyLock } from './heavyLock.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
 import { heavyChildEnv } from './testgate.js';
@@ -197,16 +197,14 @@ export type StepOutcome =
       tests?: TestRunReport;
     }
   /**
-   * Batch-only (`batchStep`): the candidate's suite passed, but
-   * `<prefix>/<epic>/integration` had moved to a different commit by the time
-   * the batch tried to land it — the same compare-and-swap race
-   * `mergeWithoutWorktree` guards against for a single task (a `branch` that
-   * moved during the merge throws there), now reachable with a whole group
-   * under test at once instead of one task. Reusing `rebase-conflict` or
-   * `nothing-to-merge` here would misreport the cause — the branch was fine
-   * and the tests passed — so this gets its own outcome rather than an
-   * uncaught throw: the caller can re-admit the group and it rebases onto
-   * wherever the branch actually is.
+   * The suite passed, but `<prefix>/<epic>/integration` was no longer at the
+   * commit the task (`step`) or the batch (`batchStep`) was rebased onto and
+   * tested on when it came to land, so nothing landed: a writer outside the
+   * queue moved the branch. Reusing `rebase-conflict` or `nothing-to-merge`
+   * would misreport the cause — the branch was fine and the tests passed — so
+   * this gets its own outcome rather than an uncaught throw: the caller can
+   * re-run the queue for these tasks and they rebase onto wherever the branch
+   * actually is.
    */
   | { outcome: 'integration-moved'; taskId: string; tests?: undefined };
 
@@ -235,11 +233,16 @@ type EarlyOutcome = Extract<StepOutcome, { outcome: 'nothing-to-merge' | 'rebase
  * `step` and the batch path (`runGroup`) so a task that cannot even be
  * rebased fails exactly the same way whether it is running alone or as part
  * of a group.
+ *
+ * `hold` is `step`'s: the rebase runs onto exactly the head the caller read
+ * (`onto`), with the lease-carrying env so a project hook that calls
+ * `bs heavy run` re-enters the lock `step` holds. The batch path passes none.
  */
 async function certifyAndRebase(
   task: QueueTask,
   integrationBranch: string,
   logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  hold?: { env: NodeJS.ProcessEnv; onto: string },
 ): Promise<EarlyOutcome | null> {
   // Before the rebase, because a rebase, a test run and a merge all "succeed"
   // against a branch that carries nothing: certify that there is a commit to
@@ -258,13 +261,18 @@ async function certifyAndRebase(
   }
 
   try {
-    execFileSync('git', ['rebase', integrationBranch], {
+    execFileSync('git', ['rebase', hold?.onto ?? integrationBranch], {
       cwd: task.worktreeDir,
       stdio: 'pipe',
+      ...(hold ? { env: hold.env } : {}),
     });
   } catch {
     const files = conflictingFiles(task.worktreeDir);
-    execFileSync('git', ['rebase', '--abort'], { cwd: task.worktreeDir, stdio: 'pipe' });
+    execFileSync('git', ['rebase', '--abort'], {
+      cwd: task.worktreeDir,
+      stdio: 'pipe',
+      ...(hold ? { env: hold.env } : {}),
+    });
     await logBlocked(
       task.taskId,
       'integration.merge-conflict-textual',
@@ -282,6 +290,12 @@ async function certifyAndRebase(
  * merge --no-ff into the integration branch. Never auto-resolves a conflict
  * and never touches main — the caller decides what happens next on a
  * non-merged outcome.
+ *
+ * The heavy lock is taken once, before the rebase, and held through the merge
+ * and its `wave-merged` append, so queue steps of one epic (or several) take
+ * turns and a suite always runs on the head the task lands on. The task lands
+ * only onto the head it was rebased onto and tested on; a head that moved
+ * since (a writer outside the queue) is `integration-moved` and lands nothing.
  */
 export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutcome> {
   const integrationBranch = integrationBranchName(
@@ -315,11 +329,41 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     await emitTaskBlocked(taskId, { error, severity: 'S2-major', detail }, ctx, opt);
   };
 
-  const early = await certifyAndRebase(task, integrationBranch, logBlocked);
+  return withHeavyLock((lease) => stepUnderLock(task, opts, integrationBranch, logBlocked, lease), {
+    ...opts.heavyLock,
+    label: `queue-${task.taskId}`,
+    cwd: task.worktreeDir,
+    env: process.env,
+  });
+}
+
+async function stepUnderLock(
+  task: QueueTask,
+  opts: StepOptions,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  lease: HeavyLease,
+): Promise<StepOutcome> {
+  const events = opts.events;
+  const env = heavyChildEnv(process.env, lease);
+  const ref = `refs/heads/${integrationBranch}`;
+  // The head this task is rebased onto and tested on: the only head it may land on.
+  const tested = runGit(opts.projectDir, ['rev-parse', '--verify', `${ref}^{commit}`]);
+
+  const early = await certifyAndRebase(task, integrationBranch, logBlocked, { env, onto: tested });
   if (early) return early;
 
+  const moved = async (now: string): Promise<StepOutcome> => {
+    await logBlocked(
+      task.taskId,
+      'execution.env-failure',
+      `${integrationBranch} moved from ${tested} (rebased and tested on) to ${now} before ${task.taskId} could land; nothing landed.`,
+    );
+    return { outcome: 'integration-moved', taskId: task.taskId };
+  };
+
   const plan = planTestRun(task.worktreeDir, opts);
-  const testOutcome = await runTestCmd(plan.cmd, task.worktreeDir, `queue-${task.taskId}`, opts);
+  const testOutcome = runSuite(plan.cmd, task.worktreeDir, lease);
   if (!testOutcome.passed) {
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
     await logBlocked(task.taskId, 'execution.test-failure', outputTail);
@@ -335,9 +379,14 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
   // at all — never by `git checkout` in the project directory, which moved
   // the operator's own clone off the branch they were using.
   const message = `Merge ${task.taskId} into ${integrationBranch}`;
+  // A head that moved wins over a conflict with it: compare before any merge.
+  const now = runGit(opts.projectDir, ['rev-parse', '--verify', `${ref}^{commit}`]);
+  if (now !== tested) return moved(now);
   const holder = worktreeHolding(opts.projectDir, integrationBranch);
   if (holder === null) {
-    mergeWithoutWorktree(opts.projectDir, integrationBranch, task.branch, message);
+    if (!mergeWithoutWorktree(opts.projectDir, integrationBranch, task.branch, message, tested)) {
+      return moved(runGit(opts.projectDir, ['rev-parse', '--verify', `${ref}^{commit}`]));
+    }
   } else {
     // A merge into a worktree with edits in it either stops half-way or folds
     // someone's unfinished work into the merge's checkout; neither is ours.
@@ -356,9 +405,12 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
         ...(plan.report ? { tests: plan.report } : {}),
       };
     }
+    const holderHead = runGit(holder, ['rev-parse', '--verify', 'HEAD^{commit}']);
+    if (holderHead !== tested) return moved(holderHead);
     execFileSync('git', ['merge', '--no-ff', task.branch, '-m', message], {
       cwd: holder,
       stdio: 'pipe',
+      env,
     });
   }
 
@@ -421,8 +473,8 @@ function trackedChanges(worktreeDir: string): string[] {
  * plumbing, and the gate runs the suite. It also means nothing is added to,
  * removed from or pruned out of the repository's worktree list.
  *
- * A conflict throws, and so does a `branch` that moved during the merge;
- * either way `branch` is left where it was.
+ * A conflict throws; a `branch` that is no longer at `base` by the time of
+ * the `update-ref` returns false. Either way `branch` is left where it was.
  */
 /** `merge-tree --write-tree` + `commit-tree`, the two-parent merge commit
  * alone — no ref touched. Shared by `mergeWithoutWorktree` (one task, lands
@@ -438,11 +490,16 @@ function mergeWithoutWorktree(
   branch: string,
   source: string,
   message: string,
-): void {
-  const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
+  base: string,
+): boolean {
   const head = runGit(projectDir, ['rev-parse', '--verify', `${source}^{commit}`]);
   const commit = buildMergeCommit(projectDir, base, head, message);
-  runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
+  try {
+    runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1028,23 +1085,32 @@ export async function runTestCmd(
   label: string,
   opts: Pick<StepOptions, 'heavyLock'> = {},
 ): Promise<{ passed: boolean; output: string }> {
-  return withHeavyLock(
-    (lease) => {
-      try {
-        const output = execFileSync(testCmd, {
-          cwd,
-          shell: true,
-          encoding: 'utf8',
-          stdio: 'pipe',
-          env: heavyChildEnv(process.env, lease),
-        });
-        return { passed: true, output };
-      } catch (err) {
-        const e = err as { stdout?: string; stderr?: string; message: string };
-        const output = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
-        return { passed: false, output };
-      }
-    },
-    { ...opts.heavyLock, label, cwd, env: process.env },
-  );
+  return withHeavyLock((lease) => runSuite(testCmd, cwd, lease), {
+    ...opts.heavyLock,
+    label,
+    cwd,
+    env: process.env,
+  });
+}
+
+/** The suite child itself, under a lease already held by the caller. */
+function runSuite(
+  testCmd: string,
+  cwd: string,
+  lease: HeavyLease,
+): { passed: boolean; output: string } {
+  try {
+    const output = execFileSync(testCmd, {
+      cwd,
+      shell: true,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      env: heavyChildEnv(process.env, lease),
+    });
+    return { passed: true, output };
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; message: string };
+    const output = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
+    return { passed: false, output };
+  }
 }

@@ -3,9 +3,9 @@
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
 none of it is restated here.
 
-The loop playbook (architecture §3, §5, §11): one wave at a time, and every
-task in the wave at once. Independent dispatches go in one message, as
-parallel calls, never one message per agent.
+The loop playbook (architecture §3, §5, §11): waves overlap under rolling
+admission (below), and every task in a wave runs at once. Independent
+dispatches go in one message, as parallel calls, never one message per agent.
 
 **Two tiers, two logs.** This file is the epic tier. It admits a wave (step
 1), hands it to [`wave.md`](wave.md) — the wave playbook, steps 2-10 — and
@@ -135,13 +135,31 @@ the wave rather than ran it, `bs delegation check <session-id>` is what
 turns that silence into a red: a `wave-runner` that dispatched before opening
 its log, or against the wrong event, is `unverifiable` and exits 1.
 
-**Rolling admission.** Do not wait for the whole wave to drain. After every
-merge, run `bs wave next` (step 1's command) and admit what it returns right
-away: a task whose dependencies just landed and whose claims overlap nothing
-in flight starts now, not when its slowest neighbour finishes. `wave next`
-counts a task already admitted and not yet merged as occupied, so it is safe
-to ask mid-wave, even right after a `bs plan ingest`; `bs wave check` refuses
-a task that is already in flight. The loop is then merge, `wave next`, admit.
+**Rolling admission.** Waves overlap: do not wait for the whole wave to
+drain. After every merge, run `bs wave next` (step 1's command) and admit what
+it returns right away: a task whose dependencies just landed and whose claims
+overlap nothing in flight starts now, not when its slowest neighbour finishes.
+`wave next` counts a task already admitted and not yet merged as occupied, so
+it is safe to ask mid-wave, even right after a `bs plan ingest`; `bs wave
+check` refuses a task that is already in flight. The loop is then merge,
+`wave next`, admit.
+
+The epic session is the only session that admits, right after each landing, in
+whichever shape the wave runs:
+
+- Inline, or in a session it drives: right after a `bs queue run` it ran
+  returns `merged`.
+- Through a dispatched `bs-wave-runner`: dispatch it as a background agent
+  (`run_in_background: true`) and watch `bs event tail <session-id> --lineage
+  --follow` with the Monitor tool. On each `wave-merged`, run `bs wave next`
+  and admit what it returns at once, as a wave of its own (inline or another
+  runner). A runner never admits tasks to work; it only queues its own passed
+  tasks with `bs queue run`.
+
+When the Agent call cannot run in the background, run the wave inline or in a
+session the epic session drives itself, never as a blocking runner: a session
+blocked on a runner cannot see a landing, so admission would wait for the whole
+wave again.
 
 **Then check that it did.** Once the wave's tasks reach a terminal state,
 `bs wave audit --session <id> --epic <epic>` reads the log back and
