@@ -670,7 +670,11 @@ describe('heavy run signals (follow-up 0cda4bb8)', () => {
     const sb = sandbox();
     const marker = path.join(scratch, `term-marker-${counter++}`);
     const ready = path.join(scratch, `ready-marker-${counter++}`);
-    const childSrc = `const fs=require('fs');process.on('SIGTERM',()=>{setTimeout(()=>{fs.writeFileSync(${JSON.stringify(marker)},'x');process.exit(7)},300)});fs.writeFileSync(${JSON.stringify(ready)},'x');setInterval(()=>{},1000)`;
+    const gotTerm = path.join(scratch, `got-term-marker-${counter++}`);
+    const go = path.join(scratch, `go-marker-${counter++}`);
+    // On SIGTERM the child records it, then drains until the test releases it, so
+    // the "lock still held" probe never races a fixed timer.
+    const childSrc = `const fs=require('fs');process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(gotTerm)},'x');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(go)})){clearInterval(t);fs.writeFileSync(${JSON.stringify(marker)},'x');process.exit(7)}},20)});fs.writeFileSync(${JSON.stringify(ready)},'x');setInterval(()=>{},1000)`;
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       BS_HOME: sb.home,
@@ -689,15 +693,20 @@ describe('heavy run signals (follow-up 0cda4bb8)', () => {
       }
       expect(existsSync(ready)).toBe(true);
       hr.kill('SIGTERM');
-      // While the child is still draining, the lock must still be held.
-      await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 200 && !existsSync(gotTerm); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(existsSync(gotTerm)).toBe(true);
+      // The child got the signal and is still draining: the lock must still be held.
       const busy = cli(
         ['heavy', 'run', '--label', 'u', '--max-wait-ms', '0', '--', 'node', '-e', ''],
         sb,
       );
       expect(busy.status).toBe(75);
+      writeFileSync(go, 'x');
       expect(await exited).toBe(7);
     } finally {
+      writeFileSync(go, 'x'); // never leave the child draining
       if (hr.exitCode === null && hr.signalCode === null) hr.kill('SIGKILL');
     }
     expect(existsSync(marker)).toBe(true);
