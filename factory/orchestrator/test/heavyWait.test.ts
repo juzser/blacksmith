@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   statSync,
@@ -13,15 +14,22 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { roleOfTemplateFile } from '../src/agentNames.js';
+import { readTemplateMaxTurns } from '../src/agentsSync.js';
+import { DEFAULT_MAX_WAIT_MS } from '../src/heavyLock.js';
 import {
+  DEFAULT_BASH_TIMEOUT_MS,
   DEFAULT_WAIT_MS,
   heavyWait,
+  LONG_WAIT_BASH_TIMEOUT_MS,
+  LONG_WAIT_MS,
   MAX_WAIT_MS,
   TAIL_BYTES,
   TAIL_LINES,
 } from '../src/heavyWait.js';
 import { decideHookPayload, dietDecision } from '../src/hookDecision.js';
 import { closeSandbox, openSandbox } from '../src/sandbox.js';
+import { parseSharedRegions } from '../src/templateFragments.js';
 import { runOrThrow, runProcess } from './helpers/process.js';
 
 // Finding f-bs-optimize/integration-dcc5330f: `bs heavy wait` and the rewritten
@@ -182,6 +190,75 @@ describe('heavyWait (the module)', () => {
   });
 });
 
+// ---- `next`: which bound the next call uses (finding f-bs-optimize/integration-cdcd0b23) ----
+
+const LONG = { max_wait_ms: 540_000, bash_timeout_ms: 600_000 };
+const SHORT = { max_wait_ms: 100_000, bash_timeout_ms: 120_000 };
+
+describe('heavyWait names the next call’s bound', () => {
+  const writeHolder = (content: string) => writeFileSync(path.join(lockDir, 'heavy.lock'), content);
+  const liveRecord = () =>
+    JSON.stringify({
+      pid: process.pid,
+      token: 't',
+      label: 'someone-else',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      cwd: dir,
+    });
+
+  it('keeps the default bound and the ceiling, and sizes the long pair to the tool timeout', () => {
+    expect(DEFAULT_WAIT_MS).toBe(100_000);
+    expect(MAX_WAIT_MS).toBe(570_000);
+    expect(LONG_WAIT_MS).toBe(540_000);
+    expect(LONG_WAIT_MS).toBeLessThanOrEqual(MAX_WAIT_MS);
+    expect(LONG_WAIT_BASH_TIMEOUT_MS).toBe(600_000);
+    expect(LONG_WAIT_BASH_TIMEOUT_MS).toBeLessThanOrEqual(600_000);
+    expect(LONG_WAIT_BASH_TIMEOUT_MS).toBeGreaterThanOrEqual(LONG_WAIT_MS + 30_000);
+    expect(DEFAULT_BASH_TIMEOUT_MS).toBe(120_000);
+    expect(DEFAULT_WAIT_MS + 10_000).toBeLessThanOrEqual(DEFAULT_BASH_TIMEOUT_MS);
+  });
+
+  it('(a) carries the long pair on an existing file with a live holder', async () => {
+    const file = outFile();
+    writeFileSync(file, 'running\n');
+    writeHolder(liveRecord());
+    const r = await heavyWait({ file, maxWaitMs: 0, lockDir });
+    expect(r).toMatchObject({ done: false, holder: { label: 'someone-else' }, next: LONG });
+  });
+
+  it('(b) carries the long pair when the lock record is corrupt', async () => {
+    const file = outFile();
+    writeFileSync(file, 'running\n');
+    writeHolder('not json');
+    const r = await heavyWait({ file, maxWaitMs: 0, lockDir });
+    expect(r).toMatchObject({ done: false, holder: { corrupt: true }, next: LONG });
+  });
+
+  it('(c) carries the default pair when no holder is named', async () => {
+    const file = outFile();
+    writeFileSync(file, 'running\n');
+    const r = await heavyWait({ file, maxWaitMs: 0, lockDir });
+    expect(r).toMatchObject({ done: false, holder: null, next: SHORT });
+  });
+
+  it('(d) carries the default pair for a missing file even with a live holder', async () => {
+    writeHolder(liveRecord());
+    const r = await heavyWait({ file: outFile('never'), maxWaitMs: 0, lockDir });
+    if (r.done) throw new Error('unreachable');
+    expect(r.holder).not.toBeNull();
+    expect(r).toMatchObject({ missing: true, next: SHORT });
+  });
+
+  it('(e) has no next key on a done result', async () => {
+    const file = outFile();
+    writeFileSync(file, 'x\n\nEXIT=0\n');
+    writeHolder(liveRecord());
+    const r = await heavyWait({ file, maxWaitMs: 0, lockDir });
+    expect(r.done).toBe(true);
+    expect('next' in r).toBe(false);
+  });
+});
+
 // ---- the CLI ---------------------------------------------------------------------
 
 function bs(args: string[], env: Record<string, string> = {}) {
@@ -207,6 +284,14 @@ describe('bs heavy wait (the verb)', () => {
     const run = bs(['heavy', 'wait', '--file', file, '--max-wait-ms', '200']);
     expect(run.status).toBe(124);
     expect(JSON.parse(run.stdout)).toMatchObject({ done: false, holder: null });
+  });
+
+  it('prints next beside done: false and still exits 124', () => {
+    const file = outFile();
+    writeFileSync(file, 'running\n');
+    const run = bs(['heavy', 'wait', '--file', file, '--max-wait-ms', '200']);
+    expect(run.status).toBe(124);
+    expect(JSON.parse(run.stdout)).toMatchObject({ done: false, next: SHORT });
   });
 
   it('keeps done: true on a suite that itself exited 124', () => {
@@ -255,6 +340,20 @@ function waitCalls(): { call: string; sentence: string }[] {
   return calls;
 }
 
+/** The steer sentence: the one holding both a `"holder"` and a `--max-wait-ms` call. */
+function steerSentence(): string {
+  const flat = FRAGMENT.replace(/\s+/g, ' ');
+  const found = flat.split('. ').find((s) => s.includes('--max-wait-ms') && s.includes('"holder"'));
+  if (found === undefined)
+    throw new Error('no steer sentence: no sentence pairs a holder with a --max-wait-ms call');
+  return found;
+}
+const steerBound = (): number => Number(/--max-wait-ms (\d+)/.exec(steerSentence())?.[1]);
+const steerTimeout = (): number =>
+  Number(/Bash `timeout` (?:of )?(\d+)/.exec(steerSentence())?.[1]);
+const steerCall = (): string =>
+  /`(bs heavy wait [^`]*--max-wait-ms \d+)`/.exec(steerSentence())?.[1] as string;
+
 describe('each bs heavy wait call the fragment shows fits its Bash tool timeout', () => {
   it('has a default bound inside the Bash default of 120000 ms with 10 s for start-up', () => {
     expect(DEFAULT_WAIT_MS).toBeLessThanOrEqual(110_000);
@@ -267,6 +366,11 @@ describe('each bs heavy wait call the fragment shows fits its Bash tool timeout'
     expect(calls.some((c) => c.includes('--max-wait-ms 540000'))).toBe(true);
   });
 
+  it('steers to the bound and timeout the module exports', () => {
+    expect(steerBound()).toBe(LONG_WAIT_MS);
+    expect(steerTimeout()).toBe(LONG_WAIT_BASH_TIMEOUT_MS);
+  });
+
   it('passes --max-wait-ms only beside a Bash timeout of at most 600000 that is >= bound + 30000', () => {
     for (const { call, sentence } of waitCalls()) {
       const bound = /--max-wait-ms (\d+)/.exec(call)?.[1];
@@ -277,6 +381,85 @@ describe('each bs heavy wait call the fragment shows fits its Bash tool timeout'
       expect(Number(timeout), call).toBeGreaterThanOrEqual(Number(bound) + 30_000);
       expect(Number(bound), call).toBeLessThanOrEqual(MAX_WAIT_MS);
     }
+  });
+});
+
+// ---- a dispatch's heavy-run turns fit each carrier's cap ---------------------------
+
+/** The epic's measured full suite, in ms. */
+const SUITE_MS = 440_000;
+/**
+ * The heavy runs each carrier's template or brief directs in one dispatch
+ * (epic spec, "Closing review (plan v6)", pre-code review (v7 draft), item 1).
+ */
+const HEAVY_RUNS_PER_DISPATCH: Record<string, number> = {
+  coder: 3,
+  tester: 2,
+  merger: 1,
+  'wave-runner': 1,
+  auditor: 1,
+  grader: 1,
+  reviewer: 1,
+  'security-reviewer': 1,
+  'spec-reviewer': 1,
+  uiux: 1,
+  verifier: 1,
+};
+
+const AGENTS_DIR = path.join(REPO_ROOT, '.claude', 'agents');
+function carriers(): string[] {
+  return readdirSync(AGENTS_DIR)
+    .filter((f) => /^bs-.*\.md$/.test(f))
+    .filter((f) =>
+      parseSharedRegions(readFileSync(path.join(AGENTS_DIR, f), 'utf8')).some(
+        (r) => r.name === 'heavy-run',
+      ),
+    )
+    .map((f) => roleOfTemplateFile(f) ?? f)
+    .sort();
+}
+
+/** mktemp + start + the plain wait + the steered waits for the rest of the queue and the suite. */
+function turnsPerRun(): number {
+  return 3 + Math.ceil((DEFAULT_MAX_WAIT_MS + SUITE_MS - DEFAULT_WAIT_MS) / steerBound());
+}
+
+describe('a dispatch’s heavy-run turns fit each carrier’s cap', () => {
+  it('the runs table names exactly the carriers the templates stamp', () => {
+    const derived = carriers();
+    const table = Object.keys(HEAVY_RUNS_PER_DISPATCH);
+    expect(
+      derived.filter((r) => !table.includes(r)),
+      'carrier missing from the table',
+    ).toEqual([]);
+    expect(
+      table.filter((r) => !derived.includes(r)),
+      'table entry that is no carrier',
+    ).toEqual([]);
+  });
+
+  it('costs one queued run at most 11 turns', () => {
+    expect(DEFAULT_MAX_WAIT_MS).toBe(3_600_000);
+    expect(turnsPerRun()).toBe(11);
+  });
+
+  it('leaves every carrier at least half its maxTurns for its own work', () => {
+    const perRun = turnsPerRun();
+    const failures: string[] = [];
+    for (const role of carriers()) {
+      const cap = readTemplateMaxTurns(AGENTS_DIR, role);
+      const runs = HEAVY_RUNS_PER_DISPATCH[role];
+      if (cap === undefined || runs === undefined) {
+        failures.push(`bs-${role}: no maxTurns or no runs entry`);
+        continue;
+      }
+      const limit = Math.floor(cap / 2);
+      if (runs * perRun > limit)
+        failures.push(
+          `bs-${role}: ${runs} runs x ${perRun} turns = ${runs * perRun} against a limit of ${limit}`,
+        );
+    }
+    expect(failures).toEqual([]);
   });
 });
 
@@ -347,6 +530,40 @@ describe('the fragment’s commands, run for real', () => {
     expect(done.status).toBe(7);
     expect(JSON.parse(done.stdout)).toMatchObject({ done: true, exit: 7 });
     expect(readFileSync(out, 'utf8').split('\n').at(-2)).toBe('EXIT=7');
+    expect(JSON.parse(bs(['heavy', 'status']).stdout)).toEqual({});
+  });
+
+  it('a run queued behind a holder is told to wait long, then takes the lock and finishes', async () => {
+    const out = outFile('queued.out');
+    writeFileSync(out, '');
+    const record = path.join(lockDir, 'heavy.lock');
+    writeFileSync(
+      record,
+      JSON.stringify({
+        pid: process.pid,
+        token: 'mine',
+        label: 'someone-else',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        cwd: dir,
+      }),
+    );
+    const { cmd, release } = suiteScript(3);
+    startShell(startCommand(out, cmd));
+    const waiting = bs(['heavy', 'wait', '--file', out, '--max-wait-ms', '300']);
+    expect(waiting.status).toBe(124);
+    const parsed = JSON.parse(waiting.stdout);
+    expect(parsed).toMatchObject({ done: false, holder: { label: 'someone-else' } });
+    expect(parsed.next).toEqual(LONG);
+    await rm(record); // the record this test wrote
+    await until(
+      () => bs(['heavy', 'status']).stdout.includes(LABEL),
+      'the queued run to take the lock',
+    );
+    writeFileSync(release, 'go');
+    await until(() => /\nEXIT=3\n$/.test(readFileSync(out, 'utf8')), 'EXIT=3');
+    const done = bs(['heavy', 'wait', '--file', out]);
+    expect(done.status).toBe(3);
+    expect(JSON.parse(done.stdout)).toMatchObject({ done: true, exit: 3 });
     expect(JSON.parse(bs(['heavy', 'status']).stdout)).toEqual({});
   });
 
@@ -443,6 +660,42 @@ describe('the hooks allow the fragment’s three commands', () => {
         tool_input: { command: start, run_in_background: true },
       }),
     ).toBeNull();
+  });
+
+  it('allows the steered long wait with a Bash timeout of 600000', () => {
+    const repo = repoWithResults();
+    const leases = path.join(dir, 'leases');
+    const out = path.join(repo, 'state', 'results', 'epic-task-coder-AbCdEf');
+    const command = steerCall().split('<out>').join(out);
+    const input = { command, timeout: steerTimeout() };
+    expect(input.timeout).toBe(600_000);
+    expect(dietDecision({ tool_name: 'Bash', tool_input: input })).toBeNull();
+    const body = JSON.stringify({ tool_name: 'Bash', tool_input: input, cwd: repo });
+    expect(decideHookPayload(body, repo, leases)).toBeNull();
+    for (const role of ROLES) {
+      openSandbox(
+        {
+          worktreeDir: repo,
+          role,
+          taskId: 'epic/task',
+          sessionId: `sess-steer-${role}`,
+          openedAt: new Date().toISOString(),
+        },
+        leases,
+      );
+      try {
+        expect(decideHookPayload(body, repo, leases), role).toBeNull();
+      } finally {
+        closeSandbox(repo, leases);
+      }
+    }
+  });
+
+  it('dietDecision denies the steered call once a foreground sleep rides along', () => {
+    const command = `${steerCall().split('<out>').join('/tmp/x')}; sleep 5`;
+    expect(
+      dietDecision({ tool_name: 'Bash', tool_input: { command, timeout: 600_000 } }),
+    ).not.toBeNull();
   });
 
   const payload = (command: string, cwd: string, background = false) =>

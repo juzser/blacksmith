@@ -10,6 +10,12 @@ import {
 export const DEFAULT_WAIT_MS = 100_000;
 /** For a Bash call whose `timeout` is raised to 600000 ms, with 30 s to spare. */
 export const MAX_WAIT_MS = 570_000;
+/** The bound `next` steers to while a run is queued or running. */
+export const LONG_WAIT_MS = 540_000;
+/** The Bash `timeout` the long bound needs: 30 s to spare, the tool's ceiling. */
+export const LONG_WAIT_BASH_TIMEOUT_MS = 600_000;
+/** The Bash tool's default timeout, which `DEFAULT_WAIT_MS` fits. */
+export const DEFAULT_BASH_TIMEOUT_MS = 120_000;
 export const TAIL_LINES = 40;
 export const TAIL_BYTES = 8192;
 
@@ -25,6 +31,12 @@ export interface HeavyWaitOptions {
   lockDir?: string;
 }
 
+/** Which bound, and which Bash `timeout`, the next wait call uses. */
+export interface NextWait {
+  max_wait_ms: number;
+  bash_timeout_ms: number;
+}
+
 export type HeavyWaitResult =
   | { done: true; exit: number; tail: string }
   | {
@@ -33,6 +45,7 @@ export type HeavyWaitResult =
       holder: HeavyLockRecord | { corrupt: true } | null;
       idle_ms?: number;
       missing?: true;
+      next: NextWait;
     };
 
 type Probe =
@@ -114,9 +127,20 @@ export async function heavyWait(opts: HeavyWaitOptions): Promise<HeavyWaitResult
     const waited = Date.now() - started;
     if (waited >= maxWaitMs) {
       const holder = await currentHolder(opts.lockDir);
+      // Long only for a file that exists and a named holder: queued or running.
+      const next: NextWait =
+        !p.missing && holder !== null
+          ? { max_wait_ms: LONG_WAIT_MS, bash_timeout_ms: LONG_WAIT_BASH_TIMEOUT_MS }
+          : { max_wait_ms: DEFAULT_WAIT_MS, bash_timeout_ms: DEFAULT_BASH_TIMEOUT_MS };
       return p.missing
-        ? { done: false, waited_ms: waited, holder, missing: true }
-        : { done: false, waited_ms: waited, holder, idle_ms: Math.max(0, Date.now() - p.mtimeMs) };
+        ? { done: false, waited_ms: waited, holder, missing: true, next }
+        : {
+            done: false,
+            waited_ms: waited,
+            holder,
+            idle_ms: Math.max(0, Date.now() - p.mtimeMs),
+            next,
+          };
     }
     await new Promise((r) => setTimeout(r, Math.min(pollMs, Math.max(1, maxWaitMs - waited))));
   }

@@ -33,7 +33,7 @@ const LOCK_FILE = 'heavy.lock';
 const RECLAIM_FILE = 'heavy.lock.reclaim';
 const RECLAIM_BREAK_MS = 10_000;
 const DEFAULT_POLL_MS = 2000;
-const DEFAULT_MAX_WAIT_MS = 3_600_000;
+export const DEFAULT_MAX_WAIT_MS = 3_600_000;
 
 /**
  * A pid is dead only when `kill(pid, 0)` throws `ESRCH`; `EPERM` (a live

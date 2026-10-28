@@ -123,8 +123,9 @@ bs heavy wait --file <out>
 Each wait call ends inside the Bash tool's timeout. `"done"`, not the exit code,
 says whether to call again (a suite may itself exit 124): on `"done": false`
 call it again, without re-running the command and without `sleep`, and do not
-end your turn while the run is live. Pass `bs heavy wait --file <out> --max-wait-ms 540000`
-only together with a Bash `timeout` of 600000. Two calls in a row with `"done": false` and
+end your turn while the run is live. Every wait call is a turn, so call again with the bound its `"next"` gives: for 540000 that is
+`bs heavy wait --file <out> --max-wait-ms 540000` with a Bash `timeout` of 600000, never that bound
+without that timeout, which `"next"` gives only while the file exists and a `"holder"` is named. Two calls in a row with `"done": false` and
 `"holder": null` mean the run is gone: report it with the file's tail rather
 than waiting on it. On `"done": true` the exit code is the suite's. Exit 75 is
 `heavy.wait-timeout`: another holder kept the lock past the wait. Put the holder
