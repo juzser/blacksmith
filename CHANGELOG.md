@@ -284,7 +284,10 @@ than appearing in it.
   <task-id>-<role> -- <cmd>` in the background, its output in a fresh file
   that ends with an `EXIT=<n>` line, and waits with `bs heavy wait --file
   <out>`, a read-only poll whose every call ends inside the Bash tool's
-  timeout (`"done": false` means call again). A wait past its limit fails
+  timeout (`"done": false` means call again). A not-done wait carries
+  `"next"`, the bound and Bash timeout of the next call: while a holder is
+  named, the agent waits with `--max-wait-ms 540000` under a Bash `timeout` of
+  600000, so a queued run costs a handful of turns. A wait past its limit fails
   `heavy.wait-timeout` naming the holder; step 10 of `wave.md` says how the
   runner resumes the merge queue after it.
 - **`bs doctor` warns when the concurrency caps are not raised.** The

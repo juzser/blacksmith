@@ -395,11 +395,63 @@ describe('criteria 12 and 5: the heavy-run fragment', () => {
     expect(body).toMatch(/do not end your turn while the run is live/);
   });
 
-  it('pairs a longer --max-wait-ms with a Bash timeout of 600000', () => {
+  const LONG_CALL = '`bs heavy wait --file <out> --max-wait-ms 540000`';
+  /** The one sentence of the flattened fragment that holds `--max-wait-ms`. */
+  const steer = (): string => {
+    const found = flat(fragment())
+      .split('. ')
+      .filter((s) => s.includes('--max-wait-ms'));
+    expect(found, 'exactly one sentence holds --max-wait-ms').toHaveLength(1);
+    return found[0] as string;
+  };
+
+  it('keeps the plain wait as its first wait line', () => {
+    const first = fragment()
+      .split('\n')
+      .find((l) => l.startsWith('bs heavy wait'));
+    expect(first).toBe('bs heavy wait --file <out>');
+  });
+
+  it('shows the long wait once, in one steer sentence, and no longer offers it', () => {
     const body = flat(fragment());
-    expect(body).toMatch(
-      /`bs heavy wait --file <out> --max-wait-ms 540000` only together with a Bash `timeout` of 600000/,
-    );
+    expect(body).not.toMatch(/only together with/);
+    expect(body.split('bs heavy wait --file <out> --max-wait-ms')).toHaveLength(2);
+    expect(steer()).toContain(LONG_CALL);
+  });
+
+  it('the steer names "next" as what decides the bound, and why: every call is a turn', () => {
+    const s = steer();
+    expect(s).toContain('`"next"`');
+    expect(s).toMatch(/every wait call is a turn/i);
+    expect(s).toContain('`"holder"`');
+    expect(s).toContain(LONG_CALL);
+    expect(s).toMatch(/with a Bash `timeout` of 600000, never that bound without that timeout/);
+  });
+
+  it('the steer lets "next" govern the long call: "next" comes first, no "holder" before it', () => {
+    const s = steer();
+    const long = s.indexOf(LONG_CALL);
+    expect(s.indexOf('"next"')).toBeGreaterThanOrEqual(0);
+    expect(s.indexOf('"next"')).toBeLessThan(long);
+    expect(s.slice(0, long)).not.toContain('"holder"');
+  });
+
+  // v6's fragment (e4341588) had 313 words, 16 of them in the offer sentence this
+  // steer replaces: 313 - 16 = 297. Growing the fragment must raise this on purpose.
+  const REST_WORDS = 297;
+  const STEER_WORDS = 60;
+  const words = (text: string): number => text.split(' ').filter((w) => w !== '').length;
+
+  it('keeps the steer within 60 words and the rest of the fragment within 297', () => {
+    const body = flat(fragment()).trim();
+    const s = steer();
+    expect(words(s), 'steer sentence').toBeLessThanOrEqual(STEER_WORDS);
+    const rest = body
+      .split('. ')
+      .filter((x) => x !== s && x !== `${s}.`)
+      .map(words)
+      .reduce((a, b) => a + b, 0);
+    expect(rest, 'rest of the fragment').toBeLessThanOrEqual(REST_WORDS);
   });
 
   it('stops after two not-done calls with no lock holder and reports the tail', () => {
