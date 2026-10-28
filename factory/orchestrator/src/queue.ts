@@ -496,10 +496,31 @@ function mergeWithoutWorktree(
   const commit = buildMergeCommit(projectDir, base, head, message);
   try {
     runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
-  } catch {
-    return false;
+  } catch (error) {
+    return rethrowUnlessMoved(projectDir, branch, base, error);
   }
   return true;
+}
+
+/**
+ * After a failed `update-ref`: false when `branch` no longer points at `base`
+ * (a moved head); otherwise the failure was not a race, so the original error
+ * is rethrown — also when the re-read itself fails.
+ */
+function rethrowUnlessMoved(
+  projectDir: string,
+  branch: string,
+  base: string,
+  error: unknown,
+): false {
+  let now: string;
+  try {
+    now = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${branch}`]);
+  } catch {
+    throw error;
+  }
+  if (now === base) throw error;
+  return false;
 }
 
 /**
@@ -537,7 +558,8 @@ function landCandidate(
         candidate,
         base,
       ]);
-    } catch {
+    } catch (error) {
+      rethrowUnlessMoved(projectDir, integrationBranch, base, error);
       return { outcome: 'integration-moved' };
     }
     return { outcome: 'landed' };
