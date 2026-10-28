@@ -30,6 +30,7 @@ import {
 /** The fragments this PR introduced. A fifth is fine — but it must be listed here on purpose. */
 const EXPECTED_FRAGMENTS = [
   'finding-fields',
+  'heavy-run',
   'read-only-judge-guard',
   'read-only-judge-rule',
   'token-usage',
@@ -55,6 +56,20 @@ const EXPECTED_REGIONS: Record<string, string[]> = {
   ],
   'token-usage': ['coder', 'grader', 'merger', 'researcher', 'tester', 'uiux'],
   'finding-fields': ['reviewer', 'security-reviewer', 'spec-reviewer'],
+  // The eleven templates that run a suite (epic bs-optimize D9).
+  'heavy-run': [
+    'auditor',
+    'coder',
+    'grader',
+    'merger',
+    'reviewer',
+    'security-reviewer',
+    'spec-reviewer',
+    'tester',
+    'uiux',
+    'verifier',
+    'wave-runner',
+  ],
 };
 
 describe('shipped templates vs .claude/fragments (MD-5)', () => {

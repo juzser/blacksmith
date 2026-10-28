@@ -14,6 +14,12 @@ block, every `dispatch_decision` carries a one-line plain-words `reason`
 (dispatch.md's payload contract), and fetched text is wrapped before it is
 quoted. None of it is restated here; a second copy is a copy that drifts.
 
+**Read by slice.** A `bs-wave-runner` never reads this file whole. Once per
+wave it reads the two common sections, `bs playbook slice wave --section
+"You own the log for what you dispatch"` and `bs playbook slice wave --section
+"Run the whole wave at once"`, then one `bs playbook slice wave --step <n>`
+per step as it reaches it. Each step below names its own slice command.
+
 The step numbers are the loop's own. They start at 2 because step 1 — which
 tasks, and how wide — was answered before you were handed anything, and they
 stop at 10 because the epic's own gates resume there. Nothing in this file
@@ -99,9 +105,11 @@ stopped.
 The wave is the unit of work, not the task. Three rules follow, and they are
 the difference between a factory and a queue with extra steps:
 
-- **One message, many dispatches.** When steps 3–7 reach a phase, issue
-  that phase for *every* task in the wave as parallel tool calls in a
-  single message. Five coders in one message is five agents working; five
+- **One message, many dispatches.** Independent dispatches go in one
+  message. When steps 3–7 reach a phase, issue that phase for *every* task
+  in the wave as parallel tool calls in a single message — and, per task,
+  the judges that read the same finished work (grader, reviewer, security
+  reviewer, step 6) in one message too. Five coders in one message is five agents working; five
   messages of one coder is five agents waiting. The worktrees are
   disjoint by construction — that is what step 1's `wave check` certified
   before you were handed the wave — so there is nothing for them to
@@ -111,6 +119,12 @@ the difference between a factory and a queue with extra steps:
   tester the moment it returns. Waiting for the slowest task at every
   phase boundary costs the wave the difference between its longest task
   and the sum of its phases, which is most of what parallelism buys.
+- **Waits are background tasks.** Start anything that outlasts a call (the
+  gate, the merge queue, a suite) with `run_in_background` and go on with the
+  next step; the completion notification or the Monitor tool tells you when it
+  ended. Never a `sleep` loop. Read an output file's tail, not its exit code
+  alone: a background command that writes `EXIT=<n>` as its last line says
+  when it is done.
 - **A blocked task blocks itself.** Gate outcome `blocked` bounces to
   *that* task's coder (step 9) while its neighbours carry on. One task
   escalating to the operator does not stop the other four; report it and
@@ -126,6 +140,7 @@ one thing this playbook never asks you to.
 
 2. Per admitted task, and for all of them together: `bs worktree create
    <project-dir> <epic> <task-id>`.
+   Slice: `bs playbook slice wave --step 2`.
 3. Pre-code, if the task needs it: dispatch `bs-researcher` for an unknown, or
    `bs-uiux` (`.claude/agents/bs-uiux.md`) for any UI-affecting acceptance
    criterion — before the coder starts, not after. Bracket the uiux spec
@@ -147,6 +162,7 @@ one thing this playbook never asks you to.
      `recommendation.provenance` into the coder's prompt so the task knows
      whether its research rests on this repo or on a fetched page. Any raw
      fetched text you quote alongside it is wrapped with `bs prompt wrap`.
+   Slice: `bs playbook slice wave --step 3`.
 4. Dispatch **`bs-coder`** (`.claude/agents/bs-coder.md`) in that worktree.
    Token/diff caps (`budgets.yml`, sized per effort tier) and YAGNI
    are the coder's own constraints — don't restate them here, the template
@@ -181,6 +197,8 @@ one thing this playbook never asks you to.
      the session gets linked under `--continues` next time.
    - `parallel` or `single` — nothing further; the wave ran as wide as it
      was admitted.
+
+   Slice: `bs playbook slice wave --step 4`.
 5. Dispatch **`bs-tester`** (`.claude/agents/bs-tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
    - The moment it returns, project its result: `bs results record --task
@@ -217,6 +235,8 @@ one thing this playbook never asks you to.
      primitive's importers — and records it alongside the screenshots it
      captures. The "max 4 per feature" screenshot cap (bs-tester.md) still applies per
      screen; it is the screen count that grows, not the shots on each one.
+
+   Slice: `bs playbook slice wave --step 5`.
 6. Dispatch **`bs-grader`** (`.claude/agents/bs-grader.md`) — bounded rubric
    loop, `profile.graderRounds` rounds (2 at `huge`, 1 below; never more
    than 2, agent-constraints.md "grader (v3)"), before any gate
@@ -225,6 +245,22 @@ one thing this playbook never asks you to.
    step 7**, not a note to the operator: pass it as `--grader` or the rubric
    gates nothing (D-34). A round-2 `fail` re-scopes via dispatch.md's "Round
    counting and escalation", not a round 3 on this id.
+   - **The judges go out in one message, after the tester.** When the tester
+     has returned (and the uiux visual pass, when step 5 ran one), the grader, the
+     **`bs-reviewer`** (`.claude/agents/bs-reviewer.md`, step 7 says what its
+     findings feed) and, only when `bs security triggers --task <spec.json>`
+     says `dispatchSecurityReviewer` is true, the **`bs-security-reviewer`**
+     are dispatched **in one message**, as parallel calls. Record each
+     `bs judge dispatch` first (each declares its own artifact, so the three
+     never share one), then send the one message. Do not wait for the grader
+     before sending the reviewer: they read the same finished work.
+   - **A grader bounce keeps the others.** The reviewer's and the
+     security-reviewer's results from the same round are kept, raised as
+     findings and spliced into the bounce brief. The verifier still runs on
+     the reviewer's S1/S2 findings before that brief is composed. No judge is
+     skipped because another judge bounced.
+
+   Slice: `bs playbook slice wave --step 6`.
 7. Run the gate pipeline:
    `bs gate run <task-id> --worktree <dir> --checks checks.json --result
    result.json --grader state/results/<task-id>.grader-r<round>.json
@@ -233,6 +269,13 @@ one thing this playbook never asks you to.
    --causal-parent ...` (schema check → grader verdict → tests → coverage
    evidence → findings intake → severity decision,
    `docs/guide/operator-guide/queue-and-gate.md` §5).
+   - **Run it as a background task** (`run_in_background`), ending the command
+     with `; echo EXIT=$?` so its output file closes with an `EXIT=<n>` line.
+     The gate takes the heavy lock itself and can queue behind another
+     session's suite, so it outlasts a foreground call. While it runs, prepare
+     the next step (compose the next brief, record the judges' results); the
+     completion notification, or the Monitor tool, says when it ended. Read the
+     output file's tail, never poll it with `sleep`.
    - `--plan` is what lets the gate's uiux stage read the task's
      `ui_affecting` flag; without it the stage records "unverifiable" and
      does not block. `--uiux-visual` hands over the visual pass's result
@@ -243,6 +286,16 @@ one thing this playbook never asks you to.
      `bs queue run --select-test-cmd` (`factory/orchestrator/src/testSelect.ts`),
      a queue-tier flag `--batch` refuses; it does not reach `checks.json`. A
      scoped-down unit check is how red tests have merged before.
+   - **Heavy checks.** `gate run` and `bs integration check` hold the machine's
+     heavy lock for a check that is heavy and for no other. `checks.json` marks
+     a check with `"heavy": true` (or `"heavy": false`, which wins); unmarked,
+     a check is heavy when its name is `unit` or `coverage` or starts with
+     `test` or `e2e` (`test*`, `unit`, `coverage`, `e2e*`), and `lint` or
+     `typecheck*` is not. A full-suite or e2e run outside those two verbs goes
+     through `bs heavy run --label <task-id>-<role>` ahead of the command, as the
+     `heavy-run` fragment in each role template says; never wrap `bs gate run`,
+     `bs integration check` or `bs queue run` in it, because they take the lock
+     themselves, so a wrapper adds nothing but a second hold on it.
    - `--grader` takes step 6's file, latest round. A criterion that came back
      `fail` or `partial` blocks before any check command runs — the outcome is
      `blocked` with `reason: "grader-fail"`, and the payload's
@@ -255,9 +308,9 @@ one thing this playbook never asks you to.
      reporter or the include glob, not the code. Ask the same question
      outside a gate run with `bs coverage check <worktree-dir> --plan
      <plan.json> --task <task-id>` (§5c).
-   - Findings come from dispatching **`bs-reviewer`**
-     (`.claude/agents/bs-reviewer.md`, fresh context, read-only) then
-     **`bs-verifier`** (`.claude/agents/bs-verifier.md`, adversarial refute
+   - Findings come from **`bs-reviewer`**
+     (`.claude/agents/bs-reviewer.md`, fresh context, read-only, dispatched in
+     step 6's message) then **`bs-verifier`** (`.claude/agents/bs-verifier.md`, adversarial refute
      mandate) — never skip the adversarial stage on an S1/S2 finding
      (`crosscheck.yml` `asymmetric_roles`). Which findings that covers is
      `profile.verifierSeverities`, plus a
@@ -267,8 +320,8 @@ one thing this playbook never asks you to.
      thing a cheaper tier drops; `S1-stop-the-line` is in every tier's list
      and no tier may remove it. A finding outside the tier's list still goes
      to the coder — it is verified by the coder's fix, not waived.
-   - Dispatch **`bs-security-reviewer`** only when its conditional triggers
-     fire — never per-task by default. Ask, do not recall:
+   - **`bs-security-reviewer`** goes out in step 6's message, and only when its
+     conditional triggers fire — never per-task by default. Ask, do not recall:
      `bs security triggers --task <spec.json>` and dispatch iff
      `dispatchSecurityReviewer` is true ("Dispatching the security-reviewer"
      above).
@@ -294,13 +347,18 @@ one thing this playbook never asks you to.
      coder that writes and runs its own tests grades itself and every gate
      downstream still goes green — step 5 is what prevents that, and this is
      the log checking that step 5 happened.
-8. Every dispatch in steps 3–7 carries the compiled lessons block for that
-   role (`bs lessons for-dispatch <role> --plan … --task …`), every
-   worktree dispatch also carries the open-findings block for that task
-   (`bs findings for-dispatch --plan … --task …`) — both under "Dispatch
-   contract" above — and each is a `dispatch_decision` event with a `causal_parent`
-   chaining back to the prompt/decision that caused it (architecture §7) —
-   this is the timeline, not optional bookkeeping.
+
+   Slice: `bs playbook slice wave --step 7`.
+8. Build every dispatch in steps 3–7 with `bs brief compose --role <role>
+   --task <task-id> --session <id>` (dispatch.md says what it emits and what
+   it needs). It carries the compiled lessons block for that role (D2
+   selection) and, for a worktree dispatch, the open-findings block for that
+   task — both under "Dispatch contract" above — and every brief it writes
+   passes `bs dispatch lint`. Each dispatch is a `dispatch_decision` event with
+   a `causal_parent` chaining back to the prompt/decision that caused it
+   (architecture §7) — this is the timeline, not optional bookkeeping. Send
+   the brief to the typed `bs-<role>` agent it is marked for.
+   Slice: `bs playbook slice wave --step 8`.
 9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
    After 2 failed rounds on the same task, escalate model tier
    automatically (mid → frontier, logged — `budgets.yml`
@@ -310,6 +368,7 @@ one thing this playbook never asks you to.
    — see "Round counting and escalation" above. Then have the log check
    you: `bs escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
+   Slice: `bs playbook slice wave --step 9`.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting, audit
     the wave's own parallelism: `bs wave audit --session <id> --epic
     <epic>`. It reads the log back and says whether the tasks admitted
@@ -339,7 +398,25 @@ one thing this playbook never asks you to.
     <plan.json> --session <id> --plan-version <n> --causal-parent
     <event-id>` — the same write triple as every other dispatch above; a
     merge that lands with no session to log it into is a fact the
-    timeline never gets. On a
+    timeline never gets.
+
+    **Run `bs queue run` as a background task** (`run_in_background`, the
+    command ending `; echo EXIT=$?`) and wait on its completion notification
+    or the Monitor tool. Each merge runs the cumulative suite under the heavy
+    lock, so its lock wait can last up to `maxWaitMs` (1 h by default), past
+    the 10-minute cap of a foreground Bash call; a foreground call killed at
+    that cap would look like a real timeout.
+
+    **When it fails** (e.g. `heavy.wait-timeout`) it has printed no outcomes,
+    including for the tasks it merged first. Read those from the log: the
+    session's `wave-merged` events (`bs event tail <session-id>`,
+    `payload.task_ids`). Rebuild `tasks.json` from the tasks not yet merged and
+    never re-queue a merged task: the queue would find no commit ahead and log
+    it `nothing-to-merge` with a blocked event. Report the lock holder the
+    error names, then re-run once that holder is gone (`bs heavy status` no
+    longer names it), or escalate to the epic session.
+
+    On a
     `rebase-conflict` outcome, dispatch **`bs-merger`**
     (`.claude/agents/bs-merger.md`) with both diffs + specs, and note three
     things the queue's own behaviour forces (agent-interviews.md N-12):
@@ -379,3 +456,12 @@ one thing this playbook never asks you to.
     bounding nothing here (D-188) — the fix is to record the missing spend,
     never to raise the cap until the number fits. Do not report an epic as
     under budget on the strength of `measuredTokens` alone.
+
+    **At wave end, stop what you started.** Use TaskStop on this session's own
+    still-running background tasks and idle subagents, and only once every
+    output file the task was told to write ends with an `EXIT=<n>` line and it
+    does not hold the heavy lock (`bs heavy status` names no holder whose label
+    or cwd is that task's; otherwise leave it running and say so). Never stop a
+    task this session did not start.
+
+    Slice: `bs playbook slice wave --step 10`.

@@ -18,6 +18,8 @@ the contract in its own agent template beside this skill
 never embeds a role prompt** — the templates own that; duplicating them here
 would let this file drift out of sync with the real contracts. Cite policy
 files (`factory/policies/*.yml`) rather than restating their numbers.
+Independent dispatches go in one message, as parallel tool calls, never one message per agent. Dispatch typed
+`bs-*` agents only, and build each brief with `bs brief compose` (dispatch.md).
 
 **Preflight:** when a `bs` command is not found or the plugin looks missing,
 run `bs doctor` and act on the fix lines it prints.
