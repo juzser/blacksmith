@@ -167,3 +167,49 @@ describe('sliceSection by name (finding aae952a5, module half)', () => {
     );
   });
 });
+
+describe('sliceSection by name, edge cases (tester)', () => {
+  it('still cuts the byte-identical Return discipline heading brief compose uses', () => {
+    const heading = 'Return discipline (agent-interviews.md M-6)';
+    const md = `## Intro\nx\n## ${heading}\nbody\n## After\n`;
+    expect(sliceSection(md, heading)).toBe(`## ${heading}\nbody\n`);
+    expect(codeOf(() => sliceSection(md, 'Return discipline (agent-interviews.md M-7)'))).toBe(
+      'playbook.unknown-section',
+    );
+  });
+
+  it('strips only one trailing parenthetical group, and only after a space', () => {
+    const md = '## Alpha (x) (y)\na\n## Beta(z)\nb\n';
+    expect(codeOf(() => sliceSection(md, 'Alpha (x)'))).toBeUndefined();
+    expect(codeOf(() => sliceSection(md, 'Alpha'))).toBe('playbook.unknown-section');
+    expect(codeOf(() => sliceSection(md, 'Beta'))).toBe('playbook.unknown-section');
+    expect(codeOf(() => sliceSection(md, 'Beta(z)'))).toBeUndefined();
+  });
+
+  it('keeps an exact duplicate ambiguous even when a name match exists', () => {
+    const md = '## A\none\n### A\ntwo\n## A (x)\nthree\n';
+    const err = errorOf(() => sliceSection(md, 'A'));
+    expect(err.code).toBe('playbook.ambiguous-section');
+    expect((err.details as { sections: string[] }).sections).toEqual(['## A', '### A']);
+  });
+
+  it('names an ambiguity across ## and ### in document order', () => {
+    const md = '### B (y)\none\n## B (x)\ntwo\n';
+    const err = errorOf(() => sliceSection(md, 'B'));
+    expect((err.details as { sections: string[] }).sections).toEqual(['### B (y)', '## B (x)']);
+  });
+
+  it('cuts a name-matched ### section by its own level', () => {
+    const md = '## A\n### B (y)\nb\n#### C\nc\n### D\nd\n';
+    expect(sliceSection(md, 'B')).toBe('### B (y)\nb\n#### C\nc\n');
+  });
+
+  it('matches a very long heading in linear time', () => {
+    const long = `${'word ( '.repeat(20000)}end`;
+    const md = `## ${long} (x)\nbody\n`;
+    const start = Date.now();
+    expect(sliceSection(md, long)).toBe(`${md.split('\n')[0]}\nbody\n`);
+    expect(codeOf(() => sliceSection(md, `${long} x`))).toBe('playbook.unknown-section');
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+});
