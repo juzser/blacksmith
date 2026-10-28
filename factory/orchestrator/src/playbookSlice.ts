@@ -59,28 +59,47 @@ export function sliceWaveStep(markdown: string, n: number): string {
   return join(lines, start, lines.length);
 }
 
+/** The heading text minus one trailing ` (...)` group, or null when it has none. */
+function withoutParenthetical(text: string): string | null {
+  if (!text.endsWith(')')) return null;
+  const open = text.lastIndexOf(' (');
+  return open > 0 ? text.slice(0, open) : null;
+}
+
 /**
- * Serves epic bs-optimize criterion 7: the exact `##`/`###` heading `heading`
- * to the next heading of the same or a higher level, else EOF.
+ * Serves epic bs-optimize criterion 7: the `##`/`###` heading `heading` to the
+ * next heading of the same or a higher level, else EOF. The exact heading text
+ * wins; failing that, a heading whose text minus one trailing parenthetical
+ * group equals the name (whitespace runs read as one space) is taken when
+ * exactly one does. No prefix, substring or fuzzy match.
  */
 export function sliceSection(markdown: string, heading: string): string {
   const lines = scan(markdown);
-  const hits: number[] = [];
+  const name = heading.trim().replace(/\s+/g, ' ');
+  const exact: number[] = [];
+  const named: number[] = [];
+  const sections: string[] = [];
   lines.forEach((l, i) => {
     if (l.fenced) return;
     const m = HEADING_RE.exec(l.text);
-    if (m !== null && (m[1]?.length === 2 || m[1]?.length === 3) && m[2] === heading) hits.push(i);
+    if (m === null || (m[1]?.length !== 2 && m[1]?.length !== 3)) return;
+    const text = m[2] as string;
+    sections.push(l.text);
+    if (text === heading || text === name) exact.push(i);
+    else if (withoutParenthetical(text) === name) named.push(i);
   });
+  const hits = exact.length > 0 ? exact : named;
   if (hits.length === 0) {
     throw new PlaybookError('playbook.unknown-section', `playbook has no section "${heading}"`, {
       heading,
+      sections,
     });
   }
   if (hits.length > 1) {
     throw new PlaybookError(
       'playbook.ambiguous-section',
       `playbook has ${hits.length} sections "${heading}"`,
-      { heading },
+      { heading, sections: hits.map((i) => (lines[i] as Line).text) },
     );
   }
   const start = hits[0] as number;
