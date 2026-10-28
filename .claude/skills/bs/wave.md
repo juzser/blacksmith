@@ -131,8 +131,8 @@ the difference between a factory and a queue with extra steps:
   keep the wave moving.
 
 The single place the wave rejoins is step 10's merge queue, which is
-serial on purpose — `bs queue run` rebases one task at a time onto
-`bs/<epic>/integration` and runs the cumulative tests between. Merging
+serial on purpose — `bs queue run` holds the heavy lock for each task while it
+rebases it onto `bs/<epic>/integration`, runs the cumulative tests and merges. Merging
 is the one thing that cannot be done in parallel, and it is already the
 one thing this playbook never asks you to.
 
@@ -369,8 +369,8 @@ one thing this playbook never asks you to.
    you: `bs escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
    Slice: `bs playbook slice wave --step 9`.
-10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting, audit
-    the wave's own parallelism: `bs wave audit --session <id> --epic
+10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting to the
+    merge queue, audit the wave's own parallelism: `bs wave audit --session <id> --epic
     <epic>`. It reads the log back and says whether the tasks admitted
     together actually ran together — `parallel` when every admitted task was
     in flight at once, `partial` when two or more overlapped but never all,
@@ -382,7 +382,7 @@ one thing this playbook never asks you to.
     admitted and the log shows no work for any of its tasks. Exit 1 on
     `serialized`, exit 2 on `unobserved`, exit 0 on `unlinked` — each
     is a fact for the wave-loop's hand-back, not a reason to hold the merge:
-    report the verdict and keep going to admission. Then ask what the diff
+    report the verdict and keep going to merge-queue admission. Then ask what the diff
     did to everyone outside the claims, and whether it
     kept what the spec promised:
     `bs claims impact <worktree-dir> <spec.json>`. Exit 1 means a
@@ -399,6 +399,17 @@ one thing this playbook never asks you to.
     <event-id>` — the same write triple as every other dispatch above; a
     merge that lands with no session to log it into is a fact the
     timeline never gets.
+
+    **The queue takes turns.** `bs queue run` holds the heavy lock for each
+    task from its rebase through its merge, so queue runs of one epic take turns
+    and each task's cumulative suite runs on the head it lands on. A task lands
+    only on the head it was rebased onto and tested on: `integration-moved`
+    means a writer outside the queue moved `bs/<epic>/integration` meanwhile,
+    nothing landed for that task, and you re-run `bs queue run` for those tasks.
+    Admitting the wave's own passed tasks into the merge queue (`bs queue run`)
+    is the runner's job; admitting tasks to work (`bs wave next`, `bs wave
+    check`) is the epic session's, so the runner never runs `bs wave next` to
+    admit.
 
     **Run `bs queue run` as a background task** (`run_in_background`, the
     command ending `; echo EXIT=$?`) and wait on its completion notification
