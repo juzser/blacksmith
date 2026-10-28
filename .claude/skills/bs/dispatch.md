@@ -8,7 +8,21 @@ The agent you dispatch is named `bs-<role>` (`bs-coder`, `bs-spec-reviewer`);
 the **role** stays bare (`coder`) wherever it is data: `--role`, `--agent`,
 `--actor`, event payloads, policies and lessons scopes.
 
+Independent dispatches go in one message, as parallel tool calls; a message
+per agent is a wave waiting on itself.
+
+Typed `bs-*` agents only. Every dispatch goes to the `bs-<role>` its brief is
+marked for (`blacksmith:bs-<role>` when the plugin namespaces it), never to
+`general-purpose` or to another role's type: the template is where the role's
+tools, turn cap and lessons markers live, and an untyped agent has none of them.
+
 ## Carry into the prompt
+
+Build every brief with `bs brief compose --role <role> --session <id>
+[--task <task-id>] [--worktree <dir>] [--artifact <file>] --out <file>`. It
+writes the brief and a manifest beside it (`<file>.manifest.json`), and the
+brief passes `bs dispatch lint`. The list below is what compose emits, kept as
+the description of it — and the check for the one case it cannot cover.
 
 The agent cannot see any of this otherwise, so the prompt carries: the
 task spec or the one question · the **absolute** worktree path · the path
@@ -46,18 +60,19 @@ dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
 `Declared artifact: <path>` line. It reads the prompt itself, so a dispatch
 that points the agent at a brief file still carries the line inline. It checks
 the line only; `dispatch lint` still checks it against the ledger. An ad-hoc
-reviewer or verifier dispatch must therefore declare an artifact too, or use
-`general-purpose`.
+reviewer or verifier dispatch must therefore declare an artifact too; there
+is no untyped way around the line.
 
 ## Splice the compiled lessons into every prompt (agent-interviews.md N-9, P9-2)
 
-Before you dispatch, run
+`bs brief compose` runs this for you and splices the block; the command
+below is what it calls, and what you run to read a block by hand.
 
 ```
 bs lessons for-dispatch <role> [--plan factory/specs/active/<epic>/plan-vN.json --task <task-id>]
 ```
 
-and paste its `text` verbatim into the prompt you compose. That is the only
+Its `text` goes verbatim into the prompt. That is the only
 thing that closes the loop: the gate escalates a repeat mistake
 (`gate run --lessons`), but nothing *prevents* one unless the lesson text
 reaches the agent before it works. The command reads
@@ -67,6 +82,17 @@ role's own template declares via its `<!-- LESSONS:<scope> --> ` markers.
 Pass `--plan`/`--task` for any worktree role so `claim-path`/`stack-wide`
 lessons are filtered to that task's claims; omit both for a role with no
 claims (scribe, planner-as-judge) and only the unscoped lessons come back.
+
+**Which lessons are spliced.** `agent-role` and `claim-path` lessons always
+are. A `stack-wide`, `case-type` or `security` lesson carries an `error_class`
+and is spliced only when that class recurs (an `error-logged` event on at least
+3 distinct tasks in the last 30 days, store-wide) or repeats in the dispatch's
+own epic (at least one `error-logged` of the class; pass `--epic <epic>` when you run it by hand). The rest are withheld, and
+the block's last line names each withheld class with its count and the command
+that reads it, `bs lessons for-dispatch --class <group.class>`. A bounce logs
+`error-logged` with its class, so the re-dispatch brief splices that class's
+lessons by itself. A security-reviewer brief withholds nothing. The `lessons`
+array is left out of the output unless you pass `--full`.
 
 The topology is flat and deliberate: **one block, spliced once at dispatch**,
 not one render per marker. The markers document *where in the template the

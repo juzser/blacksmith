@@ -1,7 +1,7 @@
 # `/bs plan <goal>` — draft or re-plan an epic
 
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
-none of it is restated here.
+none of it is restated here. Independent dispatches go in one message, as parallel tool calls, never one message per agent.
 
 The planner-session playbook (architecture §3, §12):
 

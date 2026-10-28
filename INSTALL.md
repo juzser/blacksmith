@@ -220,6 +220,11 @@ file), never overwrites or lowers a value, and keeps the file out of git via
 does not pick the change up. A clone carries the same lines in its tracked
 `.claude/settings.json`.
 
+`bs init` writes the caps, and `bs doctor` checks them: its `concurrency-caps`
+check warns (status `unknown`; doctor's exit code does not change) when either
+variable is unset, is not an integer, or is not above Claude Code's defaults.
+The fix it prints is to re-run `bs init` in the project and restart Claude Code.
+
 ```json
 {
   "env": {

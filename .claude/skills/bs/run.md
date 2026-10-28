@@ -4,7 +4,8 @@
 none of it is restated here.
 
 The loop playbook (architecture §3, §5, §11): one wave at a time, and every
-task in the wave at once.
+task in the wave at once. Independent dispatches go in one message, as
+parallel calls, never one message per agent.
 
 **Two tiers, two logs.** This file is the epic tier. It admits a wave (step
 1), hands it to [`wave.md`](wave.md) — the wave playbook, steps 2-10 — and
@@ -133,6 +134,14 @@ failing — which is the same silence, arriving as a green. When you dispatched
 the wave rather than ran it, `bs delegation check <session-id>` is what
 turns that silence into a red: a `wave-runner` that dispatched before opening
 its log, or against the wrong event, is `unverifiable` and exits 1.
+
+**Rolling admission.** Do not wait for the whole wave to drain. After every
+merge, run `bs wave next` (step 1's command) and admit what it returns right
+away: a task whose dependencies just landed and whose claims overlap nothing
+in flight starts now, not when its slowest neighbour finishes. `wave next`
+counts a task already admitted and not yet merged as occupied, so it is safe
+to ask mid-wave, even right after a `bs plan ingest`; `bs wave check` refuses
+a task that is already in flight. The loop is then merge, `wave next`, admit.
 
 **Then check that it did.** Once the wave's tasks reach a terminal state,
 `bs wave audit --session <id> --epic <epic>` reads the log back and
@@ -463,3 +472,32 @@ playbooks are written to prevent.
     The receipt says whether the timeline reads the type; it does, and it
     titles the row `<owner>/<repo>#<n> (<head> → <base>)` — the one line
     that shows a stacked PR's base before anyone merges in the wrong order.
+18. Clean up. Run `git fetch --prune origin` first, because `bs cleanup`
+    reads the local refs and never fetches. Then dry-run the epic's own
+    leftovers, read the report, and apply it:
+
+    ```bash
+    bs cleanup --project <project-dir> --epic <epic>
+    bs cleanup --project <project-dir> --epic <epic> --apply
+    ```
+
+    Then run the same pair unscoped, `bs cleanup --project <project-dir>` and
+    `bs cleanup --project <project-dir> --apply`, to pick up earlier epics'
+    leftovers. The dry run changes nothing, and `--apply` builds its own list
+    again in the same run, so a stale report is never replayed. Report what
+    was removed and what was kept, and why: every `keep` and `manual` item in
+    the JSON names its reason (an open epic, a dirty tree, activity in the last
+    24 hours, a lock, a branch not yet merged).
+
+    The integration branch `bs/<epic>/integration` and its worktree stay until
+    the integration PR merges, so this run keeps them; the next epic's close or
+    the next `bs cleanup` removes them. Removal goes only through
+    `bs cleanup --apply`: delete nothing by hand, and do not retry an item the
+    report kept.
+
+    Last, stop what this session started. Use TaskStop on the epic session's
+    own still-running background tasks and idle subagents, and only once every
+    output file the task was told to write ends with an `EXIT=<n>` line and it
+    does not hold the heavy lock (`bs heavy status` names no holder whose label
+    or cwd is that task's; otherwise leave it running and say so). Never stop a
+    task this session did not start.

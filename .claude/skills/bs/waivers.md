@@ -63,7 +63,8 @@
         live status and logged follow-ups, and defers an overlapping task
         with `claim-overlap`. `wave check` validates only the ids it is
         given and cannot see the conflict.
-     4. Dispatch it like any task, with these gaps filled by hand. It
+     4. Dispatch it like any task (independent dispatches go in one message),
+        with these gaps filled by hand. It
         carries no acceptance criteria and no budget: **write the ACs into
         the dispatch brief** (the finding's fix, plus the test that proves
         it). `wave check` prices it at the coder cap, and `gate run` reports

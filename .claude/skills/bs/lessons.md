@@ -1,7 +1,7 @@
 # `/bs lessons` — review pending lesson candidates
 
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
-none of it is restated here.
+none of it is restated here. Independent dispatches go in one message, as parallel tool calls, never one message per agent.
 
 1. `bs lessons candidates [--session <id>] [--db state/smith.db]
    [--state-dir <dir>]` — pending candidates with their statement, type,
