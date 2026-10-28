@@ -555,6 +555,191 @@ describe('checkDelegationLog', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A resumed wave-runner: the epic session logs a new dispatch naming the
+// original through `continuation_of`, and no session opens against it.
+// ---------------------------------------------------------------------------
+
+function continuation(
+  sessionId: string,
+  index: number,
+  role: string,
+  of: string,
+  opts: { actor?: string; taskId?: string } = {},
+): StoredEvent {
+  const base = dispatch(sessionId, index, role, opts);
+  return {
+    ...base,
+    record: { ...base.record, payload: { ...base.record.payload, continuation_of: of } },
+  };
+}
+
+/** The original wave-runner dispatch, taken up by wave-1, then a continuation of it. */
+function resumed(): StoredEvent[] {
+  return [
+    event('epic-1', 0, 'session-start'),
+    dispatch('epic-1', 1, 'wave-runner'),
+    event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+    continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+  ];
+}
+
+const summary = (r: {
+  checks: { eventId: string | null; status: string; sessionId: string | null }[];
+}) => r.checks.map((c) => `${c.eventId}:${c.status}:${c.sessionId}`);
+
+describe('checkDelegationLog on a continuation dispatch', () => {
+  beforeEach(() => {
+    clock = 0;
+  });
+
+  it('answers a continuation from the session its original dispatch opened', () => {
+    const report = log(resumed());
+    expect(report.ok, details(report)).toBe(true);
+    expect(summary(report)).toEqual(['epic-1#1:ok:wave-1', 'epic-1#2:ok:wave-1']);
+  });
+
+  it('answers a continuation from its own session when the original opened none', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+      event('wave-2', 0, 'session-start', { parent: 'epic-1#2' }),
+    ];
+    const report = log(events);
+    expect(summary(report)).toEqual(['epic-1#1:unverifiable:epic-1', 'epic-1#2:ok:wave-2']);
+    expect(report.delegatedSessions).toBe(1);
+  });
+
+  it('gives a continuation of an unanswered original the original status: unverifiable while unfinished', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable', 'unverifiable']);
+  });
+
+  it('gives a continuation of an unanswered original the original status: violation once finished', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+      terminal('epic-1', 3, 'wave-runner'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['violation', 'violation']);
+  });
+
+  it('answers a continuation whose original sits in an ancestor session of the lineage', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+      event('epic-2', 0, 'session-start'),
+      continuation('epic-2', 1, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.ok, details(report)).toBe(true);
+    expect(summary(report)).toContain('epic-2#1:ok:wave-1');
+  });
+
+  it('answers a continuation whose original session is known only through openedElsewhere', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = checkDelegationLog(events, WAVE_POLICY, {
+      sessionId: 'wave-2',
+      openedElsewhere: new Map([['epic-1#1', 'wave-1']]),
+    });
+    expect(report.ok, details(report)).toBe(true);
+    expect(summary(report)).toEqual(['epic-1#1:ok:wave-1', 'epic-1#2:ok:wave-1']);
+  });
+
+  it('adds no delegated session and leaves rule 3 naming the original as owner', () => {
+    const base = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+      dispatch('wave-1', 1, 'coder', { actor: 'operator' }),
+    ];
+    const withContinuation = [...base, continuation('epic-1', 2, 'wave-runner', 'epic-1#1')];
+    const without = log(base);
+    const withIt = log(withContinuation);
+    expect(withIt.delegatedSessions).toBe(without.delegatedSessions);
+    const rule3 = (r: ReturnType<typeof log>) => r.checks.filter((c) => c.status === 'violation');
+    expect(rule3(without)).toHaveLength(1);
+    expect(rule3(withIt)).toEqual(rule3(without));
+    expect(rule3(withIt)[0]?.detail).toContain('opened against epic-1#1');
+    expect(rule3(withIt)[0]?.detail).not.toContain('opened against epic-1#2');
+  });
+
+  it('follows a chain of two continuations to the original', () => {
+    const events = [...resumed(), continuation('epic-1', 3, 'wave-runner', 'epic-1#2')];
+    const report = log(events);
+    expect(report.ok, details(report)).toBe(true);
+    expect(summary(report)).toEqual([
+      'epic-1#1:ok:wave-1',
+      'epic-1#2:ok:wave-1',
+      'epic-1#3:ok:wave-1',
+    ]);
+  });
+
+  it('terminates on a cycle of continuation_of and reports it unanswered', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      continuation('epic-1', 1, 'wave-runner', 'epic-1#2'),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.ok).toBe(false);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable', 'unverifiable']);
+  });
+
+  it('terminates on a continuation_of that names its own event id', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      continuation('epic-1', 1, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable']);
+  });
+
+  it('judges a continuation_of naming an unknown event as a fresh dispatch', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      continuation('epic-1', 1, 'wave-runner', 'epic-9#9'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable']);
+  });
+
+  it('judges a continuation_of naming a dispatch of another role as a fresh dispatch', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'tester'),
+      event('tester-1', 0, 'session-start', { parent: 'epic-1#1' }),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1'),
+    ];
+    const report = log(events);
+    expect(report.checks.map((c) => c.status)).toEqual(['unverifiable']);
+  });
+
+  it('judges a continuation_of naming a dispatch for another task as a fresh dispatch', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner', { taskId: 'E1/t-2' }),
+      event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+      continuation('epic-1', 2, 'wave-runner', 'epic-1#1', { taskId: 'E1/t-1' }),
+    ];
+    const report = log(events);
+    expect(summary(report)).toEqual(['epic-1#1:ok:wave-1', 'epic-1#2:unverifiable:epic-1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // E. sessionOwnerRole -- the default a write reaches for before `system`
 // (issue #218)
 // ---------------------------------------------------------------------------

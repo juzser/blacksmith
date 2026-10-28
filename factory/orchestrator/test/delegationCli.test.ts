@@ -257,6 +257,40 @@ describe('smith delegation check (D13 step 3)', () => {
     });
   });
 
+  it('answers a resumed wave-runner from the session its original dispatch opened', () => {
+    const dispatched = dispatchTheWave();
+    const waveRoot = start(WAVE, dispatched, 'wave-runner');
+    dispatch(WAVE, waveRoot, 'wave-runner', 'coder', T1);
+    const run = smith([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: EPIC,
+        actor: 'operator',
+        event_type: 'dispatch_decision',
+        task_id: T1,
+        plan_version: 1,
+        causal_parent: dispatched,
+        payload: {
+          agent_role: 'wave-runner',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet-5',
+          continuation_of: dispatched,
+        },
+      }),
+    ]);
+    expect(run.status, run.stderr).toBe(0);
+    const resumed = JSON.parse(run.stdout).event_id as string;
+
+    const { run: checkRun, checks, ok } = check(EPIC);
+
+    expect(ok).toBe(true);
+    expect(checkRun.status).toBe(0);
+    expect(checks.map((c) => `${c.status}:${c.sessionId}`)).toEqual(['ok:wave-1', 'ok:wave-1']);
+    expect(checks.some((c) => c.detail.includes(resumed))).toBe(true);
+  });
+
   it('reports a grantee dispatching outside its grant as a violation, and exits 1', () => {
     const dispatched = dispatchTheWave();
     const waveRoot = start(WAVE, dispatched, 'wave-runner');

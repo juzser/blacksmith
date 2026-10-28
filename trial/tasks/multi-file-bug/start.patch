@@ -1,0 +1,26 @@
+diff --git a/src/db.js b/src/db.js
+index d61678b..22e6675 100644
+--- a/src/db.js
++++ b/src/db.js
+@@ -1,7 +1,6 @@
+ import { DatabaseSync } from "node:sqlite";
+ 
+ export function openDatabase(path) {
+-  const db = new DatabaseSync(path);
+-  db.exec("PRAGMA foreign_keys = ON");
++  const db = new DatabaseSync(path, { enableForeignKeyConstraints: false });
+   return db;
+ }
+diff --git a/src/routes/notes.js b/src/routes/notes.js
+index 6108ac3..2faab25 100644
+--- a/src/routes/notes.js
++++ b/src/routes/notes.js
+@@ -16,7 +16,7 @@ export const noteRoutes = [
+     method: "GET",
+     pattern: /^\/api\/notes$/,
+     handler: ({ db, res, url }) => {
+-      const tag = url.searchParams.get("tag");
++      const tag = url.searchParams.get("tag_id");
+       sendJson(res, 200, listNotes(db, { tagId: tag ? Number(tag) : undefined }));
+     },
+   },

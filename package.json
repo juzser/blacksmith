@@ -2,12 +2,11 @@
   "name": "@juzser/blacksmith",
   "version": "0.5.1",
   "type": "module",
-  "description": "Autonomous agent factory — loop runner and worktree engine.",
+  "description": "Plan a feature as signed spec contracts, build each in its own git worktree, put the result through review and verification gates, and merge through a queue into one pull request.",
   "keywords": [
     "agent",
     "agents",
     "ai",
-    "autonomous",
     "claude-code",
     "code-review",
     "git-worktree",
@@ -37,7 +36,8 @@
     "bs-run": "factory/orchestrator/dist/run-cli.js",
     "smith": "factory/orchestrator/dist/cli.js",
     "smith-run": "factory/orchestrator/dist/run-cli.js",
-    "bs-prompt-hook": "factory/orchestrator/dist/promptHook.js"
+    "bs-prompt-hook": "factory/orchestrator/dist/promptHook.js",
+    "bs-policy-hook": "factory/orchestrator/dist/policyHook.js"
   },
   "files": [
     "factory/orchestrator/dist",
@@ -49,10 +49,13 @@
     "factory/specs/roadmap.md",
     "factory/scaffold",
     ".claude/agents",
-    ".claude/skills"
+    ".claude/skills",
+    "ui/dist",
+    "ui/server/dist"
   ],
   "scripts": {
     "prepare": "pnpm run build",
+    "prepack": "pnpm run build && pnpm run build:server && pnpm run build:ui",
     "check": "bash scripts/check.sh",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
@@ -77,15 +80,16 @@
   "dependencies": {
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "@hono/node-server": "2.1.5",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4",
+    "hono": "4.13.13",
     "picomatch": "4.0.7",
     "yaml": "2.9.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@floating-ui/dom": "1.8.0",
-    "@hono/node-server": "2.1.5",
     "@lucide/vue": "1.60.0",
     "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "4.3.3",
@@ -94,7 +98,6 @@
     "@vitejs/plugin-vue": "6.0.10",
     "@vitest/coverage-v8": "5.0.5",
     "drizzle-kit": "0.31.11",
-    "hono": "4.13.13",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",

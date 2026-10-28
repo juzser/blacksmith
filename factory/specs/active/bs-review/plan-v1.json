@@ -1,0 +1,1041 @@
+{
+  "epic_id": "bs-review",
+  "version": 1,
+  "status": "draft",
+  "effort": "medium",
+  "project": "black-smith",
+  "tasks": [
+    {
+      "task_id": "bs-review/task-1-guard-git-config-env",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Force-push rule reads git configuration values",
+      "summary": "The force-push rule reads a command named in a git configuration value (-c, --config-env, GIT_CONFIG_*, GIT_PAGER, GIT_EXTERNAL_DIFF, -O) the same way it reads the in-line form.",
+      "objective": "Make `checkForcePush` in factory/orchestrator/src/policy.ts read a command line carried by a git configuration value the same way it reads that command line typed directly. Today an inline `alias.` definition is refused by `definesInlineGitAlias`; extend the same reading to every configuration value that git runs as a command: a `-c key=value` or `--config-env=key=VAR` on the git command, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_PAGER`, `GIT_EXTERNAL_DIFF`, and the `-O<cmd>` / `--open-files-in-pager=<cmd>` option of `git grep`. Each value is read whether it is set on the git command itself, in an earlier `export` or assignment segment of the same command line, or through `env`. A readable value is dequoted and checked by the same force-push checks a `sh -c` payload goes through; a value the rule cannot read statically is refused the way an unreadable inline alias is, whatever its key.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Each of these is refused with the force-push violation: `git -c core.pager='git push --force origin main' log`; `git -c diff.external='git push -f origin main' diff`; `GIT_PAGER='git push -f origin main' git log`; `env GIT_EXTERNAL_DIFF='git push --force origin main' git diff`; `export GIT_PAGER='git push -f origin main'; git log`; `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0='git push -f origin main' git log`; `git grep -O'git push -f origin main' x`; `git grep --open-files-in-pager='git push --force origin main' x`.",
+        "A configuration value the rule cannot read statically is refused, whatever its key: `git -c core.pager=\"$P\" log`, `git -c user.name=\"$NAME\" commit -m y`, `export GIT_PAGER=\"$P\"; git log`, `GIT_EXTERNAL_DIFF=$(cat f) git diff`, a backtick value, and `git --config-env=core.pager=SOMEVAR log`.",
+        "Each of these is still allowed: `git -c color.ui=always log`, `git -c core.pager=cat log`, `GIT_PAGER=cat git log`, `env GIT_PAGER=less git log`, `git -c user.name=x commit -m y`, `git log --oneline`, `git grep -n foo`.",
+        "`GIT_CONFIG_PARAMETERS` is read entry by entry, each entry by the same rule as a `-c key=value`, in both entry spellings git writes: the single-quoted `'key=value'` and the `'key'='value'` form that git 2.31 and later writes, with several entries in one value separated by spaces and the two spellings mixed. Each case is its own named test in policyGitConfig.test.ts: `GIT_CONFIG_PARAMETERS=\"'core.pager=git push -f origin main'\" git log` and `GIT_CONFIG_PARAMETERS=\"'core.pager'='git push -f origin main'\" git log` are each refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"'color.ui=always'\" git log` and `GIT_CONFIG_PARAMETERS=\"'color.ui'='always'\" git log` are each allowed; `GIT_CONFIG_PARAMETERS=\"'color.ui'='always' 'core.pager=git push --force origin main'\" git log`, a two-entry value in which only the second entry changes what git runs, is refused with the force-push violation; `GIT_CONFIG_PARAMETERS=\"$X\" git log` is refused as unreadable.",
+        "Every existing test in factory/orchestrator/test/policy.test.ts and policyHookEntry.test.ts passes unchanged.",
+        "Each new branch of the rule is proven by mutation: the result names, per branch, the test that fails when that branch is disabled.",
+        "The rule reads every value of every carrier the objective names and needs no list of configuration keys: an unreadable value is refused whatever its key, and a readable value is judged on the command line it sets. So `git -c user.name=x commit -m y` is allowed and `git -c user.name=\"$NAME\" commit -m y` is refused by the same reading, with no key named in the rule."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitConfig.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Extend the per-segment force-push check so the value of every git configuration carrier named in the objective is dequoted and checked as a nested command line by the same checks a `sh -c` payload receives (including `isUnknownForcePushShape` and the `+refspec` check).",
+          "Assignments in an earlier top-level segment of the same command line (`export NAME=value`, `NAME=value;`) are carried forward to the later git segment; `env NAME=value git ...` and `NAME=value git ...` are read on the segment itself.",
+          "A value containing an unexpanded parameter, a command substitution or a backtick, on any configuration key, and any `--config-env` whose value comes from a named environment variable, makes the segment a violation, matching how `definesInlineGitAlias` treats an unreadable alias. The key does not change this: the rule holds no list of keys.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitConfig.test.ts and drive `checkForcePush` (and the public policy entry the hook uses) with literal command strings."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check (disable it, run the new test file, see a named test fail, restore) and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Force-push rule reads xargs and shell pipes; history-rewrite rule reads per command",
+      "summary": "git arguments supplied through xargs and git output piped into a shell are read like their in-line forms; a read-only git search naming a rewrite word is allowed on a protected branch.",
+      "objective": "Two behaviours in factory/orchestrator/src/policy.ts. (1) The force-push rule reads a git command whose arguments come from xargs, and git output that a shell interpreter runs, the same way it reads the in-line form: `xargs git ...` with a subcommand that is missing, unreadable, or one of the force-gated subcommands is refused; git output piped into `sh`/`bash`/`zsh`/`dash`/`ksh` (directly, via `xargs` or via `env`), `eval \"$(git ...)\"` and `source <(git ...)` are refused. (2) The history-rewrite rule (`checkHistoryRewriteOnProtected`) reads each top-level command on its own and does not refuse a segment that `isReadOnlyGitCommand` accepts, so a read-only search such as `git grep rebase` on a protected branch is allowed while a real rewrite elsewhere on the line is still refused.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Refused by the force-push rule: `echo --force | xargs git push origin main`; `printf 'push -f origin main' | xargs git`; `xargs -I{} git {} < cmds.txt`; `git log --format=%s | sh`; `git show HEAD:run.sh | bash`; `git log | xargs sh -c 'git push -f origin main'`; `git log | env bash`; `eval \"$(git log -1 --format=%B)\"`; `source <(git show HEAD:x.sh)`.",
+        "Allowed: `git ls-files | xargs grep x`; `git ls-files -z | xargs -0 git add`; `git diff --name-only | xargs git log --oneline --`; `git log | less`; `git diff | cat`; `git log | grep x`; `xargs echo < list.txt`.",
+        "With a protected branch checked out, these are allowed by the history-rewrite rule: `git grep rebase`; `git grep -n filter-branch -- docs/`; `git log --grep='commit --amend'`.",
+        "With a protected branch checked out, these are still refused: `git rebase -i HEAD~2`; `git commit --amend`; `git grep rebase && git rebase main`; `git grep rebase; git rebase main`; `git filter-repo --path x`.",
+        "A command line the segment splitter cannot read keeps today's whole-command reading for the history-rewrite rule (it errs toward refusal).",
+        "Every existing test in policy.test.ts, policyHookEntry.test.ts and task-1's policyGitConfig.test.ts passes unchanged; each new branch is proven by mutation and the result names the failing test per branch."
+      ],
+      "claims": [
+        "factory/orchestrator/src/policy.ts",
+        "factory/orchestrator/test/policyGitInput.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "In the force-push per-segment check, recognise `xargs` (with its own options, including `-I`, `-0`, `-n`) whose command is `git`, and refuse when the git subcommand is absent from the literal words, unreadable, or one of FORCE_GATE_SUBCOMMANDS; read-only and non-gated subcommands stay allowed.",
+          "Refuse a pipeline where a segment after a `|` whose earlier segment runs git is a shell interpreter (sh, bash, zsh, dash, ksh), directly or through `xargs` or `env`; also refuse `eval` of a command substitution that runs git and `source`/`.` of a process substitution that runs git.",
+          "Change `checkHistoryRewriteOnProtected` to evaluate the rewrite predicates per `topLevelCommands` segment and skip a segment `isReadOnlyGitCommand` accepts; when the splitter returns the whole line as one unreadable segment, keep today's whole-command match.",
+          "All new tests live in the new file factory/orchestrator/test/policyGitInput.test.ts."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Keep every existing export of policy.ts and its signature; add internal helpers only.",
+          "Run each new branch's mutation check and list the results.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/policy.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-3-delegation-continuation",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Delegation check answers a continuation from its original dispatch",
+      "summary": "`bs delegation check` treats a dispatch_decision with continuation_of as answered by the session the original dispatch opened; a fresh dispatch is judged exactly as today.",
+      "objective": "Fix `bs delegation check` for a resumed wave-runner. When the epic session resumes a sub-agent it logs a new dispatch_decision whose payload names `continuation_of: <original dispatch event id>`; no new session-start names the new event as its causal parent, so the check reports the continuation as unanswered. Make delegation.ts follow `continuation_of` (transitively, cycle-safe) to the original dispatch of the same agent role and task, and count the continuation as answered when that original opened a session (including one opened elsewhere). A dispatch without `continuation_of`, or whose `continuation_of` names an unknown event or a dispatch of another role or task, is judged by today's rules unchanged. Document the `continuation_of` field in .claude/skills/bs/dispatch.md.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "A failing test reproduces the bug first. Fixture: an original wave-runner dispatch_decision answered by a session-start whose causal_parent is its event id, then a continuation dispatch_decision whose payload has `continuation_of` naming it and no session of its own. Before the fix the continuation's check has status `unverifiable` with the detail that it has opened no session against it yet; after the fix its status is `ok` and its sessionId is the original's session. (DelegationStatus is `ok | violation | unverifiable | not-applicable`.)",
+        "When the original opened no session, the continuation's status equals what today's rules give the original (`unverifiable` while unfinished, `violation` once finished), never `ok`.",
+        "The original dispatch may sit in an ancestor session of the checked lineage, and its opened session may be known only through `openedElsewhere` (a later wave session checking an earlier wave's dispatch); both cases are covered by tests and answer `ok`.",
+        "A continuation adds no delegated session and changes no rule-3 result. On the continuation fixture, `delegatedSessions` equals its value on the same log with the continuation dispatch_decision removed, and rule 3 gives the same result on both logs (no new violation, the same count). In a variant where the original's session also holds a dispatch written by an actor other than the original's role, the one rule-3 violation names the original dispatch as the owner (\"opened against <original event id>\", the original's role), on both logs; if the continuation took over the session, the detail would name the continuation's event id instead. Rule 3 itself is unchanged.",
+        "A chain of two continuations (C2 -> C1 -> original) is answered when the original opened a session; a cycle of `continuation_of` references terminates and is reported unanswered.",
+        "A `continuation_of` naming an unknown event id, a dispatch of a different agent_role, or a dispatch for a different task_id is judged as a fresh dispatch and is never answered by the original's session.",
+        "Every existing case in delegation.test.ts and delegationCli.test.ts passes unchanged, including the rule-2 cases for a fresh dispatch.",
+        "dispatch.md documents `continuation_of`: when the epic session writes it, that its value is the original dispatch_decision's event id, and that the check answers the continuation from the original's session.",
+        "The `bs delegation check` CLI output for a continuation is covered by a delegationCli.test.ts case."
+      ],
+      "claims": [
+        "factory/orchestrator/src/delegation.ts",
+        "factory/orchestrator/test/delegation.test.ts",
+        "factory/orchestrator/test/delegationCli.test.ts",
+        ".claude/skills/bs/dispatch.md"
+      ],
+      "budget": {
+        "tokens": 170000,
+        "diff_lines": 450
+      },
+      "contract": {
+        "functional_clauses": [
+          "Read `continuation_of` from the dispatch_decision payload alongside agent_role and task_id in delegation.ts.",
+          "Resolve a continuation to its root original through same-role, same-task links with a visited set; the continuation is answered exactly when the root original is answered by today's rules (its opened session, `openedElsewhere` included).",
+          "Answering a continuation from the original's session adds nothing to the `delegated` map: that map stays keyed by child session id, and the session the original opened keeps the original's DispatchRow, so `delegatedSessions` and rule 3 see the same sessions and owners with or without the continuation.",
+          "Leave every rule for a dispatch without a valid `continuation_of` byte-for-byte as it is today.",
+          "Add the `continuation_of` paragraph to .claude/skills/bs/dispatch.md next to the existing resume guidance."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of delegation.ts and its signature.",
+          "Do not edit cli.ts: it already passes `openedElsewhere` (from `sessionsOpenedByEdge`) into `checkDelegationLog`, so the fix lives in delegation.ts.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/delegation.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-4-transcript-tokens",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Transcript token reader shared by stats and the dashboard",
+      "summary": "One definition of transcript token spend (input + cache creation + output, no cache reads, deduped by message id and request id), a per-session reader with per-role attribution, reused by the dashboard Budget.",
+      "objective": "Create factory/orchestrator/src/transcriptTokens.ts holding the one definition of Claude Code transcript token spend that the dashboard Budget already uses: per assistant record, input_tokens + cache_creation_input_tokens + output_tokens, cache reads excluded, deduplicated by message.id + requestId. Add a reader that, given a Claude config directory and a CLI session id, finds `<configDir>/projects/*/<sessionId>.jsonl` and its `<sessionId>/subagents/agent-*.jsonl` files, sums the main session and each sub-agent, and attributes a sub-agent to a role when the call that launched it (matched through the sub-agent's `.meta.json` toolUseId) had a `subagent_type` of `bs-<role>` with <role> a taxonomy agent. Every total is `{used, complete}`: `complete` is false when any expected file is missing or unreadable, so a total is a floor, never a guess. Make ui/server/src/cliSessions.ts take its per-record count and dedupe key from this module so there is one definition.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "A unit test on fixture transcripts shows: cache_read_input_tokens never counted; a record repeated with the same message.id + requestId counted once; records with different requestId counted separately; non-assistant lines ignored.",
+        "The reader returns per-session totals, a per-sub-agent breakdown with agent id and role, and `complete:false` when a sub-agent file or meta file is missing or holds an unparseable line; it never throws on a missing directory.",
+        "A sub-agent whose launching call's subagent_type is not `bs-<taxonomy agent>` is reported with role null, not guessed.",
+        "ui/server/src/cliSessions.ts imports the per-record count and dedupe key from the new module the same way ui/server/src/activeScope.ts already imports orchestrator code, and its existing tests pass unchanged: the dashboard Budget numbers do not change.",
+        "The reader takes the config directory as a parameter; no code path reads the operator's real home directory in tests.",
+        "Before any path is built, `cliSessionId` and every sub-agent agent id (taken from a `subagents/agent-<id>.jsonl` name) must match one plain-token pattern: non-empty, only ASCII letters, digits, `-`, `_` and `.`, containing no `..`, and therefore holding no `/`, no `\\` and no absolute form. A `cliSessionId` that does not match opens no file, and the reader returns `{used: 0, complete: false, subagents: []}`: the one \"nothing read\" form, the same one a missing session file returns. A sub-agent id that does not match opens no file, adds no `subagents` entry and sets the session's `complete` to false. A test passes the session ids `../x`, `a/b`, `a\\b`, an absolute path (for example `/abs/x`) and the empty string, plus an injected sub-agent listing that holds `agent-../x.jsonl`; through an injected fs reader that records every path it is asked to open, it asserts that no path outside a temp `configDir` is opened and that each such session result is the nothing-read form.",
+        "Every transcript and meta path the reader opens sits inside `configDir` after `path.resolve` (equal to it, or under it followed by a path separator); the reader checks this before each open and skips a path that fails it, marking the total `complete:false`. A test pins it: with the injected fs reader recording every opened path over the whole fixture run, every recorded path resolves inside the temp `configDir`.",
+        "No message text reaches any output. A fixture transcript carries one sentinel string in a message's text, in a text content block, in a `tool_use` input field other than `subagent_type`, and in an unparseable line; `JSON.stringify` of the reader's result, of the per-record count and of the dedupe key never contains the sentinel."
+      ],
+      "claims": [
+        "factory/orchestrator/src/transcriptTokens.ts",
+        "factory/orchestrator/test/transcriptTokens.test.ts",
+        "ui/server/src/cliSessions.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Export from transcriptTokens.ts: a pure per-record count function, a pure dedupe-key function, and an async reader `readSessionTokens({configDir, cliSessionId})` returning `{used, complete, subagents: [{agentId, role, used, complete}]}` (names may differ; the shape is the contract).",
+          "Role attribution reads `<agent>.meta.json` toolUseId and the parent transcript's tool_use input `subagent_type`; the taxonomy agent list is read from the existing taxonomy loader, not hand-copied.",
+          "Replace the local count and dedupe logic in cliSessions.ts addUsage/tokensOf with calls to the new module, keeping every exported name and return shape of cliSessions.ts.",
+          "The reader accepts an injectable fs reader (read file, read directory) that defaults to node:fs, so tests can record every path it opens; the id check and the `configDir` containment check live in one helper that every path the reader builds goes through, before every open.",
+          "Fixtures are synthetic JSONL written by the test into a temp dir; they hold no real transcript text."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `pnpm run typecheck:server` and `pnpm run test:server`; the root suite does not run ui/server tests.",
+          "Read only token-usage fields and the ids needed for dedupe and attribution; never copy message text into any output.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "ui/server/src/cliSessions.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-5-effectiveness-fold",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Effectiveness fold: tokens per task and role, escaped defects, finding precision",
+      "summary": "A pure fold over the event log plus transcript totals that yields tokens per task and per role, escaped defects after merge, and precision per finding role.",
+      "objective": "Create factory/orchestrator/src/db/effectiveness.ts, a fold over a session's (or lineage's) events that computes three metric groups. (1) Tokens per task and per role: transcript-measured through task-4's reader over the CLI session ids stamped on the events (`cli_session_id`); a sub-agent is attributed to a task when a dispatch_decision's top-level `agent_id` equals its agent id; tokens that match no dispatch are reported as unattributed and never spread; result `token_usage` counts (measured vs unmeasured results) are reported alongside. (2) Escaped defects: a finding-raised or issue-reported event that names a task after that task's wave-merged event, for a task whose latest gate-outcome before the merge was a pass (`pass` or `pass-with-waivers-pending`), counted when its folded status is confirmed or fix-*, pending when still raised, excluded when refuted. (3) Precision per `found_by` role: confirmed / (confirmed + refuted + waived) with the three counts, using the existing findings fold; null when the role raised no decided finding.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Fixture-log tests cover each metric: per-task and per-role token sums with an unattributed bucket; `complete:false` propagates from any partial transcript to every total it feeds.",
+        "Escaped defects: a finding raised after wave-merged for a task whose latest pre-merge gate-outcome passed counts when confirmed or fix-pending/fix-landed, appears as pending when raised, and is excluded when refuted; a finding raised before the merge, or on a task with no passing gate-outcome, is not an escaped defect.",
+        "Precision: a role with 3 confirmed, 1 refuted, 0 waived reads 0.75 with counts {confirmed:3, refuted:1, waived:0}; a role with no decided findings reads null, not 0.",
+        "The fold takes its transcript reader as an injected function so tests never touch a real config directory.",
+        "No edit to factory/orchestrator/src/db/queries.ts or findings.ts; their tests pass unchanged."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/effectiveness.ts",
+        "factory/orchestrator/test/effectiveness.test.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Export a pure function (for example `effectiveness(events, {readTokens})`) returning `{tokens: {byTask, byRole, unattributed, complete, resultsMeasured, resultsUnmeasured}, escapedDefects: {count, pending, items}, precision: {<role>: {value, confirmed, refuted, waived}}}`.",
+          "Reuse the findings status fold in findings.ts and the event readers already used by stats; do not re-derive finding status.",
+          "Report every count with the ids it came from so the export (task-6/7) can show evidence without re-reading events."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Do not edit db/queries.ts, findings.ts or cli.ts.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-6-report-export-renderer",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Redacted Markdown export renderer",
+      "summary": "Pure helpers that redact home-directory and temp paths and render report and stats sections as Markdown, keeping passed, failed, not-run and unknown distinct.",
+      "objective": "Create factory/orchestrator/src/reportExport.ts with pure helpers for an opt-in Markdown export of `/bs report` and `bs stats`. (1) A redactor `redact(text, {homeDir})` that replaces each of these home-directory and temp path forms with a stable placeholder, `<name>` being one path segment: `/Users/<name>`, `/home/<name>` and `/root`, where `/root` matches only as a whole path segment, that is `/root(?![A-Za-z0-9._-])` (`/root` and `/root/x` are replaced, `/rootfs/x` is kept); `C:\\Users\\<name>` and `C:/Users/<name>` (any drive letter) and the JSON-escaped `C:\\\\Users\\\\<name>`; a `file://` URL over any of those; the dash-encoded slug forms that start `-Users-` or `-home-`; the temp roots `/private/tmp/`, `/tmp/`, `/var/folders/` and `/private/var/folders/`; and the running user's home directory, whatever it is, passed in as `homeDir`; an empty `homeDir` or a `homeDir` of `/` is ignored, and the fixed forms still apply. A home form becomes `<home>` with the rest of the path kept (so `/Users/<name>/repo/x.ts` becomes `<home>/repo/x.ts`). A slug form is replaced whole: in a slug a name's own hyphens cannot be told apart from the separators, so the match runs from `-Users-` or `-home-` up to the next whitespace, `/`, quote character (a double quote, a single quote or a backtick) or the end of the string, and that whole token becomes the one placeholder `<home-slug>` (so `projects/-Users-example-user-repo-x/a.jsonl` becomes `projects/<home-slug>/a.jsonl`). A temp-root path becomes `<tmp>` through the end of the path. `~/x` names no user and stays as written: that is a decision, not an omission. Other absolute paths (for example `/api/tasks`, `/usr/bin/git`) name no user and are kept as written: that is a decision too. (2) A check-state type `passed | failed | not-run | unknown` whose Markdown rendering keeps the four states distinct (a check with no event renders \"not run\", an unreadable one \"unknown\", never \"passed\"). (3) Section renderers for a metrics table and a per-task checks table. The module never reads transcript text and never writes anywhere.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Redaction tests: one case per path form the objective lists (each of the home forms, each Windows spelling, `file://`, both slug forms, each temp root, and an injected `homeDir` outside `/Users` and `/home`) is replaced by its placeholder; a repo-relative path is kept; `~/x` is kept as written; `/usr/bin/git` and `/api/tasks` are kept as written; the redactor is idempotent; a string with no path is unchanged. The slug cases pin the whole-token span and the placeholder: `projects/-Users-example-user-repo-x/a.jsonl` becomes exactly `projects/<home-slug>/a.jsonl`, `-home-example-user-repo-x` becomes exactly `<home-slug>`, a slug followed by a space or by a quote character ends there, and a test asserts that neither `example` nor `user` from the slug survives in the output. Each degenerate input has its own test: with `homeDir` set to the empty string, and again with `homeDir` set to `/`, the input `/usr/bin/git /opt/x/y` comes back unchanged and `/Users/example-user/repo` still becomes `<home>/repo`; `/root` becomes `<home>`, `/root/x` becomes `<home>/x`, and `/rootfs/x` is kept.",
+        "Check-state tests: each of the four states renders a distinct label; an absent state renders \"not run\"; no input renders \"passed\" unless its state is passed.",
+        "The renderers' output, for a fixture input carrying each path form the objective lists, matches none of an independent pattern list written in reportExport.test.ts itself: one pattern and one case per form, not imported from reportExport.ts and not the redactor's own detector. For the slug forms the pattern follows the same span as the redactor, from `-Users-` or `-home-` up to the next whitespace, `/`, quote character or the end of the string (for example `-(?:Users|home)-[^\\s/\"'\\x60]*`), and the slug case also asserts that neither `example` nor `user` appears in the rendered cell that carried the slug. Each case also asserts that its pattern matched the fixture input before rendering, so a pattern that matches nothing fails rather than passes.",
+        "The module has no filesystem or network import."
+      ],
+      "claims": [
+        "factory/orchestrator/src/reportExport.ts",
+        "factory/orchestrator/test/reportExport.test.ts"
+      ],
+      "budget": {
+        "tokens": 140000,
+        "diff_lines": 400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Export the redactor (taking `homeDir` as a parameter, so the module needs no `node:os` or filesystem import), the CheckState type, a `renderCheckState` function, and section renderers taking plain data (no event log access); the renderers redact every string they emit.",
+          "Render numbers that are null or unmeasured as `NOT MEASURED`, never as 0."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "No other project's name, no client code and no real home-directory path in any committed file, test fixture included. The redaction fixtures spell every home form with the placeholder user name `example-user` (for example `/Users/example-user/repo`) and use a placeholder home such as `/opt/example-home` for the running-user case; never a real user name or a real home path.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "`bs stats effectiveness` and the opt-in `bs report export`",
+      "summary": "Wire the effectiveness fold into `bs stats effectiveness` (plain words and JSON) and add `bs report export`, which writes a redacted Markdown file or stdout and never publishes.",
+      "objective": "Add two CLI verbs in factory/orchestrator/src/cli.ts with their usage entries in usage.ts. `bs stats effectiveness --session <id> | --lineage <id> [--claude-config-dir <dir>] [--json]` prints the task-5 metrics (tokens per task and per role with the unattributed bucket and completeness, escaped defects, precision per role). `bs report export --session <id> [--lineage] [--digest <file>] [--out <file>] [--json]` renders, through task-6, a redacted Markdown export (or, with `--json`, the same content as JSON) of the report digest and the effectiveness metrics, with per-task check states (tests = latest testgate-result, grader = latest grader-verdict, gate = latest gate-outcome; missing = not run, unreadable = unknown). The export writes only to stdout or the named file. Add the opt-in export step to .claude/skills/bs/report.md.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "`bs stats effectiveness --json` on a fixture log prints the task-5 shape; the human form prints the same numbers in plain words with `NOT MEASURED` for null values and \"at least\" for incomplete token totals.",
+        "`bs report export --out <file>` writes the Markdown export, and with `--json` the same content as JSON; without --out it prints to stdout; it makes no network call and writes no other file. Neither form contains a home-directory or temp path, or a user name, in any of task-6's path forms, checked against an independent pattern list written in statsEffectivenessCli.test.ts (one pattern per task-6 form, not the redactor's own detector), nor any transcript text: a sentinel planted in a fixture transcript's message text is absent from both forms. Other absolute paths (for example `/api/tasks`, `/usr/bin/git`) name no user and are kept as written: that is a decision, not an omission, and a test plants `/usr/bin/git` in a fixture finding summary and asserts it appears unchanged in both forms.",
+        "An incomplete token total reads the same in every form: when the reader returns `complete:false`, the human `bs stats effectiveness` form, the Markdown export and the JSON export all carry the label \"at least <n>\", and the JSON export also carries `complete: false` on that total. A test pins the Markdown and the JSON form against the human form's label on the same fixture.",
+        "Free text that flows into the export is redacted by task-6's rule, not dropped: a test plants a home-path sentinel (`/Users/example-sentinel/repo/a.ts` and `C:\\Users\\example-sentinel\\repo`) in a finding summary and in the `--digest` text, and asserts that in both the Markdown and the JSON form the name `example-sentinel` never appears and `<home>` stands where each path's home prefix stood.",
+        "Per-task check states in the export distinguish passed, failed, not run and unknown, each covered by a fixture.",
+        "Every existing `bs stats <lens>` and `bs report` JSON output is unchanged for the existing fixtures (existing tests pass unchanged); any shape change is an added field only.",
+        "usage.ts lists both verbs so docCommands.test.ts resolves them; report.md describes the export as opt-in and says the operator decides whether to share the file.",
+        "The default Claude config directory is resolved from `CLAUDE_CONFIG_DIR` or the home directory at run time only; tests always pass `--claude-config-dir`.",
+        "Both export forms open with a notice telling the reader to check the export before sharing it: the Markdown form's first line is exactly `> Review this export before you share it.`, and the JSON form's first top-level key is `notice`, whose value is exactly `Review this export before you share it.`. A test pins both on the same fixture: the Markdown first line, and the JSON `notice` value and its place as the first key."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/statsEffectivenessCli.test.ts",
+        ".claude/skills/bs/report.md"
+      ],
+      "budget": {
+        "tokens": 210000,
+        "diff_lines": 660
+      },
+      "contract": {
+        "functional_clauses": [
+          "Add `stats effectiveness` beside the existing stats lenses and `report export` (with `--json`) as a new verb, both in COMMANDS/usage.ts with flags documented.",
+          "Build the export from task-5's fold and task-6's renderers; the CLI layer does selection and I/O only.",
+          "Every free-text string the export carries (finding summaries, digest text, task titles) goes through task-6's redactor with `homeDir` set to the running user's home directory; the redactor hides home-directory and temp paths and the user names in them (task-6's forms), and other absolute paths stay as written. The JSON form is built from the same redacted data as the Markdown form, and both carry the notice line.",
+          "New CLI tests live in factory/orchestrator/test/statsEffectivenessCli.test.ts and run the built CLI or the command handler against fixture logs in a temp dir."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of cli.ts and usage.ts; existing stats and report JSON shapes only gain fields.",
+          "Never publish: no gh, no network, no upload; the only writes are stdout and --out.",
+          "No other project's name, no client code and no real home-directory path in any committed file, test fixture included. Path fixtures spell every home form with a placeholder user name (`example-user`, `example-sentinel`) and pass a placeholder home such as `/opt/example-home`; never a real user name or a real home path.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-8-trial-sample-app",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Generic sample app for the comparison trial",
+      "summary": "A small dependency-free Node app (HTTP API, SQLite with migrations, static front end, node:test tests) under trial/sample-app that the five trial task kinds run against.",
+      "objective": "Create trial/sample-app/: a generic, dependency-free Node (>= 22.13) application to serve as the starting repository for the plain-Claude-Code vs Blacksmith trial. It has a node:http JSON API with at least two resources, node:sqlite storage with numbered migrations and a migration runner, a static vanilla HTML/JS front end that calls the API, a node:test suite (`npm test` inside the app), its own package.json with no dependencies, and a README describing the app and how to run it. The app is generic (a small notes or inventory domain) and names no real product or client.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "`cd trial/sample-app && npm test` passes with Node 22.13 or newer and installs nothing.",
+        "The app has: an HTTP server module, at least two API resources with tests, a migrations directory with a runner and at least two migrations, a static front end served by the app, and a module layout spread over enough files that a multi-file bug and a large refactor are meaningful.",
+        "trial/sample-app/package.json declares no dependencies or devDependencies; the root package.json `files` does not include trial/.",
+        "The README states the app's purpose (a fixture for the trial), how to start it and how to test it.",
+        "No file names another project, a client, or an absolute home path.",
+        "`bash scripts/check.sh` passes: the doc guards walk every tracked Markdown file, so trial/sample-app/README.md is held to them."
+      ],
+      "claims": [
+        "trial/sample-app/**"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 650
+      },
+      "contract": {
+        "functional_clauses": [
+          "Write the app, its tests, migrations, front end and README entirely under trial/sample-app/.",
+          "Keep the code plain and idiomatic so the five trial task kinds (REST endpoint, large refactor, multi-file bug, FE+BE feature, DB schema change) each have an obvious place to land."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Run `cd trial/sample-app && npm test` and report its output; also run the root `pnpm run test` and `pnpm exec biome check .` to show the root gates are unaffected.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Every Markdown file this task adds falls under the repo's doc guards (docCommands.test.ts, docErrorCodes.test.ts and their siblings walk every tracked Markdown file): a backticked dotted name that is not a filename is read as an error code and must be one the code raises, and a named `bs`/`smith` command must exist in usage.ts. Write such a name without backticks, or leave it out.",
+          "Node built-ins only; no npm dependency of any kind.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-9-trial-task-corpus",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Trial task corpus: five task kinds with hidden checks",
+      "summary": "Five trial tasks (REST endpoint, large refactor, multi-file bug, FE+BE feature, DB schema change), each with one prompt for both arms, a start state and a hidden grading check.",
+      "objective": "Create trial/tasks/ with one directory per task kind: rest-endpoint, large-refactor, multi-file-bug, fe-be-feature, db-schema-change. Each holds a manifest.json (kind, title, prompt file, `start_state`: the name of a unified-diff patch file in the task directory or null, `fail_to_pass` and `pass_to_pass`: the task-relative paths of the two check subdirectories, `check/fail_to_pass` and `check/pass_to_pass`, expected touched areas), a prompt.md given verbatim to both arms, an optional start state, which is a unified diff applied with `git apply` to a temp copy of trial/sample-app or nothing at all (the multi-file bug is planted by its patch), and a hidden check directory of node:test files in two subdirectories: `check/fail_to_pass/` holds the tests that fail on the start state and must pass after the task, and `check/pass_to_pass/` holds the tests that pass before and must still pass. One test is one file holding one top-level `test()`; it is run on its own with `node --test <file>`, the prepared copy as working directory, and its exit code is its result (0 is a pass). The file is the unit the self-check and task-10's harness report on.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Five task directories exist, one per kind, each with manifest.json, prompt.md and a check directory holding the two subdirectories `check/fail_to_pass/` and `check/pass_to_pass/`, each with at least one test file; manifests validate against a small schema file in trial/tasks/, which requires both `fail_to_pass` and `pass_to_pass` (task-relative directory paths), and every manifest sets them to `check/fail_to_pass` and `check/pass_to_pass`.",
+        "For each task, a self-check script in trial/tasks/ copies trial/sample-app to a temp directory and, when the manifest's `start_state` names a patch file, applies that unified diff there with `git apply`; a patch that does not apply cleanly fails the script, and a null `start_state` uses the copy as is. No other start-state form (a script, an overlay directory) is accepted. The script takes the two check directories from the manifest's `fail_to_pass` and `pass_to_pass` fields (never a hard-coded path), runs each test file in them on the start state, and prints one pass/fail line per test, naming the task and the file. It exits non-zero when any fail_to_pass test passes on the start state, when any pass_to_pass test fails on it, or when a directory the manifest names is missing or holds no test file; on the real corpus it exits 0.",
+        "Prompts describe the wanted behaviour only; they do not mention Blacksmith, plain Claude Code, the hidden checks or their file names.",
+        "The large-refactor task's check verifies behaviour is unchanged and a structural target is met (for example a module split) without pinning exact file contents.",
+        "The fe-be-feature task's hidden check verifies the front end headlessly with node:test and opens no browser: it either starts the app on an ephemeral port and asserts on the HTML/JS the app serves, or imports a pure front-end module (one that touches no DOM when imported) and tests its functions. It needs no browser, DOM library or other dependency.",
+        "`bash scripts/check.sh` passes: the doc guards walk every tracked Markdown file, so each prompt.md and any README this task adds is held to them."
+      ],
+      "claims": [
+        "trial/tasks/**"
+      ],
+      "budget": {
+        "tokens": 180000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Write the corpus and its self-check script under trial/tasks/ only; read trial/sample-app but do not edit it.",
+          "Hidden checks use node:test and node built-ins only."
+        ],
+        "nonfunctional_clauses": [
+          "Run the corpus self-check script and report, per task, the FAIL_TO_PASS and PASS_TO_PASS results on the start state.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Every Markdown file this task adds falls under the repo's doc guards (docCommands.test.ts, docErrorCodes.test.ts and their siblings walk every tracked Markdown file): a backticked dotted name that is not a filename is read as an error code and must be one the code raises, and a named `bs`/`smith` command must exist in usage.ts. Write such a name without backticks, or leave it out.",
+          "Node built-ins only; no npm dependency.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-10-trial-recording-harness",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Trial recording harness: prepare, record, summarize",
+      "summary": "A harness that prepares a trial workspace and prompt, records one run's check result, transcript tokens and diff as a JSONL line, and summarizes runs with NOT MEASURED for every missing value.",
+      "objective": "Create the trial harness. Logic in factory/orchestrator/src/trial/harness.ts (tested under the root suite), a thin entry trial/harness/trial.mjs that imports the built module, and trial/README.md. Verbs: `prepare --task <kind> --arm plain|blacksmith --dir <empty dir>` copies trial/sample-app, applies the start state (the task's unified diff with `git apply` when the manifest names one, nothing when `start_state` is null), runs `git init` with one commit, and prints the prompt and the command the operator runs; it never launches claude. `record --task <kind> --arm <arm> --dir <dir> --cli-session <id> [--claude-config-dir] [--interventions <n>] --results <file.jsonl>` runs the hidden check, reads tokens through task-4's reader, computes diff stats against the start commit, and appends one record. `summarize --results <file>` prints a Markdown table per kind and arm with `NOT MEASURED` for every missing cell. A record has exactly: task_kind, arm, check (passed|failed|not-run|unknown), tokens ({used, complete} or null), wall_clock_ms (or null), diff {files, added, removed}, interventions (or null), cli_session_id, recorded_at, harness_version.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Root-suite tests drive prepare, record and summarize against temp dirs and fixture transcripts; prepare never spawns claude (asserted by an injected spawner). A case gives `record` a fixture manifest whose `fail_to_pass` and `pass_to_pass` name non-default directories and asserts the harness runs the files in exactly those directories; one failing fail_to_pass file, or one failing pass_to_pass file, each stores `check: failed`.",
+        "A record with no transcript found stores tokens null and summarize prints NOT MEASURED; a check that could not run stores `not-run`, an errored check `unknown`; neither is ever `passed`.",
+        "summarize never computes a mean or a ratio from fewer than one recorded run per cell and labels every cell with its run count; with one run it says single run.",
+        "The record field set matches the plan's list exactly, pinned by a test.",
+        "trial/README.md explains the three verbs, says running the trial (and its spend) is the operator's decision, and contains no measured number.",
+        "wall_clock_ms is the span between the first and last timestamp of the run's main transcript when it is found, else null; interventions comes only from the operator's --interventions flag, else null. Neither is ever estimated.",
+        "`bash scripts/check.sh` passes: the doc guards walk every tracked Markdown file, so trial/README.md is held to them."
+      ],
+      "claims": [
+        "factory/orchestrator/src/trial/harness.ts",
+        "factory/orchestrator/test/trialHarness.test.ts",
+        "trial/harness/**",
+        "trial/README.md"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Implement the three verbs in harness.ts with injected filesystem, clock, spawner and token reader; trial.mjs only parses argv and calls them.",
+          "Use task-4's transcript reader for tokens; do not re-implement token counting.",
+          "Read task manifests from trial/tasks/<kind>/manifest.json as written by task-9, and take the hidden check's two directories from the manifest's `fail_to_pass` and `pass_to_pass` fields, never from a hard-coded path. `record` runs each test file in both directories with `node --test <file>`, the prepared copy as working directory, and stores `check: passed` only when every file in both exits 0, `failed` when any exits non-zero, and `not-run` when a directory the manifest names is missing or holds no test file. Do not edit trial/tasks/ or trial/sample-app/."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Every Markdown file this task adds falls under the repo's doc guards (docCommands.test.ts, docErrorCodes.test.ts and their siblings walk every tracked Markdown file): a backticked dotted name that is not a filename is read as an error code and must be one the code raises, and a named `bs`/`smith` command must exist in usage.ts. Write such a name without backticks, or leave it out.",
+          "Never start a claude process, never call the network, never publish results.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-11-trial-methodology-doc",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Trial methodology and results template",
+      "summary": "docs/trial/methodology.md (arms, task kinds, metrics, threats to validity) and docs/trial/results.md with every number NOT MEASURED.",
+      "objective": "Write docs/trial/methodology.md and docs/trial/results.md for the plain-Claude-Code vs Blacksmith trial. The methodology states the question, the two arms and how each is run with an identical prompt, the five task kinds and their FAIL_TO_PASS / PASS_TO_PASS checks, the metrics (check outcome, transcript tokens by the task-4 definition, wall clock, diff size, operator interventions; for the Blacksmith arm also the effectiveness metrics), the record fields, what a single run can and cannot show, threats to validity, and that this trial is not the roadmap's agent-bench benchmark (no epochs, no repeats, no error bars). results.md is a template whose every number is NOT MEASURED.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Every numeric cell in docs/trial/results.md reads NOT MEASURED; neither doc contains a measured or estimated number about Blacksmith's effect.",
+        "methodology.md names the five task kinds as they appear in trial/tasks/, the two arms, every record field, and the token definition (no cache reads, dedupe by message id + request id).",
+        "methodology.md states that running the trial and its spend are the operator's decision and that results from one run per cell are labelled single-run.",
+        "methodology.md has a section on the overlap with agent-bench and what is left to it.",
+        "The docs name only `bs`/`smith` commands that exist in usage.ts at this task's base; `bash scripts/check.sh` passes.",
+        "A new test trialDocs.test.ts pins that every metric cell in docs/trial/results.md reads NOT MEASURED and that methodology.md names exactly the task kinds present under trial/tasks/."
+      ],
+      "claims": [
+        "docs/trial/**",
+        "factory/orchestrator/test/trialDocs.test.ts"
+      ],
+      "budget": {
+        "tokens": 140000,
+        "diff_lines": 400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Write the two docs under docs/trial/ only.",
+          "Link to trial/README.md and trial/tasks/ by repo-relative path."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write trialDocs.test.ts first and watch it fail on the missing docs.",
+          "Before hand-back run, in the foreground and in full: `pnpm run test` (the whole suite), `pnpm run typecheck:test` and `pnpm exec biome check .`.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Also run root `pnpm run test` (docCommands and doc guards run there).",
+          "No unmeasured claim: every statement about outcomes is phrased as what the trial will measure.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-12-package-ships-dashboard",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "npm package ships the built dashboard",
+      "summary": "Add ui/dist and ui/server/dist to the package files, build them on prepack, and move the dashboard server's runtime imports into dependencies.",
+      "objective": "Make the published package carry the dashboard so `bs ui` works after an npm install. In package.json: add `ui/dist` and `ui/server/dist` to `files`; add a `prepack` script that builds the orchestrator, the dashboard server and the dashboard UI; move hono and @hono/node-server (imported at runtime by ui/server/dist) from devDependencies to dependencies; update pnpm-lock.yaml accordingly. In packaging.test.ts: assert the ui entry files are in `files`, and widen the test that the package depends on exactly what it imports so it also covers ui/server/src's runtime imports, derived from the sources rather than hand-listed.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "packaging.test.ts asserts `files` covers ui/dist and ui/server/dist and that the dashboard server entry the CLI launches is inside them.",
+        "The dependencies test derives the runtime import set from factory/orchestrator/src and ui/server/src (excluding tests and type-only imports) and fails if a runtime import is missing from dependencies or a dependency is unused.",
+        "`npm pack --dry-run` lists ui/dist/index.html and the ui/server/dist entry; the result reports the packed size and file count from that output.",
+        "No version bump, no publish, no `npm publish` or `pnpm publish` anywhere.",
+        "pnpm-lock.yaml is regenerated by `pnpm install` (not hand-edited) and `pnpm install --frozen-lockfile` succeeds."
+      ],
+      "claims": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "factory/orchestrator/test/packaging.test.ts"
+      ],
+      "budget": {
+        "tokens": 140000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "Edit only `files`, `scripts.prepack`, `dependencies` and `devDependencies` in package.json.",
+          "Derive the ui/server import set the same way the existing test derives the CLI's, extended to a second source root."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `pnpm run typecheck:server` and `pnpm run test:server`; the root suite does not run ui/server tests.",
+          "Also run `pnpm run build:server`, `pnpm run build:ui` and `npm pack --dry-run`, and report the size lines.",
+          "Moving hono and @hono/node-server is the only dependency change; add nothing new.",
+          "Never publish and never bump the version.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "infra",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-13-doctor-install-check",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "`bs doctor`: one install check in plain words and JSON",
+      "summary": "Install probes behind `bs doctor [--json]`, listed in usage.ts and used by INSTALL.md Part 4, each fix quoted from INSTALL.md.",
+      "objective": "Create factory/orchestrator/src/installCheck.ts with injectable probes for: Node version against package.json engines, pnpm, git, the bs version, the claude CLI on PATH, the Blacksmith plugin (via `claude plugin list`; absent or unparseable output is unknown, never ok), and the built dashboard files. Each probe reports ok, missing or unknown with a one-line fix. In cli.ts add `bs doctor [--json]`: plain words by default, a stable JSON shape with --json, exit non-zero when any probe is missing. Add `doctor` to usage.ts and update INSTALL.md Part 4 (Verify the install) to use it. The guidance after `bs init`, the `ui.not-built` wording and the SKILL.md preflight line belong to task-17, which runs after this task.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "installCheck.test.ts covers each probe with injected results: ok, missing, and unknown (including unparseable `claude plugin list` output); no test spawns the real claude CLI.",
+        "`bs doctor --json` prints `{checks: [{id, status, detail, fix}], ok}` with status in ok|missing|unknown; the plain-words form prints one line per check; exit code is non-zero when any check is missing and zero otherwise.",
+        "The missing-CLI and missing-plugin fixes name the exact command to run, quoted from INSTALL.md, and the doc and the message are pinned equal by a test.",
+        "INSTALL.md Part 4 uses `bs doctor`; docCommands.test.ts resolves it; `bash scripts/check.sh` passes."
+      ],
+      "claims": [
+        "factory/orchestrator/src/installCheck.ts",
+        "factory/orchestrator/test/installCheck.test.ts",
+        "factory/orchestrator/test/doctorCli.test.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "INSTALL.md"
+      ],
+      "budget": {
+        "tokens": 160000,
+        "diff_lines": 440
+      },
+      "contract": {
+        "functional_clauses": [
+          "Probes are functions with injected spawn and filesystem access; `bs doctor` composes them; the probe list and JSON shape are the contract.",
+          "The plugin probe treats any spawn error, timeout or unrecognised output as unknown.",
+          "Do not touch the `bs init` handler, the `ui.not-built` message or .claude/skills/bs/SKILL.md: task-17 owns them."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of cli.ts and usage.ts.",
+          "Never install, update or enable anything: doctor only reads.",
+          "The claude probe has a short timeout so doctor never hangs.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts"
+      ]
+    },
+    {
+      "task_id": "bs-review/task-14-plugin-guard-opt-in",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Opt-in policy guard for plugin installs",
+      "summary": "The plugin carries a PreToolUse policy hook that is inert unless BS_PLUGIN_GUARD=1, plus a doc with the deny rules to copy, so a plugin install can enforce the same rules as a clone.",
+      "objective": "Give a plugin install an opt-in way to enforce Blacksmith's policy. Add a PreToolUse entry to .claude/hooks/hooks.json (matcher Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task) running a new .claude/hooks/plugin-policy.sh. The shim exits 0 with no output unless `BS_PLUGIN_GUARD=1`; when on, it runs `$BS_POLICY_HOOK` if set, else `bs-policy-hook` from PATH, and if neither exists it returns an `ask` decision with a message naming the fix. Add the `bs-policy-hook` bin to package.json pointing at factory/orchestrator/dist/policyHook.js. Write docs/guide/plugin-guard.md: what the guard enforces, the one switch, how to turn it on, and the deny rules to paste into a project's settings, whose block must equal the deny list in .claude/settings.json (pinned by a test). Default behaviour of a plugin install is unchanged.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "With BS_PLUGIN_GUARD unset or not `1`, the shim exits 0 and prints nothing for every tool input (tested with an empty PATH, like the existing inert-wrapper test).",
+        "With BS_PLUGIN_GUARD=1 and BS_POLICY_HOOK pointing at the built policyHook.js, a force push to main is denied and `git status` is allowed, through the shim, in a test.",
+        "With BS_PLUGIN_GUARD=1 and no hook found, the shim emits an `ask` decision whose message names `bs-policy-hook` and BS_POLICY_HOOK.",
+        "pluginManifest.test.ts pins the full hook set: UserPromptSubmit and PostToolUse(AskUserQuestion) as today plus exactly one PreToolUse entry running plugin-policy.sh; the existing pin that the plugin never references guard.sh or judge-stop.sh still holds; every hook keeps a timeout of at most 5 seconds and no async flag.",
+        "packaging.test.ts covers the new `bs-policy-hook` bin and its target file, and the shim is inside the shipped plugin source.",
+        "docs/guide/plugin-guard.md's deny block equals the .claude/settings.json deny list (test); the doc claims only behaviour a test covers, and says plainly whether a settings-file `env` entry is a tested way to set the switch.",
+        "No file under factory/policies/ changes."
+      ],
+      "claims": [
+        ".claude/hooks/hooks.json",
+        ".claude/hooks/plugin-policy.sh",
+        "package.json",
+        "factory/orchestrator/test/packaging.test.ts",
+        "factory/orchestrator/test/pluginManifest.test.ts",
+        "factory/orchestrator/test/pluginGuard.test.ts",
+        "docs/guide/plugin-guard.md"
+      ],
+      "budget": {
+        "tokens": 180000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "The shim is POSIX sh, reads the hook input from stdin and passes it unchanged to the resolved hook.",
+          "Edit only `bin` in package.json.",
+          "Do not edit .claude/settings.json or .claude/hooks/guard.sh; read the settings deny list in the test."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Write test inputs that hold literal git commands with the Write or Edit tool, never inside a Bash command line (heredoc, echo, python -c): the session's own guard reads Bash command text and evaluates such a line as the command it names. Run the tests with plain `pnpm` commands.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Off by default: no behaviour change for any install that does not set BS_PLUGIN_GUARD=1.",
+          "The shim never runs a command from its input and never evaluates a variable it did not set; quote every expansion.",
+          "Security-sensitive: the reviewer pass must include the security reviewer.",
+          "Do not edit anything under factory/policies/.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-15-readme-quickstart-descriptions",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "README first screen, quickstart and one description",
+      "summary": "New README first screen with the agreed tagline and a workflow table vs plain Claude Code, a quickstart guide, one description across package and plugin manifests, and a proposal doc for listings.",
+      "objective": "Rewrite the README's first screen to open with the exact tagline \"From feature request to reviewable PR — with an AI engineering workflow.\", drop the word \"autonomous\", and add a table of workflow differences vs plain Claude Code (what each does at spec, plan, review, verification and merge; no numbers). Write docs/guide/quickstart.md: install, `bs doctor`, `bs init`, a first `/bs new` and `/bs run`, where to look next. Put one description string in package.json `description` (and drop the \"autonomous\" keyword), in .claude-plugin/marketplace.json for the blacksmith entry with matching wording for bs-mod and pr-mod, in .claude/.claude-plugin/plugin.json, and in the README. Write docs/positioning-proposal.md proposing GitHub About text, topics and plugin-hub listings, for the operator to apply. A demo appears only from a real run labelled single-run; otherwise the README shows a NOT MEASURED placeholder.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "The first text line under the `# Blacksmith` heading is exactly the tagline \"From feature request to reviewable PR — with an AI engineering workflow.\" (emphasis markup around it allowed), replacing today's \"An autonomous agent factory.\" line; the logo and badges stay.",
+        "The word \"autonomous\" appears in no description string, no package keyword and nowhere on the README first screen; a sentence further down that uses it to state a limit (today's README \"No autonomous deploy or outbound sends\") may stay.",
+        "A new test descriptions.test.ts pins one description string: package.json `description`, the `blacksmith` entry in .claude-plugin/marketplace.json, .claude/.claude-plugin/plugin.json `description`, and the README sentence directly under the tagline are equal. The bs-mod and pr-mod entries keep their own subject, use no \"autonomous\", and make no claim the claims matrix cannot back.",
+        "The comparison table describes workflow steps only and contains no number; any demo is labelled single-run with its run id, else the README shows a NOT MEASURED placeholder.",
+        "docs/guide/quickstart.md uses only commands that exist (docCommands.test.ts resolves them) including `bs doctor`, and links INSTALL.md for detail.",
+        "docs/positioning-proposal.md is a proposal only; no GitHub setting, topic or listing is changed by this task.",
+        "`bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "README.md",
+        "docs/guide/quickstart.md",
+        "docs/positioning-proposal.md",
+        "package.json",
+        ".claude-plugin/marketplace.json",
+        ".claude/.claude-plugin/plugin.json",
+        "factory/orchestrator/test/descriptions.test.ts"
+      ],
+      "budget": {
+        "tokens": 200000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Edit only `description` and `keywords` in package.json, and only description fields in the two manifests.",
+          "Keep every README section below the first screen and every link the doc guards check; move, do not delete, content that leaves the first screen."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "No unmeasured claim: every capability named on the first screen is one the claims matrix (task-16) can back with code or a test.",
+          "Never publish and never change a GitHub setting.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-16-claims-matrix-and-changelog",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Claims matrix and the epic's changelog entries",
+      "summary": "docs/claims-matrix.md maps every public claim to the code or test that backs it and its limits; unbacked claims are reworded or removed; CHANGELOG Unreleased gets the epic's entries.",
+      "objective": "Write docs/claims-matrix.md: one row per claim made in README.md, package.json, the marketplace and plugin manifests, docs/guide/quickstart.md and docs/guide/plugin-guard.md, each with the code path or test that backs it and its stated limits. A claim no code or test backs is reworded to what is backed or removed, in the file that makes it. Then write the CHANGELOG.md Unreleased entries for every user-visible change in this epic, from the `notes` of tasks 1-15 and 17, with neutral wording for the policy changes (behaviour only).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "factory/orchestrator/test/claimsMatrix.test.ts extracts every claim on the README first screen (from the `# Blacksmith` heading to the first `## ` heading) and every description string: package.json `description`, the descriptions of the `blacksmith`, `bs-mod` and `pr-mod` entries in .claude-plugin/marketplace.json, and .claude/.claude-plugin/plugin.json `description`; each description string is one claim. The README first screen is cut into claims by this rule, which works on structure only and names no README words, so a rewrite of the first screen is cut the same way: (a) a table: each body row is one claim, its cells trimmed and joined by ` | ` (the leading and trailing pipes dropped); the header row and the separator row (only `|`, `-`, `:` and spaces) are not claims, and a `\\|` in a matrix cell reads as `|`; (b) each bullet or numbered item (a line opening `- `, `* ` or `+ `, or digits followed by `. ` or `) `, after optional indent) is one claim, its indented continuation lines included; (c) a paragraph, a run of consecutive non-blank lines that belongs to no other unit, has each `<br>`, `<br/>` or `<br />` read as whitespace, is normalised, and is split into sentences by the regex `(?<=[.!?])\\s+(?=[A-Z\"(])`; each sentence is one claim; (d) a `<pre>` block, or a fenced block (a line opening with three backticks to the next such line) that is not a command fence, is one claim for the whole block, its lines joined by single spaces; a command fence is one whose info string is `bash`, `sh`, `shell`, `zsh` or `console`, or whose every non-empty line starts with `$`, `/`, `bs `, `npm `, `pnpm `, `npx `, `git ` or `claude `, and it is not a claim; (e) text inside `<sub>` is read as paragraph text by (c), so it is split into sentences the same way. Headings are not claims, nor are image and badge lines, a paragraph made only of in-page anchor links and separator characters, or a unit that the normalisation leaves empty. The check fails, naming the text, when any claim has no row in docs/claims-matrix.md quoting it verbatim, compared after one normalisation applied to both sides (HTML tags and Markdown emphasis and link markup stripped, whitespace collapsed). The extraction must return at least one claim from the README first screen and from each of the five description strings, so an empty extraction fails rather than passes. The claims in docs/guide/quickstart.md and docs/guide/plugin-guard.md also have rows; those rows, like every other row, name a file path or test that exists at this task's base, and the same test checks that each named path exists.",
+        "The check is shown to discriminate, unit by unit, on a fixture README first screen and a fixture matrix in claimsMatrix.test.ts. The fixture first screen holds a table (a header row, a separator row and one body row), a bullet, a paragraph of two sentences with a `<br />` between them, a two-line `<pre>` block, an untagged fenced prose block, a `bash` command fence and a `<sub>` line, and the fixture matrix quotes every claim the rule cuts from it, so the full fixture passes. One case per unit removes that unit's row from the fixture matrix (the table body row, the bullet, the second sentence of the split paragraph, the `<pre>` block, the fenced prose block, the `<sub>` sentence) and asserts the check fails and names that claim. A further case pins the extraction's output for the fixture, showing that the header and separator rows and the command fence yield no claim and that the two-sentence paragraph yields two. On the real README, manifests and matrix the check passes.",
+        "Each claim with no backing is reworded or removed and listed in the matrix's changes section with what it said before.",
+        "CHANGELOG.md Unreleased has entries for: stats effectiveness, report export, trial kit, bs doctor and init guidance, shipped dashboard, opt-in plugin guard, delegation continuation, the two policy-rule changes, and the docs rewrite.",
+        "The policy-rule entries describe behaviour neutrally (\"reads a command named in a git configuration value the same way as ...\"), use no adversarial framing, and do not describe an earlier version as defective.",
+        "descriptions.test.ts still pins one description; `bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "docs/claims-matrix.md",
+        "README.md",
+        "package.json",
+        ".claude-plugin/marketplace.json",
+        ".claude/.claude-plugin/plugin.json",
+        "docs/guide/quickstart.md",
+        "docs/guide/plugin-guard.md",
+        "factory/orchestrator/test/descriptions.test.ts",
+        "factory/orchestrator/test/claimsMatrix.test.ts",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 680
+      },
+      "contract": {
+        "functional_clauses": [
+          "Build the matrix from the files at this task's base; do not add new capabilities or claims.",
+          "The extraction, the normalisation and the path check live in claimsMatrix.test.ts and read README.md, package.json and both manifests at run time, so a later edit to any of them is checked against the matrix too.",
+          "Edit only description and keywords in package.json and the manifests, and only claim sentences elsewhere.",
+          "Write the CHANGELOG entries under the existing Unreleased heading in the file's existing style."
+        ],
+        "nonfunctional_clauses": [
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Wording rule for every identifier, comment, test name, commit message, PR text and result note: describe only the behaviour the rule gains, in neutral terms (\"reads X the same way as Y\", \"refuses a force push named inside a git configuration value\"). Use no adversarial framing of any kind, do not describe an earlier version as defective, and do not frame any example as getting through the rule. Test inputs may hold literal commands.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-review/task-17-init-next-steps-and-messages",
+      "epic_id": "bs-review",
+      "plan_version": 1,
+      "project": "black-smith",
+      "title": "Next steps after `bs init` and a clearer unbuilt-dashboard message",
+      "summary": "Init guidance on stderr only, a `ui.not-built` message that tells an installed package from a clone, and a `bs doctor` preflight line in the /bs skill.",
+      "objective": "Create factory/orchestrator/src/installGuidance.ts with two pure functions that take the clone-or-installed distinction as a parameter (cli.ts passes `IS_CLONE` from paths.ts): the next-step guidance printed after `bs init`, and the `ui.not-built` message. In cli.ts, write the guidance to stderr after init's existing JSON report, so init's stdout, exit code and files written stay the same; build the `ui.not-built` error's message from the second function so an installed package (not a clone) says what to do, with the error code and its cause unchanged. Add one preflight line to the body of .claude/skills/bs/SKILL.md that runs `bs doctor` (task-13's verb) when the CLI or the plugin looks missing.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "A test in installGuidance.test.ts runs `bs init` on a temp work root and asserts that stdout is exactly the init report as the existing JSON printer serializes it, with nothing added (the whole stdout string compared with that serialization, so a guidance line on stdout fails it), and that the exit code and the files written are the ones the init report lists for that work root; the guidance appears on stderr and names `bs doctor` and the next command.",
+        "The guidance function is covered for a clone and for an installed package (`isClone` true and false): both name `bs doctor`; the installed-package form also gives the plugin step INSTALL.md gives, which is the `/plugin` lines of the first untagged fenced block in INSTALL.md, today `/plugin marketplace add juzser/blacksmith` and `/plugin install blacksmith@blacksmith`. The test reads INSTALL.md at run time and extracts the block by position. A fence opens on a line at column 0 made of exactly three backticks followed by an info string or by nothing, and closes on the next column-0 line of exactly three backticks; an indented fence does not count. The first fence with no info string is the plugin block. The test asserts that the block is not empty and every non-empty line in it starts with `/plugin `, and that the installed-package guidance holds those lines as consecutive lines, each equal to the doc's, in the doc's order. A change to those lines in INSTALL.md fails the test until the guidance follows.",
+        "The `ui.not-built` message comes from one pure function given the expected server entry path and `isClone`: from a clone it still names `pnpm build:server`; from an installed package it names no pnpm script (an installed package has none to run) and gives the install command INSTALL.md gives for the package, which is the single line of the first `bash` fenced block in INSTALL.md (the first fence, by the rule in the criterion above, whose info string is exactly `bash`), today `npm i -g @juzser/blacksmith`. The test extracts that block by position, asserts it holds exactly one non-empty line, and asserts the installed-package message contains that line exactly, so a change to it in INSTALL.md fails the test until the message follows. The error code stays `ui.not-built`; existing tests pass unchanged.",
+        "SKILL.md gains one preflight line in its body: when a `bs` command is not found or the plugin looks missing, run `bs doctor` and act on the fix lines it prints. docCommands.test.ts resolves `bs doctor` there; `bash scripts/check.sh` passes, with every SKIP named."
+      ],
+      "claims": [
+        "factory/orchestrator/src/installGuidance.ts",
+        "factory/orchestrator/test/installGuidance.test.ts",
+        "factory/orchestrator/src/cli.ts",
+        ".claude/skills/bs/SKILL.md"
+      ],
+      "budget": {
+        "tokens": 120000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "installGuidance.ts holds pure functions whose inputs (clone or installed, the expected server entry path) are parameters; cli.ts passes `IS_CLONE` and only writes the strings.",
+          "Guidance after init is written to stderr; no change to init's stdout, exit code or files written.",
+          "The `ui.not-built` error keeps its code and its cause; only its message text comes from the new function.",
+          "Do not touch installCheck.ts, `bs doctor`, usage.ts or INSTALL.md: task-13 owns them. Read INSTALL.md only to quote it."
+        ],
+        "nonfunctional_clauses": [
+          "TDD: write each new test first, run it and watch it fail for the stated reason, then implement until it passes.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .`; report each exit code and the tail of each output.",
+          "Also run `bash scripts/check.sh` and read the tail of its output: a printed SKIP is not an OK, so name every skipped step.",
+          "Keep every existing export of cli.ts.",
+          "Leave the `description:` frontmatter of SKILL.md as it is: the preflight line goes in the body. Write no backticked dotted name in it other than an error code the code raises.",
+          "No other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, test fixture included; fixtures use placeholder paths.",
+          "Add no runtime or dev dependency.",
+          "Do not edit CHANGELOG.md: task-16 is its sole owner this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-16 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/cli.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "dependsOn": "bs-review/task-1-guard-git-config-env",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-5-effectiveness-fold",
+      "dependsOn": "bs-review/task-4-transcript-tokens",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "dependsOn": "bs-review/task-5-effectiveness-fold",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "dependsOn": "bs-review/task-6-report-export-renderer",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "dependsOn": "bs-review/task-17-init-next-steps-and-messages",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-9-trial-task-corpus",
+      "dependsOn": "bs-review/task-8-trial-sample-app",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-10-trial-recording-harness",
+      "dependsOn": "bs-review/task-4-transcript-tokens",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-10-trial-recording-harness",
+      "dependsOn": "bs-review/task-9-trial-task-corpus",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-11-trial-methodology-doc",
+      "dependsOn": "bs-review/task-5-effectiveness-fold",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-11-trial-methodology-doc",
+      "dependsOn": "bs-review/task-9-trial-task-corpus",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-14-plugin-guard-opt-in",
+      "dependsOn": "bs-review/task-12-package-ships-dashboard",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-7-stats-effectiveness-and-export-cli",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-11-trial-methodology-doc",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-12-package-ships-dashboard",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-17-init-next-steps-and-messages",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-13-doctor-install-check",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-17-init-next-steps-and-messages",
+      "dependsOn": "bs-review/task-13-doctor-install-check",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-15-readme-quickstart-descriptions",
+      "dependsOn": "bs-review/task-14-plugin-guard-opt-in",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-15-readme-quickstart-descriptions",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-2-guard-xargs-pipes-readonly-search",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-3-delegation-continuation",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-review/task-16-claims-matrix-and-changelog",
+      "dependsOn": "bs-review/task-10-trial-recording-harness",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "open_questions": [],
+  "planner_notes": [
+    "Slicing: 17 tasks over 5 waves; widest wave 7. W1: 1, 3, 4, 6, 8, 12, 13. W2: 2, 5, 9, 14, 17. W3: 7, 10, 11. W4: 15. W5: 16. Cuts follow the import graph: the guard (policy.ts), delegation (delegation.ts), transcript tokens (new module + ui/server/src/cliSessions.ts), the effectiveness fold and renderer (new modules), the trial kit (trial/**, outside the root import graph), packaging (package.json), the install check (installCheck.ts + cli.ts, task-13) and the install guidance (installGuidance.ts + cli.ts, task-17). The install work is two tasks so that each fits its caps: 13 adds `bs doctor`, 17 adds the guidance after `bs init`, the `ui.not-built` wording and the SKILL.md preflight line.",
+    "Hub serialization: policy.ts is claimed by tasks 1 and 2, so 2 depends on 1 (claim-order) and both promise keeps_exports on policy.ts. cli.ts is claimed by 13, 17 and 7, and usage.ts by 13 and 7, so they chain 13 -> 17 -> 7: 17 -> 13 is an artifact edge (17's guidance and SKILL.md line name `bs doctor`, which 13 adds) that also serializes cli.ts, and 7 -> 17 is claim-order (7 also needs 5 and 6). All three promise keeps_exports on cli.ts; 13 and 7 also on usage.ts. package.json is claimed by 12, 14, 15 and 16 and packaging.test.ts by 12 and 14, so they chain 12 -> 14 -> 15 -> 16. README.md, the manifests and descriptions.test.ts are claimed by 15 and 16 (16 after 15). CHANGELOG.md has one owner, task-16; every other task puts its user-facing note in its result `notes`.",
+    "serialize-always: policy.ts is a hub claimed by tasks 1 and 2. It is not in worktree.yml serialize_always_globs and adding it would be a policies change, which this plan does not make; the plan serializes it with the claim-order edge 1 -> 2 instead (overlapping claims are never scheduled together anyway). pnpm-lock.yaml, which the globs already cover, is claimed by task-12 alone.",
+    "Why the docs tail is a chain (15 -> 16): the README first screen, quickstart and descriptions are written once after G1 (task-7), G2's methodology (task-11) and G3 (tasks 12-14) land, and the claims matrix audits that final copy, so it cannot run beside it. Tasks 2, 3 and 10 also feed 16 because 16 writes their CHANGELOG entries and audits the claims they back.",
+    "Edges that are dependencies, not claim order: 5 needs 4's reader; 7 needs 5's fold and 6's renderers; 9 needs 8's app; 10 needs 4's reader and 9's manifests; 11 needs 9's task kinds and 5's metric definitions; 17 needs 13's `bs doctor`; 15 needs the verbs and docs of 7, 11, 13, 14 and 17 (13 directly for `bs doctor` in the quickstart, 17 for the flow after `bs init`) and the package change of 12.",
+    "Read back from the project (claims impact over all 17 ids, against main 0e845840): status clean, 0 unplanned crossings, 0 unresolved. Two crossings run on keeps_exports promises: task-1's policy.ts and task-3's delegation.ts are imported by cli.ts (task-7); both producers only add internals. task-4 promises keeps_exports on ui/server/src/cliSessions.ts (activeScope.ts, app.ts and its tests import it). The new files of tasks 2, 5, 6, 8-11, 13 and 15-17 do not exist yet, so impact lists them as claims without files. wave schedule: depth 5, widest 7, 17 scheduled, none stalled.",
+    "New runtime dependencies: none added. hono and @hono/node-server move from devDependencies to dependencies because ui/server/dist imports them at run time once it ships. Operator answer: they move into `dependencies` as task-12 plans, and there is no bundling task, because the shipped dashboard server imports them at run time (see the operator-answers note below).",
+    "Package size (measured with du on main 0e845840): ui/dist 676K, ui/server/dist 208K, factory/orchestrator/dist 3.7M. Task-12 reports the real `npm pack --dry-run` size.",
+    "agent-bench decision: the overlap is G2's task corpus with FAIL_TO_PASS / PASS_TO_PASS checks (task-9) and the recording harness (task-10). Left to agent-bench: epochs and K repeats, error-bar statistics (paired differences, power), the version stamp on dispatch_decision, and replaying a golden corpus. The trial kit is built so agent-bench can reuse the corpus format and harness records later, but this epic does not claim agent-bench work. Operator answer: bs-review attaches to a new milestone, \"worth-it evidence\", not agent-bench; the orchestrator adds it to roadmap.md, and this plan does not edit that file (see the operator-answers note below).",
+    "Trial placement: trial/sample-app, trial/tasks and trial/harness live in-repo, outside npm `files` and outside the root biome/vitest/tsconfig scope; their own checks are node:test run by the task. The harness logic sits in factory/orchestrator/src/trial so the root gates test it. Operator answer: the sample app stays in-repo under trial/sample-app/; a separate public repository is decided later, outside this epic (see the operator-answers note below).",
+    "Trial runs: no task runs the trial or needs numbers from runs; every number in docs/trial/results.md and any README demo is NOT MEASURED until a real run exists, and a single real run is labelled single-run. Operator answer: running the trial, and its spend, are the operator's call, decided later (see the operator-answers note below).",
+    "Policies: operator answer, no task edits factory/policies/* (see the operator-answers note below); any need stops the task with \"needs operator review of a policies change\".",
+    "Plugin guard switch: operator answer, only the tested switch, the environment variable `BS_PLUGIN_GUARD=1`, is documented (see the operator-answers note below). Whether a settings-file `env` entry reaches plugin hooks is unverified, so task-14's doc does not present one as a switch, and under its criterion 6 it says plainly that such an entry is not a tested way to set it; the doc claims only what its tests cover.",
+    "ui_affecting is false on every task: no task changes what a dashboard user sees (task-4 swaps cliSessions.ts internals with numbers pinned unchanged). trial/sample-app's HTML and JS are a trial fixture, not the Blacksmith UI.",
+    "Wording rule: tasks 1, 2 and 16 describe the policy changes as neutral behaviour (\"reads X the same way as Y\") in titles, criteria, code, tests, commits, the PR and CHANGELOG, with no adversarial framing and no description of an earlier version as defective.",
+    "Security review: tasks 1, 2 and 14 change enforcement and should get the security reviewer in their review pass.",
+    "Gates: every code task runs the full root `pnpm run test`, typecheck, typecheck:test and biome; tasks touching ui/server also run typecheck:server and test:server; doc tasks, and every task that adds or edits a tracked Markdown file (3, 7-11, 13-17), run `bash scripts/check.sh` and name every SKIP, because the doc guards walk every tracked Markdown file.",
+    "Budget estimate (medium tier, cap 16M, alarm 11.2M): coder caps sum to 3.10M (3,100,000 over 17 tasks; round 3 raised task-7 from 200k/620 to 210k/660 for its notice criterion and the kept-path test); with tester, reviewer, verifier and grader per task (about 270k a task across the four) and the security reviewer on tasks 1, 2 and 14, a first-pass epic is about 8.0M, leaving room for one bounce on roughly a third of the tasks before the alarm.",
+    "Live guard while working on the guard: the epic's own sessions run the repo guard, which reads Bash command text. Tasks 1, 2 and 14 therefore write test inputs holding literal git commands with Write/Edit, not through Bash; the planner hit this while drafting this plan (a Bash line quoting a read-only search example was refused on main), which is the behaviour task-2 changes.",
+    "Why each chain is a chain (depth 5 comes from the docs tail; widest 7 shows everything else runs side by side): (a) 1 -> 2: both edit the force-push and history-rewrite matching in policy.ts, a hub, so they run one after the other (claim-order), not concurrently. (b) 4 -> 5 -> 7: the fold (5) consumes the transcript-token reader's new export (4), and the CLI verbs (7) consume the fold and 6's renderers; each link is a new export the next task imports. 13 -> 17 -> 7: 17 names 13's `bs doctor` (artifact) and both edit cli.ts, and 7 follows 17 in claim order on the cli.ts/usage.ts hub. (c) 8 -> 9 -> {10, 11}: the task corpus targets the sample app's code, and the harness and methodology read the corpus manifests and task kinds; 10 also needs 4's reader and 11 needs 5's metric definitions. (d) 12 -> 14: claim-order on package.json and packaging.test.ts. (e) {7, 11, 12, 13, 14, 17} -> 15 -> 16: docs are written last, against shipped verbs and docs, and the claims matrix audits the final README copy and writes every CHANGELOG entry, so 16 also takes edges from 2, 3 and 10.",
+    "Operator answers (2026-10-19; all six questions are resolved, so open_questions is now empty and the answers live in this note only): (1) dashboard dependencies: hono and @hono/node-server move into `dependencies` (task-12), with no bundling task, because the shipped dashboard server imports them at run time. (2) milestone: bs-review attaches to a new milestone, \"worth-it evidence\", not agent-bench; the orchestrator adds it to roadmap.md, and this plan does not edit that file. (3) trial runs and spend: left to the operator, decided later; no task runs the trial. (4) sample app location: stays in-repo under trial/sample-app/; a separate public repository is decided later. (5) plugin guard switch: only the tested switch, the environment variable `BS_PLUGIN_GUARD=1`, is documented; a settings-file `env` entry is not documented as a switch. (6) policies: no task edits factory/policies/*; a task that finds it needs to stops and raises \"needs operator review of a policies change\".",
+    "Round-2 decisions: (a) `~/x` is kept as written by the export redactor (task-6): it names no user, and expanding it would need the running home. (b) An unreadable configuration value is refused whatever its key (task-1), so the rule holds no list of keys. (c) Path fixtures use placeholder users (`example-user`, `example-sentinel`) and a placeholder home (`/opt/example-home`), so the redaction tests need no real home path (tasks 6 and 7). (d) The doc-guard clauses say \"dotted name\", so the effort keyword scan raises no extra security trigger on tasks 8, 9, 10 and 17.",
+    "Round-3 decisions: (a) task-1 reads `GIT_CONFIG_PARAMETERS` in both entry spellings, `'key=value'` and `'key'='value'`, and in a value mixing them, each case a named test. (b) task-6 replaces a dash-encoded slug whole, from `-Users-` or `-home-` up to the next whitespace, `/`, quote character or the end of the string, with the one placeholder `<home-slug>`; the test pattern follows the same span (for example `-(?:Users|home)-[^\\s/\"'\\x60]*`). (c) task-6 ignores an empty `homeDir` and a `homeDir` of `/`, and matches `/root` only as a whole segment, `/root(?![A-Za-z0-9._-])`. (d) Other absolute paths (for example `/api/tasks`, `/usr/bin/git`) name no user and are kept as written (tasks 6 and 7); the export hides home-directory and temp paths and the user names in them only. (e) Export notice (task-7): the Markdown first line is `> Review this export before you share it.` and the JSON form's first top-level key is `notice`, holding the same sentence without the `> `. (f) Trial checks (tasks 9 and 10): the manifest fields `fail_to_pass` and `pass_to_pass` name the task-relative directories `check/fail_to_pass` and `check/pass_to_pass`; one test is one file holding one top-level `test()`, run alone with `node --test <file>`, its exit code being its result. (g) Claims extraction (task-16): a table body row, a bullet, a sentence (paragraph text, `<br>` read as whitespace and `<sub>` text included, split by `(?<=[.!?])\\s+(?=[A-Z\"(])`), and a whole `<pre>` block or non-command fenced block are each one claim; a command fence (info string `bash`, `sh`, `shell`, `zsh` or `console`, or every line a command) is not. (h) INSTALL.md strings (task-17): the tests take the `/plugin` lines of the first untagged column-0 fence and the single line of the first `bash` fence, by position, and pin the guidance equal to them."
+  ]
+}

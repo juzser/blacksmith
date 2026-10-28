@@ -64,6 +64,7 @@ import {
   runIndependentFinder,
 } from './crossFinding.js';
 import type { TickOptions } from './daemon.js';
+import type { Effectiveness } from './db/effectiveness.js';
 import type { DbOpts } from './db/projector.js';
 import { formatDeclaredArtifactLine } from './declaredArtifactLine.js';
 import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
@@ -79,6 +80,7 @@ import {
   appendEvent,
   EventError,
   type EventOpts,
+  eventTaskId,
   filterEvents,
   followEvents,
   listSessionIds,
@@ -106,6 +108,7 @@ import {
   AMEND_PENDING_STATUS,
   AMENDED_STATUS,
   findingScope,
+  foldFindings,
   listFindings,
   mintFindings,
   OPEN_FINDING_STATUSES,
@@ -136,6 +139,8 @@ import {
   type WorktreeFingerprint,
 } from './immutability.js';
 import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
+import { doctorExitCode, formatChecks, realDeps, runChecks } from './installCheck.js';
+import { initGuidance, uiNotBuiltMessage } from './installGuidance.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
@@ -154,6 +159,7 @@ import {
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
   DOTENV_PATH,
+  IS_CLONE,
   LESSONS_MD_PATH,
   lessonsReadPath,
   REPO_ROOT,
@@ -234,7 +240,7 @@ import {
   unadmissibleTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
-import { epicOfTaskId } from './taskId.js';
+import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
@@ -1412,6 +1418,367 @@ async function nextWaveInputFrom(
   };
 }
 
+// ---- `stats effectiveness` and `report export` ------------------------------
+
+const EXPORT_NOTICE = 'Review this export before you share it.';
+
+/** The default is resolved when the verb runs, never earlier: flag, then $CLAUDE_CONFIG_DIR, then ~/.claude. */
+function claudeConfigDirFor(flag: string | undefined): string {
+  if (flag) return path.resolve(flag);
+  const env = process.env.CLAUDE_CONFIG_DIR;
+  return env ? path.resolve(env) : path.join(homedir(), '.claude');
+}
+
+/** One label for a token total in every form: a floor reads "at least <n>". */
+function tokenLabel(t: { used: number; complete: boolean }): string {
+  return t.complete ? `${t.used}` : `at least ${t.used}`;
+}
+
+const percent = (v: number | null): number | null => (v === null ? null : Math.round(v * 100));
+
+function describeEffectiveness(e: Effectiveness, scope: string): string {
+  const tokens = e.tokens;
+  const lines = [
+    `Effectiveness for ${scope}`,
+    '',
+    tokens.complete
+      ? 'Tokens (every transcript was read):'
+      : 'Tokens (some transcripts were missing or partial, so these are floors):',
+  ];
+  const row = (name: string, t: { used: number; complete: boolean }): string =>
+    `  ${name}: ${tokenLabel(t)} tokens`;
+  for (const [id, t] of Object.entries(tokens.byTask)) lines.push(row(`task ${id}`, t));
+  for (const [id, t] of Object.entries(tokens.byRole)) lines.push(row(`role ${id}`, t));
+  lines.push(row('unattributed (main thread, no dispatch)', tokens.unattributed));
+  lines.push(
+    `  task results with measured tokens: ${tokens.resultsMeasured} of ${
+      tokens.resultsMeasured + tokens.resultsUnmeasured
+    }`,
+    '',
+    `Escaped defects: ${e.escapedDefects.count} counted, ${e.escapedDefects.pending} pending`,
+    '',
+    'Finding precision (confirmed of decided):',
+  );
+  for (const [role, p] of Object.entries(e.precision)) {
+    const v = percent(p.value);
+    lines.push(
+      `  ${role}: ${v === null ? 'NOT MEASURED' : `${v}%`} (${p.confirmed} confirmed, ${p.refuted} refuted, ${p.waived} waived)`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+type CheckStateName = 'passed' | 'failed' | 'not-run' | 'unknown';
+
+/** The state a task's latest event of one check type says, or `not-run` when it has none. */
+function checkStateOf(
+  events: readonly StoredEvent[],
+  taskId: string,
+  eventType: string,
+  read: (payload: Record<string, unknown>) => CheckStateName,
+): CheckStateName {
+  const last = events.filter(
+    ({ record }) =>
+      record.event_type === eventType && taskIdsMatch(eventTaskId(record) ?? undefined, taskId),
+  );
+  const latest = last[last.length - 1];
+  if (latest === undefined) return 'not-run';
+  const payload = latest.record.payload;
+  return typeof payload === 'object' && payload !== null && !Array.isArray(payload)
+    ? read(payload as Record<string, unknown>)
+    : 'unknown';
+}
+
+const CHECKS: ReadonlyArray<{
+  check: string;
+  eventType: string;
+  read: (p: Record<string, unknown>) => CheckStateName;
+}> = [
+  {
+    check: 'tests',
+    eventType: 'testgate-result',
+    read: (p) => (p.pass === true ? 'passed' : p.pass === false ? 'failed' : 'unknown'),
+  },
+  {
+    check: 'grader',
+    eventType: 'grader-verdict',
+    read: (p) => (p.verdict === 'met' ? 'passed' : p.verdict === 'not-met' ? 'failed' : 'unknown'),
+  },
+  {
+    check: 'gate',
+    eventType: 'gate-outcome',
+    read: (p) =>
+      p.outcome === 'pass' || p.outcome === 'pass-with-waivers-pending'
+        ? 'passed'
+        : p.outcome === 'blocked'
+          ? 'failed'
+          : 'unknown',
+  },
+];
+
+interface ExportTokenRow {
+  id: string;
+  used: number;
+  complete: boolean;
+  label: string;
+}
+
+interface ExportModel {
+  notice: string;
+  session: string;
+  lineage: boolean;
+  digest: string | null;
+  tokens: {
+    complete: boolean;
+    byTask: ExportTokenRow[];
+    byRole: ExportTokenRow[];
+    unattributed: ExportTokenRow;
+  };
+  escapedDefects: {
+    count: number;
+    pending: number;
+    items: { taskId: string; findingId: string | null; kind: string; state: string }[];
+  };
+  precision: {
+    role: string;
+    value: number | null;
+    confirmed: number;
+    refuted: number;
+    waived: number;
+  }[];
+  findings: { id: string; task: string; status: string; severity: string; summary: string }[];
+  checks: { task: string; title: string | null; check: string; state: CheckStateName }[];
+}
+
+function buildExportModel(
+  events: readonly StoredEvent[],
+  e: Effectiveness,
+  scope: { session: string; lineage: boolean; digest: string | null },
+): ExportModel {
+  const tokenRow = (id: string, t: { used: number; complete: boolean }): ExportTokenRow => ({
+    id,
+    used: t.used,
+    complete: t.complete,
+    label: tokenLabel(t),
+  });
+  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const titles = new Map<string, string>();
+  const taskIds: string[] = [];
+  const checkTypes = new Set(CHECKS.map((c) => c.eventType));
+  for (const { record } of events) {
+    const seen = eventTaskId(record);
+    if (seen === null) continue;
+    // A bare id and its qualified form are one row, under the id first seen.
+    const id = taskIds.find((t) => taskIdsMatch(t, seen)) ?? seen;
+    if (record.event_type === 'task-added') {
+      const title = (record.payload as Record<string, unknown>).title;
+      if (typeof title === 'string' && !titles.has(id)) titles.set(id, title);
+    }
+    if (
+      (record.event_type === 'task-added' || checkTypes.has(record.event_type)) &&
+      !taskIds.includes(id)
+    ) {
+      taskIds.push(id);
+    }
+  }
+  return {
+    notice: EXPORT_NOTICE,
+    session: scope.session,
+    lineage: scope.lineage,
+    digest: scope.digest,
+    tokens: {
+      complete: e.tokens.complete,
+      byTask: Object.entries(e.tokens.byTask).map(([id, t]) => tokenRow(id, t)),
+      byRole: Object.entries(e.tokens.byRole).map(([id, t]) => tokenRow(id, t)),
+      unattributed: tokenRow('unattributed', e.tokens.unattributed),
+    },
+    escapedDefects: {
+      count: e.escapedDefects.count,
+      pending: e.escapedDefects.pending,
+      items: e.escapedDefects.items.map((i) => ({
+        taskId: i.taskId,
+        findingId: i.findingId ?? null,
+        kind: i.kind,
+        state: i.state,
+      })),
+    },
+    precision: Object.entries(e.precision).map(([role, p]) => ({
+      role,
+      value: p.value,
+      confirmed: p.confirmed,
+      refuted: p.refuted,
+      waived: p.waived,
+    })),
+    findings: foldFindings([...events]).map((f) => ({
+      id: f.finding_id,
+      task: f.task_id,
+      status: text(f.finding_status),
+      severity: text(f.severity),
+      summary: text(f.summary),
+    })),
+    checks: taskIds.flatMap((task) =>
+      CHECKS.map((c) => ({
+        task,
+        title: titles.get(task) ?? null,
+        check: c.check,
+        state: checkStateOf(events, task, c.eventType, c.read),
+      })),
+    ),
+  };
+}
+
+/** Every string in the model goes through the redactor once; both forms render from the result. */
+function redactModel<T>(
+  value: T,
+  homeDir: string,
+  redact: (s: string, o: { homeDir: string }) => string,
+): T {
+  if (typeof value === 'string') return redact(value, { homeDir }) as T;
+  if (Array.isArray(value)) return value.map((v) => redactModel(v, homeDir, redact)) as T;
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, redactModel(v, homeDir, redact)]),
+    ) as T;
+  }
+  return value;
+}
+
+async function renderExportMarkdown(m: ExportModel, homeDir: string): Promise<string> {
+  const { renderChecksTable, renderMetricsTable } = await import('./reportExport.js');
+  const opts = { homeDir };
+  const oneLine = (s: string): string => s.replace(/\s*\n\s*/g, ' ');
+  const tokenLines = (rows: ExportTokenRow[]): string[] =>
+    rows.length === 0 ? ['- none'] : rows.map((r) => `- ${r.id}: ${r.label} tokens`);
+  const parts = [
+    `> ${m.notice}`,
+    '',
+    '# Report export',
+    '',
+    `Scope: session ${m.session}${m.lineage ? ' and its lineage' : ''}`,
+    '',
+  ];
+  if (m.digest !== null) parts.push('## Digest', '', m.digest.trimEnd(), '');
+  parts.push(
+    `## Tokens (${m.tokens.complete ? 'complete' : 'incomplete: totals are floors'})`,
+    '',
+    'By task:',
+    ...tokenLines(m.tokens.byTask),
+    '',
+    'By role:',
+    ...tokenLines(m.tokens.byRole),
+    '',
+    'Unattributed (main thread, no dispatch):',
+    ...tokenLines([m.tokens.unattributed]),
+    '',
+    renderMetricsTable(
+      'Escaped defects',
+      [
+        { label: 'Counted', value: m.escapedDefects.count },
+        { label: 'Pending', value: m.escapedDefects.pending },
+      ],
+      opts,
+    ),
+    renderMetricsTable(
+      'Finding precision',
+      m.precision.map((p) => ({ label: p.role, value: percent(p.value), unit: '%' })),
+      opts,
+    ),
+    '## Findings',
+    '',
+    ...(m.findings.length === 0
+      ? ['- none']
+      : m.findings.map(
+          (f) => `- ${f.id} (${f.task}, ${f.status}, ${f.severity}): ${oneLine(f.summary)}`,
+        )),
+    '',
+    renderChecksTable(
+      'Check states',
+      m.checks.map((c) => ({
+        task: c.title === null ? c.task : `${c.task} - ${c.title}`,
+        check: c.check,
+        state: c.state,
+      })),
+      opts,
+    ),
+  );
+  return `${parts.join('\n').trimEnd()}\n`;
+}
+
+async function runEffectivenessVerb(
+  action: 'effectiveness' | 'export',
+  flags: Record<string, string>,
+): Promise<number> {
+  const eventOpts = eventOptsFromFlags(flags);
+  let sessionId: string;
+  let lineage: boolean;
+  if (action === 'effectiveness') {
+    const { session, lineage: chain } = flags;
+    if ((session === undefined) === (chain === undefined)) {
+      throw new SmithError(
+        'cli.usage',
+        `Name exactly one of --session <id> or --lineage <id>. Usage: ${usageFor('stats effectiveness')}`,
+        {},
+      );
+    }
+    sessionId = (session ?? chain) as string;
+    lineage = chain !== undefined;
+  } else {
+    sessionId = requireFlag(flags, 'session');
+    lineage = flags.lineage === 'true';
+  }
+  requireSession(sessionId, eventOpts);
+  const events = lineage
+    ? await readLineageEvents(sessionId, eventOpts)
+    : await readEvents(sessionId, eventOpts);
+
+  const configDir = claudeConfigDirFor(flags['claude-config-dir']);
+  const { effectiveness } = await import('./db/effectiveness.js');
+  const { readSessionTokens } = await import('./transcriptTokens.js');
+  const result = await effectiveness(events, {
+    readTokens: (cliSessionId) => readSessionTokens({ configDir, cliSessionId }),
+  });
+  const scope = `${lineage ? 'the lineage of session' : 'session'} ${sessionId}`;
+
+  if (action === 'effectiveness') {
+    if (flags.json === 'true') printJson(result);
+    else process.stdout.write(describeEffectiveness(result, scope));
+    return 0;
+  }
+
+  let digest: string | null = null;
+  if (flags.digest !== undefined) {
+    try {
+      digest = readFileSync(flags.digest, 'utf8');
+    } catch (err) {
+      throw new SmithError(
+        'cli.usage',
+        `Cannot read --digest file: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          flag: 'digest',
+        },
+      );
+    }
+  }
+  const { redact } = await import('./reportExport.js');
+  const homeDir = homedir();
+  const model = redactModel(
+    buildExportModel(events, result, { session: sessionId, lineage, digest }),
+    homeDir,
+    redact,
+  );
+  const body =
+    flags.json === 'true'
+      ? `${JSON.stringify(model, null, 2)}\n`
+      : await renderExportMarkdown(model, homeDir);
+  if (flags.out !== undefined) {
+    writeFileSync(flags.out, body, 'utf8');
+    printJson({ written: path.resolve(flags.out) });
+  } else {
+    process.stdout.write(body);
+  }
+  return 0;
+}
+
 async function main(): Promise<number> {
   // bs-rename, operator decision 3: a no-op unless argv[1]'s basename is the
   // deprecated `smith`, in which case it writes one line to stderr, never
@@ -2205,10 +2572,20 @@ async function main(): Promise<number> {
     if (report.claudeCaps.restartNeeded || report.claudeWindow.restartNeeded) {
       process.stderr.write('bs: restart Claude Code for the new settings to take effect\n');
     }
+    // Guidance goes to stderr so init's stdout stays the JSON report alone.
+    process.stderr.write(initGuidance(IS_CLONE));
     // A default that did not ship is a packaging defect, not an operator
     // error: report it as red rather than leaving them to notice later that
     // the questionnaire they were told to answer is not there.
     return report.files.some((file) => file.status === 'missing-default') ? 1 : 0;
+  }
+
+  if (namespace === 'doctor') {
+    const checks = runChecks(realDeps(REPO_ROOT));
+    const exitCode = doctorExitCode(checks);
+    if (flags.json === 'true') printJson({ checks, ok: exitCode === 0 });
+    else process.stdout.write(formatChecks(checks));
+    return exitCode;
   }
 
   if (namespace === 'new') {
@@ -5215,11 +5592,9 @@ async function main(): Promise<number> {
     try {
       mod = await import(pathToFileURL(serverEntry).href);
     } catch (err) {
-      throw new SmithError(
-        'ui.not-built',
-        `ui/server is not built (expected ${serverEntry}). Run "pnpm build:server" first.`,
-        { cause: err instanceof Error ? err.message : String(err) },
-      );
+      throw new SmithError('ui.not-built', uiNotBuiltMessage(serverEntry, IS_CLONE), {
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
     const dbPath = flags.db ?? STATE_DB_PATH;
     const stateDir = flags['state-dir'];
@@ -5285,6 +5660,13 @@ async function main(): Promise<number> {
     const result = await applyDb(dbPath, sessionId, dbOptsFromFlags(flags));
     printJson(result);
     return 0;
+  }
+
+  if (
+    (namespace === 'stats' && action === 'effectiveness') ||
+    (namespace === 'report' && action === 'export')
+  ) {
+    return runEffectivenessVerb(action, flags);
   }
 
   if (namespace === 'stats') {

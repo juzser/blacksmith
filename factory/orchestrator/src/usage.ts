@@ -225,6 +225,15 @@ export const COMMANDS: readonly CommandDoc[] = [
       'file the factory ships a default of for you to edit. Idempotent; a clone needs none of it.',
   },
   {
+    command: 'doctor',
+    positionals: '',
+    flags: '[--json]',
+    summary:
+      'Check the install: Node, pnpm, git, the bs version, the claude CLI, the Blacksmith plugin ' +
+      'and the built dashboard, each ok, missing or unknown with a one-line fix. Reads, never ' +
+      'installs. Exit 1 when any check is missing.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',
@@ -962,6 +971,22 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `[--since <iso>] ${STATS}`,
     summary: 'Cross-provider judge agreement, for calibration.',
+  },
+  {
+    command: 'stats effectiveness',
+    positionals: '',
+    flags:
+      '[--session <id>] [--lineage <id>] [--claude-config-dir <dir>] [--state-dir <dir>] [--json]',
+    summary:
+      'Tokens per task and role (an incomplete total reads "at least <n>"), escaped defects, and finding precision per role, folded from the event log and the session transcripts. Name exactly one of --session (that log) or --lineage (that session and every session it continues). The default config directory is $CLAUDE_CONFIG_DIR, then ~/.claude. --json prints the fold as JSON.',
+  },
+  {
+    command: 'report export',
+    positionals: '',
+    flags:
+      '--session <id> [--lineage] [--digest <file>] [--out <file>] [--claude-config-dir <dir>] [--state-dir <dir>] [--json]',
+    summary:
+      'Opt-in, redacted Markdown export of a report digest, the effectiveness metrics and per-task check states (tests, grader, gate: passed, failed, not run, unknown). Home and temp paths and user names are replaced; transcript text is never read. Writes only to stdout or --out; --json prints the same content as JSON. Review the export before you share it.',
   },
 ];
 

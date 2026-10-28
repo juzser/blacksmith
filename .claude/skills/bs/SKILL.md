@@ -19,6 +19,9 @@ never embeds a role prompt** — the templates own that; duplicating them here
 would let this file drift out of sync with the real contracts. Cite policy
 files (`factory/policies/*.yml`) rather than restating their numbers.
 
+**Preflight:** when a `bs` command is not found or the plugin looks missing,
+run `bs doctor` and act on the fix lines it prints.
+
 **The project directory is an answer you ask for, not a path this file
 knows.** A project this factory builds is not part of it: `bs new` puts one
 *outside* the factory when no `--target-dir` says otherwise (beside the clone
