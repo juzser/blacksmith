@@ -23,7 +23,8 @@ same without them.
 `bs init` also [raises Claude Code's concurrency caps](#raise-the-concurrency-caps)
 for the project, so a wide wave is not throttled, and sets the
 [compact window](#compact-earlier-on-1m-models) so a long session compacts at
-the policy's 60%. Restart Claude Code afterwards.
+the policy's 60%. Restart every running Claude Code session afterwards: a
+running session and its subagents keep the window they started with.
 
 **To have Blacksmith install itself**, say *"install Blacksmith"* to a Claude
 Code session. This file is a runbook, not a description — every step is a
@@ -120,7 +121,7 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | Command | the block at the top of this file | Part 2 below |
 | You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
-| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart Claude Code once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code; a mod loaded with `--plugin-dir` is the checkout's copy |
+| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart every running Claude Code session once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code (every running session); a mod loaded with `--plugin-dir` is the checkout's copy |
 | Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
 Take the install unless you are hacking on Blacksmith itself.
@@ -243,18 +244,24 @@ and without help a 1M-token session compacts near the full window, around
 967k tokens. The setting `autoCompactWindow` caps the window Claude Code
 compacts against: an integer from 100000 to 1000000, or `"auto"`. The window it
 uses is the smaller of the model's own window and this value, and Claude Code
-compacts 33,000 tokens before the end of it (a 20,000-token output reserve plus
-a 13,000-token buffer).
+compacts 33,000 tokens before the end of it: an output reserve, which is the
+model's maximum output capped at 20,000 tokens (20,000 for every current
+model), plus a 13,000-token buffer.
 
 **What `bs init` writes.** A top-level `autoCompactWindow` of
 `auto_compact_ratio` × 1,000,000 + 33,000, which is 633000 today, into the
 project's `.claude/settings.local.json`, git-excluded like the caps. The 33,000
 adds Claude Code's own margin back, so a 1M-window model compacts at exactly
 60%. Every current model has a 1M window, and a future model with a 1M window
-inherits the value with no new entry. The result is more, shorter windows than
-Claude Code's default; that is the 60% policy, intended. If the policy is
-unreadable or the value falls outside 100000-1000000, nothing is written and
-`bs init` says why.
+inherits the value with no new entry. All of this holds for a session started
+after the keys are written: Claude Code reads the window when a session starts,
+and every subagent takes its parent session's value, so a session already
+running, and every subagent it starts, keeps its old window until it is
+restarted. Running `/autocompact` in it also makes it re-read the settings, but
+that saves a value of yours (see Opting out, below). The result is more,
+shorter windows than Claude Code's default; that is the 60% policy, intended.
+If the policy is unreadable or the value falls outside 100000-1000000, nothing
+is written and `bs init` says why.
 
 **Models with a smaller window.** The value is clamped: a model with a smaller
 window gets the smaller of its window and 633000. The 200k models (Opus 4.0 to
@@ -337,7 +344,10 @@ you. They do not win over `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, which beats every
 settings file, so there bs's lines are merely unused; and
 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` stacks on bs's window rather than replacing
 it. Deleting bs's lines is not an opt-out: the next `bs init` writes them back.
-`/autocompact` changes the window for one session only.
+`/autocompact <value>` saves that value for the session's current model in
+`~/.claude/settings.json`, so it is yours from then on and blocks `bs init`
+like any other value of yours. Accepting Claude Code's own offer to change the
+window saves a value the same way.
 
 **Re-running and upgrading.** `bs init` records what it wrote in
 `.claude/bs-settings-record.json` of the project (git-excluded like
@@ -350,8 +360,9 @@ equal to the record (the policy ratio changed), and changes no file when there
 is nothing to change. If it could not read the settings, could not write them,
 or the policy gave no value, it says so on stderr and the record stays old, so
 the reminder keeps coming. After upgrading the package, re-run `bs init` in
-each project, then restart Claude Code: a running session does not pick the
-change up. `bs session start` prints one line on stderr until you do, naming
+each project, then restart every running Claude Code session: a running
+session does not pick the change up, and its subagents inherit the old window
+too. `bs session start` prints one line on stderr until you do, naming
 the directory that holds the record to run `bs init` in, or the git root when
 there is none. It stays quiet in a subdirectory or a linked worktree of a
 project that is already initialised, and looks no further than that

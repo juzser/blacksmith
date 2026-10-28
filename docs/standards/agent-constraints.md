@@ -296,7 +296,10 @@ M-3).
   writes Claude Code's `autoCompactWindow` (the 60% ratio × the window +
   33,000, with a per-model value for the old 200k models) into the project's
   local settings, so a model whose window the setting reaches compacts at 60%
-  of it. A 4.x model with the `[1m]` add-on takes the 200k value and compacts
+  of it. A session reads the window when it starts and its subagents inherit
+  it, so a session started before the keys were written keeps its old window,
+  subagents included, until restarted.
+  A 4.x model with the `[1m]` add-on takes the 200k value and compacts
   at 120k, about 12% of 1M. It yields to any value you set, once you
   re-run `bs init`; see
   [INSTALL.md](../../INSTALL.md#compact-earlier-on-1m-models). Everything
