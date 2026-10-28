@@ -369,6 +369,46 @@ describe('criteria 12 and 5: the heavy-run fragment', () => {
     expect(body).toMatch(/scoped run[^.]{0,120}directly/i);
   });
 
+  it('starts the run in the background and writes the exit code on a line of its own', () => {
+    const body = flat(fragment());
+    expect(body).toContain('`run_in_background: true`');
+    expect(body).toContain(
+      'bs heavy run --label <task-id>-<role> -- <cmd> > <out> 2>&1; printf \'\\nEXIT=%s\\n\' "$?" >> <out>',
+    );
+  });
+
+  it('makes <out> with a foreground mktemp under state/results, not state/artifacts', () => {
+    const body = flat(fragment());
+    expect(body).toContain('mktemp <work-root>/state/results/<task-id>-<role>-XXXXXX');
+    expect(body).toMatch(/before every start/i);
+    expect(body).toMatch(/foreground call/i);
+    expect(body).toMatch(/outside the worktree/i);
+    expect(body).toMatch(/never `state\/artifacts\/`/);
+  });
+
+  it('waits with bs heavy wait in the foreground and says what decides calling again', () => {
+    const body = flat(fragment());
+    expect(body).toContain('bs heavy wait --file <out>');
+    expect(body).toMatch(/waited for in the foreground|wait in the foreground/i);
+    expect(body).toContain('`"done"`, not the exit code');
+    expect(body).toMatch(/call it again, without re-running the command and without `sleep`/);
+    expect(body).toMatch(/do not end your turn while the run is live/);
+  });
+
+  it('pairs a longer --max-wait-ms with a Bash timeout of 600000', () => {
+    const body = flat(fragment());
+    expect(body).toMatch(
+      /`bs heavy wait --file <out> --max-wait-ms 540000` only together with a Bash `timeout` of 600000/,
+    );
+  });
+
+  it('stops after two not-done calls with no lock holder and reports the tail', () => {
+    const body = flat(fragment());
+    expect(body).toMatch(
+      /Two calls in a row with `"done": false` and `"holder": null` mean the run is gone: report it with the file's tail/,
+    );
+  });
+
   const templates = readdirSync(agentsDir).filter((f) => /^bs-.*\.md$/.test(f));
 
   it('stamps exactly the eleven suite-running templates', () => {
@@ -402,7 +442,7 @@ describe('criteria 12 and 5: the heavy-run fragment', () => {
         /<!-- BEGIN SHARED:heavy-run -->[\s\S]*?<!-- END SHARED:heavy-run -->/,
         '',
       );
-      expect(stripped, f).not.toMatch(/bs heavy run/);
+      expect(stripped, f).not.toMatch(/bs heavy (run|wait)/);
     }
   });
 });

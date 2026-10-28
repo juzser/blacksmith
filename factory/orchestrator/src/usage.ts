@@ -842,6 +842,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Run the command after a bare "--" under the machine-wide heavy lock (exit 75 if the wait times out).',
   },
   {
+    command: 'heavy wait',
+    positionals: '',
+    flags: '--file <out> [--max-wait-ms <ms>]',
+    summary:
+      'Wait for a background heavy run to end its file with EXIT=<n>; exits <n>, or 124 with "done": false at the bound.',
+  },
+  {
     command: 'heavy status',
     positionals: '',
     flags: '',

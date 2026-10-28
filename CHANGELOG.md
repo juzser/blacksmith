@@ -275,14 +275,18 @@ than appearing in it.
   merged as occupied, so `/bs run` admits the next task right after each merge
   rather than when the whole wave drains, and `bs wave check` refuses a task
   already in flight.
-- **`bs heavy run` and `bs heavy status` queue the heavy jobs.** A full suite or
-  e2e run takes one machine-wide lock: `bs gate run`, `bs integration check` and
-  the merge queue take it themselves, `checks.json` marks a check heavy with
-  `"heavy": true` (`test*`, `unit`, `coverage` and `e2e*` names are heavy by
-  default), and `bs heavy run --label <task-id>-<role> -- <cmd>` is the rule
-  for an agent, stamped into the eleven suite-running role templates. A wait
-  past its limit fails `heavy.wait-timeout` naming the holder; step 10 of
-  `wave.md` says how the runner resumes the merge queue after it.
+- **`bs heavy run`, `bs heavy wait` and `bs heavy status` queue the heavy jobs.**
+  A full suite or e2e run takes one machine-wide lock: `bs gate run`,
+  `bs integration check` and the merge queue take it themselves, `checks.json`
+  marks a check heavy with `"heavy": true` (`test*`, `unit`, `coverage` and
+  `e2e*` names are heavy by default). For an agent, the rule stamped into the
+  eleven suite-running role templates starts `bs heavy run --label
+  <task-id>-<role> -- <cmd>` in the background, its output in a fresh file
+  that ends with an `EXIT=<n>` line, and waits with `bs heavy wait --file
+  <out>`, a read-only poll whose every call ends inside the Bash tool's
+  timeout (`"done": false` means call again). A wait past its limit fails
+  `heavy.wait-timeout` naming the holder; step 10 of `wave.md` says how the
+  runner resumes the merge queue after it.
 - **`bs doctor` warns when the concurrency caps are not raised.** The
   `concurrency-caps` check reads the process environment and the project and
   user settings; `INSTALL.md` says `bs init` writes the caps.
