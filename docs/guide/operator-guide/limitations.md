@@ -106,10 +106,6 @@ does wherever else this repo cites it.
   run writes nothing to its output file until it holds the lock, so nothing
   tells the two apart. The stop rule — two not-done waits with no holder —
   covers a run that is gone while the lock is free, and only that.
-- **A gate bounce does not yet count toward a lesson's class.** Lessons are
-  spliced by recurring `error-logged` class (§10), and a gate `blocked`
-  writes only `gate-outcome`, so the fix-round brief after a gate bounce gets
-  no lesson the bounce alone would have earned.
 - **The heavy lock is one machine's.** It serializes full-suite and e2e runs
   of every session on the box it lives on, and nothing across machines.
 - **The trial has not been run.** `docs/trial/methodology.md` and `trial/`

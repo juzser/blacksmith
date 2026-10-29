@@ -3,7 +3,7 @@
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { listSessionIds, readEvents, type StoredEvent } from './events.js';
-import type { RecurrenceWindow } from './lessonRecurrence.js';
+import { isRecurrenceEvent, type RecurrenceWindow } from './lessonRecurrence.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -14,8 +14,9 @@ export interface RecurrenceReaders {
 }
 
 /**
- * Serves epic criterion 3 (store-wide means every session): the `error-logged`
- * events of every session log under `stateDir` whose `ts` lies in the window.
+ * Serves epic criterion 3 (store-wide means every session): the events
+ * `isRecurrenceEvent` admits (`error-logged`, and a blocked `gate-outcome`) of
+ * every session log under `stateDir` whose `ts` lies in the window.
  * A session file whose mtime is older than the window is never opened: every
  * `ts` is stamped at write time, so the file's mtime is never earlier than its
  * newest event (epic-spec D2). One `stat` per file, one read per in-window
@@ -41,7 +42,7 @@ export async function readRecurrenceEvents(
     }
     if (mtimeMs < cutoff) continue;
     for (const event of await read(sessionId, { stateDir })) {
-      if (event.record.event_type === 'error-logged' && Date.parse(event.record.ts) >= cutoff) {
+      if (isRecurrenceEvent(event.record) && Date.parse(event.record.ts) >= cutoff) {
         kept.push(event);
       }
     }
