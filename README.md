@@ -406,20 +406,24 @@ it is unsure of. One epic, one integration PR, merged by you.
 
 ## Safety
 
-Enforced mechanically — a `PreToolUse` policy layer on every command an agent
-runs, plus branch protection — not by trust. Full rules:
+In a clone, and in a plugin install with the
+[plugin guard](docs/guide/plugin-guard.md) turned on, these rules are enforced
+mechanically — a `PreToolUse` policy layer on every command an agent runs,
+plus branch protection — not by trust. A default plugin install has that
+layer off: there, branch protection and the rules the playbooks give the
+agents are what hold. Full rules:
 **[`docs/standards/guardrails.md`](docs/standards/guardrails.md)**.
 
 - **Secrets are environment-only.** `.env.example` is the only committed env
-  file (variable names, never a secret's value). Agents never echo a
-  credential, and in this repo a gitleaks scan in the CI gate blocks a merge
+  file (variable names, never a secret's value). Agents are told never to echo
+  a credential, and in this repo a gitleaks scan in the CI gate blocks a merge
   that carries one. The event logger writes values as given; masking happens
   only at the few points that handle a known credential shape, such as URL
   userinfo in git errors.
 - **Only you merge to `main`.** No agent may push or merge to a protected
-  branch, and force-push is refused on every branch, protected or not — an
-  agent's pushed branch is append-only. Task branches reach the integration
-  branch solely through the serial merge queue.
+  branch, and force-push is refused by that layer on every branch, protected
+  or not — an agent's pushed branch is append-only. Task branches reach the
+  integration branch solely through the serial merge queue.
 - **No autonomous deploy or outbound sends.** Deploys, publishes and message
   sends each need per-invocation approval.
 - **Budgets are declared per role and sized per effort tier.** A medium epic
@@ -489,7 +493,7 @@ version in
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `bs daemon` unattended |
 | [`docs/trial/methodology.md`](docs/trial/methodology.md) | How to compare plain Claude Code with Blacksmith, and what one run can show |
-| [`docs/claims-matrix.md`](docs/claims-matrix.md) | What backs each claim on this page's first screen |
+| [`docs/claims-matrix.md`](docs/claims-matrix.md) | What backs each claim this page makes |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
 
 Agents read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) instead — this
@@ -504,8 +508,8 @@ locally is red there; and several artifacts here are *generated* — see
 
 A pull request merges into `main` only when both CI checks are green, the gate
 and the e2e job: a GitHub ruleset on the default branch requires them, with
-no bypass. Set a pull request to auto-merge (`gh pr merge --auto`) and it
-lands once both pass.
+no bypass. A maintainer can set a pull request to auto-merge
+(`gh pr merge --auto`), and it lands once both checks pass.
 
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) ·
 [`SECURITY.md`](SECURITY.md) ·

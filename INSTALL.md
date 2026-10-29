@@ -459,11 +459,23 @@ within 3 s, the guard asks you instead of allowing the call.
 
 Turning it on is the operator's choice, not a default step. An agent running
 this file may offer it once the package and the plugin are in, and moves on at
-a no. After a yes, check that the hook is reachable:
+a no. After a yes, check that the hook is reachable and decides. Both commands
+only read; the second hands the hook a sample call and runs nothing:
 
 ```bash
 command -v bs-policy-hook    # expect a path; the global package installs it
+echo '{"tool_name":"Bash","tool_input":{"command":"sleep 3"}}' | bs-policy-hook
 ```
+
+**Expect:** a path, then this one line, a deny:
+
+```
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: foreground `sleep` of 3 s. Fix: use a background task or the Monitor tool instead of `sleep`."}}
+```
+
+**If** `command -v` printed nothing, the guard would ask for approval on every
+matched call: install the package, or set `BS_POLICY_HOOK` to the built
+`policyHook.js` and pipe the same line into `node "$BS_POLICY_HOOK"` instead.
 
 The switch is read from the environment Claude Code starts in, so the operator
 sets it in the shell that starts the session (an `env` entry in a settings
@@ -474,12 +486,12 @@ export BS_PLUGIN_GUARD=1
 claude
 ```
 
-**Expect:** in that session, a foreground `sleep 3` in Bash is denied with a
-reason that starts `Blocked: foreground`, and `git status` runs as before.
-**If** `command -v` printed nothing, every matched call asks for approval
-instead: install the package, or set `BS_POLICY_HOOK` to the built
-`policyHook.js`. [`docs/guide/plugin-guard.md`](docs/guide/plugin-guard.md)
-has the switch and the deny rules to copy as a second layer.
+The check inside that session is the operator's, because an agent running
+this file cannot start one: there a foreground `sleep 3` in Bash is denied
+with the reason above, and `git status` runs as before. Report the hook check
+above as run, and this one as the operator's to make, not as passed.
+[`docs/guide/plugin-guard.md`](docs/guide/plugin-guard.md) has the switch and
+the deny rules to copy as a second layer.
 
 #### The mods (optional)
 
@@ -561,8 +573,9 @@ In a clone the work root and the package are one directory, which is what
 makes the two installs one codebase, so `bs init` has no files to seed here.
 It still writes the compact window into the project it runs in (the caps are
 already in the clone's tracked settings, so it adds none there): run it once
-in the clone, and again after a `git pull` that changes them, then restart
-Claude Code.
+in the clone, and again after a `git pull` that changes
+`context_window.auto_compact_ratio` in `factory/policies/budgets.yml`, then
+restart Claude Code.
 
 ---
 

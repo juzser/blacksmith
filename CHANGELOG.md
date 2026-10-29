@@ -1,15 +1,18 @@
 # Changelog
 
 Blacksmith has one versioned artifact and it is not the whole factory. The
-`bs` CLI (`smith` is kept as a deprecated alias) — the binary plus the
-policies, schemas, scaffold templates, agent role files and migrations it
-reads — is published to npm as
-`@juzser/blacksmith`; `package.json` carries that version and a `v<version>`
-git tag marks each publish. Everything else — the `/bs` console, the
-dashboard, the docs, the roadmap — runs from a clone, and the only supported
-revision of the clone is `main`. So this file is not a list of releases — it
-is a list of what landed, in the order it landed, keyed to the milestones in
-[`factory/specs/roadmap.md`](factory/specs/roadmap.md).
+`bs` CLI (`smith` is kept as a deprecated alias) — the binaries plus the
+policies, schemas, scaffold templates, agent role files, `/bs` playbooks,
+migrations and roadmap they read, and the built dashboard that `bs ui serve`
+runs — is published to npm as `@juzser/blacksmith`; `package.json` carries
+that version and a `v<version>` git tag marks each publish. The `/bs` console
+reaches Claude Code as the `blacksmith` plugin, the `.claude/` folder of this
+repository installed through its marketplace, whose manifest carries the same
+version; bs-mod and pr-mod are optional plugins beside it. Everything else —
+the docs, the tests, the sources — is read from a clone, and the only
+supported revision of the clone is `main`. So this file is not a list of
+releases — it is a list of what landed, in the order it landed, keyed to the
+milestones in [`factory/specs/roadmap.md`](factory/specs/roadmap.md).
 
 Dates are the day the roadmap first recorded a milestone as `completed`,
 derived from the development history that preceded this repository. They mark
@@ -27,6 +30,18 @@ entries below record development that predates this repo's git history rather
 than appearing in it.
 
 ### Changed
+
+- **The CLI tests run as ten files, and CI runs e2e in two shards.**
+  `factory/orchestrator/test/cli.test.ts` is split into ten
+  `cli<Area>.test.ts` files, with `test/helpers/cliHarness.ts` for what they
+  share: the same 414 tests, their bodies unchanged. Locally the unit suite's
+  wall time drops from about 469 s to 166 s. CI runs e2e as two shards behind
+  the same required check, `e2e (Playwright, Chromium)`, caches the Chromium
+  download, and no longer fails a run on a failed or hung screenshot upload.
+  On #502's own CI run the gate took 6m04s and the two shards 3m42s and
+  2m50s; on the runs of #499–#501 the gate took 8–13 min and e2e about
+  5 min. CONTRIBUTING.md now says `bash scripts/check.sh` is the whole local
+  gate. Nothing in the npm package changes.
 
 - **The README leads with the factory, not the dashboard.** Its dashboard
   section and screenshots are gone; the README links to
@@ -117,15 +132,15 @@ than appearing in it.
   their form. The hand-kept lesson on result schemas is now
   `dispatch-brief-names-result-schema`.
 
-- **The dashboard only reads.** `bs ui` is for watching the factory; every
-  decision now goes through the CLI. Removed from the dashboard: Home's "Needs
-  you" box, the Waive and Deny buttons on a task's findings, and the approve,
-  edit and reject controls on the Lessons page. Findings and lessons still
-  show, read-only, and a live session still reads "Waiting on you" when it
-  stops on you. Waive or deny a finding with `/bs waivers`; approve, edit or
-  reject a lesson with `/bs lessons`. The dashboard server has no write route
-  left: it answers `405` to any `/api` request that is not `GET` or `HEAD`,
-  and `GET /api/inbox` is gone.
+- **The dashboard only reads.** `bs ui serve` is for watching the factory;
+  every decision now goes through the CLI. Removed from the dashboard:
+  Home's "Needs you" box, the Waive and Deny buttons on a task's findings, and
+  the approve, edit and reject controls on the Lessons page. Findings and
+  lessons still show, read-only, and a live session still reads "Waiting on
+  you" when it stops on you. Waive or deny a finding with `/bs waivers`;
+  approve, edit or reject a lesson with `/bs lessons`. The dashboard server
+  has no write route left: it answers `405` to any `/api` request that is not
+  `GET` or `HEAD`, and `GET /api/inbox` is gone.
 
 ### Fixed
 
@@ -213,8 +228,9 @@ than appearing in it.
   plan with `cli.plan-not-ingested`. Ingest now owes it only when an amendment
   maps the task to a successor.
 
-- **The dashboard after 0.5.0 (#444-#452, #456).** It runs from a clone and is
-  not in the npm package. These fixes bring it closer to the design mock
+- **The dashboard after 0.5.0 (#444-#452, #456).** It ran from a clone at the
+  time and was not in the npm package; from 0.6.0 the package ships it (see
+  *Added*). These fixes bring it closer to the design mock
   (`ui/docs/ds-review.html`) and the spec (`ui/docs/ds-spec.md`):
 
   *Home.* The "Needs you" box reads every project's store. Each row says which
@@ -414,7 +430,7 @@ than appearing in it.
 
 - **The npm package ships the dashboard.** `ui/dist` and `ui/server/dist` are
   built at pack time and `hono` and `@hono/node-server` are regular
-  dependencies, so `bs ui` works after an npm install.
+  dependencies, so `bs ui serve` works after an npm install.
 
 - **An opt-in plugin guard.** With `BS_PLUGIN_GUARD=1` the plugin runs the
   policy hook and always answers before its time limit: a slow or hung hook
@@ -433,13 +449,14 @@ than appearing in it.
   fewer tokens per merged task, more agents at once.** 0.5.1 was bumped in
   the repository (#486) but never tagged or published, so 0.6.0 is the first
   npm release since 0.5.0 and also carries everything the 0.5.1 entry below
-  lists. Seventeen pull requests landed after that bump (#477–#481,
-  #487–#493, #497–#501), and thirty-two entries above this one ship in 0.6.0:
-  under *Changed*, the README and guides pass,
-  `bs lessons for-dispatch` (#501), the 1-hour prompt cache (#489), the
-  lesson ids (#487, #488), the wave-runner, merger and scribe prices (#493),
-  and the concurrency caps (#490, #491) and compact window (#497, #498) that
-  `bs init` writes; under *Fixed*, the Node pin (#492), the four guard entries
+  lists. Twenty pull requests landed after that bump (#477–#481,
+  #487–#493, #495–#502), and thirty-three entries above this one ship in
+  0.6.0: under *Changed*, the CLI test split and e2e shards (#502), the
+  README and guides pass, `bs lessons for-dispatch` (#501), the 1-hour
+  prompt cache (#489), the lesson ids (#487, #488), the wave-runner, merger
+  and scribe prices (#493), and the concurrency caps (#490, #491) and
+  compact window (#497, #498) that `bs init` writes; under *Fixed*, the Node
+  pin (#492), the four guard entries
   and `bs delegation check` on a resumed wave-runner (#499), the verdict
   digest (#500) and the merge queue's landing (#501); and every *Added* entry
   above this one (#499, #501). This entry does not repeat them.
@@ -478,12 +495,13 @@ than appearing in it.
   which the plugin guard runs; `ui/dist` and `ui/server/dist` in `files`; and
   `hono` and `@hono/node-server` as runtime dependencies. `@hono/node-server`
   moves to 2.1.5 (#479) and `drizzle-orm` to 0.45.4 (#481); the other
-  Dependabot bumps (#477, #478, #480) are dev dependencies. Three migrations
-  were added since v0.5.0, and each applies when the store next opens:
-  `0018_events_raw_scope_ts_idx` and `0019_dispatches_scope_ts_idx` (indexes,
-  from 0.5.1), and `0020_lessons_error_class` (a nullable `error_class`
-  column on `lessons`). To upgrade, run `npm i -g @juzser/blacksmith@latest`
-  and `claude plugin marketplace update blacksmith`, then
+  Dependabot bumps (#477, #478, #480, #495, #496) are dev dependencies. Three
+  migrations were added since v0.5.0, and each applies when the store next
+  opens: `0018_events_raw_scope_ts_idx` and `0019_dispatches_scope_ts_idx`
+  (indexes, from 0.5.1), and `0020_lessons_error_class` (a nullable
+  `error_class` column on `lessons`). To upgrade, run
+  `npm i -g @juzser/blacksmith@latest` and
+  `claude plugin marketplace update blacksmith`, then
   `claude plugin update blacksmith` (the `/bs` playbooks, the agent templates
   and the plugin's hooks changed), re-run `bs init` in each project (it
   writes the concurrency caps and the compact window), and restart every
