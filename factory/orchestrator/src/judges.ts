@@ -913,19 +913,26 @@ function notDispatchedMessage(
   return `Role "${input.role}" on ${input.taskId} is on round ${turn.round}, not round ${input.round}.`;
 }
 
+/** What a report would record, once every check that precedes the append has passed. */
+export interface JudgeReportCheck {
+  turn: JudgeTurn;
+  artifactPath: string | null;
+  findingCount: number;
+}
+
 /**
- * Close a judge turn. Refuses unless the role was actually dispatched for the
- * round being reported, so a report cannot invent its own dispatch and make
- * the two sets agree by growing both.
+ * Everything `recordJudgeReport` checks before it appends: the kind, the turn
+ * the report belongs to, the artifact's freshness and its shape. Throws the
+ * same JudgeError codes and writes nothing, so a preflight can ask whether a
+ * report would be accepted without making it.
  */
-export async function recordJudgeReport(
+export function checkJudgeReport(
   input: JudgeReportInput,
-  ctx: EventContext,
+  turns: readonly JudgeTurn[],
   opts: EventOpts = {},
-): Promise<JudgeReport> {
+): JudgeReportCheck {
   assertKindAllowed(input.role, input.kind);
   const kind = input.kind ?? null;
-  const turns = await readJudgeTurns(input.taskId, ctx, opts);
   const forRole = turns.filter(
     (t) => t.role === input.role && taskIdsMatch(t.taskId, input.taskId),
   );
@@ -967,6 +974,21 @@ export async function recordJudgeReport(
     artifactPath === null
       ? 0
       : readJudgeArtifact(artifactPath, input.role, input.taskId, turn.kind, opts);
+  return { turn, artifactPath, findingCount };
+}
+
+/**
+ * Close a judge turn. Refuses unless the role was actually dispatched for the
+ * round being reported, so a report cannot invent its own dispatch and make
+ * the two sets agree by growing both.
+ */
+export async function recordJudgeReport(
+  input: JudgeReportInput,
+  ctx: EventContext,
+  opts: EventOpts = {},
+): Promise<JudgeReport> {
+  const turns = await readJudgeTurns(input.taskId, ctx, opts);
+  const { turn, artifactPath, findingCount } = checkJudgeReport(input, turns, opts);
 
   const stored = await emit(
     JUDGE_REPORT_EVENT_TYPE,

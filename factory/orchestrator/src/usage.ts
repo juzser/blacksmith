@@ -623,6 +623,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. --worktree records that worktree's HEAD and the Result's screenshot artifacts, the freshness evidence the uiux gate stage reads back. Exit 1 when blocked.",
   },
   {
+    command: 'results check',
+    positionals: '<task-id>',
+    flags: `--as <coder|tester|grader|gate> [--result <result.json>] [--worktree <dir>] [--base <ref>] [--plan <file>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--checks <checks.json>] [--project <dir>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--run-all] ${EVENTS_DIR}`,
+    summary:
+      "The gate's paperwork before hand-back, read-only: the same stage checks, none of the tests, and nothing written. --as coder takes --result and --worktree [--base]; --as tester takes --result and --plan; --as grader takes --grader; each also takes [--agent --provider --model-tier], [--artifacts-dir] and the session flags where it reads them, and refuses the gate-only flags (--checks, --run-all, --evidence, --found-by, --found-by-provider, --findings, --no-findings, --uiux-visual, --lessons). --as gate takes the `gate run` line verbatim, reads every file on it, dry-runs the judge closes it would make, includes the uiux stage, and runs no check. Exit 1 when blocked.",
+  },
+  {
     command: 'uiux check',
     positionals: '',
     flags: `--task <task-id> --plan <plan.json> [--worktree <dir>] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
