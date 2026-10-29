@@ -1294,6 +1294,9 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
   if (as === 'tester') requireFlag(flags, 'plan');
   if (as === 'grader') requireFlag(flags, 'grader');
   if (as === 'gate') requireFlag(flags, 'checks');
+  // `gate run` loads the project's crosscheck policy and exits on a malformed
+  // overlay; the preflight surfaces the same SmithError rather than a pass.
+  if (as === 'gate') loadCrosscheckPolicy(undefined, { projectDir: projectDirFromFlags(flags) });
   const ctx = as === 'gate' ? eventContextFromFlags(flags) : undefined;
   const envelope = flags.agent
     ? {

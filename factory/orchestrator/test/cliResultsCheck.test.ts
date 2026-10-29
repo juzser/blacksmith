@@ -840,6 +840,51 @@ describe('bs results check (built binary)', () => {
     );
   });
 
+  describe('crosscheck overlay parity', () => {
+    const overlayProject = async (body: string): Promise<string> => {
+      const project = await mkdtemp(path.join(tmpdir(), 'bs-rc-project-'));
+      await mkdir(path.join(project, '.blacksmith'), { recursive: true });
+      await writeFile(path.join(project, '.blacksmith', 'crosscheck.yml'), body);
+      return project;
+    };
+    const runBoth = async (project: string) => {
+      const line = [...(await gateLine(await build(w, 'clean'))), '--project', project];
+      return {
+        gate: runCli(['gate', 'run', w.taskId, ...line], {}, undefined, w.worktreeDir),
+        check: runCli(
+          ['results', 'check', w.taskId, '--as', 'gate', ...line],
+          {},
+          undefined,
+          w.worktreeDir,
+        ),
+      };
+    };
+
+    it('fails --as gate with the exit code and error code of gate run on a malformed overlay', async () => {
+      const project = await overlayProject('other_knob: true\n');
+      try {
+        const { gate: real, check: preflight } = await runBoth(project);
+        expect(real.status).not.toBe(0);
+        expect(real.stdout + real.stderr).toContain('crosscheck.invalid-overlay');
+        expect(preflight.status).toBe(real.status);
+        expect(preflight.stdout + preflight.stderr).toContain('crosscheck.invalid-overlay');
+      } finally {
+        await rm(project, { recursive: true, force: true });
+      }
+    });
+
+    it('changes nothing for a well-formed overlay', async () => {
+      const project = await overlayProject('providers: {}\n');
+      try {
+        const { check: preflight } = await runBoth(project);
+        expect(preflight.status).toBe(0);
+        expect(JSON.parse(preflight.stdout).outcome).toBe('pass');
+      } finally {
+        await rm(project, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('output shape', () => {
     it('prints one document with the documented keys, and verdicts only when a grader file was read', async () => {
       const clean = checkGate(await gateLine(await build(w, 'clean')));
