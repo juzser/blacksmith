@@ -5165,3 +5165,73 @@ describe('epic.ts epicVerdictJudgeRequest — closing spec review line', () => {
     );
   });
 });
+
+describe('epic.ts epicVerdictJudgeRequest — how each closing-review finding ended', () => {
+  const BUDGET = { timeout_ms: 1_000, max_output_bytes: 4_096 };
+  const reviewRaising = (ids: string[]): SpecReviewStatus => {
+    const base = okSpecReview();
+    return { ...base, review: base.review && { ...base.review, findingIds: ids } };
+  };
+  const digest = (ids: string[], findings: Finding[]): string =>
+    epicVerdictJudgeRequest(
+      summarizeEpic(
+        'epic-1',
+        [taskRow({ taskStatus: 'completed' })],
+        findings,
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        reviewRaising(ids),
+        okGoalCheck(1),
+        alwaysEffort(),
+      ),
+      BUDGET,
+    ).prompt;
+  const lineFor = (prompt: string, id: string): string =>
+    prompt.split('\n').find((l) => l.includes(`review finding ${id}`)) ?? '';
+
+  it('says a refuted finding is closed, not open', () => {
+    const line = lineFor(
+      digest(['f-r'], [findingFixture({ finding_id: 'f-r', finding_status: 'refuted' })]),
+      'f-r',
+    );
+    expect(line).toContain('S2-major');
+    expect(line).toContain('refuted');
+    expect(line).toContain('adversarial verifier showed the claim false');
+    expect(line).toContain('closed, not open');
+  });
+
+  it('says a fix-verified finding is closed, not open', () => {
+    const line = lineFor(
+      digest(['f-v'], [findingFixture({ finding_id: 'f-v', finding_status: 'fix-verified' })]),
+      'f-v',
+    );
+    expect(line).toContain('fix-verified');
+    expect(line).toContain('closed, not open');
+  });
+
+  it('names a waived finding as closed by a person, and keeps it in the discretionary list', () => {
+    const prompt = digest(
+      ['f-w'],
+      [findingFixture({ finding_id: 'f-w', finding_status: 'waived' })],
+    );
+    const line = lineFor(prompt, 'f-w');
+    expect(line).toContain('waived');
+    expect(line).toContain('closed by a person');
+    expect(prompt).toContain('Findings already closed by waiver or amendment before this close: 1');
+  });
+
+  it('says an id the findings fold does not know is unknown', () => {
+    const line = lineFor(digest(['f-ghost'], []), 'f-ghost');
+    expect(line).toContain('not in the findings record');
+  });
+
+  it('keeps an open finding reading as open', () => {
+    const line = lineFor(
+      digest(['f-o'], [findingFixture({ finding_id: 'f-o', finding_status: 'raised' })]),
+      'f-o',
+    );
+    expect(line).toContain('raised');
+    expect(line).toContain('still open');
+    expect(line).not.toContain('closed, not open');
+  });
+});

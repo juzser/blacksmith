@@ -413,6 +413,19 @@ export interface EpicFindingSummary {
   summary: string;
 }
 
+/**
+ * How one finding the closing spec review raised stands now, read from the
+ * findings fold. `null` severity and status mean the fold does not know the
+ * id. Carried so the judge digest can account for every id it names: a finding
+ * closed by the machine (refuted, fix-verified) is in neither `openFindings`
+ * nor `discretionaryFindings`, and an id named nowhere else read as unaccounted.
+ */
+export interface SpecReviewFindingOutcome {
+  findingId: string;
+  severity: string | null;
+  findingStatus: string | null;
+}
+
 export interface SatisfiedAmendment extends EpicFindingSummary {
   /**
    * The landed rows that discharge it — one per amends_task_ids entry, with the
@@ -616,6 +629,8 @@ export interface EpicSummary {
   integration: IntegrationStatus;
   mcp: McpSurfaceStatus;
   specReview: SpecReviewStatus;
+  /** One entry per id `specReview.review` raised; empty when no review is on record. */
+  specReviewFindings: SpecReviewFindingOutcome[];
   goalCheck: GoalCheckStatus;
   /**
    * How wide this epic ran, or null when the caller measured nothing. Null is
@@ -1122,6 +1137,14 @@ export function summarizeEpic(
     integration,
     mcp,
     specReview,
+    specReviewFindings: (specReview.review?.findingIds ?? []).map((findingId) => {
+      const f = findings.find((x) => x.finding_id === findingId);
+      return {
+        findingId,
+        severity: f?.severity ?? null,
+        findingStatus: f?.finding_status ?? null,
+      };
+    }),
     goalCheck,
     concurrency,
     closingSpecReviewSkippedByTier,
@@ -1129,6 +1152,31 @@ export function summarizeEpic(
     mechanicallyReady: blockers.length === 0,
   };
 }
+
+/** What a finding's status means for "is this still owed", in words a judge cannot misread. */
+const findingStatusMeaning = (status: string): string => {
+  switch (status) {
+    case 'refuted':
+      return 'an adversarial verifier showed the claim false; closed, not open';
+    case 'fix-verified':
+      return 'the fix landed and was verified; closed, not open';
+    case 'expired':
+      return 'the window it applied to is gone; closed, not open';
+    case 'waived':
+      return 'closed by a person (waiver); listed under discretionary closures below';
+    case 'amended':
+      return 'closed by a plan amendment that landed; listed under discretionary closures below';
+    case AMEND_PENDING_STATUS:
+      return 'awaiting an amendment; see the amend-pending list below';
+    default:
+      return 'still open; it is counted in the open findings above';
+  }
+};
+
+const specReviewFindingLine = (o: SpecReviewFindingOutcome): string =>
+  o.findingStatus === null
+    ? `  review finding ${o.findingId}: not in the findings record, so how it ended cannot be shown`
+    : `  review finding ${o.findingId} (${o.severity ?? 'unknown severity'}): ${o.findingStatus} — ${findingStatusMeaning(o.findingStatus)}`;
 
 const findingLine = (f: EpicFindingSummary): string =>
   `  ${f.findingId} (${f.taskId}, ${f.severity}, ${f.findingStatus}): ${f.summary}`;
@@ -1270,6 +1318,7 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
           `  Reviewed by: ${review.reviewedBy}`,
           `  Against commit ${review.headSha.slice(0, 8)}${coverage(review.headSha, summary.specReview.headSha)}, plan v${review.planVersion}`,
           `  Findings that review raised: ${review.findingIds.length}${review.findingIds.length > 0 ? ` (${review.findingIds.join(', ')})` : ''}`,
+          ...summary.specReviewFindings.map(specReviewFindingLine),
         ];
 
   const goalText = summary.goalCheck.goal;
