@@ -469,6 +469,66 @@ block the merge queue, it queues an operator question (§8 below).
 | `blocked` (`reason: "coverage-evidence"`) | A coverage check ran, and the numbers it produced don't cover a file this task's claims name | Fix the reporter or the include glob, not the code — see §5c |
 | `blocked` (`reason: "findings"`) | An S1/S2 finding was raised | Bounce to coder on the same branch; `blockingFindings` lists exactly which |
 
+### Before hand-back: `bs results check`
+
+The gate finds out that a worker's paperwork is wrong after the worker has
+gone. `bs results check <task-id> --as <role>` asks the same question earlier,
+read-only: it runs the paperwork stages the gate runs for that role, writes no
+event and no file, and never runs a check command, so it costs no suite and
+takes no lock.
+
+| `--as` | Reads | Stages |
+|---|---|---|
+| `--as coder` | `--result`, `--worktree` [`--base`] | `schema, artifacts, commit, deps` |
+| `--as tester` | `--result`, `--plan` | `schema, artifacts, screenshots` |
+| `--as grader` | `--grader` | `grader` |
+| `--as gate` | the `gate run` line, verbatim | `schema, artifacts, commit, deps, judges, uiux, grader` |
+
+Each worker mode also takes `--agent --provider --model-tier` and
+`--artifacts-dir`, and refuses the gate-only flags. `--as gate` reads every
+file on the gate line, dry-runs the judge closes `gate run` would make and
+includes the uiux stage. The output is one JSON object, `{outcome, reason?, as,
+task_id, artifact_home, problems, skipped, not_run, verdicts?, warnings}`, with
+exit 0 for a pass and 1 for blocked or refused. The check looks at shape
+only: a grader file that is well formed but says `fail` exits 0 and shows in
+`verdicts.grader`, and the gate still records that verdict.
+
+The check and the gate line must take the same `--artifacts-dir`. Without the
+flag the artifact home is `state/artifacts` under the work root of whichever
+`bs` runs the line, and an installed `bs` with no `BS_HOME` puts that work root
+under its working directory, so a worker in its worktree and the wave-runner in
+the project would read two different homes. `.claude/skills/bs/wave.md` passes
+`<work-root>/state/artifacts` on every one of them. The three worker templates
+tell the worker to run its line as the last step, fix what it lists, and quote
+the final output in `notes`; the wave-runner runs `--as gate` before `gate run`
+(step 7). Tester screenshots are named `<name>-<desktop|mobile>-<light|dark>.png`,
+and an e2e server binds port 0 or a port the runner reports back; that is a
+prompt-level rule with no run-time check in v1, an accepted gap, so a violation
+shows up only later as a `tests-failed` block.
+
+### An env-failure block: the machine slept during a check
+
+When a check fails, the gate compares the wall clock with the monotonic clock
+over that check's own process (the command-only window, which starts after the
+heavy-lock wait and stops when the command exits). A gap of `SLEEP_GAP_MS`
+(30 000 ms) or more means the machine was suspended while the command ran. The
+`testgate-result`, the `gate-outcome` and the blocked outcome then carry
+`error_class: execution.env-failure` and `environment_evidence`: one entry per
+check with `window`, `wall_ms`, `monotonic_ms`, `clock_gap_ms`, `load_1m_start`,
+`load_1m_end` and `cpus`. Load is evidence only and never classifies, because a
+full suite raises it itself, and a lock-wait timeout never classifies either
+(its window is `none`).
+
+Classification changes nothing else. The outcome stays `blocked` with
+`reason: "tests-failed"`, no check is re-run and no gate stage is dropped. The
+wave-runner logs it as `error-logged` with error `execution.env-failure`, raises
+no finding against the coder and sends no fix-round brief. It is a failed round
+on the escalation ladder like every other blocked `gate-outcome`
+(`readFailedRounds` counts it), so the epic session may re-gate the same HEAD
+only after the first failed round, needs a builder dispatch on a higher model
+tier from the second and the operator's answer from the third, and a second
+env-classified block for the same task at the same HEAD goes to the operator.
+
 ## 5a. The commit check — why a green gate used to prove nothing (D-30)
 
 In the dogfood run, `task-3-validate` reported done with 260 lines staged

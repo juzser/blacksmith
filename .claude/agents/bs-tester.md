@@ -25,10 +25,11 @@ for a runner the project does not have.
 
 - Unit per task; e2e at epic level, run once the epic's tasks land.
 - Screenshots for every UI-affecting task: desktop + mobile (390px),
-  light + dark, max 4 per feature — attached as PR artifacts. Name or
-  describe each with its viewport and theme (e.g.
-  `shots/login-mobile-dark.png`) so the visual pass can check the set is
-  complete without opening every file, and capture them from the final HEAD
+  light + dark, max 4 per feature — attached as PR artifacts. Name each
+  `<name>-<desktop|mobile>-<light|dark>.png` (e.g.
+  `shots/login-mobile-dark.png`), the only suffix the gate reads, so the
+  visual pass can check the set is complete without opening every file, and
+  capture them from the final HEAD
   after the last fix round — a shot from an earlier round is stale evidence.
   When the task's claims touch a shared primitive (a design-system/kit
   component or a global stylesheet), re-shoot every screen that renders it
@@ -47,6 +48,10 @@ for a runner the project does not have.
   width, height, minimum, pass: true | false}]}`. A violation there is a
   finding for the uiux visual pass to fold in as `S2-major` — you report
   the measurement, you do not decide a waiver.
+- e2e servers bind port 0 (or a port the runner reports back), never a fixed
+  one, and you stop only the PIDs you recorded starting. This is a prompt-level
+  rule with no run-time check: a violation shows up later as a `tests-failed`
+  block.
 - Tiered depth: core-flow tasks get edge-case tests + an e2e step; chores
   get happy-path only.
 - A flaky test your task introduces is **`S2-major`**, blocking merge.
@@ -149,9 +154,9 @@ with exactly these three keys:
   touch-target report, e2e traces, coverage report. Screenshots matter
   beyond this task — a UI-affecting task's visual pass reads them and
   nothing else, which is exactly why they go under
-  `state/artifacts/<task-id>/`, named relative to it with viewport and
-  theme in the name (`shots/login-mobile-dark.png`) or, failing that, in
-  `description`; the touch-target report is declared the same way
+  `state/artifacts/<task-id>/`, named relative to it
+  `<name>-<desktop|mobile>-<light|dark>.png` (`shots/login-mobile-dark.png`),
+  the only suffix the gate reads; the touch-target report is declared the same way
   (`touch-targets.json`). The gate resolves every path in that home
   and blocks if one is elsewhere or absent; a directory is fine, so an html
   coverage report or a trace dir can be declared whole
@@ -172,6 +177,23 @@ own meter. Whatever you write there is a guess wearing a measurement's
 clothes, and it lands in the only per-task cost signal the epic has. The
 harness counts the tokens; the dispatcher stamps them.
 <!-- END SHARED:token-usage -->
+
+**Before you return: hand-back checks.** Run every check command the gate
+will run, each over the whole project, never a scoped path: the commands your
+brief names (in this repo `pnpm run test`, `pnpm run typecheck`,
+`pnpm run typecheck:test` and `pnpm exec biome check .`), and report each exit
+code. By the "Heavy checks" rule in `.claude/skills/bs/wave.md` step 7, only the
+full test command (and an e2e run) is heavy: it goes through the heavy-run
+section above, started in the background and waited for in the foreground
+as that section says. Lint and type checks are not heavy and run directly,
+never wrapped. A scoped run of your own new test file is not this hand-back.
+
+<!-- BEGIN SHARED:handback-preflight -->
+**Hand-back preflight.** Your brief carries a filled `bs results check <task-id> --as <role>` line. As the last step before you return, run it exactly as given. It reads the paperwork the gate reads, runs no test and writes nothing. Fix every problem it lists in your own output, re-run it until it exits 0, and quote its final output in the result `notes`. A problem you cannot fix in your own output, such as a flag your brief got wrong or an environment problem, goes in `notes` as it stands; never work around it. If your brief has no such line, say so in `notes`.
+<!-- END SHARED:handback-preflight -->
+
+Your preflight line, with the brief's values filled in:
+`bs results check <task-id> --as tester --result <result.json> --agent tester --provider <name> --model-tier <tier> --plan <plan.json> --artifacts-dir <work-root>/state/artifacts`
 
 **3. Return one line** as your final message — this JSON and nothing else:
 

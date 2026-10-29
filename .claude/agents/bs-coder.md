@@ -192,6 +192,24 @@ clothes, and it lands in the only per-task cost signal the epic has. The
 harness counts the tokens; the dispatcher stamps them.
 <!-- END SHARED:token-usage -->
 
+**Before you return: hand-back checks.** Run every check command the gate
+will run, each over the whole project, never a scoped path: the commands your
+brief names (in this repo `pnpm run test`, `pnpm run typecheck`,
+`pnpm run typecheck:test` and `pnpm exec biome check .`), and report each exit
+code. By the "Heavy checks" rule in `.claude/skills/bs/wave.md` step 7, only the
+full test command (and an e2e run) is heavy: it goes through the heavy-run
+section above, started in the background and waited for in the foreground
+as that section says. Lint and type checks are not heavy and run directly,
+never wrapped. A scoped run of your own new test file in the TDD loop is not
+this hand-back.
+
+<!-- BEGIN SHARED:handback-preflight -->
+**Hand-back preflight.** Your brief carries a filled `bs results check <task-id> --as <role>` line. As the last step before you return, run it exactly as given. It reads the paperwork the gate reads, runs no test and writes nothing. Fix every problem it lists in your own output, re-run it until it exits 0, and quote its final output in the result `notes`. A problem you cannot fix in your own output, such as a flag your brief got wrong or an environment problem, goes in `notes` as it stands; never work around it. If your brief has no such line, say so in `notes`.
+<!-- END SHARED:handback-preflight -->
+
+Your preflight line, with the brief's values filled in:
+`bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts`
+
 **3. Return one line** as your final message — this JSON and nothing else:
 
 ```
