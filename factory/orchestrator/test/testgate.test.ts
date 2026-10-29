@@ -1,15 +1,18 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readHeavyLock, withHeavyLock } from '../src/heavyLock.js';
 import {
+  type CheckEnvironment,
   heavyChildEnv,
   isHeavyCheck,
   maskCommandCredentials,
   run,
   runCumulative,
+  SLEEP_GAP_MS,
+  sleptDuringCheck,
 } from '../src/testgate.js';
 
 function processAlive(pid: number): boolean {
@@ -507,5 +510,207 @@ describe('testgate.ts heavy lock', () => {
     });
     expect(result.pass).toBe(true);
     expect(JSON.parse(await readFile(out, 'utf8'))).toMatchObject({ pid: process.pid });
+  });
+});
+
+/** A source that hands out `values` in order, one per read, and fails loudly when they run out. */
+function sequence(values: number[]): () => number {
+  const rest = [...values];
+  return () => {
+    const next = rest.shift();
+    if (next === undefined) throw new Error('source read more often than the test planned');
+    return next;
+  };
+}
+
+describe('testgate.ts environment evidence', () => {
+  let cwd: string;
+  let lockDir: string;
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(path.join(tmpdir(), 'smith-testgate-env-'));
+    lockDir = await mkdtemp(path.join(tmpdir(), 'smith-testgate-envlock-'));
+  });
+
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+    await rm(lockDir, { recursive: true, force: true });
+  });
+
+  it('pins every value of a command entry, one entry per result in order, even for equal names', async () => {
+    const result = await run(
+      [
+        { name: 'same', cmd: 'true', heavy: false },
+        { name: 'same', cmd: 'true', heavy: false },
+      ],
+      {
+        cwd,
+        environmentSources: {
+          wallMs: sequence([1_000, 61_000, 70_000, 70_400]),
+          monotonicMs: sequence([500, 1_500, 600, 1_000]),
+          load1m: sequence([1.5, 2.5, 3, 4]),
+          cpus: () => 8,
+        },
+      },
+    );
+    expect(result.environment).toEqual([
+      {
+        name: 'same',
+        window: 'command',
+        wall_ms: 60_000,
+        monotonic_ms: 1_000,
+        clock_gap_ms: 59_000,
+        load_1m_start: 1.5,
+        load_1m_end: 2.5,
+        cpus: 8,
+      },
+      {
+        name: 'same',
+        window: 'command',
+        wall_ms: 400,
+        monotonic_ms: 400,
+        clock_gap_ms: 0,
+        load_1m_start: 3,
+        load_1m_end: 4,
+        cpus: 8,
+      },
+    ]);
+    expect(result.results).toHaveLength(2);
+    for (const r of result.results)
+      expect(Object.keys(r).sort()).toEqual(['exitCode', 'lock_wait_ms', 'name', 'pass', 'tail']);
+  });
+
+  it('sets environment from the real sources when none are injected', async () => {
+    const result = await run([{ name: 'ok', cmd: 'true', heavy: false }], { cwd });
+    const [entry] = result.environment ?? [];
+    expect(result.environment).toHaveLength(1);
+    expect(entry).toMatchObject({ name: 'ok', window: 'command' });
+    expect(entry?.cpus).toBeGreaterThan(0);
+    expect(entry?.load_1m_start).toBeGreaterThanOrEqual(0);
+    expect(Math.abs(entry?.clock_gap_ms ?? Number.NaN)).toBeLessThan(SLEEP_GAP_MS);
+  });
+
+  it('carries the array on runCumulative too', async () => {
+    const result = await runCumulative('true', { cwd, heavyLock: { lockDir, pollMs: 5 } });
+    expect(result.environment).toHaveLength(1);
+    expect(result.environment?.[0]?.name).toBe('cumulative');
+  });
+
+  describe('sleptDuringCheck', () => {
+    const entry = (over: Partial<CheckEnvironment>): CheckEnvironment => ({
+      name: 'x',
+      window: 'command',
+      wall_ms: 0,
+      monotonic_ms: 0,
+      clock_gap_ms: 0,
+      load_1m_start: 0,
+      load_1m_end: 0,
+      cpus: 1,
+      ...over,
+    });
+
+    it('names the constant and fires at it, not below it', () => {
+      expect(SLEEP_GAP_MS).toBe(30_000);
+      expect(sleptDuringCheck(entry({ clock_gap_ms: SLEEP_GAP_MS - 1 }))).toBe(false);
+      expect(sleptDuringCheck(entry({ clock_gap_ms: SLEEP_GAP_MS }))).toBe(true);
+    });
+
+    it('never fires on load alone', () => {
+      expect(
+        sleptDuringCheck(entry({ cpus: 1, load_1m_start: 100, load_1m_end: 100, clock_gap_ms: 0 })),
+      ).toBe(false);
+    });
+
+    it('never fires on a window none entry, whatever its fields', () => {
+      expect(
+        sleptDuringCheck(entry({ window: 'none', clock_gap_ms: SLEEP_GAP_MS * 10, wall_ms: 1e9 })),
+      ).toBe(false);
+    });
+  });
+
+  describe('heavy check window', () => {
+    function plant(): void {
+      writeFileSync(
+        path.join(lockDir, 'heavy.lock'),
+        JSON.stringify({
+          pid: 4242,
+          token: 'other-token',
+          label: 'other',
+          startedAt: '2020-01-01T00:00:00.000Z',
+          cwd: '/elsewhere',
+        }),
+      );
+    }
+
+    it('opens the window after the lease is held: lock wait stays outside the gap', async () => {
+      plant();
+      const log: string[] = [];
+      let probes = 0;
+      const tick = (name: string, values: number[]): (() => number) => {
+        const next = sequence(values);
+        return () => {
+          log.push(name);
+          return next();
+        };
+      };
+      const result = await run([{ name: 'test', cmd: 'true' }], {
+        cwd,
+        heavyLock: {
+          lockDir,
+          pollMs: 5,
+          isPidAlive: () => {
+            log.push('probe');
+            probes += 1;
+            return probes <= 3;
+          },
+        },
+        environmentSources: {
+          wallMs: tick('wall', [10_000, 10_000 + 45_000]),
+          monotonicMs: tick('mono', [0, 1_000]),
+          load1m: tick('load', [0.5, 0.75]),
+          cpus: () => 4,
+        },
+      });
+      expect(probes).toBe(4);
+      const lastProbe = log.lastIndexOf('probe');
+      expect(log.slice(0, lastProbe + 1).filter((e) => e !== 'probe')).toEqual([]);
+      expect(result.results[0]?.lock_wait_ms).toBeGreaterThan(0);
+      expect(result.environment?.[0]).toMatchObject({
+        window: 'command',
+        wall_ms: 45_000,
+        monotonic_ms: 1_000,
+        clock_gap_ms: 44_000,
+      });
+    });
+
+    it('a lock wait timeout spawns nothing and gets a window none entry with one load sample', async () => {
+      plant();
+      const marker = path.join(cwd, 'marker');
+      const wall = sequence([]);
+      const result = await run([{ name: 'test', cmd: `touch '${marker}'` }], {
+        cwd,
+        heavyLock: { lockDir, pollMs: 5, maxWaitMs: 30, isPidAlive: () => true },
+        environmentSources: {
+          wallMs: wall,
+          monotonicMs: wall,
+          load1m: sequence([7.25]),
+          cpus: () => 4,
+        },
+      });
+      expect(result.results[0]).toMatchObject({ reason: 'heavy.wait-timeout', pass: false });
+      expect(result.environment).toEqual([
+        {
+          name: 'test',
+          window: 'none',
+          wall_ms: 0,
+          monotonic_ms: 0,
+          clock_gap_ms: 0,
+          load_1m_start: 7.25,
+          load_1m_end: 7.25,
+          cpus: 4,
+        },
+      ]);
+      await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    });
   });
 });
