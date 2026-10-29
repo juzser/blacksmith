@@ -695,7 +695,7 @@ describe('composeBrief for a follow-up the log added (f-bs-gate-bounce/integrati
       });
       expect(parseBriefMarker(text)).toEqual({ role, taskId: FU, sessionId });
       expect(text).toContain(`bs results check ${FU} --as ${role}`);
-      expect(text).toContain('Task spec (verbatim from the log\'s task-added record');
+      expect(text).toContain("Task spec (verbatim from the log's task-added record");
       expect(text).toContain('- src/widget.ts');
       expect(text).toContain('Token cap: 50000');
       expect(text).not.toContain('Diff cap');
@@ -801,9 +801,9 @@ describe('composeBrief for a follow-up the log added (f-bs-gate-bounce/integrati
     await writeFile(planFile, JSON.stringify(plan));
     await addTask(dead, { epic_id: 'project-a' });
     await raise('f-gone', dead);
-    expect(
-      await codeOf(composeBrief({ ...base(), planFile, taskId: dead, role: 'coder' })),
-    ).toBe('brief.task-not-in-plan');
+    expect(await codeOf(composeBrief({ ...base(), planFile, taskId: dead, role: 'coder' }))).toBe(
+      'brief.task-not-in-plan',
+    );
   });
 
   it('reads a bare follow-up id as the plan epic qualifies it, and still refuses an unknown one', async () => {

@@ -502,7 +502,10 @@ describe('brief compose for a follow-up minted by findings raise (task-9 close-r
   }
 
   const lint = (sb: Sandbox, file: string, followUpId: string) =>
-    cli(['dispatch', 'lint', file, '--role', 'coder', '--task', followUpId, '--session', SESSION], sb);
+    cli(
+      ['dispatch', 'lint', file, '--role', 'coder', '--task', followUpId, '--session', SESSION],
+      sb,
+    );
 
   it('composes the brief with its own findings as scope, and lint refuses one without the line or the checks', () => {
     const { sb, planPath, followUpId } = mint();
