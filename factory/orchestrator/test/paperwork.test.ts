@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -309,6 +309,31 @@ describe('paperwork role parity', () => {
     expect(pre.problems.map((p) => p.reason)).toEqual(['screenshots-missing']);
   });
 
+  it('tester: on a task that is not ui-affecting, a screenshot declared but not on disk is artifacts-missing in both', async () => {
+    const result = await testerResult(w, SHOT_NAMES, SHOT_NAMES.slice(0, 3));
+    const recorded = await recordTaskResult(
+      { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
+      w.ctx(),
+      w.opts(),
+    );
+    expect(recorded).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing' });
+    for (const uiAffecting of [false, undefined]) {
+      const pre = await checkPaperwork(
+        {
+          as: 'tester',
+          taskId: w.taskId,
+          result,
+          artifactsDir: w.artifactsDir,
+          ...(uiAffecting === undefined ? {} : { uiAffecting }),
+        },
+        w.ctx(),
+        w.opts(),
+      );
+      expect(pre).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing', as: 'tester' });
+      expect(pre.problems.map((p) => p.reason)).toEqual(['artifacts-missing']);
+    }
+  });
+
   it('tester: a missing non-screenshot artifact is still artifacts-missing', async () => {
     const result = await testerResult(w, SHOT_NAMES);
     (result.artifacts as { type: string; path: string }[]).push({ type: 'log', path: 'gone.txt' });
@@ -496,34 +521,41 @@ describe('what checkPaperwork writes and what it skips', () => {
     return out.join('\n--\n');
   }
 
-  it('writes nothing: events, results and the git index are byte-identical after every role on every fixture', async () => {
-    const resultsDir = await mkdtemp(path.join(tmpdir(), 'bs-paperwork-results-'));
-    await mkdir(resultsDir, { recursive: true });
-    try {
-      await writeFile(path.join(resultsDir, 'epic-1.task-1.json'), '{}');
-      for (const { build } of PARITY_CASES) {
+  // One bounded case per (fixture, role): each builds its fixture once in a fresh world and checks twice.
+  const WRITE_CASES = PARITY_CASES.flatMap(({ name, build }) =>
+    (['coder', 'tester', 'grader', 'gate'] as const).map((as) => ({ name, build, as })),
+  );
+
+  it.each(WRITE_CASES)(
+    'writes nothing: $as on $name leaves events, results and the git index byte-identical',
+    async ({ build, as }) => {
+      const resultsDir = await mkdtemp(path.join(tmpdir(), 'bs-paperwork-results-'));
+      try {
+        await writeFile(path.join(resultsDir, 'epic-1.task-1.json'), '{}');
         const input = await build(w);
-        const snap = async () => [
-          await treeBytes(w.stateDir),
-          await treeBytes(resultsDir),
-          await readFile(path.join(w.worktreeDir, '.git', 'index')),
-          w.git(['status', '--porcelain']),
-        ];
+        // Status first: its own stat refresh of the index must land before the index is read.
+        const snap = async () => {
+          const status = w.git(['status', '--porcelain']);
+          return [
+            status,
+            await treeBytes(w.stateDir),
+            await treeBytes(resultsDir),
+            await readFile(path.join(w.worktreeDir, '.git', 'index')),
+          ];
+        };
         const before = await snap();
-        for (const as of ['coder', 'tester', 'grader', 'gate'] as const) {
-          await checkPaperwork(paperworkInput(input, as), w.ctx(), w.opts());
-          await checkPaperwork(
-            { ...paperworkInput(input, as), alsoReported: [OPEN_JUDGE] },
-            w.ctx(),
-            w.opts(),
-          );
-        }
+        await checkPaperwork(paperworkInput(input, as), w.ctx(), w.opts());
+        await checkPaperwork(
+          { ...paperworkInput(input, as), alsoReported: [OPEN_JUDGE] },
+          w.ctx(),
+          w.opts(),
+        );
         expect(await snap()).toEqual(before);
+      } finally {
+        await rm(resultsDir, { recursive: true, force: true });
       }
-    } finally {
-      await rm(resultsDir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it('never reports a stage as passed when it did not run', async () => {
     // No worktree, no session, not ui-affecting, no grader file.

@@ -496,9 +496,11 @@ export async function checkPaperwork(
           skip(stage, 'unreadable-input');
           break;
         }
-        // The tester's declared screenshots belong to its screenshots stage, which also checks the disk.
+        // The tester's declared screenshots go to its screenshots stage when that stage checks them (ui-affecting).
         const owed =
-          input.as === 'tester' ? artifacts.filter((a) => !SCREENSHOT_RE.test(a.path)) : artifacts;
+          input.as === 'tester' && input.uiAffecting === true
+            ? artifacts.filter((a) => !SCREENSHOT_RE.test(a.path))
+            : artifacts;
         const r = artifactsStage(owed, {
           taskId: input.taskId,
           artifactsDir: input.artifactsDir,
