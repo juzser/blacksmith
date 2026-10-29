@@ -5289,6 +5289,7 @@ async function main(): Promise<number> {
         claimPath: l.claimPath,
         agentRole: l.agentRole,
         caseType: l.caseType,
+        errorClass: l.errorClass,
       }));
       const markdown = compileLessons(compileInputs, existingMarkdown);
       writeFileSync(outPath, markdown, 'utf8');

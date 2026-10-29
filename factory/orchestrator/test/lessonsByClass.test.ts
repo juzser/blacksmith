@@ -170,7 +170,7 @@ describe('lessonsForDispatch by recurring class (epic criteria 3 and 4)', () => 
     const lines = r.text.split('\n');
     const trailer = lines[lines.length - 2] as string;
     expect(trailer).toContain('execution.flaky-test (2 tasks');
-    expect(trailer).toContain('bs lessons for-dispatch --class execution.flaky-test');
+    expect(trailer).toContain('bs lessons for-dispatch coder --class execution.flaky-test');
   });
 
   it('does not count an event older than 30 days', () => {
