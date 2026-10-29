@@ -122,7 +122,7 @@ fi
 # hookDecision.ts for the full reasoning). So there is nothing to filter here
 # and this shim does not second-guess the layer that owns the decision: a
 # filter would only hide a regression in it. The tests in
-# test/policyHookEntry.test.ts and test/cli.test.ts assert the silent allow
+# test/policyHookEntry.test.ts and test/cliWorktree.test.ts assert the silent allow
 # directly, where breaking it fails a test instead of being quietly absorbed
 # by plumbing.
 if [ -n "$OUTPUT" ]; then

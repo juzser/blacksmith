@@ -28,6 +28,12 @@ describe('cli.ts (built binary)', () => {
     if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
   });
 
+  // D-46/P9-29: a task's life must be readable off the log alone. These two
+  // verbs close the last gaps — `plan ingest` is where a task starts
+  // existing, and `wave check` is where one becomes ready — and both mint
+  // ids from the plan rather than from whatever was typed at them.
+  // (This describe is split across cliWave, cliFindings, cliSpec and cliGate;
+  // they share the fixtures in helpers/cliHarness.ts.)
   describe('task-status producers (D-46/P9-29)', () => {
     const { PLAN, session, tail, ingest, append } = taskStatusFixtures(() => scratchDir);
 
@@ -712,7 +718,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(result.status).toBe(1);
       const parsed = JSON.parse(result.stdout);
-      // Named apart, as in the D-48 block below: exit 1 here must mean
+      // Named apart, as in the D-48 block in cliSpec.test.ts: exit 1 here must mean
       // "checked, and these two are ordered", not "could not resolve an id".
       expect(parsed.error).toBeUndefined();
       expect(parsed.valid).toBe(false);

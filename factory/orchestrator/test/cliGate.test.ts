@@ -1457,7 +1457,7 @@ describe('cli.ts (built binary)', () => {
         return [worktreeDir, checksPath, resultPath];
       }
 
-      // Same neutralization as the plan-quorum --project test above: turn the
+      // Same neutralization as the plan-quorum --project test in cliBasics.test.ts: turn the
       // suite-wide SMITH_CROSSCHECK_OFFLINE switch off (it disables every
       // non-native provider regardless of configSource, including one the
       // overlay adds), then neutralize this dev box's real codex/deepseek/

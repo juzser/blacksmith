@@ -386,7 +386,7 @@ describe('cli.ts (built binary)', () => {
     });
 
     it("run --project: reads the project overlay's provider over the policy file", async () => {
-      // Same proof shape as `judge preflight --project` above, but for the
+      // Same proof shape as `judge preflight --project` (cliDispatch.test.ts), but for the
       // one crossfind subcommand an overlay can ever move: `request` and
       // `reconcile` only ever read `policy.independentFinder`, which
       // loadProjectProviderOverlay is structurally forbidden to touch (it

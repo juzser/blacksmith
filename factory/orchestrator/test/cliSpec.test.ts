@@ -32,7 +32,7 @@ describe('cli.ts (built binary)', () => {
   describe('task-status producers (D-46/P9-29)', () => {
     const { PLAN, session, tail, ingest, append } = taskStatusFixtures(() => scratchDir);
 
-    // The other side of the same wall. `plan amend` above is the operator's
+    // The other side of the same wall. `plan amend` (cliFindings.test.ts) is the operator's
     // exit from a spec defect; these four verbs are the worker's way of
     // reaching it. A coder cannot emit an event and cannot mint a spec-scoped
     // finding, so it returns the request and the dispatcher records it.

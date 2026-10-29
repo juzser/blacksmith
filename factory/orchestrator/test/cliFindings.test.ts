@@ -586,8 +586,8 @@ describe('cli.ts (built binary)', () => {
     // is the verb that writes the fact down. The dogfood epic was closed by a
     // human overriding a hold, and the log recorded nothing at all.
     //
-    // Nested inside the block above to reuse its PLAN/session()/tail()
-    // fixtures — an epic can only be closed once it has tasks, and `plan
+    // Nested inside the task-status describe (opened in cliWave.test.ts) to
+    // reuse its PLAN/session()/tail() fixtures, now from helpers/cliHarness.ts — an epic can only be closed once it has tasks, and `plan
     // ingest` is what puts them on the log.
     describe('epic close (D-43/P9-27)', () => {
       async function heldEpic() {

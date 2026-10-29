@@ -198,8 +198,8 @@ describe('cli.ts (built binary)', () => {
     // D-211. `plan quorum` read --plan-version twice with two parsers that
     // disagree: Number.parseInt chose the plan FILE, boundedIntFlag (via
     // eventContextFromFlags) chose the plan_version stamped on every event the
-    // command appends. D-210's rule for the same notation is asserted below in
-    // the --round block -- "1e2 is an unambiguous numeric literal for 100" --
+    // command appends. D-210's rule for the same notation is asserted in
+    // the --round block of cliSession.test.ts -- "1e2 is an unambiguous numeric literal for 100" --
     // so `--plan-version 1e2` critiqued v1 while the log said v100, and nothing
     // errored. The file it goes looking for is the observable half.
     const { stdout, status } = runCli([
@@ -346,8 +346,8 @@ describe('cli.ts (built binary)', () => {
     it("--project: reads the project overlay's provider, same as `epic verdict`/`judge preflight` (D-42)", async () => {
       // `plan quorum` has no --policy override at all (unlike judge preflight):
       // it always reads the shipped factory/policies/crosscheck.yml, so this
-      // test can't swap in a throwaway policy file the way the crossfind test
-      // above does -- the overlay has to override an existing provider's
+      // test can't swap in a throwaway policy file the way the crossfind test in
+      // cliCrossfind.test.ts does -- the overlay has to override an existing provider's
       // fields instead of inventing a new one. A brand-new provider name
       // parses fine at parseCrosscheckPolicy() (the merge is a union of
       // policy/env/overlay provider NAMES), but every attempted provider --
@@ -358,7 +358,7 @@ describe('cli.ts (built binary)', () => {
       // validation and the CLI exits 1, so the overlay below reuses
       // `deepseek` (already `transport: api` in the shipped policy) and
       // overrides its endpoint/model/key fields, the same trick the
-      // judge-preflight --project test above plays with `ds`.
+      // judge-preflight --project test in cliDispatch.test.ts plays with `ds`.
       //
       // --confidence below plan_quorum.confidence_threshold (0.8 in the
       // shipped policy) fires trigger 3, so providers.length is actually
@@ -368,7 +368,7 @@ describe('cli.ts (built binary)', () => {
       // the offline switch forces EVERY non-native provider off regardless of
       // configSource (crosscheck.ts's merge loop) -- including an
       // overlay-added one -- so it has to come off here, same as the
-      // crossfind --project test above. With it off, this box's shipped
+      // crossfind --project test in cliCrossfind.test.ts. With it off, this box's shipped
       // policy would otherwise reach real providers: codex is `enabled: auto`
       // and genuinely on PATH on a dev box with `codex login` run, and
       // deepseek is `enabled: auto` gated on a real DEEPSEEK_API_KEY. Both

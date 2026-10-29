@@ -8,7 +8,7 @@ import { assertExited, runProcess } from './helpers/process.js';
 
 // smith-run (dist/run-cli.js), driven as the built binary — the way it
 // actually runs — not via src/run-cli.ts's functions directly. Mirrors
-// the test/cli*.test.ts files' "verify the built binary" convention.
+// the test/cli<Area>.test.ts files' "verify the built binary" convention.
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const RUN_CLI_PATH = path.join(REPO_ROOT, 'factory', 'orchestrator', 'dist', 'run-cli.js');

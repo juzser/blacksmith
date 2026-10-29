@@ -12,8 +12,8 @@ import { expect } from 'vitest';
 import { ALL_BUDGET_ENV_NAMES } from '../../src/budgets.js';
 import { assertExited, runOrThrow, runProcess } from './process.js';
 
-// Shared by the cli*.test.ts files, split out of the former cli.test.ts. Each
-// file owns its own scratch directory (see their beforeAll); only the
+// Shared by the ten cli<Area>.test.ts files (cliBasics … cliCrossfind), split
+// out of the former cli.test.ts. Each file owns its own scratch directory (see their beforeAll); only the
 // scratch-free pieces live here.
 export const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
 export const CLI_PATH = path.join(REPO_ROOT, 'factory', 'orchestrator', 'dist', 'cli.js');

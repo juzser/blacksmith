@@ -27,7 +27,7 @@ describe('cli.ts (built binary)', () => {
     if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
   });
 
-  // D-210. P9-28 just above closed the collapse for the session id: "you
+  // D-210. P9-28 (the missing-argument block in cliBasics.test.ts) closed the collapse for the session id: "you
   // forgot the argument", "no such session" and "the session is empty" used to
   // be one observable state, and it was the success one. `--n` reopened it
   // from the other side. The count went through a bare Number.parseInt and was
