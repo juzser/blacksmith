@@ -300,14 +300,25 @@ describe('paperwork role parity', () => {
     expect(pre).toMatchObject({ outcome: 'blocked', reason: 'screenshots-missing' });
   });
 
-  it('tester: a screenshot declared but not on disk is screenshots-missing in the uiux stage and a problem in the preflight', async () => {
+  it('tester: a screenshot declared but not on disk is screenshots-missing in both', async () => {
     const { recorded, uiux, pre } = await testerCase(SHOT_NAMES, SHOT_NAMES.slice(0, 3));
     expect(recorded).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing' });
     expect(uiux).toEqual({ outcome: 'blocked', reason: 'screenshots-missing' });
-    // The artifacts stage comes first in the tester's set and says the same file is missing;
-    // the screenshots stage still reports the set as incomplete.
-    expect(pre.reason).toBe('artifacts-missing');
-    expect(pre.problems.map((p) => p.reason)).toEqual(['artifacts-missing', 'screenshots-missing']);
+    // The tester's artifacts stage leaves declared screenshots to the screenshots stage.
+    expect(pre).toMatchObject({ outcome: 'blocked', reason: 'screenshots-missing', as: 'tester' });
+    expect(pre.problems.map((p) => p.reason)).toEqual(['screenshots-missing']);
+  });
+
+  it('tester: a missing non-screenshot artifact is still artifacts-missing', async () => {
+    const result = await testerResult(w, SHOT_NAMES);
+    (result.artifacts as { type: string; path: string }[]).push({ type: 'log', path: 'gone.txt' });
+    const pre = await checkPaperwork(
+      { as: 'tester', taskId: w.taskId, result, artifactsDir: w.artifactsDir, uiAffecting: true },
+      w.ctx(),
+      w.opts(),
+    );
+    expect(pre).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing' });
+    expect(pre.problems.map((p) => p.reason)).toEqual(['artifacts-missing']);
   });
 
   it('tester: a clean tester result passes in both', async () => {

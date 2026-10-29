@@ -496,7 +496,10 @@ export async function checkPaperwork(
           skip(stage, 'unreadable-input');
           break;
         }
-        const r = artifactsStage(artifacts, {
+        // The tester's declared screenshots belong to its screenshots stage, which also checks the disk.
+        const owed =
+          input.as === 'tester' ? artifacts.filter((a) => !SCREENSHOT_RE.test(a.path)) : artifacts;
+        const r = artifactsStage(owed, {
           taskId: input.taskId,
           artifactsDir: input.artifactsDir,
         });
