@@ -610,16 +610,22 @@ describe('cli.ts (built binary)', () => {
         '--state-dir',
         stateDir,
         '--no-db',
+        // The tick gap under test, not a deadline: long enough that no second
+        // tick can start while this test runs. The repeat (one report per
+        // tick, each handed out before the sleep) is pinned in-process in
+        // daemon.test.ts ('hands each report to onTick before the sleep').
         '--interval',
-        '1',
+        '3600',
       ]);
       try {
-        // Two lines means two ticks, each one a whole TickReport: the first
-        // lands before the first sleep, not after it.
-        const ticks = await run.waitForLines(2);
+        // One line is the first tick, a whole TickReport: it lands before the
+        // first sleep, not after it -- the sleep is an hour long.
+        const ticks = await run.waitForLines(1);
         for (const line of ticks) expect(JSON.parse(line).sessions).toEqual(['sess-cli']);
 
-        // `smith daemon stop` is SIGTERM. The lock goes with the process.
+        // `smith daemon stop` is SIGTERM, here sent during the sleep, so it
+        // also pins that the signal reaches the sleep. The lock goes with the
+        // process.
         const ended = await run.stop('SIGTERM');
         expect(ended.status).toBe(0);
         expect(ended.stderr).toBe('');
@@ -629,7 +635,8 @@ describe('cli.ts (built binary)', () => {
         // `last` is the --once shape, where nothing else carried the report.
         const lines = run.lines();
         const closing = JSON.parse(lines[lines.length - 1] as string);
-        expect(closing).toEqual({ ticks: lines.length - 1, dir });
+        expect(lines).toHaveLength(2);
+        expect(closing).toEqual({ ticks: 1, dir });
       } finally {
         await run.stop('SIGKILL');
       }

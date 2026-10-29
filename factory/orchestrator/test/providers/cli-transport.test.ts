@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCliJudge } from '../../src/providers/cli-transport.js';
 import type { JudgeRequest } from '../../src/providers/types.js';
 import { ProviderError } from '../../src/providers/types.js';
@@ -115,22 +115,65 @@ describe('providers/cli-transport.ts', () => {
     ).rejects.toBeInstanceOf(ProviderError);
   });
 
-  it('times out and kills the WHOLE process group, not just the immediate child', async () => {
-    const pidFile = path.join(cwd, 'grandchild.pid');
-    await expect(
-      runCliJudge(
-        'fake',
-        { command: 'node', args: [FIXTURE, 'slow-grandchild', pidFile] },
-        baseRequest({ budget: { timeout_ms: 200, max_output_bytes: 100_000 } }),
-      ),
-    ).rejects.toMatchObject({ code: 'provider.timeout' });
+  // The 200 ms timer is spawnCapped's global setTimeout. Under fake time it
+  // cannot fire until this test advances it, so it fires only once the
+  // fixture has spawned its grandchild and written the pid -- however slow the
+  // machine, and however long the fixture waits first (`startDelayMs`, real
+  // time, in the child).
+  describe.each([
+    ['immediately', 0],
+    ['after a start delay longer than timeout_ms', 400],
+  ])(
+    'times out and kills the WHOLE process group, not just the immediate child (grandchild starts %s)',
+    (_label, startDelayMs) => {
+      it('kills the grandchild too', async () => {
+        const pidFile = path.join(cwd, 'grandchild.pid');
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        let grandchildPid = 0;
+        try {
+          let settled: 'resolved' | 'rejected' | null = null;
+          const call = runCliJudge(
+            'fake',
+            {
+              command: 'node',
+              args: [FIXTURE, 'slow-grandchild', pidFile, String(startDelayMs)],
+            },
+            baseRequest({ budget: { timeout_ms: 200, max_output_bytes: 100_000 } }),
+          );
+          const outcome = call.then(
+            () => {
+              settled = 'resolved';
+            },
+            () => {
+              settled = 'rejected';
+            },
+          );
 
-    const grandchildPid = Number.parseInt((await readFile(pidFile, 'utf8')).trim(), 10);
-    expect(Number.isNaN(grandchildPid)).toBe(false);
+          // Read and parse each time: a missing file, or one the fixture has
+          // created but not yet filled, is not a pid. The clock never moves here.
+          while (!(grandchildPid > 0)) {
+            expect(
+              settled,
+              `runCliJudge settled (${settled}) before grandchild.pid held a pid`,
+            ).toBeNull();
+            const text = await readFile(pidFile, 'utf8').catch(() => '');
+            const parsed = Number.parseInt(text.trim(), 10);
+            if (Number.isInteger(parsed) && parsed > 0) grandchildPid = parsed;
+            else await new Promise((resolve) => setImmediate(resolve));
+          }
 
-    const died = await waitUntil(() => !processAlive(grandchildPid), 2000);
-    expect(died).toBe(true);
-  });
+          vi.advanceTimersByTime(200);
+          await expect(call).rejects.toMatchObject({ code: 'provider.timeout' });
+          await outcome;
+        } finally {
+          vi.useRealTimers();
+        }
+
+        const died = await waitUntil(() => !processAlive(grandchildPid), 2000);
+        expect(died).toBe(true);
+      });
+    },
+  );
 
   // D-116: a provider that refuses (no quota, not logged in, not installed)
   // used to be reported as `provider.invalid-output` — a schema critique of
