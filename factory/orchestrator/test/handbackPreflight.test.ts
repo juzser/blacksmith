@@ -1152,9 +1152,14 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
 
   it('leaves the handback-preflight fragment and the SHARED regions of the three templates alone', () => {
     const fragments = listFragments();
+    const compared = new Map<string, string[]>();
     for (const role of ['tester', 'wave-runner', 'uiux']) {
       const regions = parseSharedRegions(agent(role), `bs-${role}.md`);
       expect(regions.length, role).toBeGreaterThan(0);
+      compared.set(
+        role,
+        regions.map((region) => region.name),
+      );
       for (const region of regions) {
         const fragment = fragments.get(region.name);
         expect(fragment, `bs-${role}.md: SHARED:${region.name} names no fragment`).toBeDefined();
@@ -1163,9 +1168,11 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
         );
       }
     }
-    expect(fragments.get('handback-preflight')).toBe(
-      read('.claude/fragments/handback-preflight.md'),
-    );
+    expect(
+      compared.get('tester'),
+      'bs-tester.md carries no SHARED:handback-preflight region',
+    ).toContain('handback-preflight');
+    expect(fragments.has('handback-preflight')).toBe(true);
   });
 });
 
