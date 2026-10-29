@@ -229,11 +229,13 @@ and [`docs/guide/mods.md`](docs/guide/mods.md) has what each needs:
 
 Then `bs init` in the project you want it to work on. That creates
 `.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
-a `stack.yml` to answer. Outside it, `bs init` adds only Claude Code settings,
-to the project's git-excluded `.claude/settings.local.json` and only where you
-have not set them yourself: the
+a `stack.yml` to answer. Outside it, `bs init` writes two files in the
+project's `.claude/`, both kept out of git through `.git/info/exclude`:
+`settings.local.json`, where it adds Claude Code settings only where you have
+not set them yourself — the
 [concurrency caps](INSTALL.md#raise-the-concurrency-caps) and the
-[compact window](INSTALL.md#compact-earlier-on-1m-models). `BS_HOME` moves the
+[compact window](INSTALL.md#compact-earlier-on-1m-models) — and
+`bs-settings-record.json`, its record of the keys it wrote. `BS_HOME` moves the
 `.blacksmith/` root if you want one home for several projects. You now have
 `/bs`; restart every running Claude Code session once so it reads those
 settings.

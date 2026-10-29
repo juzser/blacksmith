@@ -47,10 +47,14 @@ That creates `.blacksmith/` beside your code: the event log, your epic plans, a
 roadmap and a `stack.yml` to answer. It also merges Claude Code settings into
 `.claude/settings.local.json`, keeps a record of the keys it wrote in
 `.claude/bs-settings-record.json`, and adds a line for each of those two files
-to `.git/info/exclude`. A cap already set is kept; when you have set `autoCompactWindow` in any
-settings source, bs writes none of its window keys and removes the window lines
-it wrote earlier; when no recommended window can be read, no window is written.
-A settings file that is not a JSON object is left alone (and then no record is
+to `.git/info/exclude`. A cap already set is kept, and no cap is added to a
+local file whose `env` is not an object. When a compact window is
+already yours — `autoCompactWindow`, at the top level or for any model, in any
+settings source, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in the environment or in a settings `env`
+block — bs writes none of its window keys and removes the window lines it wrote
+earlier; when no recommended window can be read, no window is written. A
+settings file that is not a JSON object is left alone (and then no record is
 written), and the exclude line is skipped outside a git repository and for a
 file git already ignores or tracks.
 
