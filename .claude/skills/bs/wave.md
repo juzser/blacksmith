@@ -204,7 +204,8 @@ one thing this playbook never asks you to.
    coverage and epic-level e2e/screenshots.
    - The moment it returns, project its result: `bs results record --task
      <task-id> --result <tester-result.json> --agent tester --provider <name>
-     --model-tier <tier> --worktree <dir> --session ... --plan-version N
+     --model-tier <tier> --worktree <dir> --artifacts-dir
+     <work-root>/state/artifacts --session ... --plan-version N
      --causal-parent ...`. `--agent` stamps the envelope, token_usage
      included, as `gate run` does; `--worktree` is the coder's worktree the
      tester shares, and records the HEAD that proves the screenshots fresh
@@ -263,14 +264,44 @@ one thing this playbook never asks you to.
      skipped because another judge bounced.
 
    Slice: `bs playbook slice wave --step 6`.
-7. Run the gate pipeline:
-   `bs gate run <task-id> --worktree <dir> --checks checks.json --result
-   result.json --grader state/results/<task-id>.grader-r<round>.json
-   --findings findings.json --plan <plan.json> --uiux-visual
-   state/results/<task-id>.uiux-visual.json --session ... --plan-version N
-   --causal-parent ...` (schema check → grader verdict → tests → coverage
-   evidence → findings intake → severity decision,
-   `docs/guide/operator-guide/queue-and-gate.md` §5).
+7. Run the gate pipeline. First the preflight, which reads the same paperwork
+   the gate will read and runs no check, then the gate with the very same
+   flags:
+
+   ```bash
+   bs results check <task-id> --as gate \
+     --worktree <dir> --checks checks.json --result result.json \
+     --agent <role> --provider <name> --model-tier <tier> \
+     --grader state/results/<task-id>.grader-r<round>.json \
+     --findings findings.json --plan <plan.json> \
+     --uiux-visual state/results/<task-id>.uiux-visual.json \
+     --artifacts-dir <work-root>/state/artifacts \
+     --session <id> --plan-version <n> --causal-parent <event-id>
+   bs gate run <task-id> \
+     --worktree <dir> --checks checks.json --result result.json \
+     --agent <role> --provider <name> --model-tier <tier> \
+     --grader state/results/<task-id>.grader-r<round>.json \
+     --findings findings.json --plan <plan.json> \
+     --uiux-visual state/results/<task-id>.uiux-visual.json \
+     --artifacts-dir <work-root>/state/artifacts \
+     --session <id> --plan-version <n> --causal-parent <event-id>
+   ```
+
+   The gate runs schema check → artifact check → commit check → deps check →
+   outstanding-judge check → uiux check → grader verdict → tests → coverage
+   evidence → findings intake → severity decision
+   (`docs/guide/operator-guide/queue-and-gate.md` §5).
+   - **The preflight comes first.** While it exits 1, the
+     wave-runner fixes its own flags or bounces the problem to the worker whose
+     file it names, and does not call `gate run`. A `verdicts.grader` of `fail`
+     or `not-graded` is not a preflight problem and does not stop `gate run`,
+     which records the verdict. Every `--artifacts-dir` in this playbook (step
+     5's record line, the two lines above and each worker's preflight line in
+     step 8) carries the one value `<work-root>/state/artifacts`, where
+     `<work-root>` is the workRoot `bs init` printed. The flag is explicit because
+     without it the home follows the caller's work root, which for an installed
+     `bs` sits under its working directory, and a worker runs from its worktree
+     while the wave-runner runs from the project.
    - **Run it as a background task** (`run_in_background`), ending the command
      with `; echo EXIT=$?` so its output file closes with an `EXIT=<n>` line.
      The gate takes the heavy lock itself and can queue behind another
@@ -363,7 +394,13 @@ one thing this playbook never asks you to.
    passes `bs dispatch lint`. Each dispatch is a `dispatch_decision` event with
    a `causal_parent` chaining back to the prompt/decision that caused it
    (architecture §7) — this is the timeline, not optional bookkeeping. Send
-   the brief to the typed `bs-<role>` agent it is marked for.
+   the brief to the typed `bs-<role>` agent it is marked for. Each worker's
+   brief carries its filled hand-back preflight line (the worker runs it as its
+   last step, `docs/guide/operator-guide/queue-and-gate.md` §5), with the same
+   `--artifacts-dir` as steps 5 and 7:
+   - coder: `bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts`
+   - tester: `bs results check <task-id> --as tester --result <result.json> --agent tester --provider <name> --model-tier <tier> --plan <plan.json> --artifacts-dir <work-root>/state/artifacts`
+   - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
    Slice: `bs playbook slice wave --step 8`.
 9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
    After 2 failed rounds on the same task, escalate model tier
@@ -375,6 +412,24 @@ one thing this playbook never asks you to.
    slice dispatch --section "Round counting and escalation"`. Then have the log check
    you: `bs escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
+   - **An env-failure block.** A `gate-outcome` carrying `error_class:
+     execution.env-failure` (the machine slept during a check) is logged as
+     `error-logged` with error `execution.env-failure` and the gate's
+     `environment_evidence`. It raises no finding against the coder, is not
+     bounced to the coder, and the wave-runner does not re-run the gate on its
+     own: the epic session decides whether and when to re-gate, and a second
+     env-classified block for the same task at the same HEAD goes to the
+     operator. It is still a failed round on the escalation ladder like every
+     other blocked `gate-outcome` (`escalation.ts` `readFailedRounds` counts it
+     as today), so the re-gate decision stays inside the ladder: a bare re-gate
+     only after the first failed round (the same HEAD, no new builder
+     dispatch), a higher-tier builder
+     dispatch from the second, the operator from the third. An env-classified
+     block never resets, skips or exempts a rung. Here "no coder bounce" means
+     no finding against the coder and no fix-round brief; from the second failed
+     round another gate round still needs a builder dispatch on a higher model
+     tier first, as `checkModelTierRung` and `checkOperatorRung` in
+     `escalation.ts` enforce.
    Slice: `bs playbook slice wave --step 9`.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting to the
     merge queue, audit the wave's own parallelism: `bs wave audit --session <id> --epic

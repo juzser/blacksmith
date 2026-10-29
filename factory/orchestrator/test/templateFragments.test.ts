@@ -30,6 +30,7 @@ import {
 /** The fragments this PR introduced. A fifth is fine — but it must be listed here on purpose. */
 const EXPECTED_FRAGMENTS = [
   'finding-fields',
+  'handback-preflight',
   'heavy-run',
   'read-only-judge-guard',
   'read-only-judge-rule',
@@ -56,6 +57,7 @@ const EXPECTED_REGIONS: Record<string, string[]> = {
   ],
   'token-usage': ['coder', 'grader', 'merger', 'researcher', 'tester', 'uiux'],
   'finding-fields': ['reviewer', 'security-reviewer', 'spec-reviewer'],
+  'handback-preflight': ['coder', 'grader', 'tester'],
   // The eleven templates that run a suite (epic bs-optimize D9).
   'heavy-run': [
     'auditor',

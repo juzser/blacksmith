@@ -29,6 +29,54 @@ private repository and published here as a single initial commit, so the phase
 entries below record development that predates this repo's git history rather
 than appearing in it.
 
+### Added
+
+The gate-bounce epic (`bs-gate-bounce`) moves the gate's paperwork checks to
+before hand-off. One entry per task.
+
+- **One paperwork module for every gate stage** (`task-1-paperwork-validators`).
+  `src/paperwork.ts` holds one pure function per paperwork stage and
+  `checkPaperwork`, which runs a stage set per role. `gate run` and the uiux
+  gate call it, with the old behaviour pinned by a characterization test. A
+  tester's declared screenshots go to the screenshots stage only on a
+  ui-affecting task.
+
+- **`bs results check`** (`task-2-results-check-verb`).
+  `bs results check <task-id> --as <coder|tester|grader|gate>` runs a role's
+  paperwork stages read-only, with no test run. Gate mode takes the
+  `gate run` line verbatim, reads every file on it and dry-runs the judge
+  closes. It prints `{outcome, reason?, as, task_id, artifact_home, problems,
+  skipped, not_run, verdicts?, warnings}` and exits 1 when blocked.
+
+- **Environment evidence on a failed check** (`task-3-testgate-env-evidence`).
+  The test gate records, per check, a `command` or `none` window with wall and
+  monotonic time, their gap, load and CPU count. When a failed check's own
+  clock gap reaches `SLEEP_GAP_MS` (30 s) the gate stamps
+  `error_class: execution.env-failure` and `environment_evidence`; the outcome
+  stays blocked `tests-failed` and nothing is re-run.
+
+- **Workers run the preflight; the wave-runner runs it before the gate**
+  (`task-4-handback-preflight-playbooks`). The coder, tester and grader
+  templates tell the worker to run its role's `bs results check` line as its
+  last step, fix what it lists and quote the output in `notes`. The coder and
+  tester also run every gate check over the whole project at hand-back. The
+  tester's screenshots must end in `-<desktop|mobile>-<light|dark>.png`, with no
+  fallback. `wave.md` runs `--as gate` before `gate run`, gives every
+  `--artifacts-dir` one shared value, and reads an env-failure block without a
+  coder bounce or an automatic re-run (it stays a failed round on the escalation
+  ladder). `queue-and-gate.md` section 5 documents all of it.
+
+- **Two tests stop waiting on the clock** (`task-5-deterministic-named-tests`).
+  The daemon per-tick test waits for one line and stops the daemon during its
+  sleep, and the process-group timeout test uses fake timers and advances them
+  only once the grandchild's pid is known. No production change.
+
+- **A blocked gate counts toward lesson recurrence**
+  (`task-6-gate-block-counts-toward-class`). A blocked `gate-outcome` now counts
+  toward the class its reason maps to, or toward its stamped `error_class`,
+  through `GATE_BLOCK_ERROR_CLASSES`, `isRecurrenceEvent` and
+  `recurrenceClassOf` in `lessonRecurrence.ts`. `gate.ts` is untouched.
+
 ### Changed
 
 - **The CLI tests run as ten files, and CI runs e2e in two shards.**
