@@ -151,7 +151,7 @@ export function fingerprintWorktree(worktreeDir: string): WorktreeFingerprint {
   };
 }
 
-function describe(entry: FingerprintEntry): string {
+function describeFingerprintEntry(entry: FingerprintEntry): string {
   return `${entry.status} ${entry.hash ?? GONE}`;
 }
 
@@ -203,15 +203,29 @@ export function checkWorktreeImmutable(
     const wasEntry = before.entries[key];
     const isEntry = after.entries[key];
     if (!wasEntry && isEntry) {
-      drift.push({ kind: 'dirtied', path: key, before: null, after: describe(isEntry) });
+      drift.push({
+        kind: 'dirtied',
+        path: key,
+        before: null,
+        after: describeFingerprintEntry(isEntry),
+      });
     } else if (wasEntry && !isEntry) {
-      drift.push({ kind: 'reverted', path: key, before: describe(wasEntry), after: null });
-    } else if (wasEntry && isEntry && describe(wasEntry) !== describe(isEntry)) {
+      drift.push({
+        kind: 'reverted',
+        path: key,
+        before: describeFingerprintEntry(wasEntry),
+        after: null,
+      });
+    } else if (
+      wasEntry &&
+      isEntry &&
+      describeFingerprintEntry(wasEntry) !== describeFingerprintEntry(isEntry)
+    ) {
       drift.push({
         kind: 'modified',
         path: key,
-        before: describe(wasEntry),
-        after: describe(isEntry),
+        before: describeFingerprintEntry(wasEntry),
+        after: describeFingerprintEntry(isEntry),
       });
     }
   }

@@ -337,7 +337,7 @@ function decide(
   return 'under';
 }
 
-function describe(
+function describeBudgetAlarm(
   check: Omit<EpicSpendCheck, 'detail'>,
   unattributed: number,
   largestPrice: number,
@@ -553,7 +553,10 @@ export function checkBudgetAlarm(
         tasksOverPrice,
         status,
       };
-      return { ...partial, detail: describe(partial, unattributedDispatches, largestPrice) };
+      return {
+        ...partial,
+        detail: describeBudgetAlarm(partial, unattributedDispatches, largestPrice),
+      };
     });
 
   if (epics.length === 0) {
