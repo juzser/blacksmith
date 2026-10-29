@@ -583,6 +583,10 @@ describe('bs results check (built binary)', () => {
       const run = check('coder', [...base(), '--result', path.join(scratch, 'absent.json')]);
       expect(run.status).toBe(1);
       expect(run.json.reason).toBe('result-unreadable');
+      expect(run.json.problems).toHaveLength(1);
+      expect(run.json.skipped.map((s: { why: string }) => s.why)).toEqual(
+        Array(run.json.skipped.length).fill('unreadable-input'),
+      );
     });
 
     it('blocks invalid JSON as result-unreadable', async () => {
