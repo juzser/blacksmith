@@ -413,6 +413,38 @@ export interface EpicFindingSummary {
   summary: string;
 }
 
+/**
+ * Where summarizeEpic sorted a finding: the list it landed in, never a reading
+ * of its status string, so a status added later cannot print as open while
+ * `openFindings` is empty. `closed` is closed with no person's decision behind
+ * it (neither open nor discretionary); `unknown` is an id the fold has no
+ * record of.
+ */
+export type FindingDisposition =
+  | 'open'
+  | 'satisfied-amendment'
+  | 'discretionary'
+  | 'closed'
+  | 'unknown';
+
+/**
+ * How one finding the closing spec review raised stands now. Carried so the
+ * judge digest can account for every id it names: a finding closed without a
+ * person's decision is in neither `openFindings` nor `discretionaryFindings`,
+ * and an id named nowhere else read as unaccounted.
+ */
+export interface SpecReviewFindingOutcome {
+  findingId: string;
+  disposition: FindingDisposition;
+  /** Null exactly when the disposition is `unknown`. */
+  finding: {
+    severity: string;
+    status: string;
+    verifiedBy?: string;
+    verifiedByProvider?: string;
+  } | null;
+}
+
 export interface SatisfiedAmendment extends EpicFindingSummary {
   /**
    * The landed rows that discharge it — one per amends_task_ids entry, with the
@@ -616,6 +648,8 @@ export interface EpicSummary {
   integration: IntegrationStatus;
   mcp: McpSurfaceStatus;
   specReview: SpecReviewStatus;
+  /** One entry per id `specReview.review` raised; empty when no review is on record. */
+  specReviewFindings: SpecReviewFindingOutcome[];
   goalCheck: GoalCheckStatus;
   /**
    * How wide this epic ran, or null when the caller measured nothing. Null is
@@ -1041,6 +1075,38 @@ export function summarizeEpic(
     }
   }
 
+  // Read off the lists the loop above filled, so the digest's wording follows
+  // the branch that sorted each finding and not a second opinion on the status.
+  const specReviewFindings: SpecReviewFindingOutcome[] = (specReview.review?.findingIds ?? []).map(
+    (findingId): SpecReviewFindingOutcome => {
+      const f = findings.find((x) => x.finding_id === findingId);
+      if (f === undefined) return { findingId, disposition: 'unknown', finding: null };
+      const inList = (list: EpicFindingSummary[]) => list.some((x) => x.findingId === findingId);
+      const disposition: FindingDisposition = inList(openFindings)
+        ? 'open'
+        : inList(satisfiedAmendments)
+          ? 'satisfied-amendment'
+          : inList(discretionaryFindings)
+            ? 'discretionary'
+            : 'closed';
+      return {
+        findingId,
+        disposition,
+        finding: {
+          severity: f.severity,
+          status: f.finding_status,
+          // The fold hands back null, not undefined, for an unstamped finding.
+          ...(typeof f.verified_by === 'string' && f.verified_by !== ''
+            ? { verifiedBy: f.verified_by }
+            : {}),
+          ...(typeof f.verified_by_provider === 'string' && f.verified_by_provider !== ''
+            ? { verifiedByProvider: f.verified_by_provider }
+            : {}),
+        },
+      };
+    },
+  );
+
   const blockers: string[] = [
     // An epic with no tasks is vacuously "all tasks done", which would let a
     // typo'd --epic (or an epic whose plan was never dispatched) sail through
@@ -1122,6 +1188,7 @@ export function summarizeEpic(
     integration,
     mcp,
     specReview,
+    specReviewFindings,
     goalCheck,
     concurrency,
     closingSpecReviewSkippedByTier,
@@ -1129,6 +1196,28 @@ export function summarizeEpic(
     mechanicallyReady: blockers.length === 0,
   };
 }
+
+const DISPOSITION_WORDS: Readonly<Record<FindingDisposition, string>> = {
+  open: 'still open; counted in the open findings above',
+  'satisfied-amendment':
+    'its amendment already landed; not open, not a blocker; this close marks it amended (amend-pending list below)',
+  discretionary: 'closed by a person; listed under discretionary closures below',
+  closed: 'recorded closed; not counted among the open findings',
+  unknown: '',
+};
+
+// The disposition says open or closed; the status and verifier are only added
+// facts, printed as the fold records them.
+const specReviewFindingLine = (o: SpecReviewFindingOutcome): string => {
+  if (o.finding === null)
+    return `  review finding ${o.findingId}: not in the findings record, so how it ended cannot be shown`;
+  const { severity, status, verifiedBy, verifiedByProvider } = o.finding;
+  const who =
+    verifiedBy === undefined
+      ? ''
+      : ` (verified by ${verifiedBy}${verifiedByProvider === undefined ? '' : ` via ${verifiedByProvider}`})`;
+  return `  review finding ${o.findingId} (${severity}): ${status} — ${DISPOSITION_WORDS[o.disposition]}${who}`;
+};
 
 const findingLine = (f: EpicFindingSummary): string =>
   `  ${f.findingId} (${f.taskId}, ${f.severity}, ${f.findingStatus}): ${f.summary}`;
@@ -1270,6 +1359,7 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
           `  Reviewed by: ${review.reviewedBy}`,
           `  Against commit ${review.headSha.slice(0, 8)}${coverage(review.headSha, summary.specReview.headSha)}, plan v${review.planVersion}`,
           `  Findings that review raised: ${review.findingIds.length}${review.findingIds.length > 0 ? ` (${review.findingIds.join(', ')})` : ''}`,
+          ...summary.specReviewFindings.map(specReviewFindingLine),
         ];
 
   const goalText = summary.goalCheck.goal;

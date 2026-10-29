@@ -5165,3 +5165,118 @@ describe('epic.ts epicVerdictJudgeRequest — closing spec review line', () => {
     );
   });
 });
+
+describe('epic.ts epicVerdictJudgeRequest — how each closing-review finding ended', () => {
+  const BUDGET = { timeout_ms: 1_000, max_output_bytes: 4_096 };
+  const reviewRaising = (ids: string[]): SpecReviewStatus => {
+    const base = okSpecReview();
+    return { ...base, review: base.review && { ...base.review, findingIds: ids } };
+  };
+  const summaryOf = (ids: string[], findings: Finding[]) =>
+    summarizeEpic(
+      'epic-1',
+      [taskRow({ taskStatus: 'completed' })],
+      findings,
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      reviewRaising(ids),
+      okGoalCheck(1),
+      alwaysEffort(),
+    );
+  const lineIn = (prompt: string, id: string): string =>
+    prompt.split('\n').find((l) => l.includes(`review finding ${id}`)) ?? '';
+  const lineFor = (id: string, findings: Finding[]): string =>
+    lineIn(epicVerdictJudgeRequest(summaryOf([id], findings), BUDGET).prompt, id);
+  const at = (finding_status: string, extra: Partial<Finding> = {}): Finding[] => [
+    findingFixture({ finding_id: 'f-x', finding_status, ...extra }),
+  ];
+
+  it('says a refuted finding is closed without claiming who closed it', () => {
+    const line = lineFor('f-x', at('refuted'));
+    expect(line).toContain('S2-major');
+    expect(line).toContain('refuted — recorded closed; not counted among the open findings');
+    expect(line).not.toContain('adversarial');
+    expect(line).not.toContain('verified by');
+  });
+
+  it('names the verifier only when the fold records one', () => {
+    expect(
+      lineFor('f-x', at('refuted', { verified_by: 'verifier-a', verified_by_provider: 'codex' })),
+    ).toContain('(verified by verifier-a via codex)');
+    expect(lineFor('f-x', at('refuted', { verified_by: 'verifier-a' }))).toContain(
+      '(verified by verifier-a)',
+    );
+  });
+
+  it('prints nothing about a verifier the fold holds as null or empty', () => {
+    // listFindings returns null, not undefined, for a finding no verifier stamped.
+    const nulls = { verified_by: null, verified_by_provider: null } as unknown as Partial<Finding>;
+    expect(lineFor('f-x', at('refuted', nulls))).not.toContain('verified by');
+    expect(lineFor('f-x', at('refuted', { verified_by: '' }))).not.toContain('verified by');
+  });
+
+  it('says a fix-verified finding is closed, not open', () => {
+    const line = lineFor('f-x', at('fix-verified'));
+    expect(line).toContain('fix-verified — recorded closed');
+    expect(line).not.toContain('still open');
+  });
+
+  it('names a waived finding as closed by a person, and keeps it in the discretionary list', () => {
+    const prompt = epicVerdictJudgeRequest(summaryOf(['f-x'], at('waived')), BUDGET).prompt;
+    const line = lineIn(prompt, 'f-x');
+    expect(line).toContain('closed by a person');
+    expect(line).toContain('discretionary closures below');
+    expect(prompt).toContain('Findings already closed by waiver or amendment before this close: 1');
+  });
+
+  it('closes expired and amended findings without calling them machine closures', () => {
+    expect(lineFor('f-x', at('expired'))).toContain('recorded closed; not counted among the open');
+    expect(lineFor('f-x', at('expired'))).not.toContain('verifier');
+    expect(lineFor('f-x', at('amended'))).toContain('closed by a person');
+  });
+
+  it('says an id the findings fold does not know is unknown', () => {
+    expect(lineFor('f-ghost', [])).toContain('not in the findings record');
+  });
+
+  it('keeps an open finding reading as open', () => {
+    const line = lineFor('f-x', at('raised'));
+    expect(line).toContain('raised — still open; counted in the open findings above');
+    expect(line).not.toContain('recorded closed');
+  });
+
+  it('reads an unsatisfied amend-pending finding as open', () => {
+    const line = lineFor(
+      'f-x',
+      at('amend-pending', { amends_task_ids: ['epic-1/task-9'], amends_plan_version: 1 }),
+    );
+    expect(line).toContain('still open; counted in the open findings above');
+  });
+
+  it('reads a satisfied amend-pending finding as landed, not open', () => {
+    const summary = summaryOf(
+      ['f-x'],
+      at('amend-pending', { amends_task_ids: ['epic-1/task-1'], amends_plan_version: 1 }),
+    );
+    expect(summary.openFindings).toHaveLength(0);
+    const line = lineIn(epicVerdictJudgeRequest(summary, BUDGET).prompt, 'f-x');
+    expect(line).toContain('its amendment already landed; not open, not a blocker');
+    expect(line).toContain('amend-pending list below');
+    expect(line).not.toContain('still open');
+  });
+
+  // The wording must follow how summarizeEpic sorted the finding, whatever a
+  // status is called: a status added to LEGAL_TRANSITIONS later is covered.
+  it.each(Object.keys(LEGAL_TRANSITIONS))(
+    'for status %s the line agrees with the list summarizeEpic put it in',
+    (status) => {
+      const summary = summaryOf(['f-x'], at(status));
+      const line = lineIn(epicVerdictJudgeRequest(summary, BUDGET).prompt, 'f-x');
+      const isOpen = summary.openFindings.some((f) => f.findingId === 'f-x');
+      const isDiscretionary = summary.discretionaryFindings.some((f) => f.findingId === 'f-x');
+      expect(line.includes('still open')).toBe(isOpen);
+      expect(line.includes('discretionary closures below')).toBe(isDiscretionary);
+      if (!isOpen) expect(line).not.toContain('counted in the open findings');
+    },
+  );
+});
