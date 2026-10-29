@@ -301,10 +301,12 @@ That is a session with nothing measured yet: `complete: false` because a
 transcript was missing, and every list empty rather than zero-filled.
 
 **Sharing it is a separate, opt-in step.** `bs report export --session <id>`
-writes the same numbers, with a report digest and each task's checks shown as
-passed, failed, not run or unknown, as Markdown on stdout or to
-`--out <file>` (`--json` for the same content as JSON). Home and temp paths
-and user names are replaced, transcript text is never read, and nothing is
-sent anywhere. Its first line is "Review this export before you share it."
-Read it before it leaves the machine; whether to share it is yours to decide.
-`/bs report` offers it as its last step, only when you ask for a file.
+writes the same numbers, with each task's checks shown as passed, failed, not
+run or unknown, as Markdown on stdout or to `--out <file>` (`--json` for the
+same content as JSON). It carries a report digest only when you hand it one
+with `--digest <file>`, as `/bs report` does with the scribe's digest. Home
+and temp paths and user names are replaced, transcript text is never read,
+and nothing is sent anywhere. Its first line is "Review this export before you
+share it." Read it before it leaves the machine; whether to share it is yours
+to decide. `/bs report` offers it as its last step, only when you ask for a
+file.

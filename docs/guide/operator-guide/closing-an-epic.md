@@ -182,11 +182,14 @@ the close can be audited later without re-deriving state that has since moved.
 An empty or whitespace-only rationale is refused: an override with no reason is
 a `go` wearing a costume.
 
-A follow-up counts as finished once every finding it owns is closed, yet keeps
-its raw status, often `todo`. So the summary's `cleared_follow_ups` names each
-such task with that status and the finding ids that cleared it, and a task
-list reading `todo` beside a zero non-terminal count says why. The key is
-always present, empty when none applied.
+A follow-up task (origin `escalation`) counts as finished when it owns at
+least one finding and every finding it owns is waived, refuted or
+fix-verified; one still open, or closed any other way (expired, amended),
+still blocks. Such a task keeps its raw status, often `todo`. So the
+summary's `cleared_follow_ups` names each one with that status and the
+finding ids that cleared it, and a task list reading `todo` beside a zero
+non-terminal count says why. The key is always present, empty when none
+applied.
 
 That summary now also states **how wide the epic actually ran**, folded from
 the same lineage the verdict already read:
@@ -625,7 +628,8 @@ after the integration PR is open.
 git -C ../my-project fetch --prune origin
 bs cleanup --project ../my-project --epic epic-1          # dry run: report only
 bs cleanup --project ../my-project --epic epic-1 --apply  # the same, applied
-bs cleanup --project ../my-project                        # then both, unscoped
+bs cleanup --project ../my-project                        # then the pair unscoped
+bs cleanup --project ../my-project --apply
 ```
 
 It reads the local refs and never fetches, which is why the fetch comes first.
@@ -636,7 +640,7 @@ per candidate, and every `keep` names the rule that kept it:
 ```json
 {"items":[
   {"kind":"worktree","path":"/abs/path/.wt/my-project/task-1","branch":"bs/epic-1/task-1","action":"keep","reason":"active-24h: bs/epic-1/task-1 has a commit in the last 24 h"},
-  {"kind":"branch","branch":"bs/epic-1/integration","action":"keep","reason":"active-24h: bs/epic-1/integration has a commit in the last 24 h"},
+  {"kind":"branch","branch":"bs/epic-1/integration","action":"keep","reason":"not-merged: bs/epic-1/integration is not an ancestor of refs/heads/main, refs/remotes/origin/main"},
   {"kind":"directory","path":"/abs/path/.wt/my-project/old-scratch","action":"keep","reason":"active-24h: /abs/path/.wt/my-project/old-scratch changed in the last 24 h"}],
  "warnings":[]}
 ```

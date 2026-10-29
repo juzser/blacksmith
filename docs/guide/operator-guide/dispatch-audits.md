@@ -26,9 +26,9 @@ bs security triggers --task factory/specs/active/epic-1/task-1.json
 
 **Exit code is 0 either way** when the command can answer — a fired trigger is a
 dispatch instruction, not a violation, unlike `claims check` and `wave check`.
-Read `dispatchSecurityReviewer`; dispatch the reviewer iff it is true, in the
-same message as the grader and the reviewer once the tester has returned
-(wave.md step 6, §3c). Each
+Read `dispatchSecurityReviewer`; dispatch the security-reviewer iff it is
+true, in the same message as the grader and the reviewer once the tester has
+returned (wave.md step 6, §3c). Each
 trigger names its own evidence: the claim and the glob that fired it, so a
 surprising result is arguable against the policy file rather than against a
 boolean.

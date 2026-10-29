@@ -16,7 +16,8 @@ A force push to main is denied, and `git status` is not.
 The same hook also denies two habits that waste an orchestrator's turns, and
 names the fix in the reason. An `Agent` call whose prompt opens with a brief
 marker for one role (the first line `bs brief compose` writes) must go to that
-role's `bs-<role>` agent; one sent to `general-purpose` or to another role is
+role's agent, `blacksmith:bs-<role>` under the plugin (the hook accepts the
+bare `bs-<role>` too); one sent to `general-purpose` or to another role is
 denied. A foreground `sleep` of 2 seconds or more is denied too, with a
 background task or the Monitor tool as the fix; a shorter or backgrounded
 sleep, and one inside a script the command runs, are not. A prompt with no
