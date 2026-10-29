@@ -137,7 +137,7 @@ function parseInvocations(markdown: string): Invocation[] {
       const flags: string[] = [];
       for (const raw of text.slice(match.index + match[0].length).split(/[ \t]+/)) {
         if (raw === '') continue;
-        if (SHELL_OPERATORS.has(raw)) break;
+        if (SHELL_OPERATORS.has(raw) || raw === '--') break;
         const token = raw.replace(/^[[(]+/, '').replace(/[\]),.`]+$/, '');
         if (token.startsWith('--')) {
           for (const alternative of token.split(ALT))
@@ -363,6 +363,19 @@ describe('parseInvocations', () => {
   it('splits an alternation of flags, not just of words', () => {
     expect(parseInvocations('`smith stats overview --json\\|--pretty`')).toEqual([
       { line: 1, words: ['stats', 'overview'], flags: ['json', 'pretty'] },
+    ]);
+  });
+
+  it('ends the flags and words of a command at a bare --', () => {
+    // `--` is the end-of-options marker: what follows is the child command,
+    // not flags of this one.
+    expect(
+      parseInvocations(
+        '`bs heavy run --label <l> -- node --version` and `bs heavy run -- pnpm test`',
+      ),
+    ).toEqual([
+      { line: 1, words: ['heavy', 'run'], flags: ['label'] },
+      { line: 1, words: ['heavy', 'run'], flags: [] },
     ]);
   });
 

@@ -174,6 +174,26 @@ describe('scanErrorCodes', () => {
     expect(scan.codes.has('security-surface')).toBe(false);
   });
 
+  it("reads the code a logBlocked(<task>, '<code>', ...) call raises", () => {
+    // queue.ts reports a blocked task through a callback rather than a throw,
+    // wrapped by the formatter or not. The declaration (parameter names, no
+    // literal) must not read as a raise.
+    const scan = scanErrorCodes([
+      ...fixture,
+      {
+        file: 'src/queue.ts',
+        text: [
+          'const logBlocked = (taskId: string, error: string, detail: string) => {};',
+          "await logBlocked(task.taskId, 'execution.test-failure', outputTail);",
+          "await logBlocked(\n  task.taskId,\n  'integration.merge-conflict-textual',\n  `x`,\n);",
+        ].join('\n'),
+      },
+    ]);
+    expect(scan.codes.has('execution.test-failure')).toBe(true);
+    expect(scan.codes.has('integration.merge-conflict-textual')).toBe(true);
+    expect(scan.opaque).toEqual([]);
+  });
+
   it('reports a construction whose code it cannot read rather than dropping it', () => {
     const scan = scanErrorCodes([
       ...fixture,
