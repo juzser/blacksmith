@@ -38,8 +38,18 @@ goal → contracts you sign → one worktree per contract, run in parallel
 | Review | The author checks its own work | A fresh-context reviewer that never saw the coder's session |
 | Verification | You run the tests and read the diff | Schema check, tests and coverage evidence, then a verifier whose only job is to refute the reviewer |
 | Merge | You merge what the session produced | A serial merge queue into one integration branch and one pull request that you merge |
+| Long work | One session carries the work, with any subagents it starts; compaction summarizes it when the window fills, and what outlives the session is its transcript and the files it wrote | Plans, task states and gate results live on disk, so a new session picks the epic up from the log, and a wave too wide for one window runs in a session of its own |
+| Course change | You or the session change the plan in chat, and the change lives in the conversation | A worker that finds a criterion wrong proposes a plan diff; you approve or reject it, and an approval cuts a new plan version |
+| Lessons | You or the session record what to avoid in CLAUDE.md or memory, and later sessions read it | Errors are classified, a scribe drafts lesson candidates you approve, and each brief carries the lessons for its role and paths |
 
 Demo: NOT MEASURED. No single-run recording is published yet.
+
+Every claim from the tagline to here has a row in the
+[claims matrix](docs/claims-matrix.md) that names the code, test or document
+behind it, and a test fails when one has no row or a row cites a path that
+does not exist. Further down the page, the matrix holds rows only for the
+claims the 0.6.0 docs pass and later edits wrote or changed, kept by hand, and
+the test checks only that the paths they cite exist.
 
 ## Why Blacksmith
 
@@ -85,6 +95,27 @@ warns when the caps are not raised. The wave-runner, the coder and the tester,
 which wait minutes on test runs, keep a 1h prompt cache instead of the default
 five minutes.
 
+How wide it runs can be checked. Before anyone is dispatched,
+`bs wave schedule` replays the plan and reports how many rounds it needs, its
+widest round, and the tasks held back by their claims, a shared hotspot or an
+import edge rather than by a dependency; it exits 1 when the plan stalls and 2
+when tasks are held back that way. Once a wave lands, `bs wave audit` reads the
+log back and says whether a wave admitted N wide ran N wide, and
+`bs epic width` asks the same of every closed epic. All three only read; the
+close records an epic's width without holding on it, though an external
+judge, when one is enabled, may refute a wave that was admitted and shows no
+work.
+
+Only what the turn needs is loaded. Each `/bs` verb loads its own playbook when
+it runs, and only the verbs that dispatch read the dispatch contract. A
+wave-runner reads the wave and dispatch playbooks by slice:
+`bs playbook slice` prints one wave step or one dispatch section.
+
+Merge lanes are opt-in. `bs queue run --batch` groups claim-disjoint tasks
+that do not depend on each other, tests each group once, and bisects a red
+group so the tasks that pass still land. No playbook passes `--batch`, so by
+default the queue tests and merges one task at a time.
+
 </td>
 </tr>
 
@@ -97,6 +128,14 @@ Every task carries an objective, an output schema, acceptance criteria, a tool
 allowlist, the exact paths it may touch and a token budget. The plan is frozen
 the moment you sign it and versioned in the event log, so a worker cannot
 quietly reinterpret the job. No contract, no dispatch.
+
+A worker can still argue with it out loud. A coder or tester that finds a
+criterion wrong returns a proposed plan diff; `bs plan propose` checks that
+the diff yields a valid plan and records it without touching the plan, and
+`bs plan proposals` lists it, marked stale once a newer plan version overtakes
+the one it was drafted against. The answer is yours: `bs plan approve` cuts
+the next version through `bs plan amend`, and `bs plan reject` requires a
+rationale.
 
 </td>
 <td width="50%">
@@ -122,6 +161,12 @@ the reviewer. S1 stops the line, S2 bounces back to the same branch, S3 batches
 into one waiver question per epic, answered with `/bs waivers`. Only S3 and S4
 are ever waivable.
 
+A judge's verdict counts only if the worktree did not move under it. The
+playbook brackets each judge of a task, and the audit's shared tree, with
+`bs worktree fingerprint` and `bs worktree verify`, gitignored paths aside;
+drift exits 1, and the playbook discards the verdict and dispatches the judge
+again on a clean tree.
+
 </td>
 <td>
 
@@ -134,6 +179,43 @@ machine that holds the credentials and are skipped on one that does not, so
 which of them you get is a fact about your machine, not about this repo. A
 judge earns its vote in **shadow mode** first — every verdict recorded, none
 of them gating anything — and is promoted only once you have read the numbers.
+
+</td>
+</tr>
+
+<tr valign="top">
+<td>
+
+**Checked against your goal before the pull request**
+
+Every task gate reads text the planner wrote, so they can all pass a plan that
+solves the wrong problem. Before the integration PR, `bs epic goal-check`
+records the plan checked clause by clause against the roadmap goal, the one
+reference the planner did not write, and an uncovered clause raises a spec
+finding. `bs integration check` runs the project's checks on the assembled
+integration branch, not in a worktree, and `bs epic spec-review` records the
+closing spec review read against that branch. `bs epic verdict` holds the epic
+while a task is unfinished, a blocking finding is open, or the integration
+check, the goal check or a closing review the tier requires is missing, failed
+or stale; once those pass and an external judge is enabled, a cross-provider
+quorum decides go or hold. `bs epic close` refuses a hold unless you give a
+rationale, which it records.
+
+</td>
+<td>
+
+**An epic outlives one context window**
+
+`/bs run` has two tiers. The epic tier,
+[`run.md`](.claude/skills/bs/run.md), admits waves and closes the epic; the
+wave tier, [`wave.md`](.claude/skills/bs/wave.md), takes one wave from
+worktrees to the merge queue. A wave that fits the epic session's window runs
+inline. One too wide for that runs in a session of its own, driven by the epic
+session or, when the wave would eat the window the epic needs, by the
+`bs-wave-runner` agent. `bs session start --continues` links a new session to
+the epic's log, `bs event lineage` prints the sessions on that line, and
+`--lineage` makes a `bs stats` read answer for the whole epic rather than the
+window you are in.
 
 </td>
 </tr>
@@ -176,6 +258,11 @@ Every prompt, dispatch, gate result and error is an append-only event on disk.
 The dashboard is a projection of that log, and `bs db rebuild` reconstructs
 the entire database from the log alone. Nothing the factory did exists only in
 a chat transcript.
+
+Every event but a `session-start` names a parent event, and an append whose
+parent is not already in the log is refused, so any record can be followed
+back to a `session-start`
+(`bs stats timeline --causal-chain-for <event-id>`).
 
 </td>
 </tr>
@@ -383,6 +470,16 @@ judgment half is a Claude Code session the playbook dispatches. That is also
 the line between the two installs: the `bs` half travels in the package, the
 playbooks in the plugin.
 
+How `/bs` talks to you is written down, in the console's
+[Talking to the operator](.claude/skills/bs/SKILL.md#talking-to-the-operator)
+section. It replies in the language you write in and in plain words, opens
+with the result or the decision you need to make, and puts commands, ids and
+paths in a short technical part at the end, except a command you have to run.
+A reply with more than one step numbers them, and when it offers options and
+recommends one, every option carries a confidence figure. The same rules bind
+the `/bs report` digest and the integration PR body; agent briefs and event
+payloads are exempt.
+
 → **[The operator loop](docs/guide/operator-loop.md)** — the six steps, in the
 order you meet them.<br />
 → **[Operator guide](docs/guide/operator-guide.md)** — the same ground with real
@@ -402,6 +499,25 @@ lands the task on `bs/<epic>/integration`. Each merge frees paths, and
 wave to drain. At the close, `bs cleanup` removes the task worktrees and
 branches that are merged and have been idle for 24 hours, and keeps anything
 it is unsure of. One epic, one integration PR, merged by you.
+
+The fourteen roles, and when each one is dispatched:
+
+| Role | What it does | When it is dispatched |
+|---|---|---|
+| `bs-planner` | Turns the goal into a plan of task specs, and renders the verdict against acceptance criteria | `/bs plan`, and again once every task is done |
+| `bs-spec-reviewer` | Hunts holes in the spec | Before you sign; at the close against the assembled branch (on a small epic only after an amendment); and for the goal check |
+| `bs-researcher` | Writes a research brief on an unknown | Only when a task needs one before code (never on a small epic), a worker asks for one, or `/bs plan` meets an unfamiliar repo |
+| `bs-uiux` | Writes the UI spec, then checks the tester's screenshots against it | Only for a UI-affecting task: the spec before code, the visual pass once screenshots exist |
+| `bs-coder` | Implements one task, tests first, in its worktree | Every task |
+| `bs-tester` | Adds missing unit coverage, runs e2e, captures screenshots | Every task, after the coder |
+| `bs-grader` | Scores the result against the task's acceptance criteria | Every task, after the tester: at most two rounds on a huge epic, one below |
+| `bs-reviewer` | Reviews the diff read-only, in a fresh context | Every task, with the grader |
+| `bs-security-reviewer` | Reviews a task's diff, or the whole project in an audit, for security | Only when `bs security triggers` fires for the task, and for the security axis of `/bs audit` |
+| `bs-verifier` | Tries to refute the reviewer's findings | On S1 and S2 findings (S1 only on a small epic), plus a 20% sample of S3 on a huge one |
+| `bs-merger` | Resolves a merge-queue conflict | Only when the automatic rebase fails |
+| `bs-wave-runner` | Runs one wave, worktrees through merge queue, in a session of its own | Only when a wave would eat the window the epic session needs to reach its end |
+| `bs-scribe` | Distills lesson candidates, writes the integration PR body and the `/bs report` digest | `/bs lessons` for raw candidates, `/bs report`, and the integration PR |
+| `bs-auditor` | Reads a project on one axis: performance, code quality or architecture | Only in `/bs audit`, three at once |
 
 → The pipeline diagram and the reasoning behind each stage:
 **[architecture §3 — The loop](docs/specs/black-smith-architecture.md#3-the-loop)**.
