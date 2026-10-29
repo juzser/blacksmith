@@ -985,6 +985,28 @@ describe('bs results check (built binary)', () => {
     );
   });
 
+  describe('the other worker modes keep refusing what they refused', () => {
+    it.each([
+      ['coder', '--plan', 'p.json'],
+      ['coder', '--grader', 'g.json'],
+      ['tester', '--worktree', '.'],
+      ['tester', '--base', 'main'],
+      ['tester', '--grader', 'g.json'],
+    ])('--as %s refuses %s as cli.flag-not-for-mode', async (...args) => {
+      const [as, ...flag] = args;
+      const run = parse(
+        runCli(
+          ['results', 'check', w.taskId, '--as', as, '--artifacts-dir', w.artifactsDir, ...flag],
+          {},
+          undefined,
+          w.worktreeDir,
+        ),
+      );
+      expect(run.status).toBe(1);
+      expect(run.json.error.code).toBe('cli.flag-not-for-mode');
+    });
+  });
+
   describe('intake problems name their input', () => {
     const inputs = (run: Parsed) =>
       run.json.problems
