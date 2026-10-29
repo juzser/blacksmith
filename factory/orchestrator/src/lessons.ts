@@ -1177,7 +1177,9 @@ export function lessonsForDispatch(
               cls +
               ' (' +
               (counts.get(cls)?.tasks ?? 0) +
-              ' tasks, read with "bs lessons for-dispatch --class ' +
+              ' tasks, read with "bs lessons for-dispatch ' +
+              role +
+              ' --class ' +
               cls +
               '")',
           )
