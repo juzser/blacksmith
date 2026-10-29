@@ -1,0 +1,260 @@
+{
+  "epic_id": "bs-optimize",
+  "version": 6,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-optimize/task-13-slice-citations",
+      "epic_id": "bs-optimize",
+      "plan_version": 6,
+      "title": "Slice citations resolve",
+      "summary": "sliceSection also takes a heading's name without its trailing parenthetical, and every playbook citation of a sliceable section resolves, pinned by a drift guard.",
+      "objective": "Answer closing-review finding f-bs-optimize/integration-aae952a5 (S2): a slice-only bs-wave-runner cannot reach the dispatch.md sections wave.md's steps point at, because `sliceSection` (factory/orchestrator/src/playbookSlice.ts) matches a `##`/`###` heading only by its exact text, the headings carry a trailing parenthetical citation (e.g. `## Round counting and escalation (agent-interviews.md N-4)`), the steps cite short names followed by \"above\", and step 8 cites a \"Dispatch contract\" section that no playbook has. (1) `sliceSection`: exact heading match first (unchanged); when nothing matches exactly, match a heading whose text minus one trailing ` (...)` group equals the given name, only when exactly one does; two such headings raise `playbook.ambiguous-section`; the given name is trimmed and its whitespace runs read as one space; `playbook.unknown-section` details gain `sections`, every `##`/`###` heading of that playbook in order. (2) wave.md: every citation in steps 2-10 of a dispatch.md section names dispatch.md and carries its `bs playbook slice dispatch --section \"<name>\"` command with a name that resolves; step 8's \"Dispatch contract\" becomes the two sections that hold the lessons and findings splice; step 4's \"One message, many dispatches\" / \"No lockstep barrier\" name the common section they live in; \"above\" only ever points at wave.md text the runner has read. (3) bs-wave-runner.md, outside its SHARED regions: the slice instruction says a section may be named with or without its trailing parenthetical and that an unknown name's error lists the sections; its \"dispatch.md's payload contract\" pointer becomes the slice command for the section that holds it. (4) A drift guard, test/playbookCitations.test.ts, resolves every quoted section citation in wave.md, dispatch.md and bs-wave-runner.md, and every citation of a wave.md or dispatch.md section from any .claude/skills/bs/*.md or .claude/agents/*.md, through the slice module and, for dispatch sections, the built CLI. Scope decision (planner): the slice verb serves exactly wave.md and dispatch.md and the only slice-only reader is the wave-runner, so the guard covers those two playbooks whole plus every citation into them; self-citations inside run.md or SKILL.md, read whole by the epic session, are not slice-reachable and are not in the guard. Runs after task-14 (bs-wave-runner.md) and task-15 (wave.md) have merged, so the guard is written against the final text of both files. Read factory/specs/active/bs-optimize/epic-spec.md first, including its section \"Closing review (plan v5) — changes\". TDD: write the named failing test first, watch it fail on the unfixed tree, implement minimally, watch it pass.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Finding f-bs-optimize/integration-aae952a5 (module half), failing test first in factory/orchestrator/test/playbookSlice.test.ts against the real dispatch.md: `sliceSection(dispatch, 'Round counting and escalation')` returns the section whose first line is `## Round counting and escalation (agent-interviews.md N-4)` (on head dc7db626 it throws `playbook.unknown-section`; the result quotes that failing run). Also: a fixture holding `## A` and `## A (x)` cuts `## A` for `A` (exact wins); a fixture holding `## B (x)` and `### B (y)` raises `playbook.ambiguous-section` for `B` with details naming both full headings; `Round counting\\n  and escalation` (a hard-wrapped name) resolves like the one-line name; an unknown name raises `playbook.unknown-section` whose `details.sections` equals the playbook's `##`/`###` headings outside fences, in order (on dc7db626 the details carry only `heading`); a heading inside a fence never matches. Every existing assertion in playbookSlice.test.ts and briefCompose.test.ts is unchanged and passes (a renamed Return discipline heading still fails `playbook.unknown-section`).",
+        "Finding f-bs-optimize/integration-aae952a5 (wave.md): each citation in steps 2-10 of a dispatch.md section names dispatch.md and carries `bs playbook slice dispatch --section \"<name>\"` with a name that resolves: step 3 `Fetched and quoted text goes into a prompt fenced, never raw`; steps 6 and 9 `Round counting and escalation`; step 7 `Dispatching the security-reviewer`, `Fingerprint the worktree around every judge`, `Declare each judge's artifact before you dispatch it`; step 8 replaces \"Dispatch contract\" with `Splice the compiled lessons into every prompt` and `Splice the open findings into every worktree dispatch`. Step 4's two rule names say they are rules of `Run the whole wave at once`. Each quoted heading inside a slice command sits on one line. The top-level step items stay 2-10 and every existing doc test (playbookOptimize, wavePlaybook, cliOptimize's documented `wave --section` run) passes unchanged.",
+        "Finding f-bs-optimize/integration-aae952a5 (runner template): bs-wave-runner.md says, outside its SHARED regions, that `bs playbook slice dispatch --section` takes a heading with or without its trailing parenthetical and that an unknown name's error lists the playbook's sections, and its \"dispatch.md's payload contract\" pointer becomes `bs playbook slice dispatch --section \"The task id goes on the event, not in the payload\"`. `node scripts/sync-shared-fragments.mjs --check` reports no drift (no SHARED region byte moved).",
+        "Finding f-bs-optimize/integration-aae952a5 (drift guard): factory/orchestrator/test/playbookCitations.test.ts extracts, from the real files with whitespace collapsed (so a hard-wrapped name is one name): (a) every `bs playbook slice <wave|dispatch> --section \"X\"` in .claude/skills/bs/*.md and .claude/agents/*.md, skipping `<...>` placeholders; (b) every quoted name tied to wave.md or dispatch.md in those files (`dispatch.md's \"X\"` with or without a path prefix and backticks, as bs-grader.md writes it, `(dispatch.md, \"X\")`, `` [`dispatch.md`](dispatch.md), \"X\" ``, and the wave.md forms); (c) in wave.md and dispatch.md, every `\"X\" above` or `\"X\" below` with no file named. (a) and (b) resolve through `sliceSection` against the named playbook's real text; (c) resolves in the same file as a `##`/`###` section or, in wave.md, as a bold lead-in `**X.**` inside one of its two common sections; inside wave.md and bs-wave-runner.md a quoted name tied the same way to any other file under .claude/skills/bs/ fails (the runner cannot slice it); a quoted reference to a document outside the playbooks, such as step 6's agent-constraints.md \"grader (v3)\", is not a slice target and is not checked. Every `dispatch --section` citation also runs through the built CLI with exit 0 and stdout starting `## `. The test asserts it extracted at least 12 citations (an extractor that matches nothing fails), and an inline wave-shaped fixture proves it discriminates: `\"Dispatch contract\" above` and `\"Fetched and quoted text goes into a prompt fenced\" above` are each reported by name as unresolvable. The task result quotes the guard run once against dc7db626's wave.md text (restored afterwards) failing by name on at least those two citations.",
+        "Finding f-bs-optimize/integration-aae952a5 (CLI half), in playbookCitations.test.ts through the built CLI: `bs playbook slice dispatch --section \"Round counting and escalation\"` exits 0 and prints the section; `--section \"Dispatch contract\"` exits 1 with `playbook.unknown-section` whose printed details list dispatch.md's sections.",
+        "Gate, run from the worktree root on the task's own tree and each output read to its end: `pnpm run test` (the full root suite, never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`, `node scripts/sync-shared-fragments.mjs --check`. The role templates the harness loads predate the heavy-run fix, so the full suite runs as the wave brief directs (epic spec, \"Pre-code review (v6 draft) — changes\", item 6): a background task under the heavy lock writing a fresh output file outside the worktree whose last line is `EXIT=<n>` on a line of its own, waited for in foreground calls that each end inside the Bash tool's timeout and use no `sleep`; the result quotes that file's final summary lines and its `EXIT=0`. All five green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/playbookSlice.ts",
+        "factory/orchestrator/test/playbookSlice.test.ts",
+        "factory/orchestrator/test/playbookCitations.test.ts",
+        ".claude/skills/bs/wave.md",
+        ".claude/agents/bs-wave-runner.md"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/playbookSlice.ts"
+      ],
+      "budget": {
+        "tokens": 300000,
+        "diff_lines": 600
+      },
+      "contract": {
+        "functional_clauses": [
+          "Exact heading match always wins; the name match (a heading's text minus one trailing parenthetical group) applies only when no heading matches exactly, and only when it is unique; ambiguity is still refused with `playbook.ambiguous-section`. No prefix, substring or fuzzy match.",
+          "`sliceSection` and `sliceWaveStep` keep their signatures; the slice boundaries (to the next heading of the same or a higher level, fences skipped) are unchanged; brief compose keeps slicing the byte-identical `## Return discipline (agent-interviews.md M-6)` heading.",
+          "`playbook.unknown-section` details keep `heading` and gain `sections`; the CLI prints them through its existing error path (cli.ts is not edited).",
+          "dispatch.md is not edited. wave.md keeps its two common section headings and its top-level step items 2-10; bs-wave-runner.md changes only outside its SHARED regions.",
+          "Every rule a wave.md step points at is reachable through `bs playbook slice` with the name the step prints."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check, and no role's model is downgraded.",
+          "Open source: no other project's name in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other file is read-only, including factory/specs/** (the epic spec is the planner's).",
+          "Tests that spawn processes clean up every child they start (killed or awaited in an `afterEach`/`finally`) and never signal a pid they did not start.",
+          "Tests that take a lock point it at a temporary directory (`BS_HEAVY_LOCK_DIR` or the `lockDir` option), never the machine's real locks under `~/.blacksmith/locks`.",
+          "Matching is linear in the playbook's size; no regex that can backtrack on a long heading.",
+          "Verify the guard by mutation: reintroduce each defect it claims to catch and watch it fail by name before trusting the pass."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.9,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-14-heavy-run-wait",
+      "epic_id": "bs-optimize",
+      "plan_version": 6,
+      "title": "Heavy runs wait in bounded calls",
+      "summary": "A new `bs heavy wait` and a rewritten heavy-run fragment let an agent without Monitor run a full suite in the background and wait for it in calls that each end inside the Bash tool's timeout.",
+      "objective": "Answer closing-review finding f-bs-optimize/integration-dcc5330f (S2): the shared fragment .claude/fragments/heavy-run.md, stamped by `node scripts/sync-shared-fragments.mjs` into the eleven suite-running templates (bs-auditor, bs-coder, bs-grader, bs-merger, bs-reviewer, bs-security-reviewer, bs-spec-reviewer, bs-tester, bs-uiux, bs-verifier, bs-wave-runner), tells agents to run a full suite as a plain foreground `bs heavy run`, whose lock wait defaults to 1 h (heavyLock.ts DEFAULT_MAX_WAIT_MS) while a full suite now takes about 440 s; a foreground Bash call is cut at its tool timeout (120 s unless the call sets `timeout`, 600 s at most); coders and testers hold no Monitor, the diet hook denies a foreground `sleep` of 2 s or more, and a turn that ends with only a background shell hands back. Give every carrier a way to run a full suite and wait for it in which no single foreground call can outlive its tool timeout, the lock is held for the whole run, exit 75 still means `heavy.wait-timeout`, and nothing the diet hook denies is needed. (1) A new read-only verb `bs heavy wait --file <out> [--max-wait-ms <ms>]` (module src/heavyWait.ts, wired in cli.ts and usage.ts) polls `<out>` in-process until its last non-empty line is exactly `EXIT=<n>` and then prints `\"done\": true`, `exit` and a bounded tail and exits `<n>`; when its bound passes first it prints `\"done\": false` with the time waited, the current heavy-lock holder (or null) and how long the file has been idle, and exits 124. The bound defaults to 100000 ms, so the call fits the Bash tool's default 120 s timeout as written; up to 570000 ms is accepted for a call whose Bash `timeout` is raised to 600000; anything above is refused. `done`, never the exit code alone, says whether to call again (a suite may itself exit 124). (2) The fragment is rewritten: start the full-suite or e2e command in the background (Bash `run_in_background: true`) as `bs heavy run --label <task-id>-<role> -- <cmd> > <out> 2>&1; printf '\\nEXIT=%s\\n' \"$?\" >> <out>`, where `<out>` is the path a foreground `mktemp` printed just before, from a template under `state/results/` (the directory the role's own result goes to, outside the worktree; never `state/artifacts/`, which holds declared evidence) naming the task id and the role, so every run gets a new, empty file with nothing for the agent to remember across runs or re-dispatches; then wait with `bs heavy wait --file <out>` in the foreground, calling it again on `\"done\": false` without re-running the command, without `sleep`, and without ending the turn while the run is live; pass `--max-wait-ms 540000` only together with a Bash `timeout` of 600000; two calls in a row with `\"done\": false` and no lock holder mean the run is gone, which the agent reports with the file's tail instead of waiting on. It keeps exit 75 / holder / no blind retry, the three self-locking verbs and the scoped-run exemption. (3) Restamp the eleven carriers with the sync script. (4) Update the pins in playbookOptimize.test.ts and the CHANGELOG `## Unreleased` heavy-run entry. `bs heavy run` itself is unchanged. Read factory/specs/active/bs-optimize/epic-spec.md first, including its section \"Closing review (plan v5) — changes\" and its subsection \"Pre-code review (v6 draft) — changes\". TDD: write the named failing test first, watch it fail on the unfixed tree, implement minimally, watch it pass.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Finding f-bs-optimize/integration-dcc5330f (wait module), failing test first in factory/orchestrator/test/heavyWait.test.ts: on a file whose last non-empty line is exactly `EXIT=0` / `EXIT=3` / `EXIT=75` / `EXIT=124` the wait returns done with that code (an `EXIT=124` file is `done: true`, never mistaken for the wait's own bound); a file whose last line only ends in `EXIT=0` after other text (output with no final newline) is not done; an `EXIT=` line followed by more output is not done; on a file with no `EXIT=` line it returns not-done once its bound passes (bound 300 ms in the test, returning within the bound plus 2 s) with `waited_ms`, the heavy-lock holder read from a temporary lock dir (or null) and `idle_ms`; a file still absent at the bound is not-done with `missing: true`. The tail it returns is the last 40 lines before the `EXIT=` line, and when those exceed 8192 bytes only their last 8192 bytes are kept (the cut drops the start, so a failed suite's closing summary survives): on a 50 MB file whose last 40 lines exceed 8192 bytes the module reads only the file's end, and the returned tail is at most 40 lines and 8192 bytes, is a suffix of the text before the `EXIT=` line and ends with that text's last line. The wait starts no child process and calls no shell.",
+        "Finding f-bs-optimize/integration-dcc5330f (CLI): `bs heavy wait --file <out>` prints one JSON object and exits `<n>` from the file's final `EXIT=<n>` line (so 75 passes through as `heavy.wait-timeout`), or prints `\"done\": false` and exits 124 when its bound passes; `--max-wait-ms` defaults to 100000, and a negative, non-integer or above-570000 value is refused with `cli.invalid-flag`; the verb has a usage entry and docCommands passes for every doc that names it.",
+        "Finding f-bs-optimize/integration-dcc5330f (each call fits its tool timeout): the test imports the module's default bound and asserts it is at most 110000 ms (inside the Bash tool's default 120000 ms timeout with 10 s for process start), and reads every `bs heavy wait` call the fragment shows: a call without `--max-wait-ms` passes on the default; a call with one passes only when the same sentence names a Bash `timeout` of at most 600000 that is at least the bound plus 30000. A fragment that shows `--max-wait-ms 540000` with no Bash `timeout` beside it fails the test by name.",
+        "Finding f-bs-optimize/integration-dcc5330f (end to end), spawned processes under a temporary `BS_HEAVY_LOCK_DIR` and a temporary HOME: the fragment's start command, read from .claude/fragments/heavy-run.md with its placeholders filled (not restated in the test), launched through `sh -c` as a background child around a node child that waits on a release file: while it runs `bs heavy status` names its label and `bs heavy wait --max-wait-ms 300` exits 124 with `\"done\": false`; after the release `bs heavy wait` exits with the node child's code, the out file's last line is `EXIT=<n>` on its own line even though the child printed no final newline, and `bs heavy status` prints `{}` (the lock was held for the whole run, then released). With the lock pre-held by a live pid and `--max-wait-ms 200` added to the start command's `bs heavy run`, the out file ends `EXIT=75` and `bs heavy wait` exits 75 with the holder's pid and label in its output. A start whose shell is killed before it writes `EXIT=` gives two `bs heavy wait` calls in a row with `\"done\": false` and `holder` null. The fragment's `mktemp` step, read from the fragment with its placeholders filled, run twice under a temporary `state/results/` prints two distinct paths to existing empty files, and `bs heavy wait --max-wait-ms 300` on a fresh one is not done. Every child is killed or awaited in `afterEach`.",
+        "Finding f-bs-optimize/integration-dcc5330f (fragment): .claude/fragments/heavy-run.md states the background start (`run_in_background: true`, the start command above with the exit code written by `printf` on a line of its own), how `<out>` is made (a foreground `mktemp` from a template under `state/results/` naming the task id and the role, run before every start; not `state/artifacts/`), the foreground `bs heavy wait --file <out>` and the Bash `timeout` that goes with a longer `--max-wait-ms`, that `\"done\"` and not the exit code decides whether to call again and that the agent calls again without re-running the command or using `sleep` and does not end its turn while the run is live, the stop rule (two `\"done\": false` in a row with no lock holder: the run is gone, report it with the tail), exit 75 = `heavy.wait-timeout` with the holder put in the result and no blind retry, the `bs gate run` / `bs integration check` / `bs queue run` exclusion and the scoped-run exemption. playbookOptimize.test.ts's fragment pins are replaced by pins of each of these, none weaker than the one it replaces, and its other assertions are unchanged; the eleven-carrier and no-restatement tests pass (no template names `bs heavy run` or `bs heavy wait` outside the region).",
+        "Finding f-bs-optimize/integration-dcc5330f (nothing the hooks deny): `dietDecision` returns no deny for the fragment's `mktemp` step and wait command in the foreground and for its start command with `run_in_background: true`; `decideHookPayload` allows all three for an unleased session and under a judge lease for each of the six judge roles (a temporary lease dir built the way hookDecision's lease tests build one), with `<out>` where the fragment says. If no `<out>` location satisfies the judge sandbox without editing guardrails.yml or policy.ts, the task stops and reports; it never widens the sandbox.",
+        "Finding f-bs-optimize/integration-dcc5330f (stamps and changelog): `node scripts/sync-shared-fragments.mjs` restamps exactly the eleven carriers and `--check` then reports 0 drifted; templateFragments.test.ts passes unchanged; the CHANGELOG `## Unreleased` heavy-run entry states the background start and `bs heavy wait`, and the CHANGELOG feature test passes.",
+        "Gate, run from the worktree root on the task's own tree and each output read to its end: `pnpm run test` (the full root suite, never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`, `node scripts/sync-shared-fragments.mjs --check`. The role templates the harness loads predate the heavy-run fix, so the full suite runs as the wave brief directs (epic spec, \"Pre-code review (v6 draft) — changes\", item 6): a background task under the heavy lock writing a fresh output file outside the worktree whose last line is `EXIT=<n>` on a line of its own, waited for in foreground calls that each end inside the Bash tool's timeout and use no `sleep`; the result quotes that file's final summary lines and its `EXIT=0`. All five green before hand-back."
+      ],
+      "claims": [
+        ".claude/fragments/heavy-run.md",
+        ".claude/agents/bs-auditor.md",
+        ".claude/agents/bs-coder.md",
+        ".claude/agents/bs-grader.md",
+        ".claude/agents/bs-merger.md",
+        ".claude/agents/bs-reviewer.md",
+        ".claude/agents/bs-security-reviewer.md",
+        ".claude/agents/bs-spec-reviewer.md",
+        ".claude/agents/bs-tester.md",
+        ".claude/agents/bs-uiux.md",
+        ".claude/agents/bs-verifier.md",
+        ".claude/agents/bs-wave-runner.md",
+        "factory/orchestrator/src/heavyWait.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/heavyWait.test.ts",
+        "factory/orchestrator/test/playbookOptimize.test.ts",
+        "factory/orchestrator/test/usage.test.ts",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 420000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "`bs heavy run` keeps its flags, its default lock wait (heavyLock.ts DEFAULT_MAX_WAIT_MS, 1 h) and its exit codes; the `bs heavy run` process holds the lock for the whole child run, so a background start keeps the machine serialized exactly as a foreground one.",
+          "`bs heavy wait` takes no lock, writes nothing, spawns nothing and runs no shell; it polls in-process at most every 2000 ms and reads only the file's end.",
+          "`bs heavy wait` output: `\"done\": true` with `exit` and a tail of the last 40 lines before the `EXIT=` line, of which at most the last 8192 bytes are kept, exiting `<n>` from the file's final `EXIT=<n>` line; or `\"done\": false` with `waited_ms`, `holder` and `idle_ms` (or `missing: true`), exiting 124. `done` is the signal; the exit code alone is not.",
+          "Its bound defaults to 100000 ms, which fits the Bash tool's default 120 s timeout as written; values up to 570000 ms are accepted and the fragment shows them only beside a Bash `timeout` of 600000; above 570000 is refused.",
+          "The fragment's start command writes the exit code with `printf` on a line of its own, so a suite whose output lacks a final newline still ends the file with an `EXIT=<n>` line; `<out>` is minted by a foreground `mktemp` before every start, from a template under `state/results/` naming the task id and role, so it is new and empty for every run with no counter for the agent to keep; it lies outside the worktree and outside `state/artifacts/`.",
+          "The fragment stays the rule's one home (epic D9): brief compose, wave.md and dispatch.md gain no copy. Agent templates change only inside their `heavy-run` SHARED region, written by `node scripts/sync-shared-fragments.mjs`, never by hand.",
+          "guardrails.yml and policy.ts are not edited; the sandbox is never widened to make the documented commands pass."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check, and no role's model is downgraded.",
+          "Open source: no other project's name in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other file is read-only, including factory/specs/** (the epic spec is the planner's).",
+          "Tests that spawn processes clean up every child they start (killed or awaited in an `afterEach`/`finally`) and never signal a pid they did not start.",
+          "Tests that take a lock point it at a temporary directory (`BS_HEAVY_LOCK_DIR` or the `lockDir` option), never the machine's real locks under `~/.blacksmith/locks`.",
+          "The fragment is stamped into eleven system prompts: keep it to one short block holding the two commands and the rules above.",
+          "Usage entry and `--max-wait-ms` validation reuse the CLI's existing flag helpers (`boundedIntFlag`)."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-15-queue-landing",
+      "epic_id": "bs-optimize",
+      "plan_version": 6,
+      "title": "Every landing tested on its own head",
+      "summary": "The merge queue's `step` holds the heavy lock from rebase through merge and lands only on the head its suite ran on; run.md says the epic session admits after every landing, a dispatched runner's included.",
+      "objective": "Answer closing-review finding f-bs-optimize/integration-a2f0a33f (S2): with rolling admission two `bs queue run` for one epic can overlap, and queue.ts `step` rebases at `certifyAndRebase`, then waits for the heavy lock and runs the cumulative suite, then merges with `--no-ff` (or `mergeWithoutWorktree`, which re-reads the head) without re-checking the integration head, so a task can land onto a head its suite never ran against; run.md also says \"one wave at a time\" (line 6) against epic D6 and its own rolling-admission paragraph. Rolling admission stays (operator decision). (1) `step` takes the heavy lock once, before certify-and-rebase, and holds it through the merge and the `wave-merged` append; its suite runs under that same hold with `heavyChildEnv(process.env, lease)`, never a second acquire; so queue steps, of one epic or several, never interleave between a rebase and its merge. (2) `step` lands only onto the integration head the task was rebased onto and tested on (compare-and-swap): otherwise it reports `integration-moved`, logs a blocked `execution.env-failure` naming both heads and lands nothing, as the batch path already does. The batch path keeps its compare-and-swap landing and its per-suite lock. (3) run.md: drop \"one wave at a time\"; say waves overlap under rolling admission and that the epic session is the only session that admits, right after each landing in every shape (item 6 below). wave.md step 10: `bs queue run` holds the heavy lock per task from rebase through merge, so queue runs of one epic take turns and each suite runs on the head it lands on; `integration-moved` means a writer outside the queue moved the branch, nothing landed, re-run `bs queue run` for those tasks; and, in plain words for its slice-only reader, that admitting the wave's own passed tasks into the merge queue (`bs queue run`) is the runner's job and admitting tasks to work (`bs wave next`, `bs wave check`) is the epic session's, so the runner never runs `bs wave next` to admit. Step 10's existing \"before admitting\", \"keep going to admission\" and \"Then admit into the merge queue\" (wave.md:372, :385, :395) stay merge-queue admission and are qualified as such wherever they could be read as admitting work. (4) Git subprocesses `step` starts while it holds the lock (the rebase and the `--no-ff` merge, which run the project's git hooks) get `heavyChildEnv(process.env, lease)` like the suite child (the parent env minus every `BS_`/`SMITH_` variable, plus `BS_HEAVY_LOCK_TOKEN` and `BS_HEAVY_LOCK_DIR`), so a hook that calls `bs heavy run` re-enters instead of waiting on its own parent. (5) A head that moved wins over a conflict: when the integration head differs from the one the suite ran on, `step` returns `integration-moved` without attempting the merge, whether or not the task would also conflict with the new head (the next `bs queue run` rebases and reports `rebase-conflict` if it does); queue.test.ts's 'throws on a tree-less merge conflict and leaves the integration ref alone' is replaced accordingly. (6) Rolling admission for a dispatched runner (operator decision: after every merge, any ready non-overlapping task is admitted at once): the epic session dispatches a `bs-wave-runner` as a background agent (`run_in_background: true`) and watches `bs event tail <session-id> --lineage --follow` with the Monitor tool; on each `wave-merged` it runs `bs wave next` and admits what it returns at once, as a wave of its own (inline or another runner); a runner never admits tasks to work (it only queues its own passed tasks with `bs queue run`); when the Agent call cannot run in the background, the epic session runs the wave inline or in a session it drives itself rather than block on a runner. (7) Test the interleaving. task-13 edits wave.md after this task merges, so keep the edits to step 10 (and the merge-queue paragraph of \"Run the whole wave at once\" if it needs a word), and cite no section of another playbook by quoted name. Read factory/specs/active/bs-optimize/epic-spec.md first, including its section \"Closing review (plan v5) — changes\" and its subsection \"Pre-code review (v6 draft) — changes\". TDD: write the named failing test first, watch it fail on the unfixed tree, implement minimally, watch it pass.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Finding f-bs-optimize/integration-a2f0a33f (interleaving), failing test first in factory/orchestrator/test/queueSerial.test.ts: on a temporary repo and a temporary lock dir pre-held by a test-owned record (`isPidAlive` injected), two `step` calls of one epic start concurrently: task B changes `api.txt`, task C (claim-disjoint) changes `use.txt` to rely on the old `api.txt`; the test command fails on a tree holding both changes and appends the tree it ran on (`git rev-parse HEAD^{tree}`) to a log outside the repo. The test releases its record only after both steps have probed the held lock (counted through the injected `isPidAlive`; no timing sleeps). With the fix, exactly one of B and C is `merged` and the other `tests-failed`, and after every landing the integration branch's tree appears in the tested-tree log. On head dc7db626 the same test fails because both are `merged` and the final integration tree is absent from the log; the result quotes that failing run.",
+        "Finding f-bs-optimize/integration-a2f0a33f (head moved by an outside writer), in queueSerial.test.ts: while `step`'s suite runs, its test command moves `bs/<epic>/integration` (a commit no queue made); `step` returns `integration-moved` without attempting the merge, the integration head is the outside commit (the task did not land), and the events sink holds a blocked `execution.env-failure` event naming both heads and no `wave-merged` for the task. Covered once with no worktree holding the integration branch (the outside writer moves the ref with `git update-ref`) and once with a clean holder worktree (the outside writer commits in that worktree, so it stays clean and the `integration-dirty` refusal does not fire first). A moved head wins over a conflict: when the outside commit also conflicts with the task, `step` still returns `integration-moved` and throws nothing, and a second `step` on the same task then reports `rebase-conflict` naming the file. A second `step` after a non-conflicting move rebases onto the moved head, re-runs the suite and merges.",
+        "Finding f-bs-optimize/integration-a2f0a33f (batch path): a `step` landing between a batch candidate's build and its land leaves every task of the batch `integration-moved` with nothing of the batch landed; the existing `integration-moved` batch test passes unchanged.",
+        "Epic AC10's merge-queue cases in factory/orchestrator/test/queue.test.ts pass with their assertions unchanged: label `queue-<task id>` / `queue-batch-<first task id>` and the token in the child env, no command run while another holder has the lock, `heavy.wait-timeout` rejecting with no `tests-failed` outcome and no `execution.test-failure` event, tasks merged before a timeout staying merged. A `step` that times out on the lock also leaves the task branch where it was (no rebase ran). queue.test.ts's 'throws on a tree-less merge conflict and leaves the integration ref alone' is replaced by a case with the same setup that expects `integration-moved`, the integration ref left at the side commit and no merge worktree left behind; any other assertion that pinned the old order (rebase before the lock wait) is replaced by one pinning the new order. Every other queue.test.ts case passes unchanged, and the result names each replaced case.",
+        "Finding f-bs-optimize/integration-a2f0a33f (playbooks), pinned in factory/orchestrator/test/queuePlaybook.test.ts: run.md no longer says \"one wave at a time\" and states that waves overlap under rolling admission and that the epic session is the only session that admits, right after each landing in every shape: inline or in a session it drives, when a `bs queue run` it ran returns `merged`; with a dispatched `bs-wave-runner`, which it dispatches as a background agent (`run_in_background: true`), when `bs event tail <session-id> --lineage --follow`, watched with the Monitor tool, shows a `wave-merged`; each time it runs `bs wave next` and admits what it returns at once as a wave of its own; a runner never admits tasks to work (it only queues its own passed tasks with `bs queue run`); and when the Agent call cannot run in the background the wave runs inline or in a session the epic session drives, never as a blocking runner. wave.md step 10, pinned on its `sliceWaveStep` cut, states that `bs queue run` holds the heavy lock for each task from its rebase through its merge so queue runs of one epic take turns and each task's cumulative suite runs on the head it lands on, what `integration-moved` means and that the runner re-runs `bs queue run` for those tasks, and that admitting the wave's own passed tasks into the merge queue (`bs queue run`) is the runner's job and admitting tasks to work (`bs wave next`, `bs wave check`) is the epic session's, so the runner never runs `bs wave next` to admit. Step 10's \"before admitting\", \"keep going to admission\" and \"Then admit into the merge queue\" (wave.md:372, :385, :395 on dc7db626) stay merge-queue admission, qualified as such where they could be read as admitting work, and the pin reads both halves of the split inside the step-10 cut. playbookOptimize.test.ts's run.md and wave.md assertions pass unchanged, and every verb and flag the new text names exists (docCommands).",
+        "Finding f-bs-optimize/integration-a2f0a33f (git hooks under the lock), in queueSerial.test.ts: a project whose `post-merge` hook writes `$BS_HEAVY_LOCK_TOKEN` and `$BS_HEAVY_LOCK_DIR` to a file outside the repo, merged through a holder worktree by `step`, records the token of the lock `step` holds and its lock dir, and a `SMITH_`/`BS_` variable set in the queue's own env (other than the two lease variables) is absent from the hook's env; the same holds for a hook the rebase runs (`post-rewrite` or `pre-rebase`). The suite child keeps getting `heavyChildEnv(process.env, lease)`.",
+        "Gate, run from the worktree root on the task's own tree and each output read to its end: `pnpm run test` (the full root suite, never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`, `node scripts/sync-shared-fragments.mjs --check`. The role templates the harness loads predate the heavy-run fix, so the full suite runs as the wave brief directs (epic spec, \"Pre-code review (v6 draft) — changes\", item 6): a background task under the heavy lock writing a fresh output file outside the worktree whose last line is `EXIT=<n>` on a line of its own, waited for in foreground calls that each end inside the Bash tool's timeout and use no `sleep`; the result quotes that file's final summary lines and its `EXIT=0`. All five green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/queue.ts",
+        "factory/orchestrator/test/queue.test.ts",
+        "factory/orchestrator/test/queueSerial.test.ts",
+        "factory/orchestrator/test/queuePlaybook.test.ts",
+        ".claude/skills/bs/run.md",
+        ".claude/skills/bs/wave.md"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/queue.ts"
+      ],
+      "budget": {
+        "tokens": 420000,
+        "diff_lines": 1200
+      },
+      "contract": {
+        "functional_clauses": [
+          "`step` acquires the heavy lock once, with label `queue-<task id>`, cwd the task worktree, and the lock dir and `StepOptions.heavyLock` test knobs resolved as today, before certify-and-rebase, and releases it after the merge and its `wave-merged` append; the suite runs under that hold with `heavyChildEnv(process.env, lease)`. The serialization is the heavy lock's own hold: no second lock file and no new error code.",
+          "Every git subprocess `step` starts while it holds the lock that can run a project hook (the rebase, the `--no-ff` merge) gets `heavyChildEnv(process.env, lease)`, the suite child's env rule: the parent env minus every `BS_`/`SMITH_` variable, plus the lease's `BS_HEAVY_LOCK_TOKEN` and `BS_HEAVY_LOCK_DIR`. The batch path's git calls, made outside any hold, keep their env.",
+          "`step` lands only onto the integration head its suite ran on: the tree-less merge's `update-ref` takes that head as its old value, and with a holder worktree the holder's HEAD is checked against it immediately before `git merge --no-ff`. A mismatch returns `integration-moved` (an existing `StepOutcome` member), logs a blocked `execution.env-failure` naming both heads, and lands nothing. The comparison comes before any merge attempt, so a moved head wins over a conflict with it: `integration-moved`, never a merge-tree throw.",
+          "`heavy.wait-timeout` still propagates out of `step` and `batchStep` uncaught (epic D7), now before any git mutation for that task; no `tests-failed` outcome and no `execution.test-failure` event for it.",
+          "The batch path (`batchStep`, `runGroup`, `attemptCandidate`, `landCandidate`) keeps its compare-and-swap landing and its per-suite lock hold.",
+          "Every existing queue.ts export keeps its name and declaration (`keeps_exports`); `bs queue run` in cli.ts is unchanged.",
+          "Rolling admission stays and reaches every shape: the epic session admits right after each landing, watching a dispatched runner's landings through `bs event tail <session-id> --lineage --follow`; a runner never admits tasks to work and only queues its own passed tasks with `bs queue run`. run.md keeps \"after every merge, run `bs wave next` and admit\"."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check, and no role's model is downgraded.",
+          "Open source: no other project's name in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other file is read-only, including factory/specs/** (the epic spec is the planner's).",
+          "Tests that spawn processes clean up every child they start (killed or awaited in an `afterEach`/`finally`) and never signal a pid they did not start.",
+          "Tests that take a lock point it at a temporary directory (`BS_HEAVY_LOCK_DIR` or the `lockDir` option), never the machine's real locks under `~/.blacksmith/locks`.",
+          "The interleaving tests are deterministic: ordering is forced through the injected lock knobs and test-owned records, never by wall-clock sleeps.",
+          "Every test repo, worktree and lock dir is under a temporary directory removed in `afterEach`."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-16-sleep-operands",
+      "epic_id": "bs-optimize",
+      "plan_version": 6,
+      "title": "Sleep operands read as sleep reads them",
+      "summary": "The diet hook reads exponent, hex and signed `sleep` operands as their real duration, and counts an operand it cannot read as unknown length.",
+      "objective": "Answer closing-review finding f-bs-optimize/integration-1e75d554 (S4): hookDecision.ts `sleepDuration` reads only operands matching `NUMBER_RE` (plain decimals) and treats every other operand as \"sleep rejects it at once\", so `sleep 1e3` and `sleep 0x10` pass the decision-15 deny although macOS and GNU `sleep` both block on them. Read each operand the way strtod reads one (optional leading `+`; decimal with optional fraction and exponent; `0x` hex with optional fraction and binary exponent; `inf`/`infinity` in any case), greedily, then at most one of `s`, `m`, `h`, `d`; an operand that reader cannot read counts as unknown length (2 s or more, epic D4's duration rule), not as an instant error. `sleep` with no operand stays allowed. Only the operand reader changes: the shell scanner, the wrappers, the failure rule and the deny reason format stay as they are. policy.ts's `PREFIX_OPERAND_RE` reads prefix-word durations the same plain-decimal way, but the planner's probe on dc7db626 found every guard rule still denying behind `timeout 1e1` / `timeout 0x10`, so it is out of this task. Read factory/specs/active/bs-optimize/epic-spec.md first, including its section \"Closing review (plan v5) — changes\". TDD: write the named failing test first, watch it fail on the unfixed tree, implement minimally, watch it pass.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Finding f-bs-optimize/integration-1e75d554 (deny rows), failing test first in factory/orchestrator/test/hookDecision.test.ts, one test per row through `dietDecision` on a Bash payload with `run_in_background` unset, each reason naming the duration: `sleep 1e3` (1000 s), `sleep 0x10` (16 s), `sleep 2e0` (2 s), `sleep 2E0` (2 s), `sleep +5` (5 s), `sleep 1e1m` (600 s), `sleep 5e-1m` (30 s), `sleep 0x1d` (29 s: the hex digit `d` belongs to the number, as strtod reads it), `sleep 1 0x1` (2 s), `sleep 5.` (5 s), `sleep .5e1` (5 s), `timeout 30 sleep 1e3` (1000 s). On head dc7db626 each row except `sleep 5.` (which the old reader already read) returns no deny (`findForegroundSleeps` returns []); the result quotes that failing run.",
+        "Finding f-bs-optimize/integration-1e75d554 (allow rows): `sleep 1e0`, `sleep 0x1`, `sleep 5e-1`, `sleep 1e-3`, `sleep 0x1p0`, `sleep .5`, `sleep 1.` (each under 2 s), `sleep 1e3 &`, `sleep 1e3` with `run_in_background: true`, and `timeout 1e3 pnpm test` (`timeout`'s own duration is not a sleep) get no diet deny.",
+        "Finding f-bs-optimize/integration-1e75d554 (unknown length): `sleep abc`, `sleep 1x`, `sleep nan`, `sleep .` and `sleep 1,5` are denied as unknown length (the reason says `unknown`), where dc7db626 allowed them as an instant error; `sleep` with no operand stays allowed. Every existing D4 verdict-table row keeps its verdict and every existing hookDecision test passes unchanged, the failure-rule cases included.",
+        "Finding f-bs-optimize/integration-1e75d554 (bounded): the operand reader is driven with operands near the parser's 65536-character command cap (hookDecision.ts MAX_COMMAND_LENGTH, which makes a longer command no diet match before any operand is read): `sleep ` plus a 65000-character operand of each shape — all digits (a number, deny), digits then `x` (unreadable, deny as unknown), `1` then 64999 `e` characters, and `0x` then 64998 `p` characters — each gets its verdict (the assertion is on the verdict, so the length cap cannot satisfy it) in under 200 ms, and a 1 MB command still gets no diet deny (failure rule, unchanged).",
+        "Gate, run from the worktree root on the task's own tree and each output read to its end: `pnpm run test` (the full root suite, never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`, `node scripts/sync-shared-fragments.mjs --check`. The role templates the harness loads predate the heavy-run fix, so the full suite runs as the wave brief directs (epic spec, \"Pre-code review (v6 draft) — changes\", item 6): a background task under the heavy lock writing a fresh output file outside the worktree whose last line is `EXIT=<n>` on a line of its own, waited for in foreground calls that each end inside the Bash tool's timeout and use no `sleep`; the result quotes that file's final summary lines and its `EXIT=0`. All five green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/hookDecision.ts",
+        "factory/orchestrator/test/hookDecision.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/hookDecision.ts"
+      ],
+      "budget": {
+        "tokens": 220000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "An operand is read as strtod reads one: optional leading `+`; a decimal mantissa, which is digits with an optional `.` and optional further digits (`5`, `5.`, `5.25`) or a `.` followed by digits (`.5`), then an optional exponent (`e`/`E`, optional sign, at least one digit); or `0x`/`0X` hex digits with an optional fraction and an optional binary exponent (`p`/`P`); or `inf`/`infinity` in any case (unbounded). Then at most one unit suffix `s`, `m`, `h` or `d`, and nothing after it. Reading is greedy, so a hex digit is never taken as a suffix. A lone `.` is not a number. Every operand the current reader reads (`2`, `2.`, `.5`, `1.9`, with suffixes) keeps its value.",
+          "An operand the reader cannot read is unknown length and counts as 2 s or more (deny), extending epic D4's rule for variables, substitutions and `infinity`; `sleep` with no operand still blocks nothing and is allowed.",
+          "The deny reason keeps its format (Blocked: foreground `sleep` of N s, or of unknown length, with the fix). `dietDecision`, `decideHookPayload` and `findForegroundSleeps` keep their signatures (`keeps_exports`).",
+          "policy.ts is not edited."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check, and no role's model is downgraded.",
+          "Open source: no other project's name in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other file is read-only, including factory/specs/** (the epic spec is the planner's).",
+          "Tests that spawn processes clean up every child they start (killed or awaited in an `afterEach`/`finally`) and never signal a pid they did not start.",
+          "Tests that take a lock point it at a temporary directory (`BS_HEAVY_LOCK_DIR` or the `lockDir` option), never the machine's real locks under `~/.blacksmith/locks`.",
+          "The operand reader is a linear scan; no regex that can backtrack on a long operand."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.95,
+      "project": "blacksmith",
+      "ui_affecting": false
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-optimize/task-13-slice-citations",
+      "dependsOn": "bs-optimize/task-15-queue-landing",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-optimize/task-13-slice-citations",
+      "dependsOn": "bs-optimize/task-14-heavy-run-wait",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "blacksmith",
+  "effort": "huge"
+}
