@@ -82,7 +82,7 @@ function closeLease(worktreeDir: string): void {
 describe('guard.sh (PreToolUse transport shim)', () => {
   let scratchDir: string;
 
-  // dist/ comes from test/globalSetup.ts — see cli.test.ts's note.
+  // dist/ comes from test/globalSetup.ts — see the cli*.test.ts files' note.
   beforeAll(async () => {
     scratchDir = await mkdtemp(path.join(tmpdir(), 'smith-guard-'));
   });

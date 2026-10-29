@@ -11,8 +11,8 @@ export default defineConfig({
     // A hang-detector, not a performance budget.
     //
     // vitest's 5s default is sized for in-process unit tests. Much of this
-    // suite is not that: `cli.test.ts` and `guardHook.test.ts` drive the built
-    // binary through `spawnSync`, and every spawn pays a `node dist/cli.js`
+    // suite is not that: the `cli*.test.ts` files and `guardHook.test.ts` drive the
+    // built binary through `spawnSync`, and every spawn pays a `node dist/cli.js`
     // boot before the code under test runs. That boot is module loading, not
     // the command, and it is far cheaper than it was — `cli.ts` no longer
     // imports the database layer at module scope, so `smith --help` measures

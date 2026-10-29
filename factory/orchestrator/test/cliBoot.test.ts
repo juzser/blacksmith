@@ -23,7 +23,7 @@ import { moduleGraphFrom } from './helpers/moduleGraph.js';
 //
 // Graph, not stopwatch — see the note on `moduleGraphFrom`. That the commands
 // behind those dynamic imports still work is pinned elsewhere, by the
-// integration tests in `cli.test.ts` that run each of them for real.
+// integration tests in the `cli*.test.ts` files that run each of them for real.
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const DIST = path.join(REPO_ROOT, 'factory', 'orchestrator', 'dist');
 const CLI_PATH = path.join(DIST, 'cli.js');
