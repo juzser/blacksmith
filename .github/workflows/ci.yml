@@ -99,10 +99,23 @@ jobs:
       - name: Run the gate
         run: bash scripts/check.sh
 
-  e2e:
-    name: e2e (Playwright, Chromium)
+  # The Playwright specs run as two shards on two runners, then one job
+  # collects them under the name the ruleset on `main` requires. The suite is
+  # one worker by design (ui/playwright.config.ts: `workers: 1`, because the
+  # dashboard binds the fixed port 4681), so the only way to cut its wall time
+  # is more runners, not more workers. Each shard is its own runner and its own
+  # port 4681. `e2e` below is the check that gates merging.
+  e2e-shard:
+    name: e2e shard ${{ matrix.shard }}/2
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # A red shard must not cancel the other: both shards' screenshots are the
+      # evidence for the run, and a cancelled sibling would read as a second
+      # failure rather than as "not run".
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v7
 
@@ -133,22 +146,45 @@ jobs:
       # fixtures the db tests use (ui/e2e/global-setup.ts). This job is the
       # only place in the project where a browser has ever rendered these
       # pages; before it, "the dashboard works" rested on unit tests plus
-      # reading the markup.
-      - name: Run e2e
+      # reading the markup. `pnpm test:e2e` appends the flag to the playwright
+      # command it ends in, so --shard reaches Playwright itself.
+      - name: Run e2e (shard ${{ matrix.shard }}/2)
         id: e2e
         timeout-minutes: 10
-        run: pnpm test:e2e
+        run: pnpm test:e2e --shard=${{ matrix.shard }}/2
 
       # The specs capture per-page screenshots at several viewports and both
       # themes. Uploaded even on failure: a red run is exactly when the
       # picture is worth having. Not when the step never ran, though — the
       # baseline PNGs are committed, so uploading after a skipped e2e
       # publishes the repo's own pictures under this run's name (D-190).
+      # One artifact per shard: two uploads under one name collide.
       - name: Upload screenshots
         if: always() && steps.e2e.conclusion != 'skipped'
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.shard }}
           path: ui/e2e/__screenshots__/
           if-no-files-found: warn
           retention-days: 14
+
+  # The required check. Ruleset 26017656 on `main` names exactly
+  # `e2e (Playwright, Chromium)`, so a shard rename or a split must not change
+  # it: this job keeps the name and passes only when every shard did. `always()`
+  # so it still reports when a shard failed (otherwise it would be skipped, and
+  # GitHub counts a skipped required check as passing); the step then fails
+  # unless the result is exactly `success`, so a skipped or cancelled shard
+  # fails the check as well.
+  e2e:
+    name: e2e (Playwright, Chromium)
+    needs: e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every e2e shard passed
+        env:
+          SHARDS_RESULT: ${{ needs.e2e-shard.result }}
+        run: |
+          echo "e2e shards: ${SHARDS_RESULT}"
+          test "${SHARDS_RESULT}" = "success"
