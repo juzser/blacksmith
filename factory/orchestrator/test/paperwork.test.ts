@@ -64,8 +64,19 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
       v !== null && typeof v === 'object' && !Array.isArray(v)
         ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)))
         : v;
+    // The environment evidence holds clock and load values, so only its entry count is pinned.
+    const stable = (type: string, payload: unknown) =>
+      type === 'testgate-result' &&
+      payload !== null &&
+      typeof payload === 'object' &&
+      Array.isArray((payload as { environment?: unknown }).environment)
+        ? {
+            ...payload,
+            environment: `<${(payload as { environment: unknown[] }).environment.length} entries>`,
+          }
+        : payload;
     const line = (type: string, payload: unknown) =>
-      `${type} ${JSON.stringify(payload, sorted)}`
+      `${type} ${JSON.stringify(stable(type, payload), sorted)}`
         .replace(/\/[^"]*?bs-paperwork-(state|wt|art|else)-[A-Za-z0-9]+/g, '<$1>')
         .replace(/\b[0-9a-f]{40}\b/g, '<sha>');
     return [
@@ -89,7 +100,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
         "budget-check-result {"overruns":[],"status":"not-declared","tokensUsed":150}",
-        "testgate-result {"pass":true,"results":[{"exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}]}",
+        "testgate-result {"environment":"<1 entries>","pass":true,"results":[{"exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}]}",
         "severity-decisions {"decisions":[],"lesson_ids_escalating":[],"lessons_escalating":0,"lessons_loaded":0}",
         "gate-outcome {"outcome":"pass","reason":null}",
       ]
