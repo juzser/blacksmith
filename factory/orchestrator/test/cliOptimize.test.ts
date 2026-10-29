@@ -417,6 +417,152 @@ describe('brief compose preflight lines (task-8 close-review r2, CLI half)', () 
   });
 });
 
+// ---- follow-up briefs: routing, compose, lint (f-bs-gate-bounce/integration-5c096bd9, -9c1bb4d6) ----
+
+describe('brief compose for a follow-up minted by findings raise (task-9 close-review r3)', () => {
+  const SESSION = 'sess-followup';
+  const EPIC = 'epic-1';
+  const PLAN = {
+    epic_id: EPIC,
+    version: 1,
+    status: 'active',
+    tasks: [
+      {
+        task_id: `${EPIC}/task-1`,
+        epic_id: EPIC,
+        plan_version: 1,
+        objective: 'Own the widget file.',
+        output_schema_ref: 'result.schema.json',
+        acceptance_criteria: ['it works'],
+        claims: ['src/widget.ts'],
+        budget: { tokens: 1000, diff_lines: 100 },
+        contract: { functional_clauses: ['do it'], nonfunctional_clauses: [] },
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+      },
+    ],
+    edges: [],
+  };
+  const AC_BLOCK =
+    '\nAcceptance criteria\n- The widget keeps its last item.\n- A test in test/widget.test.ts proves it.\n';
+
+  function mint() {
+    const sb = sandbox();
+    startSession(sb, SESSION);
+    const planPath = path.join(scratch, `followup-plan-${counter++}.json`);
+    writeFileSync(planPath, JSON.stringify(PLAN));
+    appendEvent(sb, {
+      session_id: SESSION,
+      actor: 'orchestrator',
+      event_type: 'wave-merged',
+      task_id: `${EPIC}/task-1`,
+      plan_version: 1,
+      causal_parent: `${SESSION}#0`,
+      payload: { task_ids: [`${EPIC}/task-1`] },
+    });
+    const evidence = path.join(scratch, `followup-evidence-${counter++}.json`);
+    writeFileSync(
+      evidence,
+      JSON.stringify([
+        {
+          file_path: 'src/widget.ts',
+          finding_category: 'correctness',
+          severity: 'S2-major',
+          summary: 'widget drops the last item',
+          failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
+        },
+      ]),
+    );
+    const raised = cli(
+      [
+        'findings',
+        'raise',
+        '--plan',
+        planPath,
+        '--evidence',
+        evidence,
+        '--found-by',
+        'reviewer',
+        '--session',
+        SESSION,
+        '--plan-version',
+        '1',
+        '--causal-parent',
+        `${SESSION}#0`,
+        '--actor',
+        'operator',
+      ],
+      sb,
+    );
+    expect(raised.status, raised.stdout + raised.stderr).toBe(0);
+    const [row] = JSON.parse(raised.stdout) as { taskId: string; attribution: string }[];
+    expect(row?.attribution).toBe('follow-up');
+    return { sb, planPath, followUpId: (row as { taskId: string }).taskId };
+  }
+
+  const lint = (sb: Sandbox, file: string, followUpId: string) =>
+    cli(['dispatch', 'lint', file, '--role', 'coder', '--task', followUpId, '--session', SESSION], sb);
+
+  it('composes the brief with its own findings as scope, and lint refuses one without the line or the checks', () => {
+    const { sb, planPath, followUpId } = mint();
+    expect(followUpId).toMatch(/^epic-1\/followup-[0-9a-f]{8}$/);
+    const out = path.join(scratch, 'followup-brief', `${counter++}.md`);
+    const run = cli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        'coder',
+        '--session',
+        SESSION,
+        '--plan',
+        planPath,
+        '--task',
+        followUpId,
+        '--worktree',
+        path.join(scratch, 'wt', 'followup'),
+        ...workerFlags(),
+        '--out',
+        out,
+      ],
+      sb,
+    );
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const listed = JSON.parse(
+      cli(['findings', 'list', '--session', SESSION, '--task', followUpId], sb).stdout,
+    ) as { finding_id: string; summary: string }[];
+    expect(listed).toHaveLength(1);
+    const text = readFileSync(out, 'utf8');
+    const scope = text.slice(
+      text.indexOf('<!-- BEGIN FOLLOW-UP SCOPE -->'),
+      text.indexOf('<!-- END FOLLOW-UP SCOPE -->'),
+    );
+    expect(scope).toContain(listed[0]?.finding_id);
+    expect(scope).toContain(listed[0]?.summary);
+
+    const good = `${out}.good.md`;
+    writeFileSync(good, text + AC_BLOCK);
+    const ok = lint(sb, good, followUpId);
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    expect(JSON.parse(ok.stdout).preflight.status).toBe('ok');
+
+    const at = text.indexOf('Result file:');
+    const gates = text.indexOf('Gate checks (');
+    const noLine = `${out}.no-line.md`;
+    writeFileSync(noLine, text.slice(0, at) + text.slice(gates) + AC_BLOCK);
+    const missing = lint(sb, noLine, followUpId);
+    expect(missing.status).toBe(1);
+    expect(JSON.parse(missing.stdout).preflight.status).toBe('missing');
+
+    const noChecks = `${out}.no-checks.md`;
+    writeFileSync(noChecks, text.slice(0, gates) + AC_BLOCK);
+    const none = lint(sb, noChecks, followUpId);
+    expect(none.status).toBe(1);
+    expect(JSON.parse(none.stdout).preflight.status).toBe('no-checks');
+  });
+});
+
 // ---- --state-dir beats STATE_EVENTS_DIR (eventOptsFromFlags) -------------------
 
 describe('--state-dir on lessons for-dispatch and brief compose', () => {

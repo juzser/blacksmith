@@ -1606,6 +1606,11 @@ describe('gate.ts (integration)', () => {
       // The numbers it did read stay on the certificate: the hole is whose
       // files to judge, not whether the reporter ran.
       expect(outcome.coverageEvidence?.total?.lines.pct).toBe(90);
+      // The third case of the coverage-evidence answerers (wave.md step 9): a
+      // summary was read and no subject is unmeasured, so the gate read no
+      // claims for this id.
+      expect(outcome.coverageEvidence?.present).toBe(true);
+      expect(outcome.coverageEvidence?.subjects.some((s) => s.status === 'unmeasured')).toBe(false);
     });
 
     /**

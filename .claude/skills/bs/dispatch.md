@@ -19,7 +19,7 @@ tools, turn cap and lessons markers live, and an untyped agent has none of them.
 ## Carry into the prompt
 
 Build every brief with `bs brief compose --role <role> --session <id>
-[--task <task-id>] [--worktree <dir>] [--artifact <file>] --out <file>`. It
+[--task <task-id>] [--worktree <dir>] [--artifact <file>] [--provider <name> --model-tier <tier> --checks <file>] [--base <ref>] [--work-root <work-root>] --out <file>`. Compose requires `--work-root` for a coder, tester or grader; `--provider`, `--model-tier` and `--checks` for a coder or tester; `--base` for the coder. It
 writes the brief and a manifest beside it (`<file>.manifest.json`), and the
 brief passes `bs dispatch lint`. The list below is what compose emits, kept as
 the description of it — and the check for the one case it cannot cover.
@@ -274,6 +274,8 @@ memory of its previous attempt and will happily report round 1 forever.
      grader starts that id at round 1 — the ledger's round counter is per
      `(task_id, role)`, and a new id has never opened a round.
   5. Gate with `--plan` naming the new plan version.
+
+  This re-scope path also answers a `grader-invalid` with no grader round left.
 
   A same-id re-dispatch of round 3 is never legal, superseded or not: the cap
   binds the id, and a kept-id supersede (same task_id, new claims/criteria)

@@ -459,17 +459,19 @@ block the merge queue, it queues an operator question (§8 below).
 | `pass` | Schema valid, tests green, no findings | Task proceeds straight to the merge queue |
 | `pass-with-waivers-pending` | Schema valid, tests green, only S3/S4 findings | Task proceeds to the merge queue; findings queue into the epic's waiver batch |
 | `blocked` (`reason: "schema-invalid"`) | Worker's `Result` failed `result.schema.json` | Never reaches tests; bounce to the worker whose result it is (the coder, or the tester for its own result) immediately |
-| `blocked` (`reason: "artifacts-missing"`) | A declared artifact is outside `state/artifacts/<task-id>/` or absent | Never reaches tests; `artifactIssues` names each path and which of the two it is |
+| `blocked` (`reason: "artifacts-missing"`) | A declared artifact is outside `state/artifacts/<task-id>/` or absent | Never reaches tests; `artifactIssues` names each path and which of the two it is; bounce to the worker whose result it is |
 | `blocked` (`reason: "not-committed"`) | There is no commit here to score — see §5a | Never reaches tests; bounce to the coder to commit |
-| `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; run `pnpm install` in the worktree and re-gate |
-| `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes — re-poke it, then `bs judge report` (§3c) |
-| `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; `wave.md` step 7 sends it to the grader before `gate run` |
+| `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; the wave-runner's own fix answers it: run `pnpm install` in the worktree, then the preflight again (no agent runs) |
+| `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes. With a uiux turn among them, bounce to the uiux pass (any other judge it names is re-poked beside it); with no uiux turn among them, a judge turn answers it (each judge it names re-poked, then `bs judge report`, §3c) |
+| `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; a judge turn answers it: the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'); `wave.md` step 7 sends it to the grader before `gate run` |
+| `blocked` (`reason: "uiux-spec-missing"`) | A UI-affecting task has no uiux spec from the uiux spec pass | Never reaches tests; bounce to the uiux pass (the spec pass) |
+| `blocked` (`reason: "uiux-visual-missing"`) | A UI-affecting task has no uiux visual pass over its screenshots | Never reaches tests; bounce to the uiux pass (the visual pass) |
 | `blocked` (`reason: "screenshots-missing"`) | A UI-affecting task has no screenshot set from the tester | Never reaches tests; bounce to the tester |
 | `blocked` (`reason: "screenshots-stale"`) | The tester's screenshots were taken at another HEAD than the gate's | Never reaches tests; bounce to the tester to re-shoot at the gate's HEAD |
-| `blocked` (`reason: "grader-fail"`) | A criterion came back `fail`/`partial`, or the grading run was `dead` | Never reaches tests; bounce to coder with the named gaps, or to the planner at round 2 |
-| `blocked` (`reason: "tests-failed"`) | A check command exited non-zero | Bounce to coder on the same branch |
-| `blocked` (`reason: "coverage-evidence"`) | A coverage check ran, and the numbers it produced don't cover a file this task's claims name | Fix the reporter or the include glob, not the code — see §5c |
-| `blocked` (`reason: "findings"`) | An S1/S2 finding was raised | Bounce to coder on the same branch; `blockingFindings` lists exactly which |
+| `blocked` (`reason: "grader-fail"`) | A criterion came back `fail`/`partial`, or the grading run was `dead` | Never reaches tests; bounce to the coder with the named gaps; a round-2 `fail` re-scopes under wave.md step 6 instead |
+| `blocked` (`reason: "tests-failed"`) | A check command exited non-zero | On the same branch, bounce to the coder; an env-classified block follows the env-failure paragraph below instead |
+| `blocked` (`reason: "coverage-evidence"`) | A coverage check ran, and the evidence it left does not cover the task's claims: no summary, a claimed file with no row, or no claims read for the task id | The tests ran; three cases, see §5c: `present` false, the epic session answers it; `present` true with an `unmeasured` subject, bounce to the coder; `present` true with no `unmeasured` subject, the wave-runner's own fix answers it |
+| `blocked` (`reason: "findings"`) | An S1/S2 finding was raised | On the same branch, bounce to the coder; `blockingFindings` lists exactly which |
 
 ### Before hand-back: `bs results check`
 
@@ -546,7 +548,7 @@ problem falls in exactly one of five branches:
    existing rules; a judge's turn is not a ladder round. The answer to
    `grader-invalid` is the grader's turn: re-poked in the same round to rewrite
    its file in place, or re-run as a new round only while `profile.graderRounds`
-   leaves one; with none left the task goes to the epic session, never to
+   leaves one; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'), never to
    `gate run` and never to a builder.
 3. **A worker's file the gate blocks on.** `schema-invalid`,
    `artifacts-missing`, `not-committed`, `screenshots-missing` and
@@ -590,7 +592,11 @@ dispatch after it runs on a strictly higher model tier
 (`checkModelTierRung`), and from the third no builder dispatch and no gate round
 goes out before an operator answer (`checkOperatorRung`). The ladder counts a
 tester bounce (the two screenshots reasons) like a coder bounce: it counts every
-blocked round whichever builder it goes to. Branch 4's bound of one
+blocked round whichever builder it goes to.
+
+A block no builder answers (a reason or case the list gives to a judge turn, which is the grader's or another non-builder judge's: `grader-invalid`, and `judges-outstanding` when no uiux turn is outstanding; the wave-runner's own fix; or the epic session; and an env-classified `tests-failed`) is never bounced, while a uiux pass is a builder dispatch (`escalation.ts` `BUILDER_ROLES`), so the uiux reasons and cases (`uiux-spec-missing`, `uiux-visual-missing` and `judges-outstanding` with a uiux turn outstanding) are not among them: after the first failed round its answerer acts and a bare re-gate follows; from the second failed round nothing more runs on that task id, no gate round and no builder dispatch, until the operator's answer is in the log, and the epic session puts it to the operator; the answer, a `user_prompt` event, picks one ladder-clean move: a re-scope under a new task id (dispatch.md 'Round counting and escalation'), whose ledger starts empty; one builder dispatch on a strictly higher model tier whose `dispatch_decision` names that answer as its `causal_parent`; or a waiver or closure of the task. From the third failed round every block, whatever its reason, needs the operator's answer first (`checkOperatorRung`). Its operator-first bound at the second failed round is a playbook rule the log evidences by structure (the dispatch's `causal_parent` is the answer) and no verb enforces, an accepted gap like branch 4's bound.
+
+Branch 4's bound of one
 return is a playbook rule: the log evidences it by structure, the count of
 builder dispatches whose `causal_parent` is such an event, and no verb enforces
 it, an accepted gap like the port-0 rule.
@@ -620,8 +626,7 @@ wave-runner logs it as `error-logged` with error `execution.env-failure`, raises
 no finding against the coder and sends no fix-round brief. It is a failed round
 on the escalation ladder like every other blocked `gate-outcome`
 (`readFailedRounds` counts it), so the epic session may re-gate the same HEAD
-only after the first failed round, needs a builder dispatch on a higher model
-tier from the second and the operator's answer from the third, and a second
+only after the first failed round (no new builder dispatch); from the second failed round, the operator's answer first and only then, if the answer picks it, one builder dispatch on a strictly higher model tier; the operator's answer from the third, and a second
 env-classified block for the same task at the same HEAD goes to the operator.
 
 ## 5a. The commit check — why a green gate used to prove nothing (D-30)

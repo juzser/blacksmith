@@ -4,8 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lintDispatchPrompt } from '../src/dispatchLint.js';
+import { BUILDER_ROLES } from '../src/escalation.js';
+import { appendEvent } from '../src/events.js';
+import type { GateOutcome } from '../src/gate.js';
 import { type PaperworkReason, SCREENSHOT_RE, STAGES_FOR_ROLE } from '../src/paperwork.js';
 import { AGENTS_DIR, REPO_ROOT } from '../src/paths.js';
+import { sliceSection as sliceSectionOf } from '../src/playbookSlice.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 import { listFragments, parseSharedRegions } from '../src/templateFragments.js';
 import type { CheckEnvironment } from '../src/testgate.js';
@@ -301,7 +305,9 @@ describe('wave.md', () => {
     expect(s).toMatch(/failed round on the escalation ladder/);
     expect(s).toMatch(/`readFailedRounds`/);
     expect(s).toMatch(/bare re-gate only after the first failed round/);
-    expect(s).toMatch(/higher-tier builder dispatch from the second/);
+    expect(s).toContain(
+      "from the second failed round, the operator's answer first and only then, if the answer picks it, one builder dispatch on a strictly higher model tier",
+    );
     expect(s).toMatch(/operator from the third/);
     expect(s).toMatch(/never resets, skips or exempts a rung/);
     expect(s).toMatch(
@@ -347,6 +353,7 @@ describe('queue-and-gate.md section 5 and the CHANGELOG', () => {
       'task-6-gate-block-counts-toward-class',
       'task-7-close-review-fixes',
       'task-8-close-review-r2-fixes',
+      'task-9-close-review-r3-fixes',
     ]) {
       expect(unreleased, id).toContain(id);
     }
@@ -852,32 +859,15 @@ const branchOf = (text: string, reason: string, start: RegExp): number | undefin
 
 describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in wave.md', () => {
   const step9 = flatten(stepOf(waveText, 9));
-  const BUILDER_OF: Record<string, RegExp> = {
-    'schema-invalid':
-      /for `schema-invalid` and `artifacts-missing` the worker whose result the gate line's `--result` and `--agent` name/,
-    'artifacts-missing': /for `schema-invalid` and `artifacts-missing` the worker whose result/,
-    'not-committed': /the coder for every other reason/,
-    'screenshots-missing': /the tester for `screenshots-missing` and `screenshots-stale`/,
-    'screenshots-stale': /the tester for `screenshots-missing` and `screenshots-stale`/,
-  };
-
-  it('names a builder in step 9 for every reason of branch 3, keyed from the branch-3 reasons', () => {
-    const branch3 = Object.entries(REASON_BRANCH)
-      .filter(([, b]) => b === 3)
-      .map(([r]) => r);
-    expect(Object.keys(BUILDER_OF).sort()).toEqual(branch3.sort());
-    for (const reason of branch3) expect(step9, reason).toMatch(BUILDER_OF[reason] as RegExp);
-  });
-
   it('says the tester re-shoots at the gate HEAD, step 5 records it and the uiux pass reviews it', () => {
     expect(step9).toMatch(
       /re-shoots at the gate's HEAD, step 5 records the new set, and step 5's uiux visual pass reviews it/,
     );
   });
 
-  it('answers a grader-invalid in the log with the grader turn and the epic session', () => {
-    expect(step9).toMatch(
-      /A `grader-invalid` `gate-outcome` in the log is still a failed round the ladder counts, is answered by the grader's turn and not by a bounce, and goes to the epic session/,
+  it('answers a grader-invalid in the log with the grader turn only', () => {
+    expect(step9).toContain(
+      "A `grader-invalid` `gate-outcome` in the log is still a failed round the ladder counts, and is answered by the grader's turn, not by a bounce.",
     );
   });
 
@@ -887,9 +877,9 @@ describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in wave.md', () => {
     );
   });
 
-  it('names the task builder in the blocked-task rule', () => {
+  it('names the step 9 answerer, not the task builder, in the blocked-task rule', () => {
     expect(flatten(waveText)).toMatch(
-      /A blocked task blocks itself\.\*\* Gate outcome `blocked` bounces to \*that\* task's builder \(step 9\)/,
+      /A blocked task blocks itself\.\*\* Gate outcome `blocked` goes to the answerer step 9 names for its reason, not to the task's builder/,
     );
   });
 
@@ -901,7 +891,7 @@ describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in wave.md', () => {
       ),
     );
     expect(two).toMatch(
-      /re-poke the grader in the same round to rewrite its file in place, or re-run it as a new round only while step 6's `profile.graderRounds` leaves one; with none left the task goes to the epic session\. It is never sent to `gate run` and never to a builder/,
+      /re-poke the grader in the same round to rewrite its file in place, or re-run it as a new round only while step 6's `profile.graderRounds` leaves one; with no grader round left, the grader cap's re-scope applies \(dispatch\.md 'Round counting and escalation'\)\. It is never sent to `gate run` and never to a builder/,
     );
   });
 
@@ -1173,6 +1163,608 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
       'bs-tester.md carries no SHARED:handback-preflight region',
     ).toContain('handback-preflight');
     expect(fragments.has('handback-preflight')).toBe(true);
+  });
+});
+
+// ---- Task-9 close-review r3 ---------------------------------------------------
+
+type Answerer =
+  | 'coder'
+  | 'tester'
+  | 'uiux'
+  | 'result-worker'
+  | 'judge-turn'
+  | 'wave-runner'
+  | 'epic-session';
+type JudgesCase = 'uiux-named' | 'judges-only';
+type CoverageCase = 'summary-missing' | 'subject-unmeasured' | 'claims-unreadable';
+
+/** The one answerer of every reason the gate blocks on; a reason added to the gate without a row fails to compile. */
+const ANSWERER_OF = {
+  'not-committed': 'coder',
+  'grader-fail': 'coder',
+  'tests-failed': 'coder',
+  findings: 'coder',
+  'screenshots-missing': 'tester',
+  'screenshots-stale': 'tester',
+  'schema-invalid': 'result-worker',
+  'artifacts-missing': 'result-worker',
+  'uiux-spec-missing': 'uiux',
+  'uiux-visual-missing': 'uiux',
+  'grader-invalid': 'judge-turn',
+  'deps-missing': 'wave-runner',
+  'judges-outstanding': {
+    'uiux-named': 'uiux',
+    'judges-only': 'judge-turn',
+  } satisfies Record<JudgesCase, Answerer>,
+  'coverage-evidence': {
+    'summary-missing': 'epic-session',
+    'subject-unmeasured': 'coder',
+    'claims-unreadable': 'wave-runner',
+  } satisfies Record<CoverageCase, Answerer>,
+} satisfies Record<
+  Extract<GateOutcome, { outcome: 'blocked' }>['reason'],
+  Answerer | Record<JudgesCase, Answerer> | Record<CoverageCase, Answerer>
+>;
+
+const PHRASE = {
+  coder: 'bounce to the coder',
+  tester: 'bounce to the tester',
+  uiux: 'bounce to the uiux pass',
+  'result-worker': 'bounce to the worker whose result it is',
+  'judge-turn': 'a judge turn answers it',
+  'wave-runner': "the wave-runner's own fix answers it",
+  'epic-session': 'the epic session answers it',
+} satisfies Record<Answerer, string>;
+
+const CASE_LEAD: Record<string, string> = {
+  'uiux-named': 'a uiux turn among them',
+  'judges-only': 'no uiux turn among them',
+  'summary-missing': '`present` false',
+  'subject-unmeasured': '`present` true with an `unmeasured` subject',
+  'claims-unreadable': '`present` true with no `unmeasured` subject',
+};
+
+/** The role each builder kind stands for; `result-worker` is the coder or the tester. */
+const BUILDER_KIND_ROLES = {
+  coder: ['coder'],
+  tester: ['tester'],
+  uiux: ['uiux'],
+  'result-worker': ['coder', 'tester'],
+} satisfies Partial<Record<Answerer, string[]>>;
+
+const reasonOf = ANSWERER_OF as Record<string, Answerer | Record<string, Answerer>>;
+const kindsOf = (a: Answerer | Record<string, Answerer>): Answerer[] =>
+  typeof a === 'string' ? [a] : Object.values(a);
+const otherPhrases = (own: Answerer[]): string[] =>
+  (Object.keys(PHRASE) as Answerer[]).filter((k) => !own.includes(k)).map((k) => PHRASE[k]);
+
+interface Step9Bullet {
+  reason: string | undefined;
+  head: string;
+  subs: string[];
+}
+
+/** Step 9's top-level bullets (three spaces) and their sub-bullets (five), continuation lines joined. */
+function step9Bullets(raw: string): Step9Bullet[] {
+  const out: Step9Bullet[] = [];
+  let cur: Step9Bullet | undefined;
+  for (const line of raw.split('\n')) {
+    const top = line.match(/^ {3}- (`([a-z-]+)`)?/);
+    if (top) {
+      cur = { reason: top[2], head: line.replace(/^ {3}- /, ''), subs: [] };
+      out.push(cur);
+    } else if (/^ {5}- /.test(line) && cur) {
+      cur.subs.push(line.replace(/^ {5}- /, ''));
+    } else if (/^ {5,}\S/.test(line) && cur) {
+      if (cur.subs.length > 0) cur.subs[cur.subs.length - 1] += ` ${line.trim()}`;
+      else cur.head += ` ${line.trim()}`;
+    } else cur = undefined;
+  }
+  return out.map((b) => ({
+    ...b,
+    head: flatten(b.head).trim(),
+    subs: b.subs.map((x) => flatten(x).trim()),
+  }));
+}
+
+const queueRows = (reason: string): string[] =>
+  queueText
+    .split('\n')
+    .filter((l) => l.startsWith(`| \`blocked\` (\`reason: "${reason}"\`)`))
+    .map((l) => flatten(l));
+
+const CAPPED_CLAUSE =
+  "with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation')";
+const ROUND_RULE_START = 'A block no builder answers';
+const ROUND_RULE_END = '(`checkOperatorRung`).';
+const ENV_ORDER =
+  "from the second failed round, the operator's answer first and only then, if the answer picks it, one builder dispatch on a strictly higher model tier";
+const roundRuleOf = (text: string): string => {
+  const flat = flatten(text);
+  const at = flat.indexOf(ROUND_RULE_START);
+  expect(at, 'no round-rule sentence').toBeGreaterThan(-1);
+  const end = flat.indexOf(ROUND_RULE_END, at);
+  expect(end, 'round-rule sentence has no end').toBeGreaterThan(at);
+  return flat.slice(at, end + ROUND_RULE_END.length);
+};
+
+describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733: one answerer per blocked reason', () => {
+  const raw9 = stepOf(waveText, 9);
+  const step9 = flatten(raw9);
+  const bullets = step9Bullets(raw9);
+  const reasonBullets = (reason: string) => bullets.filter((b) => b.reason === reason);
+
+  it('has exactly one bullet per reason of the gate type and none for another', () => {
+    const reasons = Object.keys(ANSWERER_OF).sort();
+    expect(reasons).toHaveLength(14);
+    expect(
+      bullets
+        .filter((b) => b.reason !== undefined)
+        .map((b) => b.reason)
+        .sort(),
+    ).toEqual(reasons);
+    for (const reason of reasons) expect(reasonBullets(reason), reason).toHaveLength(1);
+  });
+
+  it('puts one answerer phrase in each bullet and none of the other six', () => {
+    for (const [reason, answer] of Object.entries(reasonOf)) {
+      const [bullet] = reasonBullets(reason) as [Step9Bullet];
+      if (typeof answer === 'string') {
+        expect(bullet.head, reason).toContain(PHRASE[answer]);
+        for (const other of otherPhrases([answer]))
+          expect(bullet.head, `${reason}: ${other}`).not.toContain(other);
+        expect(bullet.subs, reason).toEqual([]);
+        continue;
+      }
+      for (const phrase of Object.values(PHRASE)) expect(bullet.head, reason).not.toContain(phrase);
+      expect(bullet.subs, reason).toHaveLength(Object.keys(answer).length);
+      for (const [name, kind] of Object.entries(answer)) {
+        const lead = CASE_LEAD[name] as string;
+        const sub = bullet.subs.find((x) => x.startsWith(lead));
+        expect(sub, `${reason} ${name}`).toBeDefined();
+        expect(sub, `${reason} ${name}`).toContain(`${lead}, ${PHRASE[kind]}`);
+        for (const other of otherPhrases([kind]))
+          expect(sub, `${reason} ${name}: ${other}`).not.toContain(other);
+      }
+    }
+  });
+
+  it('ties every reason of step 7 to the answerer kinds its branch allows', () => {
+    for (const [reason, branch] of Object.entries(REASON_BRANCH)) {
+      const kinds = kindsOf(reasonOf[reason] as Answerer | Record<string, Answerer>);
+      const allowed: Answerer[][] = [
+        [],
+        ['wave-runner'],
+        ['uiux', 'judge-turn'],
+        ['coder', 'tester', 'result-worker'],
+      ];
+      for (const kind of kinds) expect(allowed[branch], `${reason} ${kind}`).toContain(kind);
+    }
+  });
+
+  it('keeps the builder kinds and the ladder s BUILDER_ROLES in step', () => {
+    const covered = new Set(Object.values(BUILDER_KIND_ROLES).flat());
+    for (const role of BUILDER_ROLES) expect(covered.has(role), role).toBe(true);
+  });
+
+  it('says only the builder-given reasons are bounced, and has no catch-all', () => {
+    expect(step9).toMatch(
+      /on the \*\*same branch\*\*\. Only the reasons and cases the list below gives to a builder are bounced/,
+    );
+    expect(step9).not.toMatch(/every other reason/i);
+    expect(step9).toMatch(
+      /re-shoots at the gate's HEAD, step 5 records the new set, and step 5's uiux visual pass reviews it/,
+    );
+    expect(step9).toContain(
+      "The uiux pass is a builder too (`escalation.ts` `BUILDER_ROLES`), so a bounce to it is a builder dispatch the ladder counts and from the second failed round runs on a strictly higher model tier than the failing round's builder dispatch",
+    );
+  });
+
+  it('points tests-failed to the env-failure bullet and a round-2 grader-fail to the re-scope', () => {
+    const [tests] = reasonBullets('tests-failed') as [Step9Bullet];
+    expect(tests.head).toMatch(
+      /`error_class: execution\.env-failure`[^.]*env-failure bullet instead/,
+    );
+    const [grader] = reasonBullets('grader-fail') as [Step9Bullet];
+    expect(grader.head).toContain('`failed_criteria`');
+    expect(grader.head).toMatch(/round-2 `fail` re-scopes under step 6 instead/);
+  });
+
+  it('ends the grader-invalid bullet and branch 2 with the one capped clause, and sends neither to the epic session', () => {
+    const [bullet] = reasonBullets('grader-invalid') as [Step9Bullet];
+    expect(bullet.head).toContain(CAPPED_CLAUSE);
+    expect(bullet.head).toContain("step 6's `profile.graderRounds`");
+    expect(bullet.head).not.toContain('goes to the epic session');
+    const s7 = stepOf(waveText, 7);
+    const two = flatten(s7.slice(s7.search(/^ {5}2\. \*\*/m), s7.search(/^ {5}3\. \*\*/m)));
+    expect(two).toContain(CAPPED_CLAUSE);
+    expect(two).not.toContain('goes to the epic session');
+    expect(step9).not.toContain('and goes to the epic session');
+  });
+
+  it('keys the coverage cases in step 7 to step 9, without saying not the code', () => {
+    const s7 = flatten(stepOf(waveText, 7));
+    const at = s7.indexOf('`reason: "coverage-evidence"`');
+    expect(at).toBeGreaterThan(-1);
+    const bullet = s7.slice(at, s7.indexOf('Ask the same question', at));
+    expect(bullet).not.toContain('not the code');
+    expect(bullet).toMatch(/no per-file number for a file this task's claims name/);
+    expect(bullet).toMatch(/no coverage summary/);
+    expect(bullet).toMatch(/no claims for the task id/);
+    expect(bullet).toContain('step 9 gives each of the three cases its answerer');
+  });
+
+  it('says dispatch.md re-scope also answers a grader-invalid with no grader round left', () => {
+    const section = flatten(
+      sliceSectionOf(read('.claude/skills/bs/dispatch.md'), 'Round counting and escalation'),
+    );
+    expect(section).toContain('also answers a `grader-invalid` with no grader round left');
+  });
+
+  describe("queue-and-gate.md's outcome table", () => {
+    it('holds one blocked row per reason, with the step 9 phrase and no second one', () => {
+      for (const [reason, answer] of Object.entries(reasonOf)) {
+        const rows = queueRows(reason);
+        expect(rows, reason).toHaveLength(1);
+        const row = rows[0] as string;
+        const kinds = kindsOf(answer);
+        for (const kind of kinds) expect(row, `${reason} ${kind}`).toContain(PHRASE[kind]);
+        for (const other of otherPhrases(kinds))
+          expect(row, `${reason}: ${other}`).not.toContain(other);
+        if (typeof answer !== 'string') {
+          for (const [name, kind] of Object.entries(answer)) {
+            expect(row, `${reason} ${name}`).toContain(`${CASE_LEAD[name]}, ${PHRASE[kind]}`);
+          }
+        }
+      }
+      expect(
+        queueText.split('\n').filter((l) => l.startsWith('| `blocked` (`reason:')),
+      ).toHaveLength(14);
+    });
+
+    it('ends the grader-invalid row with the capped clause and keeps its two pinned phrases', () => {
+      const [row] = queueRows('grader-invalid') as [string];
+      expect(row).toContain(CAPPED_CLAUSE);
+      expect(row).not.toContain('epic session');
+      expect(row).toMatch(
+        /grader's turn answers it \(re-poked in the same round, or re-run within its round cap\), never a builder/,
+      );
+      expect(row).toMatch(/wave\.md` step 7 sends it to the grader before `gate run`/);
+    });
+
+    it('names the deps-missing fix without an unconditional re-gate and the coverage cases without not the code', () => {
+      const [deps] = queueRows('deps-missing') as [string];
+      expect(deps).not.toMatch(/re-gate/);
+      const [coverage] = queueRows('coverage-evidence') as [string];
+      expect(coverage).not.toContain('not the code');
+    });
+
+    it('ends section 5 branch 2 with the capped clause', () => {
+      const s5 = section5.slice(0, section5.indexOf('One preflight result can hold'));
+      const two = flatten(s5.slice(s5.search(/^2\. \*\*/m), s5.search(/^3\. \*\*/m)));
+      expect(two).toContain(CAPPED_CLAUSE);
+      expect(two).not.toContain('goes to the epic session');
+    });
+  });
+});
+
+describe('f-bs-gate-bounce/integration-29686266, -446ee7cf, -105d3733: a block no builder answers waits for the operator', () => {
+  const raw9 = stepOf(waveText, 9);
+  const step9 = flatten(raw9);
+
+  it('says every blocked reason is a failed round the ladder counts, whoever answers it', () => {
+    expect(step9).toMatch(
+      /Every one of these reasons is a blocked `gate-outcome` and so a failed round `readFailedRounds` counts, whoever answers it\./,
+    );
+  });
+
+  it('carries the round-rule sentence, word for word, in step 9 and in section 5, naming the uiux reasons as builder-answered', () => {
+    const a = roundRuleOf(raw9);
+    expect(a).toBe(roundRuleOf(section5));
+    expect(a).toMatch(/a uiux pass is a builder dispatch \(`escalation\.ts` `BUILDER_ROLES`\)/);
+    for (const reason of ['uiux-spec-missing', 'uiux-visual-missing'])
+      expect(a).toContain(`\`${reason}\``);
+    expect(a).toMatch(/is never bounced/);
+    expect(a).toMatch(
+      /from the second failed round nothing more runs on that task id, no gate round and no builder dispatch, until the operator's answer is in the log, and the epic session puts it to the operator/,
+    );
+    expect(a).toMatch(
+      /the answer, a `user_prompt` event, picks one ladder-clean move: a re-scope under a new task id \(dispatch\.md 'Round counting and escalation'\), whose ledger starts empty; one builder dispatch on a strictly higher model tier whose `dispatch_decision` names that answer as its `causal_parent`; or a waiver or closure of the task/,
+    );
+    expect(a).toMatch(
+      /From the third failed round every block, whatever its reason, needs the operator's answer first/,
+    );
+  });
+
+  it('says in section 5 that its operator-first bound is a playbook rule no verb enforces', () => {
+    expect(flatten(section5)).toMatch(
+      /operator-first bound at the second failed round is a playbook rule the log evidences by structure \(the dispatch's `causal_parent` is the answer\) and no verb enforces, an accepted gap like branch 4's bound/,
+    );
+  });
+
+  it('states the round-2 order once, in the same words, in the env-failure bullet and paragraph', () => {
+    const env = step9.slice(step9.indexOf('**An env-failure block.**'));
+    expect(env).toContain(ENV_ORDER);
+    expect(env).toMatch(
+      /"no coder bounce" means no finding against the coder and no fix-round brief[^.]*`checkModelTierRung` and `checkOperatorRung`.*that dispatch waits for the operator's answer/,
+    );
+    const queue = flatten(queueText);
+    const para = queue.slice(queue.indexOf('Classification changes nothing else.'));
+    expect(para).toContain(ENV_ORDER);
+    for (const text of [step9, queue]) {
+      expect(text).not.toContain('higher-tier builder dispatch from the second');
+      expect(text).not.toContain('higher model tier from the second');
+    }
+  });
+});
+
+describe('f-bs-gate-bounce/integration-38ddc74d, -29686266, -105d3733: the ladder premise, through the built CLI', () => {
+  const SESSION = 'sess-r3-ladder';
+  const TASK = 'epic-9/task-9';
+  let home = '';
+  beforeAll(() => {
+    home = mkdtempSync(path.join(tmpdir(), 'bs-r3-ladder-'));
+  });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
+  type Step =
+    | { blocked: string }
+    | { pass: true }
+    | { prompt: true }
+    | { dispatch: string; tier: string };
+  const check = async (steps: Step[]) => {
+    const dir = mkdtempSync(path.join(home, 's-'));
+    const stateDir = path.join(dir, 'state', 'events');
+    const append = (event_type: string, payload: Record<string, unknown>, actor = 'orchestrator') =>
+      appendEvent(
+        {
+          session_id: SESSION,
+          actor,
+          event_type,
+          task_id: TASK,
+          plan_version: 1,
+          causal_parent: `${SESSION}#0`,
+          payload,
+        },
+        { stateDir },
+      );
+    await appendEvent(
+      {
+        session_id: SESSION,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const dispatch = (agent_role: string, model_tier: string) =>
+      append('dispatch_decision', { agent_role, provider: 'claude', model: 'm', model_tier });
+    await dispatch('coder', 'mid');
+    for (const step of steps) {
+      if ('blocked' in step)
+        await append('gate-outcome', { outcome: 'blocked', reason: step.blocked });
+      else if ('pass' in step) await append('gate-outcome', { outcome: 'pass' });
+      else if ('prompt' in step)
+        await append('user_prompt', { text: 'the operator answers' }, 'user');
+      else await dispatch(step.dispatch, step.tier);
+    }
+    const out = runCli(['escalation', 'check', SESSION, '--task', TASK], { BS_HOME: dir });
+    const checks = JSON.parse(out.stdout).checks as {
+      rung: number;
+      status: string;
+      failedRounds?: number;
+    }[];
+    return { status: out.status, rung: (n: number) => checks.find((c) => c.rung === n) };
+  };
+  const blocked = (reason: string): Step => ({ blocked: reason });
+  const coder = (tier: string): Step => ({ dispatch: 'coder', tier });
+  const twoBlocks: Step[] = [blocked('judges-outstanding'), blocked('deps-missing')];
+
+  it('(i) a bare re-gate after the first failed round is clean', async () => {
+    expect((await check([blocked('deps-missing'), { pass: true }])).status).toBe(0);
+  });
+
+  it('(ii) two non-builder blocks and nothing more: both counted, stopping is clean', async () => {
+    const r = await check(twoBlocks);
+    expect(r.status).toBe(0);
+    expect(r.rung(2)).toMatchObject({ status: 'not-applicable', failedRounds: 2 });
+  });
+
+  it('(iii) an operator answer does not make a bare re-gate clean', async () => {
+    const r = await check([...twoBlocks, { prompt: true }, { pass: true }]);
+    expect(r.status).toBe(1);
+    expect(r.rung(2)?.status).toBe('unverifiable');
+  });
+
+  it('(iv) a same-tier builder dispatch is a violation', async () => {
+    const r = await check([...twoBlocks, coder('mid'), { pass: true }]);
+    expect(r.status).toBe(1);
+    expect(r.rung(2)?.status).toBe('violation');
+  });
+
+  it('(v) an answer, then a strictly higher-tier builder dispatch, is ok', async () => {
+    const r = await check([...twoBlocks, { prompt: true }, coder('frontier'), { pass: true }]);
+    expect(r.status).toBe(0);
+    expect(r.rung(2)?.status).toBe('ok');
+  });
+
+  it('(vi) the third failed round wants an operator answer first', async () => {
+    const upToThird: Step[] = [
+      ...twoBlocks,
+      { prompt: true },
+      coder('frontier'),
+      blocked('findings'),
+    ];
+    const answered = await check([
+      ...upToThird,
+      { prompt: true },
+      coder('frontier'),
+      { pass: true },
+    ]);
+    expect(answered.status).toBe(0);
+    expect(answered.rung(3)?.status).toBe('ok');
+    const unanswered = await check([...upToThird, coder('frontier'), { pass: true }]);
+    expect(unanswered.status).toBe(1);
+    expect(unanswered.rung(3)?.status).toBe('violation');
+  });
+
+  it('(vii) a uiux pass is a builder dispatch the ladder counts', async () => {
+    const uiux = (tier: string): Step => ({ dispatch: 'uiux', tier });
+    const log = (last: string): Step[] => [
+      blocked('uiux-visual-missing'),
+      uiux('mid'),
+      blocked('uiux-visual-missing'),
+      uiux(last),
+      { pass: true },
+    ];
+    const up = await check(log('frontier'));
+    expect(up.status).toBe(0);
+    expect(up.rung(2)?.status).toBe('ok');
+    const same = await check(log('mid'));
+    expect(same.status).toBe(1);
+    expect(same.rung(2)?.status).toBe('violation');
+  });
+
+  it('(viii) a reviewer dispatch is no builder dispatch', async () => {
+    const reviewer: Step = { dispatch: 'reviewer', tier: 'mid' };
+    const r = await check([
+      blocked('judges-outstanding'),
+      reviewer,
+      blocked('judges-outstanding'),
+      reviewer,
+      { pass: true },
+    ]);
+    expect(r.status).toBe(1);
+    expect(r.rung(2)?.status).toBe('unverifiable');
+  });
+});
+
+describe('f-bs-gate-bounce/integration-b3e3083c: the coverage cases, through the built CLI', () => {
+  let dir = '';
+  let planPath = '';
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'bs-r3-coverage-'));
+    planPath = path.join(dir, 'plan.json');
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        epic_id: 'epic-9',
+        version: 1,
+        status: 'active',
+        tasks: [{ task_id: 'epic-9/task-9', claims: ['src/claimed.ts'] }],
+        edges: [],
+      }),
+    );
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const metric = { total: 10, covered: 9, skipped: 0, pct: 90 };
+  const entry = { lines: metric, statements: metric, functions: metric, branches: metric };
+  const run = (summary: Record<string, unknown> | null) => {
+    const worktree = mkdtempSync(path.join(dir, 'wt-'));
+    if (summary !== null) {
+      mkdirSync(path.join(worktree, 'coverage'), { recursive: true });
+      writeFileSync(
+        path.join(worktree, 'coverage', 'coverage-summary.json'),
+        JSON.stringify(summary),
+      );
+    }
+    const out = runCli([
+      'coverage',
+      'check',
+      worktree,
+      '--plan',
+      planPath,
+      '--task',
+      'epic-9/task-9',
+    ]);
+    return { status: out.status, doc: JSON.parse(out.stdout) };
+  };
+
+  it('reads present false when no summary was written', () => {
+    const r = run(null);
+    expect(r.status).toBe(1);
+    expect(r.doc.present).toBe(false);
+  });
+
+  it('reads present true with an unmeasured subject when a file beside the claimed one has a row', () => {
+    const r = run({ total: entry, 'src/other.ts': entry });
+    expect(r.status).toBe(1);
+    expect(r.doc.present).toBe(true);
+    expect(r.doc.subjects).toContainEqual(
+      expect.objectContaining({ path: 'src/claimed.ts', status: 'unmeasured' }),
+    );
+  });
+});
+
+describe('f-bs-gate-bounce/integration-5c096bd9, -9c1bb4d6: waivers.md and section 3d route a follow-up through compose', () => {
+  const waivers = flatten(read('.claude/skills/bs/waivers.md'));
+  const step4 = waivers.slice(
+    waivers.indexOf('Dispatch it like any task'),
+    waivers.indexOf('At its gate, run'),
+  );
+  const worktreesDoc = flatten(read('docs/guide/operator-guide/worktrees-and-judges.md'));
+
+  it('waivers.md step 4 composes the brief and leaves only the criteria and the budget by hand', () => {
+    expect(step4).toContain(
+      "compose each follow-up brief with `bs brief compose` as wave.md step 8 does, passing the follow-up's id as `--task`",
+    );
+    expect(step4).toContain(
+      'compose reads the follow-up from its `task-added` record, the register `wave next` reads',
+    );
+    expect(step4).toMatch(/its `scope` section, the read `bs findings list --task <id>` makes/);
+    expect(step4).toMatch(
+      /the open findings of other tasks on its claims, the lessons for its claims, its filled hand-back preflight line and the gate check commands/,
+    );
+    expect(step4).toMatch(
+      /the gaps still filled by hand are the acceptance criteria[^;]*`bs dispatch lint` run on it, which must exit 0\) and the budget/,
+    );
+    expect(step4).toMatch(
+      /a coder, tester or grader follow-up brief is never hand-built, and `bs dispatch lint` refuses one without the preflight line and the gate checks/,
+    );
+    expect(step4).toContain('independent dispatches go in one message');
+    expect(step4).toContain('`coverage check`');
+    expect(waivers).toMatch(/run `gate run` \*\*without\*\* `--plan`/);
+  });
+
+  it('waivers.md no longer tells the epic session to splice lessons or the findings block by hand', () => {
+    expect(waivers).not.toContain('lessons for-dispatch <role>');
+    expect(waivers).not.toContain('replace the findings block');
+    expect(waivers).not.toContain('--case-type bugfix');
+  });
+
+  it('worktrees-and-judges.md section 3d names the follow-up route', () => {
+    expect(worktreesDoc).toContain(
+      "a task that neither the plan nor the log's follow-up register holds (`brief.task-not-in-plan`)",
+    );
+    expect(worktreesDoc).toContain(
+      'composes a follow-up from its `task-added` record, with its own findings as scope',
+    );
+  });
+
+  it('usage.ts says --task may name a follow-up the log added', () => {
+    const spec = COMMANDS.find((c) => c.command === 'brief compose');
+    expect(spec?.summary).toMatch(/--task may name a follow-up the log added/);
+  });
+});
+
+describe('f-bs-gate-bounce/integration-5c096bd9: the CHANGELOG entry', () => {
+  it('says what task-9 does', () => {
+    const log = flatten(read('CHANGELOG.md'));
+    const entry = log.slice(log.indexOf('task-9-close-review-r3-fixes'));
+    expect(entry).toMatch(
+      /every blocked gate reason \(each `coverage-evidence` case\) has one answerer/,
+    );
+    expect(entry).toMatch(
+      /a block no builder answers is never bounced, and from its second failed round waits for the operator's answer before a higher-tier builder dispatch or any re-gate/,
+    );
+    expect(entry).toMatch(
+      /`bs brief compose` composes a follow-up's brief from the log, its own findings as scope and its preflight line and gate checks included/,
+    );
+    expect(entry).toMatch(/the documented compose commands run as printed/);
   });
 });
 

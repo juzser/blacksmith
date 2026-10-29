@@ -48,7 +48,7 @@ export interface DispatchFindings {
  * A finding summary is reviewer free text, which makes it exactly as
  * untrusted as a compiled lesson statement.
  */
-function flatten(raw: string): string {
+export function flatten(raw: string): string {
   return raw.replace(/\s+/g, ' ').replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;').trim();
 }
 

@@ -379,6 +379,8 @@ command builds the whole brief, and the playbooks call it for every dispatch:
 bs brief compose --role coder --session <session-id> \
   --task epic-1/task-1 --plan factory/specs/active/epic-1/plan-v1.json \
   --worktree /abs/path/.wt/my-project/task-1 --branch bs/epic-1/task-1 \
+  --provider claude --model-tier mid --base bs/epic-1/integration \
+  --checks /abs/path/checks.json --work-root /abs/path/work-root \
   --out state/results/task-1.coder-brief.md
 ```
 
@@ -418,10 +420,9 @@ each check's command verbatim, a check the gate treats as heavy marked
 `(heavy)`.
 
 It refuses rather than guesses: a worktree role with no `--worktree`
-(`brief.worktree-required`), a task the plan does not hold
-(`brief.task-not-in-plan`), a judge with no `--artifact`
+(`brief.worktree-required`), a task that neither the plan nor the log's follow-up register holds (`brief.task-not-in-plan`), a judge with no `--artifact`
 (`brief.artifact-required`), and a `--turns` that differs from the template
-(`brief.turns-mismatch`) each fail by name. A coder, tester or grader brief
+(`brief.turns-mismatch`) each fail by name. A follow-up (`<epic>/followup-<fp8>`, minted by `bs findings raise` and recorded only as a `task-added` event) is in no plan, so compose composes a follow-up from its `task-added` record, with its own findings as scope: a `scope` section between `<!-- BEGIN FOLLOW-UP SCOPE -->` and `<!-- END FOLLOW-UP SCOPE -->` holds its open findings, one line of JSON each, and the manifest lists their ids as `scope_finding_ids`. A follow-up with no open finding, or with claims that are not a list of non-empty strings, is refused as `brief.invalid-value`. A coder, tester or grader brief
 without those values fails as `brief.preflight-values-required`, a value it
 cannot write (a provider outside the taxonomy, a relative `--work-root`, a
 control character, a `<...>` token, a check with no runnable `cmd`) as

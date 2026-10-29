@@ -103,6 +103,18 @@ before hand-off. One entry per task.
   `state/results/<task-id>.tester.json`, and `wave.md` and `queue-and-gate.md`
   bound a branch-4 return at one per task with one shared sentence.
 
+- **The closing review's third round** (`task-9-close-review-r3-fixes`). Now every
+  blocked gate reason (each `coverage-evidence` case) has one answerer, listed
+  in `wave.md` step 9 and matched row for row in `queue-and-gate.md`: a builder
+  (the uiux pass is one), a judge turn, the wave-runner's own fix or the epic
+  session; a block no builder answers is never bounced, and from its second
+  failed round waits for the operator's answer before a higher-tier builder
+  dispatch or any re-gate, the env-failure block included; `bs brief compose`
+  composes a follow-up's brief from the log, its own findings as scope and its
+  preflight line and gate checks included, and `waivers.md` routes every
+  follow-up through it; the documented compose commands carry the worker flags,
+  and a test runs them, so the documented compose commands run as printed.
+
 ### Changed
 
 - **The CLI tests run as ten files, and CI runs e2e in two shards.**

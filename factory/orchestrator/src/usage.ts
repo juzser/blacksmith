@@ -834,7 +834,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags:
       '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--provider <name>] [--model-tier <tier>] [--base <ref>] [--checks <file>] [--work-root <dir>] [--out <file>] [--state-dir <dir>]',
     summary:
-      'Compose one dispatch brief; a coder, tester or grader brief carries its filled preflight line; --out writes it plus <out>.manifest.json.',
+      'Compose one dispatch brief; --task may name a follow-up the log added. A coder, tester or grader brief carries its filled preflight line; --out writes it plus <out>.manifest.json.',
   },
   {
     command: 'playbook slice',
