@@ -41,6 +41,21 @@ To add one:
    - the set of `.claude/agents/bs-*.md` basenames, prefix stripped, equals `taxonomy.yml`'s
      `agent` dimension exactly (Section "Agent templates: frontmatter" in
      `scripts/check.sh`).
+5. **If the role runs a suite, carry the heavy-run rule.** A template that
+   holds `Bash` (the planner and the researcher excepted) or says it runs the
+   full suite, a regression gate, `test_unit` or `test_e2e` must carry the
+   `heavy-run` shared region below, so its suite runs take the machine lock;
+   `playbookOptimize.test.ts` fails a template that lacks it, and
+   `templateFragments.test.ts` lists the carriers.
+6. **Decide its prompt cache.** A role that sits idle for minutes between its
+   own calls (it waits on test runs or on agents it dispatched) sets
+   `cacheTtl: 1h` under `experimental:` in its frontmatter, as the
+   wave-runner, coder and tester do, so the default 5-minute cache does not
+   expire and get written again. A short-burst role keeps the default,
+   because a 1h write costs more than it saves there. `pluginManifest.test.ts`
+   holds the list of 1h roles, so adding one is a deliberate edit; the
+   `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` env and the `subagentPromptCacheTtl`
+   setting override the template.
 
 Run `bash scripts/check.sh` before opening a PR — it catches all of the
 above mechanically; don't rely on review to catch a taxonomy/template
@@ -50,9 +65,11 @@ mismatch.
 
 Some paragraphs are the same contract in several templates — the judges'
 read-only rule, the workers' `token_usage` note, the finding-field
-prohibition. Each of those lives once, in `.claude/fragments/<name>.md`, and
-is stamped into every template that carries it between two whole-line
-fences:
+prohibition, and the `heavy-run` rule that eleven suite-running templates
+carry (how to start a full suite or e2e run under `bs heavy run` and wait on
+it with `bs heavy wait`). Each of those lives once, in
+`.claude/fragments/<name>.md`, and is stamped into every template that
+carries it between two whole-line fences:
 
 ```
 <!-- BEGIN SHARED:<name> -->
@@ -345,3 +362,10 @@ page load.
   `test/worktree.test.ts`) — never operate on the real `state/` or
   `workspaces/` trees from a unit test; those are gitignored runtime
   directories, not fixtures.
+- **The heavy lock stays out of the suite.** A test that runs a `test`- or
+  `unit`-named check through the gate takes the heavy lock like a real gate
+  does. `test/setup.ts` points `BS_HEAVY_LOCK_DIR` at a temporary directory
+  per test file and drops any inherited `BS_HEAVY_LOCK_TOKEN`, so the suite
+  never waits on a lock another session's gate holds. A test of the lock
+  itself injects its own directory, `pollMs` and liveness probe rather than
+  sleeping.

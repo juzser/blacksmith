@@ -17,8 +17,8 @@ and hands you exactly one pull request.
 ![TypeScript](https://img.shields.io/badge/TypeScript-1f1f1f)
 
 **[Features](#features) · [Install](#install) · [Using it](#using-it) ·
-[How it works](#how-it-works) · [Safety](#safety) ·
-[Dashboard](#the-dashboard) · [Status](#status) · [Docs](#docs)**
+[How it works](#how-it-works) · [Safety](#safety) · [Status](#status) ·
+[Docs](#docs)**
 
 <pre>
 goal → contracts you sign → one worktree per contract, run in parallel
@@ -61,6 +61,33 @@ pull request**. Everything in between runs unattended.
 ## Features
 
 <table>
+<tr valign="top">
+<td colspan="2">
+
+**More agents at once, fewer tokens per merged task, no check skipped**
+
+Quality comes first, speed second, tokens third. After every merge, each task
+whose dependencies are done and whose paths no task in flight claims is
+admitted at once, rather than when the whole wave drains. Once the tester is
+done, the grader, the reviewer and, when its triggers fire, the security
+reviewer are dispatched together. `bs brief compose` builds every brief.
+Full-suite and e2e runs take one lock per machine (`bs heavy run`), so agents
+running at once queue for them instead of running them all together. In a
+clone, or with the [plugin guard](docs/guide/plugin-guard.md) on, the policy
+hook refuses a brief sent to the wrong agent type and a foreground `sleep` of
+2 s or more, and names the fix. No judge, check, review round or verifier pass
+is dropped to save tokens, and no model is downgraded.
+
+Claude Code is set up for the width. `bs init` raises its caps of 20 subagents
+and 10 parallel tool calls to 1000 each, and sets a 633k compact window, so a
+session on a current 1M-token model compacts at the policy's 60%; `bs doctor`
+warns when the caps are not raised. The wave-runner, the coder and the tester,
+which wait minutes on test runs, keep a 1h prompt cache instead of the default
+five minutes.
+
+</td>
+</tr>
+
 <tr valign="top">
 <td width="50%">
 
@@ -117,9 +144,13 @@ of them gating anything — and is promoted only once you have read the numbers.
 **It learns from its own errors**
 
 Errors are classified against a taxonomy, and a scribe distills them into
-lesson candidates you approve or reject with `/bs lessons`. Approved lessons
-splice into later prompts — and the same-mistake rate tells you whether that
-is actually working. A loop you can audit, not a memory you have to trust.
+lesson candidates you approve or reject with `/bs lessons`. Each approved
+lesson carries one error class. A brief always carries the lessons for the
+agent's role and for the paths it claims; a broader lesson goes in up front
+only once its class has proven to recur (three tasks in 30 days) or has come up
+in this epic, and the rest are named for the agent to read on demand. The
+same-mistake rate tells you whether that is actually working. A loop you can
+audit, not a memory you have to trust.
 
 </td>
 <td>
@@ -129,7 +160,9 @@ is actually working. A loop you can audit, not a memory you have to trust.
 Planning and judgment go to a frontier model; the bulk of the work goes to
 small, fast tiers, many at once. Every session and every live agent is visible
 with the tier that drew it, and cost breaks down per task, per tier and per
-provider.
+provider. `bs stats effectiveness` says what that bought: tokens per task and
+per role, defects that escaped a passing gate, and how often each reviewing
+role's findings held up, with NOT MEASURED where nothing was measured.
 
 </td>
 </tr>
@@ -161,8 +194,9 @@ a chat transcript.
   [extending](docs/guide/extending.md).
 - **One integration branch per epic**, one pull request at the end, merged by
   you.
-- **A local dashboard**, eight pages over the same event log —
-  optional, and [further down](#the-dashboard).
+- **A local, read-only dashboard** over the same event log — optional, in
+  the package and in a clone; [its guide](docs/guide/dashboard.md) walks the
+  pages.
 
 ## Install
 
@@ -217,8 +251,8 @@ directory, which the next `npm i` replaces.
 <details>
 <summary><b>A clone instead — the whole factory</b></summary>
 
-A clone is for hacking on Blacksmith itself, and for the two things an install
-does not carry: the dashboard and this repo's own enforcement.
+A clone is for hacking on Blacksmith itself, and for the one thing an install
+does not carry by default: this repo's own enforcement.
 
 ```bash
 git clone https://github.com/juzser/blacksmith.git && cd blacksmith
@@ -238,15 +272,13 @@ the plugin registers; a clone that wants its prompts recorded keeps the plugin
 enabled and accepts the double listing
 ([INSTALL.md](INSTALL.md#the-install--bs-and-bs)).
 
-The dashboard is clone-only because `ui/` is in neither the tarball nor the
-plugin, so `bs ui serve` answers `ui.not-built` in an install and means it.
-Enforcement is clone-only because this repo's `.claude/settings.json` deny
-rules and its policy hook resolve paths against a checkout; the plugin ships one
-`hooks/hooks.json`, holding only the non-blocking prompt-capture hook, and
-loads neither the deny rules nor the policy guard, since a `/bs` that asked
-you about every Bash command would be worse than one that asks about none. The
-rest of that port is scoped in
-[`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
+Enforcement stays with the clone because this repo's `.claude/settings.json`
+deny rules and its guard hook resolve paths against a checkout. The plugin's
+`hooks/hooks.json` holds the non-blocking prompt-capture hook and the
+[plugin guard](docs/guide/plugin-guard.md), which does nothing until you set
+`BS_PLUGIN_GUARD=1` and then runs the package's `bs-policy-hook` in front of
+your tool calls for the same policy decisions. The rest of that port is scoped
+in [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
 `INSTALL.md` Part 2 is the long form of the clone above: per-platform
 setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2), the stack interview,
@@ -359,33 +391,47 @@ commands and real output.
 You describe a goal. A planner on a frontier model turns it into spec contracts
 and a spec-reviewer hunts holes in them *before* you sign; signing freezes plan
 v1. From there the loop admits a wave whose path claims do not overlap, sends
-researcher and UI/UX work ahead of code where the epic needs it, runs a coder
-and a tester in a worktree, grades the result against its own acceptance
-criteria, then puts it through the gates and a serial merge queue into
-`bs/<epic>/integration`. One epic, one integration PR, merged by you.
+researcher and UI/UX work ahead of code where the epic needs it, and runs a
+coder and a tester in each task's worktree. Then the grader, which holds the
+result to its own acceptance criteria, the reviewer and, when triggered, the
+security reviewer go out together; the gates run, and a serial merge queue
+lands the task on `bs/<epic>/integration`. Each merge frees paths, and
+`/bs run` admits the next task that fits right away instead of waiting for the
+wave to drain. At the close, `bs cleanup` removes the task worktrees and
+branches that are merged and have been idle for 24 hours, and keeps anything
+it is unsure of. One epic, one integration PR, merged by you.
 
 → The pipeline diagram and the reasoning behind each stage:
 **[architecture §3 — The loop](docs/specs/black-smith-architecture.md#3-the-loop)**.
 
 ## Safety
 
-Enforced mechanically — a `PreToolUse` policy layer on every command an agent
-runs, plus branch protection — not by trust. Full rules:
+In a clone, and in a plugin install with the
+[plugin guard](docs/guide/plugin-guard.md) turned on, these rules are enforced
+mechanically — a `PreToolUse` policy layer on every command an agent runs,
+plus branch protection — not by trust. A default plugin install has that
+layer off: there, branch protection and the rules the playbooks give the
+agents are what hold. Full rules:
 **[`docs/standards/guardrails.md`](docs/standards/guardrails.md)**.
 
 - **Secrets are environment-only.** `.env.example` is the only committed env
-  file (variable names, never a secret's value), and the event logger redacts
-  credential-shaped strings before write.
+  file (variable names, never a secret's value). Agents are told never to echo
+  a credential, and in this repo a gitleaks scan in the CI gate blocks a merge
+  that carries one. The event logger writes values as given; masking happens
+  only at the few points that handle a known credential shape, such as URL
+  userinfo in git errors.
 - **Only you merge to `main`.** No agent may push or merge to a protected
-  branch, and force-push is refused on every branch, protected or not — an
-  agent's pushed branch is append-only. Task branches reach the integration
-  branch solely through the serial merge queue.
+  branch, and force-push is refused by that layer on every branch, protected
+  or not — an agent's pushed branch is append-only. Task branches reach the
+  integration branch solely through the serial merge queue.
 - **No autonomous deploy or outbound sends.** Deploys, publishes and message
   sends each need per-invocation approval.
 - **Budgets are declared per role and sized per effort tier.** A medium epic
   gets 16M tokens with an alarm at 70%, and a coder task 220K tokens and 700
   diff lines; a small epic gets half the task numbers and 4M, a huge one
-  double and 32M. Fan-out is bounded by the
+  double and 32M. Every role that is dispatched has a price, the wave-runner,
+  the merger and the scribe included, so `bs budget alarm` and `bs wave check`
+  count all of them. Fan-out is bounded by the
   claim graph, and `max_in_flight_tasks` is available on top of it, off by
   default. Which of these *block* versus *report* is spelled out in
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml) — the task cap
@@ -393,45 +439,6 @@ runs, plus branch protection — not by trust. Full rules:
 
 Found a vulnerability? [`SECURITY.md`](SECURITY.md) — report privately, not in
 a public issue.
-
-## The dashboard
-
-Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eight
-pages to `127.0.0.1`. They are a projection of the event log — `bs db rebuild`
-reconstructs them from it, and `bs stats` prints the same facts in a terminal.
-The dashboard only reads: you watch the factory there, and nothing you click
-writes an event or dispatches an agent. Its server answers `405` to anything
-but a read. Decisions go through the CLI: waivers with `/bs waivers`, lesson
-candidates with `/bs lessons`. It also reads
-the local Claude Code session registry, transcripts and prompt history (read-only;
-`--claude-config-dir`, then `$CLAUDE_CONFIG_DIR`, then Claude Code's default),
-served as `GET /api/cli-sessions` to loopback requests only. The factory runs
-without ever opening the dashboard.
-
-<table>
-<tr valign="top">
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a strip of four facts, Active sessions, Agents running, Budget used and Tasks done, reading 0, 0, 0 tokens and None, then a Live sessions panel reading No live Blacksmith sessions and a Recent activity list of system, finding and error events" /><br /><sub><b>Home</b> — what is running and what it costs.</sub></td>
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/activity-desktop-dark.png" width="100%" alt="Activity page: the event log with project and session selectors and kind chips from Prompt to System, showing a coordination.deadlock error at S1-stop-the-line, a judge verdict, a lesson candidate and a cross-provider judge dispatch, grouped by session" /><br /><sub><b>Activity</b> — the append-only log itself, filtered by kind.</sub></td>
-</tr>
-<tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/work-kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns over 11 tasks; cards carry role chips such as Builder - reviewing, type tags, severity chips such as S2-major, and a Waits for line naming the blocking task" /><br /><sub><b>Kanban</b> — what is moving, and what is stuck and why.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/work-roadmap-epic-desktop-dark.png" width="100%" alt="Roadmap page: a timeline of the demo-hub phase Phase 6b - Remaining pages with bars for epic-9, epic-10 and epic-11, and the epic-9 card at 2 of 4 tasks done, waves 1 and 2 done, wave 3 running Task 3 and wave 4 upcoming" /><br /><sub><b>Roadmap</b> — milestones as epics, and an epic as its waves.</sub></td>
-</tr>
-<tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for Task 3 of epic-9, in progress: the request text, the files the task may change, a Details card with plan version, status and case, and an Agents card listing each agent's tier, provider and outcome" /><br /><sub><b>Task detail</b> — the contract, and every agent that worked on it.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/sessions-desktop-dark.png" width="100%" alt="Sessions page: one active session, Fix the login retry loop, with two quiet sessions behind Show all, and the selected session's Builder runs marked Working, No result after 4h, Done, Failed and Stopped" /><br /><sub><b>Sessions</b> — which agents each session ran, and how each run ended.</sub></td>
-</tr>
-<tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Cost and quality page: tokens per day and in total by role, a table of tokens by role and model tier, cards for tokens per task, repeated mistakes after a lesson, fixes that held on recheck and second-opinion reviewers, and cost per task by provider" /><br /><sub><b>Cost &amp; quality</b> — tokens by role, tier and provider, and whether lessons stop repeats.</sub></td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-cards-desktop-dark.png" width="100%" alt="Lessons page with Pending review, Approved, Closed and All tabs over three lesson cards, each with a scope chip, the session it was learned from, and how many repeats it has prevented" /><br /><sub><b>Lessons</b> — what the factory learned, and what each lesson prevented.</sub></td>
-</tr>
-</table>
-
-Dark and light, desktop and mobile; errors grouped by taxonomy class under
-Activity, roadmap progress joined to real task counts, and per-project scoping.
-
-→ **[The dashboard](docs/guide/dashboard.md)** — what each of the eight pages
-shows you. It is part of the clone, not of the package or the plugin.
 
 ## Status
 
@@ -442,16 +449,18 @@ runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
-The CLI is on npm as `@juzser/blacksmith`, at `0.5.1`. Two binaries are
+The CLI is on npm as `@juzser/blacksmith`, at `0.6.0`. Two binaries are
 the ones you run: `bs`, and `bs-run` (since `0.2.0`), which runs a rendered
 turn on a `cli` harness such as Codex. `bs-prompt-hook` is the lean hook
-entry that records operator prompts. `smith` and `smith-run` remain as
+entry that records operator prompts, and `bs-policy-hook` the policy hook the
+opt-in plugin guard runs. `smith` and `smith-run` remain as
 deprecated aliases. `0.1.1` was the first version that ran beside
 you and knew it was a package, rather than out of the clone-shaped install
 `0.1.0` was. The package is the `bs` binaries and what they read: policies,
-schemas, migrations, scaffold templates and the agent role contracts. The
-plugin is `/bs`, the `bs-<role>` agents and the prompt-capture hook. A clone
-adds the dashboard, the docs, the test suite and this repo's own enforcement;
+schemas, migrations, scaffold templates and the agent role contracts, plus the
+built dashboard. The plugin is `/bs`, the `bs-<role>` agents, the
+prompt-capture hook and the plugin guard, off until you turn it on. A clone
+adds the docs, the test suite and this repo's own enforcement;
 [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) is the
 record of how the port was scoped and what has shipped.
 
@@ -470,6 +479,7 @@ version in
 | Doc | For |
 |---|---|
 | [`INSTALL.md`](INSTALL.md) | Getting it running, per platform |
+| [`docs/guide/quickstart.md`](docs/guide/quickstart.md) | From install to a first epic |
 | [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) | The six steps you actually do |
 | [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) | Every command, end to end, with output |
 | [`docs/guide/status.md`](docs/guide/status.md) | What is real today |
@@ -477,10 +487,13 @@ version in
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | Why it is shaped this way |
 | [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) | What `/bs audit` promises an audited project, and why |
 | [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | How `/bs` runs without a clone, and what the plugin leaves behind |
-| [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
+| [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The optional read-only dashboard, page by page |
+| [`docs/guide/plugin-guard.md`](docs/guide/plugin-guard.md) | The policy guard a plugin install can turn on |
 | [`docs/guide/mods.md`](docs/guide/mods.md) | The optional bs-mod HUD and pr-mod |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `bs daemon` unattended |
+| [`docs/trial/methodology.md`](docs/trial/methodology.md) | How to compare plain Claude Code with Blacksmith, and what one run can show |
+| [`docs/claims-matrix.md`](docs/claims-matrix.md) | What backs each claim this page makes |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
 
 Agents read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) instead — this
@@ -492,6 +505,11 @@ repo is self-governing, and the rules it runs under live there.
 gate is `bash scripts/check.sh` and it is the same script CI runs, so red
 locally is red there; and several artifacts here are *generated* — see
 [extending](docs/guide/extending.md) for which files you may hand-edit.
+
+A pull request merges into `main` only when both CI checks are green, the gate
+and the e2e job: a GitHub ruleset on the default branch requires them, with
+no bypass. A maintainer can set a pull request to auto-merge
+(`gh pr merge --auto`), and it lands once both checks pass.
 
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) ·
 [`SECURITY.md`](SECURITY.md) ·

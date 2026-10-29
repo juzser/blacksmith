@@ -13,6 +13,27 @@ transcripts and prompt history — from `--claude-config-dir`, else `$CLAUDE_CON
 Claude Code's default — and serves them as `GET /api/cli-sessions`, to
 loopback requests only.
 
+## Opening it
+
+```bash
+bs ui serve                          # http://127.0.0.1:4680
+```
+
+The npm package ships the dashboard already built (`ui/dist` and
+`ui/server/dist`), so after `npm i -g @juzser/blacksmith` that one line is all
+it takes; if `bs ui serve` says the server is not built there, the install is
+incomplete and reinstalling the package is the fix. A clone builds it first:
+
+```bash
+pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
+```
+
+From a Claude Code session, `/bs ui` does the same and prints the URL. The
+plugin does not carry the dashboard; the package does.
+
+It binds to `127.0.0.1` and ships no auth, because it is a local tool showing
+you your own event log. Do not put it on a public interface.
+
 ## Other projects' stores
 
 The pages also show every project that has a live Claude Code CLI session,
@@ -54,16 +75,6 @@ is a 404, never the served store. The task page keeps the store in its URL
 waivers resolve in the served store only, so a foreign task shows their empty
 state.
 
-```bash
-pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
-bs ui serve                          # http://127.0.0.1:4680
-```
-
-From a Claude Code session, `/bs ui` does the same and prints the URL.
-
-It binds to `127.0.0.1` and ships no auth, because it is a local tool showing
-you your own event log. Do not put it on a public interface.
-
 ## Live sessions
 
 Home lists one card per live, in-scope Claude Code CLI session, from
@@ -98,7 +109,9 @@ only read, never written (a `?session` query still reads the served home alone).
 <td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) —
 what is running and what it costs. Four facts open the page: how many
 sessions are live on a running epic, how many agents are running, the tokens
-those sessions used (cache reads left out), and the plan tasks done out of all. A word such as
+those sessions used (cache reads left out, the definition
+<code>bs stats effectiveness</code> uses too), and the plan tasks done out of
+all. A word such as
 "None" or "Not measured" reads quiet, a figure bold. Live sessions come next,
 each with its <b>Now</b> and <b>Next</b> lines (a session stopped on you reads
 "Waiting on you"); under them, recent activity, what is running per project,
@@ -110,7 +123,9 @@ from <a href="../../factory/specs/roadmap.md"><code>factory/specs/roadmap.md</co
 and joined with real task counts. Open an epic and it shows as its waves:
 which are done, which is running and on what task, which are still to come.
 A wave is only admitted once its tasks' path claims are pairwise disjoint,
-which is what lets everything in it run at the same time.</td>
+which is what lets everything in it run at the same time. Under rolling
+admission the next wave, drawn from tasks whose claims touch nothing still
+running, can start before the last one has finished.</td>
 </tr>
 <tr>
 <td><img src="../../ui/e2e/__screenshots__/phase-6b/work-kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns over 11 tasks; cards carry role chips such as Builder - reviewing, type tags, severity chips such as S2-major, and a Waits for line naming the blocking task" /></td>

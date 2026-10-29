@@ -26,7 +26,7 @@ is your console:
 | `/bs ui` | Serve the local dashboard |
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |
 | `/bs lessons` | Review pending lesson candidates |
-| `/bs report` | Render or send the scribe's progress digest |
+| `/bs report` | Render or send the scribe's progress digest, and on request a redacted export you can share |
 
 One thing to know up front: those playbooks are dispatch instructions for
 your orchestrator session, **not a background daemon**. Nothing advances
@@ -146,11 +146,24 @@ finding, no amendment.
 ## 3. Let it run — `/bs run <epic>`
 
 You are out of the per-step loop from here (keep the session open, though —
-the daemon watches, it does not dispatch). The scheduler admits a **wave**: tasks whose path claims
-are disjoint and whose dependencies are satisfied. Each gets its own worktree
-and runs coder → tester → grader → the gate pipeline (schema check, cumulative
-tests, coverage evidence, reviewer, verifier). Whatever passes joins the
-serial merge queue into `bs/<epic>/integration`.
+the daemon watches, it does not dispatch). The session admits a **wave**:
+tasks whose path claims are disjoint and whose dependencies are satisfied.
+Each gets its own worktree and runs coder → tester → the judges (the grader,
+the reviewer and, when its triggers fire, the security-reviewer, sent
+together) → the gate pipeline (schema check, grader verdict, tests, coverage
+evidence, findings, with the verifier re-checking the severe ones). Whatever
+passes joins the serial merge queue into `bs/<epic>/integration`.
+
+Waves overlap. After every merge the session asks `bs wave next` again and
+starts whatever is ready right away, so a task whose dependency just landed
+does not wait for the rest of its wave (rolling admission). Every brief is
+built by one command, `bs brief compose`, and splices a broad lesson only
+while its error class keeps recurring. Full-suite and e2e runs take turns on
+one lock per machine (`bs heavy run`), so two epics on one laptop queue
+rather than collide. No judge, check, round or verifier pass is skipped to
+make any of this cheaper. When the epic closes, `bs cleanup` retires its
+merged, idle worktrees and branches; the integration branch stays until you
+merge its PR.
 
 A wide wave may run in a session of its own, or be handed to a `wave-runner`
 agent, so the epic's own window lasts to the end of the epic. You do not have
@@ -203,7 +216,11 @@ reject them with `/bs lessons` (`bs lessons approve|reject`; an edit rides on
 the approval) — the dashboard's Lessons page shows them but decides nothing —
 then `bs lessons compile` writes the approved ones into
 [`factory/policies/lessons.md`](../../factory/policies/lessons.md), from where
-they are injected into the matching agent's next dispatch.
+they are injected into the matching agent's next dispatch. Each lesson names
+the error class it guards against; a broad lesson is spliced while that class
+keeps recurring, or once it shows up in the epic at hand, and is otherwise
+named in one line the agent can read on demand
+([operator-guide §10](operator-guide/lessons-and-daemon.md#10-how-lessons-get-approved)).
 
 That is the loop that closes: a mistake made once becomes a constraint the
 next worker is handed. Whether it is working is a number —
@@ -249,6 +266,7 @@ The [dashboard](dashboard.md) shows the bound project on the session's card.
 | The same loop with real commands and real output | [`operator-guide.md`](operator-guide.md) |
 | Every `bs` command | `bs --help`, or [`operator-guide.md`](operator-guide.md) |
 | What the dashboard shows | [`dashboard.md`](dashboard.md) |
+| What an epic cost and what its reviews caught | `bs stats effectiveness`, or [operator-guide §9b](operator-guide/severity-and-budget.md#9b-bs-stats-effectiveness--what-the-factory-spent-and-what-it-caught) |
 | What is actually built vs. planned | [`status.md`](status.md) |
 | What an audit promises the project it reads | [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md) |
 | Why the factory is shaped this way | [`../specs/black-smith-architecture.md`](../specs/black-smith-architecture.md) |

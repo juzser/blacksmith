@@ -30,7 +30,10 @@ bs doctor
 
 It reports what is present and what is missing, with a reason for each gap.
 Fix what it names before going on; [`INSTALL.md`](../../INSTALL.md) says how
-for each platform.
+for each platform. Its `concurrency-caps` line reads `unknown` until Claude
+Code's two concurrency caps are raised, which they are not before step 3
+unless you set them yourself: that is a warning, not a failure, and `bs init`
+below is what raises them.
 
 ## 3. Initialise a project
 
@@ -50,6 +53,11 @@ it wrote earlier; when no recommended window can be read, no window is written.
 A settings file that is not a JSON object is left alone (and then no record is
 written), and the exclude line is skipped outside a git repository and for a
 file git already ignores or tracks.
+
+Those settings are the two concurrency caps, so a wave can run many agents at
+once, and the auto-compact window. Restart every running Claude Code session
+afterwards: a running session and its subagents keep the settings they
+started with.
 
 ## 4. Your first epic
 

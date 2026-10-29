@@ -26,7 +26,9 @@ bs security triggers --task factory/specs/active/epic-1/task-1.json
 
 **Exit code is 0 either way** when the command can answer — a fired trigger is a
 dispatch instruction, not a violation, unlike `claims check` and `wave check`.
-Read `dispatchSecurityReviewer`; dispatch the reviewer iff it is true. Each
+Read `dispatchSecurityReviewer`; dispatch the security-reviewer iff it is
+true, in the same message as the grader and the reviewer once the tester has
+returned (wave.md step 6, §3c). Each
 trigger names its own evidence: the claim and the glob that fired it, so a
 surprising result is arguable against the policy file rather than against a
 boolean.
@@ -352,6 +354,14 @@ in one file would silently disarm a check in another.
 `bs session start <wave-id> --continues <dispatch-event-id>` writes. A
 grantee that dispatched from inside the dispatcher's session, or dispatched a
 role outside its grant, is a `violation`.
+
+A resumed grantee is not a new delegation. A dispatch whose payload carries
+`continuation_of` is answered by the session it opened, else by the session
+its original dispatch opened, following the chain through every same-role,
+same-task link to the dispatch that names no further original. So a
+wave-runner resumed after it capped reads `ok` when the original opened its
+log, and otherwise takes the original's status, `unverifiable` or
+`violation`. A dispatch with no `continuation_of` is judged exactly as above.
 
 | Status | Meaning | Counts as failure |
 |---|---|---|

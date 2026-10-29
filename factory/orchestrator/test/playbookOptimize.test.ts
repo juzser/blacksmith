@@ -60,7 +60,7 @@ describe('criterion 12: dispatch.md', () => {
     expect(doc).toContain('`bs brief compose`');
     expect(doc).toMatch(/typed `bs-\*` agents only/i);
     expect(doc).toMatch(/recur/i);
-    expect(doc).toContain('bs lessons for-dispatch --class');
+    expect(doc).toContain('bs lessons for-dispatch <role> --class');
   });
 
   it('keeps the Return discipline heading byte-identical (compose slices it)', () => {

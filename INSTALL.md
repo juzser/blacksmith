@@ -72,7 +72,7 @@ last two are for the optional mods only:
 
 | Requirement | Why |
 |---|---|
-| **Node ≥ 22** | `engines` in `package.json`; ESM + `node:` builtins throughout |
+| **Node ≥ 22** | `engines` in `package.json`; ESM + `node:` builtins throughout. A clone's `.nvmrc` names `22.23.4`, Node's October 2026 security release, which CI runs too |
 | **Claude Code CLI** | `/bs` is a Claude Code skill, and every worker it dispatches is a Claude Code session |
 | **git ≥ 2.38** | `worktree add` / `remove` / `list --porcelain` *is* the isolation mechanism, once you run an epic; the merge queue needs `merge-tree --write-tree` (2.38) |
 | A Claude Code build that loads plugin modules *(optional)* | bs-mod and pr-mod are plugin modules; [The mods](#the-mods-optional) says which build bs-mod was tested on |
@@ -94,7 +94,7 @@ last two are for the optional mods only:
 <summary><b>No C/C++ toolchain, and no <code>pnpm-workspace.yaml</code></b></summary>
 
 **No C/C++ toolchain is required.** The one native dependency,
-`better-sqlite3` (13.0.2), declares no `install`/`postinstall` script at all:
+`better-sqlite3` (13.0.3), declares no `install`/`postinstall` script at all:
 it ships prebuilt binaries for `darwin-{arm64,x64}`, `linux-{arm64,x64}`,
 `linuxmusl-{arm64,x64}` and `win32-{arm64,x64}` and picks one at `require`
 time (verified in `node_modules/better-sqlite3/prebuilds/` after a clean
@@ -119,10 +119,10 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | | **The install — package + plugin** | **A clone** |
 |---|---|---|
 | Command | the block at the top of this file | Part 2 below |
-| You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
+| You get | the `bs` CLI, `/bs` and the dashboard (`bs ui serve`), in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
-| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith`, re-run `bs init` in each project, and restart every running Claude Code session once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code (every running session); a mod loaded with `--plugin-dir` is the checkout's copy |
-| Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
+| Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith` and `claude plugin update blacksmith`, re-run `bs init` in each project, and restart every running Claude Code session once; an installed mod moves only when its manifest `version` changes, at a release, so then also run `claude plugin update bs-mod@blacksmith` (or `pr-mod@blacksmith`) before that restart | `git pull`, build, run `bs init` once in the clone, restart Claude Code (every running session); a mod loaded with `--plugin-dir` is the checkout's copy |
+| Not included | `scripts/check.sh`, the repo's own suite, the docs | — |
 
 Take the install unless you are hacking on Blacksmith itself.
 
@@ -130,8 +130,8 @@ Take the install unless you are hacking on Blacksmith itself.
 
 Two halves, and you need both. The package is the deterministic `bs` CLI
 every playbook calls. The plugin is `/bs` and the fourteen agent roles it
-dispatches — a router and ten playbooks under `.claude/skills/bs/` that a
-session reads and follows. `bs` alone never gives you `/bs`: Claude Code
+dispatches — a router and a playbook per verb under `.claude/skills/bs/` that
+a session reads and follows. `bs` alone never gives you `/bs`: Claude Code
 loads skills from a project's `.claude/`, from `~/.claude/`, or from a plugin,
 never from `node_modules`, which is where an install puts the tarball's copy.
 And a `/bs` with no `bs` on PATH can run nothing.
@@ -140,7 +140,7 @@ The command used to be `smith`. `smith` and `smith-run` still work as
 deprecated aliases of `bs` and `bs-run`, each printing one notice to stderr,
 and will be removed in a future release.
 
-**Take `latest`** — `0.5.1`. `0.1.1` was the first release that knew it is a
+**Take `latest`** — `0.6.0`. `0.1.1` was the first release that knew it is a
 package.
 `0.1.0` has no `bs init`, ships no roadmap for `bs new` to read, and
 keeps state inside its own install directory, which the next `npm install`
@@ -192,6 +192,14 @@ updates those keys only while they still equal the record, and removes its own
 keys when you set yours. Commit `.blacksmith/factory/` if your team shares the
 project: the roadmap and the stack answers are declarations about the project,
 not about your laptop.
+
+Two things live outside `.blacksmith/` once an epic runs. Task worktrees go in
+a `.wt/<project>/` folder beside the project; `/bs run` ends each epic with
+`bs cleanup`, which removes the merged, idle ones and their branches (without
+`--apply` it only reports). Full-suite and e2e runs take one lock per machine,
+`~/.blacksmith/locks/heavy.lock` (`BS_HEAVY_LOCK_DIR` moves it, `BS_HOME` does
+not), so the runs of every session queue for it; `bs heavy status` names the
+holder, or prints `{}` when it is free.
 
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
 against `.blacksmith/factory/policies/stack.yml`. It is the one step of Part 2
@@ -397,15 +405,22 @@ the version you installed:
 claude plugin marketplace update blacksmith
 ```
 
-What the plugin deliberately does **not** activate is this repo's enforcement:
-the twelve `permissions.deny` rules in `.claude/settings.json` and the policy
-hook in `.claude/hooks/`. A plugin's component set — skills, agents,
-commands, hooks, MCP and LSP servers — has no permissions in it, and it loads
-hooks only from a `hooks/hooks.json`, and this plugin ships one non-blocking
-recorder: one script, registered for two events (`UserPromptSubmit` and
-`PostToolUse`), which is the intended result, not an omission. The recorder
-(`prompt-capture.sh`) writes each prompt and each option answer to the event
-log, never blocks, and exits silently when it finds no entry. It runs only an
+What the plugin deliberately does **not** activate by default is this repo's
+enforcement: the twelve `permissions.deny` rules in `.claude/settings.json`
+and the guard hook in `.claude/hooks/`. A plugin's component set — skills,
+agents, commands, hooks, MCP and LSP servers — has no permissions in it, and
+it loads hooks only from a `hooks/hooks.json`. This plugin's file registers
+two scripts, and only one of them can block:
+
+- **The recorder**, `prompt-capture.sh`, for `UserPromptSubmit` and for
+  `PostToolUse` on `AskUserQuestion`. It only records.
+- **The plugin guard**, `plugin-policy.sh`, for `PreToolUse` on Bash, Write,
+  Edit, MultiEdit, NotebookEdit, Agent and Task. It is off by default: unless
+  `BS_PLUGIN_GUARD=1` is set it exits at once and decides nothing. On, it can
+  deny a call, as [the plugin guard](#the-plugin-guard-opt-in) below says.
+
+The recorder writes each prompt and each option answer to the event log,
+never blocks, and exits silently when it finds no entry. It runs only an
 entry you named, never a file from the project that is open: first the
 absolute path in `$BS_PROMPT_HOOK`, then `bs-prompt-hook` on `PATH`.
 
@@ -424,11 +439,59 @@ absolute path in `$BS_PROMPT_HOOK`, then `bs-prompt-hook` on `PATH`.
   exact line and wait for a yes.
 - **With neither**, the hook records nothing and never blocks.
 
-The guard and the deny rules
+The clone's guard hook and its deny rules
 are not shipped. Both resolve paths against a checkout, and a hook that
 cannot find its policy binary degrades to `ask`: installed as-is it would put a
 confirmation prompt in front of every command you run. A clone keeps them,
 because in a clone the paths are real.
+
+#### The plugin guard (opt-in)
+
+The plugin guard is the install's route to the clone's policy decisions. On,
+it hands each matched call to the policy hook (the file named by
+`BS_POLICY_HOOK`, run with node, else `bs-policy-hook` on `PATH`, which the
+global package installs) and relays its answer. A call that breaks a rule in
+`factory/policies/guardrails.yml` is denied, and so are a brief marked for one
+role and sent to another agent type, and a foreground `sleep` of 2 s or more;
+each reason names the fix. Any other call goes on to Claude Code's normal
+permission flow. When the hook cannot be found, errors, or gives no answer
+within 3 s, the guard asks you instead of allowing the call.
+
+Turning it on is the operator's choice, not a default step. An agent running
+this file may offer it once the package and the plugin are in, and moves on at
+a no. After a yes, check that the hook is reachable and decides. Both commands
+only read; the second hands the hook a sample call and runs nothing:
+
+```bash
+command -v bs-policy-hook    # expect a path; the global package installs it
+echo '{"tool_name":"Bash","tool_input":{"command":"sleep 3"}}' | bs-policy-hook
+```
+
+**Expect:** a path, then this one line, a deny:
+
+```
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: foreground `sleep` of 3 s. Fix: use a background task or the Monitor tool instead of `sleep`."}}
+```
+
+**If** `command -v` printed nothing, the guard would ask for approval on every
+matched call: install the package, or set `BS_POLICY_HOOK` to the built
+`policyHook.js` and pipe the same line into `node "$BS_POLICY_HOOK"` instead.
+
+The switch is read from the environment Claude Code starts in, so the operator
+sets it in the shell that starts the session (an `env` entry in a settings
+file is not a tested way to set it):
+
+```bash
+export BS_PLUGIN_GUARD=1
+claude
+```
+
+The check inside that session is the operator's, because an agent running
+this file cannot start one: there a foreground `sleep 3` in Bash is denied
+with the reason above, and `git status` runs as before. Report the hook check
+above as run, and this one as the operator's to make, not as passed.
+[`docs/guide/plugin-guard.md`](docs/guide/plugin-guard.md) has the switch and
+the deny rules to copy as a second layer.
 
 #### The mods (optional)
 
@@ -508,9 +571,11 @@ clone, with their worktrees beside them. So put the clone somewhere you're
 happy to keep it, in a directory you're happy to see projects appear in.
 In a clone the work root and the package are one directory, which is what
 makes the two installs one codebase, so `bs init` has no files to seed here.
-It still writes the Claude Code settings (the caps and the compact window)
-into the project it runs in: run it once in the clone, and again after a
-`git pull` that changes them, then restart Claude Code.
+It still writes the compact window into the project it runs in (the caps are
+already in the clone's tracked settings, so it adds none there): run it once
+in the clone, and again after a `git pull` that changes
+`context_window.auto_compact_ratio` in `factory/policies/budgets.yml`, then
+restart Claude Code.
 
 ---
 
@@ -658,9 +723,10 @@ Biome, `tsc --noEmit`, the Vitest suite, the server/UI typechecks, the UI
 build, and the design-system gates (hardcoded values, emoji, contrast, token
 resolution).
 
-A green run today is **2,122 tests across 71 files** in the orchestrator
-suite, plus **32** server and **331** UI tests — and, in a separate Playwright
-job, **130** e2e tests across 11 specs.
+A green run passes all three Vitest suites, the orchestrator's
+(`factory/orchestrator/test/`), the server's and the UI's, each with its
+coverage floor, and the Playwright e2e specs when Chromium is found (see
+[Known gaps](#known-platform-gaps)); CI runs e2e in a job of its own.
 
 *Read the tail, not the exit code.* Every step degrades to a printed `SKIP`
 rather than a false `OK` when its tool is missing. `SKIP` lines for the
@@ -774,10 +840,10 @@ one writes outside the clone, so an agent must ask first.
 
 The registry package is the other route to the same command: `npm i -g
 @juzser/blacksmith` (or `npx @juzser/blacksmith` for one call) gives you
-`bs` with no clone at all. It is the CLI, what it reads and the `/bs`
-playbooks, not the dashboard or the docs — README "From npm" says exactly
-where that line falls — and an agent running this file must ask before that
-install too.
+`bs` with no clone at all. It is the CLI, what it reads, the built dashboard
+and the `/bs` playbooks, not the docs — [Which install](#which-install) says
+exactly where that line falls — and an agent running this file must ask
+before that install too.
 
 Installed that way, `bs` writes under `.blacksmith/` in the directory you
 run it from rather than into its own package directory, which the next
@@ -838,8 +904,8 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-See the first entry under [Known gaps](#known-platform-gaps) for why
-`check.sh` still skips e2e even after this.
+Once Chromium is installed, `check.sh` runs e2e too; the first entry under
+[Known gaps](#known-platform-gaps) says how it finds the browser.
 
 ### Cross-provider judges (Phase 8)
 
@@ -858,8 +924,9 @@ decision an operator makes once, not a per-box switch.
   picks it up with no file edit; only touch `providers.codex.enabled`
   yourself if you want to force it on or off regardless of what this box has.
 - **DeepSeek** — put `DEEPSEEK_API_KEY` in `.env`. Copy `.env.example` as the
-  starting point. `.env` is gitignored and the event logger redacts
-  credential-shaped values before write; never commit a key. Same `auto`
+  starting point. `.env` is gitignored, and the API judge scrubs its own key
+  from a provider's error body; the event logger writes values as given, so
+  never paste a key anywhere else and never commit one. Same `auto`
   behaviour as codex above.
 - **OpenRouter** — one key covers two cases. Put `OPENROUTER_API_KEY` in
   `.env`. (a) If codex's or deepseek's own precondition is unmet here, that
@@ -896,21 +963,28 @@ OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ## Part 4 — Verify the install
 
-For the package and the plugin, one command answers it:
+For the package and the plugin, one command answers it, run from the project
+you ran `bs init` in:
 
 ```bash
 bs doctor
 ```
 
 It checks Node, pnpm, git, the `bs` version, the `claude` CLI, the Blacksmith
-plugin and the built dashboard, one line each: `ok`, `missing` with the fix, or
-`unknown` when it could not tell (an unreadable `claude plugin list` is
-`unknown`, never `ok`). It exits non-zero when anything is `missing`, and
-`bs doctor --json` prints the same checks as `{checks: [{id, status, detail,
-fix}], ok}`. It only reads. Run `claude --version` to confirm the CLI by hand;
+plugin, the built dashboard and the
+[concurrency caps](#raise-the-concurrency-caps), one line each: `ok`,
+`missing` with the fix, or `unknown` when it could not tell (an unreadable
+`claude plugin list` is `unknown`, never `ok`). The caps check reads the
+environment, then the project's settings, then the user settings, which is why
+it runs from the project; a cap that is unset or not above Claude Code's
+default is a warning, `unknown`. It exits non-zero when anything is
+`missing`, and `bs doctor --json` prints the same checks as
+`{checks: [{id, status, detail, fix}], ok}`. It only reads. Run
+`claude --version` to confirm the CLI by hand;
 `claude plugin details blacksmith` reports `Skills (1)` and `Agents (14)`. If
-the checks pass, you are installed; the rest of this part is the clone's. If you took an optional plugin,
-`claude plugin details bs-mod` or `claude plugin details pr-mod` shows it.
+the checks pass, you are installed; the rest of this part is the clone's. If
+you took an optional plugin, `claude plugin details bs-mod` or
+`claude plugin details pr-mod` shows it.
 Then start a new session and look. bs-mod's band sits above the prompt; with
 no epic in view it is idle and ends in the dim line `no running epic ·
 /bs-mod <epic-id> pins one`. `/pr-mod` opens its pane in a repo with a GitHub
@@ -945,18 +1019,18 @@ walkthrough with real invocations and real output.
 
 Stated rather than papered over, in this repo's usual style:
 
-- **`check.sh` still skips `pnpm test:e2e` locally.** Its guard looks for
+- **`check.sh` runs `pnpm test:e2e` only where it finds Chromium.** It looks
+  at `$PLAYWRIGHT_CHROMIUM_PATH`, then
   `${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}/chromium`, the container the
-  UI was built in, and prints `SKIP pnpm test:e2e` when that file is absent.
-  Running the specs directly does work now: after
-  `pnpm exec playwright install chromium`, `pnpm test:e2e` picks up the
-  per-user cache, because `ui/playwright.config.ts` only pins an
-  `executablePath` when that path exists (override it with
-  `PLAYWRIGHT_CHROMIUM_PATH`). CI takes the second route in its own job.
-- **pnpm is not pinned for local development.** There is no `packageManager`
-  field, so `corepack enable` gives you whatever pnpm your Node bundles. The
-  lockfile is v9 and was written by pnpm 9.3.0, which is what CI pins; pnpm 10
-  blocks `better-sqlite3`'s postinstall unless you allow it explicitly.
+  UI was built in, then asks Playwright where its own binary is, and prints
+  `SKIP pnpm test:e2e` when none is there. After
+  `pnpm exec playwright install chromium` it runs the specs, which rewrite the
+  committed screenshots under `ui/e2e/__screenshots__/`; the gate prints a
+  `NOTE` when they changed. CI runs e2e in its own job.
+- **pnpm comes from `packageManager`.** `package.json` names `pnpm@9.3.0`, so
+  `corepack enable` gives you that version in the clone, and CI reads the same
+  field. The lockfile is v9; on pnpm 10, read `pnpm install`'s output, as the
+  note under [Part 1](#part-1--what-it-needs) says.
 - **CI is one Linux runner, not a matrix.** `.github/workflows/ci.yml` covers
   `ubuntu-latest` on the `.nvmrc` Node only. Every platform claim above still
   comes from reading the code plus a real install on macOS 26 / arm64; Linux
@@ -975,6 +1049,8 @@ Stated rather than papered over, in this repo's usual style:
 | `dist/cli.js` not found | build not run, or stale after a pull | `pnpm run build` |
 | `check.sh: command not found` / syntax errors on Alpine | running under `sh`, not `bash` | `apk add bash` and invoke `bash scripts/check.sh` |
 | Guard hook never fires in Claude Code | no bash on `PATH` (native Windows) | Use WSL2 |
+| A Bash call is denied: "Blocked: foreground `sleep` of *n* s" | in a clone, or with the [plugin guard](#the-plugin-guard-opt-in) on, the policy hook refuses a foreground `sleep` of 2 s or more in every session, yours included | Run the wait as a background task, or watch for the condition with the Monitor tool |
+| A gate, queue or `bs heavy run` waits, or fails with `heavy.wait-timeout` | another full-suite or e2e run on this machine holds the heavy lock | `bs heavy status` names the holder; let it finish, then run again |
 | A mod does not show, shows no epic, no prompt lines, or `stale` | one of several, each with its own fix | [`docs/guide/mods.md`](docs/guide/mods.md#when-it-does-not-show) lists them by symptom |
 
 Still stuck: [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md)

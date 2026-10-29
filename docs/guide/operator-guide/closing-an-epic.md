@@ -124,6 +124,10 @@ bs integration check --epic epic-1 --project ../my-project \
 overrides the shared five-minute default, at most 2147483647). Unlike the task gate, every check
 runs even after one fails (`--run-all false` opts back into
 short-circuiting) — closing an epic, you want the whole picture in one pass.
+A heavy check waits its turn on the machine's heavy lock exactly as in the
+task gate (§5, §5e). The record stores each check's command, with credential
+values masked, and the verdict's judges read it beside the result:
+`` unit (`pnpm test`): passed (exit 0) ``. Command output never reaches them.
 
 It **refuses** rather than guesses in four cases, all of which would
 otherwise write down a pass nothing earned: an empty check list, an epic with
@@ -177,6 +181,15 @@ their statuses, open findings, the integration-root check and its head sha — s
 the close can be audited later without re-deriving state that has since moved.
 An empty or whitespace-only rationale is refused: an override with no reason is
 a `go` wearing a costume.
+
+A follow-up task (origin `escalation`) counts as finished when it owns at
+least one finding and every finding it owns is waived, refuted or
+fix-verified; one still open, or closed any other way (expired, amended),
+still blocks. Such a task keeps its raw status, often `todo`. So the
+summary's `cleared_follow_ups` names each one with that status and the
+finding ids that cleared it, and a task list reading `todo` beside a zero
+non-terminal count says why. The key is always present, empty when none
+applied.
 
 That summary now also states **how wide the epic actually ran**, folded from
 the same lineage the verdict already read:
@@ -310,6 +323,27 @@ The closing spec review for "epic-1" is stale: it read plan v4, and the
 epic's live plan is v5. Whatever the amendment changed has been reviewed
 against no spec at all.
 ```
+
+**What the verdict's judges read about it.** `bs epic verdict` hands the
+cross-provider judges a text digest of the epic. For the closing review it
+used to list only the ids the review raised, so a finding closed without a
+person's decision (refuted, fix-verified, expired) sat in no other list, and
+a judge read the id as unaccounted for and refuted a clean epic. Each id the
+review raised now gets a line of its own: its severity, its status, and the
+list the close sorted it into.
+
+```
+  Findings that review raised: 1 (f-x)
+  review finding f-x (S2-major): refuted — recorded closed; not counted among the open findings
+```
+
+Open or closed is read from that sort (open, an amendment already landed,
+closed by a person, recorded closed), never from the status string, so a
+status added later cannot print "still open" under "Open findings: 0". A
+verifier is named only when the findings record carries one, and an id the
+record does not hold says so rather than guessing. When the tier skipped the
+review, the digest says it was not due rather than "no closing spec review on
+record".
 
 ## 7d. `bs crossfind` — a second eye, not a second vote
 
@@ -581,3 +615,66 @@ state a fresh factory is in, and it says so rather than passing:
 "Every epic closed narrow" and "no epic was ever measured" are opposite states
 of knowledge, and a factory that has never measured itself must not be able to
 read as a healthy one.
+
+## 7g. `bs cleanup` — retiring what the epic left behind
+
+Every task gets a worktree and a branch (§3), and nothing used to take them
+away again: a project's `.wt/` folder filled with merged worktrees, with
+directories git no longer registered, and with `bs/*` branches long since
+merged. `bs cleanup` retires them, and `/bs run` runs it as its last step,
+after the integration PR is open.
+
+```bash
+git -C ../my-project fetch --prune origin
+bs cleanup --project ../my-project --epic epic-1          # dry run: report only
+bs cleanup --project ../my-project --epic epic-1 --apply  # the same, applied
+bs cleanup --project ../my-project                        # then the pair unscoped
+bs cleanup --project ../my-project --apply
+```
+
+It reads the local refs and never fetches, which is why the fetch comes first.
+`--epic` narrows the worktrees and branches to one epic; the orphan directories
+and `git worktree prune` are project-wide in every run. The report is one item
+per candidate, and every `keep` names the rule that kept it:
+
+```json
+{"items":[
+  {"kind":"worktree","path":"/abs/path/.wt/my-project/task-1","branch":"bs/epic-1/task-1","action":"keep","reason":"active-24h: bs/epic-1/task-1 has a commit in the last 24 h"},
+  {"kind":"branch","branch":"bs/epic-1/integration","action":"keep","reason":"not-merged: bs/epic-1/integration is not an ancestor of refs/heads/main, refs/remotes/origin/main"},
+  {"kind":"directory","path":"/abs/path/.wt/my-project/old-scratch","action":"keep","reason":"active-24h: /abs/path/.wt/my-project/old-scratch changed in the last 24 h"}],
+ "warnings":[]}
+```
+
+`action` is `remove` (a worktree or a branch, through git), `trash` (an
+orphan directory, moved to the macOS Trash), `prune`, `keep`, or `manual` (an
+orphan on a platform with no Trash, reported and left for you). The dry run
+changes nothing, and `--apply` builds its list again in the same run that
+removes, so a stale report is never replayed.
+
+What it removes is narrow on purpose, and when unsure it keeps the item and
+says why:
+
+- Only a task worktree on a `bs/<epic>/<task>` branch (or a legacy `smith/`
+  one), with that branch, and only once the branch is merged into the epic's
+  integration branch, the local default branch or `origin/<default>`. The
+  merge is checked again right before each removal and each branch deletion,
+  so a commit made in between keeps the branch.
+- Nothing active in the last 24 hours: a recent commit, index change or file
+  keeps it.
+- Nothing of an open epic, and no integration branch, or its worktree, until
+  its PR has merged into the default branch. This epic's own integration
+  branch therefore stays; the next close, or any later `bs cleanup --apply`,
+  takes it.
+- Nothing dirty, nothing under a lock (the heavy lock of §5e while its holder
+  is alive, a git `index.lock`, a worktree git marks `locked`), no
+  independent repository, no symlink, and nothing outside `.wt/<project>/` or
+  the project's own `bs/` and `smith/` branches.
+- Removal goes only through `git worktree remove` without `--force`,
+  `git branch -d` and `git worktree prune`; never `rm -rf`. A refusal is
+  reported as `keep` with git's message and is never retried or forced.
+
+A project directory that is not a git repository fails with
+`cleanup.not-a-git-repo` and nothing is touched. Last, the epic session stops
+the background tasks and idle subagents it started itself, with TaskStop, and
+only those whose output files end with an `EXIT=<n>` line and which hold no
+heavy lock; a wave-runner does the same at the end of its wave.

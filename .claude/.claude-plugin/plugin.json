@@ -1,6 +1,6 @@
 {
   "name": "blacksmith",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Plan a feature as signed spec contracts, build each in its own git worktree, put the result through review and verification gates, and merge through a queue into one pull request.",
   "author": {
     "name": "juzser",

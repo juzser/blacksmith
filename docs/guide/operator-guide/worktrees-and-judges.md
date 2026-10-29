@@ -31,7 +31,10 @@ a sibling it is created beside that clone rather than under this repo.
 
 `bs worktree stale <projectDir> <epic>` lists worktrees
 that should have been cleaned up (a stale worktree is a bug, not a feature);
-`bs worktree rm <projectDir> <epic> <taskId>` removes one after merge.
+`bs worktree rm <projectDir> <epic> <taskId>` removes one after merge. The
+epic close does it for the whole project: `bs cleanup` (§7g) retires every
+merged, idle task worktree with its branch, and the orphan directories under
+`.wt/<project>/`.
 
 Either spelling of a task id works throughout — `task-1` and
 `<epic>/task-1` name the same worktree, as they already named the same
@@ -44,10 +47,11 @@ those, and they need `git worktree remove` by absolute path once.
 
 Six roles — reviewer, verifier, grader, spec-reviewer, security-reviewer,
 uiux — are read-only in their templates and hold `Bash` in fact
-(agent-interviews.md N-10). `Bash` is there to run the suite and `git diff`,
-and the same tool writes files. Before this pair of verbs, "the judge did not
-edit the code it was judging" was a sentence in a prompt. Now it is a check:
-fingerprint the worktree before dispatching the judge, verify it after.
+(agent-interviews.md N-10). `Bash` is there to run the suite (through
+`bs heavy run`, §5e) and `git diff`, and the same tool writes files. Before
+this pair of verbs, "the judge did not edit the code it was judging" was a
+sentence in a prompt. Now it is a check: fingerprint the worktree before
+dispatching the judge, verify it after.
 
 ```bash
 bs worktree fingerprint /abs/path/.wt/my-project/task-1 > before.json
@@ -270,6 +274,26 @@ Two shortcuts, both on `gate run` (§5):
   error (`cli.no-findings-needs-role`), not an attestation for a role called
   "true".
 
+### Three judges, one message
+
+The grader, the reviewer and, when `bs security triggers` says so (§2a), the
+security-reviewer all read the same finished work, so `wave.md` step 6 sends
+them together, as parallel calls in one message, once the tester has returned.
+Nothing here forces an order between them. Record each `judge dispatch`
+first: each declares its own artifact, so the three never share a file, and
+each holds its own round per task id and role, read across every session of
+the epic. Their reports close in any order, and one judge's report never
+closes another's turn — `judge outstanding` lists exactly the roles still
+owing a file.
+
+A grader bounce does not throw the other two away. The reviewer's and the
+security-reviewer's results from the same round are raised as findings, the
+verifier still runs on the reviewer's S1/S2 findings, and the bounce brief
+carries them to the coder. No judge is skipped because another one bounced.
+`--round` defaults to 1, so pass the next round for each role you dispatch
+again after the fix. `factory/orchestrator/test/judgesConcurrent.test.ts`
+pins each of these.
+
 ### `bs judge escalations` — the disagreement nobody read back
 
 `judge outstanding` answers *which judge still owes me a file*. This one
@@ -341,3 +365,95 @@ in that configuration would be reporting the absence of a check as the absence
 of a problem. `bs judge preflight` (`docs/runbooks/providers.md` §1)
 tells you the same thing before the run; this one tells you what it already
 cost.
+
+## 3d. `bs brief compose` — every brief from one command
+
+A dispatch prompt has to carry what the agent cannot see for itself: the task
+spec, the absolute worktree path, the claims, the caps, the turn budget, the
+lessons and open-findings blocks, the return discipline, and for a judge the
+declared-artifact line. Assembled by hand, each of those is a place to drift,
+and `bs dispatch lint` could only catch two of them after the fact. One
+command builds the whole brief, and the playbooks call it for every dispatch:
+
+```bash
+bs brief compose --role coder --session <session-id> \
+  --task epic-1/task-1 --plan factory/specs/active/epic-1/plan-v1.json \
+  --worktree /abs/path/.wt/my-project/task-1 --branch bs/epic-1/task-1 \
+  --out state/results/task-1.coder-brief.md
+```
+
+It writes the brief to `--out`, writes a manifest beside it
+(`<out>.manifest.json`), and prints the manifest: which lessons it spliced and
+which it withheld, the finding ids, and the bytes in each section.
+
+```json
+{"role":"coder","task_id":"epic-1/task-1",
+ "lessons_spliced":["lesson-raised-3b5746704cfc","…"],
+ "lessons_withheld":[{"lesson_id":"lesson-raised-53d48e95c31f","error_class":"economy.budget-exceeded"},"…"],
+ "warnings":[],"finding_ids":[],
+ "sections":{"header":323,"spec":4704,"claims":215,"limits":54,"epic_spec":119,"lessons":3474,"findings":744,"return_discipline":823,"envelope":121},
+ "total_bytes":10594}
+```
+
+Without `--out` it prints the brief itself. The brief opens with a marker
+line, `<!-- bs-brief role=coder task=epic-1/task-1 session=<session-id> -->`,
+then the role and task, the worktree and branch, the task's spec entry
+verbatim from the plan, the claims, the token and diff caps, `Turn budget:`
+read from the role template's `maxTurns`, the epic spec to read first, the
+lessons block (§10), the open-findings block, the return-discipline section
+cut from `.claude/skills/bs/dispatch.md`, and one line naming the result
+fields the dispatcher stamps and the agent must not write. A judge role also
+takes `--artifact`, and its brief carries the `Declared artifact:` line §3c
+asks for; a coder's never does.
+
+It refuses rather than guesses: a worktree role with no `--worktree`
+(`brief.worktree-required`), a task the plan does not hold
+(`brief.task-not-in-plan`), a judge with no `--artifact`
+(`brief.artifact-required`), and a `--turns` that differs from the template
+(`brief.turns-mismatch`) each fail by name. What it writes passes
+`bs dispatch lint` as written:
+
+```json
+{"turns":{"status":"ok","stated":150,"template":150},"artifact":{"status":"not-applicable","expected_line":null,"declared_line":null},"exitCode":0}
+```
+
+**The hook holds a marked brief to its role.** The marker is also what the
+policy hook reads. An `Agent` call whose prompt opens with one must go to the
+matching `bs-<role>`, or `blacksmith:bs-<role>` under the plugin; one sent to
+`general-purpose` or to another role's type is denied, and the reason names
+the type it expected:
+
+```
+Blocked: this brief is marked for role `coder`; typed agents only (got `general-purpose`). Fix: dispatch to the matching `bs-coder` (or `blacksmith:bs-coder`).
+```
+
+The template is where a role's tools, turn cap and lessons markers live, and
+an untyped agent has none of them. The same hook denies a foreground `sleep`
+of 2 seconds or more, with "use a background task or the Monitor tool
+instead" as the fix. Each `sleep` the call would wait on is judged on its own
+duration, wherever it sits: chained after another command, in a loop body,
+behind `timeout` or `nohup`, inside `bash -c`. An operand it cannot read, such
+as a variable, counts as 2 seconds or more. A sleep under 2 seconds, a
+backgrounded one, one inside a script the command runs, and a prompt with no
+marker are left alone, and a command line the hook cannot parse at all is
+decided exactly as before. Both rules apply in every session the hook runs
+in, the operator's own included: always in a clone, and in a plugin install
+when the [plugin guard](../plugin-guard.md) is on.
+
+**`bs playbook slice` reads one step at a time.** A `bs-wave-runner` never
+reads `wave.md` or `dispatch.md` whole. `bs playbook slice wave --step <n>`
+prints one numbered step (2 to 10), and `--section "<heading>"` prints one
+section of either playbook, up to the next heading of the same or a higher
+level:
+
+```bash
+bs playbook slice wave --step 2
+bs playbook slice dispatch --section "Round counting and escalation"
+```
+
+A step that does not exist fails `playbook.unknown-step`, a heading that does
+not exist fails `playbook.unknown-section`, and one that occurs twice fails
+`playbook.ambiguous-section`. A heading written without its trailing
+parenthetical still resolves when exactly one heading has that name, which is
+how the second line above finds "Round counting and escalation
+(agent-interviews.md N-4)".

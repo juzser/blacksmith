@@ -1,15 +1,18 @@
 # Changelog
 
 Blacksmith has one versioned artifact and it is not the whole factory. The
-`bs` CLI (`smith` is kept as a deprecated alias) — the binary plus the
-policies, schemas, scaffold templates, agent role files and migrations it
-reads — is published to npm as
-`@juzser/blacksmith`; `package.json` carries that version and a `v<version>`
-git tag marks each publish. Everything else — the `/bs` console, the
-dashboard, the docs, the roadmap — runs from a clone, and the only supported
-revision of the clone is `main`. So this file is not a list of releases — it
-is a list of what landed, in the order it landed, keyed to the milestones in
-[`factory/specs/roadmap.md`](factory/specs/roadmap.md).
+`bs` CLI (`smith` is kept as a deprecated alias) — the binaries plus the
+policies, schemas, scaffold templates, agent role files, `/bs` playbooks,
+migrations and roadmap they read, and the built dashboard that `bs ui serve`
+runs — is published to npm as `@juzser/blacksmith`; `package.json` carries
+that version and a `v<version>` git tag marks each publish. The `/bs` console
+reaches Claude Code as the `blacksmith` plugin, the `.claude/` folder of this
+repository installed through its marketplace, whose manifest carries the same
+version; bs-mod and pr-mod are optional plugins beside it. Everything else —
+the docs, the tests, the sources — is read from a clone, and the only
+supported revision of the clone is `main`. So this file is not a list of
+releases — it is a list of what landed, in the order it landed, keyed to the
+milestones in [`factory/specs/roadmap.md`](factory/specs/roadmap.md).
 
 Dates are the day the roadmap first recorded a milestone as `completed`,
 derived from the development history that preceded this repository. They mark
@@ -27,6 +30,37 @@ entries below record development that predates this repo's git history rather
 than appearing in it.
 
 ### Changed
+
+- **The CLI tests run as ten files, and CI runs e2e in two shards.**
+  `factory/orchestrator/test/cli.test.ts` is split into ten
+  `cli<Area>.test.ts` files, with `test/helpers/cliHarness.ts` for what they
+  share: the same 414 tests, their bodies unchanged. Locally the unit suite's
+  wall time drops from about 469 s to 166 s. CI runs e2e as two shards behind
+  the same required check, `e2e (Playwright, Chromium)`, caches the Chromium
+  download, and no longer fails a run on a failed or hung screenshot upload.
+  On #502's own CI run the gate took 6m04s and the two shards 3m42s and
+  2m50s; on the runs of #499–#501 the gate took 8–13 min and e2e about
+  5 min. CONTRIBUTING.md now says `bash scripts/check.sh` is the whole local
+  gate. Nothing in the npm package changes.
+
+- **The README leads with the factory, not the dashboard.** Its dashboard
+  section and screenshots are gone; the README links to
+  `docs/guide/dashboard.md`, which describes the dashboard on its own. Where
+  the README says how the factory works, it now says what 0.6.0 changed:
+  lessons spliced by recurring class, `bs brief compose`, judges in one
+  message, rolling admission, the machine-wide lock for heavy runs,
+  `bs cleanup`, the caps and compact window `bs init` writes, and the 1-hour
+  prompt cache. The guides under `docs/guide/`, the operator guide first,
+  were brought up to the same handling.
+
+- **`bs lessons for-dispatch` leaves out the `lessons` array unless
+  `--full`.** The rendered block stays in `text`; the JSON gains `withheld`
+  (each lesson left out, with its class), and `warnings` also names a lesson
+  read as `other.unclassified` because it has no class or one the taxonomy
+  no longer holds. `--class <group.class>` returns exactly that class's
+  lessons, and `--epic <id>` counts a class logged in that epic as a repeat.
+  `bs lessons raise` takes `--error-class <group.class>` and refuses, by
+  name, a class the taxonomy does not hold.
 
 - **`wave-runner`, `merger` and `scribe` now carry token caps.** `budgets.yml`
   prices them as judges, none of them ending in a `task-result-recorded`:
@@ -85,17 +119,42 @@ than appearing in it.
   their old window.
   [INSTALL.md](INSTALL.md#compact-earlier-on-1m-models) has the details.
 
-- **The dashboard only reads.** `bs ui` is for watching the factory; every
-  decision now goes through the CLI. Removed from the dashboard: Home's "Needs
-  you" box, the Waive and Deny buttons on a task's findings, and the approve,
-  edit and reject controls on the Lessons page. Findings and lessons still
-  show, read-only, and a live session still reads "Waiting on you" when it
-  stops on you. Waive or deny a finding with `/bs waivers`; approve, edit or
-  reject a lesson with `/bs lessons`. The dashboard server has no write route
-  left: it answers `405` to any `/api` request that is not `GET` or `HEAD`,
-  and `GET /api/inbox` is gone.
+- **The roles that wait keep a 1-hour prompt cache.** The wave-runner, coder
+  and tester templates set `experimental.cacheTtl: 1h`. These roles sit idle
+  for minutes on test runs and dispatched agents, longer than the default
+  5-minute cache lives, so their next turn no longer rewrites the whole
+  prompt prefix. A 1-hour cache write costs more than a 5-minute one, so the
+  short-burst roles keep the default. `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
+  and the `subagentPromptCacheTtl` setting still override the templates.
+
+- **Lesson ids.** A dream-pass lesson id is `lesson-dream-` plus 12 hex
+  characters of a sha256 of its source event id; ids already recorded keep
+  their form. The hand-kept lesson on result schemas is now
+  `dispatch-brief-names-result-schema`.
+
+- **The dashboard only reads.** `bs ui serve` is for watching the factory;
+  every decision now goes through the CLI. Removed from the dashboard:
+  Home's "Needs you" box, the Waive and Deny buttons on a task's findings, and
+  the approve, edit and reject controls on the Lessons page. Findings and
+  lessons still show, read-only, and a live session still reads "Waiting on
+  you" when it stops on you. Waive or deny a finding with `/bs waivers`;
+  approve, edit or reject a lesson with `/bs lessons`. The dashboard server
+  has no write route left: it answers `405` to any `/api` request that is not
+  `GET` or `HEAD`, and `GET /api/inbox` is gone.
 
 ### Fixed
+
+- **`bs lessons compile` keeps a lesson's error class.** It built its input
+  from the approved store rows without the class, so a lesson raised with
+  `--error-class` compiled with no `- error_class:` bullet and
+  `bs lessons for-dispatch` read it as `other.unclassified`: every new lesson
+  fell into the fallback class and was withheld when its own class recurred.
+  The class now carries through, and the store's class still wins over one
+  the compiled file carries. The withheld-lessons line also quoted a command
+  that exits 1 (`for-dispatch` needs the role); it now reads
+  `bs lessons for-dispatch <role> --class <group.class>` with the role filled
+  in. The shipped lessons were unaffected: their classes are written in the
+  file (#503).
 
 - **The repo pins Node's October 2026 security release, and scaffolded CI
   takes the newest Node 22.** `.nvmrc` now names `22.23.4` instead of the bare
@@ -181,8 +240,9 @@ than appearing in it.
   plan with `cli.plan-not-ingested`. Ingest now owes it only when an amendment
   maps the task to a successor.
 
-- **The dashboard after 0.5.0 (#444-#452, #456).** It runs from a clone and is
-  not in the npm package. These fixes bring it closer to the design mock
+- **The dashboard after 0.5.0 (#444-#452, #456).** It ran from a clone at the
+  time and was not in the npm package; from 0.6.0 the package ships it (see
+  *Added*). These fixes bring it closer to the design mock
   (`ui/docs/ds-review.html`) and the spec (`ui/docs/ds-spec.md`):
 
   *Home.* The "Needs you" box reads every project's store. Each row says which
@@ -225,6 +285,28 @@ than appearing in it.
   `git -c color.ui=always log`, `GIT_PAGER=cat git log`, and a quoted-delimiter
   here-document followed by a git command.
 
+- **The force-push guard reads the other variables git runs as commands.**
+  `PAGER`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `EDITOR`, `VISUAL`,
+  `GIT_SSH_COMMAND`, `GIT_ASKPASS` and `SSH_ASKPASS` are read the way
+  `GIT_PAGER` is: a readable value is checked as a command line, and one the
+  guard cannot read statically is refused. On a line that runs git, a
+  mention the guard did not read is refused too, such as
+  `echo "$EDITOR"; git log`. `PAGER=less git log` and
+  `EDITOR=true git commit` stay allowed.
+
+- **The force-push guard reads git that `xargs` runs and git output a shell
+  runs, and the history-rewrite rule reads each command on its own.**
+  `xargs git` is read like git typed directly: a subcommand that is missing,
+  unreadable or force-gated is refused, while
+  `git ls-files -z | xargs -0 git add` stays allowed. Git output piped into
+  `sh`, `bash`, `zsh`, `dash` or `ksh` (by name, by path, through `env` or
+  through `xargs`), `eval` of a git substitution, and `source` of a process
+  substitution that runs git are refused; output that does not come from git
+  may still feed a shell. The guard reads through prefix words such as
+  `timeout`, `nohup` and `env -S`. On a protected branch, a read-only search
+  that names a rewrite word, such as `git grep rebase`, is allowed, and a
+  real rewrite elsewhere on the same line is still refused.
+
 - **The force-push guard reads more pipes, `xargs` options and long lines.**
   The BSD `xargs` replacement options `-J`, `-R` and `-S` are read like `-I`.
   In a pipeline that feeds a shell, an earlier segment whose command word is an
@@ -237,6 +319,25 @@ than appearing in it.
 - **`bs delegation check` no longer reports a resumed wave-runner as
   unanswered.** A dispatch carrying `continuation_of` is answered by the session
   it opened, else by the original dispatch's session.
+
+- **The verdict digest says how each closing-review finding ended.**
+  `bs epic verdict` gave the judges only the ids the closing spec review
+  raised, so a finding closed without a person's decision (refuted,
+  fix-verified, expired) appeared in no other list, and a judge could read
+  it as unaccounted for. Each id now has its own line with its severity, its
+  status and the list the epic summary sorted it into, such as
+  `refuted — recorded closed; not counted among the open findings`. A
+  verifier is named only when the findings record carries one.
+
+- **The merge queue lands a task only on the head its suite ran on.** A
+  `bs queue run` step takes the heavy lock before the rebase and holds it
+  through the merge and its `wave-merged` record, so queue runs of one epic
+  or of several take turns. When the integration branch moved after the
+  rebase, the step lands nothing and reports `integration-moved`, with an
+  `execution.env-failure` blocked event; the batch path already landed this
+  way. The rebase and the merge run with the lock's token in their
+  environment, so a project hook that calls `bs heavy run` re-enters the
+  lock instead of waiting on it.
 
 ### Removed
 
@@ -301,6 +402,128 @@ than appearing in it.
   unless `--apply` is given, and `/bs run` runs it as its last step. The epic
   session and the wave-runner also stop their own finished background tasks
   and idle subagents with TaskStop at close.
+
+- **`bs stats effectiveness` reports what the factory spent and caught.** It
+  reads tokens per task and per role (spend it cannot attribute is reported
+  separately), escaped defects after a merge on a passing gate, and finding
+  precision per reviewing role. Output is words or JSON. A total that could not
+  be read in full reads "at least <n>", and a number nothing measured reads NOT
+  MEASURED, never 0. A recurring error counts once as one escaped defect. Token
+  spend has one definition (input, cache creation and output, no cache reads,
+  repeated responses counted once), shared with the dashboard's Budget.
+
+- **`bs report export` writes an opt-in report you can read before sharing.**
+  Markdown or JSON, to stdout or one named file, starting with a review notice,
+  with home and temp paths redacted and each task's checks shown as passed,
+  failed, not run or unknown. It sends nothing anywhere. `/bs report` gains an
+  export step.
+
+- **A trial kit for comparing plain Claude Code with Blacksmith.**
+  `docs/trial/methodology.md` describes five task kinds, the metrics recorded
+  and what a single run can and cannot show; `docs/trial/results.md` is a
+  template where every number reads NOT MEASURED until you run the trial.
+  `trial/` holds a dependency-free sample notes app (loopback only, bodies over
+  1 MiB answered with 413, unknown tag ids answered with 404), the task corpus
+  with hidden checks and a self-check script, and a recording harness that
+  records a check as passed only when the passing report lists exactly the
+  tests the check file declares. None of it is in the npm package.
+
+- **`bs doctor [--json]` checks the install in one command.** It checks Node,
+  pnpm, git, the `bs` version, the `claude` CLI, the Blacksmith plugin and the
+  built dashboard files. Each is ok, missing or unknown, with a one-line fix;
+  output it cannot parse is unknown, never ok. It exits non-zero when anything
+  is missing and installs nothing.
+
+- **`bs init` prints next steps.** On stderr, so its JSON on stdout is
+  unchanged: run `bs doctor`, then `bs new`; an installed package also gets the
+  plugin lines and a stack interview step. When the dashboard is not built, an
+  installed package is told to reinstall with `npm i -g @juzser/blacksmith`
+  rather than pointed at a pnpm script it lacks.
+
+- **The npm package ships the dashboard.** `ui/dist` and `ui/server/dist` are
+  built at pack time and `hono` and `@hono/node-server` are regular
+  dependencies, so `bs ui serve` works after an npm install.
+
+- **An opt-in plugin guard.** With `BS_PLUGIN_GUARD=1` the plugin runs the
+  policy hook and always answers before its time limit: a slow or hung hook
+  stops the command and asks you to approve it. A limit override accepts only
+  digits or digits.digits, else the 3 s default.
+
+- **A new README first screen and quickstart.** The README opens with the
+  tagline, one description sentence and a table comparing each workflow step
+  with plain Claude Code, with no numbers (the demo reads NOT MEASURED). The
+  same description is used in the npm package, plugin manifest and marketplace,
+  and "autonomous" is gone from them. `docs/guide/quickstart.md` walks from
+  install through `bs doctor` and `bs init` to a first `/bs new` and `/bs run`;
+  `docs/claims-matrix.md` lists each first-screen claim with what backs it.
+
+- **0.6.0 — bs-review: what the factory costs and catches; bs-optimize:
+  fewer tokens per merged task, more agents at once.** 0.5.1 was bumped in
+  the repository (#486) but never tagged or published, so 0.6.0 is the first
+  npm release since 0.5.0 and also carries everything the 0.5.1 entry below
+  lists. Twenty-one pull requests landed after that bump (#477–#481,
+  #487–#493, #495–#503), and thirty-four entries above this one ship in
+  0.6.0: under *Changed*, the CLI test split and e2e shards (#502), the
+  README and guides pass, `bs lessons for-dispatch` (#501), the 1-hour
+  prompt cache (#489), the lesson ids (#487, #488), the wave-runner, merger
+  and scribe prices (#493), and the concurrency caps (#490, #491) and
+  compact window (#497, #498) that `bs init` writes; under *Fixed*, the Node
+  pin (#492), the four guard entries
+  and `bs delegation check` on a resumed wave-runner (#499), the verdict
+  digest (#500), the merge queue's landing (#501) and `bs lessons compile`
+  keeping a lesson's class (#503); and every *Added* entry
+  above this one (#499, #501). This entry does not repeat them.
+
+  *bs-review (#499).* An operator can see what the factory costs and what it
+  catches, and a reader can check what the project says about itself.
+  `bs stats effectiveness` reads tokens per task and per role from the Claude
+  Code transcripts, escaped defects and each reviewing role's finding
+  precision; `bs report export` writes an opt-in, redacted report. A trial
+  kit compares plain Claude Code with Blacksmith; the trial has not been run,
+  so its numbers read NOT MEASURED. The npm package ships the dashboard,
+  `bs doctor` checks the install, `bs init` prints next steps,
+  `BS_PLUGIN_GUARD=1` turns on the plugin's policy hook, and
+  `docs/claims-matrix.md` backs each claim on the README's first screen. The
+  force-push guard reads git configuration values, the variables git runs as
+  commands, `xargs` and shell pipes.
+
+  *bs-optimize (#501).* Fewer tokens per merged task and more agents at once,
+  without lowering quality: quality comes first, speed second, tokens third.
+  Each lesson carries one error class. A brief still carries every lesson for
+  its role and its paths, but a broader lesson goes in up front only when its
+  class has proven to recur or repeats in the epic; the rest are named for
+  reading on demand. `bs brief compose` builds every brief. The policy hook
+  (in a clone, or with `BS_PLUGIN_GUARD=1`) denies a marked brief sent to the
+  wrong agent type and a foreground `sleep` of 2 s or more. The grader, the
+  reviewer and (when triggered) the security-reviewer go out in one message
+  after the tester. Admission rolls: after each merge, a ready task that
+  overlaps nothing in flight is admitted at once. Full-suite and e2e runs
+  take one machine-wide lock (`bs heavy run`, `bs heavy wait`,
+  `bs heavy status`), `bs doctor` warns when a concurrency cap is not raised,
+  and `bs cleanup` retires merged worktrees and branches at epic close. No
+  judge, check, review round or verifier pass was dropped, and no model was
+  downgraded.
+
+  *Packaging and migrations.* The package gains the `bs-policy-hook` bin,
+  which the plugin guard runs; `ui/dist` and `ui/server/dist` in `files`; and
+  `hono` and `@hono/node-server` as runtime dependencies. `@hono/node-server`
+  moves to 2.1.5 (#479) and `drizzle-orm` to 0.45.4 (#481); the other
+  Dependabot bumps (#477, #478, #480, #495, #496) are dev dependencies. Three
+  migrations were added since v0.5.0, and each applies when the store next
+  opens: `0018_events_raw_scope_ts_idx` and `0019_dispatches_scope_ts_idx`
+  (indexes, from 0.5.1), and `0020_lessons_error_class` (a nullable
+  `error_class` column on `lessons`). To upgrade, run
+  `npm i -g @juzser/blacksmith@latest` and
+  `claude plugin marketplace update blacksmith`, then
+  `claude plugin update blacksmith` (the `/bs` playbooks, the agent templates
+  and the plugin's hooks changed), re-run `bs init` in each project (it
+  writes the concurrency caps and the compact window), and restart every
+  running Claude Code session. Since 0.5.1, bs-mod and pr-mod change only
+  their version, so updating them is optional, except for a pr-mod still at
+  0.5.0: `claude plugin update pr-mod@blacksmith` brings 0.5.1's fence around
+  pull request text. The INSTALL.md floors (Node 22, git 2.38) did not move;
+  `.nvmrc` now pins 22.23.4 for this repository's own runs.
+
 - **0.5.1 — `/bs use` binds a session to one project, and the dashboard
   only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Eleven
   entries above this one and one below landed after 0.5.0 and ship in it:
@@ -369,60 +592,6 @@ than appearing in it.
   `claude plugin update pr-mod@blacksmith`, and start a new session. bs-mod
   changes only its version; `claude plugin update bs-mod@blacksmith` is
   optional. The INSTALL.md floors (Node 22, git 2.38) did not move.
-
-- **`bs stats effectiveness` reports what the factory spent and caught.** It
-  reads tokens per task and per role (spend it cannot attribute is reported
-  separately), escaped defects after a merge on a passing gate, and finding
-  precision per reviewing role. Output is words or JSON. A total that could not
-  be read in full reads "at least <n>", and a number nothing measured reads NOT
-  MEASURED, never 0. A recurring error counts once as one escaped defect. Token
-  spend has one definition (input, cache creation and output, no cache reads,
-  repeated responses counted once), shared with the dashboard's Budget.
-
-- **`bs report export` writes an opt-in report you can read before sharing.**
-  Markdown or JSON, to stdout or one named file, starting with a review notice,
-  with home and temp paths redacted and each task's checks shown as passed,
-  failed, not run or unknown. It sends nothing anywhere. `/bs report` gains an
-  export step.
-
-- **A trial kit for comparing plain Claude Code with Blacksmith.**
-  `docs/trial/methodology.md` describes five task kinds, the metrics recorded
-  and what a single run can and cannot show; `docs/trial/results.md` is a
-  template where every number reads NOT MEASURED until you run the trial.
-  `trial/` holds a dependency-free sample notes app (loopback only, bodies over
-  1 MiB answered with 413, unknown tag ids answered with 404), the task corpus
-  with hidden checks and a self-check script, and a recording harness that
-  records a check as passed only when the passing report lists exactly the
-  tests the check file declares. None of it is in the npm package.
-
-- **`bs doctor [--json]` checks the install in one command.** It checks Node,
-  pnpm, git, the `bs` version, the `claude` CLI, the Blacksmith plugin and the
-  built dashboard files. Each is ok, missing or unknown, with a one-line fix;
-  output it cannot parse is unknown, never ok. It exits non-zero when anything
-  is missing and installs nothing.
-
-- **`bs init` prints next steps.** On stderr, so its JSON on stdout is
-  unchanged: run `bs doctor`, then `bs new`; an installed package also gets the
-  plugin lines and a stack interview step. When the dashboard is not built, an
-  installed package is told to reinstall with `npm i -g @juzser/blacksmith`
-  rather than pointed at a pnpm script it lacks.
-
-- **The npm package ships the dashboard.** `ui/dist` and `ui/server/dist` are
-  built at pack time and `hono` and `@hono/node-server` are regular
-  dependencies, so `bs ui` works after an npm install.
-
-- **An opt-in plugin guard.** With `BS_PLUGIN_GUARD=1` the plugin runs the
-  policy hook and always answers before its time limit: a slow or hung hook
-  stops the command and asks you to approve it. A limit override accepts only
-  digits or digits.digits, else the 3 s default.
-
-- **A new README first screen and quickstart.** The README opens with the
-  tagline, one description sentence and a table comparing each workflow step
-  with plain Claude Code, with no numbers (the demo reads NOT MEASURED). The
-  same description is used in the npm package, plugin manifest and marketplace,
-  and "autonomous" is gone from them. `docs/guide/quickstart.md` walks from
-  install through `bs doctor` and `bs init` to a first `/bs new` and `/bs run`;
-  `docs/claims-matrix.md` lists each first-screen claim with what backs it.
 
 - **Home opens with four facts.** Under the page header, four read-only
   tiles read Active sessions, Agents running, Budget used and Tasks done.

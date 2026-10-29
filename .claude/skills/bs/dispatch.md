@@ -89,9 +89,11 @@ and is spliced only when that class recurs (an `error-logged` event on at least
 3 distinct tasks in the last 30 days, store-wide) or repeats in the dispatch's
 own epic (at least one `error-logged` of the class; pass `--epic <epic>` when you run it by hand). The rest are withheld, and
 the block's last line names each withheld class with its count and the command
-that reads it, `bs lessons for-dispatch --class <group.class>`. A bounce logs
-`error-logged` with its class, so the re-dispatch brief splices that class's
-lessons by itself. A security-reviewer brief withholds nothing. The `lessons`
+that reads it, `bs lessons for-dispatch <role> --class <group.class>`. A
+merge-queue failure, a worker that died or a judge turn that failed logs
+`error-logged` with its class, so later briefs in that epic splice that
+class's lessons by themselves; a gate `blocked` writes only `gate-outcome`
+and does not count yet. A security-reviewer brief withholds nothing. The `lessons`
 array is left out of the output unless you pass `--full`.
 
 The topology is flat and deliberate: **one block, spliced once at dispatch**,

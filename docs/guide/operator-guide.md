@@ -55,25 +55,29 @@ kilobytes first.
 ## [Worktrees and judges](operator-guide/worktrees-and-judges.md)
 
 Creating a task worktree, proving a judge did not edit what it judged,
-fencing text that arrived from outside, and holding a dispatched judge
-to a report.
+fencing text that arrived from outside, holding a dispatched judge to a
+report, and building every brief from one command.
 
 - [3. `bs worktree create`](operator-guide/worktrees-and-judges.md#3-bs-worktree-create)
 - [3a. `bs worktree fingerprint` / `verify` — the judge-immutability guard](operator-guide/worktrees-and-judges.md#3a-bs-worktree-fingerprint--verify--the-judge-immutability-guard)
 - [3b. `bs prompt wrap` / `bs research check` — ingested text is data](operator-guide/worktrees-and-judges.md#3b-bs-prompt-wrap--bs-research-check--ingested-text-is-data)
 - [3c. `bs judge dispatch` / `report` / `outstanding` — a dispatched judge must report back](operator-guide/worktrees-and-judges.md#3c-bs-judge-dispatch--report--outstanding--a-dispatched-judge-must-report-back)
+- [3d. `bs brief compose` — every brief from one command](operator-guide/worktrees-and-judges.md#3d-bs-brief-compose--every-brief-from-one-command)
 
 ## [The queue and the gate](operator-guide/queue-and-gate.md)
 
 The merge queue and the gate: what each outcome means, why a green gate
-used to prove nothing, one epic across several sessions, and evidence
-that names the file a criterion names.
+used to prove nothing, one epic across several sessions, evidence that
+names the file a criterion names, and the one lock every heavy suite on a
+machine takes.
 
 - [4. `bs queue run`](operator-guide/queue-and-gate.md#4-bs-queue-run)
 - [5. `bs gate run`](operator-guide/queue-and-gate.md#5-bs-gate-run)
 - [5a. The commit check — why a green gate used to prove nothing (D-30)](operator-guide/queue-and-gate.md#5a-the-commit-check--why-a-green-gate-used-to-prove-nothing-d-30)
 - [5b. One epic across several sessions — `bs event lineage`](operator-guide/queue-and-gate.md#5b-one-epic-across-several-sessions--bs-event-lineage)
 - [5c. `bs coverage check` — evidence that names the file the criterion names](operator-guide/queue-and-gate.md#5c-bs-coverage-check--evidence-that-names-the-file-the-criterion-names)
+- [5d. `bs results record` — projecting a Result with no gate to run it through](operator-guide/queue-and-gate.md#5d-bs-results-record--projecting-a-result-with-no-gate-to-run-it-through)
+- [5e. `bs heavy run` / `wait` / `status` — one heavy suite per machine](operator-guide/queue-and-gate.md#5e-bs-heavy-run--wait--status--one-heavy-suite-per-machine)
 
 ## [Findings and spec defects](operator-guide/findings.md)
 
@@ -87,8 +91,8 @@ wrong, and the worker-proposed spec change.
 ## [Closing an epic](operator-guide/closing-an-epic.md)
 
 Quorum and verdict, the one check that sees the assembled branch, the
-closing spec review, the second eye, the goal-check and the width
-report.
+closing spec review, the second eye, the goal-check, the width report and
+the cleanup.
 
 - [7. `bs plan quorum` + `bs epic verdict`](operator-guide/closing-an-epic.md#7-bs-plan-quorum--bs-epic-verdict)
 - [7a. `bs integration check` — the only command that sees the branch](operator-guide/closing-an-epic.md#7a-bs-integration-check--the-only-command-that-sees-the-branch)
@@ -97,15 +101,17 @@ report.
 - [7d. `bs crossfind` — a second eye, not a second vote](operator-guide/closing-an-epic.md#7d-bs-crossfind--a-second-eye-not-a-second-vote)
 - [7e. `bs epic goal-check` — the plan against the goal it was cut from](operator-guide/closing-an-epic.md#7e-bs-epic-goal-check--the-plan-against-the-goal-it-was-cut-from)
 - [7f. `bs epic width` — does this factory build in parallel?](operator-guide/closing-an-epic.md#7f-bs-epic-width--does-this-factory-build-in-parallel)
+- [7g. `bs cleanup` — retiring what the epic left behind](operator-guide/closing-an-epic.md#7g-bs-cleanup--retiring-what-the-epic-left-behind)
 
 ## [Severity, waivers and budget](operator-guide/severity-and-budget.md)
 
-What each severity buys, what a waiver costs, and the alarm that counts
-a budget instead of remembering it.
+What each severity buys, what a waiver costs, the alarm that counts a
+budget instead of remembering it, and what the factory spent and caught.
 
 - [8. Severity + waiver semantics, from the operator's chair](operator-guide/severity-and-budget.md#8-severity--waiver-semantics-from-the-operators-chair)
 - [9. Budget alarms + the escalation ladder](operator-guide/severity-and-budget.md#9-budget-alarms--the-escalation-ladder)
 - [9a. `bs budget alarm` — the alarm, counted instead of remembered](operator-guide/severity-and-budget.md#9a-bs-budget-alarm--the-alarm-counted-instead-of-remembered)
+- [9b. `bs stats effectiveness` — what the factory spent and what it caught](operator-guide/severity-and-budget.md#9b-bs-stats-effectiveness--what-the-factory-spent-and-what-it-caught)
 
 ## [Lessons and the daemon](operator-guide/lessons-and-daemon.md)
 

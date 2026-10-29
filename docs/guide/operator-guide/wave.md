@@ -109,7 +109,8 @@ offered ahead of the consumer that imports it. Every task left out is in
 short wave always comes with its explanation. `done` is terminal work
 (`completed`, `waived`); `occupied` is everything non-terminal that is not a
 candidate, which includes `blocked` and `failed`: those are waiting on a
-person, not on nothing, and their worktrees still hold their claims.
+person, not on nothing, and their worktrees still hold their claims. A task
+still running is `occupied` too, read from the log (below).
 
 Three things it deliberately does not do.
 
@@ -137,9 +138,31 @@ or the claim-overlap check, exactly as if it had never been logged. A
 so a follow-up you append by hand must carry the plan's `epic_id` for `wave
 next` to offer it.
 
+The log also says which tasks are running, and with `--session` that outranks
+the plan too: a task the log admitted and has not ended is `occupied`,
+whatever its plan row says. Admitted means named by a `wave-admitted` or by a
+coder `dispatch_decision`; ended means a `wave-merged` or `task-superseded`
+naming it, or an `epic-closed` for its epic. A bounce, a re-dispatch and a
+failed agent run end nothing, so the task stays in flight through them. This
+is what makes `bs plan ingest` safe mid-wave: ingest rewrites the plan file,
+and a running task reads `todo` there again, which without the log would have
+offered it a second time. `wave check --session` refuses such a task by name
+with `wave.in-flight`.
+
 Exit 1 means work remains and none of it can start: a stall worth reporting,
 distinguished from the epic simply being finished, which is an empty `wave`
 with `remaining: 0`.
+
+**Rolling admission.** Because asking mid-wave is safe, `/bs run` does not
+wait for a wave to drain. After every merge the epic session runs `wave next`
+and admits what it returns at once, as a wave of its own: a task whose
+dependencies just landed and whose claims overlap nothing in flight starts
+then, not when the slowest task of its wave finishes. The epic session is the
+only session that admits. A dispatched `bs-wave-runner` queues its own passed
+tasks with `bs queue run` and never runs `wave next` to admit; the epic
+session watches its log with `bs event tail <session-id> --lineage --follow`
+and admits on each `wave-merged` (`.claude/skills/bs/run.md`, "Rolling
+admission").
 
 ### `bs wave audit` — did the wave that was admitted actually run wide?
 
