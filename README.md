@@ -38,7 +38,7 @@ goal → contracts you sign → one worktree per contract, run in parallel
 | Review | The author checks its own work | A fresh-context reviewer that never saw the coder's session |
 | Verification | You run the tests and read the diff | Schema check, tests and coverage evidence, then a verifier whose only job is to refute the reviewer |
 | Merge | You merge what the session produced | A serial merge queue into one integration branch and one pull request that you merge |
-| Long work | One session's context carries the work; compaction summarizes it when the window fills, and what outlives the session is its transcript and the files it wrote | Plans, task states and gate results live on disk, so a new session picks the epic up from the log, and a wave too wide for one window runs in a session of its own |
+| Long work | One session carries the work, with any subagents it starts; compaction summarizes it when the window fills, and what outlives the session is its transcript and the files it wrote | Plans, task states and gate results live on disk, so a new session picks the epic up from the log, and a wave too wide for one window runs in a session of its own |
 | Course change | You or the session change the plan in chat, and the change lives in the conversation | A worker that finds a criterion wrong proposes a plan diff; you approve or reject it, and an approval cuts a new plan version |
 | Lessons | You or the session record what to avoid in CLAUDE.md or memory, and later sessions read it | Errors are classified, a scribe drafts lesson candidates you approve, and each brief carries the lessons for its role and paths |
 
@@ -102,7 +102,9 @@ import edge rather than by a dependency; it exits 1 when the plan stalls and 2
 when tasks are held back that way. Once a wave lands, `bs wave audit` reads the
 log back and says whether a wave admitted N wide ran N wide, and
 `bs epic width` asks the same of every closed epic. All three only read; the
-close records an epic's width and never holds on it.
+close records an epic's width without holding on it, though an external
+judge, when one is enabled, may refute a wave that was admitted and shows no
+work.
 
 Only what the turn needs is loaded. Each `/bs` verb loads its own playbook when
 it runs, and only the verbs that dispatch read the dispatch contract. A
@@ -160,9 +162,10 @@ into one waiver question per epic, answered with `/bs waivers`. Only S3 and S4
 are ever waivable.
 
 A judge's verdict counts only if the worktree did not move under it. The
-playbook runs `bs worktree fingerprint` before every judge and
-`bs worktree verify` after, gitignored paths aside; drift exits 1, and the
-verdict is discarded and the judge dispatched again on a clean tree.
+playbook brackets each judge of a task, and the audit's shared tree, with
+`bs worktree fingerprint` and `bs worktree verify`, gitignored paths aside;
+drift exits 1, and the playbook discards the verdict and dispatches the judge
+again on a clean tree.
 
 </td>
 <td>
@@ -256,9 +259,9 @@ The dashboard is a projection of that log, and `bs db rebuild` reconstructs
 the entire database from the log alone. Nothing the factory did exists only in
 a chat transcript.
 
-Every event after a session's first names the event that caused it, and an
-append whose parent is not already in the log is refused, so any record can be
-followed back to its session's first event
+Every event but a `session-start` names a parent event, and an append whose
+parent is not already in the log is refused, so any record can be followed
+back to a `session-start`
 (`bs stats timeline --causal-chain-for <event-id>`).
 
 </td>
@@ -507,12 +510,12 @@ The fourteen roles, and when each one is dispatched:
 | `bs-uiux` | Writes the UI spec, then checks the tester's screenshots against it | Only for a UI-affecting task: the spec before code, the visual pass once screenshots exist |
 | `bs-coder` | Implements one task, tests first, in its worktree | Every task |
 | `bs-tester` | Adds missing unit coverage, runs e2e, captures screenshots | Every task, after the coder |
-| `bs-grader` | Scores the result against the task's acceptance criteria | Every task, after the tester: two rounds on a huge epic, one below |
+| `bs-grader` | Scores the result against the task's acceptance criteria | Every task, after the tester: at most two rounds on a huge epic, one below |
 | `bs-reviewer` | Reviews the diff read-only, in a fresh context | Every task, with the grader |
-| `bs-security-reviewer` | Reviews the diff for security | Only when `bs security triggers` fires for the task, and for the security axis of `/bs audit` |
+| `bs-security-reviewer` | Reviews a task's diff, or the whole project in an audit, for security | Only when `bs security triggers` fires for the task, and for the security axis of `/bs audit` |
 | `bs-verifier` | Tries to refute the reviewer's findings | On S1 and S2 findings (S1 only on a small epic), plus a 20% sample of S3 on a huge one |
 | `bs-merger` | Resolves a merge-queue conflict | Only when the automatic rebase fails |
-| `bs-wave-runner` | Runs one wave, worktrees through merge queue, in a session of its own | Only when a wave is too wide to carry inline |
+| `bs-wave-runner` | Runs one wave, worktrees through merge queue, in a session of its own | Only when a wave would eat the window the epic session needs to reach its end |
 | `bs-scribe` | Distills lesson candidates, writes the integration PR body and the `/bs report` digest | `/bs lessons` for raw candidates, `/bs report`, and the integration PR |
 | `bs-auditor` | Reads a project on one axis: performance, code quality or architecture | Only in `/bs audit`, three at once |
 
