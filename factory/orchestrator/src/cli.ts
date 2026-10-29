@@ -1260,13 +1260,18 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
   const known = new Set(Object.values(RESULTS_CHECK_FLAGS).flat());
   for (const { key } of args.ordered) {
     if (allowed.includes(key) || !known.has(key)) continue;
-    throw new SmithError(
-      GATE_ONLY_FLAGS.includes(key) ? 'cli.gate-only-flag' : 'cli.flag-not-for-mode',
-      GATE_ONLY_FLAGS.includes(key)
-        ? `--${key} belongs to a full gate line: use --as gate, not --as ${as}.`
-        : `--${key} is not a flag of --as ${as}.`,
-      { flag: key, as, accepted: allowed },
-    );
+    if (GATE_ONLY_FLAGS.includes(key)) {
+      throw new SmithError(
+        'cli.gate-only-flag',
+        `--${key} belongs to a full gate line: use --as gate, not --as ${as}.`,
+        { flag: key, as, accepted: allowed },
+      );
+    }
+    throw new SmithError('cli.flag-not-for-mode', `--${key} is not a flag of --as ${as}.`, {
+      flag: key,
+      as,
+      accepted: allowed,
+    });
   }
   if (as !== 'grader') requireFlag(flags, 'result');
   if (as === 'coder' || as === 'gate') requireFlag(flags, 'worktree');
