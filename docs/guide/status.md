@@ -31,8 +31,9 @@ the findings are ranked, the operator decides at a hard stop, and one epic is
 cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
 is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
 `bs` binary and everything it reads at runtime — policies, schemas,
-scaffold templates, agent role files, migrations. Not the dashboard and not
-the docs. **`/bs` ships beside it, as a plugin**, because it is a Claude Code
+scaffold templates, agent role files, migrations — plus the built dashboard,
+so `bs ui serve` works after an install. Not the docs. **`/bs` ships beside
+it, as a plugin**, because it is a Claude Code
 skill and a session looks for one in a project's `.claude/`, in `~/.claude/`
 or in a plugin — never under `node_modules`, so the tarball's copy of the
 playbooks is in the wrong place by construction. This repository is its own
@@ -40,14 +41,36 @@ marketplace: `claude plugin marketplace add juzser/blacksmith`, then
 `claude plugin install blacksmith@blacksmith`, and what it installs is the
 same `.claude/` a clone uses. Install both halves — the package is the
 deterministic verbs, the plugin is the loop that drives them. What the plugin
-deliberately does not carry is the dashboard and this repo's own enforcement;
-[`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) is the
-record. Installed, `bs`
+deliberately does not carry is the dashboard (the package has it) and, unless
+you switch on the [plugin guard](plugin-guard.md), this repo's own
+enforcement; [`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md)
+is the record. `bs doctor` checks both halves and the machine in one command.
+Installed, `bs`
 writes under `.blacksmith/` in the directory you run it from, or wherever
 `BS_HOME` points — true of every release since `0.1.1`; the registry
 carries `0.5.1`.
 `0.1.0`, the release before it, predates `bs init`, ships no roadmap for
 `bs new` to read, and keeps state inside its own install directory.
+
+What a run **costs and catches** is now a command rather than an estimate:
+`bs stats effectiveness` reads tokens per task and per role from the Claude
+Code transcripts, counts defects found after a merge on a passing gate, and
+reports how often each reviewing role's findings held up
+([operator-guide §9b](operator-guide/severity-and-budget.md#9b-bs-stats-effectiveness--what-the-factory-spent-and-what-it-caught)).
+A **trial kit** for comparing plain Claude Code with Blacksmith on the same
+tasks is built and has **not** been run: the method is
+[`../trial/methodology.md`](../trial/methodology.md), and every number in its
+results template reads NOT MEASURED until a real run fills it.
+
+The loop is built to spend fewer tokens per merged task and to run more
+agents at once, with no judge, check, round or verifier pass removed: each
+brief splices a broad lesson only while its error class keeps recurring,
+waves overlap instead of draining, the judges of one task go out together,
+and heavy suites take turns on one lock per machine. What a test pins is the
+mechanism, not the saving: on the shipped corpus and an empty store, a coder
+brief's lessons block is at most half of what splicing every class would be.
+The end-to-end effect on an epic has not been measured yet.
+[The operator loop](operator-loop.md), step 3, has the short version.
 
 ## The five things to know before you rely on it
 

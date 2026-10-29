@@ -8,11 +8,11 @@ does wherever else this repo cites it.
 
 - **Dispatch orchestration is skill-guided; the background process watches,
   it does not drive.** Phase 7 ships `.claude/skills/bs/SKILL.md` — the
-  operator runs `/bs new|plan|run|status|ui|waivers|lessons|report` in a
-  Claude Code session inside this repo, and that session follows the skill's
-  playbooks: it dispatches planner/coder/tester/reviewer/etc. sessions from
-  `.claude/agents/` itself and drives them through the real `bs` commands
-  in sequence. Phase 10 adds `bs daemon`
+  operator runs `/bs new|mcp|plan|run|audit|use|status|ui|waivers|lessons|report`
+  in a Claude Code session, and that session follows the skill's
+  playbooks: it builds each brief with `bs brief compose`, dispatches
+  planner/coder/tester/reviewer/etc. sessions from `.claude/agents/` itself,
+  and drives them through the real `bs` commands. Phase 10 adds `bs daemon`
   ([`../runbooks/ops.md`](../../runbooks/ops.md)): a standalone background
   process that folds the event log on an interval and reports budget alarms,
   agents that never came back, and rechecks and cadences that are due, so
@@ -100,3 +100,16 @@ does wherever else this repo cites it.
   edits and a decision about which vendor sees this repository's source; until
   you make it, `bs crossfind run` refuses and no diff leaves the machine
   (§7d).
+- **A queued heavy run cannot tell its own dead run from a live one ahead of
+  it.** An agent whose own `bs heavy run` died while another session holds
+  the lock keeps calling `bs heavy wait` until its turn cap (§5e): a queued
+  run writes nothing to its output file until it holds the lock, so nothing
+  tells the two apart. The stop rule — two not-done waits with no holder —
+  covers a run that is gone while the lock is free, and only that.
+- **The heavy lock is one machine's.** It serializes full-suite and e2e runs
+  of every session on the box it lives on, and nothing across machines.
+- **The trial has not been run.** `docs/trial/methodology.md` and `trial/`
+  hold a kit for comparing plain Claude Code with Blacksmith on the same
+  tasks, and every number in its results template reads NOT MEASURED. Nothing
+  in the repository runs it, and nothing here claims an outcome for it;
+  running it, and its spend, is the operator's call.

@@ -13,6 +13,15 @@ Task call is passed to Blacksmith's policy hook. The hook applies the rules in
 that breaks none goes on to Claude Code's normal permission flow, unchanged.
 A force push to main is denied, and `git status` is not.
 
+The same hook also denies two habits that waste an orchestrator's turns, and
+names the fix in the reason. An `Agent` call whose prompt opens with a brief
+marker for one role (the first line `bs brief compose` writes) must go to that
+role's `bs-<role>` agent; one sent to `general-purpose` or to another role is
+denied. A foreground `sleep` of 2 seconds or more is denied too, with a
+background task or the Monitor tool as the fix; a shorter or backgrounded
+sleep, and one inside a script the command runs, are not. A prompt with no
+marker is decided as before.
+
 If the guard is on but cannot reach the hook, it asks you instead of allowing
 the call. The message names the fix: put `bs-policy-hook` on your PATH, or set
 `BS_POLICY_HOOK` to the path of the built `policyHook.js`.

@@ -32,6 +32,19 @@ this epic") → merge on green, bounce on red. The command stops at the
 first non-`merged` outcome and exits `1`; prints the full outcome array
 either way.
 
+Each task's step holds the machine's heavy lock (§5e), under the label
+`queue-<task id>`, from the rebase through the merge and its `wave-merged`.
+So queue runs take turns, across epics and sessions too, and a task's
+cumulative suite always runs on the head the task lands on. A task lands only
+on the head it was rebased onto and tested on: when `bs/<epic>/integration`
+moved meanwhile (a writer outside the queue), nothing lands for it, the
+outcome is `integration-moved`, and you re-run `bs queue run` for that task.
+A lock wait past its limit is different: `heavy.wait-timeout` is not a test
+failure, so the task gets no `tests-failed` outcome and the whole command
+fails, naming the holder, without printing the outcomes of the tasks it merged
+before it. Those stay merged; read them from the session's `wave-merged`
+events and re-queue only the rest (`.claude/skills/bs/wave.md` step 10).
+
 `--test-cmd` runs in the task's worktree with this process's environment
 minus every `BS_*` variable, and the gate's own check commands run the
 same way. A command the factory launches on a project's behalf belongs to
@@ -48,6 +61,11 @@ than for the factory running it, state it in the command
 (`--test-cmd 'BS_CROSSCHECK_OFFLINE=1 pnpm test'`), which is what
 `docs/runbooks/providers.md` means by passing it per command. The shell
 applies anything the command string sets after this strip.
+
+A command that runs under the heavy lock gets two back, and only two:
+`BS_HEAVY_LOCK_TOKEN` and `BS_HEAVY_LOCK_DIR`, the lease it runs under. A suite
+that itself calls `bs heavy run` then re-enters the lock its parent holds,
+instead of waiting on itself until the wait times out.
 
 *The merge order is the plan's, not the file's*: the ids are resolved
 against the plan and the set is then sorted topologically by the plan's
@@ -179,8 +197,9 @@ CPU-bound suite that is the honest cost, not a wasted one: measured on this
 repo's own root suite (10 CPUs), one run alone is ~268s green, two concurrent
 runs are ~331s green, and four concurrent runs are ~475s and all four come
 back flaky on timing. Parallel *lanes* make the machine do more work at once
-and get less total work done for it — so `--batch` does not add lanes, it
-shrinks the number of suite runs:
+and get less total work done for it — which is also why one machine runs one
+heavy suite at a time (§5e) — so `--batch` does not add lanes, it shrinks the
+number of suite runs:
 
 ```bash
 bs queue run epic-1 \
@@ -198,7 +217,8 @@ one task's claims overlaps another's, nothing in the group touches a
 group `depends_on` another one in it — stacks each group into a single
 candidate commit (`git merge-tree` + `commit-tree`, the same plumbing §4
 uses for a lone merge), and tests the *group* once instead of testing every
-task in it separately. A green group lands every task in it — one suite run
+task in it separately, under the heavy lock (label
+`queue-batch-<first task id>`). A green group lands every task in it — one suite run
 for however many tasks it holds. `--batch` additionally needs `--plan`'s
 dependency edges and, for a `--tasks` entry that omits its own `claims`, its
 claim list — on top of the `--plan`/`--session`/`--causal-parent` envelope
@@ -308,14 +328,24 @@ bs gate run epic-1/task-1 \
   verdict (D-19).
   `--artifacts-dir <dir>` moves the root, which is for tests and replays; the
   default is the repo's `state/artifacts`.
-- `checks.json` — `Array<{ name, cmd, timeout_ms? }>`, run sequentially in the
-  worktree (first failure short-circuits unless `--run-all`, which the task
-  gate takes bare — its value would be read as the `<task-id>` positional).
+- `checks.json` — `Array<{ name, cmd, timeout_ms?, heavy? }>`, run
+  sequentially in the worktree (first failure short-circuits unless
+  `--run-all`, which the task gate takes bare — its value would be read as
+  the `<task-id>` positional).
   Every check gets the same five-minute timeout unless its own entry sets
   `timeout_ms`, which overrides it for that check alone; refused at read time,
   before any check runs, if it is not a positive whole number of
   milliseconds at most 2147483647 (Node's `setTimeout` ceiling — above it
   the delay clamps to 1ms and the check would time out instantly).
+  A heavy check runs under the machine's heavy lock (§5e), taken when its
+  turn comes and released before the next check. `heavy: true` or `false`
+  decides it; unset, a check is heavy when its name is `unit` or `coverage` or
+  starts with `test` or `e2e`, so `lint` and `typecheck` never wait. A `heavy`
+  that is not a boolean is refused at read time (`gate.invalid-check-heavy`).
+  Each check's result carries `lock_wait_ms`, which is not counted against
+  `timeout_ms`; a lock wait that times out fails that check with
+  `reason: "heavy.wait-timeout"` and the holder in its `tail`, so the gate
+  reads `tests-failed`.
 - `--grader` — the grader's own result file for this task
   (`state/results/<task-id>.grader-r<round>.json`). Its `structured_output` is
   validated against `grader-verdict.schema.json`, and the rubric gates: any
@@ -788,3 +818,72 @@ Recording the same result twice is a no-op rather than a second row:
 `task-result-recorded` is deduped by content hash within the session's
 lineage (§5b), so a byte-identical re-run returns the same `eventId` with
 `deduped: true`.
+
+## 5e. `bs heavy run` / `wait` / `status` — one heavy suite per machine
+
+A full suite or an e2e run uses every CPU the machine has, and an e2e suite
+often binds a fixed port, so two of them at once on one machine slow each
+other down and come back flaky (§4c measured it). Sessions on the same
+machine used to collide anyway: two epics at the gate, a tester's e2e run
+beside another task's merge queue. Now they take turns on one lock per
+machine, a file at `~/.blacksmith/locks/heavy.lock` (`$BS_HEAVY_LOCK_DIR`
+moves it).
+
+Three verbs take it themselves, so you never wrap them: `bs gate run` and
+`bs integration check` hold it for each heavy check (§5) and for no other, and
+`bs queue run` holds it for each task's step (§4). Anything else that runs a
+full suite or e2e goes through `bs heavy run`:
+
+```bash
+bs heavy run --label task-4-coder -- pnpm run test
+```
+
+Everything after the bare `--` is the command. It waits for the lock (an hour
+by default; `--max-wait-ms` changes that), runs the command under it, and
+exits with the command's code. A wait that runs out exits 75 with the holder
+named, and the command never runs:
+
+```json
+{"error":{"code":"heavy.wait-timeout","message":"heavy lock held by pid 37075 (label task-4-coder, cwd /abs/path/.wt/my-project/task-4, started 2026-10-29T04:12:39.206Z); waited 504ms; inspect /Users/you/.blacksmith/locks/heavy.lock","details":{"pid":37075,"label":"task-4-coder","cwd":"/abs/path/.wt/my-project/task-4","startedAt":"2026-10-29T04:12:39.206Z","lockPath":"/Users/you/.blacksmith/locks/heavy.lock","waitedMs":504}}}
+```
+
+Who holds it, or `{}` when nobody does:
+
+```bash
+bs heavy status
+```
+
+```json
+{"pid":37075,"token":"4792f1e6-c5bf-4592-ac0c-882eae834805","label":"task-4-coder","startedAt":"2026-10-29T04:12:39.206Z","cwd":"/abs/path/.wt/my-project/task-4"}
+```
+
+A live holder is never stolen, however old the lock is; age is no evidence. A
+lock is taken over only when its pid is dead or the file is empty or
+unparseable, and a wait that outlasts a live holder is the timeout above, not
+a takeover.
+
+An agent cannot block on a run that may queue for an hour: a foreground Bash
+call ends at ten minutes, and a turn spent waiting is a turn taken from its
+cap. So the agents that run suites start the run in the background, write its
+output to a new file that ends with an `EXIT=<n>` line, and wait with
+`bs heavy wait`, a read-only poll whose every call ends inside the Bash
+tool's timeout:
+
+```bash
+bs heavy wait --file <out>
+```
+
+```json
+{"done":false,"waited_ms":1027,"holder":{"pid":37075,"label":"task-4-coder","…":"…"},"idle_ms":3653.5,"next":{"max_wait_ms":540000,"bash_timeout_ms":600000}}
+{"done":true,"exit":0,"tail":"…"}
+```
+
+`done`, not the exit code, says whether to call again: a not-done call exits
+124, and so can a suite. `next` is the bound and the Bash timeout of the next
+call: the long one while the file exists and a holder is named, 100000 and
+120000 otherwise. On `done: true` the exit code is the run's, with the last 40
+lines before the `EXIT=` line as `tail`. The rule the agents follow, word for
+word, is the `heavy-run` fragment (`.claude/fragments/heavy-run.md`), stamped
+into the eleven role templates that run a suite. Their output files go under
+`state/results/` of the work root, never into the worktree, so neither a
+commit nor a judge's fingerprint sees them.

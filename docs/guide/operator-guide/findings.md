@@ -172,6 +172,11 @@ it does not do is appear on the Kanban or the Flow graph until a gate event
 names the task by accident, and then as a bare row with none of the above
 (the 2026-09-14 cross-provider UI check found two epics in that state).
 
+Ingesting mid-wave is safe. A task already running reads `todo` in the plan
+file again afterwards, but `bs wave next --session` keeps it occupied from the
+log's admission, and `bs wave check --session` refuses it with
+`wave.in-flight` (§2), so the next admission never offers it twice.
+
 ## 6b. Worker-proposed spec changes — the third exit
 
 §6a assumes a judge found the wrong criterion. Usually the worker finds it

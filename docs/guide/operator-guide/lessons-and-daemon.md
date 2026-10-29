@@ -21,7 +21,10 @@ does wherever else this repo cites it.
 5. Approved lessons compile into `factory/policies/lessons.md`, sectioned
    by `lesson_scope`, and inject **step-wise** at the matching decision
    point (a coder gets claim-path-scoped rules at dispatch; a merger gets
-   integration rules at queue time) — never as one global preamble.
+   integration rules at queue time) — never as one global preamble. Each
+   lesson names the error class it guards against, and the broad scopes are
+   spliced only while that class keeps recurring; the rest wait until a
+   brief needs them (below).
 
 Built (Phase 7): `bs dream [--since]` is the "dreaming pass"
 (`factory/orchestrator/src/lessons.ts`'s `extractDecisionCheckpoints`);
@@ -29,8 +32,9 @@ Built (Phase 7): `bs dream [--since]` is the "dreaming pass"
 Jaccard similarity, not SAGE's embedding-density check — the "uncertain →
 one LLM merge step" middle tier from step 3 above is a documented future
 upgrade, never built). `bs lessons candidates`/`approve`/`reject`/
-`compile` are the CLI side of steps 4–5; the Lessons UI page (§10) is the
-operator-facing side of the same review.
+`compile` are the CLI side of steps 4–5, and `/bs lessons` is the
+operator-facing side of the same review; the dashboard's Lessons page only
+shows it.
 
 Step 5's injection half is `bs lessons for-dispatch <role> [--plan
 plan-vN.json --task <task-id>]` (Phase 9, P9-2): it reads the compiled
@@ -40,7 +44,35 @@ filters it to the scopes that role's template declares through its
 block ready to splice into the prompt. That is what makes it step-wise rather
 than a global preamble: the coder's dispatch carries claim-path lessons for
 its own claims, the merger's carries integration lessons at queue time, and
-neither sees the other's. The `/bs` skill calls it before every dispatch.
+neither sees the other's. `bs brief compose` (§3d) calls it for every brief
+it builds.
+
+**Spliced by recurring class.** Every lesson carries one `error_class`, a
+`group.class` from `taxonomy.yml`'s `error` dimension, written as a
+`- error_class:` bullet in the compiled file; one that fits no specific class
+carries `other.unclassified`. `agent-role` and `claim-path` lessons are
+already narrow and are always spliced. A `stack-wide`, `case-type` or
+`security` lesson is spliced only when its class **recurs** (`error-logged`
+events of that class on at least 3 distinct tasks in the last 30 days, across
+every session in the store) or **repeats** in the dispatch's own epic (at
+least one such event there; pass `--epic <epic>` when you run it by hand).
+Every other one is withheld, and the block's last line names each withheld
+class with its count and the command that reads it:
+
+```
+Withheld lessons (class not recurring): spec.spec-gap (0 tasks, read with "bs lessons for-dispatch --class spec.spec-gap"); …
+```
+
+`--class <group.class>` returns exactly that class's approved lessons. A
+bounce logs `error-logged` with its class, so the brief for the fix round
+splices that class's lessons without anyone asking for them. A
+security-reviewer brief withholds nothing, of any scope. A lesson with no
+class, or one whose class has left the taxonomy, is read as
+`other.unclassified` and named in `warnings`. The JSON carries the block as
+`text` and the withheld ids as `withheld`; the `lessons` array itself is left
+out unless you pass `--full`. On an empty store nothing recurs yet, so a brief
+splices only the `agent-role` and `claim-path` lessons its template declares,
+and names every other class in that last line.
 
 **Every scope carries its own selector** (D-129). Three of the five scopes
 filter on exactly one field, and each entry must name it:
@@ -93,11 +125,13 @@ untouched. The id defaults to a hash of the statement, so re-raising the same
 text collides rather than forking a duplicate. Optional `--finding-category`,
 `--claim-path` (required for `claim-path` scope), `--agent-role` (required for
 `agent-role` scope), `--case-type` (required for `case-type` scope),
-`--lesson-id`, `--novelty-threshold`. The three selector flags are refusals,
-not warnings: a selector scope with nothing to select on compiles into a
-section no dispatch reads. `lessons approve` takes `--agent-role`/`--case-type`
-too, so narrowing a candidate to a selector scope can name the selector in the
-same edit.
+`--error-class` (a `group.class` from the taxonomy's `error` dimension; an
+unknown one is refused by name, and a lesson raised without one is read as
+`other.unclassified`), `--lesson-id`, `--novelty-threshold`. The three
+selector flags are refusals, not warnings: a selector scope with nothing to
+select on compiles into a section no dispatch reads. `lessons approve` takes
+`--agent-role`/`--case-type` too, so narrowing a candidate to a selector scope
+can name the selector in the same edit.
 
 Warnings are printed, not fatal. The one you will see most is a file-scoped
 `rule` with no `finding_category`: it will be injected at dispatch and will
@@ -165,26 +199,20 @@ approval whose text is not novel exits 1 with the transition applied** — it
 landed, and it is a duplicate; both are true, and the exit code reports the
 second.
 
-**The UI's lesson actions run the same gate (P9-36).** Approve, Reject and
-Edit in the Lessons page all go through `transitionLesson` now, so the button
-and the CLI refuse the same things: an illegal transition, an out-of-taxonomy
-tag, an edit that duplicates an existing lesson. Two consequences worth
-knowing before you click:
+**Every lesson decision goes through the CLI.** The dashboard's Lessons page
+once carried Approve, Reject and Edit buttons that ran this same gate (P9-36);
+they are gone, because the dashboard only reads. `/bs lessons` drives
+`bs lessons approve` and `bs lessons reject`, so the novelty gate above is the
+one door, and keeping a duplicate takes `--accept-duplicate`, recorded on the
+event as a deliberate act. A transition folds the lineage of the `--session`
+you pass, so pass the session that raised the lesson or one that continues
+it; a lesson id that lineage does not hold is refused with
+`lessons.unknown-lesson` rather than written into another session's history.
 
-- **The session is derived from the lesson, not from what the page sends.** A
-  transition folds one log, and it is always the log that raised the lesson.
-  You cannot approve a lesson into a different session's history by accident.
-- **A duplicate edit is refused with no override in the UI.** The error names
-  the lesson it duplicates and its score. If you genuinely mean to keep the
-  duplicate, do it from the CLI with `bs lessons approve --statement ...
-  --accept-duplicate` — which records the override on the event. That
-  asymmetry is intentional: overriding the memory gate should take a
-  deliberate act, not a second click.
-
-If a lesson's session log has been archived off disk, the action fails with
-`events.unknown-session` and prints the path it expected. The lesson is still
-in SQLite — the projection outlives the log — but a transition needs the log
-to fold. Restore it, or leave the lesson alone.
+If a lesson's session log has been archived off disk, the transition fails
+with `events.unknown-session` and prints the path it expected. The lesson is
+still in SQLite — the projection outlives the log — but a transition needs the
+log to fold. Restore it, or leave the lesson alone.
 
 **Known limitation — polarity conflicts.** The novelty gate additionally
 never auto-rejects a near-duplicate whose imperative polarity contradicts
@@ -383,24 +411,29 @@ Run against a session with no severity decisions, it still says something true
 about the corpus itself:
 
 ```json
-{"reach":{"total":24,"escalating":0,"withoutCategory":24,
-          "nonFileScoped":2,"categoriesCovered":[]},
- "counts":{"keep":0,"review":0,"retire":0,"rescope":0,"no-evidence":24},
- "status":"unverifiable","ok":false}
+{"reach":{"total":112,"escalating":16,"withoutCategory":94,
+          "nonFileScoped":7,"categoriesCovered":["correctness","maintainability"]},
+ "counts":{"keep":0,"review":0,"retire":13,"rescope":0,"no-evidence":99},
+ "status":"defective","ok":false}
 ```
 
-**None of the 24 compiled lessons can escalate anything.** All 24 name no
-`finding_category`, so none of them participates in the escalation match at
-all; they are spliced into role prompts instead, and this audit is honest that
-it cannot measure that path. Two are not file-scoped on top of it. That is not
-a bug the audit found in itself — it is the state of the corpus, and it is why
-`status` is `unverifiable` rather than `clean`: a corpus that cannot fire is
-not a corpus that is working.
+**Sixteen of the 112 compiled lessons can escalate anything, and 13 of those
+never will.** The other 94 name no `finding_category`, so they take no part in
+the escalation match; they are spliced into role prompts instead (§10, by
+recurring class), and this audit is honest that it cannot measure that path.
+Seven are not file-scoped on top of it. Of the sixteen that do escalate, 13
+are `correctness` entries on `claim_path: **` that sit behind an earlier
+`correctness` entry on `**`: that one provably covers every path they cover,
+and the match returns the first hit, so they are `unreachable` and the
+recommendation is `retire`. That is the state of the corpus, not of any run,
+which is why `status` is `defective` however little the log holds.
 
-The fix is upstream, in what `bs dream` and the scribe write: a checkpoint
-distilled without a `finding_category` compiles to an entry the severity gate
-can never reach. Until those entries carry one, `kpi same-mistake` above is
-reading a number the corpus could not have moved.
+Both fixes are upstream, in what `bs dream`, the scribe and the approvals
+write. A checkpoint distilled without a `finding_category` compiles to an
+entry the severity gate can never reach, and a broad `**` rule approved after
+another of the same category is one it can never return. Until those entries
+change, `kpi same-mistake` above is reading a number most of the corpus could
+not have moved.
 
 ## 11. `bs daemon` — the same folds, without an open session
 

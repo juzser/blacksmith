@@ -26,16 +26,18 @@ yet — a finding already granted or denied never resurfaces. Answer with:
 bs waivers apply decisions.json --session <session-id> --plan-version 1 --causal-parent <event-id> --actor operator
 ```
 
-`--actor` is not decoration. The Timeline page's **Decisions** toggle shows a
-`waiver-granted`, `waiver-denied`, `lesson-status-changed` or `operator-note`
-event only when its actor is a person, so that the factory's own traffic under
-those same types stays out; `planSignOffCheckpoint` asks the same of `plan-version-created`
-before a plan sign-off becomes a lesson checkpoint. Three spellings count as a
+`--actor` is not decoration. The dashboard server's decisions filter on the
+timeline (`/api/timeline?decisionsOnly=true`; the Activity page shows no such
+toggle) keeps a `waiver-granted`, `waiver-denied`, `lesson-status-changed` or
+`operator-note` event only when its actor is a person, so that the factory's
+own traffic under those same types stays out; `planSignOffCheckpoint` asks the
+same of `plan-version-created` before a plan sign-off becomes a lesson
+checkpoint. Three spellings count as a
 person — `operator`, `user` (the default when a decision verb is given no
 `--actor`) and
 `operator-skill` (what the operator console passes). Anything else — `system`,
 or an agent role such as `planner` or `scribe` — records the decision durably
-but keeps it off the lens. The list lives in
+but keeps it out of that filter. The list lives in
 `factory/orchestrator/src/actors.ts` (D-164); add a spelling there, with its
 reason, rather than in a caller.
 
@@ -246,5 +248,63 @@ not as near-zero spend.
 - The projection prices each unmeasured dispatch at its role's *cap*, a p90
   rather than a maximum. So `at-risk` means "could cross", not "will", and
   `under` means "under on these prices", not a guarantee.
-- Judge tokens are never recorded anywhere, at any budget. Until a dispatch
-  harness writes them down, no number here is the real bill.
+- Judge tokens never reach the event log, at any budget, so no number here is
+  the real bill. `bs stats effectiveness` (§9b) reads every role's spend,
+  judges included, from the Claude Code transcripts after the fact; this
+  alarm does not read it.
+
+## 9b. `bs stats effectiveness` — what the factory spent and what it caught
+
+§9a prices what the log cannot see. This reads what was actually spent, from
+the place Claude Code writes it down, and sets it beside what the reviewing
+roles caught:
+
+```bash
+bs stats effectiveness --session <session-id> [--json]
+bs stats effectiveness --lineage <session-id> [--json]
+```
+
+Name exactly one of the two: `--session` reads that one log, `--lineage` that
+session and every session it continues. `--claude-config-dir` points at
+another Claude Code config directory (the default is `$CLAUDE_CONFIG_DIR`,
+then `~/.claude`). It reads, never writes, and prints three things.
+
+**Tokens per task and per role**, read from the session transcripts and
+matched to the dispatches in the log. Spend has one definition, the one the
+dashboard's Home uses for Budget used: input, cache creation and output tokens,
+cache reads left out, a response repeated under the same message and request
+id counted once. Spend no dispatch accounts for, such as the main thread's own
+turns, is reported as `unattributed` and never spread over tasks. A total fed
+by a missing, unreadable or partial transcript reads "at least <n>": it is a
+floor, never a guess. The wave-runner, coder and tester keep a 1h prompt
+cache, so a pause of minutes between their own calls re-reads the cache
+instead of writing it again; their templates set it, and
+`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` or the `subagentPromptCacheTtl`
+setting overrides it.
+
+**Escaped defects**: a finding or issue that names a task after its
+`wave-merged`, on a task whose gate passed. It counts once confirmed or
+fix-*, shows as pending while still raised, and is left out when refuted; a
+recurring error counts once.
+
+**Finding precision per reviewing role**: confirmed / (confirmed + refuted +
+waived), shown with its counts. A role with no decided finding reads NOT
+MEASURED, never 0.
+
+```json
+{"tokens":{"byTask":{},"byRole":{},"unattributed":{"used":0,"complete":false,"agentIds":[],"sessionIds":["<cli-session-id>"]},"complete":false,"resultsMeasured":0,"resultsUnmeasured":0,"resultEventIds":{"measured":[],"unmeasured":[]}},
+ "escapedDefects":{"count":0,"pending":0,"items":[],"excluded":[],"uncounted":[]},
+ "precision":{}}
+```
+
+That is a session with nothing measured yet: `complete: false` because a
+transcript was missing, and every list empty rather than zero-filled.
+
+**Sharing it is a separate, opt-in step.** `bs report export --session <id>`
+writes the same numbers, with a report digest and each task's checks shown as
+passed, failed, not run or unknown, as Markdown on stdout or to
+`--out <file>` (`--json` for the same content as JSON). Home and temp paths
+and user names are replaced, transcript text is never read, and nothing is
+sent anywhere. Its first line is "Review this export before you share it."
+Read it before it leaves the machine; whether to share it is yours to decide.
+`/bs report` offers it as its last step, only when you ask for a file.
