@@ -232,7 +232,7 @@ Two parts, both mandatory.
 **1. Write the full spec** to `state/results/<task-id>.uiux-spec.json` for a
 pre-code spec, or `state/results/<task-id>.uiux-visual.json` for a post-test
 visual pass — never the bare `state/results/<task-id>.json`, which is the
-coder's and the tester's own result path, and the same task can carry both a
+coder's own result path (the tester's is `state/results/<task-id>.tester.json`), and the same task can carry both a
 spec and a visual-pass result over its lifetime. Each is an object with
 exactly these three keys:
 

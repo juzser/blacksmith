@@ -92,6 +92,17 @@ before hand-off. One entry per task.
   which `environment` field holds every check's clock and load evidence and
   which events carry `environment_evidence`.
 
+- **The closing review's second round** (`task-8-close-review-r2-fixes`).
+  `bs brief compose` writes each coder's, tester's and grader's filled
+  hand-back preflight line, and each coder's and tester's gate check commands
+  (heavy ones marked), from `--provider`, `--model-tier`, `--base`, `--checks`
+  and `--work-root`; it refuses a brief without them, and `bs dispatch lint`
+  exits 1 on a coder, tester or grader brief that lacks them. A `grader-invalid`
+  is the grader's to fix, in its own turn, never a `gate run` or a builder; a
+  screenshots block is the tester's to fix. The tester's result file is
+  `state/results/<task-id>.tester.json`, and `wave.md` and `queue-and-gate.md`
+  bound a branch-4 return at one per task with one shared sentence.
+
 ### Changed
 
 - **The CLI tests run as ten files, and CI runs e2e in two shards.**

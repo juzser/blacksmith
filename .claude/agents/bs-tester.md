@@ -141,7 +141,7 @@ same worktree, recording its HEAD as the proof your screenshots are fresh
 (D2) — commit before that call, not after, or the recorded HEAD won't match
 what you shot.
 
-**2. Write the full result** to `state/results/<task-id>.json` — an object
+**2. Write the full result** to `state/results/<task-id>.tester.json` — an object
 with exactly these three keys:
 
 - `run_status` — `done` if the suite is green and the spec's coverage is met,
@@ -197,7 +197,7 @@ Your preflight line, with the brief's values filled in:
 **3. Return one line** as your final message — this JSON and nothing else:
 
 ```
-{"status": "done", "artifact_path": "state/results/<task-id>.json"}
+{"status": "done", "artifact_path": "state/results/<task-id>.tester.json"}
 ```
 
 Never return the transcript or a test-by-test log: under uncapped fan-out the

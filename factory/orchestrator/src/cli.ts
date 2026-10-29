@@ -6111,6 +6111,11 @@ async function main(): Promise<number> {
       ...(flags.branch ? { branch: flags.branch } : {}),
       ...(turnBudget !== undefined ? { turnBudget } : {}),
       ...(flags.artifact ? { artifactPath: flags.artifact } : {}),
+      ...(flags.provider ? { provider: flags.provider } : {}),
+      ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
+      ...(flags.base ? { base: flags.base } : {}),
+      ...(flags.checks ? { checks: readChecksFile(flags.checks) } : {}),
+      ...(flags['work-root'] ? { workRoot: flags['work-root'] } : {}),
       events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
         now,
         windowDays: RECUR_WINDOW_DAYS,

@@ -6,6 +6,7 @@ import { readTemplateMaxTurns } from '../src/agentsSync.js';
 import { composeBrief } from '../src/briefCompose.js';
 import { parseBriefMarker } from '../src/briefMarker.js';
 import {
+  GATE_CHECKS_HEADING,
   lintDispatchPrompt,
   parseDeclaredArtifactLine,
   parseStatedTurns,
@@ -99,6 +100,11 @@ const base = () => ({
   agentsDir,
   lessonsPath,
   eventOpts: { stateDir },
+  provider: 'claude',
+  modelTier: 'mid',
+  base: 'bs/project-a/integration',
+  workRoot: path.join(dir, 'work'),
+  checks: [{ name: 'unit', cmd: 'run-the-suite' }],
 });
 
 const artifactFor = (role: string) => path.join(dir, 'artifacts', `${role}.json`);
@@ -347,6 +353,8 @@ describe('composeBrief error codes and manifest depth', () => {
       'findings',
       'return_discipline',
       'envelope',
+      'preflight',
+      'gate_checks',
     ]);
     const sum = Object.values(manifest.sections).reduce((a, b) => a + b, 0);
     // sections are joined by a blank line and the text ends in one newline
@@ -413,5 +421,199 @@ describe('composeBrief shared text from dispatch.md (epic criterion 5)', () => {
     expect(await codeOf(composeBrief({ ...base(), role: 'coder', dispatchDoc }))).toBe(
       'playbook.ambiguous-section',
     );
+  });
+});
+
+// Task-8 close-review r2 (f-bs-gate-bounce/integration-fdeb317e and siblings):
+// the composer writes each worker's filled preflight line and gate checks.
+describe('composeBrief preflight and gate_checks sections', () => {
+  const workRoot = () => path.join(dir, 'work');
+  const lineOf = (text: string) =>
+    text.split('\n').find((l) => l.startsWith('bs results check ')) as string;
+  const flagNames = (line: string) => [...line.matchAll(/ --([a-z-]+)/g)].map((m) => m[1]);
+
+  it('writes the coder line, Result file and gate_checks with absolute, filled values', async () => {
+    const { text } = await composeBrief({ ...base(), role: 'coder' });
+    const result = path.join(workRoot(), 'state', 'results', `${TASK}.json`);
+    expect(text).toContain(`Result file: ${result}`);
+    expect(text).toContain(
+      'Hand-back preflight line (run it as your last step, exactly as written):',
+    );
+    expect(lineOf(text)).toBe(
+      `bs results check ${TASK} --as coder --result ${result} --agent coder --provider claude --model-tier mid --worktree ${worktree} --base bs/project-a/integration --artifacts-dir ${path.join(workRoot(), 'state', 'artifacts')}`,
+    );
+    expect(text).toContain(`${GATE_CHECKS_HEADING}\n- unit (heavy):\n    run-the-suite\n`);
+  });
+
+  it('writes the tester its own result file and a --plan that is absolute even for a relative --plan', async () => {
+    const rel = path.relative(process.cwd(), fixturePlan);
+    const { text } = await composeBrief({ ...base(), role: 'tester', planFile: rel });
+    const coderFile = path.join(workRoot(), 'state', 'results', `${TASK}.json`);
+    const testerFile = path.join(workRoot(), 'state', 'results', `${TASK}.tester.json`);
+    expect(testerFile).not.toBe(coderFile);
+    expect(text).toContain(`Result file: ${testerFile}`);
+    expect(lineOf(text)).toBe(
+      `bs results check ${TASK} --as tester --result ${testerFile} --agent tester --provider claude --model-tier mid --plan ${fixturePlan} --artifacts-dir ${path.join(workRoot(), 'state', 'artifacts')}`,
+    );
+    expect(text).toContain(GATE_CHECKS_HEADING);
+  });
+
+  it('writes the grader line from its declared artifact with no Result file or gate_checks', async () => {
+    const artifactPath = artifactFor('grader');
+    const { text, manifest } = await composeBrief({ ...base(), role: 'grader', artifactPath });
+    expect(lineOf(text)).toBe(
+      `bs results check ${TASK} --as grader --grader ${artifactPath} --artifacts-dir ${path.join(workRoot(), 'state', 'artifacts')}`,
+    );
+    expect(text).not.toContain('Result file:');
+    expect(manifest.sections).toHaveProperty('preflight');
+    expect(manifest.sections).not.toHaveProperty('gate_checks');
+  });
+
+  it('keeps the flag names and order of the line in wave.md step 8 and in the role template', async () => {
+    const wave = await readFile(path.join(REPO_ROOT, '.claude', 'skills', 'bs', 'wave.md'), 'utf8');
+    for (const role of ['coder', 'tester', 'grader']) {
+      const artifactPath = artifactFor(role);
+      const { text } = await composeBrief({ ...base(), role, artifactPath });
+      const documented = wave
+        .split('\n')
+        .find((l) => l.includes(`bs results check <task-id> --as ${role} `)) as string;
+      expect(flagNames(lineOf(text))).toEqual(flagNames(documented));
+      const template = await readFile(path.join(agentsDir, `bs-${role}.md`), 'utf8');
+      const sample = template.split('\n').find((l) => l.includes(`--as ${role}`)) ?? documented;
+      expect(flagNames(sample)).toEqual(flagNames(lineOf(text)));
+    }
+  });
+
+  it('quotes a work root holding a space and a single quote as one word', async () => {
+    const odd = path.join(dir, "it's a root");
+    const { text } = await composeBrief({ ...base(), role: 'coder', workRoot: odd });
+    const quoted = `'${path.join(odd, 'state', 'artifacts').replaceAll("'", "'\\''")}'`;
+    expect(lineOf(text).endsWith(`--artifacts-dir ${quoted}`)).toBe(true);
+    const report = await lintDispatchPrompt({
+      prompt: text,
+      role: 'coder',
+      taskId: TASK,
+      sessionId,
+      agentsDir,
+      eventOpts: { stateDir },
+    });
+    expect(report.preflight.status).toBe('ok');
+  });
+
+  it('marks a check heavy as isHeavyCheck says, lists commands verbatim and refuses none for their content', async () => {
+    const checks = [
+      { name: 'unit', cmd: 'a' },
+      { name: 'lint', cmd: 'b' },
+      { name: 'lint-heavy', cmd: 'c', heavy: true },
+      { name: 'test', cmd: 'd', heavy: false },
+      { name: 'odd', cmd: 'echo <x>\n\n  indented' },
+    ];
+    const { text } = await composeBrief({ ...base(), role: 'coder', checks });
+    expect(text).toContain(
+      `${GATE_CHECKS_HEADING}\n- unit (heavy):\n    a\n- lint:\n    b\n- lint-heavy (heavy):\n    c\n- test:\n    d\n- odd:\n    echo <x>\n    \n      indented\n`,
+    );
+  });
+
+  it.each([
+    ['missing', { name: 'x' }],
+    ['numeric', { name: 'x', cmd: 7 }],
+    ['empty', { name: 'x', cmd: '' }],
+    ['blank', { name: 'x', cmd: '  \n ' }],
+  ])('refuses a check whose cmd is %s, naming the check', async (_label, check) => {
+    const err = await composeBrief({
+      ...base(),
+      role: 'coder',
+      checks: [check as never],
+    }).catch((e) => e as { code: string; message: string });
+    expect((err as { code: string }).code).toBe('brief.invalid-value');
+    expect((err as { message: string }).message).toContain('"x"');
+    expect((err as { message: string }).message).toContain('cmd');
+  });
+
+  it('refuses missing values with brief.preflight-values-required naming each flag', async () => {
+    const miss = async (role: string, drop: Record<string, undefined>) => {
+      const err = (await composeBrief({
+        ...base(),
+        role,
+        artifactPath: artifactFor(role),
+        ...drop,
+      }).catch((e) => e)) as { code: string; message: string };
+      return err;
+    };
+    const coder = await miss('coder', {
+      provider: undefined,
+      modelTier: undefined,
+      base: undefined,
+      workRoot: undefined,
+      checks: undefined,
+    });
+    expect(coder.code).toBe('brief.preflight-values-required');
+    for (const f of ['--provider', '--model-tier', '--base', '--work-root', '--checks']) {
+      expect(coder.message).toContain(f);
+    }
+    const noBase = await miss('tester', { base: undefined });
+    expect(noBase).not.toBeInstanceOf(Error); // a tester takes no --base
+    const tester = await miss('tester', { provider: undefined, workRoot: undefined });
+    expect(tester.code).toBe('brief.preflight-values-required');
+    expect(tester.message).not.toContain('--base');
+    const grader = await miss('grader', { workRoot: undefined });
+    expect(grader.code).toBe('brief.preflight-values-required');
+    expect(grader.message).toContain('--work-root');
+    const empty = await composeBrief({ ...base(), role: 'coder', checks: [] }).catch((e) => e);
+    expect(empty.code).toBe('brief.preflight-values-required');
+  });
+
+  it('refuses a vocabulary miss, a relative work root and unsafe values as brief.invalid-value', async () => {
+    const codeAndMessage = async (extra: Record<string, unknown>) => {
+      const err = (await composeBrief({ ...base(), role: 'coder', ...extra }).catch((e) => e)) as {
+        code: string;
+        message: string;
+      };
+      return err;
+    };
+    const provider = await codeAndMessage({ provider: '<name>' });
+    expect(provider.code).toBe('brief.invalid-value');
+    expect(provider.message).toContain('--provider');
+    expect(provider.message).toContain('claude, codex');
+    const tier = await codeAndMessage({ modelTier: 'huge' });
+    expect(tier.message).toContain('--model-tier');
+    expect(tier.message).toContain('frontier, mid, small');
+    const rel = await codeAndMessage({ workRoot: 'work' });
+    expect(rel.code).toBe('brief.invalid-value');
+    expect(rel.message).toContain('--work-root');
+    for (const bad of ['a\nb', ' ', 'x\u0007y', '<ref>']) {
+      const err = await codeAndMessage({ base: bad });
+      expect(err.code).toBe('brief.invalid-value');
+      expect(err.message).toContain('--base');
+    }
+    const badName = await codeAndMessage({ checks: [{ name: 'a\nb', cmd: 'x' }] });
+    expect(badName.code).toBe('brief.invalid-value');
+    const blankName = await codeAndMessage({ checks: [{ name: ' ', cmd: 'x' }] });
+    expect(blankName.code).toBe('brief.invalid-value');
+  });
+
+  it('keeps every existing refusal first and the other roles unchanged', async () => {
+    const noWorktree = await composeBrief({ ...base(), role: 'coder', worktree: undefined }).catch(
+      (e) => e,
+    );
+    expect(noWorktree.code).toBe('brief.worktree-required');
+    const noArtifact = await composeBrief({
+      ...base(),
+      role: 'grader',
+      provider: undefined,
+    }).catch((e) => e);
+    expect(noArtifact.code).toBe('brief.artifact-required');
+    const reviewer = await composeBrief({
+      ...base(),
+      role: 'reviewer',
+      artifactPath: artifactFor('reviewer'),
+      provider: undefined,
+      workRoot: undefined,
+      checks: undefined,
+    });
+    expect(Object.keys(reviewer.manifest.sections)).not.toContain('preflight');
+    expect(reviewer.text).not.toContain('bs results check');
+    const uiux = await composeBrief({ ...base(), role: 'uiux', artifactPath: artifactFor('uiux') });
+    expect(Object.keys(uiux.manifest.sections)).not.toContain('preflight');
   });
 });

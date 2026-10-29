@@ -484,7 +484,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<prompt-file>',
     flags: '--role <role> --task <id> --session <id> [--agents-dir <dir>] [--state-dir <dir>]',
     summary:
-      "Check a composed dispatch prompt's stated turn budget against the role template's maxTurns, and a judge prompt's declared-artifact line against the ledger. Exit 1 on a violation OR an unverifiable answer. `-` reads stdin.",
+      "Check a composed dispatch prompt's stated turn budget against the role template's maxTurns, and a judge prompt's declared-artifact line against the ledger, and a coder, tester or grader prompt's preflight line. Exit 1 on a violation OR an unverifiable answer. `-` reads stdin.",
   },
   {
     command: 'tester check',
@@ -832,8 +832,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'brief compose',
     positionals: '',
     flags:
-      '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--out <file>] [--state-dir <dir>]',
-    summary: 'Compose one dispatch brief; --out writes it plus <out>.manifest.json.',
+      '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--provider <name>] [--model-tier <tier>] [--base <ref>] [--checks <file>] [--work-root <dir>] [--out <file>] [--state-dir <dir>]',
+    summary:
+      'Compose one dispatch brief; a coder, tester or grader brief carries its filled preflight line; --out writes it plus <out>.manifest.json.',
   },
   {
     command: 'playbook slice',

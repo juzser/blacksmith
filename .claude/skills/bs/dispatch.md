@@ -53,6 +53,38 @@ lower — a missing turn-budget line, a template it cannot read at all, and a
 judge prompt missing or mismatching its artifact line are each a lint
 failure, not a maybe.
 
+A coder, tester or grader brief also carries the worker's filled hand-back
+preflight line, and a coder or tester brief the gate's check commands. Compose
+writes them from `--provider`, `--model-tier`, `--base` (the coder), `--checks`
+(the file `gate run` takes) and `--work-root <work-root>` (the workRoot `bs init`
+printed, the value of wave.md steps 5 and 7); it refuses a brief without them
+as `brief.preflight-values-required`, a value it cannot write as
+`brief.invalid-value`, and a brief the lint would refuse as
+`brief.preflight-unlintable`. `bs dispatch lint` exits 1 on a coder, tester or
+grader brief whose line is missing, ambiguous, for another task or role, or
+still holds a placeholder, and on a coder or tester brief that names no gate
+check. A hand-built brief satisfies it with the text compose writes: the
+`Result file:` line (coder and tester only), the heading, the role's line with
+every value filled and shell-quoted, then the heading of the gate checks and one
+`- <name>:` line per check (`- <name> (heavy):` for a check the gate treats as
+heavy) with each line of its command indented by four spaces.
+
+```text
+Result file: <work-root>/state/results/<task-id>.json
+Hand-back preflight line (run it as your last step, exactly as written):
+bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts
+
+Gate checks (run each over the whole project before you hand back; run a check marked heavy as your template's heavy-run section says, never bare):
+- unit (heavy):
+    <command line>
+- lint:
+    <command line>
+```
+
+The tester's file is `<work-root>/state/results/<task-id>.tester.json`, and a
+grader brief has the line only. Fill the `<...>` tokens above with the real
+values: a line that still holds one fails the lint.
+
 In this clone a PreToolUse guard also refuses, at the `Agent` call, a judge-role
 dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
 `bs-security-reviewer`, `bs-auditor`, with or without the
@@ -138,7 +170,8 @@ when nothing matches, and names any open finding it could not check at all
 
 ## Return discipline (agent-interviews.md M-6)
 
-A worker writes its full result to `state/results/<task-id>.json` and returns
+A worker writes its full result to `state/results/<task-id>.json` (the tester
+writes `state/results/<task-id>.tester.json`, never the coder's file) and returns
 **only** `{status, severity_counts, artifact_path}`. Prose returns are what
 actually drown an orchestrator: a wave of 200 workers costs 200 short lines
 this way, and you re-read the artifact when you need detail. Blacksmith

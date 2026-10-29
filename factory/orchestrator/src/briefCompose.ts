@@ -6,7 +6,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { readTemplateMaxTurns } from './agentsSync.js';
 import { formatBriefMarker } from './briefMarker.js';
-import { formatDeclaredArtifactLine, parseStatedTurns } from './dispatchLint.js';
+import {
+  checkPreflight,
+  formatDeclaredArtifactLine,
+  GATE_CHECKS_HEADING,
+  parseStatedTurns,
+  shellQuote,
+} from './dispatchLint.js';
 import { SmithError } from './errors.js';
 import type { EventOpts, StoredEvent } from './events.js';
 import { findingsForDispatch } from './findingContext.js';
@@ -18,12 +24,15 @@ import {
   liveSpec,
   loadPlan,
   type PlanFile,
+  planFilePath,
   resolveTaskId,
   type TaskSpecRecord,
 } from './plan.js';
 import { sliceSection } from './playbookSlice.js';
 import { ORCHESTRATOR_OWNED_RESULT_FIELDS } from './results.js';
 import { epicOfTaskId } from './taskId.js';
+import { loadTaxonomy } from './taxonomy.js';
+import { type CheckCommand, isHeavyCheck } from './testgate.js';
 
 export class BriefError extends SmithError {}
 
@@ -70,6 +79,18 @@ export interface ComposeBriefOptions {
   eventOpts?: EventOpts;
   /** When set, the manifest is written there as JSON, and nowhere else. */
   manifestPath?: string;
+  /** The preflight line's `--provider`; a coder or tester brief needs it. */
+  provider?: string;
+  /** The preflight line's `--model-tier`; a coder or tester brief needs it. */
+  modelTier?: string;
+  /** The coder's `--base`. */
+  base?: string;
+  /** The checks the gate line takes (cli.ts `readChecksFile`); a coder or tester brief lists them. */
+  checks?: readonly CheckCommand[];
+  /** Absolute work root `bs init` printed; every worker brief with a preflight line needs it. */
+  workRoot?: string;
+  /** Where the taxonomy's `provider` and `model_tier` are read; defaults to taxonomy.yml. */
+  taxonomyPath?: string;
 }
 
 export interface BriefManifest {
@@ -84,29 +105,35 @@ export interface BriefManifest {
   total_bytes: number;
 }
 
-function loadPlanFor(opts: ComposeBriefOptions, epicId: string): PlanFile {
+function loadPlanFor(opts: ComposeBriefOptions, epicId: string): { plan: PlanFile; file: string } {
   if (opts.planFile !== undefined) {
-    return JSON.parse(readFileSync(opts.planFile, 'utf8')) as PlanFile;
+    return {
+      plan: JSON.parse(readFileSync(opts.planFile, 'utf8')) as PlanFile,
+      file: path.resolve(opts.planFile),
+    };
   }
   const planOpts = { specsDir: opts.specsDir ?? SPECS_ACTIVE_DIR };
   const version = latestPlanVersion(epicId, planOpts);
   if (version === null) {
     throw new BriefError('brief.plan-not-found', `No plan file for epic "${epicId}".`, { epicId });
   }
-  return loadPlan(epicId, version, planOpts);
+  return {
+    plan: loadPlan(epicId, version, planOpts),
+    file: path.resolve(planFilePath(epicId, version, planOpts)),
+  };
 }
 
 function specFor(
   opts: ComposeBriefOptions,
   typed: string,
-): { plan: PlanFile; spec: TaskSpecRecord } {
+): { plan: PlanFile; spec: TaskSpecRecord; planFile: string } {
   const epicId = epicOfTaskId(typed) ?? opts.epicId;
   if (epicId === undefined) {
     throw new BriefError('brief.epic-required', `Bare task id "${typed}" needs an epicId.`, {
       taskId: typed,
     });
   }
-  const plan = loadPlanFor(opts, epicId);
+  const { plan, file } = loadPlanFor(opts, epicId);
   let spec: TaskSpecRecord | undefined;
   try {
     spec = liveSpec(plan, resolveTaskId(plan, typed));
@@ -119,7 +146,129 @@ function specFor(
       epicId: plan.epic_id,
     });
   }
-  return { plan, spec };
+  return { plan, spec, planFile: file };
+}
+
+const hasControlChar = (value: string): boolean =>
+  [...value].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f);
+const PLACEHOLDER = /<[^<>]+>/;
+
+const invalidValue = (what: string, value: unknown, extra: Record<string, unknown> = {}) =>
+  new BriefError(
+    'brief.invalid-value',
+    `${what} is blank, holds a control character or a <...> token, or is not allowed.`,
+    { what, value: String(value), ...extra },
+  );
+
+/** A value that goes into the preflight line: not blank, no control character, no `<...>` token. */
+function lineValue(what: string, value: string): string {
+  if (value.trim() === '' || hasControlChar(value) || PLACEHOLDER.test(value)) {
+    throw invalidValue(what, value);
+  }
+  return value;
+}
+
+function checkVocabulary(what: string, value: string, allowed: readonly string[]): void {
+  if (!allowed.includes(value)) {
+    throw new BriefError(
+      'brief.invalid-value',
+      `${what} "${value}" is not one of: ${allowed.join(', ')}.`,
+      { what, value, allowed: [...allowed] },
+    );
+  }
+}
+
+interface PreflightInput {
+  role: 'coder' | 'tester' | 'grader';
+  taskId: string;
+  worktree: string;
+  planFile: string;
+  artifactPath: string | undefined;
+}
+
+/** The `preflight` and `gate_checks` sections of one worker brief, or throws `BriefError`. */
+function preflightSections(opts: ComposeBriefOptions, input: PreflightInput): [string, string][] {
+  const { role } = input;
+  const listed = role !== 'grader';
+  const missing = [
+    ...(listed && opts.provider === undefined ? ['--provider'] : []),
+    ...(listed && opts.modelTier === undefined ? ['--model-tier'] : []),
+    ...(role === 'coder' && opts.base === undefined ? ['--base'] : []),
+    ...(opts.workRoot === undefined ? ['--work-root'] : []),
+    ...(listed && !(opts.checks && opts.checks.length > 0) ? ['--checks'] : []),
+  ];
+  if (missing.length > 0) {
+    throw new BriefError(
+      'brief.preflight-values-required',
+      `A ${role} brief needs ${missing.join(', ')}.`,
+      { role, missing },
+    );
+  }
+  const workRoot = lineValue('--work-root', opts.workRoot as string);
+  if (!path.isAbsolute(workRoot)) {
+    throw new BriefError('brief.invalid-value', '--work-root must be an absolute path.', {
+      what: '--work-root',
+      value: workRoot,
+    });
+  }
+  if (listed) {
+    const taxonomy = loadTaxonomy(opts.taxonomyPath);
+    checkVocabulary('--provider', opts.provider as string, taxonomy.dimensions.provider ?? []);
+    checkVocabulary('--model-tier', opts.modelTier as string, taxonomy.dimensions.model_tier ?? []);
+  }
+  const checks = listed ? (opts.checks as readonly CheckCommand[]) : [];
+  for (const check of checks) {
+    const name = (check as { name?: unknown }).name;
+    if (typeof name !== 'string' || name.trim() === '' || hasControlChar(name)) {
+      throw invalidValue(`check name ${JSON.stringify(name)}`, name);
+    }
+    const cmd = (check as { cmd?: unknown }).cmd;
+    if (typeof cmd !== 'string' || cmd.trim() === '') {
+      throw new BriefError(
+        'brief.invalid-value',
+        `Check "${name}" has no runnable "cmd" field: it must be a non-empty string.`,
+        { what: `check ${name} cmd`, value: String(cmd) },
+      );
+    }
+  }
+  const artifactsDir = path.join(workRoot, 'state', 'artifacts');
+  const resultFile = path.join(
+    workRoot,
+    'state',
+    'results',
+    `${input.taskId}${role === 'tester' ? '.tester' : ''}.json`,
+  );
+  const flag = (name: string, value: string) =>
+    `--${name} ${shellQuote(lineValue(`--${name}`, value))}`;
+  const task = shellQuote(lineValue('task id', input.taskId));
+  const parts =
+    role === 'grader'
+      ? [flag('grader', input.artifactPath as string)]
+      : [
+          flag('result', resultFile),
+          '--agent',
+          role,
+          flag('provider', opts.provider as string),
+          flag('model-tier', opts.modelTier as string),
+          ...(role === 'coder'
+            ? [flag('worktree', input.worktree), flag('base', opts.base as string)]
+            : [flag('plan', input.planFile)]),
+        ];
+  const line = `bs results check ${task} --as ${role} ${parts.join(' ')} ${flag('artifacts-dir', artifactsDir)}`;
+  const preflight = [
+    ...(listed ? [`Result file: ${resultFile}`] : []),
+    'Hand-back preflight line (run it as your last step, exactly as written):',
+    line,
+  ].join('\n');
+  const out: [string, string][] = [['preflight', preflight]];
+  if (listed) {
+    const body = checks.flatMap((check) => [
+      `- ${check.name}${isHeavyCheck(check) ? ' (heavy)' : ''}:`,
+      ...check.cmd.split('\n').map((l) => `    ${l}`),
+    ]);
+    out.push(['gate_checks', [GATE_CHECKS_HEADING, ...body].join('\n')]);
+  }
+  return out;
 }
 
 /**
@@ -166,6 +315,7 @@ export async function composeBrief(
 
   let spec: TaskSpecRecord | undefined;
   let epicId: string;
+  let planFile = '';
   if (opts.taskId === undefined) {
     if (opts.epicId === undefined) {
       throw new BriefError('brief.epic-required', 'An epic-level brief needs an epicId.', { role });
@@ -175,6 +325,7 @@ export async function composeBrief(
     const found = specFor(opts, opts.taskId);
     spec = found.spec;
     epicId = found.plan.epic_id;
+    planFile = found.planFile;
   }
   const taskId = spec?.task_id ?? epicId;
   const claims = Array.isArray(spec?.claims) ? (spec.claims as string[]) : [];
@@ -248,17 +399,40 @@ export async function composeBrief(
   }
   if (judgeTurn) add('artifact', formatDeclaredArtifactLine(opts.artifactPath as string));
 
-  const text = `${sections.map(([, body]) => body).join('\n\n')}\n`;
   // The lint reads one occurrence, or among several the single standalone
   // line (ours); spliced text that adds a second standalone line would pass
   // here and fail there, so refuse it.
-  if (parseStatedTurns(text) !== turns) {
-    throw new BriefError(
-      'brief.turn-budget-ambiguous',
-      'The brief carries another standalone "Turn budget:" line in spliced text, so the lint cannot read one number.',
-      { role, taskId },
-    );
+  const assertOneTurnLine = (body: string) => {
+    if (parseStatedTurns(body) !== turns) {
+      throw new BriefError(
+        'brief.turn-budget-ambiguous',
+        'The brief carries another standalone "Turn budget:" line in spliced text, so the lint cannot read one number.',
+        { role, taskId },
+      );
+    }
+  };
+  const join = () => `${sections.map(([, body]) => body).join('\n\n')}\n`;
+  assertOneTurnLine(join());
+  if (role === 'coder' || role === 'tester' || role === 'grader') {
+    const extra = preflightSections(opts, {
+      role,
+      taskId,
+      worktree: opts.worktree as string,
+      planFile,
+      artifactPath: opts.artifactPath,
+    });
+    sections.splice(sections.findIndex(([name]) => name === 'envelope') + 1, 0, ...extra);
+    assertOneTurnLine(join());
+    const { status } = checkPreflight(join(), role, taskId);
+    if (status !== 'ok') {
+      throw new BriefError(
+        'brief.preflight-unlintable',
+        `The composed preflight section fails the lint: ${status}.`,
+        { role, taskId, status },
+      );
+    }
   }
+  const text = join();
 
   const manifest: BriefManifest = {
     role,

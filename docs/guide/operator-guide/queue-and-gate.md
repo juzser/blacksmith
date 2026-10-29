@@ -458,12 +458,14 @@ block the merge queue, it queues an operator question (§8 below).
 |---|---|---|
 | `pass` | Schema valid, tests green, no findings | Task proceeds straight to the merge queue |
 | `pass-with-waivers-pending` | Schema valid, tests green, only S3/S4 findings | Task proceeds to the merge queue; findings queue into the epic's waiver batch |
-| `blocked` (`reason: "schema-invalid"`) | Worker's `Result` failed `result.schema.json` | Never reaches tests; bounce to the coder immediately |
+| `blocked` (`reason: "schema-invalid"`) | Worker's `Result` failed `result.schema.json` | Never reaches tests; bounce to the worker whose result it is (the coder, or the tester for its own result) immediately |
 | `blocked` (`reason: "artifacts-missing"`) | A declared artifact is outside `state/artifacts/<task-id>/` or absent | Never reaches tests; `artifactIssues` names each path and which of the two it is |
 | `blocked` (`reason: "not-committed"`) | There is no commit here to score — see §5a | Never reaches tests; bounce to the coder to commit |
 | `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; run `pnpm install` in the worktree and re-gate |
 | `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes — re-poke it, then `bs judge report` (§3c) |
-| `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; re-run the grading pass — the diff has not been judged |
+| `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; `wave.md` step 7 sends it to the grader before `gate run` |
+| `blocked` (`reason: "screenshots-missing"`) | A UI-affecting task has no screenshot set from the tester | Never reaches tests; bounce to the tester |
+| `blocked` (`reason: "screenshots-stale"`) | The tester's screenshots were taken at another HEAD than the gate's | Never reaches tests; bounce to the tester to re-shoot at the gate's HEAD |
 | `blocked` (`reason: "grader-fail"`) | A criterion came back `fail`/`partial`, or the grading run was `dead` | Never reaches tests; bounce to coder with the named gaps, or to the planner at round 2 |
 | `blocked` (`reason: "tests-failed"`) | A check command exited non-zero | Bounce to coder on the same branch |
 | `blocked` (`reason: "coverage-evidence"`) | A coverage check ran, and the numbers it produced don't cover a file this task's claims name | Fix the reporter or the include glob, not the code — see §5c |
@@ -528,20 +530,27 @@ them.
 
 The wave-runner (`.claude/skills/bs/wave.md` step 7) first makes its line match
 the example flag for flag; an `error` document or a difference is its own line.
-Then every problem falls in exactly one of five branches:
+The composer writes that line: `bs brief compose` fills each coder's, tester's
+and grader's preflight line (and each coder's and tester's gate check commands)
+from its flags, and `bs dispatch lint` fails a brief without them. Then every
+problem falls in exactly one of five branches:
 
 1. **The wave-runner's own.** `deps-missing`, and an intake problem whose
    `input` is `artifacts`, `checks`, `findings`, `lessons`, `plan` or
    `judge-dispatch`. It fixes that and runs the preflight again. No agent runs
    again, so this is not a round.
 2. **A judge turn that is not in order.** `judges-outstanding`,
-   `uiux-spec-missing`, `uiux-visual-missing`, and an intake problem whose
-   `input` is `grader`, `evidence`, `uiux-visual` or `judge-artifact`. It takes,
-   re-pokes or re-runs that judge turn under the existing rules; a judge's turn
-   is not a ladder round.
+   `uiux-spec-missing`, `uiux-visual-missing`, `grader-invalid`, and an intake
+   problem whose `input` is `grader`, `evidence`, `uiux-visual` or
+   `judge-artifact`. It takes, re-pokes or re-runs that judge turn under the
+   existing rules; a judge's turn is not a ladder round. The answer to
+   `grader-invalid` is the grader's turn: re-poked in the same round to rewrite
+   its file in place, or re-run as a new round only while `profile.graderRounds`
+   leaves one; with none left the task goes to the epic session, never to
+   `gate run` and never to a builder.
 3. **A worker's file the gate blocks on.** `schema-invalid`,
-   `artifacts-missing`, `not-committed`, `screenshots-missing`,
-   `screenshots-stale` and `grader-invalid`. The wave-runner runs `gate run`
+   `artifacts-missing`, `not-committed`, `screenshots-missing` and
+   `screenshots-stale`. The wave-runner runs `gate run`
    with the same flags. It blocks on the same reason before any check command
    runs and writes the blocked `gate-outcome` that `readFailedRounds` counts,
    so the bounce that follows is a failed round on the escalation ladder.
@@ -551,8 +560,11 @@ Then every problem falls in exactly one of five branches:
    task (error `contract.schema-violation`, severity `S3-minor`, with `detail`
    naming the input and the reason) and returns the result to that worker at
    most once per task, as a builder `dispatch_decision` whose `causal_parent` is
-   that event. A second `result` problem on the same task goes to the epic
-   session, which returns it no more without the operator's answer.
+   that event. At most one branch-4 return per task goes out, whatever the
+   worker's role, counted as the task's builder dispatches whose `causal_parent`
+   is such an `error-logged` event; a second `result` problem on the same task
+   goes to the epic session, which returns it no more without the operator's
+   answer, from any worker.
 5. **The verb or the log failed.** An intake problem whose `input` is
    `judge-internal` or `paperwork`, or one the list above does not name. It goes
    to the epic session and never to an agent, and it is not a round.
@@ -564,8 +576,9 @@ stage reasons of branches 1 and 2. A stage reason of branch 3 goes to `gate run`
 only when the preflight shows no intake problem, because `gate run` reads its
 files, mints the evidence and closes the judge turns before the gate runs, and
 throws while any intake problem remains. A handed-in grader file that is fresh
-but neither a list nor a grader document shows both `judge-artifact` and
-`grader-invalid`; it takes branch 2 and never goes to `gate run`. A named problem
+but neither a list nor a grader document shows three problems, the intake
+`judge-artifact` and then the stage problems `judges-outstanding` and
+`grader-invalid`; all three are branch 2, and it never goes to `gate run`. A named problem
 that the line or a worker could have caused, such as an unreadable result at the
 path the worker reported, is the worker's: branch 3 when it carries a stage,
 branch 4 when it is an intake problem.
@@ -575,7 +588,9 @@ return included) is a builder dispatch like any other, so the ladder applies
 unchanged: from the second blocked `gate-outcome` of a task the first builder
 dispatch after it runs on a strictly higher model tier
 (`checkModelTierRung`), and from the third no builder dispatch and no gate round
-goes out before an operator answer (`checkOperatorRung`). Branch 4's bound of one
+goes out before an operator answer (`checkOperatorRung`). The ladder counts a
+tester bounce (the two screenshots reasons) like a coder bounce: it counts every
+blocked round whichever builder it goes to. Branch 4's bound of one
 return is a playbook rule: the log evidences it by structure, the count of
 builder dispatches whose `causal_parent` is such an event, and no verb enforces
 it, an accepted gap like the port-0 rule.
