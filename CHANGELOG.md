@@ -144,6 +144,18 @@ than appearing in it.
 
 ### Fixed
 
+- **`bs lessons compile` keeps a lesson's error class.** It built its input
+  from the approved store rows without the class, so a lesson raised with
+  `--error-class` compiled with no `- error_class:` bullet and
+  `bs lessons for-dispatch` read it as `other.unclassified`: every new lesson
+  fell into the fallback class and was withheld when its own class recurred.
+  The class now carries through, and the store's class still wins over one
+  the compiled file carries. The withheld-lessons line also quoted a command
+  that exits 1 (`for-dispatch` needs the role); it now reads
+  `bs lessons for-dispatch <role> --class <group.class>` with the role filled
+  in. The shipped lessons were unaffected: their classes are written in the
+  file (#503).
+
 - **The repo pins Node's October 2026 security release, and scaffolded CI
   takes the newest Node 22.** `.nvmrc` now names `22.23.4` instead of the bare
   major, so `nvm use` and this repo's CI run the release that fixes the ten
@@ -449,8 +461,8 @@ than appearing in it.
   fewer tokens per merged task, more agents at once.** 0.5.1 was bumped in
   the repository (#486) but never tagged or published, so 0.6.0 is the first
   npm release since 0.5.0 and also carries everything the 0.5.1 entry below
-  lists. Twenty pull requests landed after that bump (#477–#481,
-  #487–#493, #495–#502), and thirty-three entries above this one ship in
+  lists. Twenty-one pull requests landed after that bump (#477–#481,
+  #487–#493, #495–#503), and thirty-four entries above this one ship in
   0.6.0: under *Changed*, the CLI test split and e2e shards (#502), the
   README and guides pass, `bs lessons for-dispatch` (#501), the 1-hour
   prompt cache (#489), the lesson ids (#487, #488), the wave-runner, merger
@@ -458,7 +470,8 @@ than appearing in it.
   compact window (#497, #498) that `bs init` writes; under *Fixed*, the Node
   pin (#492), the four guard entries
   and `bs delegation check` on a resumed wave-runner (#499), the verdict
-  digest (#500) and the merge queue's landing (#501); and every *Added* entry
+  digest (#500), the merge queue's landing (#501) and `bs lessons compile`
+  keeping a lesson's class (#503); and every *Added* entry
   above this one (#499, #501). This entry does not repeat them.
 
   *bs-review (#499).* An operator can see what the factory costs and what it
