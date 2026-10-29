@@ -1095,8 +1095,11 @@ export function summarizeEpic(
         finding: {
           severity: f.severity,
           status: f.finding_status,
-          ...(f.verified_by !== undefined ? { verifiedBy: f.verified_by } : {}),
-          ...(f.verified_by_provider !== undefined
+          // The fold hands back null, not undefined, for an unstamped finding.
+          ...(typeof f.verified_by === 'string' && f.verified_by !== ''
+            ? { verifiedBy: f.verified_by }
+            : {}),
+          ...(typeof f.verified_by_provider === 'string' && f.verified_by_provider !== ''
             ? { verifiedByProvider: f.verified_by_provider }
             : {}),
         },

@@ -5208,6 +5208,13 @@ describe('epic.ts epicVerdictJudgeRequest — how each closing-review finding en
     );
   });
 
+  it('prints nothing about a verifier the fold holds as null or empty', () => {
+    // listFindings returns null, not undefined, for a finding no verifier stamped.
+    const nulls = { verified_by: null, verified_by_provider: null } as unknown as Partial<Finding>;
+    expect(lineFor('f-x', at('refuted', nulls))).not.toContain('verified by');
+    expect(lineFor('f-x', at('refuted', { verified_by: '' }))).not.toContain('verified by');
+  });
+
   it('says a fix-verified finding is closed, not open', () => {
     const line = lineFor('f-x', at('fix-verified'));
     expect(line).toContain('fix-verified — recorded closed');
