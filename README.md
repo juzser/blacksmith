@@ -163,10 +163,6 @@ A judge's verdict counts only if the worktree did not move under it. The
 playbook runs `bs worktree fingerprint` before every judge and
 `bs worktree verify` after, gitignored paths aside; drift exits 1, and the
 verdict is discarded and the judge dispatched again on a clean tree.
-`bs sandbox open` refuses earlier: while its lease is open, the policy hook
-denies commands run in that worktree any outbound access, any write but the
-judge's own verdict, and any `bs sandbox` call. It reads command text, holds
-only where the policy hook runs, and no `/bs` playbook opens a lease for you.
 
 </td>
 <td>
@@ -263,9 +259,7 @@ a chat transcript.
 Every event after a session's first names the event that caused it, and an
 append whose parent is not already in the log is refused, so any record can be
 followed back to its session's first event
-(`bs stats timeline --causal-chain-for <event-id>`). Those links are event ids
-checked at write time, not hashes: they do not detect an edit made to a log
-file afterwards.
+(`bs stats timeline --causal-chain-for <event-id>`).
 
 </td>
 </tr>
