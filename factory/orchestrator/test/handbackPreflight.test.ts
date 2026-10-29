@@ -353,6 +353,20 @@ describe('queue-and-gate.md section 5 and the CHANGELOG', () => {
   });
 });
 
+/** The branch of wave.md step 7 each reason goes to. The compiler ties it to the type: a new reason without a branch fails to build. */
+const REASON_BRANCH = {
+  'deps-missing': 1,
+  'judges-outstanding': 2,
+  'uiux-spec-missing': 2,
+  'uiux-visual-missing': 2,
+  'grader-invalid': 2,
+  'schema-invalid': 3,
+  'artifacts-missing': 3,
+  'not-committed': 3,
+  'screenshots-missing': 3,
+  'screenshots-stale': 3,
+} satisfies Record<PaperworkReason, 1 | 2 | 3>;
+
 describe('wave.md step 7 routes every preflight problem to one of five branches', () => {
   const wave = read('.claude/skills/bs/wave.md');
   const step7 = wave.slice(wave.search(/^7\. /m), wave.search(/^8\. /m));
@@ -365,19 +379,6 @@ describe('wave.md step 7 routes every preflight problem to one of five branches'
     items.set(Number(m[1]), step7.slice(m.index, end).replace(/\s+/g, ' '));
   });
 
-  // The compiler ties this map to the type: a new reason without a branch fails to build.
-  const REASON_BRANCH = {
-    'deps-missing': 1,
-    'judges-outstanding': 2,
-    'uiux-spec-missing': 2,
-    'uiux-visual-missing': 2,
-    'schema-invalid': 3,
-    'artifacts-missing': 3,
-    'not-committed': 3,
-    'screenshots-missing': 3,
-    'screenshots-stale': 3,
-    'grader-invalid': 2,
-  } satisfies Record<PaperworkReason, 1 | 2 | 3>;
   const INPUT_BRANCH: Record<string, number> = {
     artifacts: 1,
     checks: 1,
@@ -827,19 +828,6 @@ describe('the concrete preflight lines run through the built CLI', () => {
 
 // ---- Task-8 close-review r2 --------------------------------------------------
 
-/** The reasons wave.md step 7 puts in each branch, from the compiler-tied map below. */
-const R2_REASON_BRANCH = {
-  'deps-missing': 1,
-  'judges-outstanding': 2,
-  'uiux-spec-missing': 2,
-  'uiux-visual-missing': 2,
-  'grader-invalid': 2,
-  'schema-invalid': 3,
-  'artifacts-missing': 3,
-  'not-committed': 3,
-  'screenshots-missing': 3,
-  'screenshots-stale': 3,
-} satisfies Record<PaperworkReason, 1 | 2 | 3>;
 const flatten = (text: string): string => text.replace(/\s+/g, ' ');
 const stepOf = (text: string, n: number): string =>
   text.slice(
@@ -874,7 +862,7 @@ describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in wave.md', () => {
   };
 
   it('names a builder in step 9 for every reason of branch 3, keyed from the branch-3 reasons', () => {
-    const branch3 = Object.entries(R2_REASON_BRANCH)
+    const branch3 = Object.entries(REASON_BRANCH)
       .filter(([, b]) => b === 3)
       .map(([r]) => r);
     expect(Object.keys(BUILDER_OF).sort()).toEqual(branch3.sort());
@@ -941,7 +929,7 @@ describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in queue-and-gate.md', 
     expect(row('schema-invalid')).toMatch(/bounce to the worker whose result it is/);
   });
 
-  it.each(Object.entries(R2_REASON_BRANCH))(
+  it.each(Object.entries(REASON_BRANCH))(
     'puts %s in branch %i in section 5 as in wave.md',
     (reason, branch) => {
       const s5 = section5.slice(0, section5.indexOf('One preflight result can hold'));
@@ -1167,5 +1155,13 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
       const shared = [...agent(role).matchAll(SHARED)].map((m) => m[0]);
       expect(shared.length, role).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('the reason-to-branch map', () => {
+  it('is written once, so no second copy can drift from the routing', () => {
+    const source = readFileSync(new URL(import.meta.url), 'utf8');
+    const ties = source.match(new RegExp(`satisfies Record<${'PaperworkReason'}, `, 'g')) ?? [];
+    expect(ties).toHaveLength(1);
   });
 });
