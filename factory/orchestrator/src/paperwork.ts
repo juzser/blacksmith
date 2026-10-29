@@ -16,16 +16,10 @@ import {
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 import { evaluateUiux, screenshotSetComplete, type UiuxBlockReason } from './uiuxGate.js';
 
-/**
- * The gate's read-only pre-test checks, in one place.
- *
- * `runGate` (gate.ts) calls the stage functions below one at a time and emits
- * its events around them; `checkPaperwork` calls the same functions for a
- * preflight (`bs results check`). One implementation means the two can never
- * disagree about the same input. Nothing here writes an event, a result file
- * or a judge-turn close; the only commands started are the read-only git
- * calls `certifyCommit` already makes.
- */
+// The gate's read-only pre-test checks, one pure function per stage. `runGate` calls them
+// and emits its events around them; `checkPaperwork` calls the same functions for a
+// preflight, so the two cannot disagree. Nothing here writes an event, a result file or a
+// judge-turn close.
 
 export type PaperworkRole = 'coder' | 'tester' | 'grader' | 'gate';
 
@@ -48,7 +42,7 @@ export type PaperworkReason =
   | UiuxBlockReason
   | 'grader-invalid';
 
-/** Every stage, in the order they are evaluated and reported. `screenshots` is the tester's own and sits outside the gate's set. */
+/** Evaluation and report order. `screenshots` is the tester's own and is not in the gate's set. */
 const STAGE_ORDER: readonly PaperworkStage[] = [
   'schema',
   'artifacts',
@@ -60,7 +54,7 @@ const STAGE_ORDER: readonly PaperworkStage[] = [
   'grader',
 ];
 
-/** What each hand-off can already satisfy. Judge turns, the uiux turns and the tester record exist only once the wave-runner has dispatched and recorded them. */
+/** What each hand-off can already satisfy; judge turns and the tester record exist only once the wave-runner has recorded them. */
 export const STAGES_FOR_ROLE: Readonly<Record<PaperworkRole, readonly PaperworkStage[]>> = {
   coder: ['schema', 'artifacts', 'commit', 'deps'],
   tester: ['schema', 'artifacts', 'screenshots'],
@@ -206,22 +200,7 @@ function isDirectory(target: string): boolean {
   }
 }
 
-/**
- * Does this worktree own the toolchain its checks are about to run?
- *
- * `git worktree add` does not bring `node_modules` with it — git never copies
- * an ignored directory — and Node answers a missing dependency by walking UP
- * the filesystem. A task worktree under the factory's own tree therefore
- * finds the FACTORY's vitest and biome, runs those, and the gate reports
- * their verdict as if it were the project's. Wave 3 shipped a green epic that
- * way (P9-16d).
- *
- * The question asked is `node_modules/.bin`, not `node_modules`: a vite run
- * creates `node_modules/.vite` by itself, and that directory is precisely
- * what made wave 3's worktree look installed. A project that declares no
- * dependencies has nothing to install and is not blocked — the check reports
- * that it ran and found nothing to do, rather than staying silent.
- */
+/** The body of gate.ts `checkWorktreeDeps`, which documents it. */
 function inspectWorktreeDeps(worktreeDir: string): DepsCheck {
   let manifest: { dependencies?: unknown; devDependencies?: unknown };
   try {
@@ -298,12 +277,7 @@ export interface JudgesStage {
   payload: { judges: { agent_role: string; round: number; declared_artifact: string }[] };
 }
 
-/**
- * D-31, D-20 / P9-11. Scoring a task while one of its judges is still owed is
- * scoring an unknown, so the gate compares the dispatch set and the report set
- * before it does anything expensive. A turn named in `alsoReported` counts as
- * reported; nothing is closed here.
- */
+/** D-31 / P9-11: a judge still owed is an unknown. A turn in `alsoReported` counts as reported; nothing is closed. */
 export function judgesStage(
   turns: readonly JudgeTurn[],
   alsoReported: readonly AlsoReported[] = [],
@@ -343,14 +317,8 @@ export interface GraderStage {
 }
 
 /**
- * Read the grader's rubric result (D-34/P9-14). The verdict lives at
- * `.structured_output` of the result envelope the grader writes
- * (.claude/agents/bs-grader.md, "Output contract"); the envelope itself is a
- * Result and is not re-checked here. Three ways to not pass: the file is not
- * shaped like a grader result (`invalid`), the run came back `dead` because the
- * task spec had no checkable acceptance criteria (`not-graded`), or the rubric
- * says the criteria were not met (`not-met`). Only the first is a paperwork
- * problem; the gate blocks on the other two as `grader-fail`.
+ * The grader file's shape (`ok` or `invalid`) and its rubric verdict (D-34/P9-14). Only a bad
+ * shape is a paperwork problem; the gate blocks a `not-met` or `not-graded` rubric as `grader-fail`.
  */
 export function graderStage(
   verdictFile: unknown,
@@ -378,9 +346,7 @@ export function graderStage(
   }
 
   const runStatus = verdictFile.run_status;
-  // `dead` is the grader's own word for "this task spec has no checkable
-  // acceptance criteria". Reported as its own verdict rather than as a missing
-  // `structured_output`, which is what it would otherwise look like.
+  // `dead`: the task spec had no checkable acceptance criteria, not a missing structured_output.
   if (runStatus === 'dead') {
     return {
       shape: 'ok',
@@ -423,10 +389,7 @@ export function graderStage(
   }
 
   const criteria = structured.criteria as GradedCriterion[];
-  // A `fail` or `partial` criterion under an overall `pass` is the grader
-  // contradicting itself, and the per-criterion verdict is the one carrying
-  // evidence — so it wins. `partial` is what the grader writes when it runs
-  // out of context mid-rubric: a criterion nobody finished grading is not met.
+  // A fail or partial criterion under an overall pass: the per-criterion verdict carries the evidence.
   const failed = criteria.filter((c) => c.status !== 'pass');
   const met = structured.overall === 'pass' && failed.length === 0;
 
