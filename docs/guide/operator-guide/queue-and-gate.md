@@ -484,8 +484,13 @@ takes no lock.
 | `--as grader` | `--grader` | `grader` |
 | `--as gate` | the `gate run` line, verbatim | `schema, artifacts, commit, deps, judges, uiux, grader` |
 
-Each worker mode also takes `--agent --provider --model-tier` and
-`--artifacts-dir`, and refuses the gate-only flags. `--as gate` reads every
+`--as coder` and `--as tester` also take `--agent --provider --model-tier`;
+`--as grader` refuses them. All three worker modes take `--artifacts-dir` and
+refuse the gate-only flags. Under `--as grader` the flag only sets the reported
+`artifact_home`, because the grader stage reads no artifact: the output then
+carries one warning that says so, and `skipped` keeps the `artifacts` stage as
+`not-checked-for-grader`. The flag stays on the grader's line so that every
+preflight line in a wave shares one value. `--as gate` reads every
 file on the gate line, dry-runs the judge closes `gate run` would make and
 includes the uiux stage. The output is one JSON object, `{outcome, reason?, as,
 task_id, artifact_home, problems, skipped, not_run, verdicts?, warnings}`, with
@@ -506,18 +511,93 @@ and an e2e server binds port 0 or a port the runner reports back; that is a
 prompt-level rule with no run-time check in v1, an accepted gap, so a violation
 shows up only later as a `tests-failed` block.
 
+Every `intake` problem the output lists (a file or value the line names that
+the verb could not use) carries `input`, which says where it came from: a
+flag's file or value (`result`, `grader`, `checks`, `findings`, `evidence`,
+`uiux-visual`, `lessons`, `plan`), the task id and artifacts dir (`artifacts`),
+or a step inside the verb. A judge close that fails reads as `judge-artifact`
+when its code starts with `judges.artifact-` (the judge's file is missing,
+stale, unparseable or not a list) and as `judge-dispatch` for any other
+`judges.` code (no dispatch for that role or round, a kind the role may not
+report, no declared artifact). A failure reading the session's judge turns, or
+a close error that is not a `judges.` code, is `judge-internal`. `paperwork` is
+an exception inside the stage checks. The `problems` list holds every intake
+problem first, then the stage problems, which are checked whenever the result is
+usable even after an intake problem, and the top-level `reason` is the first of
+them.
+
+The wave-runner (`.claude/skills/bs/wave.md` step 7) first makes its line match
+the example flag for flag; an `error` document or a difference is its own line.
+Then every problem falls in exactly one of five branches:
+
+1. **The wave-runner's own.** `deps-missing`, and an intake problem whose
+   `input` is `artifacts`, `checks`, `findings`, `lessons`, `plan` or
+   `judge-dispatch`. It fixes that and runs the preflight again. No agent runs
+   again, so this is not a round.
+2. **A judge turn that is not in order.** `judges-outstanding`,
+   `uiux-spec-missing`, `uiux-visual-missing`, and an intake problem whose
+   `input` is `grader`, `evidence`, `uiux-visual` or `judge-artifact`. It takes,
+   re-pokes or re-runs that judge turn under the existing rules; a judge's turn
+   is not a ladder round.
+3. **A worker's file the gate blocks on.** `schema-invalid`,
+   `artifacts-missing`, `not-committed`, `screenshots-missing`,
+   `screenshots-stale` and `grader-invalid`. The wave-runner runs `gate run`
+   with the same flags. It blocks on the same reason before any check command
+   runs and writes the blocked `gate-outcome` that `readFailedRounds` counts,
+   so the bounce that follows is a failed round on the escalation ladder.
+4. **A worker's result the gate cannot count.** An intake problem whose `input`
+   is `result`. `gate run` would throw on it before it writes any event, so the
+   wave-runner does not run it. It appends one `error-logged` event for the
+   task (error `contract.schema-violation`, severity `S3-minor`, with `detail`
+   naming the input and the reason) and returns the result to that worker at
+   most once per task, as a builder `dispatch_decision` whose `causal_parent` is
+   that event. A second `result` problem on the same task goes to the epic
+   session, which returns it no more without the operator's answer.
+5. **The verb or the log failed.** An intake problem whose `input` is
+   `judge-internal` or `paperwork`, or one the list above does not name. It goes
+   to the epic session and never to an agent, and it is not a round.
+
+One preflight result can hold problems from several branches, so the
+wave-runner settles it in order and runs the preflight again after each step:
+first every intake problem, by its branch (5 first, then 1, 2 and 4); then the
+stage reasons of branches 1 and 2. A stage reason of branch 3 goes to `gate run`
+only when the preflight shows no intake problem, because `gate run` reads its
+files, mints the evidence and closes the judge turns before the gate runs, and
+throws while any intake problem remains. A handed-in grader file that is fresh
+but neither a list nor a grader document shows both `judge-artifact` and
+`grader-invalid`; it takes branch 2 and never goes to `gate run`. A named problem
+that the line or a worker could have caused, such as an unreadable result at the
+path the worker reported, is the worker's: branch 3 when it carries a stage,
+branch 4 when it is an intake problem.
+
+Every builder dispatch these branches make (coder, tester or uiux, a branch-4
+return included) is a builder dispatch like any other, so the ladder applies
+unchanged: from the second blocked `gate-outcome` of a task the first builder
+dispatch after it runs on a strictly higher model tier
+(`checkModelTierRung`), and from the third no builder dispatch and no gate round
+goes out before an operator answer (`checkOperatorRung`). Branch 4's bound of one
+return is a playbook rule: the log evidences it by structure, the count of
+builder dispatches whose `causal_parent` is such an event, and no verb enforces
+it, an accepted gap like the port-0 rule.
+
 ### An env-failure block: the machine slept during a check
 
 When a check fails, the gate compares the wall clock with the monotonic clock
 over that check's own process (the command-only window, which starts after the
 heavy-lock wait and stops when the command exits). A gap of `SLEEP_GAP_MS`
-(30 000 ms) or more means the machine was suspended while the command ran. The
-`testgate-result`, the `gate-outcome` and the blocked outcome then carry
-`error_class: execution.env-failure` and `environment_evidence`: one entry per
-check with `window`, `wall_ms`, `monotonic_ms`, `clock_gap_ms`, `load_1m_start`,
-`load_1m_end` and `cpus`. Load is evidence only and never classifies, because a
-full suite raises it itself, and a lock-wait timeout never classifies either
-(its window is `none`).
+(30 000 ms) or more means the machine was suspended while the command ran.
+
+The `testgate-result` payload's `environment` array holds every check's
+evidence, one entry per check in result order, with `name`, `window`,
+`wall_ms`, `monotonic_ms`, `clock_gap_ms`, `load_1m_start`, `load_1m_end` and
+`cpus`. Only when a failed check's own clock gap shows sleep do the
+`testgate-result` and `gate-outcome` events also carry
+`error_class: execution.env-failure` and `environment_evidence`, and the
+outcome `gate run` prints carries `error_class` and `environmentEvidence`
+beside `testResult.environment`. Those fields hold only the entries of the
+checks that failed and slept, not one per check. Load is evidence only and
+never classifies, because a full suite raises it itself, and a lock-wait
+timeout never classifies either (its window is `none`).
 
 Classification changes nothing else. The outcome stays `blocked` with
 `reason: "tests-failed"`, no check is re-run and no gate stage is dropped. The

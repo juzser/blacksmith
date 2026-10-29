@@ -291,9 +291,74 @@ one thing this playbook never asks you to.
    outstanding-judge check → uiux check → grader verdict → tests → coverage
    evidence → findings intake → severity decision
    (`docs/guide/operator-guide/queue-and-gate.md` §5).
-   - **The preflight comes first.** While it exits 1, the
-     wave-runner fixes its own flags or bounces the problem to the worker whose
-     file it names, and does not call `gate run`. A `verdicts.grader` of `fail`
+   - **The preflight comes first.** Before it reads the problems, the
+     wave-runner makes its line match the example above flag for flag (the
+     envelope flags included, each file the one the steps name); an `error`
+     document or a difference is its own line to fix, and it runs the preflight
+     again. While the preflight exits 1, every problem then falls in exactly one
+     of five branches, read from `reason`, `problems[].stage` and, for an
+     `intake` problem, `problems[].input`:
+     1. **The wave-runner's own.** `deps-missing`, and an `intake` problem whose
+        `input` is `artifacts`, `checks`, `findings`, `lessons`, `plan` or
+        `judge-dispatch`. Fix that (for `judge-dispatch`, its own judge records
+        or line) and run the preflight again. No agent runs again, so this is
+        not a round.
+     2. **A judge turn that is not in order.** `judges-outstanding`,
+        `uiux-spec-missing`, `uiux-visual-missing`, and an `intake` problem
+        whose `input` is `grader`, `evidence`, `uiux-visual` or `judge-artifact`.
+        Take, re-poke or re-run that judge turn under the rules of steps 5 to
+        7, unchanged. A judge's turn is not a ladder round.
+     3. **A worker's file the gate blocks on.** `schema-invalid`,
+        `artifacts-missing`, `not-committed`, `screenshots-missing`,
+        `screenshots-stale` and `grader-invalid`. Run `gate run` with the same
+        flags. It blocks on the same reason before any check command runs and
+        writes the blocked `gate-outcome` that `readFailedRounds` counts; the
+        bounce that follows is step 9's, a failed round on the ladder that
+        `bs escalation check` reads.
+     4. **A worker's result the gate cannot count.** An `intake` problem whose
+        `input` is `result`. `gate run` would throw on it before it writes any
+        event, so do not run it. Append one `error-logged` event whose fields
+        carry the facts: `task_id` and `task_ref` the task, `agent` and
+        `agent_role` the worker's role, `error` `contract.schema-violation`,
+        `severity` `S3-minor`, and a `detail` that names the input and the
+        reason. Return the result to that worker at most once per task, as a
+        builder `dispatch_decision` for that role whose `causal_parent` is that
+        `error-logged` event (and whose `continuation_of` names the worker's
+        earlier dispatch when the same agent is resumed). The returns per task
+        and role are the builder dispatches whose causal parent is such an
+        event, readable off the log. A second `result` problem on the same task
+        goes to the epic session, which returns it no more without the
+        operator's answer.
+     5. **The verb or the log failed.** An `intake` problem whose `input` is
+        `judge-internal` or `paperwork`, or one this list does not name. It goes
+        to the epic session and never to an agent, and it is not a round.
+
+     One preflight result can hold problems from several branches: `problems`
+     lists every `intake` problem first, then the stage problems, which are
+     checked even after an intake problem, and `reason` is the first of them.
+     `gate run` reads its files, mints the evidence and uiux-visual files and
+     closes the judge turns before the gate runs, so it throws, and writes no
+     `gate-outcome`, while any `intake` problem shows. So settle the result in
+     this order and run the preflight again after each step: first every
+     `intake` problem, by its branch (5 stops the task and goes to the epic
+     session; then 1; then 2; then 4); then the stage reasons of branches 1 and
+     2. A stage reason of branch 3 goes to `gate run` only when the preflight
+     shows no `intake` problem. A handed-in grader file that is fresh but
+     neither a list nor a grader document shows both `judge-artifact` and
+     `grader-invalid`; it takes branch 2 and is never sent to `gate run`. A
+     named problem that the line or a worker could have caused, such as an
+     unreadable result at the path the worker reported, is the worker's:
+     branch 3 if it carries a stage, branch 4 if it is an `intake` problem.
+
+     Every dispatch these branches make for a builder role (coder, tester or
+     uiux), a branch-4 return or a re-run uiux pass included, is a builder
+     dispatch like any other, and the ladder applies to it unchanged: from the
+     task's second blocked `gate-outcome`, the first builder dispatch after it
+     runs on a strictly higher model tier than the failing round's
+     (`checkModelTierRung`); from the third, no builder dispatch and no gate
+     round goes out before an operator answer (`checkOperatorRung`).
+
+     A `verdicts.grader` of `fail`
      or `not-graded` is not a preflight problem and does not stop `gate run`,
      which records the verdict. Every `--artifacts-dir` in this playbook (step
      5's record line, the two lines above and each worker's preflight line in
