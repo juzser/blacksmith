@@ -34,7 +34,8 @@ there is no second list to drift. A PR whose gate is red will not be merged.
 
 It is the **whole** local gate. It already runs lint, every typecheck and all
 three test suites under coverage, so for a final check run it alone: running
-`pnpm test` or the typechecks first only runs the orchestrator suite twice.
+`pnpm test` first runs the orchestrator suite twice, and running the typechecks
+first runs them twice.
 The individual `pnpm` scripts below are for iterating, not for a pre-flight.
 
 It runs, in order:
