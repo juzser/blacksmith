@@ -4223,7 +4223,7 @@ async function main(): Promise<number> {
 
   if (namespace === 'policy' && action === 'hook') {
     // The PreToolUse hook body, kept as a command because guard.sh's header,
-    // the docs and cli.test.ts all name it — but the shim no longer execs it.
+    // the docs and cliWorktree.test.ts all name it — but the shim no longer execs it.
     // It execs `dist/policyHook.js`, an entry point over the same function
     // whose import graph is the decision's alone; this router carries 64
     // top-level imports, ~1.3s of them the database layer, in front of ~39ms
@@ -5289,6 +5289,7 @@ async function main(): Promise<number> {
         claimPath: l.claimPath,
         agentRole: l.agentRole,
         caseType: l.caseType,
+        errorClass: l.errorClass,
       }));
       const markdown = compileLessons(compileInputs, existingMarkdown);
       writeFileSync(outPath, markdown, 'utf8');

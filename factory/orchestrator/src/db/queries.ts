@@ -395,7 +395,7 @@ export interface LiveAgentGroup {
  * needs each running agent's own task id (and dispatch time, for the
  * elapsed-time tooltip), which `LiveAgentGroup`'s counts-only shape can't
  * carry. Additive alongside `liveAgents` (unchanged, still used by
- * `queries.test.ts`/`cli.test.ts`), not a replacement.
+ * `queries.test.ts`/`cliDispatch.test.ts`), not a replacement.
  */
 export interface LiveAgentEntry {
   id: string;
