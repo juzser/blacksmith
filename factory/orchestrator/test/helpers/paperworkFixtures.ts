@@ -340,6 +340,16 @@ export const screenshotComboMissing: FixtureBuilder = async (w) => {
   return baseInput(w, { uiAffecting: true });
 };
 
+/** Screenshots recorded at a head the branch has since moved past. */
+export const screenshotsStale: FixtureBuilder = async (w) => {
+  await withSpecTurn(w);
+  await recordTester(w);
+  await writeFile(path.join(w.worktreeDir, 'later.ts'), 'export const y = 1;\n');
+  w.git(['add', 'later.ts']);
+  w.git(['commit', '-q', '-m', 'later work']);
+  return baseInput(w, { uiAffecting: true });
+};
+
 /** Spec closed, screenshots complete and fresh, no visual turn at all. */
 export const uiuxVisualMissing: FixtureBuilder = async (w) => {
   await withSpecTurn(w);
@@ -401,6 +411,7 @@ export const PARITY_CASES: readonly {
     reason: 'screenshots-missing',
   },
   { name: 'uiux spec missing', build: uiuxSpecMissing, reason: 'uiux-spec-missing' },
+  { name: 'screenshots stale', build: screenshotsStale, reason: 'screenshots-stale' },
   { name: 'uiux visual missing', build: uiuxVisualMissing, reason: 'uiux-visual-missing' },
   { name: 'ui-affecting, everything in place', build: uiuxClean, reason: null },
 ];
