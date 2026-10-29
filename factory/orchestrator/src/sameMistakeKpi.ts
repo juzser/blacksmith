@@ -211,7 +211,7 @@ function pct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-function describe(report: Omit<SameMistakeKpiReport, 'detail' | 'ok'>): string {
+function describeSameMistakeKpi(report: Omit<SameMistakeKpiReport, 'detail' | 'ok'>): string {
   const head =
     `${report.totalSameMistake} same-mistake of ${report.totalDecisions} decision(s) across ` +
     `${report.windows.length} measured window(s)` +
@@ -424,5 +424,9 @@ export function checkSameMistakeKpi(
     status: decide(windows, provenRises, reach, holes),
   };
 
-  return { ...partial, detail: describe(partial), ok: partial.status === 'on-target' };
+  return {
+    ...partial,
+    detail: describeSameMistakeKpi(partial),
+    ok: partial.status === 'on-target',
+  };
 }

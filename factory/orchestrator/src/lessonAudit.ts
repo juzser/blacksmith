@@ -288,7 +288,7 @@ function entryDetail(entry: Omit<LessonAuditEntry, 'detail'>): string {
   }
 }
 
-function describe(report: Omit<LessonAuditReport, 'detail' | 'ok'>): string {
+function describeLessonAudit(report: Omit<LessonAuditReport, 'detail' | 'ok'>): string {
   const head =
     `${report.entries.length} compiled lesson(s): ${report.counts.keep} firing, ` +
     `${report.counts.rescope} idle, ${report.counts.retire} unreachable, ` +
@@ -549,5 +549,5 @@ export function auditLessons(
     status,
   };
 
-  return { ...partial, detail: describe(partial), ok: status === 'clean' };
+  return { ...partial, detail: describeLessonAudit(partial), ok: status === 'clean' };
 }

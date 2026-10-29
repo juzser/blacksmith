@@ -125,7 +125,7 @@ function onMenuFocusout(event: FocusEvent) {
 }
 
 watch(overflowOpen, (open) => {
-  if (open) nextTick(() => focusItemAt(0));
+  if (open) void nextTick().then(() => focusItemAt(0));
 });
 
 // Any navigation closes the overflow — in particular Work's "View" radio
