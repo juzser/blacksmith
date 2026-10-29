@@ -482,8 +482,8 @@ if command -v pnpm >/dev/null 2>&1; then
   # could print PASS having never opened a page. Ask Playwright where it
   # thinks its own binary is before concluding there isn't one.
   #
-  # .github/workflows/ci.yml still runs e2e in its own job (it installs
-  # Chromium first), so a SKIP there is coverage moved, not coverage lost.
+  # .github/workflows/ci.yml still runs e2e in its own jobs (the e2e-shard
+  # matrix; each installs Chromium first), so a SKIP there is coverage moved, not coverage lost.
   CHROMIUM_BIN="${PLAYWRIGHT_CHROMIUM_PATH:-${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}/chromium}"
   if [ ! -x "$CHROMIUM_BIN" ]; then
     CHROMIUM_BIN="$(node -e 'try { process.stdout.write(require("@playwright/test").chromium.executablePath()) } catch { /* not installed */ }' 2>/dev/null)"

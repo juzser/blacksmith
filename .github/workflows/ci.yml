@@ -94,17 +94,20 @@ jobs:
       #
       # CI=true also turns check.sh's "pnpm not on PATH" and "gitleaks not on
       # PATH" SKIPs into failures: a job that quietly skipped the whole
-      # TypeScript half, or never scanned for secrets, must not report green. `pnpm test:e2e` still skips here (no Chromium at
-      # /opt/pw-browsers) and runs in the `e2e` job below instead.
+      # TypeScript half, or never scanned for secrets, must not report green.
+      # `pnpm test:e2e` still skips here (no Chromium at /opt/pw-browsers) and
+      # runs in the `e2e-shard` jobs below instead; the `e2e` job collects them.
       - name: Run the gate
         run: bash scripts/check.sh
 
   # The Playwright specs run as two shards on two runners, then one job
   # collects them under the name the ruleset on `main` requires. The suite is
-  # one worker by design (ui/playwright.config.ts: `workers: 1`, because the
-  # dashboard binds the fixed port 4681), so the only way to cut its wall time
-  # is more runners, not more workers. Each shard is its own runner and its own
-  # port 4681. `e2e` below is the check that gates merging.
+  # one worker by design (ui/playwright.config.ts: `workers: 1`):
+  # ui/e2e/global-setup.ts starts a single dashboard server on the fixed port
+  # 4681 over one scratch DB, and every worker in a run would share that server
+  # and DB. The same fixed port is why two runs cannot share a machine (D-276).
+  # So the way to cut wall time is more runners, not more workers. Each shard
+  # is its own runner and so has its own port 4681. `e2e` below is the check that gates merging.
   e2e-shard:
     name: e2e shard ${{ matrix.shard }}/2
     runs-on: ubuntu-latest
@@ -172,11 +175,23 @@ jobs:
         timeout-minutes: 5
         run: pnpm exec playwright install-deps chromium
 
-      # 11 specs across every page, against a scratch DB seeded from the same
+      # Every spec file, across every page, against a scratch DB seeded from the same
       # fixtures the db tests use (ui/e2e/global-setup.ts). This job is the
       # only place in the project where a browser has ever rendered these
       # pages; before it, "the dashboard works" rested on unit tests plus
-      # reading the markup. `pnpm test:e2e` appends the flag to the playwright
+      # reading the markup.
+      #
+      # The checked-out screenshots are deleted first. The specs only WRITE
+      # their PNGs (page.screenshot({path}) in ui/e2e/helpers.ts); nothing
+      # compares against a committed one (no toHaveScreenshot), and check.sh
+      # calls them "artifacts, not assertions". Left in place, each shard's
+      # upload would carry all of the committed PNGs, about half of them not
+      # rendered by this shard, and the two artifacts would overlap: the D-190
+      # problem again. Removed, each artifact holds only what its shard drew.
+      - name: Clear the committed screenshots
+        run: find ui/e2e/__screenshots__ -name '*.png' -delete
+
+      # `pnpm test:e2e` appends the flag to the playwright
       # command it ends in, so --shard reaches Playwright itself.
       - name: Run e2e (shard ${{ matrix.shard }}/2)
         id: e2e
@@ -192,9 +207,13 @@ jobs:
       # `continue-on-error`: this step publishes evidence, it is not the
       # verdict. A failed upload (the artifact service having a bad minute)
       # has turned a green e2e run red before; the verdict is the e2e step's.
+      # `continue-on-error` does not cover a hang, though: a stuck upload would
+      # run to the 30-minute job bound and turn the required check red, so the
+      # step is bounded on its own.
       - name: Upload screenshots
         if: always() && steps.e2e.conclusion != 'skipped'
         continue-on-error: true
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots-${{ matrix.shard }}
