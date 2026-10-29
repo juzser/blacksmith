@@ -1494,6 +1494,9 @@ interface DequotedWord {
   readonly text: string;
 }
 
+/** A run of characters `splitDequotedWords` takes into a word as they stand: no quote, backslash or blank. */
+const PLAIN_WORD_RUN_RE = /[^\s'"\\]+/y;
+
 function splitDequotedWords(segment: string): DequotedWord[] {
   const words: DequotedWord[] = [];
   let raw = '';
@@ -1507,6 +1510,15 @@ function splitDequotedWords(segment: string): DequotedWord[] {
   };
   let i = 0;
   while (i < segment.length) {
+    PLAIN_WORD_RUN_RE.lastIndex = i;
+    const plain = PLAIN_WORD_RUN_RE.exec(segment)?.[0];
+    if (plain !== undefined) {
+      inWord = true;
+      raw += plain;
+      text += plain;
+      i += plain.length;
+      continue;
+    }
     const c = segment.charAt(i);
     if (c === "'") {
       inWord = true;
@@ -1930,6 +1942,9 @@ function expansionEnd(
   return -1;
 }
 
+/** A run of characters `readShellWords` reads as plain word text: none opens a branch there. */
+const PLAIN_RUN_RE = /[^ \t\n;|&()<>'"\\$`#]+/y;
+
 /**
  * The one reader of a segment's shell words: plain text, quotes, escapes,
  * separators, ANSI-C quotes, `${ }` expansions, command and backtick
@@ -1974,6 +1989,14 @@ function readShellWords(
   };
   let i = 0;
   while (i < segment.length) {
+    // A run of characters no branch below treats specially is added in one piece, not one by one.
+    PLAIN_RUN_RE.lastIndex = i;
+    const plain = PLAIN_RUN_RE.exec(segment)?.[0];
+    if (plain !== undefined) {
+      add(plain, plain);
+      i += plain.length;
+      continue;
+    }
     const c = segment.charAt(i);
     const next = segment.charAt(i + 1);
     if (/[ \t]/.test(c)) {
@@ -2750,6 +2773,9 @@ function topLevelCommands(command: string): string[] {
   return splitTopLevelCommands(command) ?? [command];
 }
 
+/** Characters `splitTopLevelCommands` never reacts to, whatever quote or paren it is inside. */
+const INERT_RUN_RE = /[^'"\\`()&|;\n$]+/y;
+
 /** `topLevelCommands`' split, or `null` when the line holds something it cannot read with confidence. */
 function splitTopLevelCommands(command: string): string[] | null {
   if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return null;
@@ -2762,6 +2788,13 @@ function splitTopLevelCommands(command: string): string[] | null {
     start = next;
   };
   while (i < command.length) {
+    // Characters no state below reacts to are skipped in one step.
+    INERT_RUN_RE.lastIndex = i;
+    const inert = INERT_RUN_RE.exec(command)?.[0];
+    if (inert !== undefined) {
+      i += inert.length;
+      continue;
+    }
     const c = command[i];
     const top = stack[stack.length - 1];
     if (top === 'sq') {
@@ -3104,7 +3137,11 @@ function splitChainSegments(command: string): string[] {
  * Longest operators first: `>>` before `>`, `<<<` before `<<` before `<`.
  */
 const REDIRECTION_RE = new RegExp(
-  `(?:&|\\d*)(?:>>|>|<<<|<<-?|<>|<)(?:&\\d*-?|\\s*[^\\s${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}]*)`,
+  // The descriptor is optional, and a non-empty one starts at the head of a digit run only:
+  // from every digit of a long run, `\d+` would scan to the run's end and fail, which is
+  // quadratic in its length. The empty descriptor stays allowed everywhere, because a
+  // replace resumes right after the previous match, which may end in a digit (`2>&1>f`).
+  `(?:&|(?<!\\d)\\d+)?(?:>>|>|<<<|<<-?|<>|<)(?:&\\d*-?|\\s*[^\\s${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}]*)`,
   'g',
 );
 
