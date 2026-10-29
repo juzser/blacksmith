@@ -47,7 +47,14 @@ import { canEscalate, decide, type LessonRule, type SeverityDecision } from './s
 import { type AddedTask, readAddedTasks } from './taskEvents.js';
 import { taskIdsMatch } from './taskId.js';
 import type { Taxonomy } from './taxonomy.js';
-import { type CheckCommand, type RunResult, run as runTestgate } from './testgate.js';
+import {
+  type CheckCommand,
+  type CheckEnvironment,
+  type EnvironmentSources,
+  type RunResult,
+  run as runTestgate,
+  sleptDuringCheck,
+} from './testgate.js';
 import { checkUiux, type UiuxBlockReason } from './uiuxGate.js';
 
 // No GateError: a gate failing is the gate working. Every outcome here comes
@@ -118,6 +125,8 @@ export interface GateInput {
   artifactsDir?: string;
   runAll?: boolean;
   timeoutMs?: number;
+  /** Clock and load sources for the testgate's environment evidence; real ones by default. */
+  environmentSources?: EnvironmentSources;
   crosscheck?: GateCrosscheckOptions;
   /**
    * The gated task's declared budget, straight from its plan entry (P9-18).
@@ -249,6 +258,13 @@ export type GateOutcome =
         | 'coverage-evidence'
         | 'findings';
       testResult: RunResult | null;
+      /**
+       * Set only on a `tests-failed` block whose failed check's own clock gap
+       * shows the machine slept: the taxonomy class `execution.env-failure`,
+       * with that check's evidence beside it. The block itself is unchanged.
+       */
+      error_class?: 'execution.env-failure';
+      environmentEvidence?: CheckEnvironment[];
       /**
        * Why the result document failed its schema — inline, exactly as
        * `testResult` carries why the tests failed (P9-21). The block used to
@@ -1230,10 +1246,19 @@ async function runGateStages(
     cwd: input.worktreeDir,
     runAll: input.runAll ?? false,
     timeoutMs: input.timeoutMs,
+    environmentSources: input.environmentSources,
   });
+  const slept = sleptFailedChecks(testResult);
+  const sleptFields =
+    slept.length > 0 ? { error_class: ENV_FAILURE_CLASS, environment_evidence: slept } : {};
   await emit(
     'testgate-result',
-    { pass: testResult.pass, results: testResult.results },
+    {
+      pass: testResult.pass,
+      results: testResult.results,
+      environment: testResult.environment,
+      ...sleptFields,
+    },
     input.taskId,
     ctx,
     opts,
@@ -1245,6 +1270,7 @@ async function runGateStages(
         taskId: input.taskId,
         reason: 'tests-failed',
         testResult,
+        ...(slept.length > 0 ? { error_class: ENV_FAILURE_CLASS, environmentEvidence: slept } : {}),
         schemaErrors: [],
         blockingFindings: [],
         artifactIssues: [],
@@ -1449,6 +1475,21 @@ type UnfinalizedGateOutcome = GateOutcome extends infer T
     : T
   : never;
 
+const ENV_FAILURE_CLASS = 'execution.env-failure' as const;
+
+/**
+ * The evidence of every failed check whose own window shows the machine slept.
+ * Each failed check is judged by its own entry, so a gap on a check that
+ * passed never classifies another check's failure. Empty when the run passed.
+ */
+function sleptFailedChecks(testResult: RunResult): CheckEnvironment[] {
+  const environment = testResult.environment ?? [];
+  return testResult.results.flatMap((r, i) => {
+    const entry = environment[i];
+    return !r.pass && entry !== undefined && sleptDuringCheck(entry) ? [entry] : [];
+  });
+}
+
 async function finalize(
   outcome: UnfinalizedGateOutcome,
   ctx: GateContext,
@@ -1456,7 +1497,13 @@ async function finalize(
 ): Promise<GateOutcome> {
   const stored = await emit(
     'gate-outcome',
-    { outcome: outcome.outcome, reason: 'reason' in outcome ? outcome.reason : null },
+    {
+      outcome: outcome.outcome,
+      reason: 'reason' in outcome ? outcome.reason : null,
+      ...('error_class' in outcome && outcome.error_class !== undefined
+        ? { error_class: outcome.error_class, environment_evidence: outcome.environmentEvidence }
+        : {}),
+    },
     outcome.taskId,
     ctx,
     opts,
