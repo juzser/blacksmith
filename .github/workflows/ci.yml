@@ -189,8 +189,12 @@ jobs:
       # baseline PNGs are committed, so uploading after a skipped e2e
       # publishes the repo's own pictures under this run's name (D-190).
       # One artifact per shard: two uploads under one name collide.
+      # `continue-on-error`: this step publishes evidence, it is not the
+      # verdict. A failed upload (the artifact service having a bad minute)
+      # has turned a green e2e run red before; the verdict is the e2e step's.
       - name: Upload screenshots
         if: always() && steps.e2e.conclusion != 'skipped'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots-${{ matrix.shard }}
