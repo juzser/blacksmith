@@ -854,7 +854,7 @@ bs heavy status
 ```
 
 ```json
-{"pid":37075,"token":"4792f1e6-c5bf-4592-ac0c-882eae834805","label":"task-4-coder","startedAt":"2026-10-29T04:12:39.206Z","cwd":"/abs/path/.wt/my-project/task-4"}
+{"pid":37075,"token":"<uuid>","label":"task-4-coder","startedAt":"2026-10-29T04:12:39.206Z","cwd":"/abs/path/.wt/my-project/task-4"}
 ```
 
 A live holder is never stolen, however old the lock is; age is no evidence. A
