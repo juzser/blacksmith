@@ -7,7 +7,7 @@ import { lintDispatchPrompt } from '../src/dispatchLint.js';
 import { type PaperworkReason, SCREENSHOT_RE, STAGES_FOR_ROLE } from '../src/paperwork.js';
 import { AGENTS_DIR, REPO_ROOT } from '../src/paths.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
-import { parseSharedRegions } from '../src/templateFragments.js';
+import { listFragments, parseSharedRegions } from '../src/templateFragments.js';
 import type { CheckEnvironment } from '../src/testgate.js';
 import { COMMANDS, flagSpecFor } from '../src/usage.js';
 import { runCli } from './helpers/cliHarness.js';
@@ -1151,10 +1151,21 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
   });
 
   it('leaves the handback-preflight fragment and the SHARED regions of the three templates alone', () => {
+    const fragments = listFragments();
     for (const role of ['tester', 'wave-runner', 'uiux']) {
-      const shared = [...agent(role).matchAll(SHARED)].map((m) => m[0]);
-      expect(shared.length, role).toBeGreaterThan(0);
+      const regions = parseSharedRegions(agent(role), `bs-${role}.md`);
+      expect(regions.length, role).toBeGreaterThan(0);
+      for (const region of regions) {
+        const fragment = fragments.get(region.name);
+        expect(fragment, `bs-${role}.md: SHARED:${region.name} names no fragment`).toBeDefined();
+        expect(region.body, `bs-${role}.md: SHARED:${region.name} drifted from its fragment`).toBe(
+          fragment,
+        );
+      }
     }
+    expect(fragments.get('handback-preflight')).toBe(
+      read('.claude/fragments/handback-preflight.md'),
+    );
   });
 });
 
