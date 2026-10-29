@@ -250,6 +250,41 @@ describe('force-push rule reads a shell run with -c, behind prefix words, throug
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
+  it.each([
+    ['timeout', 'timeout'],
+    ['nice -n', 'nice -n'],
+    ['stdbuf -oL', 'stdbuf -oL'],
+    ['a plain word', 'echo'],
+  ])(
+    'answers quickly behind %s on an operand of 80000 digits and still refuses a later segment',
+    (_name, prefix) => {
+      const started = Date.now();
+      const refused = forcePushRefused(
+        `${prefix} ${'1'.repeat(80000)} git status; git push --force origin main`,
+      );
+      expect(refused).toBe(true);
+      expect(Date.now() - started).toBeLessThan(1000);
+    },
+  );
+
+  // A redirection glued to the one before it, the first target ending in a digit, is read as
+  // two redirections: both are taken out, so the verdict is that of the bare command.
+  const GLUED_REDIRECTIONS: Array<[string, string, string[]]> = [
+    ['main', 'git pull --ff-only origin main 2>&1>/dev/null', []],
+    ['main', 'git merge --ff-only origin/main 2>&1>/dev/null', []],
+    ['main', 'git grep rebase 2>&1>/dev/null', []],
+    ['feature', 'git rebase main 2>&1>/dev/null', []],
+    ['feature', 'git push origin feature 2>&1>/dev/null', []],
+    ['feature', 'git grep push >out1>out2 -- x', []],
+    ['main', 'git grep rebase >f1>g', []],
+    ['main', 'git grep rebase >&2>f', []],
+    ['main', 'git grep rebase <&0>f', []],
+  ];
+
+  it.each(GLUED_REDIRECTIONS)('on %s, reads %s as before', (branch, command, rules) => {
+    expect(decide(command, branch).violations.map((v) => v.ruleId)).toEqual(rules);
+  });
+
   it('refuses a segment after an env split-string value of 200000 words without throwing', () => {
     const line = `env -S "${'a '.repeat(200000)}"; git push --force origin main`;
     expect(() => forcePushRefused(line)).not.toThrow();
