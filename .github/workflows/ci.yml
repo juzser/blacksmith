@@ -129,18 +129,48 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The browser download is cached, keyed on the runner OS and the exact
+      # @playwright/test version (the install is frozen, so what is installed
+      # is what pnpm-lock.yaml pins). A new Playwright pins a new Chromium
+      # revision, so a version bump misses and downloads; nothing else does.
+      # Only the download is cached: ubuntu-latest's system libraries are not
+      # in ~/.cache/ms-playwright, so they are still installed on every run
+      # (next step). The runner image is deliberately unchanged and e2e does
+      # not move into a container: the geometry specs depend on the runner's
+      # fonts (ui/e2e/fontSwitch.ts forces Arial for that reason), and a
+      # different image could change what renders.
+      - name: Resolve the Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Chromium download
+        id: chromium-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
       # The dev container preinstalled a Chromium at /opt/pw-browsers and set
-      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1; a runner has neither, so it
-      # downloads the revision @playwright/test 1.62.1 pins. --with-deps pulls
-      # the shared libraries headless Chromium needs on ubuntu-latest.
-      # Bounded because --with-deps shells out to apt, and apt on an
-      # unreachable mirror does not fail, it waits. Twice on 2026-08-19 this
-      # step sat for 30m05s with no output after the InRelease fetches, ate
-      # the whole job budget, and reported as a plain red e2e check — the
-      # same red a broken dashboard produces (D-190). Healthy: 37s.
+      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1; a runner has neither, so on a cache
+      # miss it downloads the revision the locked @playwright/test pins. Split
+      # from the system libraries so a hit skips the download and a miss skips
+      # nothing; the download needs no apt.
       - name: Install Chromium
+        if: steps.chromium-cache.outputs.cache-hit != 'true'
         timeout-minutes: 5
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
+
+      # The shared libraries headless Chromium needs on ubuntu-latest, from
+      # apt. Bounded because apt on an unreachable mirror does not fail, it
+      # waits. Twice on 2026-08-19 this step (then folded into the browser
+      # install as --with-deps) sat for 30m05s with no output after the
+      # InRelease fetches, ate the whole job budget, and reported as a plain
+      # red e2e check — the same red a broken dashboard produces (D-190).
+      # Kept on every run, hit or miss, because the browser cache does not
+      # cover it; the bound is the same 5 minutes the combined step had.
+      - name: Install Chromium system dependencies
+        timeout-minutes: 5
+        run: pnpm exec playwright install-deps chromium
 
       # 11 specs across every page, against a scratch DB seeded from the same
       # fixtures the db tests use (ui/e2e/global-setup.ts). This job is the
