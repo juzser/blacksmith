@@ -303,7 +303,9 @@ describe('bs results check (built binary)', () => {
       async (_name, extra, code) => {
         const line = [...extra, ...(await gateLine(await clean(w)))];
         const real = gate(line);
+        const before = snapshot(w.stateDir);
         const preflight = checkGate(line);
+        expect(snapshot(w.stateDir)).toEqual(before);
         expect(real.json.error.code).toBe(code);
         expect(preflight.json.error.code).toBe(code);
         expect(preflight.status).toBe(real.status);
