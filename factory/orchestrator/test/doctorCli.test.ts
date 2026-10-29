@@ -48,7 +48,7 @@ describe('bs doctor', () => {
     const res = run();
     assertExited(res, 'bs doctor');
     const lines = res.stdout.trimEnd().split('\n');
-    expect(lines).toHaveLength(7);
+    expect(lines).toHaveLength(8);
     expect(lines.some((l) => l.startsWith('missing') && l.includes('git'))).toBe(true);
     expect(res.status).toBe(1);
   });

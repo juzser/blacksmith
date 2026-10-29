@@ -11,6 +11,7 @@ import {
   type RunResult,
   runChecks,
 } from '../src/installCheck.js';
+import { CONCURRENCY_CAPS } from '../src/workroot.js';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 
@@ -24,6 +25,11 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
     enginesNode: '>=22',
     bsVersion: '1.2.3',
     root: FAKE_ROOT,
+    env: { ...CONCURRENCY_CAPS },
+    home: '/home/u',
+    readFile: () => {
+      throw new Error('ENOENT');
+    },
     exists: () => true,
     run: (cmd) => {
       if (cmd === 'claude') return done('Installed plugins:\n  blacksmith@blacksmith\n');
@@ -49,6 +55,7 @@ describe('installCheck probes', () => {
       'claude',
       'plugin',
       'dashboard',
+      'concurrency-caps',
     ]);
     expect(runChecks(deps()).every((c) => c.status === 'ok')).toBe(true);
   });
@@ -185,5 +192,120 @@ describe('installCheck extra edges', () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).not.toContain('->');
     expect(lines[1]).toContain('do this');
+  });
+});
+
+describe('concurrency-caps', () => {
+  const [SUB, TOOL] = Object.keys(CONCURRENCY_CAPS) as [string, string];
+  const caps = (sub: string, tool: string) => ({ [SUB]: sub, [TOOL]: tool });
+  const files = (map: Record<string, string>) => (file: string) => {
+    const body = map[file];
+    if (body !== undefined) return body;
+    throw new Error('ENOENT');
+  };
+  const settings = (env: Record<string, string>) => JSON.stringify({ env });
+  const local = path.join(process.cwd(), '.claude', 'settings.local.json');
+  const proj = path.join(process.cwd(), '.claude', 'settings.json');
+  const user = '/home/u/.claude/settings.json';
+  const caps_ = (over: Partial<DoctorDeps>) => check(over, 'concurrency-caps');
+
+  it('unset -> unknown, fix names bs init + restart before the user-settings route', () => {
+    const c = caps_({ env: {} });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(SUB);
+    expect(c.fix.indexOf('bs init')).toBeGreaterThanOrEqual(0);
+    expect(c.fix).toContain('restart Claude Code');
+    expect(c.fix.indexOf('bs init')).toBeLessThan(c.fix.indexOf('user settings'));
+    expect(c.fix).toContain('Raise the concurrency caps');
+    expect(doctorExitCode([c])).toBe(0);
+  });
+
+  it('process env at the target, or at 64/32 -> ok', () => {
+    expect(caps_({ env: { ...CONCURRENCY_CAPS } }).status).toBe('ok');
+    expect(caps_({ env: caps('64', '32') }).status).toBe('ok');
+  });
+
+  it('compares numerically: "100" beats 20', () => {
+    expect(caps_({ env: caps('100', '100') }).status).toBe('ok');
+    expect(caps_({ env: caps('20', '10') }).status).toBe('unknown');
+    expect(caps_({ env: caps('21', '11') }).status).toBe('ok');
+  });
+
+  it.each(['64k', '1e3', ' 64', '-1', ''])('non-integer %j -> unknown naming the value', (v) => {
+    const c = caps_({ env: caps(v, '32') });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(SUB);
+    expect(c.detail).toContain(JSON.stringify(v));
+  });
+
+  it('only user settings at 20/10 -> unknown, naming the source', () => {
+    const c = caps_({ env: {}, readFile: files({ [user]: settings(caps('20', '10')) }) });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(user);
+  });
+
+  it('user settings above the defaults -> ok; CLAUDE_CONFIG_DIR moves the path', () => {
+    const body = settings(caps('64', '32'));
+    expect(caps_({ env: {}, readFile: files({ [user]: body }) }).status).toBe('ok');
+    const moved = caps_({
+      env: { CLAUDE_CONFIG_DIR: '/cfg' },
+      readFile: files({ [user]: body }),
+    });
+    expect(moved.status).toBe('unknown');
+    expect(
+      caps_({ env: { CLAUDE_CONFIG_DIR: '/cfg' }, readFile: files({ '/cfg/settings.json': body }) })
+        .status,
+    ).toBe('ok');
+  });
+
+  it('process env beats settings files; local beats project beats user', () => {
+    const low = settings(caps('20', '10'));
+    const high = settings(caps('64', '32'));
+    const read = (map: Record<string, string>) => files(map);
+    expect(caps_({ env: caps('64', '32'), readFile: read({ [local]: low }) }).status).toBe('ok');
+    expect(caps_({ env: {}, readFile: read({ [local]: low, [proj]: high }) }).status).toBe(
+      'unknown',
+    );
+    expect(caps_({ env: {}, readFile: read({ [local]: high, [proj]: low }) }).status).toBe('ok');
+    expect(caps_({ env: {}, readFile: read({ [proj]: high, [user]: low }) }).status).toBe('ok');
+    expect(caps_({ env: {}, readFile: read({ [proj]: low, [user]: high }) }).status).toBe(
+      'unknown',
+    );
+  });
+
+  it('invalid JSON is skipped with a note, never thrown', () => {
+    const c = caps_({
+      env: {},
+      readFile: files({ [local]: '{not json', [user]: settings(caps('64', '32')) }),
+    });
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('skipped');
+    expect(c.detail).toContain(local);
+  });
+
+  it('accepts JSON numbers and rejects other JSON types in a settings env block', () => {
+    const num = JSON.stringify({ env: { [SUB]: 64, [TOOL]: 32 } });
+    expect(caps_({ env: {}, readFile: files({ [user]: num }) }).status).toBe('ok');
+    const bool = JSON.stringify({ env: { [SUB]: true, [TOOL]: 32 } });
+    const c = caps_({ env: {}, readFile: files({ [user]: bool }) });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(SUB);
+  });
+
+  it('one variable low is enough to be unknown, and names only that one', () => {
+    const c = caps_({ env: caps('64', '10') });
+    expect(c.status).toBe('unknown');
+    expect(c.detail).toContain(TOOL);
+    expect(c.detail).not.toContain(`${SUB} is`);
+  });
+
+  it('echoes only the two variables it reads', () => {
+    const c = caps_({
+      env: {},
+      readFile: files({
+        [user]: JSON.stringify({ env: { ...caps('5', '5'), SECRET: 'hunter2' } }),
+      }),
+    });
+    expect(JSON.stringify(c)).not.toContain('hunter2');
   });
 });

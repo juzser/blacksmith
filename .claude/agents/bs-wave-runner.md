@@ -3,7 +3,7 @@ name: bs-wave-runner
 description: Runs one admitted wave of an epic — worktrees through merge queue — in a session of its own, so the epic session spends its window on the epic. Use when a wave is too wide to carry inline; never to plan, re-plan, or close an epic.
 model: sonnet
 effort: medium
-tools: Read, Write, Bash, Grep, Glob, Agent(bs-coder, bs-tester, bs-grader, bs-reviewer, bs-verifier, bs-security-reviewer, bs-uiux, bs-researcher, bs-merger, bs-scribe)
+tools: Read, Write, Bash, Grep, Glob, TaskStop, Monitor, Agent(bs-coder, bs-tester, bs-grader, bs-reviewer, bs-verifier, bs-security-reviewer, bs-uiux, bs-researcher, bs-merger, bs-scribe)
 maxTurns: 150
 experimental:
   cacheTtl: 1h
@@ -33,7 +33,8 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
   dispatch and quorum recording, try the session owner's role first and
   reach `system` only if that lookup itself comes back empty).
 - **Every `dispatch_decision` you write also carries a one-line, plain-words
-  `reason`** — dispatch.md's payload contract, not restated here.
+  `reason`** — `bs playbook slice dispatch --section "The task id goes on the event, not in the payload"`
+  prints that contract; it is not restated here.
 - **`--continues` is what makes your log the epic's log.** Every deciding read
   at the epic tier folds the lineage, so a dispatch you record is visible from
   the epic session that admitted you and is not visible from a sibling wave's.
@@ -54,7 +55,29 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
 
 Run steps 2-10 of `.claude/skills/bs/wave.md` for the tasks you were admitted
 with: worktrees, the dispatch fan-out, gates, findings, merge queue. That file
-is the playbook and it is not restated here — read it, then work it in order.
+is the playbook and it is not restated here, and you do not read all of it
+either. Read slices, never the whole of `wave.md` or `dispatch.md`:
+
+- once per wave, the two common sections:
+  `bs playbook slice wave --section "You own the log for what you dispatch"`
+  and `bs playbook slice wave --section "Run the whole wave at once"`;
+- then, for the step you are on, `bs playbook slice wave --step <n>` (n from
+  2 to 10), and `bs playbook slice dispatch --section "<heading>"` for a
+  dispatch.md section a step points at. A section may be named with or
+  without its trailing parenthetical, and an unknown name's error lists the
+  playbook's sections.
+
+Dispatch typed `bs-*` agents only, and build each brief with
+`bs brief compose`. Never Read a PNG: screenshots are the uiux pass's and the
+tester's to read, so you pass the paths along and open nothing. Waits are background
+tasks or the Monitor tool, never `sleep`.
+
+**At wave end, stop what this session started.** Use TaskStop on your own
+still-running background tasks and idle subagents, and only once every output
+file the task was told to write ends with an `EXIT=<n>` line and it does not
+hold the heavy lock (`bs heavy status` names no holder whose label or cwd is
+that task's; otherwise leave it running and say so in your result). Never stop
+a task this session did not start.
 
 What you are handed: the project directory, the epic id, the live plan path,
 the admitted task ids, the effort profile the epic resolved, the epic session
@@ -64,6 +87,36 @@ What you hand back: each task's terminal state, the merge-queue outcome, every
 finding with its severity, any escalation that reached the operator, and your
 wave session id with its last event id, so the epic goes on chaining from where
 you stopped.
+
+<!-- BEGIN SHARED:heavy-run -->
+**Heavy runs take the machine lock.** One full suite or e2e run at a time
+runs on the machine. A full-suite or e2e command — the project's `test_unit` or
+`test_e2e` from `bs stack show`, a full-suite gate command your brief names, or
+a check marked heavy — starts in the background (Bash `run_in_background: true`)
+and is waited for in the foreground. Before every start, in a foreground call,
+make a new empty output file outside the worktree, in `state/results/` under
+`<work-root>` (the workRoot `bs init` printed), where your own result goes, never
+`state/artifacts/`, which holds declared evidence:
+mktemp <work-root>/state/results/<task-id>-<role>-XXXXXX
+It prints `<out>`; use that path and no other, so nothing carries over between
+runs. Start (the bare `--` ends the options; the `printf` puts the exit code on
+a line of its own):
+bs heavy run --label <task-id>-<role> -- <cmd> > <out> 2>&1; printf '\nEXIT=%s\n' "$?" >> <out>
+Then wait in the foreground:
+bs heavy wait --file <out>
+Each wait call ends inside the Bash tool's timeout. `"done"`, not the exit code,
+says whether to call again (a suite may itself exit 124): on `"done": false`
+call it again, without re-running the command and without `sleep`, and do not
+end your turn while the run is live. Every wait call is a turn, so call again with the bound its `"next"` gives: for 540000 that is
+`bs heavy wait --file <out> --max-wait-ms 540000` with a Bash `timeout` of 600000, never that bound
+without that timeout, which `"next"` gives only while the file exists and a `"holder"` is named. Two calls in a row with `"done": false` and
+`"holder": null` mean the run is gone: report it with the file's tail rather
+than waiting on it. On `"done": true` the exit code is the suite's. Exit 75 is
+`heavy.wait-timeout`: another holder kept the lock past the wait. Put the holder
+it names in your result and do not retry blind. `bs gate run`,
+`bs integration check` and `bs queue run` take the lock themselves and are
+never wrapped. A scoped run of your own new test file runs directly.
+<!-- END SHARED:heavy-run -->
 
 <!-- LESSONS:stack-wide -->
 <!-- LESSONS:agent-role -->

@@ -66,6 +66,20 @@ describe('judgePreflight()', () => {
     enabled: true
 `;
 
+  // Epic bs-optimize criterion 8: three judges preflighted in one message must
+  // each see what a serial run sees. The preflight is role-blind and
+  // read-only, so the three calls share nothing.
+  it('gives the same report for grader, reviewer and security-reviewer in parallel as in series', async () => {
+    const file = path.join(scratch, 'parallel.yml');
+    await writeFile(file, NATIVE + apiProvider('ds', 'shadow', ABSENT_KEY));
+    const roles = ['grader', 'reviewer', 'security-reviewer'];
+    const run = async () => judgePreflight(file);
+    const serial: JudgePreflight[] = [];
+    for (const _role of roles) serial.push(await run());
+    const parallel = await Promise.all(roles.map(() => run()));
+    expect(parallel).toEqual(serial);
+  });
+
   it('fails an enabled API provider whose key env is unset', async () => {
     // The incident this command exists for: deepseek shipped `enabled: true`
     // on a box with no key, so every quorum trigger spent a call that never

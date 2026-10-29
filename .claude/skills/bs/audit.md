@@ -1,7 +1,7 @@
 # `/bs audit <project-dir>` — audit a project on four axes and cut one epic
 
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
-none of it is restated here.
+none of it is restated here. Independent dispatches go in one message, as parallel tool calls, never one message per agent.
 
 The audit playbook (`docs/specs/audit-command-scope.md`). Four judges read
 one project at its HEAD — performance, code-quality, architecture, security

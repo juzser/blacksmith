@@ -8,6 +8,7 @@ import {
   epicBranchPrefix,
   integrationBranchName,
   listStale,
+  parseWorktreePorcelain,
   removeTaskWorktree,
   taskBranchName,
   WorktreeError,
@@ -327,5 +328,43 @@ describe('worktree.ts - legacy `smith/` prefix continuity', () => {
     const stale = listStale(projectDir, 'epic-1');
     expect(stale.map((s) => s.taskId)).toEqual(['task-1']);
     expect(stale[0]?.worktreeDir).toBe(realpathSync(t1.worktreeDir));
+  });
+  it('parses locked (bare and with a reason), detached and prunable porcelain lines', () => {
+    const out = [
+      'worktree /r/project',
+      'HEAD aaa',
+      'branch refs/heads/main',
+      '',
+      'worktree /r/.wt/project/a',
+      'HEAD bbb',
+      'branch refs/heads/bs/e/a',
+      'locked',
+      '',
+      'worktree /r/.wt/project/b',
+      'HEAD ccc',
+      'branch refs/heads/bs/e/b',
+      'locked claimed by pid 42',
+      '',
+      'worktree /r/.wt/project/c',
+      'HEAD ddd',
+      'detached',
+      'prunable gitdir file points to non-existent location',
+      '',
+      'worktree /r/.wt/project/d',
+      'HEAD eee',
+      'branch refs/heads/bs/e/d',
+      'prunable',
+    ].join('\n');
+    const [main, a, b, c, d] = parseWorktreePorcelain(out);
+    expect(main).toMatchObject({ branch: 'main', locked: false, prunable: false, detached: false });
+    expect(a).toMatchObject({ branch: 'bs/e/a', locked: true, lockedReason: null });
+    expect(b).toMatchObject({ locked: true, lockedReason: 'claimed by pid 42' });
+    expect(c).toMatchObject({
+      branch: null,
+      detached: true,
+      prunable: true,
+      prunableReason: 'gitdir file points to non-existent location',
+    });
+    expect(d).toMatchObject({ prunable: true, prunableReason: null });
   });
 });

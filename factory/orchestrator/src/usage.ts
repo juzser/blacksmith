@@ -788,7 +788,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     // (D-208) neither may the flag that overrides it. A usage line that admits
     // it advertises the one value guaranteed to be refused.
     positionals: '',
-    flags: `--statement <text> --lesson-type <type> --lesson-scope <scope> --provenance <event-id[,...]> [--provenance-session <id>] [--evidence <text>] [--finding-category <cat>] [--claim-path <glob>] [--agent-role <role>] [--case-type <case>] [--lesson-id <id>] [--novelty-threshold <0<n<=1>] [--policy <path>] ${EVENTS_DIR}`,
+    flags: `--statement <text> --lesson-type <type> --lesson-scope <scope> --provenance <event-id[,...]> [--provenance-session <id>] [--evidence <text>] [--finding-category <cat>] [--claim-path <glob>] [--agent-role <role>] [--case-type <case>] [--lesson-id <id>] [--error-class <group.class>] [--novelty-threshold <0<n<=1>] [--policy <path>] ${EVENTS_DIR}`,
     summary: 'Raise a hand-authored lesson through the novelty gate (exit 1 if rejected).',
   },
   {
@@ -817,8 +817,48 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'lessons for-dispatch',
     positionals: '<role>',
     flags:
-      '[--plan <file> --task <task-id>] [--case-type <case>] [--lessons <lessons.md>] [--agents-dir <dir>]',
-    summary: 'Print the lesson block to splice into one role prompt.',
+      '[--plan <file> --task <task-id>] [--case-type <case>] [--lessons <lessons.md>] [--agents-dir <dir>] [--full] [--class <group.class>] [--epic <epic-id>] [--state-dir <dir>]',
+    summary:
+      'Print the lesson block to splice into one role prompt; a recurring-class filter keeps the lessons array out unless --full.',
+  },
+  {
+    command: 'brief compose',
+    positionals: '',
+    flags:
+      '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--out <file>] [--state-dir <dir>]',
+    summary: 'Compose one dispatch brief; --out writes it plus <out>.manifest.json.',
+  },
+  {
+    command: 'playbook slice',
+    positionals: '<wave|dispatch>',
+    flags: '[--step <n> | --section <heading>]',
+    summary: 'Print one numbered wave step or one dispatch section.',
+  },
+  {
+    command: 'heavy run',
+    positionals: '',
+    flags: '--label <label> [--max-wait-ms <ms>]',
+    summary:
+      'Run the command after a bare "--" under the machine-wide heavy lock (exit 75 if the wait times out).',
+  },
+  {
+    command: 'heavy wait',
+    positionals: '',
+    flags: '--file <out> [--max-wait-ms <ms>]',
+    summary:
+      'Wait for a background heavy run to end its file with EXIT=<n>; exits <n>, or 124 with "done": false at the bound.',
+  },
+  {
+    command: 'heavy status',
+    positionals: '',
+    flags: '',
+    summary: 'Print the heavy-lock holder, or {} when free.',
+  },
+  {
+    command: 'cleanup',
+    positionals: '',
+    flags: '--project <dir> [--epic <epic-id>] [--apply] [--state-dir <dir>]',
+    summary: 'Retire merged worktrees and branches; a dry run unless --apply.',
   },
   {
     command: 'lessons audit',

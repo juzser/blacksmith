@@ -107,6 +107,8 @@ export interface LessonRule {
   agentRole: string;
   /** taxonomy `case` value — the same, for a `case-type`-scoped entry (D-129). */
   caseType: string;
+  /** taxonomy `error` class (`group.class`); `''` for an entry that carries none. */
+  errorClass?: string;
   statement: string;
 }
 
@@ -179,7 +181,15 @@ export function parseLessons(markdown: string): LessonRule[] {
 
   function flush(): void {
     if (!current) return;
-    const { lesson_id, finding_category, claim_path, agent_role, case_type, statement } = current;
+    const {
+      lesson_id,
+      finding_category,
+      claim_path,
+      agent_role,
+      case_type,
+      error_class,
+      statement,
+    } = current;
     if (lesson_id && statement) {
       rules.push({
         lessonId: lesson_id,
@@ -188,6 +198,7 @@ export function parseLessons(markdown: string): LessonRule[] {
         claimPath: claim_path ?? '**',
         agentRole: agent_role ?? '',
         caseType: case_type ?? '',
+        ...(error_class ? { errorClass: error_class } : {}),
         statement,
       });
     }

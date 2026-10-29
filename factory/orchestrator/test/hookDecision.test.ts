@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { decideHookPayload } from '../src/hookDecision.js';
+import { formatBriefMarker } from '../src/briefMarker.js';
+import { decideHookPayload, dietDecision } from '../src/hookDecision.js';
 import { closeSandbox, openSandbox } from '../src/sandbox.js';
 import { runOrThrow } from './helpers/process.js';
 
@@ -468,5 +469,496 @@ describe('Agent dispatches (judge artifact line)', () => {
     expect(() => decideHookPayload(payload('Bash'), cwd, badLeases)).toThrow();
     expect(decideHookPayload(payload('Agent'), cwd, badLeases)).toBeNull();
     expect(decideHookPayload(payload('Task'), cwd, badLeases)).toBeNull();
+  });
+});
+
+// Epic bs-optimize criterion 6 (D4): the diet guards deny in every session and
+// read no session or operator identity, so no case below passes one.
+const marker = (role: string) => formatBriefMarker({ role, taskId: 'e/t', sessionId: 's' });
+const agent = (subagentType: unknown, prompt: unknown, tool = 'Agent') =>
+  JSON.stringify({
+    tool_name: tool,
+    tool_input: { subagent_type: subagentType, prompt },
+    cwd: '/',
+  });
+const dietReason = (raw: string) => reasonOf(decideHookPayload(raw, '/', undefined));
+
+describe('diet rule: marked brief to the wrong agent', () => {
+  it('denies general-purpose and names the rule and the expected type', () => {
+    const reason = dietReason(agent('general-purpose', `${marker('coder')}\nbody`)) ?? '';
+    expect(reason).toMatch(/marked for role `coder`/);
+    expect(reason).toMatch(/dispatch to the matching `bs-coder`/);
+    expect(reason).toMatch(/blacksmith:bs-coder/);
+  });
+
+  it('denies a different role, a missing type and the Task tool alike', () => {
+    expect(dietReason(agent('bs-tester', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('blacksmith:bs-tester', `${marker('coder')}\nx`))).toMatch(
+      /`bs-coder`/,
+    );
+    expect(dietReason(agent(undefined, `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('coder', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('other:bs-coder', `${marker('coder')}\nx`))).toMatch(/`bs-coder`/);
+    expect(dietReason(agent('general-purpose', `${marker('reviewer')}\nx`, 'Task'))).toMatch(
+      /`bs-reviewer`/,
+    );
+  });
+
+  it('allows both matching prefix forms', () => {
+    const prompt = `${marker('coder')}\nbody`;
+    expect(dietReason(agent('bs-coder', prompt))).toBeNull();
+    expect(dietReason(agent('blacksmith:bs-coder', prompt))).toBeNull();
+  });
+
+  it('falls through for unmarked prompts, a marker on line 2, in a fence, or an unknown role', () => {
+    for (const prompt of [
+      'plain brief',
+      `intro\n${marker('coder')}`,
+      `\`\`\`\n${marker('coder')}\n\`\`\``,
+      `${marker('wizard')}\nbody`,
+    ]) {
+      expect(dietReason(agent('general-purpose', prompt))).toBeNull();
+    }
+  });
+
+  it('leaves the judge-artifact rule as it was', () => {
+    expect(dietReason(agent('bs-reviewer', 'no line'))).toMatch(/Declared artifact/);
+    expect(
+      dietReason(agent('bs-reviewer', `${marker('reviewer')}\nDeclared artifact: /a/b`)),
+    ).toBeNull();
+    // A marked judge brief to the wrong type is the diet rule's, not the artifact rule's.
+    expect(dietReason(agent('general-purpose', `${marker('reviewer')}\nx`))).toMatch(
+      /`bs-reviewer`/,
+    );
+  });
+});
+
+describe('diet rule: foreground sleep (D4 verdict table)', () => {
+  const bash = (command: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ tool_name: 'Bash', tool_input: { command, ...extra }, cwd: '/' });
+  const deny: [string, string][] = [
+    ['sleep 2', '2'],
+    ['sleep 30', '30'],
+    ['sleep 2s', '2'],
+    ['sleep 1m', '60'],
+    ['sleep 1 1', '2'],
+    ['sleep 5 && x', '5'],
+    ['x; sleep 5', '5'],
+    ['x || sleep 5', '5'],
+    ['x\nsleep 5', '5'],
+    ['sleep 5 | cat', '5'],
+    ['until test -f x; do sleep 5; done', '5'],
+    ['while true; do sleep 5; done', '5'],
+    ['sleep 30 & wait', '30'],
+    ['timeout 30 sleep 30', '30'],
+    ['nohup sleep 30', '30'],
+    ['env X=1 sleep 30', '30'],
+    ['X=1 sleep 30', '30'],
+    ['command sleep 30', '30'],
+    ['time sleep 30', '30'],
+    ['exec sleep 30', '30'],
+    ['echo $(sleep 3)', '3'],
+    ['echo `sleep 3`', '3'],
+    ["bash -c 'sleep 30'", '30'],
+    ['sh -c "sleep 30"', '30'],
+    ["zsh -c 'sleep 30'", '30'],
+    ['sleep $N', 'unknown'],
+    ['sleep "$N"', 'unknown'],
+    ['sleep infinity', 'unknown'],
+  ];
+  it.each(deny)('denies %j', (command, duration) => {
+    const reason = dietReason(bash(command)) ?? '';
+    expect(reason).toMatch(/foreground `sleep`/);
+    expect(reason).toContain(duration === 'unknown' ? 'unknown' : `${duration} s`);
+    expect(reason).toMatch(/use a background task or the Monitor tool instead of `sleep`/);
+  });
+
+  const allow = [
+    'sleep 1',
+    'sleep 1.9',
+    'sleep 0.5',
+    'while true; do sleep 1; done',
+    'sleep 30 &',
+    'nohup sleep 30 &',
+    'x && sleep 30 &',
+    'sleep',
+    'echo "sleep 30"',
+    'grep sleep f',
+    "git commit -m 'sleep 30'",
+    'nosleep 30',
+    '# sleep 30',
+    'echo hi # sleep 30',
+    'cat <<EOF\nsleep 30\nEOF',
+    'cat <<-EOF\n\tsleep 30\n\tEOF\necho done',
+    './wait.sh',
+    'bash wait.sh',
+    'pnpm run x',
+    'ssh host sleep 30',
+    'docker run img sleep 30',
+    'xargs sleep',
+    'timeout 30 pnpm test',
+    'git status',
+  ];
+  it.each(allow)('allows %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  const groupAllow = [
+    '(sleep 30; echo done) &',
+    '{ sleep 30; } &',
+    '{ sleep 30; }&',
+    'while true; do sleep 5; done &',
+    'until test -f x; do sleep 5; done &',
+    'if true; then sleep 30; fi &',
+    'x; (sleep 30; echo done) &',
+    '((sleep 30) &) &',
+    'while true; do { sleep 5; } & done',
+    'x\n(sleep 30\necho done) &',
+  ];
+  it.each(groupAllow)('allows a backgrounded group %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  const groupDeny = [
+    '(sleep 30; echo done)',
+    '{ sleep 30; }',
+    'while true; do sleep 5; done',
+    '(sleep 30); echo x &',
+    '{ sleep 30; }; echo x &',
+    'while true; do sleep 5; done; echo x &',
+    '(sleep 30) && echo x &',
+    '(sleep 30) &&',
+    '(sleep 30) \\&',
+    "(sleep 30) '&'",
+    '(sleep 30) &> /dev/null',
+    '(sleep 30) |& cat',
+    '(sleep 30) >&2',
+    '(sleep 30) 2>&1',
+    '(sleep 30) x &',
+    '(sleep 30) $(echo) &',
+    '((sleep 30) ) ; echo &',
+    '(sleep 30; { echo; } &)',
+    '{ (sleep 30; } &)',
+    'while true; do sleep 5; fi &',
+    'cat <<EOF\nx\nEOF\n(sleep 30)',
+    '(sleep 30) # &',
+    'while a; do sleep 30; while b; do x; done & done',
+    'for i in 1; do sleep 30; done; (echo) &',
+  ];
+  it.each(groupDeny)('still denies the foreground group %j', (command) => {
+    expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep`/);
+  });
+
+  it('keeps a sleep before a backgrounded group in the foreground', () => {
+    expect(dietReason(bash('sleep 30; (echo x) &'))).toContain('30 s');
+  });
+
+  it('allows any sleep with run_in_background: true', () => {
+    expect(dietReason(bash('sleep 30', { run_in_background: true }))).toBeNull();
+    expect(dietReason(bash('sleep 30', { run_in_background: false }))).toMatch(/foreground/);
+  });
+
+  it('reports the longest offending sleep when several block', () => {
+    expect(dietReason(bash('sleep 1; sleep 10; sleep 4'))).toContain('10 s');
+  });
+
+  // Operands are read the way strtod reads them (finding f-bs-optimize/integration-1e75d554).
+  const strtodDeny: [string, string][] = [
+    ['sleep 1e3', '1000 s'],
+    ['sleep 0x10', '16 s'],
+    ['sleep 2e0', '2 s'],
+    ['sleep 2E0', '2 s'],
+    ['sleep +5', '5 s'],
+    ['sleep 1e1m', '600 s'],
+    ['sleep 5e-1m', '30 s'],
+    ['sleep 0x1d', '29 s'],
+    ['sleep 1 0x1', '2 s'],
+    ['sleep 5.', '5 s'],
+    ['sleep .5e1', '5 s'],
+    ['timeout 30 sleep 1e3', '1000 s'],
+  ];
+  it.each(strtodDeny)('denies the strtod operand in %j', (command, duration) => {
+    const reason = dietReason(bash(command)) ?? '';
+    expect(reason).toMatch(/foreground `sleep`/);
+    expect(reason).toContain(`of ${duration}`);
+  });
+
+  it.each([
+    'sleep 1e0',
+    'sleep 0x1',
+    'sleep 5e-1',
+    'sleep 1e-3',
+    'sleep 0x1p0',
+    'sleep .5',
+    'sleep 1.',
+    'sleep 1e3 &',
+    'timeout 1e3 pnpm test',
+  ])('allows the short or background operand in %j', (command) => {
+    expect(dietReason(bash(command))).toBeNull();
+  });
+
+  it('allows sleep 1e3 with run_in_background: true', () => {
+    expect(dietReason(bash('sleep 1e3', { run_in_background: true }))).toBeNull();
+  });
+
+  it.each(['sleep abc', 'sleep 1x', 'sleep nan', 'sleep .', 'sleep 1,5'])(
+    'denies the unreadable operand in %j as unknown length',
+    (command) => {
+      const reason = dietReason(bash(command)) ?? '';
+      expect(reason).toMatch(/foreground `sleep`/);
+      expect(reason).toContain('unknown');
+    },
+  );
+
+  it('keeps a sleep with no operand allowed', () => {
+    expect(dietReason(bash('sleep'))).toBeNull();
+  });
+
+  describe('strtod operand edge cases (tester depth)', () => {
+    it.each([
+      ['sleep 0x1.8p1', '3 s'],
+      ['sleep 0x.8p2', '2 s'],
+      ['sleep 0x1p1', '2 s'],
+      ['sleep 0X1P3', '8 s'],
+      ['sleep 0x10s', '16 s'],
+      ['sleep 0x10m', '960 s'],
+      ['sleep 0x1h', '3600 s'],
+      ['sleep 0x1d', '29 s'],
+      ['sleep 1e0h', '3600 s'],
+      ['sleep 1e0d', '86400 s'],
+      ['sleep 1e1s', '10 s'],
+      ['sleep 1E+1', '10 s'],
+      ['sleep 2e+0', '2 s'],
+      ['sleep 0.5e1', '5 s'],
+      ['sleep 5 5', '10 s'],
+      ['sleep 1e1 1e1', '20 s'],
+      ['sleep 0.5 1.5', '2 s'],
+      ['sleep 1 0x1p0', '2 s'],
+      ['sleep 1m 1e0m', '120 s'],
+      ['env X=1 sleep 1e3', '1000 s'],
+      ['nohup sleep 0x10', '16 s'],
+      ['time sleep 1e3', '1000 s'],
+      ["bash -c 'sleep 1e3'", '1000 s'],
+      ['x && sleep 1e3', '1000 s'],
+      ['sleep 1e3 | cat', '1000 s'],
+      ['sleep 1e3 & wait', '1000 s'],
+      ['until test -f x; do sleep 1e1; done', '10 s'],
+    ])('denies %j naming %s', (command, duration) => {
+      const reason = dietReason(bash(command)) ?? '';
+      expect(reason).toMatch(/foreground `sleep`/);
+      expect(reason).toContain(`of ${duration}`);
+    });
+
+    it.each([
+      'sleep inf',
+      'sleep INF',
+      'sleep Inf',
+      'sleep infinity',
+      'sleep INFINITY',
+      'sleep iNfInItY',
+      'sleep +inf',
+      'sleep infs',
+      'sleep infinityd',
+      'sleep 1e999',
+      'sleep 0x1p99999',
+      'sleep 1e1000000000000000000000',
+    ])('denies the unbounded operand in %j', (command) => {
+      expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep` of /);
+    });
+
+    it.each([
+      'sleep 1e',
+      'sleep 1e+',
+      'sleep 1e-',
+      'sleep 1E',
+      'sleep 0x',
+      'sleep 0X',
+      'sleep 0xp1',
+      'sleep 0x.',
+      'sleep 0xg',
+      'sleep 0x1g',
+      'sleep 0x1p',
+      'sleep 0x1p+',
+      'sleep 0x1.p',
+      'sleep -5',
+      'sleep -1e3',
+      'sleep ++5',
+      'sleep +-5',
+      'sleep +',
+      'sleep 5ss',
+      'sleep 5sm',
+      'sleep 5x',
+      'sleep 1e3x',
+      'sleep 1e3ss',
+      'sleep 0x10ss',
+      'sleep 0x10x',
+      'sleep 1e3e3',
+      'sleep 1p1',
+      'sleep 1.5.5',
+      'sleep 1e5.5',
+      'sleep 1_0',
+      'sleep infin',
+      'sleep infinit',
+      'sleep infinityy',
+      'sleep infx',
+      'sleep NaN',
+      'sleep 5 s',
+      'sleep 0.5 abc',
+      'sleep 0.1 1x',
+      'sleep 0.1 0x',
+      "sleep ''",
+      'sleep constructor',
+      'sleep 5toString',
+    ])('denies the unreadable operand in %j as unknown length', (command) => {
+      expect(dietReason(bash(command)) ?? '').toMatch(/foreground `sleep` of unknown length/);
+    });
+
+    it.each([
+      'sleep 0x1.8',
+      'sleep 0x.8',
+      'sleep 0x1p-1',
+      'sleep 0x8p-4',
+      'sleep 0x1P-1',
+      'sleep 1e-3m',
+      'sleep 0.5e0',
+      'sleep 0e5',
+      'sleep 0x0p9',
+      'sleep 0x0',
+      'sleep 0',
+      'sleep 0s',
+      'sleep +0',
+      'sleep 1e-1000',
+      'sleep 0.5 0.5',
+      'sleep 1e-1 1e-1',
+      'sleep 0x1p-1 0x1p-1s',
+      'sleep 1.9',
+      'sleep 1.9s',
+      'sleep 1e0 &',
+      'sleep 0x10 &',
+      'sleep inf &',
+      'sleep abc &',
+      'nohup sleep 1e3 &',
+    ])('allows the short or backgrounded operand in %j', (command) => {
+      expect(dietReason(bash(command))).toBeNull();
+    });
+
+    it.each(['sleep 0x10', 'sleep inf', 'sleep abc', 'sleep 5 5'])(
+      'allows %j with run_in_background: true',
+      (command) => {
+        expect(dietReason(bash(command, { run_in_background: true }))).toBeNull();
+      },
+    );
+
+    it.each(['sleep 1e3 "', "sleep 1e3 '", 'sleep 1e3 $(', 'sleep 0x10 `'])(
+      'keeps the failure rule for the unreadable command %j',
+      (command) => {
+        expect(dietReason(bash(command))).toBeNull();
+      },
+    );
+
+    it('does not read a quoted or substituted operand as a number', () => {
+      expect(dietReason(bash('sleep "$X"')) ?? '').toContain('unknown');
+      expect(dietReason(bash('sleep $(echo 1)')) ?? '').toContain('unknown');
+    });
+
+    it('keeps timeout operands out of the sleep sum', () => {
+      expect(dietReason(bash('timeout 0x10 pnpm test'))).toBeNull();
+      expect(dietReason(bash('timeout 1e3 sleep 0.5'))).toBeNull();
+      expect(dietReason(bash('timeout 1e3 sleep 1e1')) ?? '').toContain('of 10 s');
+    });
+
+    it('sums an unreadable and a readable operand to unknown length', () => {
+      expect(dietReason(bash('sleep 1e3 abc')) ?? '').toContain('unknown');
+    });
+  });
+
+  describe('near the command length cap', () => {
+    const run = (operand: string) => {
+      const started = performance.now();
+      const reason = dietReason(bash(`sleep ${operand}`)) ?? '';
+      return { reason, ms: performance.now() - started };
+    };
+    it('reads a 65000-digit number', () => {
+      const { reason, ms } = run('9'.repeat(65_000));
+      expect(reason).toMatch(/foreground `sleep` of /);
+      expect(ms).toBeLessThan(200);
+    });
+    it.each([
+      ['digits then x', `${'9'.repeat(64_999)}x`],
+      ['1 then e repeated', `1${'e'.repeat(64_999)}`],
+      ['0x then p repeated', `0x${'p'.repeat(64_998)}`],
+    ])('denies %s as unknown length', (_name, operand) => {
+      const { reason, ms } = run(operand);
+      expect(reason).toMatch(/foreground `sleep` of unknown length/);
+      expect(ms).toBeLessThan(200);
+    });
+    it('gives a 1 MB command no deny', () => {
+      const raw = JSON.parse(bash(`sleep 30 ${'9'.repeat(1_000_000)}`));
+      expect(dietDecision(raw)).toBeNull();
+    });
+  });
+});
+
+describe('diet rules fail open', () => {
+  const boom = () => {
+    throw new Error('boom');
+  };
+  const bashRaw = (command: unknown) =>
+    JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: '/' });
+
+  it("with throwing parsers, unrelated calls get today's decision", () => {
+    const deps = { parseBriefMarker: boom, findForegroundSleeps: boom };
+    expect(dietDecision(JSON.parse(bashRaw('git status')), deps)).toBeNull();
+    expect(dietDecision(JSON.parse(bashRaw('sleep 30')), deps)).toBeNull();
+    expect(
+      dietDecision(JSON.parse(agent('general-purpose', `${marker('coder')}\nx`)), deps),
+    ).toBeNull();
+    expect(decideHookPayload(bashRaw('git status'), '/', undefined, deps)).toEqual(
+      decideHookPayload(bashRaw('git status'), '/', undefined),
+    );
+    // The existing judge-artifact rule still runs when the marker parser throws.
+    expect(
+      reasonOf(decideHookPayload(agent('bs-reviewer', 'no line'), '/', undefined, deps)),
+    ).toMatch(/Declared artifact/);
+    expect(decideHookPayload(agent('general-purpose', 'plain'), '/', undefined, deps)).toBeNull();
+  });
+
+  it('never denies on malformed input', () => {
+    const bad = [
+      bashRaw(42),
+      bashRaw(null),
+      bashRaw(['sleep', '30']),
+      bashRaw(''),
+      bashRaw(`sleep 30 ${'x'.repeat(1_000_000)}`),
+      bashRaw(`echo '${'sleep 30 '.repeat(200_000)}`),
+      bashRaw('sleep 30; echo "unbalanced'),
+      bashRaw("sleep 30; echo 'unbalanced"),
+      bashRaw('sleep 30; echo $(unterminated'),
+      bashRaw('sleep 30; echo `unterminated'),
+      bashRaw('sleep 30; echo ${unterminated'),
+      agent('general-purpose', 42),
+      agent('general-purpose', ''),
+      agent(7, `${marker('coder')}\nx`),
+      agent('general-purpose', `${marker('coder')}${'x'.repeat(1_000_000)}`),
+    ];
+    for (const raw of bad) {
+      const reason = dietReason(raw) ?? '';
+      expect(reason).not.toMatch(/foreground `sleep`|marked for role/);
+    }
+  });
+
+  it('never throws out of dietDecision on odd payload shapes', () => {
+    const odd = [
+      null,
+      1,
+      'x',
+      [],
+      {},
+      { tool_name: 'Bash' },
+      { tool_name: 'Agent', tool_input: 3 },
+    ];
+    for (const payload of odd) {
+      expect(dietDecision(payload)).toBeNull();
+    }
   });
 });

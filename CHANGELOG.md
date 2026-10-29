@@ -250,6 +250,57 @@ than appearing in it.
 
 ### Added
 
+- **Lessons carry an error class, and a brief splices only the recurring
+  ones.** Each lesson names a taxonomy `error_class` (`other.unclassified`
+  where none fits). A `stack-wide`, `case-type` or `security` lesson is spliced
+  when its class recurs (3 distinct tasks in 30 days, store-wide) or repeats in
+  the dispatch's epic; the rest are withheld and named in a trailing line with
+  the command that reads them. A security-reviewer brief withholds nothing.
+- **`bs brief compose` builds the dispatch brief.** One command assembles the
+  marker, the spec entry, the worktree, `Turn budget:`, the lessons and
+  findings blocks, the return discipline and the declared artifact, and the
+  result passes `bs dispatch lint`. `dispatch.md` names it as the way to build
+  a brief, and says typed `bs-*` agents only.
+- **The hooks deny two orchestrator habits.** A marked brief sent to
+  `general-purpose` or to another role's type is denied, and so is a
+  foreground `sleep` of 2 s or more, with the fix named in the reason.
+- **Judges go out in one message.** The grader, the reviewer and (when its
+  triggers fire) the security-reviewer are dispatched together after the
+  tester; a grader bounce keeps the others' findings. Every dispatching
+  playbook now says independent dispatches go in one message.
+- **`bs playbook slice` prints one wave step or one dispatch section,** so a
+  `bs-wave-runner` reads the steps it is on instead of all of `wave.md`, and
+  never Reads a PNG. Its tools gain `TaskStop` and `Monitor`.
+- **Rolling admission.** `bs wave next` counts a task admitted and not yet
+  merged as occupied, so `/bs run` admits the next task right after each merge
+  rather than when the whole wave drains, and `bs wave check` refuses a task
+  already in flight.
+- **`bs heavy run`, `bs heavy wait` and `bs heavy status` queue the heavy jobs.**
+  A full suite or e2e run takes one machine-wide lock: `bs gate run`,
+  `bs integration check` and the merge queue take it themselves, `checks.json`
+  marks a check heavy with `"heavy": true` (`test*`, `unit`, `coverage` and
+  `e2e*` names are heavy by default). For an agent, the rule stamped into the
+  eleven suite-running role templates starts `bs heavy run --label
+  <task-id>-<role> -- <cmd>` in the background, its output in a fresh file
+  that ends with an `EXIT=<n>` line, and waits with `bs heavy wait --file
+  <out>`, a read-only poll whose every call ends inside the Bash tool's
+  timeout (`"done": false` means call again). A not-done wait carries
+  `"next"`, the bound and Bash timeout of the next call: while a holder is
+  named, the agent waits with `--max-wait-ms 540000` under a Bash `timeout` of
+  600000, so a queued run costs a handful of turns. A wait past its limit fails
+  `heavy.wait-timeout` naming the holder; step 10 of `wave.md` says how the
+  runner resumes the merge queue after it.
+- **`bs doctor` warns when the concurrency caps are not raised.** The
+  `concurrency-caps` check reads the process environment and the project and
+  user settings; `INSTALL.md` says `bs init` writes the caps.
+- **`bs cleanup` retires merged worktrees and branches.** It removes idle,
+  clean task worktrees and their merged branches, orphan directories under the
+  project's `.wt` folder (to the Trash on macOS) and prunes stale entries, by
+  safety rules that keep anything active in the last 24 hours, anything of an
+  open epic and any integration branch whose PR has not merged. It is a dry run
+  unless `--apply` is given, and `/bs run` runs it as its last step. The epic
+  session and the wave-runner also stop their own finished background tasks
+  and idle subagents with TaskStop at close.
 - **0.5.1 — `/bs use` binds a session to one project, and the dashboard
   only reads.** Thirty-seven pull requests since 0.5.0 (#441–#485). Eleven
   entries above this one and one below landed after 0.5.0 and ship in it:

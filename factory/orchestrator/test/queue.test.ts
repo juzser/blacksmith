@@ -1,9 +1,10 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendEvent, readEvents } from '../src/events.js';
+import { withHeavyLock } from '../src/heavyLock.js';
 import { admit, adopt, batchStep, groupForBatch, QueueError, step } from '../src/queue.js';
 import type { TaskEventContext } from '../src/taskEvents.js';
 import { createTaskWorktree } from '../src/worktree.js';
@@ -264,8 +265,9 @@ describe('step', () => {
 
   // The rebase leaves the task branch on top of integration, so a conflict at
   // merge time means integration moved underneath the queue; here the test
-  // command moves it. The merge must fail loudly and land nothing.
-  it('throws on a tree-less merge conflict and leaves the integration ref alone', async () => {
+  // command moves it. A head that moved wins over the conflict: the queue
+  // reports it and lands nothing, instead of attempting a merge that throws.
+  it('reports integration-moved, not a merge-tree throw, when the head moved and also conflicts', async () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
@@ -286,18 +288,14 @@ describe('step', () => {
       ].join('\n'),
     );
 
-    let movedTo = '';
-    await expect(
-      step(
-        { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
-        { projectDir, epic: 'epic-1', testCmd: `sh ${JSON.stringify(script)}` },
-      ).finally(() => {
-        movedTo = git(projectDir, ['rev-parse', integration]);
-      }),
-    ).rejects.toThrow(/git merge-tree[\s\S]*a\.txt/);
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: `sh ${JSON.stringify(script)}` },
+    );
 
+    expect(result).toEqual({ outcome: 'integration-moved', taskId: 'task-1' });
+    const movedTo = git(projectDir, ['rev-parse', integration]);
     expect(git(projectDir, ['log', '-1', '--format=%s', movedTo])).toBe('side');
-    expect(git(projectDir, ['rev-parse', integration])).toBe(movedTo);
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toContain('smith-merge-');
   });
 
@@ -1511,5 +1509,262 @@ describe('step with test selection', () => {
     expect(result.outcome).toBe('tests-failed');
     const log = git(projectDir, ['log', 'bs/epic-1/integration', '--oneline']);
     expect(log).not.toContain('edit beta');
+  });
+});
+
+describe('merge queue heavy lock', () => {
+  let root: string;
+  let projectDir: string;
+  let lockDir: string;
+  let stateDir: string;
+  const sessionId = 'sess-heavy';
+  const lockOpts = (over: { maxWaitMs?: number } = {}) => ({
+    lockDir,
+    pollMs: 5,
+    isPidAlive: () => true,
+    ...over,
+  });
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-queue-heavy-'));
+    projectDir = path.join(root, 'project');
+    lockDir = path.join(root, 'locks');
+    stateDir = path.join(root, 'state');
+    const originDir = path.join(root, 'origin.git');
+    git(root, ['init', '-q', '--bare', '-b', 'main', originDir]);
+    git(root, ['clone', '-q', originDir, projectDir]);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    git(projectDir, ['config', 'user.name', 'Test']);
+    for (const f of ['a.txt', 'b.txt', 'c.txt'])
+      await writeFile(path.join(projectDir, f), `${f}\n`);
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'init']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function makeTask(taskId: string, file: string) {
+    const worktree = createTaskWorktree(projectDir, 'epic-1', taskId);
+    writeFileSync(path.join(worktree.worktreeDir, file), `${file}-edited\n`);
+    git(worktree.worktreeDir, ['commit', '-q', '-am', `edit ${file}`]);
+    return {
+      taskId: `epic-1/${taskId}`,
+      branch: worktree.branch,
+      worktreeDir: worktree.worktreeDir,
+    };
+  }
+
+  async function makeEvents(): Promise<{ ctx: TaskEventContext; stateDir: string }> {
+    const rootEvent = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    return {
+      ctx: { sessionId, planVersion: 1, causalParent: rootEvent.event_id, actor: 'system' },
+      stateDir,
+    };
+  }
+
+  /** Another holder, live by injection, until `release()`. */
+  async function otherHolder(): Promise<{ release: () => void; done: Promise<void> }> {
+    let release: () => void = () => undefined;
+    let held: () => void = () => undefined;
+    const heldP = new Promise<void>((r) => {
+      held = r;
+    });
+    const done = withHeavyLock(
+      () => {
+        held();
+        return new Promise<void>((r) => {
+          release = r;
+        });
+      },
+      { lockDir, label: 'other', cwd: '/x', pollMs: 5 },
+    );
+    await heldP;
+    return { release: () => release(), done };
+  }
+
+  /** A suite command that records the lock it runs under and that it ran. */
+  function recordingCmd(): { cmd: string; lockCopy: string; tokenFile: string; marker: string } {
+    const lockCopy = path.join(root, 'lock-copy.json');
+    const tokenFile = path.join(root, 'token.txt');
+    const marker = path.join(root, 'ran.marker');
+    const cmd = `cp "$BS_HEAVY_LOCK_DIR/heavy.lock" '${lockCopy}' && printf '%s' "$BS_HEAVY_LOCK_TOKEN" > '${tokenFile}' && touch '${marker}'`;
+    return { cmd, lockCopy, tokenFile, marker };
+  }
+
+  async function logged(): Promise<{ type: string; payload: unknown }[]> {
+    const all = await readEvents(sessionId, { stateDir });
+    return all.map((e) => ({ type: e.record.event_type, payload: e.record.payload }));
+  }
+
+  it('step runs its suite under the lock, labelled with the task id', async () => {
+    const task = makeTask('task-1', 'a.txt');
+    const rec = recordingCmd();
+    const out = await step(task, {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: rec.cmd,
+      heavyLock: lockOpts(),
+    });
+    expect(out.outcome).toBe('merged');
+    const held = JSON.parse(await readFile(rec.lockCopy, 'utf8'));
+    expect(held.label).toBe('queue-epic-1/task-1');
+    expect(held.token).toBe(await readFile(rec.tokenFile, 'utf8'));
+    expect(existsSync(path.join(lockDir, 'heavy.lock'))).toBe(false);
+  });
+
+  it('batchStep runs its suite under the lock, labelled with the first task id', async () => {
+    const a = makeTask('task-a', 'a.txt');
+    const b = makeTask('task-b', 'b.txt');
+    const rec = recordingCmd();
+    const result = await batchStep([a, b], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: rec.cmd,
+      heavyLock: lockOpts(),
+    });
+    expect(result.outcomes.map((o) => o.outcome)).toEqual(['merged', 'merged']);
+    const held = JSON.parse(await readFile(rec.lockCopy, 'utf8'));
+    expect(held.label).toBe('queue-batch-epic-1/task-a');
+    expect(held.token).toBe(await readFile(rec.tokenFile, 'utf8'));
+    expect(existsSync(path.join(lockDir, 'heavy.lock'))).toBe(false);
+  });
+
+  it('step waits for another holder before running its command, then merges', async () => {
+    const task = makeTask('task-1', 'a.txt');
+    const rec = recordingCmd();
+    const h = await otherHolder();
+    const running = step(task, {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: rec.cmd,
+      heavyLock: lockOpts(),
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(existsSync(rec.marker)).toBe(false);
+    h.release();
+    await h.done;
+    expect((await running).outcome).toBe('merged');
+    expect(existsSync(rec.marker)).toBe(true);
+  });
+
+  it('step rejects with heavy.wait-timeout: no command, no tests-failed, no test-failure event', async () => {
+    const task = makeTask('task-1', 'a.txt');
+    const rec = recordingCmd();
+    const events = await makeEvents();
+    const h = await otherHolder();
+    try {
+      await expect(
+        step(task, {
+          projectDir,
+          epic: 'epic-1',
+          testCmd: rec.cmd,
+          events,
+          heavyLock: lockOpts({ maxWaitMs: 30 }),
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+    } finally {
+      h.release();
+      await h.done;
+    }
+    expect(existsSync(rec.marker)).toBe(false);
+    expect(JSON.stringify(await logged())).not.toContain('execution.test-failure');
+  });
+
+  it('step that times out on the lock runs no rebase: the task branch stays where it was', async () => {
+    const task = makeTask('task-1', 'a.txt');
+    // Integration moves ahead, so a rebase would rewrite the task branch.
+    const holderDir = path.join(root, 'holder');
+    git(projectDir, ['worktree', 'add', '-q', holderDir, 'bs/epic-1/integration']);
+    git(holderDir, ['commit', '-q', '--allow-empty', '-m', 'integration ahead']);
+    const branchBefore = git(projectDir, ['rev-parse', task.branch]);
+    const h = await otherHolder();
+    try {
+      await expect(
+        step(task, {
+          projectDir,
+          epic: 'epic-1',
+          testCmd: 'true',
+          heavyLock: lockOpts({ maxWaitMs: 30 }),
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+    } finally {
+      h.release();
+      await h.done;
+    }
+    expect(git(projectDir, ['rev-parse', task.branch])).toBe(branchBefore);
+  });
+
+  it('batchStep rejects with heavy.wait-timeout and leaves no candidate worktree', async () => {
+    const a = makeTask('task-a', 'a.txt');
+    const b = makeTask('task-b', 'b.txt');
+    const rec = recordingCmd();
+    const h = await otherHolder();
+    try {
+      await expect(
+        batchStep([a, b], {
+          projectDir,
+          epic: 'epic-1',
+          testCmd: rec.cmd,
+          heavyLock: lockOpts({ maxWaitMs: 30 }),
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+    } finally {
+      h.release();
+      await h.done;
+    }
+    expect(existsSync(rec.marker)).toBe(false);
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(/batch-/);
+    const wtDir = path.join(root, '.wt', 'project');
+    expect(readdirSync(wtDir).filter((n) => n.startsWith('batch-'))).toEqual([]);
+  });
+
+  it('keeps an earlier merge when a later task times out on the lock', async () => {
+    const t1 = makeTask('task-1', 'a.txt');
+    const t2 = makeTask('task-2', 'b.txt');
+    const events = await makeEvents();
+    const first = await step(t1, {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: 'true',
+      events,
+      heavyLock: lockOpts(),
+    });
+    expect(first.outcome).toBe('merged');
+    expect((await logged()).filter((e) => e.type === 'wave-merged')).toHaveLength(1);
+
+    const h = await otherHolder();
+    try {
+      await expect(
+        step(t2, {
+          projectDir,
+          epic: 'epic-1',
+          testCmd: 'true',
+          events,
+          heavyLock: lockOpts({ maxWaitMs: 30 }),
+        }),
+      ).rejects.toMatchObject({ code: 'heavy.wait-timeout' });
+    } finally {
+      h.release();
+      await h.done;
+    }
+    // Throws (non-zero exit) unless task 1 is still an ancestor of the integration branch.
+    git(projectDir, ['merge-base', '--is-ancestor', t1.branch, 'bs/epic-1/integration']);
+    const after = await logged();
+    expect(after.filter((e) => e.type === 'wave-merged')).toHaveLength(1);
+    expect(JSON.stringify(after)).not.toContain('execution.test-failure');
+    expect(JSON.stringify(after)).not.toContain('epic-1/task-2');
   });
 });

@@ -1,0 +1,294 @@
+{
+  "epic_id": "bs-optimize",
+  "version": 3,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-optimize/task-2-lessons-by-class",
+      "epic_id": "bs-optimize",
+      "plan_version": 3,
+      "title": "Lessons spliced by recurring class",
+      "summary": "lessonsForDispatch splices recurring and epic-repeating classes (other.unclassified included), withholds the rest with a read command.",
+      "objective": "Implement epic-spec D2 with the operator's thresholds (decision 14): new module src/lessonRecurrence.ts (`errorClassCounts(events, {now, windowDays})`, one named constant each for RECUR_MIN_TASKS=3, RECUR_WINDOW_DAYS=30, EPIC_REPEAT_MIN=1) and the selection rules in `lessonsForDispatch`: agent-role and claim-path untouched; every stack-wide/case-type/security lesson is spliced only when its class recurs store-wide or repeats in the dispatch's epic, otherwise withheld; `other.unclassified` follows the same rule as every class (decision 13); a lesson with no `error_class`, or with a class no longer in taxonomy.yml, is read as `other.unclassified` and the result carries a warning naming the lesson id and the stale value; nothing is withheld from a security-reviewer. Add options `{events, epicId, now, full, class}`. Event identity (D2; the event envelope has no `epic_id`, event.schema.json is `additionalProperties: false`): class = `payload.error`; task = `eventTaskId(record) ?? payload.task_ref` (events.ts `eventTaskId`, the rule agents-registry.ts's `error-logged` fold already uses: reuse it, do not re-implement it), and distinct-task counting uses that identity, so repeated events on one task count once; epic = `payload.epic_id ?? epicOfTaskId(task)` (taskId.ts), `payload.epic_id` winning when both exist; an event with a task but no epic counts store-wide only, never toward an epic; an event with no task identity is skipped; with no `epicId` nothing counts as an epic repeat; return `withheld` and `warnings`, and omit the `lessons` array unless `full`; append one trailing line naming each withheld class, its count and `bs lessons for-dispatch --class <group.class>`. New src/lessonEvents.ts `readRecurrenceEvents(stateDir, {now, windowDays})`, the one store reader the CLI and brief compose use: every session id from `listSessionIds(stateDir)` (events.ts), skipping a session file whose mtime is older than `now - windowDays` (safe by the invariant epic-spec D2 states: events.ts `appendEventLocked` stamps every `ts` at write time and `keptTs` is `prompts-`-only and refuses a future `ts`, so a file's mtime is never earlier than its newest event's `ts`, up to the file system's timestamp granularity), each read with `readEvents` (events.ts); cost bound: one `stat` per session file and one `readEvents` per in-window file, never one for an older file (`stat` and `readEvents` injectable so the test can count them), keeping `error-logged` events whose timestamp lies in the window; a missing dir returns []. Failing tests first: factory/orchestrator/test/lessonRecurrence.test.ts, factory/orchestrator/test/lessonsByClass.test.ts and factory/orchestrator/test/lessonEvents.test.ts. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 3: every selection case in criterion 3 has a fixture test (3 error-logged on distinct tasks in 30 days spliced; 2 withheld and named; an event older than 30 days not counted; epic repeat of 1 spliced; `other.unclassified` withheld without recurrence and spliced on repeat; a class-less or stale-class lesson read as `other.unclassified` with a warning; agent-role/claim-path never withheld; security-reviewer withholds nothing).",
+        "Epic criterion 4 (module half): without `full` the result has no `lessons` array; `class` returns exactly that class's approved lessons.",
+        "Store-wide means every session (S2-7): lessonEvents.test.ts builds a temporary state dir with two session files; a class logged on 2 tasks in session A and 1 task in session B within 30 days recurs; a session file whose mtime is older than 30 days is not opened (injected `readEvents` spy); an event inside a recent file but older than 30 days is dropped; a missing state dir returns []. lessonEvents.test.ts also asserts the cost bound: `stat` is called once per session file and `readEvents` exactly once per in-window file. lessonEvents.test.ts also pins the invariant the mtime skip rests on (epic-spec D2): an event appended through `appendEvent` (events.ts) with `stateDir` a temporary dir has a `ts` no later than its session file's mtime (`Date.parse(ts) <= mtimeMs + 2000`, the 2,000 ms covering file-system timestamp granularity: Linux's coarse kernel clock, 1 s on HFS+), so a future change that stamps `ts` ahead of the write fails it. lessonsByClass.test.ts shows an event of epic E counts as a repeat for `epicId: E` and not for another epic, and that no `epicId` means no repeat.",
+        "Event identity (S2-major round 4), one test each in lessonsByClass.test.ts, every fixture an envelope event.schema.json accepts (no envelope `epic_id`): (a) an `error-logged` event carrying only the envelope `task_id` (no `payload.task_ref`) is counted, under that task id's epic; (b) three `error-logged` events of one class on the same task are one task, not a recurrence; (c) `payload.epic_id` wins over the task id's epic when both exist; (d) an event with no task identity (no envelope or payload `task_id`, no `payload.task_ref`) is skipped and counts toward no class; an event with an unqualified task id and no `payload.epic_id` counts store-wide and toward no epic.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/lessonRecurrence.ts",
+        "factory/orchestrator/src/lessonEvents.ts",
+        "factory/orchestrator/src/lessons.ts",
+        "factory/orchestrator/test/lessonRecurrence.test.ts",
+        "factory/orchestrator/test/lessonEvents.test.ts",
+        "factory/orchestrator/test/lessonsByClass.test.ts",
+        "factory/orchestrator/test/lessons.test.ts"
+      ],
+      "budget": {
+        "tokens": 360000,
+        "diff_lines": 880
+      },
+      "contract": {
+        "functional_clauses": [
+          "Selection reads only the compiled lessons file (approved-only stays true by construction).",
+          "An `error-logged` event's task is `eventTaskId(record) ?? payload.task_ref` and its epic is `payload.epic_id ?? epicOfTaskId(task)`; distinct tasks are counted, an event with no task identity is skipped, and an event with a task but no epic counts store-wide only. Events logged with `other.unclassified` count toward that class like any other.",
+          "No lesson is ever spliced merely for lacking a class: the round-1 'unclassified always spliced' rule does not exist.",
+          "Callers that pass no events get the selection computed against an empty store (only role and claim-path lessons splice) plus the withheld line."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "lessonRecurrence.ts and the selection in lessons.ts are pure over passed-in events and `now`; the only store read is lessonEvents.ts, which takes `stateDir` and `now` as arguments (no clock read)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/lessons.ts"
+      ]
+    },
+    {
+      "task_id": "bs-optimize/task-4-brief-compose",
+      "epic_id": "bs-optimize",
+      "plan_version": 3,
+      "title": "bs brief compose module",
+      "summary": "One function builds every dispatch brief with D2 lessons, findings, caps and the role marker.",
+      "objective": "Implement epic-spec D3: new module src/briefCompose.ts exporting `composeBrief(opts)` returning `{text, manifest}` in dispatch.md's carry-into-the-prompt order: brief marker (formatBriefMarker from src/briefMarker.ts), role and task id, absolute worktree path and branch, the task spec entry verbatim, claims, token and diff caps, `Turn budget: N` (N read from the role template with `readTemplateMaxTurns`, agentsSync.ts; a caller-supplied turn budget that differs is refused with `brief.turns-mismatch`, because `lintDispatchPrompt` fails any other value), the epic-spec path to read first, the lessons block via `lessonsForDispatch` (D2 options; composeBrief takes the store events as an argument and reads none itself), the findings block via `findingsForDispatch` (findingContext.ts), the return-discipline section (dispatch.md's `## Return discipline (agent-interviews.md M-6)`, cut at run time from the shipped `<REPO_ROOT>/.claude/skills/bs/dispatch.md` with T5's `sliceSection` by that exact heading and spliced verbatim; a `dispatchDoc` option overrides the path in tests; a renamed or duplicated heading fails compose with `playbook.unknown-section` / `playbook.ambiguous-section`), the envelope line (the fields the worker must not write, rendered from `ORCHESTRATOR_OWNED_RESULT_FIELDS`, results.ts, the constant `stampResultEnvelope` enforces; the dispatcher-facing rest of dispatch.md's envelope section, its `bs gate run` flags, is not spliced), judge fingerprint commands, and `Declared artifact: <absolute path>` for judge roles and uiux only, never for a coder. No heavy-run text: the suite-running role templates carry T11's `heavy-run` fragment, the rule's one home (epic-spec D3, D9). Every composed brief must pass `lintDispatchPrompt` (dispatchLint.ts) with `exitCode: 0`. Named errors for a missing worktree on a worktree role, a task id not in the plan, and a judge role with no artifact path. Failing test first: factory/orchestrator/test/briefCompose.test.ts. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 5 (module half): composed coder, tester, grader and reviewer briefs on a fixture plan each give `lintDispatchPrompt({prompt, role, taskId, sessionId, agentsDir, eventOpts})` `exitCode: 0`. The test builds its event store in a temporary dir and records the grader's and reviewer's judge dispatch turns with `recordJudgeDispatch` (judges.ts) carrying the same absolute artifact paths the briefs declare; `agentsDir` is the repo's `.claude/agents`. Each brief carries the marker, the absolute worktree path, the verbatim spec entry, `Turn budget:` equal to the template's maxTurns, and the lessons block; grader and reviewer carry `Declared artifact:`, the coder does not. Liveness: a grader brief whose ledger turn is missing lints `undeclared` (exitCode non-zero), and `turnBudget` differing from the template raises `brief.turns-mismatch`. Each named error case fails with its code; the manifest lists every spliced and withheld lesson id and per-section byte counts. Shared text, against the repo's real `.claude/skills/bs/dispatch.md`: every brief carries the `## Return discipline (agent-interviews.md M-6)` section byte-for-byte as `sliceSection` returns it from that file, and an envelope line naming every member of `ORCHESTRATOR_OWNED_RESULT_FIELDS` (imported from results.ts, not restated); a `dispatchDoc` fixture with that heading renamed fails `playbook.unknown-section`, and one with it twice fails `playbook.ambiguous-section`.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/briefCompose.ts",
+        "factory/orchestrator/test/briefCompose.test.ts",
+        "factory/orchestrator/test/fixtures/brief-compose-plan.json"
+      ],
+      "budget": {
+        "tokens": 360000,
+        "diff_lines": 900
+      },
+      "contract": {
+        "functional_clauses": [
+          "The spec entry is copied byte-for-byte from the plan file.",
+          "Text dispatch.md defines is never retyped: return discipline is sliced at run time from the shipped dispatch.md by its exact heading `## Return discipline (agent-interviews.md M-6)` with `sliceSection` (src/playbookSlice.ts, T5; edge T5 -> T4), and the envelope line lists exactly `ORCHESTRATOR_OWNED_RESULT_FIELDS` (results.ts). A missing or duplicated heading is a named error, never a brief without the section.",
+          "composeBrief adds no heavy-run text; the role templates' `heavy-run` fragment (T11) is that rule's single home.",
+          "composeBrief never writes outside the path its caller names."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "Deterministic output for the same inputs (stable ordering, no timestamps in the text) so briefs diff cleanly."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-10-cli-hookup",
+      "epic_id": "bs-optimize",
+      "plan_version": 3,
+      "title": "Wire the new verbs into the CLI",
+      "summary": "cli.ts and usage.ts gain brief compose, playbook slice, heavy run, cleanup, lessons flags and in-flight admission.",
+      "objective": "Wire epic-spec D1-D8 and D10 into the CLI hub (src/cli.ts, src/usage.ts are serialize-always; this task is their only editor in the epic): `lessons raise --error-class`; `lessons for-dispatch [--full] [--class <c>] [--epic <id>]`: events are read with T2's `readRecurrenceEvents` from the store at `STATE_EVENTS_DIR` (paths.ts; tests point it with `BS_HOME`), every session, 30-day window; `--epic` sets the repeat epic (none: no epic repeat); an absent or empty store reads as an empty store; `brief compose --role --session [--plan --task --worktree --branch --turns --artifact --out]` writing the brief and manifest (events read the same way; `--turns` is optional and refused by compose when it differs from the template); `playbook slice wave --step <n>` / `playbook slice dispatch --section <heading>`; `heavy run --label <l> -- <cmd...>` (runs under `withHeavyLock` and spawns the child with T8's `heavyChildEnv(process.env, lease)`, which carries the token and the resolved lock dir and nothing else from `BS_`; T10 writes no add-back of its own; returns the child's exit code, exits 75 with the holder detail on `heavy.wait-timeout`) and `heavy status` (prints `readHeavyLock`'s record as JSON, or `{}` when free); `cleanup --project <dir> [--epic <id>] [--apply]` (a thin call into src/cleanup.ts `runCleanup` with the store's events, printing its JSON report; dry run unless `--apply`); `nextWaveInputFrom` passes `inFlightTasks` to `computeNextWave`, and `wave check` calls `assertNotInFlight`; `readChecksFile` refuses a `heavy` that is present and not a boolean (e.g. the string \"false\") with `gate.invalid-check-heavy`, beside the existing `gate.invalid-check-timeout`; heavy marking itself is T8's `isHeavyCheck` inside `run`, so gate run and integration check both get it. One usage entry per verb. Failing test first: factory/orchestrator/test/cliOptimize.test.ts (spawns the built CLI per verb). TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4 (CLI half): without `--full` no `lessons` array; on the checked-in lessons.md with an empty store a coder for-dispatch on claim `factory/orchestrator/src/**` splices at most half the lessons-block bytes of the same call with every class treated as recurring (the pre-epic set, computed in the same test, so the comparison needs no stored number); with `BS_HOME` pointing at a temporary store holding two sessions whose `error-logged` events put one class on 3 distinct tasks, that class's lessons are spliced; with `--epic E` and one event of E, a class is spliced that is withheld without `--epic`.",
+        "Epic criterion 5, 7, 9 and 10 (CLI halves): `brief compose` (its output passes `lintDispatchPrompt`), `playbook slice`, `wave next`/`wave check` after `plan ingest`, `heavy run` (exit code passed through; 75 on a wait timeout against a lock held by a live pid; nested inside `heavy run` under a temporary `BS_HEAVY_LOCK_DIR` and a temporary HOME it returns the inner exit code without waiting and no lock file appears under `$HOME/.blacksmith/locks`; every CLI test that can reach the lock sets a temporary `BS_HEAVY_LOCK_DIR`) and `heavy status` behave as the criteria say, each with a CLI test; `gate run` on a checks.json with `\"heavy\": \"false\"` fails with `gate.invalid-check-heavy`.",
+        "Epic criterion 14 (CLI half): on a temporary git repo with a `.wt/<project>/` holding one merged task worktree of a closed epic, `bs cleanup --project <dir>` prints a JSON report and changes nothing; with `--apply` it removes that worktree and branch and the report names it; a non-git `--project` exits non-zero with `cleanup.not-a-git-repo`.",
+        "docCommands and usage tests pass: every new verb has a usage entry.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/cliOptimize.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 430000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each verb is a thin call into its module; no selection, composition, admission or cleanup logic lives in cli.ts.",
+          "Existing verbs and their output shapes are unchanged except `lessons for-dispatch` dropping the `lessons` array without `--full` (documented in T11's CHANGELOG entry)."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "`heavy run` passes argv through without a shell (no injection via the label or command)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-11-playbooks",
+      "epic_id": "bs-optimize",
+      "plan_version": 3,
+      "title": "Playbooks, wave-runner and CHANGELOG",
+      "summary": "Docs make compose, batching, background waits, rolling admission, slices, epic-close cleanup and TaskStop the documented path.",
+      "objective": "Implement epic-spec D9 and the playbook half of D10 across .claude/skills/bs/*.md, the eleven suite-running .claude/agents templates, .claude/fragments/heavy-run.md, INSTALL.md and CHANGELOG.md: dispatch.md builds briefs with `bs brief compose` and describes D2 lessons; every dispatching playbook carries the one-message batching rule; wave.md puts grader + reviewer + security in one message after the tester, runs the gate in the background, replaces every wait with a background task or the Monitor tool, routes full-suite/e2e runs through `bs heavy run` as the heavy-run fragment says, never around a verb that takes the lock itself, in step 10 (the merge queue) runs `bs queue run` as a background task (its lock wait, up to `maxWaitMs`, 1 h by default, outlasts a 10-minute foreground Bash call) and says that when it fails (e.g. `heavy.wait-timeout`) the runner reads the session's `wave-merged` events (`bs event tail <session-id>`, `payload.task_ids`), rebuilds `tasks.json` from the tasks not yet merged and never re-queues a merged task (the queue would log it `nothing-to-merge` with a blocked event), reports the lock holder the error names, and re-runs once that holder is gone (`bs heavy status`) or escalates to the epic session (epic-spec D9), says checks.json marks a check heavy with `\"heavy\": true` and that `test*`/`unit`/`coverage`/`e2e*` names are heavy by default, names each step's `bs playbook slice` command, and tells the runner to read the two common sections (`You own the log for what you dispatch`, `Run the whole wave at once`) once per wave with `bs playbook slice wave --section`; keep wave.md's step numbering (2-10, top-level `N. ` items) so playbookSlice.test.ts stays green; run.md documents rolling admission after each merge; run.md gains a cleanup step after step 17 (integration PR): `bs cleanup --project <dir> --epic <id>` dry run, then `--apply`, then the same pair unscoped (`bs cleanup --project <dir>`) for earlier epics' leftovers, then report what was removed and what was kept and why; the integration branch and its worktree stay until the PR merges and are cleaned by the next epic's close or the next `bs cleanup`; the epic session at close (run.md) and the wave-runner at wave end (wave.md, bs-wave-runner.md) stop their own still-running background tasks and idle subagents with TaskStop, only after every output file the task was told to write ends with an `EXIT=<n>` line and it does not hold the heavy lock (`bs heavy status` names no holder whose label or cwd is that task's; otherwise leave it and say so), and never a task the session did not start; bs-wave-runner.md adds `TaskStop` and `Monitor` to its tools, reads only its step slice and never Reads a PNG; typed `bs-*` agents only; the heavy-run rule (epic-spec D9) is written once as the shared fragment `.claude/fragments/heavy-run.md` and stamped with `node scripts/sync-shared-fragments.mjs` into the eleven suite-running templates, bs-auditor, bs-coder, bs-grader, bs-merger, bs-reviewer, bs-security-reviewer, bs-spec-reviewer, bs-tester, bs-uiux, bs-verifier and bs-wave-runner (bs-planner and bs-researcher run no suite, bs-scribe has no Bash): a full-suite or e2e command (the project's `test_unit` or `test_e2e` from `bs stack show`, a full-suite gate command the brief names, or a check `isHeavyCheck` marks heavy) runs as `bs heavy run --label <task-id>-<role> -- <cmd>`; `bs gate run`, `bs integration check` and `bs queue run` take the lock themselves and are never wrapped; exit 75 is `heavy.wait-timeout`, and the agent puts the holder it names in its result and does not retry blind; a scoped run of the agent's own new test file runs directly; templateFragments.test.ts gains `heavy-run` in EXPECTED_FRAGMENTS and its eleven carriers in EXPECTED_REGIONS; dispatch.md keeps its `## Return discipline (agent-interviews.md M-6)` heading byte-identical (T4's compose slices it at run time); INSTALL.md's \"Raise the concurrency caps\" section names `bs doctor`'s `concurrency-caps` warning and says `bs init` writes the caps; CHANGELOG `## Unreleased` one entry per feature, including `bs cleanup`. Failing test first: factory/orchestrator/test/playbookOptimize.test.ts pinning each rule. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 12: playbookOptimize.test.ts pins every rule listed in criterion 12, including wave.md step 10's merge-queue rules on its `sliceWaveStep(wave, 10)` cut: `bs queue run` runs as a background task, and after it fails (`heavy.wait-timeout` named) the step names `wave-merged`, rebuilds `tasks.json` from the tasks not yet merged, says a merged task is never re-queued, reports the holder, and re-runs once it is gone or escalates to the epic session; docCommands, docErrorCodes, dispatchLint, dispatchAudit, wavePlaybook and docConcurrencyEnv tests pass; no playbook tells an agent to `sleep`.",
+        "Epic criterion 15: playbookOptimize.test.ts pins run.md's cleanup step (after the integration-PR step; dry run before `--apply`; report removed and kept with reasons; integration branch kept until its PR merges) and the TaskStop rule in run.md, wave.md and bs-wave-runner.md (EXIT line in every output file, heavy lock not held, own tasks only); bs-wave-runner.md's tools list names TaskStop and Monitor.",
+        "Epic criterion 7 and 8 (doc halves): bs-wave-runner.md slice-only/no-PNG rule and wave.md one-message judges rule are pinned.",
+        "INSTALL.md's \"Raise the concurrency caps\" section names the `concurrency-caps` doctor warning and `bs init` writing the caps (pinned in playbookOptimize.test.ts); wave.md documents the checks.json `heavy` field and its name defaults; playbookSlice.test.ts passes on the rewritten wave.md.",
+        "Epic criterion 12 (heavy-run half) and criterion 5 (heading half): `.claude/fragments/heavy-run.md` holds `bs heavy run --label <task-id>-<role> -- <cmd>`, exit 75 / `heavy.wait-timeout` with the holder reported and no blind retry, the `bs gate run` / `bs integration check` / `bs queue run` exclusion and the scoped-run exemption (pinned in playbookOptimize.test.ts); `node scripts/sync-shared-fragments.mjs --check` passes and templateFragments.test.ts lists `heavy-run` with its eleven carriers; playbookOptimize.test.ts fails when any `.claude/agents/bs-*.md` whose `tools` line names Bash, other than bs-planner and bs-researcher, or any template that says \"run the suite\", \"full suite\", \"regression gate\", `test_unit` or `test_e2e`, lacks a `SHARED:heavy-run` region; dispatch.md's `## Return discipline (agent-interviews.md M-6)` heading is unchanged and briefCompose.test.ts (T4, against the real file) passes.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        ".claude/skills/bs/*.md",
+        ".claude/agents/bs-wave-runner.md",
+        ".claude/agents/bs-auditor.md",
+        ".claude/agents/bs-coder.md",
+        ".claude/agents/bs-grader.md",
+        ".claude/agents/bs-merger.md",
+        ".claude/agents/bs-reviewer.md",
+        ".claude/agents/bs-security-reviewer.md",
+        ".claude/agents/bs-spec-reviewer.md",
+        ".claude/agents/bs-tester.md",
+        ".claude/agents/bs-uiux.md",
+        ".claude/agents/bs-verifier.md",
+        ".claude/fragments/heavy-run.md",
+        "factory/orchestrator/test/templateFragments.test.ts",
+        "INSTALL.md",
+        "CHANGELOG.md",
+        "factory/orchestrator/test/playbookOptimize.test.ts",
+        "factory/orchestrator/test/wavePlaybook.test.ts",
+        "factory/orchestrator/test/dispatchLint.test.ts",
+        "factory/orchestrator/test/playbookSlice.test.ts"
+      ],
+      "budget": {
+        "tokens": 440000,
+        "diff_lines": 1400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each playbook keeps its existing rules; text is moved or replaced only where this epic changes the behaviour.",
+          "The cleanup step never tells an agent to delete by hand (`rm`, `git branch -D`, `--force`); removal goes through `bs cleanup --apply` only.",
+          "No version bump; CHANGELOG entries go under `## Unreleased` only.",
+          "The heavy-run rule is worded once, in `.claude/fragments/heavy-run.md`, and reaches the templates only as the stamped `heavy-run` region; no template restates it outside that region."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "Wave-runner text never instructs Reading a PNG or a whole playbook."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-2-lessons-by-class",
+      "epic_id": "bs-optimize",
+      "plan_version": 3,
+      "title": "Lessons spliced by recurring class",
+      "summary": "lessonsForDispatch splices recurring and epic-repeating classes (other.unclassified included), withholds the rest with a read command.",
+      "objective": "Implement epic-spec D2 with the operator's thresholds (decision 14): new module src/lessonRecurrence.ts (`errorClassCounts(events, {now, windowDays})`, one named constant each for RECUR_MIN_TASKS=3, RECUR_WINDOW_DAYS=30, EPIC_REPEAT_MIN=1) and the selection rules in `lessonsForDispatch`: agent-role and claim-path untouched; every stack-wide/case-type/security lesson is spliced only when its class recurs store-wide or repeats in the dispatch's epic, otherwise withheld; `other.unclassified` follows the same rule as every class (decision 13); a lesson with no `error_class`, or with a class no longer in taxonomy.yml, is read as `other.unclassified` and the result carries a warning naming the lesson id and the stale value; nothing is withheld from a security-reviewer. Add options `{events, epicId, now, full, class}`. Event identity (D2; the event envelope has no `epic_id`, event.schema.json is `additionalProperties: false`): class = `payload.error`; task = `eventTaskId(record) ?? payload.task_ref` (events.ts `eventTaskId`, the rule agents-registry.ts's `error-logged` fold already uses: reuse it, do not re-implement it), and distinct-task counting uses that identity, so repeated events on one task count once; epic = `payload.epic_id ?? epicOfTaskId(task)` (taskId.ts), `payload.epic_id` winning when both exist; an event with a task but no epic counts store-wide only, never toward an epic; an event with no task identity is skipped; with no `epicId` nothing counts as an epic repeat; return `withheld` and `warnings`, and omit the `lessons` array unless `full`; append one trailing line naming each withheld class, its count and `bs lessons for-dispatch --class <group.class>`. New src/lessonEvents.ts `readRecurrenceEvents(stateDir, {now, windowDays})`, the one store reader the CLI and brief compose use: every session id from `listSessionIds(stateDir)` (events.ts), skipping a session file whose mtime is older than `now - windowDays` (safe by the invariant epic-spec D2 states: events.ts `appendEventLocked` stamps every `ts` at write time and `keptTs` is `prompts-`-only and refuses a future `ts`, so a file's mtime is never earlier than its newest event's `ts`, up to the file system's timestamp granularity), each read with `readEvents` (events.ts); cost bound: one `stat` per session file and one `readEvents` per in-window file, never one for an older file (`stat` and `readEvents` injectable so the test can count them), keeping `error-logged` events whose timestamp lies in the window; a missing dir returns []. Failing tests first: factory/orchestrator/test/lessonRecurrence.test.ts, factory/orchestrator/test/lessonsByClass.test.ts and factory/orchestrator/test/lessonEvents.test.ts. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 3: every selection case in criterion 3 has a fixture test (3 error-logged on distinct tasks in 30 days spliced; 2 withheld and named; an event older than 30 days not counted; epic repeat of 1 spliced; `other.unclassified` withheld without recurrence and spliced on repeat; a class-less or stale-class lesson read as `other.unclassified` with a warning; agent-role/claim-path never withheld; security-reviewer withholds nothing).",
+        "Epic criterion 4 (module half): without `full` the result has no `lessons` array; `class` returns exactly that class's approved lessons.",
+        "Store-wide means every session (S2-7): lessonEvents.test.ts builds a temporary state dir with two session files; a class logged on 2 tasks in session A and 1 task in session B within 30 days recurs; a session file whose mtime is older than 30 days is not opened (injected `readEvents` spy); an event inside a recent file but older than 30 days is dropped; a missing state dir returns []. lessonEvents.test.ts also asserts the cost bound: `stat` is called once per session file and `readEvents` exactly once per in-window file. lessonEvents.test.ts also pins the invariant the mtime skip rests on (epic-spec D2): an event appended through `appendEvent` (events.ts) with `stateDir` a temporary dir has a `ts` no later than its session file's mtime (`Date.parse(ts) <= mtimeMs + 2000`, the 2,000 ms covering file-system timestamp granularity: Linux's coarse kernel clock, 1 s on HFS+), so a future change that stamps `ts` ahead of the write fails it. lessonsByClass.test.ts shows an event of epic E counts as a repeat for `epicId: E` and not for another epic, and that no `epicId` means no repeat.",
+        "Event identity (S2-major round 4), one test each in lessonsByClass.test.ts, every fixture an envelope event.schema.json accepts (no envelope `epic_id`): (a) an `error-logged` event carrying only the envelope `task_id` (no `payload.task_ref`) is counted, under that task id's epic; (b) three `error-logged` events of one class on the same task are one task, not a recurrence; (c) `payload.epic_id` wins over the task id's epic when both exist; (d) an event with no task identity (no envelope or payload `task_id`, no `payload.task_ref`) is skipped and counts toward no class; an event with an unqualified task id and no `payload.epic_id` counts store-wide and toward no epic.",
+        "Omitted vs empty events (operator answer 1A, bs-optimize-2026-10-21#85), one test each in lessonsByClass.test.ts: (a) no `events` option splices every approved lesson for the role, class lessons included, and prints no withheld line; (b) `events: []` withholds class lessons and prints the withheld line. factory/orchestrator/test/cli.test.ts passes unchanged.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/lessonRecurrence.ts",
+        "factory/orchestrator/src/lessonEvents.ts",
+        "factory/orchestrator/src/lessons.ts",
+        "factory/orchestrator/test/lessonRecurrence.test.ts",
+        "factory/orchestrator/test/lessonEvents.test.ts",
+        "factory/orchestrator/test/lessonsByClass.test.ts",
+        "factory/orchestrator/test/lessons.test.ts"
+      ],
+      "budget": {
+        "tokens": 360000,
+        "diff_lines": 880
+      },
+      "contract": {
+        "functional_clauses": [
+          "Selection reads only the compiled lessons file (approved-only stays true by construction).",
+          "An `error-logged` event's task is `eventTaskId(record) ?? payload.task_ref` and its epic is `payload.epic_id ?? epicOfTaskId(task)`; distinct tasks are counted, an event with no task identity is skipped, and an event with a task but no epic counts store-wide only. Events logged with `other.unclassified` count toward that class like any other.",
+          "No lesson is ever spliced merely for lacking a class: the round-1 'unclassified always spliced' rule does not exist.",
+          "Callers that omit `events` get no recurrence filter: every approved lesson for the role splices, as before this task, and no withheld line is printed (the CLI callers stay unchanged until task-10 wires the events in). Callers passing `events: []` get the selection computed against an empty store (only role and claim-path lessons splice) plus the withheld line. The `events` option doc comment states both cases."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "lessonRecurrence.ts and the selection in lessons.ts are pure over passed-in events and `now`; the only store read is lessonEvents.ts, which takes `stateDir` and `now` as arguments (no clock read)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/lessons.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-optimize/task-4-brief-compose",
+      "dependsOn": "bs-optimize/task-2-lessons-by-class",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-optimize/task-10-cli-hookup",
+      "dependsOn": "bs-optimize/task-2-lessons-by-class",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-optimize/task-10-cli-hookup",
+      "dependsOn": "bs-optimize/task-4-brief-compose",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-optimize/task-11-playbooks",
+      "dependsOn": "bs-optimize/task-10-cli-hookup",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "blacksmith",
+  "effort": "huge"
+}

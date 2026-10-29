@@ -1,7 +1,7 @@
 # `/bs report` — the scribe's progress digest
 
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
-none of it is restated here.
+none of it is restated here. Independent dispatches go in one message, as parallel tool calls, never one message per agent.
 
 The scribe-template digest playbook (agent-constraints.md "scribe (digest
 duties, v3.2)"), plus running the scheduler first — a report that omits

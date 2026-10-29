@@ -4,7 +4,7 @@
  * Textual, not AST-based, for the same boring reason `eventTypeScan.ts` gives:
  * the `typescript` package here is 7.0.2, whose JS entry exposes no compiler
  * API -- `createSourceFile`, `createProgram` and `forEachChild` are all
- * `undefined`. So this reads the three shapes a code is written in:
+ * `undefined`. So this reads the four shapes a code is written in:
  *
  *   Shape A  `new <SmithError subclass>('<code>', ...)` -- the bulk of them
  *   Shape B  `super('<code>', ...)` inside a file that declares a subclass,
@@ -12,6 +12,8 @@
  *            its own code (git.ts's `GitCommandError`)
  *   Shape C  a `code: '<code>'` property, for codes held in a table and raised
  *            from it (lessons.ts's `SELECTOR_RULES`)
+ *   Shape D  `logBlocked(<task>, '<code>', ...)` -- queue.ts reports a blocked
+ *            task through a callback instead of a throw
  *
  * Shape C is narrowed to literals containing a dot. Undotted `code:` fields in
  * this tree are autonomy decision reasons (`security-surface`,
@@ -48,7 +50,7 @@ export interface RaiseSite {
   readonly file: string;
   /** 1-based line of the construction. */
   readonly line: number;
-  readonly via: 'new' | 'super' | 'table';
+  readonly via: 'new' | 'super' | 'table' | 'log';
 }
 
 /**
@@ -127,6 +129,8 @@ export function scanErrorCodes(sources: readonly SourceFile[]): ErrorCodeScan {
       const code = match[1] as string;
       if (code.includes('.')) keep(code, { file, line: lineOf(text, match.index), via: 'table' });
     }
+    for (const match of text.matchAll(/\blogBlocked\(\s*[\w.]+\s*,\s*'([^'\n]*)'/g))
+      keep(match[1], { file, line: lineOf(text, match.index), via: 'log' });
   }
 
   const codes = new Set(sites.map((site) => site.code));

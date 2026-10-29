@@ -75,6 +75,10 @@
       "x-taxonomy": "agent",
       "description": "D-129: the selector an agent-role-scoped entry is filtered by at dispatch — required for that scope and ignored for every other. Without it the entry reaches no role at all, because the three selector scopes (claim-path/agent-role/case-type) each filter on exactly one field and a missing selector matches nothing rather than everything."
     },
+    "error_class": {
+      "type": "string",
+      "description": "bs-optimize: optional — one `group.class` from taxonomy.yml `error` (e.g. `execution.flaky-test`; `other.unclassified` when no specific class fits). Validated at write time against that file (group.class form, so no flat x-taxonomy annotation); the enum is never inlined here."
+    },
     "case_type": {
       "type": "string",
       "x-taxonomy": "case",

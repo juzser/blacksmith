@@ -1,0 +1,222 @@
+{
+  "epic_id": "bs-optimize",
+  "version": 5,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-optimize/task-10-cli-hookup",
+      "epic_id": "bs-optimize",
+      "plan_version": 5,
+      "title": "Wire the new verbs into the CLI",
+      "summary": "cli.ts and usage.ts gain brief compose, playbook slice, heavy run, cleanup, lessons flags and in-flight admission.",
+      "objective": "Wire epic-spec D1-D8 and D10 into the CLI hub (src/cli.ts, src/usage.ts are serialize-always; this task is their only editor in the epic): `lessons raise --error-class`; `lessons for-dispatch [--full] [--class <c>] [--epic <id>]`: events are read with T2's `readRecurrenceEvents` from the store at `STATE_EVENTS_DIR` (paths.ts; tests point it with `BS_HOME`), every session, 30-day window; `--epic` sets the repeat epic (none: no epic repeat); an absent or empty store reads as an empty store; `brief compose --role --session [--plan --task --worktree --branch --turns --artifact --out]` writing the brief and manifest (events read the same way; `--turns` is optional and refused by compose when it differs from the template); `playbook slice wave --step <n>` / `playbook slice dispatch --section <heading>`; `heavy run --label <l> -- <cmd...>` (runs under `withHeavyLock` and spawns the child with T8's `heavyChildEnv(process.env, lease)`, which carries the token and the resolved lock dir and nothing else from `BS_`; T10 writes no add-back of its own; returns the child's exit code, exits 75 with the holder detail on `heavy.wait-timeout`) and `heavy status` (prints `readHeavyLock`'s record as JSON, or `{}` when free); `cleanup --project <dir> [--epic <id>] [--apply]` (a thin call into src/cleanup.ts `runCleanup` with the store's events, printing its JSON report; dry run unless `--apply`); `nextWaveInputFrom` passes `inFlightTasks` to `computeNextWave`, and `wave check` calls `assertNotInFlight`; `readChecksFile` refuses a `heavy` that is present and not a boolean (e.g. the string \"false\") with `gate.invalid-check-heavy`, beside the existing `gate.invalid-check-timeout`; heavy marking itself is T8's `isHeavyCheck` inside `run`, so gate run and integration check both get it. One usage entry per verb. Failing test first: factory/orchestrator/test/cliOptimize.test.ts (spawns the built CLI per verb). TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4 (CLI half): without `--full` no `lessons` array; on the checked-in lessons.md with an empty store a coder for-dispatch on claim `factory/orchestrator/src/**` splices at most half the lessons-block bytes of the same call with every class treated as recurring (the pre-epic set, computed in the same test, so the comparison needs no stored number); with `BS_HOME` pointing at a temporary store holding two sessions whose `error-logged` events put one class on 3 distinct tasks, that class's lessons are spliced; with `--epic E` and one event of E, a class is spliced that is withheld without `--epic`.",
+        "Epic criterion 5, 7, 9 and 10 (CLI halves): `brief compose` (its output passes `lintDispatchPrompt`), `playbook slice`, `wave next`/`wave check` after `plan ingest`, `heavy run` (exit code passed through; 75 on a wait timeout against a lock held by a live pid; nested inside `heavy run` under a temporary `BS_HEAVY_LOCK_DIR` and a temporary HOME it returns the inner exit code without waiting and no lock file appears under `$HOME/.blacksmith/locks`; every CLI test that can reach the lock sets a temporary `BS_HEAVY_LOCK_DIR`) and `heavy status` behave as the criteria say, each with a CLI test; `gate run` on a checks.json with `\"heavy\": \"false\"` fails with `gate.invalid-check-heavy`.",
+        "Epic criterion 14 (CLI half): on a temporary git repo with a `.wt/<project>/` holding one merged task worktree of a closed epic, `bs cleanup --project <dir>` prints a JSON report and changes nothing; with `--apply` it removes that worktree and branch and the report names it; a non-git `--project` exits non-zero with `cleanup.not-a-git-repo`.",
+        "docCommands and usage tests pass: every new verb has a usage entry.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/cliOptimize.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 430000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each verb is a thin call into its module; no selection, composition, admission or cleanup logic lives in cli.ts.",
+          "Existing verbs and their output shapes are unchanged except `lessons for-dispatch` dropping the `lessons` array without `--full` (documented in T11's CHANGELOG entry)."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "`heavy run` passes argv through without a shell (no injection via the label or command)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-11-playbooks",
+      "epic_id": "bs-optimize",
+      "plan_version": 5,
+      "title": "Playbooks, wave-runner and CHANGELOG",
+      "summary": "Docs make compose, batching, background waits, rolling admission, slices, epic-close cleanup and TaskStop the documented path.",
+      "objective": "Implement epic-spec D9 and the playbook half of D10 across .claude/skills/bs/*.md, the eleven suite-running .claude/agents templates, .claude/fragments/heavy-run.md, INSTALL.md and CHANGELOG.md: dispatch.md builds briefs with `bs brief compose` and describes D2 lessons; every dispatching playbook carries the one-message batching rule; wave.md puts grader + reviewer + security in one message after the tester, runs the gate in the background, replaces every wait with a background task or the Monitor tool, routes full-suite/e2e runs through `bs heavy run` as the heavy-run fragment says, never around a verb that takes the lock itself, in step 10 (the merge queue) runs `bs queue run` as a background task (its lock wait, up to `maxWaitMs`, 1 h by default, outlasts a 10-minute foreground Bash call) and says that when it fails (e.g. `heavy.wait-timeout`) the runner reads the session's `wave-merged` events (`bs event tail <session-id>`, `payload.task_ids`), rebuilds `tasks.json` from the tasks not yet merged and never re-queues a merged task (the queue would log it `nothing-to-merge` with a blocked event), reports the lock holder the error names, and re-runs once that holder is gone (`bs heavy status`) or escalates to the epic session (epic-spec D9), says checks.json marks a check heavy with `\"heavy\": true` and that `test*`/`unit`/`coverage`/`e2e*` names are heavy by default, names each step's `bs playbook slice` command, and tells the runner to read the two common sections (`You own the log for what you dispatch`, `Run the whole wave at once`) once per wave with `bs playbook slice wave --section`; keep wave.md's step numbering (2-10, top-level `N. ` items) so playbookSlice.test.ts stays green; run.md documents rolling admission after each merge; run.md gains a cleanup step after step 17 (integration PR): `bs cleanup --project <dir> --epic <id>` dry run, then `--apply`, then the same pair unscoped (`bs cleanup --project <dir>`) for earlier epics' leftovers, then report what was removed and what was kept and why; the integration branch and its worktree stay until the PR merges and are cleaned by the next epic's close or the next `bs cleanup`; the epic session at close (run.md) and the wave-runner at wave end (wave.md, bs-wave-runner.md) stop their own still-running background tasks and idle subagents with TaskStop, only after every output file the task was told to write ends with an `EXIT=<n>` line and it does not hold the heavy lock (`bs heavy status` names no holder whose label or cwd is that task's; otherwise leave it and say so), and never a task the session did not start; bs-wave-runner.md adds `TaskStop` and `Monitor` to its tools, reads only its step slice and never Reads a PNG; typed `bs-*` agents only; the heavy-run rule (epic-spec D9) is written once as the shared fragment `.claude/fragments/heavy-run.md` and stamped with `node scripts/sync-shared-fragments.mjs` into the eleven suite-running templates, bs-auditor, bs-coder, bs-grader, bs-merger, bs-reviewer, bs-security-reviewer, bs-spec-reviewer, bs-tester, bs-uiux, bs-verifier and bs-wave-runner (bs-planner and bs-researcher run no suite, bs-scribe has no Bash): a full-suite or e2e command (the project's `test_unit` or `test_e2e` from `bs stack show`, a full-suite gate command the brief names, or a check `isHeavyCheck` marks heavy) runs as `bs heavy run --label <task-id>-<role> -- <cmd>`; `bs gate run`, `bs integration check` and `bs queue run` take the lock themselves and are never wrapped; exit 75 is `heavy.wait-timeout`, and the agent puts the holder it names in its result and does not retry blind; a scoped run of the agent's own new test file runs directly; templateFragments.test.ts gains `heavy-run` in EXPECTED_FRAGMENTS and its eleven carriers in EXPECTED_REGIONS; dispatch.md keeps its `## Return discipline (agent-interviews.md M-6)` heading byte-identical (T4's compose slices it at run time); INSTALL.md's \"Raise the concurrency caps\" section names `bs doctor`'s `concurrency-caps` warning and says `bs init` writes the caps; CHANGELOG `## Unreleased` one entry per feature, including `bs cleanup`. Failing test first: factory/orchestrator/test/playbookOptimize.test.ts pinning each rule. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 12: playbookOptimize.test.ts pins every rule listed in criterion 12, including wave.md step 10's merge-queue rules on its `sliceWaveStep(wave, 10)` cut: `bs queue run` runs as a background task, and after it fails (`heavy.wait-timeout` named) the step names `wave-merged`, rebuilds `tasks.json` from the tasks not yet merged, says a merged task is never re-queued, reports the holder, and re-runs once it is gone or escalates to the epic session; docCommands, docErrorCodes, dispatchLint, dispatchAudit, wavePlaybook and docConcurrencyEnv tests pass; no playbook tells an agent to `sleep`.",
+        "Epic criterion 15: playbookOptimize.test.ts pins run.md's cleanup step (after the integration-PR step; dry run before `--apply`; report removed and kept with reasons; integration branch kept until its PR merges) and the TaskStop rule in run.md, wave.md and bs-wave-runner.md (EXIT line in every output file, heavy lock not held, own tasks only); bs-wave-runner.md's tools list names TaskStop and Monitor.",
+        "Epic criterion 7 and 8 (doc halves): bs-wave-runner.md slice-only/no-PNG rule and wave.md one-message judges rule are pinned.",
+        "INSTALL.md's \"Raise the concurrency caps\" section names the `concurrency-caps` doctor warning and `bs init` writing the caps (pinned in playbookOptimize.test.ts); wave.md documents the checks.json `heavy` field and its name defaults; playbookSlice.test.ts passes on the rewritten wave.md.",
+        "Epic criterion 12 (heavy-run half) and criterion 5 (heading half): `.claude/fragments/heavy-run.md` holds `bs heavy run --label <task-id>-<role> -- <cmd>`, exit 75 / `heavy.wait-timeout` with the holder reported and no blind retry, the `bs gate run` / `bs integration check` / `bs queue run` exclusion and the scoped-run exemption (pinned in playbookOptimize.test.ts); `node scripts/sync-shared-fragments.mjs --check` passes and templateFragments.test.ts lists `heavy-run` with its eleven carriers; playbookOptimize.test.ts fails when any `.claude/agents/bs-*.md` whose `tools` line names Bash, other than bs-planner and bs-researcher, or any template that says \"run the suite\", \"full suite\", \"regression gate\", `test_unit` or `test_e2e`, lacks a `SHARED:heavy-run` region; dispatch.md's `## Return discipline (agent-interviews.md M-6)` heading is unchanged and briefCompose.test.ts (T4, against the real file) passes.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        ".claude/skills/bs/*.md",
+        ".claude/agents/bs-wave-runner.md",
+        ".claude/agents/bs-auditor.md",
+        ".claude/agents/bs-coder.md",
+        ".claude/agents/bs-grader.md",
+        ".claude/agents/bs-merger.md",
+        ".claude/agents/bs-reviewer.md",
+        ".claude/agents/bs-security-reviewer.md",
+        ".claude/agents/bs-spec-reviewer.md",
+        ".claude/agents/bs-tester.md",
+        ".claude/agents/bs-uiux.md",
+        ".claude/agents/bs-verifier.md",
+        ".claude/fragments/heavy-run.md",
+        "factory/orchestrator/test/templateFragments.test.ts",
+        "INSTALL.md",
+        "CHANGELOG.md",
+        "factory/orchestrator/test/playbookOptimize.test.ts",
+        "factory/orchestrator/test/wavePlaybook.test.ts",
+        "factory/orchestrator/test/dispatchLint.test.ts",
+        "factory/orchestrator/test/playbookSlice.test.ts"
+      ],
+      "budget": {
+        "tokens": 440000,
+        "diff_lines": 1400
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each playbook keeps its existing rules; text is moved or replaced only where this epic changes the behaviour.",
+          "The cleanup step never tells an agent to delete by hand (`rm`, `git branch -D`, `--force`); removal goes through `bs cleanup --apply` only.",
+          "No version bump; CHANGELOG entries go under `## Unreleased` only.",
+          "The heavy-run rule is worded once, in `.claude/fragments/heavy-run.md`, and reaches the templates only as the stamped `heavy-run` region; no template restates it outside that region."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "Wave-runner text never instructs Reading a PNG or a whole playbook."
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-10-cli-hookup",
+      "epic_id": "bs-optimize",
+      "plan_version": 5,
+      "title": "Wire the new verbs into the CLI",
+      "summary": "cli.ts and usage.ts gain brief compose, playbook slice, heavy run, cleanup, lessons flags and in-flight admission.",
+      "objective": "Wire epic-spec D1-D8 and D10 into the CLI hub (src/cli.ts, src/usage.ts are serialize-always; this task is their only editor in the epic): `lessons raise --error-class`; `lessons for-dispatch [--full] [--class <c>] [--epic <id>]`: events are read with T2's `readRecurrenceEvents` from the store at `STATE_EVENTS_DIR` (paths.ts; tests point it with `BS_HOME`), every session, 30-day window; `--epic` sets the repeat epic (none: no epic repeat); an absent or empty store reads as an empty store; `brief compose --role --session [--plan --task --worktree --branch --turns --artifact --out]` writing the brief and manifest (events read the same way; `--turns` is optional and refused by compose when it differs from the template); `playbook slice wave --step <n>` / `playbook slice dispatch --section <heading>`; `heavy run --label <l> [--max-wait-ms <ms>] -- <cmd...>` (`--max-wait-ms` is a non-negative integer passed to `withHeavyLock` as `maxWaitMs`, default withHeavyLock's 3600000 ms, the bound the exit-75 timeout test uses; runs under `withHeavyLock` and spawns the child with T8's `heavyChildEnv(process.env, lease)`, which carries the token and the resolved lock dir and nothing else from `BS_`; T10 writes no add-back of its own; returns the child's exit code, exits 75 with the holder detail on `heavy.wait-timeout`) and `heavy status` (prints `readHeavyLock`'s record as JSON, or `{}` when free); `cleanup --project <dir> [--epic <id>] [--apply]` (a thin call into src/cleanup.ts `runCleanup` with the store's events, printing its JSON report; dry run unless `--apply`); `nextWaveInputFrom` passes `inFlightTasks` to `computeNextWave`, and `wave check` calls `assertNotInFlight`; `readChecksFile` refuses a `heavy` that is present and not a boolean (e.g. the string \"false\") with `gate.invalid-check-heavy`, beside the existing `gate.invalid-check-timeout`; heavy marking itself is T8's `isHeavyCheck` inside `run`, so gate run and integration check both get it. One usage entry per verb. Failing test first: factory/orchestrator/test/cliOptimize.test.ts (spawns the built CLI per verb). Existing tests in factory/orchestrator/test/cli.test.ts that call `lessons for-dispatch` and read its `lessons` array get `--full` added to that call and nothing else (operator answer 1, bs-optimize-2026-10-21#173). TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4 (CLI half): without `--full` no `lessons` array; on the checked-in lessons.md with an empty store a coder for-dispatch on claim `factory/orchestrator/src/**` splices at most half the lessons-block bytes of the same call with every class treated as recurring (the pre-epic set, computed in the same test, so the comparison needs no stored number); with `BS_HOME` pointing at a temporary store holding two sessions whose `error-logged` events put one class on 3 distinct tasks, that class's lessons are spliced; with `--epic E` and one event of E, a class is spliced that is withheld without `--epic`. factory/orchestrator/test/cli.test.ts passes with `--full` added to each existing `lessons for-dispatch` call whose test reads the `lessons` array, and no other change to that file (no assertion, fixture or other test edited).",
+        "Epic criterion 5, 7, 9 and 10 (CLI halves): `brief compose` (its output passes `lintDispatchPrompt`), `playbook slice`, `wave next`/`wave check` after `plan ingest`, `heavy run` (exit code passed through; 75 on a wait timeout against a lock held by a live pid, the test bounding the wait with `--max-wait-ms`; `--max-wait-ms` with a negative or non-integer value is refused; nested inside `heavy run` under a temporary `BS_HEAVY_LOCK_DIR` and a temporary HOME it returns the inner exit code without waiting and no lock file appears under `$HOME/.blacksmith/locks`; every CLI test that can reach the lock sets a temporary `BS_HEAVY_LOCK_DIR`) and `heavy status` behave as the criteria say, each with a CLI test; `gate run` on a checks.json with `\"heavy\": \"false\"` fails with `gate.invalid-check-heavy`.",
+        "Epic criterion 14 (CLI half): on a temporary git repo with a `.wt/<project>/` holding one merged task worktree of a closed epic, `bs cleanup --project <dir>` prints a JSON report and changes nothing; with `--apply` it removes that worktree and branch and the report names it; a non-git `--project` exits non-zero with `cleanup.not-a-git-repo`.",
+        "docCommands and usage tests pass: every new verb has a usage entry.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/cliOptimize.test.ts",
+        "factory/orchestrator/test/cli.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 430000,
+        "diff_lines": 1300
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each verb is a thin call into its module; no selection, composition, admission or cleanup logic lives in cli.ts.",
+          "Existing verbs and their output shapes are unchanged except `lessons for-dispatch` dropping the `lessons` array without `--full` (documented in T11's CHANGELOG entry).",
+          "Edits to factory/orchestrator/test/cli.test.ts are limited to adding `--full` to existing `lessons for-dispatch` calls whose test reads the `lessons` array; no assertion, fixture or other test in that file changes.",
+          "`heavy run --max-wait-ms <ms>` bounds the lock wait (a non-negative integer; default withHeavyLock's 3600000 ms) and is listed in the verb's usage entry."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "`heavy run` passes argv through without a shell (no injection via the label or command)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-optimize/task-10-cli-hookup",
+      "epic_id": "bs-optimize",
+      "plan_version": 5,
+      "title": "Wire the new verbs into the CLI",
+      "summary": "cli.ts and usage.ts gain brief compose, playbook slice, heavy run, cleanup, lessons flags and in-flight admission.",
+      "objective": "Wire epic-spec D1-D8 and D10 into the CLI hub (src/cli.ts, src/usage.ts are serialize-always; this task is their only editor in the epic): `lessons raise --error-class`; `lessons for-dispatch [--full] [--class <c>] [--epic <id>]`: events are read with T2's `readRecurrenceEvents` from the store at `STATE_EVENTS_DIR` (paths.ts; tests point it with `BS_HOME`), every session, 30-day window; `--epic` sets the repeat epic (none: no epic repeat); an absent or empty store reads as an empty store; `brief compose --role --session [--plan --task --worktree --branch --turns --artifact --out]` writing the brief and manifest (events read the same way; `--turns` is optional and refused by compose when it differs from the template); `playbook slice wave --step <n>` / `playbook slice dispatch --section <heading>`; `heavy run --label <l> [--max-wait-ms <ms>] -- <cmd...>` (`--max-wait-ms` is a non-negative integer passed to `withHeavyLock` as `maxWaitMs`, default withHeavyLock's 3600000 ms, the bound the exit-75 timeout test uses; runs under `withHeavyLock` and spawns the child with T8's `heavyChildEnv(process.env, lease)`, which carries the token and the resolved lock dir and nothing else from `BS_`; T10 writes no add-back of its own; returns the child's exit code, exits 75 with the holder detail on `heavy.wait-timeout`) and `heavy status` (prints `readHeavyLock`'s record as JSON, or `{}` when free); `cleanup --project <dir> [--epic <id>] [--apply]` (a thin call into src/cleanup.ts `runCleanup` with the store's events, printing its JSON report; dry run unless `--apply`); `nextWaveInputFrom` passes `inFlightTasks` to `computeNextWave`, and `wave check` calls `assertNotInFlight`; `readChecksFile` refuses a `heavy` that is present and not a boolean (e.g. the string \"false\") with `gate.invalid-check-heavy`, beside the existing `gate.invalid-check-timeout`; heavy marking itself is T8's `isHeavyCheck` inside `run`, so gate run and integration check both get it. One usage entry per verb. Failing test first: factory/orchestrator/test/cliOptimize.test.ts (spawns the built CLI per verb). Existing `lessons for-dispatch` tests in factory/orchestrator/test/cli.test.ts change only in their setup, never in an assertion (operator answers bs-optimize-2026-10-21#173 and bs-optimize-w6b-2026-10-24#3): a call whose test reads the `lessons` array gets `--full`; every call expected to succeed gets `--state-dir <a temporary directory of that test>` so it never reads the machine's real store; and the two tests that expect a stack-wide or case-type lesson (the dream end-to-end scribe call and the case-type planner call) seed that directory with `error-logged` events putting the expected lesson's class, as the selection reads it (`other.unclassified` for a lesson with no class), on 3 distinct tasks inside the 30-day window. `lessons for-dispatch` and `brief compose` honour `--state-dir <dir>` (eventOptsFromFlags) before STATE_EVENTS_DIR. TDD: write the named failing test first, watch it fail, implement minimally, watch it pass. Read factory/specs/active/bs-optimize/epic-spec.md before starting.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Epic criterion 4 (CLI half): without `--full` no `lessons` array; on the checked-in lessons.md with an empty store a coder for-dispatch on claim `factory/orchestrator/src/**` splices at most half the lessons-block bytes of the same call with every class treated as recurring (the pre-epic set, computed in the same test, so the comparison needs no stored number); with `BS_HOME` pointing at a temporary store holding two sessions whose `error-logged` events put one class on 3 distinct tasks, that class's lessons are spliced; with `--epic E` and one event of E, a class is spliced that is withheld without `--epic`. factory/orchestrator/test/cli.test.ts passes, from the worktree and from a clone whose state/events holds real logs alike, with only these changes to that file: `--full` on each existing `lessons for-dispatch` call whose test reads the `lessons` array, `--state-dir <temporary dir>` on each existing call expected to succeed, and, in the dream end-to-end and case-type tests only, a seeded temporary store whose `error-logged` events put the expected lesson's class on 3 distinct tasks. No assertion is edited and no test that does not call `lessons for-dispatch` changes.",
+        "Epic criterion 5, 7, 9 and 10 (CLI halves): `brief compose` (its output passes `lintDispatchPrompt`), `playbook slice`, `wave next`/`wave check` after `plan ingest`, `heavy run` (exit code passed through; 75 on a wait timeout against a lock held by a live pid, the test bounding the wait with `--max-wait-ms`; `--max-wait-ms` with a negative or non-integer value is refused; nested inside `heavy run` under a temporary `BS_HEAVY_LOCK_DIR` and a temporary HOME it returns the inner exit code without waiting and no lock file appears under `$HOME/.blacksmith/locks`; every CLI test that can reach the lock sets a temporary `BS_HEAVY_LOCK_DIR`) and `heavy status` behave as the criteria say, each with a CLI test; `gate run` on a checks.json with `\"heavy\": \"false\"` fails with `gate.invalid-check-heavy`.",
+        "Epic criterion 14 (CLI half): on a temporary git repo with a `.wt/<project>/` holding one merged task worktree of a closed epic, `bs cleanup --project <dir>` prints a JSON report and changes nothing; with `--apply` it removes that worktree and branch and the report names it; a non-git `--project` exits non-zero with `cleanup.not-a-git-repo`.",
+        "docCommands and usage tests pass: every new verb has a usage entry.",
+        "Gate, run from the repo root on the task's own tree and read to the end of each output: `pnpm run test` (the full root suite, about 200 s; never a scoped vitest run), `pnpm run typecheck`, `pnpm run typecheck:test`, `pnpm biome check .`. All four green before hand-back."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/cliOptimize.test.ts",
+        "factory/orchestrator/test/cli.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 430000,
+        "diff_lines": 1450
+      },
+      "contract": {
+        "functional_clauses": [
+          "Each verb is a thin call into its module; no selection, composition, admission or cleanup logic lives in cli.ts.",
+          "Existing verbs and their output shapes are unchanged except `lessons for-dispatch` dropping the `lessons` array without `--full` (documented in T11's CHANGELOG entry).",
+          "Edits to factory/orchestrator/test/cli.test.ts are limited to the setup of existing `lessons for-dispatch` tests: `--full` on calls whose test reads the `lessons` array, `--state-dir <temporary dir>` on calls expected to succeed, and seeded `error-logged` events in that temporary store for the dream end-to-end and case-type tests; no assertion changes and no other test in that file changes.",
+          "`heavy run --max-wait-ms <ms>` bounds the lock wait (a non-negative integer; default withHeavyLock's 3600000 ms) and is listed in the verb's usage entry."
+        ],
+        "nonfunctional_clauses": [
+          "Quality first, speed second, tokens third (epic decision 6): nothing in this task removes, skips or makes conditional a judge, round, verifier pass or gate check.",
+          "Open source: no foreign project names in code, tests, fixtures or docs; use `project-a` / `<project>`.",
+          "Stay inside this task's claims; every other module is read-only. New exported functions carry a doc comment naming the epic criterion they serve.",
+          "`heavy run` passes argv through without a shell (no injection via the label or command)."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "confidence": 0.85,
+      "project": "blacksmith",
+      "ui_affecting": false
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-optimize/task-11-playbooks",
+      "dependsOn": "bs-optimize/task-10-cli-hookup",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "blacksmith",
+  "effort": "huge"
+}

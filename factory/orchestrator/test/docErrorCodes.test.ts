@@ -80,6 +80,21 @@ const NOT_ERROR_CODES: NotAnErrorCode[] = [
     reason:
       "A key path in `budgets.yml`, not a code: the guide's budget section names the legacy policy key that once priced the four judges together and is still read when a judge has no key of its own. `task` is an error namespace too (`task.unknown`, `task.not-claimed`), which is the only reason this collides.",
   },
+  {
+    token: 'heavy.lock.reclaim',
+    reason:
+      "A file name, not a code: `heavyLock.ts` declares `RECLAIM_FILE = 'heavy.lock.reclaim'`, the mutex file a reclaim of a dead holder's lock takes. `heavy` is an error namespace too (`heavy.wait-timeout`), which is the only reason this collides.",
+  },
+  {
+    token: 'execution.flaky-test',
+    reason:
+      "A taxonomy `error` class (`group.class` in `taxonomy.yml`), not a raised code: the bs-optimize spec uses it as the example value of a lesson's `error_class` field. It shares the `execution` namespace with real codes such as `execution.test-failure`, which is the only reason this collides.",
+  },
+  {
+    token: 'execution.no-such-class',
+    reason:
+      'An invented value: the bs-optimize spec names it as the example of an `error_class` the taxonomy does not declare, which `lessons raise` must refuse. It is the counter-example, so it can never be a raised code.',
+  },
 ];
 
 const EXCUSED = new Map(NOT_ERROR_CODES.map((entry) => [entry.token, entry.reason]));
@@ -172,6 +187,26 @@ describe('scanErrorCodes', () => {
     expect(scan.codes.has('lessons.missing-claim-path')).toBe(true);
     // An undotted `code:` is an autonomy decision reason, not a code.
     expect(scan.codes.has('security-surface')).toBe(false);
+  });
+
+  it("reads the code a logBlocked(<task>, '<code>', ...) call raises", () => {
+    // queue.ts reports a blocked task through a callback rather than a throw,
+    // wrapped by the formatter or not. The declaration (parameter names, no
+    // literal) must not read as a raise.
+    const scan = scanErrorCodes([
+      ...fixture,
+      {
+        file: 'src/queue.ts',
+        text: [
+          'const logBlocked = (taskId: string, error: string, detail: string) => {};',
+          "await logBlocked(task.taskId, 'execution.test-failure', outputTail);",
+          "await logBlocked(\n  task.taskId,\n  'integration.merge-conflict-textual',\n  `x`,\n);",
+        ].join('\n'),
+      },
+    ]);
+    expect(scan.codes.has('execution.test-failure')).toBe(true);
+    expect(scan.codes.has('integration.merge-conflict-textual')).toBe(true);
+    expect(scan.opaque).toEqual([]);
   });
 
   it('reports a construction whose code it cannot read rather than dropping it', () => {

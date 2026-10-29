@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
 import { BS_PREFIX, LEGACY_PREFIX } from './env.js';
+import { SmithError } from './errors.js';
 import { redactCredentials } from './git.js';
+import { type HeavyLease, type HeavyLockOptions, withHeavyLock } from './heavyLock.js';
 
 // No TestGateError: a command that fails, times out or is killed is a
 // CheckResult with the exit code and the output in it. Throwing would lose
@@ -21,6 +23,25 @@ export interface CheckCommand {
    * or non-integer value is refused before it ever reaches `setTimeout`.
    */
   timeout_ms?: number;
+  /**
+   * Explicit heavy-check marker (epic bs-optimize criterion 10): `true` takes
+   * the machine-wide heavy lock, `false` never does. Absent, `isHeavyCheck`
+   * decides from the name.
+   */
+  heavy?: boolean;
+}
+
+/**
+ * Whether a check runs under the heavy lock: an explicit boolean `heavy`
+ * wins, else the name is `unit` or `coverage` or starts with `test` or `e2e`.
+ * Serves epic bs-optimize criterion 10 (gate rules).
+ */
+export function isHeavyCheck(check: Pick<CheckCommand, 'name' | 'heavy'>): boolean {
+  if (typeof check.heavy === 'boolean') return check.heavy;
+  const { name } = check;
+  return (
+    name === 'unit' || name === 'coverage' || name.startsWith('test') || name.startsWith('e2e')
+  );
 }
 
 export interface CheckResult {
@@ -41,6 +62,13 @@ export interface CheckResult {
    * does not admit it is a fragment gets read as the whole run.
    */
   tail: string;
+  /**
+   * Milliseconds spent waiting for the heavy lock before the check started;
+   * 0 for a check that never takes it. Not counted against `timeout_ms`.
+   */
+  lock_wait_ms?: number;
+  /** Set to `heavy.wait-timeout` when the check failed because the lock wait timed out. */
+  reason?: string;
 }
 
 /** `key` also covers API_KEY and APIKEY; `passw` covers PASSWORD and PASSWD. */
@@ -78,6 +106,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Run every check even after a failure. Default false (short-circuit). */
   runAll?: boolean;
+  /** Lock knobs for tests; `run` passes `process.env` as the lock's env. */
+  heavyLock?: Pick<HeavyLockOptions, 'lockDir' | 'pollMs' | 'maxWaitMs' | 'isPidAlive' | 'env'>;
 }
 
 export interface RunResult {
@@ -183,6 +213,20 @@ export function projectCommandEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
+ * `projectCommandEnv(env)` plus the lease a heavy child needs to re-enter the
+ * lock it runs under: `BS_HEAVY_LOCK_TOKEN` and `BS_HEAVY_LOCK_DIR`, and
+ * nothing else from the `BS_`/`SMITH_` namespaces. The epic's one add-back,
+ * kept beside the strip it undoes. Serves epic bs-optimize criterion 10.
+ */
+export function heavyChildEnv(env: NodeJS.ProcessEnv, lease: HeavyLease): NodeJS.ProcessEnv {
+  return {
+    ...projectCommandEnv(env),
+    BS_HEAVY_LOCK_TOKEN: lease.token,
+    BS_HEAVY_LOCK_DIR: lease.lockDir,
+  };
+}
+
+/**
  * Run one check command in its own process group (POSIX `setsid`, via
  * `detached: true`) so a timeout can kill the WHOLE group — `process.kill`
  * with a negative pid signals every process in that group, not just the
@@ -191,7 +235,12 @@ export function projectCommandEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * jobs, long-lived children) running as orphans after the parent shell
  * dies — a real leak in a 24/7 factory (reproduced: manual kill -9 needed).
  */
-function runOne(check: CheckCommand, cwd: string, defaultTimeoutMs: number): Promise<CheckResult> {
+function runOne(
+  check: CheckCommand,
+  cwd: string,
+  defaultTimeoutMs: number,
+  childEnv: NodeJS.ProcessEnv,
+): Promise<CheckResult> {
   return new Promise((resolve) => {
     const timeoutMs = check.timeout_ms ?? defaultTimeoutMs;
     const child = spawn(check.cmd, {
@@ -199,7 +248,7 @@ function runOne(check: CheckCommand, cwd: string, defaultTimeoutMs: number): Pro
       shell: true,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: projectCommandEnv(process.env),
+      env: childEnv,
     });
 
     let output = '';
@@ -275,6 +324,41 @@ function runOne(check: CheckCommand, cwd: string, defaultTimeoutMs: number): Pro
 }
 
 /**
+ * One heavy check under the machine lock, taken when its turn comes and
+ * released before the next check. The lock wait is reported as `lock_wait_ms`
+ * and never counts against the check's timeout; a wait timeout fails the
+ * check with reason `heavy.wait-timeout`.
+ */
+async function runHeavy(
+  check: CheckCommand,
+  opts: RunOptions,
+  defaultTimeoutMs: number,
+): Promise<CheckResult> {
+  const waitStart = Date.now();
+  try {
+    return await withHeavyLock(
+      async (lease) => {
+        const lock_wait_ms = Date.now() - waitStart;
+        const env = opts.heavyLock?.env ?? process.env;
+        const result = await runOne(check, opts.cwd, defaultTimeoutMs, heavyChildEnv(env, lease));
+        return { ...result, lock_wait_ms };
+      },
+      { ...opts.heavyLock, label: `gate-${check.name}`, cwd: opts.cwd },
+    );
+  } catch (err) {
+    if (!(err instanceof SmithError) || err.code !== 'heavy.wait-timeout') throw err;
+    return {
+      name: check.name,
+      pass: false,
+      exitCode: 1,
+      tail: err.message,
+      reason: 'heavy.wait-timeout',
+      lock_wait_ms: Date.now() - waitStart,
+    };
+  }
+}
+
+/**
  * Run configured check commands (test/typecheck/lint/coverage/…) sequentially
  * in a worktree, one process per command, with a per-command timeout. First
  * failure short-circuits the remaining checks unless `runAll` is set. Thin —
@@ -285,7 +369,12 @@ export async function run(checks: CheckCommand[], opts: RunOptions): Promise<Run
   const results: CheckResult[] = [];
 
   for (const check of checks) {
-    const result = await runOne(check, opts.cwd, defaultTimeoutMs);
+    const result = isHeavyCheck(check)
+      ? await runHeavy(check, opts, defaultTimeoutMs)
+      : {
+          ...(await runOne(check, opts.cwd, defaultTimeoutMs, projectCommandEnv(process.env))),
+          lock_wait_ms: 0,
+        };
     results.push(result);
     if (!result.pass && !opts.runAll) break;
   }
@@ -302,5 +391,5 @@ export async function run(checks: CheckCommand[], opts: RunOptions): Promise<Run
  * separate code path.
  */
 export async function runCumulative(epicTestCmd: string, opts: RunOptions): Promise<RunResult> {
-  return run([{ name: 'cumulative', cmd: epicTestCmd }], opts);
+  return run([{ name: 'cumulative', cmd: epicTestCmd, heavy: true }], opts);
 }
