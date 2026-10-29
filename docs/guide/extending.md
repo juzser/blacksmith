@@ -317,12 +317,12 @@ page load.
 - **Coverage floors.** `vitest.config.ts` sets an 80% threshold on lines,
   statements, functions, and branches over `factory/orchestrator/src/**/*.ts`
   (excluding `cli.ts` and `types/**` — the CLI router is thin argv-wiring,
-  covered by `test/cli.test.ts`'s integration-style tests instead of unit
+  covered by the integration-style tests in the `test/cli<Area>.test.ts` files instead of unit
   coverage). This mirrors `agent-constraints.md`'s "80% floor on claimed
   logic paths" for target-repo code the coder produces.
 - **Tests that spawn the CLI are slow, and that is not a bug to patch
-  locally.** `cli.test.ts` and `guardHook.test.ts` drive the built binary
-  through `spawnSync`, and every spawn pays a `node dist/cli.js` boot of module
+  locally.** The ten `cli<Area>.test.ts` files (`cliBasics` … `cliCrossfind`) and
+  `guardHook.test.ts` drive the built binary through `spawnSync`, and every spawn pays a `node dist/cli.js` boot of module
   loading before the command runs — ~0.11s for a command that needs nothing
   from the database layer, ~0.31s for one that does and so loads drizzle on
   demand. A test with a dozen spawns spends seconds on node startup with

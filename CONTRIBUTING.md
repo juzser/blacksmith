@@ -32,6 +32,12 @@ please open an issue rather than working around it.
 invokes that same file rather than a transcription of its command list, so
 there is no second list to drift. A PR whose gate is red will not be merged.
 
+It is the **whole** local gate. It already runs lint, every typecheck and all
+three test suites under coverage, so for a final check run it alone: running
+`pnpm test` first runs the orchestrator suite twice, and running the typechecks
+first runs them twice.
+The individual `pnpm` scripts below are for iterating, not for a pre-flight.
+
 It runs, in order:
 
 | Step | What it proves |
@@ -63,8 +69,10 @@ would be the whole gate quietly not running:
 - **gitleaks missing, with `CI` set** — same rule. A secret scan that silently
   did not run is worse than no secret scan, because the badge says otherwise.
 
-Locally, e2e usually says `SKIP`; run it explicitly once you have touched
-anything under `ui/`:
+Locally, e2e usually says `SKIP`. To get it inside the gate, point
+`PLAYWRIGHT_CHROMIUM_PATH` at a Chromium binary (`check.sh` also asks
+Playwright's own cache, so `pnpm exec playwright install chromium` is enough).
+Or run it explicitly once you have touched anything under `ui/`:
 
 ```bash
 pnpm exec playwright install chromium

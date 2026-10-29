@@ -225,7 +225,7 @@ export function startProcess(file: string, args: string[], opts: RunOpts = {}): 
  * a hint read from the project's and the user's Claude settings; a test must
  * never read those, so BS_NO_SETTINGS_HINT=1 (a switch for tests and CI, not a
  * user setting) turns it off and CLAUDE_CONFIG_DIR names a directory that does
- * not exist. The settings-hint tests in cli.test.ts switch it back on.
+ * not exist. The settings-hint tests in cliCrossfind.test.ts switch it back on.
  */
 export function cliTestEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
