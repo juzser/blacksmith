@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFailedRounds } from '../src/escalation.js';
+import { readEvents } from '../src/events.js';
 import type { GateInput } from '../src/gate.js';
 import { recordJudgeDispatch, recordJudgeReport } from '../src/judges.js';
 import { runCli } from './helpers/cliHarness.js';
@@ -883,6 +885,268 @@ describe('bs results check (built binary)', () => {
         await rm(project, { recursive: true, force: true });
       }
     });
+  });
+
+  describe('--as grader and --artifacts-dir', () => {
+    const graderLine = async (extra: string[] = []) => [
+      '--grader',
+      await write('grader.json', (await graderMet(w)).graderVerdict),
+      ...extra,
+    ];
+
+    it('accepts the flag, reports the home under it, keeps artifacts skipped and warns once', async () => {
+      const run = check('grader', await graderLine(['--artifacts-dir', w.artifactsDir]));
+      expect(run.status).toBe(0);
+      expect(run.json.outcome).toBe('pass');
+      expect(run.json.artifact_home).toBe(w.home());
+      expect(run.json.skipped).toContainEqual({
+        stage: 'artifacts',
+        why: 'not-checked-for-grader',
+      });
+      expect(run.json.warnings).toHaveLength(1);
+      expect(run.json.warnings[0]).toContain('--artifacts-dir');
+      expect(run.json.warnings[0]).toMatch(/grader stage reads no artifact/);
+      expect(Object.keys(run.json).sort()).toEqual(
+        [
+          'artifact_home',
+          'as',
+          'not_run',
+          'outcome',
+          'problems',
+          'skipped',
+          'task_id',
+          'verdicts',
+          'warnings',
+        ].sort(),
+      );
+    });
+
+    it('prints no such warning without the flag', async () => {
+      const run = check('grader', await graderLine());
+      expect(run.status).toBe(0);
+      expect(run.json.warnings).toEqual([]);
+    });
+
+    it.each([
+      ['--agent', 'coder'],
+      ['--result', 'r.json'],
+      ['--worktree', '.'],
+      ['--base', 'main'],
+      ['--plan', 'p.json'],
+    ])('still refuses %s as cli.flag-not-for-mode', async (...flag) => {
+      const run = parse(
+        runCli(
+          [
+            'results',
+            'check',
+            w.taskId,
+            '--as',
+            'grader',
+            '--grader',
+            'g.json',
+            '--artifacts-dir',
+            w.artifactsDir,
+            ...flag,
+          ],
+          {},
+          undefined,
+          w.worktreeDir,
+        ),
+      );
+      expect(run.status).toBe(1);
+      expect(run.json.error.code).toBe('cli.flag-not-for-mode');
+    });
+
+    it.each(GATE_ONLY)(
+      'still refuses the gate-only flag %s as cli.gate-only-flag',
+      async (...flag) => {
+        const run = parse(
+          runCli(
+            [
+              'results',
+              'check',
+              w.taskId,
+              '--as',
+              'grader',
+              '--grader',
+              'g.json',
+              '--artifacts-dir',
+              w.artifactsDir,
+              ...flag,
+            ],
+            {},
+            undefined,
+            w.worktreeDir,
+          ),
+        );
+        expect(run.status).toBe(1);
+        expect(run.json.error.code).toBe('cli.gate-only-flag');
+      },
+    );
+  });
+
+  describe('intake problems name their input', () => {
+    const inputs = (run: Parsed) =>
+      run.json.problems
+        .filter((p: { stage: string }) => p.stage === 'intake')
+        .map((p: { input: string }) => p.input);
+    const base = () => ['--worktree', w.worktreeDir, '--artifacts-dir', w.artifactsDir];
+    const stamp = ['--agent', 'coder', '--provider', 'claude', '--model-tier', 'mid'];
+    const owned = {
+      run_status: 'done',
+      structured_output: {},
+      artifacts: [],
+      token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    };
+
+    async function dispatchGrader(file: string) {
+      await recordJudgeDispatch(
+        {
+          taskId: w.taskId,
+          role: 'grader',
+          round: 1,
+          artifactPath: file,
+          model: 'claude-opus-5',
+        },
+        w.ctx(),
+        w.opts(),
+      );
+    }
+
+    async function gateOutcomes() {
+      const events = await readEvents(w.sessionId, w.opts());
+      return events.filter((e) => e.record.event_type === 'gate-outcome');
+    }
+
+    it('result: an unreadable result under --as gate and --as coder', async () => {
+      const absent = path.join(scratch, 'absent.json');
+      expect(inputs(check('coder', [...base(), '--result', absent]))).toEqual(['result']);
+      const line = await gateLine(await clean(w));
+      line[line.indexOf('--result') + 1] = absent;
+      const preflight = checkGate(line);
+      expect(preflight.json.problems[0].input).toBe('result');
+      expect(preflight.json.reason).toBe('result-unreadable');
+    });
+
+    it('result: an owned field under --as gate and --as coder', async () => {
+      const file = await write('owned.json', owned);
+      const coder = check('coder', [...base(), '--result', file, ...stamp]);
+      expect(coder.json.reason).toBe('results.agent-wrote-owned-field');
+      expect(inputs(coder)).toEqual(['result']);
+      const line = await gateLine(await clean(w), stamp);
+      line[line.indexOf('--result') + 1] = file;
+      const preflight = checkGate(line);
+      expect(preflight.json.reason).toBe('results.agent-wrote-owned-field');
+      expect(inputs(preflight)).toEqual(['result']);
+    });
+
+    it('grader: an unreadable grader file under --as grader', async () => {
+      const run = check('grader', ['--grader', path.join(scratch, 'absent.json')]);
+      expect(run.status).toBe(1);
+      expect(inputs(run)).toEqual(['grader']);
+    });
+
+    it('checks: an unreadable checks file', async () => {
+      const line = await gateLine(await clean(w));
+      line[line.indexOf('--checks') + 1] = path.join(scratch, 'absent-checks.json');
+      expect(inputs(checkGate(line))).toEqual(['checks']);
+    });
+
+    it('evidence: an --evidence file that is not a list', async () => {
+      const line = await gateLine(await clean(w), [
+        '--evidence',
+        await write('evidence.json', '42'),
+        '--found-by',
+        'reviewer',
+      ]);
+      const preflight = checkGate(line);
+      expect(preflight.status).toBe(1);
+      expect(inputs(preflight)).toEqual(['evidence']);
+    });
+
+    it('judge-artifact: a fresh grader file that is not a list, with the mixed-case precedence', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      const line = await gateLine(await graderMet(w));
+      await dispatchGrader(graderPath);
+      await write('grader.json', '42');
+      const soon = new Date(Date.now() + 60_000);
+      await utimes(graderPath, soon, soon);
+      const preflight = checkGate(line);
+      expect(preflight.status).toBe(1);
+      expect(preflight.json.reason).toBe('judges.artifact-not-a-list');
+      // The close failed, so the turn stays open: the judges stage shows it too.
+      expect(preflight.json.problems.map((p: { stage: string }) => p.stage)).toEqual([
+        'intake',
+        'judges',
+        'grader',
+      ]);
+      expect(preflight.json.problems[0].input).toBe('judge-artifact');
+      expect(preflight.json.problems.map((p: { reason: string }) => p.reason)).toEqual([
+        'judges.artifact-not-a-list',
+        'judges-outstanding',
+        'grader-invalid',
+      ]);
+      const real = gate(line);
+      expect(real.json.error.code).toBe('judges.artifact-not-a-list');
+      expect(await gateOutcomes()).toEqual([]);
+    });
+
+    it('judge-artifact: a stale grader file', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      const line = await gateLine(await graderMet(w));
+      await dispatchGrader(graderPath);
+      const old = new Date(Date.now() - 3_600_000);
+      await utimes(graderPath, old, old);
+      const preflight = checkGate(line);
+      expect(preflight.json.reason).toBe('judges.artifact-stale');
+      expect(inputs(preflight)).toEqual(['judge-artifact']);
+    });
+
+    it('judge-dispatch: --no-findings for a role with no dispatch', async () => {
+      const line = await gateLine(await clean(w), ['--no-findings', 'reviewer']);
+      const preflight = checkGate(line);
+      expect(preflight.json.reason).toBe('judges.not-dispatched');
+      expect(inputs(preflight)).toEqual(['judge-dispatch']);
+    });
+
+    it('judge-internal and paperwork: a session log the verb cannot read', async () => {
+      const line = await gateLine(await clean(w), ['--no-findings', 'reviewer']);
+      await writeFile(path.join(w.stateDir, `${w.sessionId}.jsonl`), '{nope\n');
+      const preflight = checkGate(line);
+      expect(preflight.status).toBe(1);
+      // The turns read fails, the close that follows finds no dispatch, and the
+      // paperwork judges stage fails on the same log.
+      expect(inputs(preflight)).toEqual(['judge-internal', 'judge-dispatch', 'paperwork']);
+    });
+
+    it('a branch-3 defect is a counted round with no check run', async () => {
+      const marker = path.join(scratch, 'check-ran');
+      const line = await gateLine(await build(w, 'artifactMissing'));
+      await write('checks.json', [{ name: 'marker', cmd: `touch ${marker}` }]);
+      const preflight = checkGate(line);
+      const real = gate(line);
+      expect(preflight.json.reason).toBe('artifacts-missing');
+      expect(real.json.reason).toBe('artifacts-missing');
+      expect(existsSync(marker)).toBe(false);
+      const rounds = readFailedRounds(await readEvents(w.sessionId, w.opts()));
+      expect(rounds.filter((r) => r.taskId === w.taskId).map((r) => r.reason)).toEqual([
+        'artifacts-missing',
+      ]);
+    });
+
+    it.each([
+      ['unreadable', async () => path.join(scratch, 'absent.json'), []],
+      ['owned field', async () => write('owned.json', owned), stamp],
+    ] as [string, () => Promise<string>, string[]][])(
+      'a result intake problem (%s) makes gate run write no gate-outcome',
+      async (_name, file, extra) => {
+        const line = await gateLine(await clean(w), extra);
+        line[line.indexOf('--result') + 1] = await file();
+        expect(gate(line).json.error).toBeDefined();
+        expect(await gateOutcomes()).toEqual([]);
+        expect(readFailedRounds(await readEvents(w.sessionId, w.opts()))).toEqual([]);
+      },
+    );
   });
 
   describe('output shape', () => {

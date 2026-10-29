@@ -1235,7 +1235,8 @@ const GATE_ONLY_FLAGS = [
 const RESULTS_CHECK_FLAGS: Record<(typeof RESULTS_CHECK_ROLES)[number], readonly string[]> = {
   coder: ['as', 'result', 'worktree', 'base', 'artifacts-dir', ...ENVELOPE_FLAGS, ...SESSION_FLAGS],
   tester: ['as', 'result', 'plan', 'artifacts-dir', ...ENVELOPE_FLAGS, ...SESSION_FLAGS],
-  grader: ['as', 'grader', ...SESSION_FLAGS],
+  // The grader stage reads no artifact, so `--artifacts-dir` only sets the reported home.
+  grader: ['as', 'grader', 'artifacts-dir', ...SESSION_FLAGS],
   gate: [
     'as',
     'result',
@@ -1313,16 +1314,40 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
   process.env.GIT_OPTIONAL_LOCKS = '0';
 
   const { checkPaperwork, STAGES_FOR_ROLE } = await import('./paperwork.js');
-  const problems: { stage: string; reason: string; detail: Record<string, unknown> }[] = [];
-  const attempt = async <T>(label: string, fn: () => T | Promise<T>): Promise<T | undefined> => {
+  const problems: {
+    stage: string;
+    input?: string;
+    reason: string;
+    detail: Record<string, unknown>;
+  }[] = [];
+  // `input` names where an intake problem came from: a flag's file or value, the
+  // task id and artifacts dir, or a step inside the verb. A judge close splits
+  // by what failed: the judge's file, the wave-runner's own dispatch records, or
+  // the log.
+  const judgeInput = (err: unknown): string => {
+    if (!(err instanceof SmithError) || !err.code.startsWith('judges.')) return 'judge-internal';
+    return err.code.startsWith('judges.artifact-') ? 'judge-artifact' : 'judge-dispatch';
+  };
+  const attempt = async <T>(
+    label: string,
+    fn: () => T | Promise<T>,
+    inputOf: (err: unknown) => string = () => label,
+  ): Promise<T | undefined> => {
     try {
       return await fn();
     } catch (err) {
+      const input = inputOf(err);
       problems.push(
         err instanceof SmithError
-          ? { stage: 'intake', reason: err.code, detail: { message: err.message, ...err.details } }
+          ? {
+              stage: 'intake',
+              input,
+              reason: err.code,
+              detail: { message: err.message, ...err.details },
+            }
           : {
               stage: 'intake',
+              input,
               reason: `${label}-unreadable`,
               detail: { message: err instanceof Error ? err.message : String(err) },
             },
@@ -1348,6 +1373,11 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       `The result names task ${claimed}, not ${taskId}; its artifacts are checked against ${taskId}, as the gate checks them.`,
     );
   }
+  if (as === 'grader' && flags['artifacts-dir']) {
+    warnings.push(
+      '--artifacts-dir only sets the reported artifact_home: the grader stage reads no artifact.',
+    );
+  }
   const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
@@ -1369,11 +1399,19 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       for (const role of noFindings) requireNoFindingsRole({ taskId, role, noFindings: true });
       const turns =
         handedIn.length > 0 || noFindings.length > 0
-          ? await attempt('judges', () => readJudgeTurns(taskId, ctx, opts))
+          ? await attempt(
+              'judges',
+              () => readJudgeTurns(taskId, ctx, opts),
+              () => 'judge-internal',
+            )
           : [];
       let simulated: readonly JudgeTurn[] = turns ?? [];
       for (const close of selectJudgeCloses(taskId, handedIn, simulated, noFindings)) {
-        const checked = await attempt('judges', () => checkJudgeReport(close, simulated, opts));
+        const checked = await attempt(
+          'judges',
+          () => checkJudgeReport(close, simulated, opts),
+          judgeInput,
+        );
         if (checked === undefined) continue;
         alsoReported.push({ role: close.role, kind: checked.turn.kind });
         simulated = simulated.map((t) => (t === checked.turn ? { ...t, reported: true } : t));

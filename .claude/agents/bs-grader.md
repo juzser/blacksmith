@@ -143,6 +143,11 @@ its evidence to get a clean preflight.
 Your preflight line, with the brief's values filled in:
 `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
 
+The line carries `--artifacts-dir` so that every preflight line in a wave
+shares one value. The grader stage reads no artifact, so the preflight prints a
+warning that says the flag only sets the reported `artifact_home`. That warning
+is expected, it is not a problem to fix, and the flag stays on your line.
+
 **2. Return one line** as your final message — this JSON and nothing else:
 
 ```

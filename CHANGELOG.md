@@ -69,13 +69,28 @@ before hand-off. One entry per task.
 - **Two tests stop waiting on the clock** (`task-5-deterministic-named-tests`).
   The daemon per-tick test waits for one line and stops the daemon during its
   sleep, and the process-group timeout test uses fake timers and advances them
-  only once the grandchild's pid is known. No production change.
+  only once the grandchild's pid is known. The change touches the two tests
+  and the fixture's slow grandchild, which takes an optional start delay.
 
 - **A blocked gate counts toward lesson recurrence**
   (`task-6-gate-block-counts-toward-class`). A blocked `gate-outcome` now counts
   toward the class its reason maps to, or toward its stamped `error_class`,
   through `GATE_BLOCK_ERROR_CLASSES`, `isRecurrenceEvent` and
-  `recurrenceClassOf` in `lessonRecurrence.ts`. `gate.ts` is untouched.
+  `recurrenceClassOf` in `lessonRecurrence.ts`. The gate writes the events it
+  wrote before; recurrence reads the class when it counts.
+
+- **The closing review's fixes** (`task-7-close-review-fixes`).
+  `bs results check --as grader` accepts the shared `--artifacts-dir` and warns
+  that the grader stage reads no artifact, so the flag only sets the reported
+  `artifact_home`; a test now runs every concrete preflight line of the
+  templates and `wave.md` through the built CLI. Every intake problem the verb
+  prints carries `input`, and the old `judges` label is split into
+  `judge-dispatch`, `judge-artifact` and `judge-internal`. `wave.md` step 7
+  maps each preflight result to one of five branches: the wave-runner's own
+  fix, a judge turn, a counted `gate run` round, one logged return of a
+  worker's unreadable result, or the epic session. `queue-and-gate.md` says
+  which `environment` field holds every check's clock and load evidence and
+  which events carry `environment_evidence`.
 
 ### Changed
 
@@ -89,7 +104,7 @@ before hand-off. One entry per task.
   On #502's own CI run the gate took 6m04s and the two shards 3m42s and
   2m50s; on the runs of #499–#501 the gate took 8–13 min and e2e about
   5 min. CONTRIBUTING.md now says `bash scripts/check.sh` is the whole local
-  gate. Nothing in the npm package changes.
+  gate. The change touches the tests, CI and CONTRIBUTING.md.
 
 - **The README leads with the factory, not the dashboard.** Its dashboard
   section and screenshots are gone; the README links to
