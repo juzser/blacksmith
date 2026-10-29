@@ -298,15 +298,18 @@ describe('bs results check (built binary)', () => {
       ['a role named "true"', ['--no-findings', 'true'], 'cli.no-findings-needs-role'],
       ['an inline "true"', ['--no-findings=true'], 'cli.no-findings-needs-role'],
       ['a bare flag', ['--no-findings'], 'cli.missing-flag-value'],
-    ])('refuses %s with the code and exit status gate run fails with', async (_name, extra, code) => {
-      const line = [...extra, ...(await gateLine(await clean(w)))];
-      const real = gate(line);
-      const preflight = checkGate(line);
-      expect(real.json.error.code).toBe(code);
-      expect(preflight.json.error.code).toBe(code);
-      expect(preflight.status).toBe(real.status);
-      expect(preflight.json.error.message).toBe(real.json.error.message);
-    });
+    ])(
+      'refuses %s with the code and exit status gate run fails with',
+      async (_name, extra, code) => {
+        const line = [...extra, ...(await gateLine(await clean(w)))];
+        const real = gate(line);
+        const preflight = checkGate(line);
+        expect(real.json.error.code).toBe(code);
+        expect(preflight.json.error.code).toBe(code);
+        expect(preflight.status).toBe(real.status);
+        expect(preflight.json.error.message).toBe(real.json.error.message);
+      },
+    );
 
     it('does not close a turn that is already reported, so a stale file on the line cannot block', async () => {
       const graderPath = path.join(scratch, 'grader.json');
