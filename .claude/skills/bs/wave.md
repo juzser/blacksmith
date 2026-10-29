@@ -126,7 +126,7 @@ the difference between a factory and a queue with extra steps:
   alone: a background command that writes `EXIT=<n>` as its last line says
   when it is done.
 - **A blocked task blocks itself.** Gate outcome `blocked` bounces to
-  *that* task's coder (step 9) while its neighbours carry on. One task
+  *that* task's builder (step 9) while its neighbours carry on. One task
   escalating to the operator does not stop the other four; report it and
   keep the wave moving.
 
@@ -206,7 +206,8 @@ one thing this playbook never asks you to.
      <task-id> --result <tester-result.json> --agent tester --provider <name>
      --model-tier <tier> --worktree <dir> --artifacts-dir
      <work-root>/state/artifacts --session ... --plan-version N
-     --causal-parent ...`. `--agent` stamps the envelope, token_usage
+     --causal-parent ...`; the tester's result file is
+     `<work-root>/state/results/<task-id>.tester.json`. `--agent` stamps the envelope, token_usage
      included, as `gate run` does; `--worktree` is the coder's worktree the
      tester shares, and records the HEAD that proves the screenshots fresh
      (D2) — step 7's uiux stage blocks `screenshots-stale` when this HEAD
@@ -304,13 +305,18 @@ one thing this playbook never asks you to.
         or line) and run the preflight again. No agent runs again, so this is
         not a round.
      2. **A judge turn that is not in order.** `judges-outstanding`,
-        `uiux-spec-missing`, `uiux-visual-missing`, and an `intake` problem
-        whose `input` is `grader`, `evidence`, `uiux-visual` or `judge-artifact`.
-        Take, re-poke or re-run that judge turn under the rules of steps 5 to
-        7, unchanged. A judge's turn is not a ladder round.
+        `uiux-spec-missing`, `uiux-visual-missing`, `grader-invalid`, and an
+        `intake` problem whose `input` is `grader`, `evidence`, `uiux-visual`
+        or `judge-artifact`. Take, re-poke or re-run that judge turn under the
+        rules of steps 5 to 7, unchanged. A judge's turn is not a ladder round.
+        The answer to `grader-invalid` is the grader's turn: re-poke the grader
+        in the same round to rewrite its file in place, or re-run it as a new
+        round only while step 6's `profile.graderRounds` leaves one; with none
+        left the task goes to the epic session. It is never sent to `gate run`
+        and never to a builder.
      3. **A worker's file the gate blocks on.** `schema-invalid`,
-        `artifacts-missing`, `not-committed`, `screenshots-missing`,
-        `screenshots-stale` and `grader-invalid`. Run `gate run` with the same
+        `artifacts-missing`, `not-committed`, `screenshots-missing` and
+        `screenshots-stale`. Run `gate run` with the same
         flags. It blocks on the same reason before any check command runs and
         writes the blocked `gate-outcome` that `readFailedRounds` counts; the
         bounce that follows is step 9's, a failed round on the ladder that
@@ -324,11 +330,13 @@ one thing this playbook never asks you to.
         reason. Return the result to that worker at most once per task, as a
         builder `dispatch_decision` for that role whose `causal_parent` is that
         `error-logged` event (and whose `continuation_of` names the worker's
-        earlier dispatch when the same agent is resumed). The returns per task
-        and role are the builder dispatches whose causal parent is such an
-        event, readable off the log. A second `result` problem on the same task
-        goes to the epic session, which returns it no more without the
-        operator's answer.
+        earlier dispatch when the same agent is resumed).
+        At most one branch-4 return per task goes out, whatever the
+        worker's role, counted as the task's builder dispatches whose
+        `causal_parent` is such an `error-logged` event; a second
+        `result` problem on the same task goes to the epic session,
+        which returns it no more without the operator's answer, from any
+        worker.
      5. **The verb or the log failed.** An `intake` problem whose `input` is
         `judge-internal` or `paperwork`, or one this list does not name. It goes
         to the epic session and never to an agent, and it is not a round.
@@ -344,8 +352,9 @@ one thing this playbook never asks you to.
      session; then 1; then 2; then 4); then the stage reasons of branches 1 and
      2. A stage reason of branch 3 goes to `gate run` only when the preflight
      shows no `intake` problem. A handed-in grader file that is fresh but
-     neither a list nor a grader document shows both `judge-artifact` and
-     `grader-invalid`; it takes branch 2 and is never sent to `gate run`. A
+     neither a list nor a grader document shows three problems, the intake
+     `judge-artifact` and then the stage problems `judges-outstanding` and
+     `grader-invalid`; all three are branch 2, and it is never sent to `gate run`. A
      named problem that the line or a worker could have caused, such as an
      unreadable result at the path the worker reported, is the worker's:
      branch 3 if it carries a stage, branch 4 if it is an `intake` problem.
@@ -449,8 +458,8 @@ one thing this playbook never asks you to.
 
    Slice: `bs playbook slice wave --step 7`.
 8. Build every dispatch in steps 3–7 with `bs brief compose --role <role>
-   --task <task-id> --session <id>` (dispatch.md says what it emits and what
-   it needs). It carries the compiled lessons block for that role (D2
+   --task <task-id> --session <id> --work-root <work-root>` (dispatch.md says
+   what it emits and what it needs). It carries the compiled lessons block for that role (D2
    selection) and, for a worktree dispatch, the open-findings block for that
    task — dispatch.md's "Splice the compiled lessons into every prompt" and
    "Splice the open findings into every worktree dispatch", read with `bs
@@ -462,12 +471,27 @@ one thing this playbook never asks you to.
    the brief to the typed `bs-<role>` agent it is marked for. Each worker's
    brief carries its filled hand-back preflight line (the worker runs it as its
    last step, `docs/guide/operator-guide/queue-and-gate.md` §5), with the same
-   `--artifacts-dir` as steps 5 and 7:
+   `--artifacts-dir` as steps 5 and 7. `bs brief compose` writes each coder's,
+   tester's and grader's line, and each coder's and tester's gate check
+   commands, from the flags `--provider`, `--model-tier`, `--base` (the coder),
+   `--checks` (the file step 7's gate line takes) and `--work-root <work-root>`
+   (the value of steps 5 and 7); it refuses to compose such a brief without
+   them, and `bs dispatch lint` exits 1 on a brief that lacks them:
    - coder: `bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts`
    - tester: `bs results check <task-id> --as tester --result <result.json> --agent tester --provider <name> --model-tier <tier> --plan <plan.json> --artifacts-dir <work-root>/state/artifacts`
    - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
    Slice: `bs playbook slice wave --step 8`.
-9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
+9. Gate outcome `blocked` → bounce to the builder whose output its reason
+   names, on the **same branch**: the tester for `screenshots-missing` and
+   `screenshots-stale` (it re-shoots at the gate's HEAD, step 5 records the new
+   set, and step 5's uiux visual pass reviews it); for `schema-invalid` and
+   `artifacts-missing` the worker whose result the gate line's `--result` and
+   `--agent` name; the coder for every other reason. A `grader-invalid`
+   `gate-outcome` in the log is still a failed round the ladder counts, is
+   answered by the grader's turn and not by a bounce, and goes to the epic
+   session. The ladder counts every blocked round whichever builder it bounces
+   to, so from the second failed round the bounced builder, a tester included,
+   runs on a strictly higher model tier (`checkModelTierRung`).
    After 2 failed rounds on the same task, escalate model tier
    automatically (mid → frontier, logged — `budgets.yml`
    `escalation_ladder`); after 3, escalate to the operator. Never skip a

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { lintDispatchPrompt } from '../src/dispatchLint.js';
 import { type PaperworkReason, SCREENSHOT_RE, STAGES_FOR_ROLE } from '../src/paperwork.js';
 import { AGENTS_DIR, REPO_ROOT } from '../src/paths.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
@@ -345,6 +346,7 @@ describe('queue-and-gate.md section 5 and the CHANGELOG', () => {
       'task-5-deterministic-named-tests',
       'task-6-gate-block-counts-toward-class',
       'task-7-close-review-fixes',
+      'task-8-close-review-r2-fixes',
     ]) {
       expect(unreleased, id).toContain(id);
     }
@@ -374,7 +376,7 @@ describe('wave.md step 7 routes every preflight problem to one of five branches'
     'not-committed': 3,
     'screenshots-missing': 3,
     'screenshots-stale': 3,
-    'grader-invalid': 3,
+    'grader-invalid': 2,
   } satisfies Record<PaperworkReason, 1 | 2 | 3>;
   const INPUT_BRANCH: Record<string, number> = {
     artifacts: 1,
@@ -463,7 +465,7 @@ describe('wave.md step 7 routes every preflight problem to one of five branches'
       /it throws, and writes no `gate-outcome`, while any `intake` problem shows/,
     );
     expect(flat).toMatch(
-      /neither a list nor a grader document shows both `judge-artifact` and `grader-invalid`; it takes branch 2 and is never sent to `gate run`/,
+      /neither a list nor a grader document shows three problems, the intake `judge-artifact` and then the stage problems `judges-outstanding` and `grader-invalid`; all three are branch 2, and it is never sent to `gate run`/,
     );
   });
 
@@ -493,7 +495,7 @@ describe('wave.md step 7 routes every preflight problem to one of five branches'
   it('leaves steps 2 to 10 and the step 9 text as they are', () => {
     for (let n = 2; n <= 10; n++) expect(wave).toMatch(new RegExp(`^${n}\\. `, 'm'));
     expect(wave).toMatch(
-      /9\. Gate outcome `blocked` → bounce to the coder on the \*\*same branch\*\*/,
+      /9\. Gate outcome `blocked` → bounce to the builder whose output its reason\s+names/,
     );
   });
 });
@@ -821,4 +823,349 @@ describe('the concrete preflight lines run through the built CLI', () => {
       expect(['pass', 'blocked'], source).toContain(out.outcome);
     });
   }
+});
+
+// ---- Task-8 close-review r2 --------------------------------------------------
+
+/** The reasons wave.md step 7 puts in each branch, from the compiler-tied map below. */
+const R2_REASON_BRANCH = {
+  'deps-missing': 1,
+  'judges-outstanding': 2,
+  'uiux-spec-missing': 2,
+  'uiux-visual-missing': 2,
+  'grader-invalid': 2,
+  'schema-invalid': 3,
+  'artifacts-missing': 3,
+  'not-committed': 3,
+  'screenshots-missing': 3,
+  'screenshots-stale': 3,
+} satisfies Record<PaperworkReason, 1 | 2 | 3>;
+const flatten = (text: string): string => text.replace(/\s+/g, ' ');
+const stepOf = (text: string, n: number): string =>
+  text.slice(
+    text.search(new RegExp(`^${n}\\. `, 'm')),
+    text.search(new RegExp(`^${n + 1}\\. `, 'm')),
+  );
+const waveText = read('.claude/skills/bs/wave.md');
+const queueText = read('docs/guide/operator-guide/queue-and-gate.md');
+const section5 = queueText.slice(
+  queueText.indexOf('problem falls in exactly one of five branches'),
+);
+const branchOf = (text: string, reason: string, start: RegExp): number | undefined => {
+  const marks = [...text.matchAll(start)];
+  const holders = marks
+    .map((m, i) => ({
+      n: Number(m[1]),
+      body: text.slice(m.index, marks[i + 1]?.index ?? m.index + 3000),
+    }))
+    .filter(({ body }) => body.includes(`\`${reason}\``));
+  return holders.length === 1 ? holders[0]?.n : undefined;
+};
+
+describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in wave.md', () => {
+  const step9 = flatten(stepOf(waveText, 9));
+  const BUILDER_OF: Record<string, RegExp> = {
+    'schema-invalid':
+      /for `schema-invalid` and `artifacts-missing` the worker whose result the gate line's `--result` and `--agent` name/,
+    'artifacts-missing': /for `schema-invalid` and `artifacts-missing` the worker whose result/,
+    'not-committed': /the coder for every other reason/,
+    'screenshots-missing': /the tester for `screenshots-missing` and `screenshots-stale`/,
+    'screenshots-stale': /the tester for `screenshots-missing` and `screenshots-stale`/,
+  };
+
+  it('names a builder in step 9 for every reason of branch 3, keyed from the branch-3 reasons', () => {
+    const branch3 = Object.entries(R2_REASON_BRANCH)
+      .filter(([, b]) => b === 3)
+      .map(([r]) => r);
+    expect(Object.keys(BUILDER_OF).sort()).toEqual(branch3.sort());
+    for (const reason of branch3) expect(step9, reason).toMatch(BUILDER_OF[reason] as RegExp);
+  });
+
+  it('says the tester re-shoots at the gate HEAD, step 5 records it and the uiux pass reviews it', () => {
+    expect(step9).toMatch(
+      /re-shoots at the gate's HEAD, step 5 records the new set, and step 5's uiux visual pass reviews it/,
+    );
+  });
+
+  it('answers a grader-invalid in the log with the grader turn and the epic session', () => {
+    expect(step9).toMatch(
+      /A `grader-invalid` `gate-outcome` in the log is still a failed round the ladder counts, is answered by the grader's turn and not by a bounce, and goes to the epic session/,
+    );
+  });
+
+  it('says the ladder counts every blocked round whichever builder it bounces to', () => {
+    expect(step9).toMatch(
+      /counts every blocked round whichever builder it bounces to, so from the second failed round the bounced builder, a tester included, runs on a strictly higher model tier \(`checkModelTierRung`\)/,
+    );
+  });
+
+  it('names the task builder in the blocked-task rule', () => {
+    expect(flatten(waveText)).toMatch(
+      /A blocked task blocks itself\.\*\* Gate outcome `blocked` bounces to \*that\* task's builder \(step 9\)/,
+    );
+  });
+
+  it('branch 2 answers grader-invalid with the grader turn, within graderRounds', () => {
+    const two = flatten(
+      stepOf(waveText, 7).slice(
+        stepOf(waveText, 7).search(/^ {5}2\. \*\*/m),
+        stepOf(waveText, 7).search(/^ {5}3\. \*\*/m),
+      ),
+    );
+    expect(two).toMatch(
+      /re-poke the grader in the same round to rewrite its file in place, or re-run it as a new round only while step 6's `profile.graderRounds` leaves one; with none left the task goes to the epic session\. It is never sent to `gate run` and never to a builder/,
+    );
+  });
+
+  it('keeps the word bounce in step 7 only inside branch 3', () => {
+    const s7 = stepOf(waveText, 7);
+    const three = s7.slice(s7.search(/^ {5}3\. \*\*/m), s7.search(/^ {5}4\. \*\*/m));
+    expect(flatten(s7.replace(three, ''))).not.toMatch(/\bbounce\b/i);
+  });
+});
+
+describe('f-bs-gate-bounce/integration-1e8e9e9b: routing in queue-and-gate.md', () => {
+  it('has the grader-invalid, screenshots and schema-invalid rows', () => {
+    const row = (reason: string) =>
+      queueText
+        .split('\n')
+        .find((l) => l.startsWith(`| \`blocked\` (\`reason: "${reason}"\`)`)) as string;
+    expect(row('grader-invalid')).toMatch(
+      /grader's turn answers it \(re-poked in the same round, or re-run within its round cap\), never a builder/,
+    );
+    expect(row('grader-invalid')).toMatch(
+      /wave\.md` step 7 sends it to the grader before `gate run`/,
+    );
+    expect(row('screenshots-missing')).toMatch(/bounce to the tester/);
+    expect(row('screenshots-stale')).toMatch(/bounce to the tester/);
+    expect(row('schema-invalid')).toMatch(/bounce to the worker whose result it is/);
+  });
+
+  it.each(Object.entries(R2_REASON_BRANCH))(
+    'puts %s in branch %i in section 5 as in wave.md',
+    (reason, branch) => {
+      const s5 = section5.slice(0, section5.indexOf('One preflight result can hold'));
+      expect(branchOf(s5, reason, /^([1-5])\. \*\*/gm)).toBe(branch);
+      const s7 = stepOf(waveText, 7);
+      expect(
+        branchOf(
+          s7.slice(0, s7.indexOf('One preflight result can hold')),
+          reason,
+          /^ {5}([1-5])\. \*\*/gm,
+        ),
+      ).toBe(branch);
+    },
+  );
+
+  it('carries the three-problem sentence and the tester ladder sentence', () => {
+    const flatQ = flatten(queueText);
+    expect(flatQ).toMatch(
+      /neither a list nor a grader document shows three problems, the intake `judge-artifact` and then the stage problems `judges-outstanding` and `grader-invalid`; all three are branch 2, and it never goes to `gate run`/,
+    );
+    expect(flatQ).toMatch(
+      /The ladder counts a tester bounce \(the two screenshots reasons\) like a coder bounce/,
+    );
+  });
+});
+
+describe('f-bs-gate-bounce/integration-2afed53d: one counting rule for branch 4', () => {
+  const sentenceOf = (text: string): string => {
+    const flat = flatten(text);
+    const at = flat.indexOf('At most one branch-4 return per task');
+    expect(at).toBeGreaterThan(-1);
+    return flat.slice(at, flat.indexOf('from any worker.', at) + 'from any worker.'.length);
+  };
+
+  it('carries one sentence, word for word, in wave.md step 7 and queue-and-gate.md section 5', () => {
+    const a = sentenceOf(stepOf(waveText, 7));
+    expect(a).toBe(sentenceOf(section5));
+    expect(a).toMatch(
+      /whatever the worker's role, counted as the task's builder dispatches whose `causal_parent` is such an `error-logged` event/,
+    );
+    expect(a).toMatch(
+      /a second `result` problem on the same task goes to the epic session, which returns it no more without the operator's answer/,
+    );
+  });
+
+  it('counts nothing per role', () => {
+    expect(waveText).not.toContain('task and role');
+    expect(queueText).not.toContain('task and role');
+  });
+});
+
+describe('f-bs-gate-bounce/integration-1e8e9e9b: the ladder premise, through the built CLI', () => {
+  const TASK_ID = 'epic-1/task-8';
+  const SESSION_ID = 'sess-ladder';
+  let home = '';
+  beforeAll(() => {
+    home = mkdtempSync(path.join(tmpdir(), 'bs-ladder-home-'));
+  });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
+  const append = (
+    event_type: string,
+    payload: Record<string, unknown>,
+    env: Record<string, string>,
+  ) => {
+    const out = runCli(
+      [
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: SESSION_ID,
+          actor: 'orchestrator',
+          event_type,
+          task_id: TASK_ID,
+          plan_version: 1,
+          causal_parent: `${SESSION_ID}#0`,
+          payload,
+        }),
+      ],
+      env,
+    );
+    expect(out.status, out.stdout + out.stderr).toBe(0);
+  };
+  const run = (finalTier: string) => {
+    const dir = mkdtempSync(path.join(home, 's-'));
+    const env = { BS_HOME: dir };
+    expect(runCli(['session', 'start', SESSION_ID], env).status).toBe(0);
+    const dispatch = (agent_role: string, model_tier: string) =>
+      append('dispatch_decision', { agent_role, provider: 'claude', model: 'm', model_tier }, env);
+    const blockedRound = () =>
+      append('gate-outcome', { outcome: 'blocked', reason: 'screenshots-missing' }, env);
+    dispatch('coder', 'mid');
+    dispatch('tester', 'mid');
+    blockedRound();
+    dispatch('tester', 'mid');
+    blockedRound();
+    dispatch('tester', finalTier);
+    return runCli(['escalation', 'check', SESSION_ID, '--task', TASK_ID], env);
+  };
+  /** The tier-rung check: rung 2 of budgets.yml's ladder, the model-tier rung. */
+  const tierRung = (stdout: string): string | undefined =>
+    (JSON.parse(stdout).checks as { rung: number; status: string }[]).find((c) => c.rung === 2)
+      ?.status;
+
+  it('accepts a tester dispatch on a higher tier after the second screenshots block', () => {
+    const out = run('frontier');
+    expect(out.status, out.stdout).toBe(0);
+    expect(tierRung(out.stdout)).toBe('ok');
+  });
+
+  it('flags the same log when the last tester dispatch stays on mid', () => {
+    const out = run('mid');
+    expect(out.status, out.stdout).toBe(1);
+    expect(tierRung(out.stdout)).toBe('violation');
+  });
+});
+
+describe('task-8 docs: composer, lint and the tester result file', () => {
+  const TESTER_PATH = 'state/results/<task-id>.tester.json';
+  const step8 = flatten(stepOf(waveText, 8));
+  const dispatchDoc = read('.claude/skills/bs/dispatch.md');
+
+  it('wave.md step 8 says compose writes the lines and checks, refuses without them, and the lint fails', () => {
+    expect(step8).toMatch(
+      /bs brief compose --role <role> --task <task-id> --session <id> --work-root <work-root>/,
+    );
+    expect(step8).toMatch(
+      /`bs brief compose` writes each coder's, tester's and grader's line, and each coder's and tester's gate check commands, from the flags `--provider`, `--model-tier`, `--base` \(the coder\), `--checks` \(the file step 7's gate line takes\) and `--work-root <work-root>` \(the value of steps 5 and 7\); it refuses to compose such a brief without them, and `bs dispatch lint` exits 1 on a brief that lacks them/,
+    );
+  });
+
+  it('names the tester result file in wave.md step 5, dispatch.md, the templates and the standard', () => {
+    expect(flatten(stepOf(waveText, 5))).toContain(`\`<work-root>/${TESTER_PATH}\``);
+    expect(flatten(dispatchDoc)).toContain(
+      `the tester writes \`${TESTER_PATH}\`, never the coder's file`,
+    );
+    for (const rel of [
+      '.claude/agents/bs-tester.md',
+      '.claude/agents/bs-wave-runner.md',
+      '.claude/agents/bs-uiux.md',
+      'docs/standards/agent-constraints.md',
+    ]) {
+      expect(flatten(read(rel)), rel).toContain(TESTER_PATH);
+    }
+    const tester = outsideShared(agent('tester'));
+    expect(tester).toContain(`**2. Write the full result** to \`${TESTER_PATH}\``);
+    expect(tester).toContain(`"artifact_path": "${TESTER_PATH}"`);
+    expect(read('.claude/skills/bs/run.md')).toContain('state/results/<task-id>.tester*.json');
+    expect(flatten(read('.claude/agents/bs-uiux.md'))).not.toMatch(
+      /coder's and the tester's own result path/,
+    );
+  });
+
+  it('no instruction file says every worker or the tester writes the bare result file', () => {
+    const bare = /(?:tester|every worker)[^.]{0,80}`state\/results\/<task-id>\.json`/i;
+    for (const rel of [
+      ...['coder', 'tester', 'grader', 'uiux', 'wave-runner'].map(
+        (r) => `.claude/agents/bs-${r}.md`,
+      ),
+      '.claude/skills/bs/wave.md',
+      '.claude/skills/bs/dispatch.md',
+      'docs/standards/agent-constraints.md',
+    ]) {
+      const text = flatten(read(rel));
+      for (const hit of text.matchAll(new RegExp(bare.source, 'gi'))) {
+        // A bare mention is fine only when the same sentence gives the tester its own file.
+        const rest = text.slice(hit.index, hit.index + hit[0].length + 120);
+        expect(rest, `${rel}: ${hit[0]}`).toContain('.tester.json');
+      }
+    }
+  });
+
+  it('dispatch.md shows the preflight and gate_checks text form and names the refusals', () => {
+    const doc = flatten(dispatchDoc);
+    for (const piece of [
+      'Result file: <work-root>/state/results/<task-id>.json',
+      'Hand-back preflight line (run it as your last step, exactly as written):',
+      "Gate checks (run each over the whole project before you hand back; run a check marked heavy as your template's heavy-run section says, never bare):",
+      '- unit (heavy):',
+      '`brief.preflight-values-required`',
+      '`brief.invalid-value`',
+      '`brief.preflight-unlintable`',
+      'bs dispatch lint` exits 1 on a coder, tester or grader brief whose line is missing, ambiguous, for another task or role, or still holds a placeholder, and on a coder or tester brief that names no gate check',
+    ]) {
+      expect(doc, piece).toContain(piece);
+    }
+  });
+
+  it('worktrees-and-judges.md names the flags, the refusals and a lint example with every real key', async () => {
+    const doc = read('docs/guide/operator-guide/worktrees-and-judges.md');
+    for (const flag of ['--provider', '--model-tier', '--base', '--checks', '--work-root']) {
+      expect(doc, flag).toContain(`\`${flag}\``);
+    }
+    for (const code of [
+      'brief.preflight-values-required',
+      'brief.invalid-value',
+      'brief.preflight-unlintable',
+    ]) {
+      expect(doc, code).toContain(code);
+    }
+    const example = doc.split('\n').find((l) => l.startsWith('{"turns":')) as string;
+    const report = await lintDispatchPrompt({
+      prompt: '',
+      role: 'planner',
+      taskId: 'e/t',
+      sessionId: 'none',
+      eventOpts: { stateDir: mkdtempSync(path.join(tmpdir(), 'bs-lint-keys-')) },
+    });
+    expect(Object.keys(JSON.parse(example)).sort()).toEqual(Object.keys(report).sort());
+    expect(Object.keys(JSON.parse(example).preflight).sort()).toEqual(
+      Object.keys(report.preflight).sort(),
+    );
+  });
+
+  it('queue-and-gate.md says the composer writes the line and the lint fails a brief without it', () => {
+    expect(flatten(queueText)).toMatch(
+      /The composer writes that line: `bs brief compose` fills each coder's, tester's and grader's preflight line[^.]*and `bs dispatch lint` fails a brief without them/,
+    );
+  });
+
+  it('leaves the handback-preflight fragment and the SHARED regions of the three templates alone', () => {
+    for (const role of ['tester', 'wave-runner', 'uiux']) {
+      const shared = [...agent(role).matchAll(SHARED)].map((m) => m[0]);
+      expect(shared.length, role).toBeGreaterThan(0);
+    }
+  });
 });

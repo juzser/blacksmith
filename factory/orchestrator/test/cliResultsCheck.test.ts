@@ -16,6 +16,7 @@ import {
   graderFailed,
   graderFile,
   graderMet,
+  graderMissingCriteriaFields,
   graderVerdictBody,
   PARITY_CASES,
   recordTester,
@@ -1111,6 +1112,61 @@ describe('bs results check (built binary)', () => {
       const real = gate(line);
       expect(real.json.error.code).toBe('judges.artifact-not-a-list');
       expect(await gateOutcomes()).toEqual([]);
+    });
+
+    // f-bs-gate-bounce/integration-1e8e9e9b: branch 2 settles grader-invalid in the grader's turn.
+    it('grader-invalid: a stage problem only, and a rewrite in place needs no new round', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      const line = await gateLine(await graderMissingCriteriaFields(w));
+      await dispatchGrader(graderPath);
+      const soon = new Date(Date.now() + 60_000);
+      await utimes(graderPath, soon, soon);
+      const before = checkGate(line);
+      expect(before.status).toBe(1);
+      expect(before.json.reason).toBe('grader-invalid');
+      expect(before.json.problems.some((p: { stage: string }) => p.stage === 'intake')).toBe(false);
+      await write('grader.json', graderFile(graderVerdictBody()));
+      const later = new Date(Date.now() + 120_000);
+      await utimes(graderPath, later, later);
+      const after = checkGate(line);
+      const stages = after.json.problems.map((p: { stage: string }) => p.stage);
+      expect(stages).not.toContain('grader');
+      expect(stages).not.toContain('judges');
+      const events = await readEvents(w.sessionId, w.opts());
+      const graderDispatches = events.filter(
+        (e) =>
+          e.record.event_type === 'dispatch_decision' &&
+          (e.record.payload as { agent_role?: string }).agent_role === 'grader',
+      );
+      expect(graderDispatches).toHaveLength(1);
+      expect(await gateOutcomes()).toEqual([]);
+    });
+
+    it('grader-invalid: gate run blocks, counts a failed round and closes the grader turn', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      const line = await gateLine(await graderMissingCriteriaFields(w));
+      await dispatchGrader(graderPath);
+      const soon = new Date(Date.now() + 60_000);
+      await utimes(graderPath, soon, soon);
+      const run = gate(line);
+      expect(run.status).toBe(1);
+      expect(JSON.stringify(run.json)).toContain('grader-invalid');
+      const rounds = readFailedRounds(await readEvents(w.sessionId, w.opts()));
+      expect(rounds).toHaveLength(1);
+      expect(rounds[0]?.reason).toBe('grader-invalid');
+      const outstanding = parse(
+        runCli([
+          'judge',
+          'outstanding',
+          '--session',
+          w.sessionId,
+          '--task',
+          w.taskId,
+          '--state-dir',
+          w.stateDir,
+        ]),
+      );
+      expect(outstanding.status).toBe(0);
     });
 
     it('judge-artifact: a stale grader file', async () => {

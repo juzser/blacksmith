@@ -22,6 +22,7 @@ import type { EventOpts } from './events.js';
 import { JUDGE_ROLES } from './judgeRoles.js';
 import { readJudgeTurns } from './judges.js';
 import { AGENTS_DIR } from './paths.js';
+import { taskIdsMatch } from './taskId.js';
 
 export type { JudgeRole } from './judgeRoles.js';
 /**
@@ -60,9 +61,27 @@ export interface ArtifactCheck {
   declared_line: string | null;
 }
 
+export type PreflightStatus =
+  | 'ok'
+  | 'missing'
+  | 'ambiguous'
+  | 'mismatch'
+  | 'placeholder'
+  | 'no-checks'
+  | 'not-applicable';
+
+export interface PreflightCheck {
+  status: PreflightStatus;
+  /** The one standalone `bs results check` line the prompt carries, or null. */
+  line: string | null;
+  /** Counted gate checks for a coder or tester prompt, null for any other role. */
+  gate_checks: number | null;
+}
+
 export interface DispatchLintReport {
   turns: TurnsCheck;
   artifact: ArtifactCheck;
+  preflight: PreflightCheck;
   exitCode: 0 | 1;
 }
 
@@ -96,6 +115,115 @@ export function parseStatedTurns(prompt: string): number | null {
   if (chosen.length !== 1) return null;
   const raw = chosen[0]?.[1] ?? '';
   return /^[0-9]+$/.test(raw) ? Number(raw) : null;
+}
+
+/** The heading the composer writes above a coder's or tester's gate check commands. */
+export const GATE_CHECKS_HEADING =
+  "Gate checks (run each over the whole project before you hand back; run a check marked heavy as your template's heavy-run section says, never bare):";
+
+const PREFLIGHT_ROLES: ReadonlySet<string> = new Set(['coder', 'tester', 'grader']);
+const CHECK_LIST_ROLES: ReadonlySet<string> = new Set(['coder', 'tester']);
+const BARE_WORD = /^[A-Za-z0-9_./:@%+=,-]+$/;
+
+/**
+ * The one quoting rule for every value in a preflight line: a value of only
+ * `A-Za-z0-9_./:@%+=,-` is written bare, any other is wrapped in single
+ * quotes with each `'` inside it written `'\''`.
+ */
+export function shellQuote(value: string): string {
+  return BARE_WORD.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** Splits a line by `shellQuote`'s rule; null when a quote is left open. */
+function splitQuoted(line: string): string[] | null {
+  const words: string[] = [];
+  let word: string | null = null;
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] as string;
+    if (quoted) {
+      if (ch === "'") quoted = false;
+      else word += ch;
+    } else if (ch === "'") {
+      quoted = true;
+      word ??= '';
+    } else if (ch === '\\' && i + 1 < line.length) {
+      word = (word ?? '') + line[++i];
+    } else if (/\s/.test(ch)) {
+      if (word !== null) words.push(word);
+      word = null;
+    } else {
+      word = (word ?? '') + ch;
+    }
+  }
+  if (quoted) return null;
+  if (word !== null) words.push(word);
+  return words;
+}
+
+/** Standalone lines (the whole line, optionally in backticks) that start with `bs results check`. */
+function standaloneResultsCheckLines(prompt: string): string[] {
+  const found: string[] = [];
+  for (const raw of prompt.split('\n')) {
+    let line = raw.trim();
+    if (line.length > 1 && line.startsWith('`') && line.endsWith('`')) line = line.slice(1, -1);
+    if (/^bs results check(\s|$)/.test(line)) found.push(line);
+  }
+  return found;
+}
+
+/** Counted checks under the gate-checks heading: a `- ` line with a non-blank command line under it. */
+function countGateChecks(prompt: string): number {
+  const lines = prompt.split('\n');
+  const at = lines.indexOf(GATE_CHECKS_HEADING);
+  if (at < 0) return 0;
+  let count = 0;
+  let open = false;
+  for (const line of lines.slice(at + 1)) {
+    if (line.startsWith('- ')) {
+      open = true;
+    } else if (line.startsWith('    ')) {
+      if (open && line.trim() !== '') {
+        count++;
+        open = false;
+      }
+    } else {
+      break;
+    }
+  }
+  return count;
+}
+
+/**
+ * The preflight check `lintDispatchPrompt` and `composeBrief` both call: a
+ * coder, tester or grader prompt carries exactly one filled `bs results check`
+ * line for this task and role, and a coder or tester prompt lists at least one
+ * gate check. Every other role is not-applicable.
+ */
+export function checkPreflight(prompt: string, role: string, taskId: string): PreflightCheck {
+  if (!PREFLIGHT_ROLES.has(role))
+    return { status: 'not-applicable', line: null, gate_checks: null };
+  const listed = CHECK_LIST_ROLES.has(role);
+  const gateChecks = listed ? countGateChecks(prompt) : null;
+  const lines = standaloneResultsCheckLines(prompt);
+  if (lines.length !== 1) {
+    return {
+      status: lines.length === 0 ? 'missing' : 'ambiguous',
+      line: null,
+      gate_checks: gateChecks,
+    };
+  }
+  const line = lines[0] as string;
+  const words = splitQuoted(line);
+  const asAt = words?.indexOf('--as') ?? -1;
+  if (words === null || !taskIdsMatch(words[3], taskId) || asAt < 0 || words[asAt + 1] !== role) {
+    return { status: 'mismatch', line, gate_checks: gateChecks };
+  }
+  if (words.some((word) => /<[^<>]+>/.test(word))) {
+    return { status: 'placeholder', line, gate_checks: gateChecks };
+  }
+  if (listed && gateChecks === 0) return { status: 'no-checks', line, gate_checks: gateChecks };
+  return { status: 'ok', line, gate_checks: gateChecks };
 }
 
 function checkTurns(prompt: string, role: string, agentsDir: string): TurnsCheck {
@@ -151,6 +279,14 @@ const ARTIFACT_FAIL: ReadonlySet<ArtifactStatus> = new Set([
   'undeclared',
 ]);
 
+const PREFLIGHT_FAIL: ReadonlySet<PreflightStatus> = new Set([
+  'missing',
+  'ambiguous',
+  'mismatch',
+  'placeholder',
+  'no-checks',
+]);
+
 /**
  * Lint one dispatch prompt. Never throws on a bad prompt — a bad prompt is
  * exactly the finding this reports — only on a missing task/session (the
@@ -167,7 +303,12 @@ export async function lintDispatchPrompt(input: DispatchLintInput): Promise<Disp
     input.sessionId,
     eventOpts,
   );
+  const preflight = checkPreflight(input.prompt, input.role, input.taskId);
   const exitCode: 0 | 1 =
-    TURNS_FAIL.has(turns.status) || ARTIFACT_FAIL.has(artifact.status) ? 1 : 0;
-  return { turns, artifact, exitCode };
+    TURNS_FAIL.has(turns.status) ||
+    ARTIFACT_FAIL.has(artifact.status) ||
+    PREFLIGHT_FAIL.has(preflight.status)
+      ? 1
+      : 0;
+  return { turns, artifact, preflight, exitCode };
 }

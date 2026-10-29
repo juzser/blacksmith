@@ -56,6 +56,24 @@ function cli(args: string[], sb: Sandbox, extraEnv: Record<string, string | unde
   return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
 }
 
+/** The flags a coder brief now needs; the checks file lives in `scratch`. */
+function workerFlags(): string[] {
+  const checks = path.join(scratch, 'checks.json');
+  writeFileSync(checks, JSON.stringify([{ name: 'unit', cmd: 'run-the-suite' }]));
+  return [
+    '--provider',
+    'claude',
+    '--model-tier',
+    'mid',
+    '--base',
+    'bs/project-a/integration',
+    '--checks',
+    checks,
+    '--work-root',
+    path.join(scratch, 'work root'),
+  ];
+}
+
 function appendEvent(sb: Sandbox, event: Record<string, unknown>): void {
   const run = cli(['event', 'append', JSON.stringify(event)], sb);
   expect(run.status, run.stdout + run.stderr).toBe(0);
@@ -223,6 +241,7 @@ describe('brief compose (criterion 5, CLI half)', () => {
         'project-a/task-1-widget',
         '--worktree',
         worktree,
+        ...workerFlags(),
         '--out',
         out,
       ],
@@ -261,6 +280,7 @@ describe('brief compose (criterion 5, CLI half)', () => {
         'project-a/task-1-widget',
         '--worktree',
         path.join(scratch, 'wt', 'task-1-widget'),
+        ...workerFlags(),
       ],
       sb,
     );
@@ -292,6 +312,108 @@ describe('brief compose (criterion 5, CLI half)', () => {
     );
     expect(run.status).toBe(1);
     expect(errorOf(run.stdout)).toBe('brief.turns-mismatch');
+  });
+});
+
+describe('brief compose preflight lines (task-8 close-review r2, CLI half)', () => {
+  const spaced = () => path.join(scratch, 'work root');
+  const composeRole = (sb: Sandbox, session: string, role: string, extra: string[] = []) => {
+    const out = path.join(scratch, 'preflight-out', `${session}-${role}.md`);
+    const run = cli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        role,
+        '--session',
+        session,
+        '--plan',
+        FIXTURE_PLAN,
+        '--task',
+        'project-a/task-1-widget',
+        '--worktree',
+        path.join(scratch, 'wt', 'task-1-widget'),
+        '--artifact',
+        path.join(scratch, 'artifacts', `${role}.json`),
+        ...(extra.length > 0 ? extra : workerFlags()),
+        '--out',
+        out,
+      ],
+      sb,
+    );
+    return { run, out };
+  };
+
+  it("writes lines whose --artifacts-dir is the gate line's and whose paperwork runs under the spaced work root", () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf');
+    const wave = readFileSync(path.join(REPO_ROOT, '.claude', 'skills', 'bs', 'wave.md'), 'utf8');
+    const gateRun = wave.slice(wave.indexOf('bs gate run <task-id>'));
+    const gateDirFlag = /--artifacts-dir (\S+)/.exec(gateRun)?.[1] as string;
+    expect(gateDirFlag).toBe('<work-root>/state/artifacts');
+    const gateDir = gateDirFlag.replace('<work-root>', spaced());
+    const shim = path.join(scratch, 'shim');
+    mkdirSync(shim, { recursive: true });
+    writeFileSync(path.join(shim, 'bs'), `#!/bin/sh\nexec node '${CLI_PATH}' "$@"\n`, {
+      mode: 0o755,
+    });
+    for (const role of ['coder', 'tester', 'grader']) {
+      const { run, out } = composeRole(sb, 'sess-pf', role);
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const line = readFileSync(out, 'utf8')
+        .split('\n')
+        .find((l) => l.startsWith('bs results check ')) as string;
+      expect(line).toContain(`--artifacts-dir '${gateDir}'`);
+      const ran = runProcess('/bin/sh', ['-c', line], {
+        env: {
+          ...process.env,
+          PATH: `${shim}:${process.env.PATH}`,
+          BS_HOME: sb.home,
+          BS_HEAVY_LOCK_DIR: sb.locks,
+        },
+      });
+      const doc = JSON.parse(ran.stdout);
+      expect(doc.error, ran.stdout).toBeUndefined();
+      expect(doc.as).toBe(role);
+      expect(doc.artifact_home.startsWith(`${gateDir}/`)).toBe(true);
+    }
+  });
+
+  it('refuses a coder brief without --provider by name and writes no --out file', () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf2');
+    const flags = workerFlags();
+    const at = flags.indexOf('--provider');
+    flags.splice(at, 2);
+    const { run, out } = composeRole(sb, 'sess-pf2', 'coder', flags);
+    expect(run.status).toBe(1);
+    expect(errorOf(run.stdout)).toBe('brief.preflight-values-required');
+    expect(run.stdout).toContain('--provider');
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it('bs dispatch lint passes a composed coder brief and fails one carrying a placeholder', () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf3');
+    const { run, out } = composeRole(sb, 'sess-pf3', 'coder');
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const lintArgs = (file: string) => [
+      'dispatch',
+      'lint',
+      file,
+      '--role',
+      'coder',
+      '--task',
+      'project-a/task-1-widget',
+      '--session',
+      'sess-pf3',
+    ];
+    expect(cli(lintArgs(out), sb).status).toBe(0);
+    const bad = `${out}.bad.md`;
+    writeFileSync(bad, readFileSync(out, 'utf8').replace('--provider claude', '--provider <name>'));
+    const failed = cli(lintArgs(bad), sb);
+    expect(failed.status).toBe(1);
+    expect(JSON.parse(failed.stdout).preflight.status).toBe('placeholder');
   });
 });
 
@@ -365,6 +487,7 @@ describe('--state-dir on lessons for-dispatch and brief compose', () => {
           'epic-1/task-1',
           '--worktree',
           path.join(scratch, 'wt', 'task-1-widget'),
+          ...workerFlags(),
           '--out',
           path.join(scratch, 'state-dir-brief', `${stateArgs.length}.md`),
           ...stateArgs,
