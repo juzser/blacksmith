@@ -114,7 +114,7 @@ describe('coder and tester run every gate check whole at hand-back', () => {
       const text = outsideShared(agent(role)).replace(/\s+/g, ' ');
       expect(text).toMatch(/run every check command the gate will run/i);
       expect(text).toMatch(/over the whole project, never a scoped path/);
-      for (const cmd of ['typecheck', 'typecheck:test', 'biome check .']) {
+      for (const cmd of ['`typecheck`', '`typecheck:test`', 'a lint of the whole repo']) {
         expect(text).toContain(cmd);
       }
       expect(text).toMatch(/report each exit code/);

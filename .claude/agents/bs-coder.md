@@ -194,9 +194,8 @@ harness counts the tokens; the dispatcher stamps them.
 
 **Before you return: hand-back checks.** Run every check command the gate
 will run, each over the whole project, never a scoped path: the commands your
-brief names (in this repo `pnpm run test`, `pnpm run typecheck`,
-`pnpm run typecheck:test` and `pnpm exec biome check .`), and report each exit
-code. By the "Heavy checks" rule in `.claude/skills/bs/wave.md` step 7, only the
+brief names (in this repo the full test command, `typecheck`,
+`typecheck:test` and a lint of the whole repo), and report each exit code. By the "Heavy checks" rule in `.claude/skills/bs/wave.md` step 7, only the
 full test command (and an e2e run) is heavy: it goes through the heavy-run
 section above, started in the background and waited for in the foreground
 as that section says. Lint and type checks are not heavy and run directly,
