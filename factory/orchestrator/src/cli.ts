@@ -1201,6 +1201,22 @@ function selectJudgeCloses(
   return closes;
 }
 
+/**
+ * `parseArgs` renders a valueless flag as the string 'true'. Attesting a role
+ * called "true" would close nothing (no such dispatch exists) and say so
+ * nowhere, so a bare --no-findings is a usage error instead. Shared by
+ * `gate run` and `results check`, which must fail on the same line alike.
+ */
+function requireNoFindingsRole(close: JudgeReportInput): void {
+  if (close.noFindings && close.role === 'true') {
+    throw new SmithError(
+      'cli.no-findings-needs-role',
+      '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
+      { usage: 'bs gate run <task-id> --no-findings <role>' },
+    );
+  }
+}
+
 const RESULTS_CHECK_ROLES = ['coder', 'tester', 'grader', 'gate'] as const;
 const SESSION_FLAGS = ['session', 'causal-parent', 'plan-version', 'actor', 'state-dir'];
 const ENVELOPE_FLAGS = ['agent', 'provider', 'model-tier', 'input-tokens', 'output-tokens'];
@@ -1347,6 +1363,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
     if (problems.length === 0) {
       const handedIn = handedInSources(args, flags);
       const noFindings = args.repeated['no-findings'] ?? [];
+      for (const role of noFindings) requireNoFindingsRole({ taskId, role, noFindings: true });
       const turns =
         handedIn.length > 0 || noFindings.length > 0
           ? await attempt('judges', () => readJudgeTurns(taskId, ctx, opts))
@@ -4588,16 +4605,7 @@ async function main(): Promise<number> {
       // attestation as an attestation — artifact_path null, attested_by
       // operator — rather than dressing it up as a file that was never written.
       //
-      // `parseArgs` renders a valueless flag as the string 'true'. Attesting a
-      // role called "true" would close nothing (no such dispatch exists) and
-      // say so nowhere, so a bare --no-findings is a usage error instead.
-      if (close.noFindings && close.role === 'true') {
-        throw new SmithError(
-          'cli.no-findings-needs-role',
-          '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
-          { usage: 'bs gate run <task-id> --no-findings <role>' },
-        );
-      }
+      requireNoFindingsRole(close);
       await recordJudgeReport(close, ctx, eventOptsFromFlags(flags));
     }
 
