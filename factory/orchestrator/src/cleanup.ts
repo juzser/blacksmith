@@ -13,6 +13,85 @@ import {
 } from './heavyLock.js';
 import { type PorcelainEntry, parseWorktreePorcelain } from './worktree.js';
 
+/** A branch some worktree holds: checked out, or named by a rebase or bisect in progress. */
+interface Holder {
+  reason: string;
+  /** True when only a rebase or bisect state file names it (porcelain shows a detached HEAD). */
+  byState: boolean;
+}
+
+const readTrim = (f: string): string | null => {
+  try {
+    return readFileSync(f, 'utf8').trim();
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Every branch a worktree holds. A worktree stopped mid-rebase or mid-bisect is
+ * detached in porcelain, so the state files are read too: `rebase-merge/head-name`
+ * and `rebase-apply/head-name` (a full ref), every `refs/heads/*` ref in
+ * `rebase-merge/update-refs` (groups of ref, old sha, new sha: `--update-refs`
+ * will still move them) and `BISECT_START` (a branch name, or a sha when the
+ * bisect started from a detached HEAD), under the git common dir for the main
+ * worktree and `worktrees/<name>/` for linked ones.
+ */
+function branchHolders(
+  git: NonNullable<CleanupOptions['git']>,
+  projectDir: string,
+): Map<string, Holder> {
+  const holders = new Map<string, Holder>();
+  const porcelain = parseWorktreePorcelain(git(projectDir, ['worktree', 'list', '--porcelain']));
+  for (const e of porcelain) {
+    if (e.branch !== null) {
+      holders.set(e.branch, {
+        reason: `checked-out: ${e.branch} at ${e.worktree}`,
+        byState: false,
+      });
+    }
+  }
+  const commonDir = git(projectDir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const dirs: { gitDir: string; worktree: string }[] = [
+    { gitDir: commonDir, worktree: porcelain[0]?.worktree ?? projectDir },
+  ];
+  let linked: string[] = [];
+  try {
+    linked = readdirSync(path.join(commonDir, 'worktrees'));
+  } catch {
+    // no linked worktrees
+  }
+  for (const name of linked) {
+    const gitDir = path.join(commonDir, 'worktrees', name);
+    const dotGit = readTrim(path.join(gitDir, 'gitdir'));
+    dirs.push({ gitDir, worktree: dotGit === null ? gitDir : path.dirname(dotGit) });
+  }
+  for (const { gitDir, worktree } of dirs) {
+    const named: [string, string][] = [];
+    const add = (value: string | null, what: string) => {
+      if (value !== null && value !== '') named.push([value, what]);
+    };
+    add(readTrim(path.join(gitDir, 'rebase-merge', 'head-name')), 'rebase');
+    add(readTrim(path.join(gitDir, 'rebase-apply', 'head-name')), 'rebase');
+    add(readTrim(path.join(gitDir, 'BISECT_START')), 'bisect');
+    const updateRefs = readTrim(path.join(gitDir, 'rebase-merge', 'update-refs'));
+    for (const line of (updateRefs ?? '').split('\n')) {
+      if (line.startsWith('refs/heads/')) add(line.trim(), 'rebase');
+    }
+    for (const [value, what] of named) {
+      const branch = value.replace(/^refs\/heads\//, '');
+      if (!holders.has(branch)) {
+        const hint = what === 'bisect' ? '; run `git bisect reset` when done' : '';
+        holders.set(branch, {
+          reason: `checked-out: ${branch} at ${worktree} (${what} in progress${hint})`,
+          byState: true,
+        });
+      }
+    }
+  }
+  return holders;
+}
+
 export class CleanupError extends SmithError {}
 
 export type CleanupAction = 'remove' | 'trash' | 'keep' | 'manual' | 'prune';
@@ -96,7 +175,6 @@ interface Plan {
   warnings: string[];
   projectDir: string;
   git: NonNullable<CleanupOptions['git']>;
-  firstMerged: (branch: string, targets: string[]) => string | null;
 }
 
 async function buildPlan(o: CleanupOptions): Promise<Plan> {
@@ -151,6 +229,16 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
   };
   const firstMerged = (branch: string, targets: string[]): string | null =>
     targets.find((t) => ancestorOf(`refs/heads/${branch}`, t)) ?? null;
+  const isSymref = (branch: string): boolean => {
+    try {
+      g(projectDir, ['symbolic-ref', '-q', `refs/heads/${branch}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const symrefReason = (branch: string): string =>
+    `symref: ${branch} is a symbolic ref, not a branch of its own`;
   const refExists = (ref: string): boolean => {
     try {
       g(projectDir, ['rev-parse', '--verify', '--quiet', ref]);
@@ -279,6 +367,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     }
     if (e.locked) return keep(base, 'git-locked: the worktree is marked locked');
     if (!refExists(`refs/heads/${branch}`)) return keep(base, `branch-missing: ${branch}`);
+    if (isSymref(branch)) return keep(base, symrefReason(branch));
     const epicReason = epicVerdict(epic, prefix);
     if (epicReason !== null) return keep(base, epicReason);
     if (defaultBranch === null) return keep(base, noDefault);
@@ -318,6 +407,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     const [, prefix = '', epic = '', task = ''] = m;
     const base = { kind: 'branch' as const, branch };
     if (branch.includes(HARNESS_MARK)) return keep(base, HARNESS_MARK);
+    if (isSymref(branch)) return keep(base, symrefReason(branch));
     const epicReason = epicVerdict(epic, prefix);
     if (epicReason !== null) return keep(base, epicReason);
     if (defaultBranch === null) return keep(base, noDefault);
@@ -390,7 +480,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     if (m && inEpic(m)) entries.push(judgeWorktree(e, m));
   }
 
-  const checkedOut = new Set(porcelain.map((e) => e.branch));
+  const holders = branchHolders(g, projectDir);
   const refs = g(projectDir, [
     'for-each-ref',
     '--format=%(refname:short)',
@@ -399,7 +489,10 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
   ]);
   for (const branch of refs.split('\n').filter((b) => b !== '')) {
     const m = BRANCH_RE.exec(branch);
-    if (m && inEpic(m) && !checkedOut.has(branch)) entries.push(judgeBranch(branch, m));
+    if (!m || !inEpic(m)) continue;
+    const held = holders.get(branch);
+    if (held === undefined) entries.push(judgeBranch(branch, m));
+    else if (held.byState) entries.push(keep({ kind: 'branch', branch }, held.reason));
   }
 
   if (rootReal !== null) {
@@ -429,7 +522,7 @@ async function buildPlan(o: CleanupOptions): Promise<Plan> {
     });
   }
 
-  return { entries, warnings, projectDir, git: g, firstMerged };
+  return { entries, warnings, projectDir, git: g };
 }
 
 /**
@@ -444,13 +537,18 @@ export async function planCleanup(o: CleanupOptions): Promise<CleanupReport> {
 
 /**
  * Plan, and with `apply` act on that plan in the same run. The only deletions
- * are `git worktree remove` (no force), `git branch -d`, `git worktree prune`
- * and the trash command; each branch deletion and worktree removal is preceded
- * by a fresh `merge-base --is-ancestor` gate. Serves epic bs-optimize
- * criterion 14.
+ * are `git worktree remove` (no force), `git update-ref --no-deref -d <ref> <sha>`,
+ * `git config --remove-section branch.<name>`, `git worktree prune` and the
+ * trash command; each branch deletion and worktree removal is preceded by a
+ * fresh `merge-base --is-ancestor` gate, and the branch is deleted only while
+ * it still sits on the sha that gate approved (never judged by the checkout's
+ * HEAD, as `git branch -d` would). A worktree removed with its branch kept
+ * reports two items: worktree `remove`, branch `keep`. Serves epic
+ * bs-optimize criterion 14.
  */
 export async function runCleanup(o: CleanupOptions): Promise<CleanupReport> {
   const plan = await buildPlan(o);
+  const extra = new Map<CleanupItem, CleanupItem>();
   if (o.apply === true) {
     const trash = o.trash ?? defaultTrash;
     for (const { item, targets } of plan.entries) {
@@ -459,11 +557,16 @@ export async function runCleanup(o: CleanupOptions): Promise<CleanupReport> {
       } else if (item.action === 'trash') {
         attempt(item, 'trash-failed', () => trash(item.path as string));
       } else if (item.action === 'remove') {
-        applyRemoval(plan, item, targets);
+        const rest = applyRemoval(plan, item, targets);
+        if (rest !== null) extra.set(item, rest);
       }
     }
   }
-  return { items: plan.entries.map((e) => e.item), warnings: plan.warnings };
+  const items = plan.entries.flatMap(({ item }) => {
+    const rest = extra.get(item);
+    return rest === undefined ? [item] : [item, rest];
+  });
+  return { items, warnings: plan.warnings };
 }
 
 function attempt(item: CleanupItem, rule: string, fn: () => void): boolean {
@@ -477,21 +580,77 @@ function attempt(item: CleanupItem, rule: string, fn: () => void): boolean {
   }
 }
 
-/** Gate, `worktree remove`, gate again, `branch -d`; any failure keeps the item. */
-function applyRemoval(plan: Plan, item: CleanupItem, targets: string[]): void {
+/**
+ * Gate, `worktree remove`, gate again, then compare-and-delete the branch at the
+ * sha the last gate approved. Any failure keeps the item; when the worktree is
+ * already gone but the branch stays, the branch part comes back as its own item.
+ */
+function applyRemoval(plan: Plan, item: CleanupItem, targets: string[]): CleanupItem | null {
   const branch = item.branch as string;
-  const gate = (): boolean => {
-    if (plan.firstMerged(branch, targets) !== null) return true;
-    item.action = 'keep';
-    item.reason = `not-merged: ${branch} is not an ancestor of ${targets.join(', ')} at removal time`;
-    return false;
+  const ref = `refs/heads/${branch}`;
+  const notMerged = `not-merged: ${branch} is not an ancestor of ${targets.join(', ')} at removal time`;
+  /** The branch's sha when it is merged into a target right now, else null. */
+  const gate = (): string | null => {
+    try {
+      const sha = plan.git(plan.projectDir, ['rev-parse', '--verify', ref]);
+      for (const t of targets) {
+        try {
+          plan.git(plan.projectDir, ['merge-base', '--is-ancestor', sha, t]);
+          return sha;
+        } catch {
+          // not an ancestor of this target; try the next
+        }
+      }
+    } catch {
+      // an unreadable branch counts as not merged
+    }
+    return null;
   };
-  if (!gate()) return;
-  if (item.kind === 'worktree') {
+  const isWorktree = item.kind === 'worktree';
+  const keepBranchOnly = (reason: string): CleanupItem => {
+    item.action = 'remove';
+    item.reason = `worktree-removed: ${item.path}`;
+    return { kind: 'branch', branch, action: 'keep', reason };
+  };
+  let sha = gate();
+  if (sha === null) {
+    item.action = 'keep';
+    item.reason = notMerged;
+    return null;
+  }
+  if (isWorktree) {
     const removed = attempt(item, 'worktree-remove-refused', () =>
       plan.git(plan.projectDir, ['worktree', 'remove', item.path as string]),
     );
-    if (!removed || !gate()) return;
+    if (!removed) return null;
+    sha = gate();
+    if (sha === null) return keepBranchOnly(notMerged);
   }
-  attempt(item, 'branch-delete-refused', () => plan.git(plan.projectDir, ['branch', '-d', branch]));
+  const approved = sha;
+  /** The branch stays: a worktree item that was already removed splits, a lone item turns keep. */
+  const finishKept = (reason: string): CleanupItem | null => {
+    if (isWorktree) return keepBranchOnly(reason);
+    item.action = 'keep';
+    item.reason = reason;
+    return null;
+  };
+  const probe: CleanupItem = { kind: 'branch', branch, action: 'remove', reason: '' };
+  // update-ref (unlike branch -d) does not look at other worktrees: re-read them now.
+  let holder: Holder | undefined;
+  try {
+    holder = branchHolders(plan.git, plan.projectDir).get(branch);
+  } catch (err) {
+    probe.reason = `branch-delete-refused: ${msg(err)}`;
+    return finishKept(probe.reason);
+  }
+  if (holder !== undefined) return finishKept(holder.reason);
+  const deleted = attempt(probe, 'branch-delete-refused', () => {
+    plan.git(plan.projectDir, ['update-ref', '--no-deref', '-d', ref, approved]);
+    try {
+      plan.git(plan.projectDir, ['config', '--remove-section', `branch.${branch}`]);
+    } catch {
+      // no such section: nothing to drop
+    }
+  });
+  return deleted ? null : finishKept(probe.reason);
 }
