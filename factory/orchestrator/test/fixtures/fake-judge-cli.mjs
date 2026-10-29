@@ -14,7 +14,9 @@
 //   slow-grandchild   -> spawns a NON-detached grandchild (inherits this
 //                        process's group, same as testgate.test.ts's
 //                        regression scenario) whose pid is written to
-//                        argv[3], then sleeps
+//                        argv[3], then sleeps. Optional argv[4]: ms to wait
+//                        (in this process, real time) before spawning it;
+//                        default 0.
 //   huge              -> a single response well over any reasonable byte cap
 //   refuse            -> a refusing judge (D-116) that puts its protocol banner
 //                        on stdout — balanced JSON, but not a verdict — and its
@@ -90,6 +92,8 @@ async function main() {
 
   if (mode === 'slow-grandchild') {
     const pidFile = process.argv[3];
+    const startDelayMs = Number(process.argv[4] ?? 0);
+    if (startDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, startDelayMs));
     const child = spawn('sleep', ['30']);
     await writeFile(pidFile, String(child.pid));
     await new Promise((resolve) => setTimeout(resolve, 30_000));

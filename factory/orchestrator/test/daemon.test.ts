@@ -1234,6 +1234,12 @@ describe('starting, reporting and stopping', () => {
     // interval late is a watcher reporting a factory that has moved on.
     expect(order).toEqual(['tick', 'sleep', 'tick', 'sleep', 'tick', 'sleep']);
     expect(seen).toHaveLength(3);
+    // Each is a whole TickReport, not a fragment: the CLI prints these lines
+    // and a reader parses `sessions` and `findings` off every one.
+    for (const report of seen) {
+      expect(Array.isArray(report.sessions)).toBe(true);
+      expect(Array.isArray(report.findings)).toBe(true);
+    }
     // And what comes back is a count and the last report, not the three. A
     // process meant to run for weeks cannot hold every tick it ever ran: at
     // the default interval that array is ~290 reports a day, forever.
