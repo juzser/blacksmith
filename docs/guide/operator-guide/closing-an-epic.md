@@ -635,7 +635,9 @@ bs cleanup --project ../my-project --apply
 It reads the local refs and never fetches, which is why the fetch comes first.
 `--epic` narrows the worktrees and branches to one epic; the orphan directories
 and `git worktree prune` are project-wide in every run. The report is one item
-per candidate, and every `keep` names the rule that kept it:
+per candidate, and every `keep` names the rule that kept it. A worktree that
+was removed while its branch was kept shows as two items, the worktree
+`remove` and the branch `keep`, side by side:
 
 ```json
 {"items":[
@@ -670,8 +672,16 @@ says why:
   independent repository, no symlink, and nothing outside `.wt/<project>/` or
   the project's own `bs/` and `smith/` branches.
 - Removal goes only through `git worktree remove` without `--force`,
-  `git branch -d` and `git worktree prune`; never `rm -rf`. A refusal is
-  reported as `keep` with git's message and is never retried or forced.
+  `git update-ref --no-deref -d refs/heads/<branch> <sha>`,
+  `git config --remove-section branch.<branch>` and `git worktree prune`;
+  never `rm -rf`. The branch is deleted by the exact commit the merge check
+  approved, so a branch that moved in between is kept, and the main checkout's
+  own `HEAD` never decides. A task branch merged into the integration branch
+  but not yet into main is deleted, because its commits stay on the
+  integration branch, which cleanup keeps until its PR merges. A symbolic-ref
+  branch, or a branch another worktree has checked out or is rebasing or
+  bisecting, is kept. A refusal is reported as `keep` with git's message and
+  is never retried or forced.
 
 A project directory that is not a git repository fails with
 `cleanup.not-a-git-repo` and nothing is touched. Last, the epic session stops

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -127,6 +128,8 @@ describe('cleanup.ts', () => {
   }
 
   const item = (items: CleanupItem[], branch: string) => items.find((i) => i.branch === branch);
+  const branchItem = (items: CleanupItem[], branch: string) =>
+    items.find((i) => i.branch === branch && i.kind === 'branch');
   const branchExists = (b: string) => git(projectDir, ['branch', '--list', b]).trim().length > 0;
   const planOf = async (over: Partial<CleanupOptions> = {}) =>
     (await planCleanup(opts(over))).items;
@@ -466,20 +469,205 @@ describe('cleanup.ts', () => {
         return realGit(cwd, args);
       };
       const report = await runCleanup(opts({ apply: true, git: git2 }));
-      expect(item(report.items, 'bs/e1/t1')).toMatchObject({ action: 'keep' });
-      expect(item(report.items, 'bs/e1/t1')?.reason).toMatch(/^not-merged/);
+      expect(branchItem(report.items, 'bs/e1/t1')).toMatchObject({ action: 'keep' });
+      expect(branchItem(report.items, 'bs/e1/t1')?.reason).toMatch(/^not-merged/);
       expect(branchExists('bs/e1/t1')).toBe(true);
+      expect(existsSync(wt)).toBe(false);
+      expect(report.items.find((x) => x.kind === 'worktree')).toMatchObject({
+        action: 'remove',
+        reason: expect.stringMatching(/^worktree-removed/),
+      });
     });
 
+    const refuseDelete: Git = (cwd, args) => {
+      if (args[0] === 'update-ref' && args.includes('-d')) throw new Error('refused by git');
+      return realGit(cwd, args);
+    };
+
     it('reports a branch deletion that git refuses as keep with git message', async () => {
-      mergedTask('t1');
+      git(projectDir, ['branch', 'bs/e1/solo', 'main']);
+      const report = await runCleanup(opts({ apply: true, git: refuseDelete }));
+      expect(item(report.items, 'bs/e1/solo')).toMatchObject({ action: 'keep' });
+      expect(item(report.items, 'bs/e1/solo')?.reason).toContain('refused by git');
+    });
+
+    it('reports each part when the worktree is removed but the branch delete is refused', async () => {
+      const wt = mergedTask('t1');
+      const report = await runCleanup(opts({ apply: true, git: refuseDelete }));
+      expect(existsSync(wt)).toBe(false);
+      expect(branchExists('bs/e1/t1')).toBe(true);
+      const wtItem = report.items.find((x) => x.kind === 'worktree');
+      expect(wtItem).toMatchObject({ action: 'remove', path: wt });
+      expect(wtItem?.reason).toMatch(/^worktree-removed/);
+      expect(branchItem(report.items, 'bs/e1/t1')).toMatchObject({
+        kind: 'branch',
+        action: 'keep',
+      });
+      expect(branchItem(report.items, 'bs/e1/t1')?.reason).toMatch(
+        /^branch-delete-refused.*refused by git/,
+      );
+    });
+
+    it('deletes a merged branch although the project checkout HEAD is behind the target', async () => {
+      const wt = mergedTask('t1');
+      // Main clone's checkout sits on an older commit that lacks t1.
+      git(projectDir, ['checkout', '-q', '--detach', 'HEAD~1']);
+      const report = await runCleanup(opts({ apply: true }));
+      expect(item(report.items, 'bs/e1/t1')?.action).toBe('remove');
+      expect(existsSync(wt)).toBe(false);
+      expect(branchExists('bs/e1/t1')).toBe(false);
+    });
+
+    it('keeps the branch when it moves between the gate and the delete', async () => {
+      const wt = mergedTask('t1');
       const git2: Git = (cwd, args) => {
-        if (args[0] === 'branch' && args[1] === '-d') throw new Error('refused by git');
+        // The late commit lands after the worktree is gone, right before the delete.
+        if (args[0] === 'update-ref' && args.includes('-d')) {
+          const tmp = path.join(root, 'late');
+          git(projectDir, ['worktree', 'add', '-q', tmp, 'bs/e1/t1']);
+          commitIn(tmp, 'late.txt');
+          git(projectDir, ['worktree', 'remove', '--force', tmp]);
+        }
         return realGit(cwd, args);
       };
       const report = await runCleanup(opts({ apply: true, git: git2 }));
-      expect(item(report.items, 'bs/e1/t1')).toMatchObject({ action: 'keep' });
-      expect(item(report.items, 'bs/e1/t1')?.reason).toContain('refused by git');
+      expect(existsSync(wt)).toBe(false);
+      expect(branchExists('bs/e1/t1')).toBe(true);
+      expect(branchItem(report.items, 'bs/e1/t1')).toMatchObject({
+        kind: 'branch',
+        action: 'keep',
+      });
+      expect(branchItem(report.items, 'bs/e1/t1')?.reason).toMatch(/^branch-delete-refused/);
+    });
+
+    it('keeps a symref branch and leaves its target and reflog alone', async () => {
+      git(projectDir, ['symbolic-ref', 'refs/heads/bs/e1/alias', 'refs/heads/main']);
+      const report = await runCleanup(opts({ apply: true }));
+      expect(item(report.items, 'bs/e1/alias')).toMatchObject({ action: 'keep' });
+      expect(item(report.items, 'bs/e1/alias')?.reason).toMatch(/^symref/);
+      expect(branchExists('main')).toBe(true);
+      expect(existsSync(path.join(projectDir, '.git', 'logs', 'refs', 'heads', 'main'))).toBe(true);
+    });
+
+    it('keeps a branch that another worktree checks out just before the delete', async () => {
+      mergedTask('t1');
+      const other = path.join(root, 'other');
+      const git2: Git = (cwd, args) => {
+        const out = realGit(cwd, args);
+        if (args[0] === 'worktree' && args[1] === 'remove') {
+          git(projectDir, ['worktree', 'add', '-q', other, 'bs/e1/t1']);
+        }
+        return out;
+      };
+      const report = await runCleanup(opts({ apply: true, git: git2 }));
+      expect(branchExists('bs/e1/t1')).toBe(true);
+      expect(branchItem(report.items, 'bs/e1/t1')?.reason).toMatch(/^checked-out: bs\/e1\/t1 at /);
+      expect(git(other, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('bs/e1/t1');
+    });
+
+    it('removes the branch config section after a delete', async () => {
+      git(projectDir, ['branch', 'bs/e1/solo', 'main']);
+      git(projectDir, ['config', 'branch.bs/e1/solo.remote', 'origin']);
+      await runCleanup(opts({ apply: true }));
+      expect(branchExists('bs/e1/solo')).toBe(false);
+      expect(() => git(projectDir, ['config', '--get', 'branch.bs/e1/solo.remote'])).toThrow();
+    });
+
+    it('lists the extra branch item right after its worktree item', async () => {
+      mergedTask('t1');
+      git(projectDir, ['branch', 'bs/e1/solo', 'main']);
+      const report = await runCleanup(opts({ apply: true, git: refuseDelete }));
+      const kinds = report.items.map((x) => `${x.kind}:${x.branch}:${x.action}`);
+      const w = kinds.indexOf('worktree:bs/e1/t1:remove');
+      expect(kinds[w + 1]).toBe('branch:bs/e1/t1:keep');
+    });
+
+    /** A task worktree with several commits, all merged into main, then main moves on. */
+    function mergedTaskWithHistory(task: string): string {
+      const wt = createTaskWorktree(projectDir, 'e1', task).worktreeDir;
+      for (const n of ['a', 'b', 'c', 'd']) commitIn(wt, `${task}-${n}.txt`);
+      git(projectDir, ['merge', '-q', '--ff-only', `bs/e1/${task}`]);
+      writeFileSync(path.join(projectDir, 'later.txt'), 'later\n');
+      git(projectDir, ['add', 'later.txt']);
+      git(projectDir, ['commit', '-q', '-m', 'later']);
+      return wt;
+    }
+
+    it('keeps a branch that another worktree is rebasing, and the rebase can continue', async () => {
+      const wt = mergedTaskWithHistory('rb');
+      execFileSync('git', ['rebase', '-q', '-i', '--root'], {
+        cwd: wt,
+        env: { ...process.env, GIT_SEQUENCE_EDITOR: "sed -i.bak 's/^pick/edit/'" },
+        stdio: 'pipe',
+      });
+      const report = await runCleanup(opts({ apply: true }));
+      expect(branchExists('bs/e1/rb')).toBe(true);
+      expect(branchItem(report.items, 'bs/e1/rb')?.reason).toMatch(
+        /^checked-out: bs\/e1\/rb at .*rebase/,
+      );
+      execFileSync('git', ['rebase', '--continue'], {
+        cwd: wt,
+        env: { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
+        stdio: 'pipe',
+      });
+    });
+
+    it('keeps a branch that a rebase --update-refs will still move, and the rebase finishes', async () => {
+      const w1 = createTaskWorktree(projectDir, 'e1', 's1').worktreeDir;
+      commitIn(w1, 's1.txt');
+      const w2 = createTaskWorktree(projectDir, 'e1', 's2', { from: 's1' }).worktreeDir;
+      commitIn(w2, 's2.txt');
+      git(projectDir, ['merge', '-q', '--ff-only', 'bs/e1/s2']);
+      git(projectDir, ['worktree', 'remove', w1]);
+      execFileSync('git', ['rebase', '-q', '-i', '--update-refs', '--root'], {
+        cwd: w2,
+        env: { ...process.env, GIT_SEQUENCE_EDITOR: "sed -i.bak 's/^pick/edit/'" },
+        stdio: 'pipe',
+      });
+      const report = await runCleanup(opts({ apply: true }));
+      expect(branchExists('bs/e1/s1')).toBe(true);
+      expect(branchItem(report.items, 'bs/e1/s1')?.reason).toMatch(
+        /^checked-out: bs\/e1\/s1 at .*rebase/,
+      );
+      const rebasing = () =>
+        existsSync(
+          path.join(
+            git(w2, ['rev-parse', '--git-path', 'rebase-merge'])
+              .trim()
+              .replace(/^(?!\/)/, `${w2}/`),
+          ),
+        );
+      for (let i = 0; i < 10 && rebasing(); i++) {
+        execFileSync('git', ['rebase', '--continue'], {
+          cwd: w2,
+          env: { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' },
+          stdio: 'pipe',
+        });
+      }
+      expect(rebasing()).toBe(false);
+    });
+
+    it('keeps a branch that another worktree is bisecting', async () => {
+      const wt = mergedTaskWithHistory('bi');
+      git(wt, ['bisect', 'start', 'HEAD', 'HEAD~3']);
+      expect(git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('HEAD');
+      const report = await runCleanup(opts({ apply: true }));
+      expect(branchExists('bs/e1/bi')).toBe(true);
+      expect(branchItem(report.items, 'bs/e1/bi')?.reason).toMatch(
+        /^checked-out: bs\/e1\/bi at .*bisect/,
+      );
+    });
+
+    it('deletes only the symref, never its target, when the symref guard is bypassed', async () => {
+      git(projectDir, ['symbolic-ref', 'refs/heads/bs/e1/alias', 'refs/heads/main']);
+      const bypass: Git = (cwd, args) => {
+        if (args[0] === 'symbolic-ref' && args.includes('-q')) throw new Error('bypassed');
+        return realGit(cwd, args);
+      };
+      await runCleanup(opts({ apply: true, git: bypass }));
+      expect(branchExists('main')).toBe(true);
+      expect(existsSync(path.join(projectDir, '.git', 'logs', 'refs', 'heads', 'main'))).toBe(true);
+      expect(branchExists('bs/e1/alias')).toBe(false);
     });
 
     it('never uses force or -D', async () => {
