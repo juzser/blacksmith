@@ -161,6 +161,14 @@ the reviewer. S1 stops the line, S2 bounces back to the same branch, S3 batches
 into one waiver question per epic, answered with `/bs waivers`. Only S3 and S4
 are ever waivable.
 
+A worker runs its role's `bs results check` as the last step before it hands
+back: the gate's own paperwork checks, read-only and with no test run, so a
+missing file or field is fixed in that turn instead of costing a gate round.
+When the gate still blocks, the wave playbook names one answerer for each
+reason (the worker whose result it is, the uiux pass, a judge turn, the
+wave-runner or the epic session), and a check whose clock shows the machine
+slept is not bounced to the coder.
+
 A judge's verdict counts only if the worktree did not move under it. The
 playbook brackets each judge of a task, and the audit's shared tree, with
 `bs worktree fingerprint` and `bs worktree verify`, gitignored paths aside;
@@ -546,8 +554,8 @@ agents are what hold. Full rules:
   sends each need per-invocation approval.
 - **Budgets are declared per role and sized per effort tier.** A medium epic
   gets 16M tokens with an alarm at 70%, and a coder task 220K tokens and 700
-  diff lines; a small epic gets half the task numbers and 4M, a huge one
-  double and 32M. Every role that is dispatched has a price, the wave-runner,
+  changed lines, not counting tests, fixtures, lockfiles or generated output;
+  a small epic gets half the task numbers and 4M, a huge one double and 32M. Every role that is dispatched has a price, the wave-runner,
   the merger and the scribe included, so `bs budget alarm` and `bs wave check`
   count all of them. Fan-out is bounded by the
   claim graph, and `max_in_flight_tasks` is available on top of it, off by
