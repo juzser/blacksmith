@@ -310,4 +310,55 @@ describe('gatherLedgerInputs', () => {
 
     expect([...snapshot(stateDir), ...snapshot(specsDir)]).toEqual(before);
   });
+
+  it('ranks plans by file name when they carry no version field', async () => {
+    plan('ea', 'plan-v10.json', { project: 'proj', tasks: [task('ea/task-1', ['ten/**'])] });
+    plan('ea', 'plan-v2.json', { project: 'proj', tasks: [task('ea/task-1', ['two/**'])] });
+
+    const out = await gather();
+
+    expect(out.taskClaims.get('ea/task-1')).toEqual(['ten/**']);
+  });
+
+  it('qualifies a bare plan task id with its epic directory', async () => {
+    plan('ea', 'plan.json', { project: 'proj', tasks: [task('task-1', ['a/**'])] });
+
+    const out = await gather();
+
+    expect(out.taskClaims.get('ea/task-1')).toEqual(['a/**']);
+  });
+
+  it('drops a session that touches no specs epic and keeps unattributed events of a kept one', async () => {
+    plan('ea', 'plan.json', { project: 'proj', tasks: [task('ea/task-1', ['x'])] });
+    session('s-a', [
+      { type: 'session-start', payload: { epic_id: 'ea' } },
+      { type: 'budget-alarm' },
+      { type: 'testgate-result', task: 'ea/task-1' },
+    ]);
+    session('s-other', [{ type: 'session-start' }, { type: 'testgate-result', task: 'task-4' }]);
+
+    const out = await gather();
+
+    expect(out.events.map((e) => e.event_id)).toEqual(['s-a#0', 's-a#1', 's-a#2']);
+    expect(out.taskIdOf.has('s-a#1')).toBe(false);
+  });
+
+  it('lets a plan that names a follow-up id win over its task-added record', async () => {
+    plan('ea', 'plan.json', {
+      project: 'proj',
+      tasks: [task('ea/followup-ab12cd34', ['plan/**'])],
+    });
+    session('s-a', [
+      { type: 'session-start' },
+      {
+        type: 'task-added',
+        task: 'ea/followup-ab12cd34',
+        payload: { epic_id: 'ea', claims: ['record/**'] },
+      },
+    ]);
+
+    const out = await gather();
+
+    expect(out.taskClaims.get('ea/followup-ab12cd34')).toEqual(['plan/**']);
+  });
 });
