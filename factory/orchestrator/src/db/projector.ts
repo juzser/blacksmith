@@ -72,7 +72,7 @@ import {
   qualifyTaskId,
   taskIdsMatch,
 } from '../taskId.js';
-import { honouredReinstatements } from '../taskLifecycle.js';
+import { bounceRevertedIds, honouredReinstatements } from '../taskLifecycle.js';
 import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { LEGACY_BRANCH_PREFIX, RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
 import {
@@ -934,6 +934,17 @@ export function foldTasks(
           // First terminal transition wins — see schema.ts's terminalAt comment.
           if (row.terminalAt === null) row.terminalAt = record.ts;
           row.taskStatus = 'completed';
+        }
+        break;
+      }
+      case 'wave-reverted': {
+        // A bounce reopens a merged task, like `task-reinstated` closes a
+        // superseded one; a record-only event names no id (taskLifecycle.ts).
+        for (const taskId of bounceRevertedIds(record)) {
+          const row = touch(taskId, record.ts, record.session_id);
+          if (row.taskStatus !== 'completed') continue;
+          row.taskStatus = 'todo';
+          row.terminalAt = null;
         }
         break;
       }

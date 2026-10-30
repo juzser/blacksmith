@@ -15,6 +15,20 @@ export function namesTask(record: StoredEvent['record'], taskId: string): boolea
   return Array.isArray(ids) && ids.some((id) => typeof id === 'string' && taskIdsMatch(id, taskId));
 }
 
+/**
+ * The task ids a `wave-reverted` with `disposition: 'bounce'` reopens: its
+ * envelope id and payload `task_ids`. A `record-only` event, or any other
+ * event, names none. The one rule the projector and `finishedInLog` share.
+ */
+export function bounceRevertedIds(record: StoredEvent['record']): string[] {
+  if (record.event_type !== 'wave-reverted') return [];
+  const payload = record.payload as { disposition?: unknown; task_ids?: unknown } | undefined;
+  if (payload?.disposition !== 'bounce') return [];
+  const ids = Array.isArray(payload.task_ids) ? payload.task_ids : [];
+  const named = ids.filter((id): id is string => typeof id === 'string');
+  return record.task_id ? [record.task_id, ...named] : named;
+}
+
 /** The one-hop old id -> replacement map; see spec.ts's `taskSuccessors` for the rules. */
 export function taskSuccessorsOf(
   events: readonly StoredEvent[],
@@ -60,9 +74,11 @@ export function reinstatementBlocker(
   taskId: string,
   epicId: string,
 ): { code: 'never-merged' } | { code: 'has-successor'; successor: string } | null {
-  const merged = events.some(
-    (e) => e.record.event_type === 'wave-merged' && namesTask(e.record, taskId),
-  );
+  let merged = false;
+  for (const { record } of events) {
+    if (record.event_type === 'wave-merged' && namesTask(record, taskId)) merged = true;
+    else if (bounceRevertedIds(record).some((id) => taskIdsMatch(id, taskId))) merged = false;
+  }
   if (!merged) return { code: 'never-merged' };
   for (const [from, to] of taskSuccessorsOf(events, epicId)) {
     if (taskIdsMatch(from, taskId)) return { code: 'has-successor', successor: to };
@@ -101,7 +117,8 @@ export function honouredReinstatements(
 /**
  * The ids the log reports finished: a `wave-merged` names the id and no
  * `task-superseded` for it follows its last merge, unless the log honours a
- * reinstatement of it (`honouredReinstatements`). Equals "the projector folds
+ * reinstatement of it (`honouredReinstatements`), and no bounced
+ * `wave-reverted` follows its last merge. Equals "the projector folds
  * the task to `completed`". Ids come back as the log spells them.
  */
 export function finishedInLog(events: readonly StoredEvent[], epicId: string): Set<string> {
@@ -116,9 +133,13 @@ export function finishedInLog(events: readonly StoredEvent[], epicId: string): S
   const finished = new Set<string>();
   for (const id of merged) {
     let supersededSinceMerge = false;
+    let reverted = false;
     for (const { record } of events) {
       if (record.event_type === 'wave-merged' && namesTask(record, id)) {
         supersededSinceMerge = false;
+        reverted = false;
+      } else if (bounceRevertedIds(record).some((r) => taskIdsMatch(r, id))) {
+        reverted = true;
       } else if (
         record.event_type === 'task-superseded' &&
         record.task_id &&
@@ -127,6 +148,7 @@ export function finishedInLog(events: readonly StoredEvent[], epicId: string): S
         supersededSinceMerge = true;
       }
     }
+    if (reverted) continue;
     if (!supersededSinceMerge || honoured.some((h) => taskIdsMatch(h, id))) finished.add(id);
   }
   return finished;
