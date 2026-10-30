@@ -92,12 +92,15 @@ quality KPI: same-mistake rate should trend to zero.
   multiple epics at spec time — the cap is never silently extended. Checked
   by `bs budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
 - **Per-task caps (coder), medium tier: 220,000 tokens, ≤700 changed diff
-  lines** (excluding lockfiles/generated files); half at small, double at
+  lines** (non-test lines: lockfiles/generated files and tests/fixtures are
+  counted apart, never capped); half at small, double at
   huge. Every other priced role (tester, planner, researcher, the four judges,
   security-reviewer, auditor, uiux, wave-runner, merger, scribe) has its own
-  per-tier token cap in `budgets.yml`. Hitting either is not a failure —
-  the coder stops, reports what's done, and the task returns to the planner
-  for re-scoping (`budget-exceeded`, no retry at the same scope).
+  per-tier token cap in `budgets.yml`. Hitting the token cap is not a
+  failure — the coder stops, reports what's done, and the task returns to the
+  planner for re-scoping (`budget-exceeded`, no retry at the same scope). A
+  diff-cap overrun is not a stop: the gate records it, the coder finishes and
+  reports the measured lines in its hand-back notes.
 - **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
   graph, not by a worker count: disjoint claims run in parallel, overlapping
   claims get a dependency edge and run serially. Hundreds of concurrent workers

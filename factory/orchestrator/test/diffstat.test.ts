@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DiffstatError, isExcludedDiffPath, measureDiff, parseNumstat } from '../src/diffstat.js';
+import {
+  DiffstatError,
+  isExcludedDiffPath,
+  isTestDiffPath,
+  measureDiff,
+  parseNumstat,
+} from '../src/diffstat.js';
 
 /** `git diff --numstat -z` records, NUL-separated, exactly as git emits them. */
 function numstat(...records: string[]): string {
@@ -68,6 +74,47 @@ describe('isExcludedDiffPath (P9-18)', () => {
   });
 });
 
+describe('isTestDiffPath', () => {
+  it.each([
+    'src/parse.test.ts',
+    'src/parse.spec.tsx',
+    'pkg/parse_test.go',
+    'tests/test_parse.py',
+    'lib/parse_test.py',
+    'spec/parse_spec.rb',
+    'src/test/java/ParseTest.java',
+    'src/main/java/ParseTests.java',
+    'Parse.Tests/ParseTests.cs',
+    'test/helper.ts',
+    'ui/e2e/flow.ts',
+    'src/__tests__/a.ts',
+    'src/fixtures/big.json',
+    'src/__fixtures__/a.json',
+    'pkg/testdata/in.txt',
+    'ui/e2e/__screenshots__/home.png',
+    'src/__snapshots__/a.snap',
+    'src/__mocks__/fs.ts',
+  ])('treats %s as a test or fixture', (p) => {
+    expect(isTestDiffPath(p)).toBe(true);
+  });
+
+  it.each([
+    'src/parse.ts',
+    'factory/specs/x/plan-v1.json',
+    'docs/specs/a.md',
+    'specs/epic.md',
+    'src/latest.ts',
+    'src/contest.ts',
+    'src/testing-utils.ts',
+  ])('treats %s as code or documents', (p) => {
+    expect(isTestDiffPath(p)).toBe(false);
+  });
+
+  it('lets excluded win: a lockfile under test/ is still excluded, not a test', () => {
+    expect(isExcludedDiffPath('test/pnpm-lock.yaml')).toBe(true);
+  });
+});
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
@@ -123,6 +170,44 @@ describe('measureDiff (P9-18, real git)', () => {
     const lock = measured.files.find((f) => f.path === 'pnpm-lock.yaml');
     expect(lock).toMatchObject({ added: 400, excluded: true });
     expect(measured.excludedLines).toBe(1300);
+  });
+
+  it('counts test and fixture lines apart, so tests never push code over the cap', async () => {
+    await writeFile(path.join(repo, 'src.ts'), 'one\ntwo\nthree\nfour\n');
+    await mkdir(path.join(repo, 'test'));
+    await writeFile(path.join(repo, 'test', 'src.test.ts'), 't\n'.repeat(500));
+    await mkdir(path.join(repo, 'fixtures'));
+    await writeFile(path.join(repo, 'fixtures', 'data.json'), 'f\n'.repeat(70));
+    await writeFile(path.join(repo, 'test', 'pnpm-lock.yaml'), 'l\n'.repeat(30));
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'work with tests']);
+
+    const measured = measureDiff(repo);
+
+    expect(measured.diffLines).toBe(1);
+    expect(measured.testLines).toBe(570);
+    expect(measured.excludedLines).toBe(30);
+    expect(measured.files.find((f) => f.path === 'test/src.test.ts')).toMatchObject({
+      test: true,
+      excluded: false,
+    });
+    expect(measured.files.find((f) => f.path === 'src.ts')).toMatchObject({ test: false });
+    expect(measured.files.find((f) => f.path === 'test/pnpm-lock.yaml')).toMatchObject({
+      test: false,
+      excluded: true,
+    });
+  });
+
+  it('leaves a binary test file off the unmeasured list: it is not capped', async () => {
+    await mkdir(path.join(repo, 'e2e'));
+    await writeFile(path.join(repo, 'e2e', 'home.png'), 'png\u0000data\n');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'screenshot']);
+
+    const measured = measureDiff(repo);
+
+    expect(measured.files).toMatchObject([{ path: 'e2e/home.png', binary: true, test: true }]);
+    expect(measured.unmeasuredFiles).toEqual([]);
   });
 
   it('measures against an explicit base ref when one is given', async () => {

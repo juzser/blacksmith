@@ -38,8 +38,9 @@
 #     measured yet, and what the dispatch harness hands a CLI turn as its
 #     `cap_tokens`.
 #   * a task's `diff_lines` — compared at the gate against a real
-#     `git diff --numstat` (src/diffstat.ts), lockfiles and generated output
-#     excluded.
+#     `git diff --numstat` (src/diffstat.ts), lockfiles, generated output and
+#     test/fixture files excluded (tests are reported as `testLines`, never
+#     capped).
 #   * `escalation_ladder.rungs[].failed_rounds` — counted from `gate-outcome`
 #     events by `bs escalation check` (src/escalation.ts), which asserts the
 #     rung's `enforce` obligation against what the log shows happened next.
@@ -229,9 +230,10 @@ task:
                              # still refused — the schema requires that field,
                              # so its absence is a plan that never passed
                              # `bs plan validate`.
-    cap_diff_lines: 700      # excludes lockfiles/generated files. Measured
-                             # p50 316 / p90 727 lines (was 400); small 350,
-                             # huge 1400.
+    cap_diff_lines: 700      # non-test lines; lockfiles/generated files and
+                             # tests/fixtures are counted apart, never capped.
+                             # Measured p50 316 / p90 727 lines (was 400);
+                             # small 350, huge 1400.
   tester:
     cap_tokens: 60000        # p90 55k
   planner:

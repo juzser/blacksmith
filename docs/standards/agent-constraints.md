@@ -36,10 +36,12 @@
   220k at medium, half at small, double at huge). Hitting the cap is not failure — the coder
   stops, reports what's done, and the task returns to the planner for
   re-scoping (`budget-exceeded`, no retry at the same scope).
-- **Diff cap: ≤700 changed lines** per medium-tier task (350 small, 1400
-  huge), excluding lockfiles/generated
-  files. Projected overrun → stop and return to planner to split; a merged
-  diff over cap fails the gate.
+- **Diff cap: ≤700 changed non-test lines** per medium-tier task (350 small,
+  1400 huge). Lockfiles/generated files and tests/fixtures are counted apart
+  and never capped. An overrun is recorded and reported, never a stop and
+  never a gate failure: the coder finishes the acceptance criteria, never
+  thins a test to fit, and reports the measured lines in its hand-back notes
+  so the planner can re-size.
 - **Strict YAGNI.** Code exactly the acceptance criteria. A new abstraction
   needs ≥2 real call sites within the same epic; no config options, generics,
   layers, or extension points the spec didn't ask for; new patterns must come

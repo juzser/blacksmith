@@ -170,9 +170,11 @@ export interface BudgetCheck {
   overruns: BudgetOverrun[];
   /** From the result's token_usage — real spend, not the plan's estimate. */
   tokensUsed?: number;
-  /** Authored lines changed; absent when the diff could not be measured. */
+  /** Authored non-test lines changed (what the cap is about); absent when the diff could not be measured. */
   diffLines?: number;
   baseRef?: string;
+  /** Test and fixture lines, counted apart and never capped. */
+  testLines?: number;
   excludedLines?: number;
   /**
    * Counted paths git gave no lines for, present only when there are any. A
@@ -1446,6 +1448,7 @@ function runBudgetCheck(input: GateInput): BudgetCheck {
       ...(tokensUsed !== undefined && { tokensUsed }),
       diffLines: measured.diffLines,
       baseRef: measured.baseRef,
+      testLines: measured.testLines,
       excludedLines: measured.excludedLines,
       ...(measured.unmeasuredFiles.length > 0 && { unmeasuredFiles: measured.unmeasuredFiles }),
     };

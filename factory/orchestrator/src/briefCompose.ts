@@ -426,7 +426,11 @@ export async function composeBrief(
     'limits',
     [
       ...(budget.tokens !== undefined ? [`Token cap: ${budget.tokens}`] : []),
-      ...(budget.diff_lines !== undefined ? [`Diff cap: ${budget.diff_lines} lines`] : []),
+      ...(budget.diff_lines !== undefined
+        ? [
+            `Diff cap: ${budget.diff_lines} non-test lines (test and fixture lines are counted apart, never capped)`,
+          ]
+        : []),
       `Turn budget: ${turns}`,
     ].join('\n'),
   );

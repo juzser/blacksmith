@@ -17,21 +17,31 @@ export interface DiffFileStat {
 export interface MeasuredDiffFile extends DiffFileStat {
   /** True when the file is a lockfile or generated output: reported, not counted. */
   excluded: boolean;
+  /**
+   * True when the file is a test or fixture (`isTestDiffPath`) and not excluded:
+   * counted in `testLines`, never in `diffLines`.
+   */
+  test: boolean;
 }
 
 export interface DiffMeasurement {
   /** The ref the diff was taken against — explicit or derived from the branch. */
   baseRef: string;
-  /** added + deleted over the counted files. This is the number a diff cap is about. */
+  /**
+   * added + deleted over the non-test, non-excluded files. This is the number a
+   * diff cap is about: tests and fixtures never count against it.
+   */
   diffLines: number;
+  /** added + deleted over the test and fixture files, reported apart and never capped. */
+  testLines: number;
   /** added + deleted over the excluded files, so the omission is auditable. */
   excludedLines: number;
   /**
-   * Counted paths git gave no lines for. A binary file contributes 0 to
+   * Capped paths (not test, not excluded) git gave no lines for. A binary file contributes 0 to
    * `diffLines`, and that 0 means "could not count", not "did not change" —
    * `judges.ts` was 14 KB of TypeScript git called binary for six days
-   * (D-155). Excluded paths stay off this list: they were never counted, and
-   * `excludedLines` already accounts for them.
+   * (D-155). Excluded and test paths stay off this list: they are never
+   * capped, so a binary screenshot baseline is not "could not count".
    */
   unmeasuredFiles: string[];
   files: MeasuredDiffFile[];
@@ -145,6 +155,50 @@ export function isExcludedDiffPath(filePath: string): boolean {
   return segments.slice(0, -1).some((segment) => EXCLUDED_DIR_SEGMENTS.has(segment));
 }
 
+/**
+ * Test and fixture files. A cap that counts them pushes a coder toward fewer
+ * tests, so they are measured apart (`testLines`) and never capped.
+ *
+ * Blacksmith builds projects in any stack, so the rule is by convention, not
+ * by language: a test basename (`*.test.*`, `*.spec.*`, `*_test.*` for Go and
+ * Python, `test_*.py`, `*_spec.rb`, `*Test.java` / `*Tests.cs` and the like)
+ * or any directory named `test`, `tests`, `__tests__`, `e2e`, `fixtures`,
+ * `__fixtures__`, `testdata`, `__snapshots__`, `__screenshots__` or
+ * `__mocks__`.
+ *
+ * A `spec` or `specs` directory is deliberately NOT a test directory: here and
+ * in many projects it holds plans and documents. `*.spec.*` and `*_spec.rb`
+ * name test files by basename only.
+ */
+const TEST_BASENAME_PATTERNS: readonly RegExp[] = [
+  /\.(test|spec)\.[^.]+$/,
+  /_test\.[^.]+$/,
+  /^test_.+\.py$/,
+  /_spec\.rb$/,
+  /(Test|Tests)\.(java|kt|scala|groovy|cs)$/,
+];
+
+const TEST_DIR_SEGMENTS: ReadonlySet<string> = new Set([
+  'test',
+  'tests',
+  '__tests__',
+  'e2e',
+  'fixtures',
+  '__fixtures__',
+  'testdata',
+  '__snapshots__',
+  '__screenshots__',
+  '__mocks__',
+]);
+
+/** Whether a changed path is a test or fixture. Excluded paths win over this in `measureDiff`. */
+export function isTestDiffPath(filePath: string): boolean {
+  const segments = filePath.split('/').filter((s) => s.length > 0);
+  const basename = segments[segments.length - 1];
+  if (basename !== undefined && TEST_BASENAME_PATTERNS.some((re) => re.test(basename))) return true;
+  return segments.slice(0, -1).some((segment) => TEST_DIR_SEGMENTS.has(segment));
+}
+
 export interface MeasureDiffOptions {
   /**
    * Diff against this ref instead of deriving one. The merge queue knows the
@@ -196,23 +250,26 @@ export function measureDiff(
     maxBuffer: GIT_OUTPUT_MAX_BUFFER,
   });
 
-  const files: MeasuredDiffFile[] = parseNumstat(output).map((stat) => ({
-    ...stat,
-    excluded: isExcludedDiffPath(stat.path),
-  }));
+  const files: MeasuredDiffFile[] = parseNumstat(output).map((stat) => {
+    const excluded = isExcludedDiffPath(stat.path);
+    return { ...stat, excluded, test: !excluded && isTestDiffPath(stat.path) };
+  });
 
   let diffLines = 0;
+  let testLines = 0;
   let excludedLines = 0;
   const unmeasuredFiles: string[] = [];
   for (const file of files) {
-    if (file.excluded) excludedLines += file.added + file.deleted;
+    const lines = file.added + file.deleted;
+    if (file.excluded) excludedLines += lines;
+    else if (file.test) testLines += lines;
     else {
-      diffLines += file.added + file.deleted;
+      diffLines += lines;
       if (file.binary) unmeasuredFiles.push(file.path);
     }
   }
 
-  return { baseRef, diffLines, excludedLines, unmeasuredFiles, files };
+  return { baseRef, diffLines, testLines, excludedLines, unmeasuredFiles, files };
 }
 
 // Operator decision 2 (bs-rename): a task branch is cut under whichever
