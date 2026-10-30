@@ -161,7 +161,8 @@ with exactly these three keys:
   and blocks if one is elsewhere or absent; a directory is fine, so an html
   coverage report or a trace dir can be declared whole
 
-Also set `diff_lines_changed` (excluding lockfiles/generated files), and
+Also set `diff_lines_changed` (authored lines including tests, excluding
+lockfiles/generated files), and
 `notes` when you stopped early.
 
 **Never set `task_id`, `agent`, `provider`, `model_tier` or `token_usage`.**

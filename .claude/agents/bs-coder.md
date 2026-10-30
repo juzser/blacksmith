@@ -178,8 +178,9 @@ with exactly these three keys:
   gone by the time anyone reads the verdict, so evidence left there is not
   evidence
 
-Also set `diff_lines_changed` (excluding lockfiles/generated files), and
-`notes` when you stopped early.
+Also set `diff_lines_changed` (authored lines including tests, excluding
+lockfiles/generated files), and `notes` when you stopped early or the diff ran
+over its cap.
 
 **Never set `task_id`, `agent`, `provider`, `model_tier` or `token_usage`.**
 The dispatcher owns those five and merges them in before validating the file

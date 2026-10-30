@@ -78,22 +78,34 @@ describe('isTestDiffPath', () => {
   it.each([
     'src/parse.test.ts',
     'src/parse.spec.tsx',
+    'cypress/login.cy.ts',
     'pkg/parse_test.go',
     'tests/test_parse.py',
     'lib/parse_test.py',
+    'src/pkg/tests/test_x.py',
+    'src/pkg/conftest.py',
+    'app/tests.py',
     'spec/parse_spec.rb',
     'src/test/java/ParseTest.java',
-    'src/main/java/ParseTests.java',
+    'src/test/java/x/ParserTest.java',
+    'src/test/java/x/Helper.java',
+    'src/test/resources/a.json',
     'Parse.Tests/ParseTests.cs',
+    'Tests/ParserTests.swift',
+    'src/parseSpec.js',
     'test/helper.ts',
     'ui/e2e/flow.ts',
+    'ui/e2e/a.spec.ts',
+    'factory/orchestrator/test/helpers/repo.ts',
+    'packages/web/tests/x.ts',
     'src/__tests__/a.ts',
-    'src/fixtures/big.json',
     'src/__fixtures__/a.json',
     'pkg/testdata/in.txt',
     'ui/e2e/__screenshots__/home.png',
     'src/__snapshots__/a.snap',
     'src/__mocks__/fs.ts',
+    'test/fixtures/a.json',
+    'spec/fixtures/b.yml',
   ])('treats %s as a test or fixture', (p) => {
     expect(isTestDiffPath(p)).toBe(true);
   });
@@ -106,12 +118,18 @@ describe('isTestDiffPath', () => {
     'src/latest.ts',
     'src/contest.ts',
     'src/testing-utils.ts',
+    'src/features/test/TestPage.tsx',
+    'src/routes/tests/[id]/+page.svelte',
+    'src/crypto/e2e/session.ts',
+    'db/fixtures/seed.rb',
+    'app/fixtures/initial_data.json',
+    'api/openapi.spec.yaml',
+    'swagger.spec.json',
+    'src/ab_test.ts',
+    'src/main/java/com/x/ABTest.java',
+    'src/main/java/ParseTests.java',
   ])('treats %s as code or documents', (p) => {
     expect(isTestDiffPath(p)).toBe(false);
-  });
-
-  it('lets excluded win: a lockfile under test/ is still excluded, not a test', () => {
-    expect(isExcludedDiffPath('test/pnpm-lock.yaml')).toBe(true);
   });
 });
 
@@ -176,8 +194,8 @@ describe('measureDiff (P9-18, real git)', () => {
     await writeFile(path.join(repo, 'src.ts'), 'one\ntwo\nthree\nfour\n');
     await mkdir(path.join(repo, 'test'));
     await writeFile(path.join(repo, 'test', 'src.test.ts'), 't\n'.repeat(500));
-    await mkdir(path.join(repo, 'fixtures'));
-    await writeFile(path.join(repo, 'fixtures', 'data.json'), 'f\n'.repeat(70));
+    await mkdir(path.join(repo, 'test', 'fixtures'));
+    await writeFile(path.join(repo, 'test', 'fixtures', 'data.json'), 'f\n'.repeat(70));
     await writeFile(path.join(repo, 'test', 'pnpm-lock.yaml'), 'l\n'.repeat(30));
     git(repo, ['add', '-A']);
     git(repo, ['commit', '-q', '-m', 'work with tests']);
@@ -192,6 +210,8 @@ describe('measureDiff (P9-18, real git)', () => {
       excluded: false,
     });
     expect(measured.files.find((f) => f.path === 'src.ts')).toMatchObject({ test: false });
+    // The path rule alone calls this a test; measureDiff lets excluded win.
+    expect(isTestDiffPath('test/pnpm-lock.yaml')).toBe(true);
     expect(measured.files.find((f) => f.path === 'test/pnpm-lock.yaml')).toMatchObject({
       test: false,
       excluded: true,

@@ -65,7 +65,7 @@
         "diff_lines": {
           "type": "integer",
           "minimum": 1,
-          "description": "Compared at the gate against the measured git diff, excluding lockfiles and generated files."
+          "description": "Compared at the gate against the measured git diff, excluding lockfiles and generated files. Test and fixture files are counted apart, never capped (src/diffstat.ts isTestDiffPath)."
         },
         "max_turns": {
           "type": "integer",

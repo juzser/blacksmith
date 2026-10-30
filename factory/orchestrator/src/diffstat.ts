@@ -34,6 +34,8 @@ export interface DiffMeasurement {
   diffLines: number;
   /** added + deleted over the test and fixture files, reported apart and never capped. */
   testLines: number;
+  /** The paths counted as tests, so a wrong call is auditable. */
+  testFiles: string[];
   /** added + deleted over the excluded files, so the omission is auditable. */
   excludedLines: number;
   /**
@@ -157,46 +159,112 @@ export function isExcludedDiffPath(filePath: string): boolean {
 
 /**
  * Test and fixture files. A cap that counts them pushes a coder toward fewer
- * tests, so they are measured apart (`testLines`) and never capped.
+ * tests, so they are measured apart (`testLines`, `testFiles`) and never
+ * capped. Real code slipping out of the cap is the worse error, so every
+ * ambiguous name is narrowed; the gate lists the paths it called tests so a
+ * wrong call is auditable (D-157's way).
  *
- * Blacksmith builds projects in any stack, so the rule is by convention, not
- * by language: a test basename (`*.test.*`, `*.spec.*`, `*_test.*` for Go and
- * Python, `test_*.py`, `*_spec.rb`, `*Test.java` / `*Tests.cs` and the like)
- * or any directory named `test`, `tests`, `__tests__`, `e2e`, `fixtures`,
- * `__fixtures__`, `testdata`, `__snapshots__`, `__screenshots__` or
- * `__mocks__`.
+ * Blacksmith builds projects in any stack, so the rule is by convention:
+ *
+ * - Directories that only ever hold test support, at any depth: `__tests__`,
+ *   `__fixtures__`, `__snapshots__`, `__screenshots__`, `__mocks__`,
+ *   `testdata`.
+ * - `test`, `tests` (any case, so Swift's `Tests/` counts) and `e2e` are also
+ *   ordinary feature names (`src/features/test/`, `src/crypto/e2e/`), so they
+ *   count only when no earlier segment is a production source root (`src`,
+ *   `app`, `lib`, `main`, `source`, `sources`). The one exception is `test`
+ *   directly after `src` — the Maven/Gradle test root (`src/test/java/...`).
+ * - `fixtures` is also a seed-data name (`db/fixtures/`), so it counts only
+ *   under a test directory (an earlier `test`/`tests`/`e2e`/`spec`/`specs`/
+ *   `__tests__` segment).
+ * - Basenames: `.test.` / `.spec.` / `.cy.` on a code extension only (an
+ *   `openapi.spec.yaml` is a document); `_test.` only for the languages that
+ *   use it (go, py, exs, dart, c, cc, cpp) plus `_unittest.cc|cpp`;
+ *   `test_*.py`, `conftest.py`, `tests.py`, `*_spec.rb`, Jasmine `*Spec.js|ts`;
+ *   and the JVM/.NET/Swift/PHP names (`*Test|Tests|Spec.java|kt|scala|groovy|cs`,
+ *   `*Test(s).swift`, `*Test.php`), which only count when no segment is `main`
+ *   (Maven/Gradle production layout: `src/main/java/.../ABTest.java` is code).
  *
  * A `spec` or `specs` directory is deliberately NOT a test directory: here and
- * in many projects it holds plans and documents. `*.spec.*` and `*_spec.rb`
- * name test files by basename only.
+ * in many projects it holds plans and documents. It matters only as the
+ * "under a test directory" condition for `fixtures`.
  */
-const TEST_BASENAME_PATTERNS: readonly RegExp[] = [
-  /\.(test|spec)\.[^.]+$/,
-  /_test\.[^.]+$/,
-  /^test_.+\.py$/,
-  /_spec\.rb$/,
-  /(Test|Tests)\.(java|kt|scala|groovy|cs)$/,
-];
-
-const TEST_DIR_SEGMENTS: ReadonlySet<string> = new Set([
-  'test',
-  'tests',
+const DATA_EXTENSIONS: ReadonlySet<string> = new Set([
+  'yaml',
+  'yml',
+  'json',
+  'toml',
+  'xml',
+  'md',
+  'txt',
+  'csv',
+]);
+const UNAMBIGUOUS_TEST_DIRS: ReadonlySet<string> = new Set([
   '__tests__',
-  'e2e',
-  'fixtures',
   '__fixtures__',
-  'testdata',
   '__snapshots__',
   '__screenshots__',
   '__mocks__',
+  'testdata',
 ]);
+const AMBIGUOUS_TEST_DIRS: ReadonlySet<string> = new Set(['test', 'tests', 'e2e']);
+const PRODUCTION_ROOTS: ReadonlySet<string> = new Set([
+  'src',
+  'app',
+  'lib',
+  'main',
+  'source',
+  'sources',
+]);
+const FIXTURE_PARENT_DIRS: ReadonlySet<string> = new Set([
+  'test',
+  'tests',
+  'e2e',
+  'spec',
+  'specs',
+  '__tests__',
+]);
+const ALWAYS_TEST_BASENAMES: readonly RegExp[] = [
+  /_test\.(go|py|exs|dart|c|cc|cpp)$/,
+  /_unittest\.(cc|cpp)$/,
+  /^test_.+\.py$/,
+  /^conftest\.py$/,
+  /^tests\.py$/,
+  /_spec\.rb$/,
+  /Spec\.(js|ts)$/,
+];
+const NON_PRODUCTION_LAYOUT_BASENAMES: readonly RegExp[] = [
+  /(Test|Tests|Spec)\.(java|kt|scala|groovy|cs)$/,
+  /Tests?\.swift$/,
+  /Test\.php$/,
+];
 
 /** Whether a changed path is a test or fixture. Excluded paths win over this in `measureDiff`. */
 export function isTestDiffPath(filePath: string): boolean {
   const segments = filePath.split('/').filter((s) => s.length > 0);
   const basename = segments[segments.length - 1];
-  if (basename !== undefined && TEST_BASENAME_PATTERNS.some((re) => re.test(basename))) return true;
-  return segments.slice(0, -1).some((segment) => TEST_DIR_SEGMENTS.has(segment));
+  const dirs = segments.slice(0, -1);
+  const lower = dirs.map((d) => d.toLowerCase());
+
+  if (basename !== undefined) {
+    const dotted = /\.(test|spec|cy)\.([^.]+)$/.exec(basename);
+    if (dotted !== null && !DATA_EXTENSIONS.has((dotted[2] as string).toLowerCase())) return true;
+    if (ALWAYS_TEST_BASENAMES.some((re) => re.test(basename))) return true;
+    if (!dirs.includes('main') && NON_PRODUCTION_LAYOUT_BASENAMES.some((re) => re.test(basename))) {
+      return true;
+    }
+  }
+
+  return dirs.some((dir, i) => {
+    if (UNAMBIGUOUS_TEST_DIRS.has(dir)) return true;
+    const name = lower[i] as string;
+    if (AMBIGUOUS_TEST_DIRS.has(name)) {
+      if (name === 'test' && lower[i - 1] === 'src') return true;
+      return !lower.slice(0, i).some((earlier) => PRODUCTION_ROOTS.has(earlier));
+    }
+    if (name === 'fixtures') return lower.slice(0, i).some((e) => FIXTURE_PARENT_DIRS.has(e));
+    return false;
+  });
 }
 
 export interface MeasureDiffOptions {
@@ -258,18 +326,21 @@ export function measureDiff(
   let diffLines = 0;
   let testLines = 0;
   let excludedLines = 0;
+  const testFiles: string[] = [];
   const unmeasuredFiles: string[] = [];
   for (const file of files) {
     const lines = file.added + file.deleted;
     if (file.excluded) excludedLines += lines;
-    else if (file.test) testLines += lines;
-    else {
+    else if (file.test) {
+      testLines += lines;
+      testFiles.push(file.path);
+    } else {
       diffLines += lines;
       if (file.binary) unmeasuredFiles.push(file.path);
     }
   }
 
-  return { baseRef, diffLines, testLines, excludedLines, unmeasuredFiles, files };
+  return { baseRef, diffLines, testLines, testFiles, excludedLines, unmeasuredFiles, files };
 }
 
 // Operator decision 2 (bs-rename): a task branch is cut under whichever

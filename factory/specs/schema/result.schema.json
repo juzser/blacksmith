@@ -83,7 +83,7 @@
     "diff_lines_changed": {
       "type": "integer",
       "minimum": 0,
-      "description": "Excludes lockfiles/generated files, per the coder diff cap (agent-constraints.md)."
+      "description": "Authored lines changed, including tests; excludes lockfiles/generated files."
     },
     "notes": {
       "type": "string",

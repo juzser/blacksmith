@@ -122,7 +122,10 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       names the counted paths git gave no
                   #                       lines for, so a cap that passed on a
                   #                       binary file's zero is auditable
-                  #                       (D-157)
+                  #                       (D-157). "testLines" and
+                  #                       "testFiles" report the test and
+                  #                       fixture lines counted apart from the
+                  #                       cap, and which paths they were
                   # testgate-result     — check-command run (test gate)
                   # coverage-evidence   — the numbers behind the green: which
                   #                       subject files the coverage summary

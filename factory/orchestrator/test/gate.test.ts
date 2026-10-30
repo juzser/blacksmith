@@ -2419,8 +2419,13 @@ describe('gate.ts budget check (P9-18)', () => {
       overruns: [],
       diffLines: 6,
       testLines: 300,
+      testFiles: ['test/src.test.ts'],
     });
-    expect(await budgetEvent()).toMatchObject({ diffLines: 6, testLines: 300 });
+    expect(await budgetEvent()).toMatchObject({
+      diffLines: 6,
+      testLines: 300,
+      testFiles: ['test/src.test.ts'],
+    });
   });
 
   // D-157. A 400-line source change lands in a file that carries a NUL byte

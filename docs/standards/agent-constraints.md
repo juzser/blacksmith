@@ -67,7 +67,7 @@
   ladder made reachable from inside a task: without it a wrong criterion has
   only two outcomes, a worker quietly widening it or a coder bounced a defect
   it has nothing to fix (D-33).
-- **Enforcement:** token/diff caps enforced by the loop runner (mechanical);
+- **Enforcement:** token cap enforced by the loop runner; diff cap measured and recorded by the gate (`budget-check-result`), never enforced;
   YAGNI enforced by the reviewer's `over-engineering` lens — findings are
   **`S3-minor`** (waiver batch, with a proposed simplification) and escalate
   to `S2-major` via the same-mistake rule once a matching lesson is approved.
