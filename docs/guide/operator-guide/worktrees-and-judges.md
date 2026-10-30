@@ -379,6 +379,8 @@ command builds the whole brief, and the playbooks call it for every dispatch:
 bs brief compose --role coder --session <session-id> \
   --task epic-1/task-1 --plan factory/specs/active/epic-1/plan-v1.json \
   --worktree /abs/path/.wt/my-project/task-1 --branch bs/epic-1/task-1 \
+  --provider claude --model-tier mid --base bs/epic-1/integration \
+  --checks /abs/path/checks.json --work-root /abs/path/work-root \
   --out state/results/task-1.coder-brief.md
 ```
 
@@ -391,7 +393,7 @@ which it withheld, the finding ids, and the bytes in each section.
  "lessons_spliced":["lesson-raised-3b5746704cfc","…"],
  "lessons_withheld":[{"lesson_id":"lesson-raised-53d48e95c31f","error_class":"economy.budget-exceeded"},"…"],
  "warnings":[],"finding_ids":[],
- "sections":{"header":323,"spec":4704,"claims":215,"limits":54,"epic_spec":119,"lessons":3474,"findings":744,"return_discipline":823,"envelope":121},
+ "sections":{"header":323,"spec":4704,"claims":215,"limits":54,"epic_spec":119,"lessons":3474,"findings":744,"return_discipline":823,"envelope":121,"preflight":590,"gate_checks":190},
  "total_bytes":10594}
 ```
 
@@ -406,15 +408,32 @@ fields the dispatcher stamps and the agent must not write. A judge role also
 takes `--artifact`, and its brief carries the `Declared artifact:` line §3c
 asks for; a coder's never does.
 
+A coder, tester or grader brief also takes the values its hand-back preflight
+line needs: `--provider`, `--model-tier`, `--base` (the coder), `--checks` (the
+file `gate run` takes) and `--work-root` (the workRoot `bs init` printed, the
+same value as wave.md steps 5 and 7). Its `preflight` section follows
+`envelope`: for a coder or tester the `Result file:` line
+(`<work-root>/state/results/<task-id>.json`, and `.tester.json` for the
+tester), then the role's `bs results check` line with every value filled and
+shell-quoted. A coder or tester brief also gets a `gate_checks` section with
+each check's command verbatim, a check the gate treats as heavy marked
+`(heavy)`.
+
 It refuses rather than guesses: a worktree role with no `--worktree`
-(`brief.worktree-required`), a task the plan does not hold
-(`brief.task-not-in-plan`), a judge with no `--artifact`
+(`brief.worktree-required`), a task that neither the plan nor the log's follow-up register holds (`brief.task-not-in-plan`), a judge with no `--artifact`
 (`brief.artifact-required`), and a `--turns` that differs from the template
-(`brief.turns-mismatch`) each fail by name. What it writes passes
-`bs dispatch lint` as written:
+(`brief.turns-mismatch`) each fail by name. A follow-up (`<epic>/followup-<fp8>`, minted by `bs findings raise` and recorded only as a `task-added` event) is in no plan, so compose composes a follow-up from its `task-added` record, with its own findings as scope: a `scope` section between `<!-- BEGIN FOLLOW-UP SCOPE -->` and `<!-- END FOLLOW-UP SCOPE -->` holds its open findings, one line of JSON each, and the manifest lists their ids as `scope_finding_ids`. A follow-up with no open finding, or with claims that are not a list of non-empty strings, is refused as `brief.invalid-value`. A coder, tester or grader brief
+without those values fails as `brief.preflight-values-required`, a value it
+cannot write (a provider outside the taxonomy, a relative `--work-root`, a
+control character, a `<...>` token, a check with no runnable `cmd`) as
+`brief.invalid-value`, and a brief the lint would refuse as
+`brief.preflight-unlintable`. `bs dispatch lint` exits 1 on a coder, tester or
+grader brief whose line is missing, ambiguous, for another task or role, or
+still holds a placeholder, and on a coder or tester brief that names no gate
+check. What compose writes passes `bs dispatch lint` as written:
 
 ```json
-{"turns":{"status":"ok","stated":150,"template":150},"artifact":{"status":"not-applicable","expected_line":null,"declared_line":null},"exitCode":0}
+{"turns":{"status":"ok","stated":150,"template":150},"artifact":{"status":"not-applicable","expected_line":null,"declared_line":null},"preflight":{"status":"ok","line":"bs results check epic-1/task-1 --as coder …","gate_checks":2},"exitCode":0}
 ```
 
 **The hook holds a marked brief to its role.** The marker is also what the

@@ -1207,6 +1207,11 @@ describe('starting, reporting and stopping', () => {
   // detached one wrote a `daemon.log` with nothing in it.
   it('hands each report to onTick before the sleep, and keeps none of them', async () => {
     const stateDir = stateDirOf(dir);
+    writeFileSync(
+      path.join(stateDir, 'sess-a.jsonl'),
+      `${JSON.stringify(record('sess-a', 'session-start', {}))}\n`,
+      'utf8',
+    );
     const order: string[] = [];
     const seen: TickReport[] = [];
     let ticks = 0;
@@ -1234,6 +1239,19 @@ describe('starting, reporting and stopping', () => {
     // interval late is a watcher reporting a factory that has moved on.
     expect(order).toEqual(['tick', 'sleep', 'tick', 'sleep', 'tick', 'sleep']);
     expect(seen).toHaveLength(3);
+    // Each is a whole TickReport, not a fragment: the CLI prints these lines
+    // and a reader parses `sessions` and `findings` off every one.
+    // Every tick, the last included, carries the session the log holds and
+    // the same two findings; only the first sees them for the first time.
+    seen.forEach((report, i) => {
+      expect(report.sessions).toEqual(['sess-a']);
+      expect(
+        report.findings.map((f) => ({ kind: f.kind, sessionId: f.sessionId, isNew: f.isNew })),
+      ).toEqual([
+        { kind: 'budget', sessionId: 'sess-a', isNew: i === 0 },
+        { kind: 'growth-review', sessionId: null, isNew: i === 0 },
+      ]);
+    });
     // And what comes back is a count and the last report, not the three. A
     // process meant to run for weeks cannot hold every tick it ever ran: at
     // the default interval that array is ~290 reports a day, forever.

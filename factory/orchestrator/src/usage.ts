@@ -484,7 +484,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<prompt-file>',
     flags: '--role <role> --task <id> --session <id> [--agents-dir <dir>] [--state-dir <dir>]',
     summary:
-      "Check a composed dispatch prompt's stated turn budget against the role template's maxTurns, and a judge prompt's declared-artifact line against the ledger. Exit 1 on a violation OR an unverifiable answer. `-` reads stdin.",
+      "Check a composed dispatch prompt's stated turn budget against the role template's maxTurns, and a judge prompt's declared-artifact line against the ledger, and a coder, tester or grader prompt's preflight line. Exit 1 on a violation OR an unverifiable answer. `-` reads stdin.",
   },
   {
     command: 'tester check',
@@ -621,6 +621,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: `--task <task-id> --result <result.json> [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--worktree <dir>] ${EVENTS_DIR}`,
     summary:
       "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. --worktree records that worktree's HEAD and the Result's screenshot artifacts, the freshness evidence the uiux gate stage reads back. Exit 1 when blocked.",
+  },
+  {
+    command: 'results check',
+    positionals: '<task-id>',
+    flags: `--as <coder|tester|grader|gate> [--result <result.json>] [--worktree <dir>] [--base <ref>] [--plan <file>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--checks <checks.json>] [--project <dir>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--run-all] ${EVENTS_DIR}`,
+    summary:
+      "The gate's paperwork before hand-back, read-only: the same stage checks, none of the tests, and nothing written. --as coder takes --result and --worktree [--base]; --as tester takes --result and --plan; --as grader takes --grader; --as coder and --as tester also take [--agent --provider --model-tier], --as grader refuses them; all three take [--artifacts-dir] (under --as grader it only sets the reported artifact_home, because the grader stage reads no artifact) and the session flags where they read them, and refuse the gate-only flags (--checks, --run-all, --evidence, --found-by, --found-by-provider, --findings, --no-findings, --uiux-visual, --lessons). --as gate takes the `gate run` line verbatim, reads every file on it, dry-runs the judge closes it would make, includes the uiux stage, and runs no check. Exit 1 when blocked.",
   },
   {
     command: 'uiux check',
@@ -825,8 +832,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'brief compose',
     positionals: '',
     flags:
-      '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--out <file>] [--state-dir <dir>]',
-    summary: 'Compose one dispatch brief; --out writes it plus <out>.manifest.json.',
+      '--role <role> --session <id> [--task <task-id>] [--epic <epic-id>] [--plan <file>] [--specs-dir <dir>] [--worktree <dir>] [--branch <name>] [--turns <n>] [--artifact <file>] [--provider <name>] [--model-tier <tier>] [--base <ref>] [--checks <file>] [--work-root <dir>] [--out <file>] [--state-dir <dir>]',
+    summary:
+      'Compose one dispatch brief; --task may name a follow-up the log added. A coder, tester or grader brief carries its filled preflight line; --out writes it plus <out>.manifest.json.',
   },
   {
     command: 'playbook slice',

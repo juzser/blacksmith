@@ -1,17 +1,22 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { templateFileFor } from '../src/agentNames.js';
+import { readTemplateMaxTurns } from '../src/agentsSync.js';
+import { composeBrief } from '../src/briefCompose.js';
 // TDD red step, observed and recorded verbatim before this module existed:
 //   Error: Cannot find module '.../factory/orchestrator/src/dispatchLint.js'
 //   imported from '.../factory/orchestrator/test/dispatchLint.test.ts'
 // Everything below is the green step, against the module written to satisfy it.
 import {
+  GATE_CHECKS_HEADING,
   JUDGE_ROLES,
   lintDispatchPrompt,
   parseDeclaredArtifactLine,
   parseStatedTurns,
+  shellQuote,
 } from '../src/dispatchLint.js';
 import { appendEvent } from '../src/events.js';
 import { recordJudgeDispatch } from '../src/judges.js';
@@ -328,7 +333,13 @@ describe('lintDispatchPrompt — declared artifact', () => {
 
   it('is "not-applicable" and exits 0 for a coder prompt with no artifact line', async () => {
     const report = await lintDispatchPrompt({
-      prompt: 'Turn budget: 40',
+      prompt: [
+        'Turn budget: 40',
+        'bs results check epic-1/task-1 --as coder --result /w/r.json --agent coder --provider claude --model-tier mid --worktree /w/wt --base main --artifacts-dir /w/a',
+        GATE_CHECKS_HEADING,
+        '- unit:',
+        '    run-the-suite',
+      ].join('\n'),
       role: 'coder',
       taskId: 'epic-1/task-1',
       sessionId,
@@ -399,5 +410,173 @@ describe('drift guard — dispatch.md example lines parse', () => {
     expect(artifactMatch, 'dispatch.md names no example "Declared artifact:" line').not.toBeNull();
     expect(parseStatedTurns(turnMatch?.[0] as string)).not.toBeNull();
     expect(parseDeclaredArtifactLine(artifactMatch?.[0] as string)).not.toBeNull();
+  });
+});
+
+// Task-8 close-review r2 (f-bs-gate-bounce/integration-fdeb317e): the preflight check.
+describe('lintDispatchPrompt preflight check', () => {
+  const LINE =
+    'bs results check epic-1/task-1 --as coder --result /w/r.json --agent coder --provider claude --model-tier mid --worktree /w/wt --base main --artifacts-dir /w/a';
+  const CHECKS = `${GATE_CHECKS_HEADING}\n- unit (heavy):\n    run-the-suite`;
+  const lint = (prompt: string, role = 'coder', taskId = 'epic-1/task-1') =>
+    lintDispatchPrompt({
+      prompt: `Turn budget: ${readTemplateMaxTurns(agentsDir, role)}\n\n${prompt}`,
+      role,
+      taskId,
+      sessionId,
+      agentsDir,
+      eventOpts: eventOpts(),
+    });
+
+  it('is ok with one filled line and a counted check, and exits 0', async () => {
+    const report = await lint(`${LINE}\n\n${CHECKS}`);
+    expect(report.preflight).toEqual({ status: 'ok', line: LINE, gate_checks: 1 });
+    expect(report.exitCode).toBe(0);
+  });
+
+  it('accepts a backticked line and the bare spelling of a qualified task id', async () => {
+    const report = await lint(`\`${LINE}\`\n\n${CHECKS}`, 'coder', 'task-1');
+    expect(report.preflight.status).toBe('ok');
+  });
+
+  it('reads a single-quoted path holding a space as one value', async () => {
+    const line = LINE.replace('--artifacts-dir /w/a', "--artifacts-dir '/w x/a'");
+    const report = await lint(`${line}\n\n${CHECKS}`);
+    expect(report.preflight.status).toBe('ok');
+  });
+
+  it('does not count a line quoted inside spec JSON or a lesson', async () => {
+    const quoted = `  "summary": "${LINE}",\n- lesson: ${LINE}`;
+    const report = await lint(`${quoted}\n\n${LINE}\n\n${CHECKS}`);
+    expect(report.preflight.status).toBe('ok');
+  });
+
+  it.each([
+    ['missing', () => CHECKS, 'missing'],
+    ['ambiguous', () => `${LINE}\n${LINE}\n\n${CHECKS}`, 'ambiguous'],
+    [
+      'mismatch (task)',
+      () => `${LINE.replace('epic-1/task-1', 'epic-1/task-2')}\n\n${CHECKS}`,
+      'mismatch',
+    ],
+    [
+      'mismatch (role)',
+      () => `${LINE.replace('--as coder', '--as tester')}\n\n${CHECKS}`,
+      'mismatch',
+    ],
+    [
+      'placeholder',
+      () => `${LINE.replace('--provider claude', '--provider <name>')}\n\n${CHECKS}`,
+      'placeholder',
+    ],
+    ['no heading', () => LINE, 'no-checks'],
+    ['check without a command', () => `${LINE}\n\n${GATE_CHECKS_HEADING}\n- unit:`, 'no-checks'],
+    [
+      'check with a blank command',
+      () => `${LINE}\n\n${GATE_CHECKS_HEADING}\n- unit:\n    `,
+      'no-checks',
+    ],
+  ])('is %s and exits 1', async (_label, build, status) => {
+    const report = await lint(build());
+    expect(report.preflight.status).toBe(status);
+    expect(report.exitCode).toBe(1);
+  });
+
+  it('counts only checks with a command', async () => {
+    const report = await lint(
+      `${LINE}\n\n${GATE_CHECKS_HEADING}\n- a:\n- b:\n    x\n    y\n- c:\n    `,
+    );
+    expect(report.preflight.gate_checks).toBe(1);
+  });
+
+  it('is not-applicable for reviewer and uiux, and a grader needs no gate checks', async () => {
+    for (const role of ['reviewer', 'uiux', 'spec-reviewer']) {
+      const report = await lint('nothing here', role);
+      expect(report.preflight).toEqual({ status: 'not-applicable', line: null, gate_checks: null });
+    }
+    const grader =
+      'bs results check epic-1/task-1 --as grader --grader /w/g.json --artifacts-dir /w/a';
+    const report = await lint(grader, 'grader');
+    expect(report.preflight).toEqual({ status: 'ok', line: grader, gate_checks: null });
+  });
+
+  it('shellQuote writes a plain value bare and quotes the rest, round-tripping through a shell', () => {
+    expect(shellQuote('/a/b-c_d.e:f@g%h+i=j,k')).toBe('/a/b-c_d.e:f@g%h+i=j,k');
+    for (const value of ["it's", 'a b', '$x', '']) {
+      const out = spawnSync('/bin/sh', ['-c', `printf %s ${shellQuote(value)}`], {
+        encoding: 'utf8',
+      });
+      expect(out.stdout).toBe(value);
+    }
+  });
+});
+
+describe('lintDispatchPrompt on composed briefs', () => {
+  const realAgents = path.join(REPO_ROOT, '.claude', 'agents');
+  const compose = async (summary: string, taskId: string, epicId?: string) => {
+    const plan = path.join(stateDir, 'plan.json');
+    await writeFile(
+      plan,
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [
+          {
+            task_id: 'epic-1/task-1',
+            epic_id: 'epic-1',
+            plan_version: 1,
+            title: 't',
+            summary,
+            claims: ['src/a.ts'],
+            task_status: 'todo',
+            agent_role: 'coder',
+          },
+        ],
+        edges: [],
+      }),
+    );
+    const { text } = await composeBrief({
+      role: 'coder',
+      taskId,
+      ...(epicId ? { epicId } : {}),
+      planFile: plan,
+      sessionId,
+      worktree: path.join(stateDir, 'wt'),
+      specsDir: stateDir,
+      events: [],
+      now: new Date('2026-10-22T00:00:00.000Z'),
+      agentsDir: realAgents,
+      eventOpts: { stateDir },
+      provider: 'claude',
+      modelTier: 'mid',
+      base: 'main',
+      workRoot: path.join(stateDir, 'work'),
+      checks: [{ name: 'unit', cmd: 'run-the-suite' }],
+    });
+    return text;
+  };
+  const lint = (prompt: string) =>
+    lintDispatchPrompt({
+      prompt,
+      role: 'coder',
+      taskId: 'epic-1/task-1',
+      sessionId,
+      agentsDir: realAgents,
+      eventOpts: eventOpts(),
+    });
+
+  it('lints ok for a brief composed with the bare task id and --epic', async () => {
+    const report = await lint(await compose('Build it.', 'task-1', 'epic-1'));
+    expect(report.preflight.status).toBe('ok');
+    expect(report.exitCode).toBe(0);
+  });
+
+  it('lints ok when the spec quotes a full bs results check line mid-text', async () => {
+    const quoted =
+      'Run bs results check epic-1/task-1 --as coder --result r.json --agent coder after.';
+    const text = await compose(quoted, 'epic-1/task-1');
+    expect(text).toContain(quoted);
+    expect((await lint(text)).preflight.status).toBe('ok');
   });
 });

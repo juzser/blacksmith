@@ -19,7 +19,7 @@ tools, turn cap and lessons markers live, and an untyped agent has none of them.
 ## Carry into the prompt
 
 Build every brief with `bs brief compose --role <role> --session <id>
-[--task <task-id>] [--worktree <dir>] [--artifact <file>] --out <file>`. It
+[--task <task-id>] [--worktree <dir>] [--artifact <file>] [--provider <name> --model-tier <tier> --checks <file>] [--base <ref>] [--work-root <work-root>] --out <file>`. Compose requires `--work-root` for a coder, tester or grader; `--provider`, `--model-tier` and `--checks` for a coder or tester; `--base` for the coder. It
 writes the brief and a manifest beside it (`<file>.manifest.json`), and the
 brief passes `bs dispatch lint`. The list below is what compose emits, kept as
 the description of it — and the check for the one case it cannot cover.
@@ -53,6 +53,38 @@ lower — a missing turn-budget line, a template it cannot read at all, and a
 judge prompt missing or mismatching its artifact line are each a lint
 failure, not a maybe.
 
+A coder, tester or grader brief also carries the worker's filled hand-back
+preflight line, and a coder or tester brief the gate's check commands. Compose
+writes them from `--provider`, `--model-tier`, `--base` (the coder), `--checks`
+(the file `gate run` takes) and `--work-root <work-root>` (the workRoot `bs init`
+printed, the value of wave.md steps 5 and 7); it refuses a brief without them
+as `brief.preflight-values-required`, a value it cannot write as
+`brief.invalid-value`, and a brief the lint would refuse as
+`brief.preflight-unlintable`. `bs dispatch lint` exits 1 on a coder, tester or
+grader brief whose line is missing, ambiguous, for another task or role, or
+still holds a placeholder, and on a coder or tester brief that names no gate
+check. A hand-built brief satisfies it with the text compose writes: the
+`Result file:` line (coder and tester only), the heading, the role's line with
+every value filled and shell-quoted, then the heading of the gate checks and one
+`- <name>:` line per check (`- <name> (heavy):` for a check the gate treats as
+heavy) with each line of its command indented by four spaces.
+
+```text
+Result file: <work-root>/state/results/<task-id>.json
+Hand-back preflight line (run it as your last step, exactly as written):
+bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts
+
+Gate checks (run each over the whole project before you hand back; run a check marked heavy as your template's heavy-run section says, never bare):
+- unit (heavy):
+    <command line>
+- lint:
+    <command line>
+```
+
+The tester's file is `<work-root>/state/results/<task-id>.tester.json`, and a
+grader brief has the line only. Fill the `<...>` tokens above with the real
+values: a line that still holds one fails the lint.
+
 In this clone a PreToolUse guard also refuses, at the `Agent` call, a judge-role
 dispatch (`bs-reviewer`, `bs-verifier`, `bs-grader`, `bs-spec-reviewer`,
 `bs-security-reviewer`, `bs-auditor`, with or without the
@@ -85,15 +117,18 @@ claims (scribe, planner-as-judge) and only the unscoped lessons come back.
 
 **Which lessons are spliced.** `agent-role` and `claim-path` lessons always
 are. A `stack-wide`, `case-type` or `security` lesson carries an `error_class`
-and is spliced only when that class recurs (an `error-logged` event on at least
-3 distinct tasks in the last 30 days, store-wide) or repeats in the dispatch's
-own epic (at least one `error-logged` of the class; pass `--epic <epic>` when you run it by hand). The rest are withheld, and
+and is spliced only when that class recurs (an `error-logged` event or a blocked
+gate on at least 3 distinct tasks in the last 30 days, store-wide) or repeats in
+the dispatch's own epic (at least one such event of the class; pass `--epic <epic>` when you run it by hand). The rest are withheld, and
 the block's last line names each withheld class with its count and the command
 that reads it, `bs lessons for-dispatch <role> --class <group.class>`. A
 merge-queue failure, a worker that died or a judge turn that failed logs
 `error-logged` with its class, so later briefs in that epic splice that
-class's lessons by themselves; a gate `blocked` writes only `gate-outcome`
-and does not count yet. A security-reviewer brief withholds nothing. The `lessons`
+class's lessons by themselves. A blocked gate counts too: its `gate-outcome`
+counts under the class its reason maps to, or under the `error_class` the gate
+stamped on it (a slept run's `execution.env-failure`); a reason that maps to
+no class counts nowhere. A task counted both ways under one class counts once.
+A security-reviewer brief withholds nothing. The `lessons`
 array is left out of the output unless you pass `--full`.
 
 The topology is flat and deliberate: **one block, spliced once at dispatch**,
@@ -135,7 +170,8 @@ when nothing matches, and names any open finding it could not check at all
 
 ## Return discipline (agent-interviews.md M-6)
 
-A worker writes its full result to `state/results/<task-id>.json` and returns
+A worker writes its full result to `state/results/<task-id>.json` (the tester
+writes `state/results/<task-id>.tester.json`, never the coder's file) and returns
 **only** `{status, severity_counts, artifact_path}`. Prose returns are what
 actually drown an orchestrator: a wave of 200 workers costs 200 short lines
 this way, and you re-read the artifact when you need detail. Blacksmith
@@ -238,6 +274,8 @@ memory of its previous attempt and will happily report round 1 forever.
      grader starts that id at round 1 — the ledger's round counter is per
      `(task_id, role)`, and a new id has never opened a round.
   5. Gate with `--plan` naming the new plan version.
+
+  This re-scope path also answers a `grader-invalid` with no grader round left.
 
   A same-id re-dispatch of round 3 is never legal, superseded or not: the cap
   binds the id, and a kept-id supersede (same task_id, new claims/criteria)

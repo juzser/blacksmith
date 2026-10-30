@@ -207,7 +207,7 @@ function resolveTaxonomyAndSchemas(opts: PlanOpts): {
   return { taxonomy, schemas };
 }
 
-function planFilePath(epicId: string, version: number, opts: PlanOpts): string {
+export function planFilePath(epicId: string, version: number, opts: PlanOpts): string {
   const dir = opts.specsDir ?? SPECS_ACTIVE_DIR;
   return path.join(dir, epicId, `plan-v${version}.json`);
 }

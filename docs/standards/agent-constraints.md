@@ -234,7 +234,8 @@ M-3).
   `wave-runner` satisfies all three by construction: it is nobody's worker
   and nobody's finder.
 - **Return discipline is mandatory under uncapped fan-out.** Every worker
-  writes its full result to `state/results/<task-id>.json` and returns only
+  writes its full result to `state/results/<task-id>.json` (a tester to
+  `state/results/<task-id>.tester.json`) and returns only
   `{status, severity_counts, artifact_path}`. The dispatcher reads the file
   when it needs detail; a wave of 200 costs 200 short lines.
 - Return discipline is the answer to context pressure, **not** a concurrency

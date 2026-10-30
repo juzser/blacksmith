@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { constants as osConstants } from 'node:os';
+import { availableParallelism, loadavg, constants as osConstants } from 'node:os';
 import { BS_PREFIX, LEGACY_PREFIX } from './env.js';
 import { SmithError } from './errors.js';
 import { redactCredentials } from './git.js';
@@ -108,12 +108,69 @@ export interface RunOptions {
   runAll?: boolean;
   /** Lock knobs for tests; `run` passes `process.env` as the lock's env. */
   heavyLock?: Pick<HeavyLockOptions, 'lockDir' | 'pollMs' | 'maxWaitMs' | 'isPidAlive' | 'env'>;
+  /** Clock and load sources for the environment evidence; each defaults to the real one. */
+  environmentSources?: EnvironmentSources;
 }
 
 export interface RunResult {
   results: CheckResult[];
   pass: boolean;
+  /** One entry per entry of `results`, same order; `run` always sets it. */
+  environment?: CheckEnvironment[];
 }
+
+/** Where the environment evidence reads the machine from; tests inject these. */
+export interface EnvironmentSources {
+  /** Wall clock, ms. Default `Date.now`. */
+  wallMs?: () => number;
+  /** Monotonic clock, ms; stops while the machine is suspended. Default `process.hrtime`. */
+  monotonicMs?: () => number;
+  /** 1-minute load average. Default `os.loadavg()[0]`. */
+  load1m?: () => number;
+  /** Logical CPU count. Default `os.availableParallelism`. */
+  cpus?: () => number;
+}
+
+/**
+ * What the machine did while one check ran. Kept beside `CheckResult`, never
+ * inside it. `window: 'none'` means no command was spawned (the heavy-lock
+ * wait timed out): the clock fields are zero and both loads are one sample.
+ */
+export interface CheckEnvironment {
+  name: string;
+  window: 'command' | 'none';
+  wall_ms: number;
+  monotonic_ms: number;
+  /** `wall_ms - monotonic_ms`: time the machine spent suspended inside the window. */
+  clock_gap_ms: number;
+  load_1m_start: number;
+  load_1m_end: number;
+  cpus: number;
+}
+
+/**
+ * A clock gap this big inside a check's own process window means the machine
+ * slept. Node's monotonic clock (`process.hrtime`, libuv `uv_hrtime`) does not
+ * advance while the machine is suspended on macOS (`mach_absolute_time`) and
+ * Linux (`CLOCK_MONOTONIC`), while the wall clock does, so the gap measures
+ * time asleep and a check cannot cause it. 30 s is far above NTP slew and
+ * below any suspend worth naming. Where the monotonic clock counts suspend
+ * the gap reads about 0 and nothing is classified. Load is evidence only: a
+ * full suite raises it itself, so it must never classify.
+ */
+export const SLEEP_GAP_MS = 30_000;
+
+/** Whether one check's evidence shows the machine slept while its process ran. */
+export function sleptDuringCheck(entry: CheckEnvironment): boolean {
+  return entry.window === 'command' && entry.clock_gap_ms >= SLEEP_GAP_MS;
+}
+
+const realSources = (): Required<EnvironmentSources> => ({
+  wallMs: () => Date.now(),
+  monotonicMs: () => Number(process.hrtime.bigint() / 1_000_000n),
+  load1m: () => loadavg()[0] ?? 0,
+  cpus: () => availableParallelism(),
+});
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const TAIL_LINES = 50;
@@ -333,29 +390,87 @@ async function runHeavy(
   check: CheckCommand,
   opts: RunOptions,
   defaultTimeoutMs: number,
-): Promise<CheckResult> {
+  src: Required<EnvironmentSources>,
+): Promise<Measured> {
   const waitStart = Date.now();
   try {
     return await withHeavyLock(
       async (lease) => {
         const lock_wait_ms = Date.now() - waitStart;
         const env = opts.heavyLock?.env ?? process.env;
-        const result = await runOne(check, opts.cwd, defaultTimeoutMs, heavyChildEnv(env, lease));
-        return { ...result, lock_wait_ms };
+        const measured = await runMeasured(
+          check,
+          opts.cwd,
+          defaultTimeoutMs,
+          heavyChildEnv(env, lease),
+          src,
+        );
+        return { ...measured, result: { ...measured.result, lock_wait_ms } };
       },
       { ...opts.heavyLock, label: `gate-${check.name}`, cwd: opts.cwd },
     );
   } catch (err) {
     if (!(err instanceof SmithError) || err.code !== 'heavy.wait-timeout') throw err;
+    const load = src.load1m();
     return {
-      name: check.name,
-      pass: false,
-      exitCode: 1,
-      tail: err.message,
-      reason: 'heavy.wait-timeout',
-      lock_wait_ms: Date.now() - waitStart,
+      result: {
+        name: check.name,
+        pass: false,
+        exitCode: 1,
+        tail: err.message,
+        reason: 'heavy.wait-timeout',
+        lock_wait_ms: Date.now() - waitStart,
+      },
+      environment: {
+        name: check.name,
+        window: 'none',
+        wall_ms: 0,
+        monotonic_ms: 0,
+        clock_gap_ms: 0,
+        load_1m_start: load,
+        load_1m_end: load,
+        cpus: src.cpus(),
+      },
     };
   }
+}
+
+interface Measured {
+  result: CheckResult;
+  environment: CheckEnvironment;
+}
+
+/**
+ * `runOne` inside the measuring window: it opens right before the command is
+ * spawned and closes when its process does, so a heavy check's lock wait and
+ * anything queued behind it are outside.
+ */
+async function runMeasured(
+  check: CheckCommand,
+  cwd: string,
+  defaultTimeoutMs: number,
+  childEnv: NodeJS.ProcessEnv,
+  src: Required<EnvironmentSources>,
+): Promise<Measured> {
+  const load_1m_start = src.load1m();
+  const wall0 = src.wallMs();
+  const mono0 = src.monotonicMs();
+  const result = await runOne(check, cwd, defaultTimeoutMs, childEnv);
+  const wall_ms = src.wallMs() - wall0;
+  const monotonic_ms = src.monotonicMs() - mono0;
+  return {
+    result,
+    environment: {
+      name: check.name,
+      window: 'command',
+      wall_ms,
+      monotonic_ms,
+      clock_gap_ms: wall_ms - monotonic_ms,
+      load_1m_start,
+      load_1m_end: src.load1m(),
+      cpus: src.cpus(),
+    },
+  };
 }
 
 /**
@@ -366,20 +481,34 @@ async function runHeavy(
  */
 export async function run(checks: CheckCommand[], opts: RunOptions): Promise<RunResult> {
   const defaultTimeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const src = { ...realSources(), ...opts.environmentSources };
   const results: CheckResult[] = [];
+  const environment: CheckEnvironment[] = [];
 
   for (const check of checks) {
-    const result = isHeavyCheck(check)
-      ? await runHeavy(check, opts, defaultTimeoutMs)
-      : {
-          ...(await runOne(check, opts.cwd, defaultTimeoutMs, projectCommandEnv(process.env))),
-          lock_wait_ms: 0,
-        };
-    results.push(result);
-    if (!result.pass && !opts.runAll) break;
+    let measured: Measured;
+    if (isHeavyCheck(check)) {
+      measured = await runHeavy(check, opts, defaultTimeoutMs, src);
+    } else {
+      const m = await runMeasured(
+        check,
+        opts.cwd,
+        defaultTimeoutMs,
+        projectCommandEnv(process.env),
+        src,
+      );
+      measured = { ...m, result: { ...m.result, lock_wait_ms: 0 } };
+    }
+    results.push(measured.result);
+    environment.push(measured.environment);
+    if (!measured.result.pass && !opts.runAll) break;
   }
 
-  return { results, pass: results.length > 0 ? results.every((r) => r.pass) : true };
+  return {
+    results,
+    pass: results.length > 0 ? results.every((r) => r.pass) : true,
+    environment,
+  };
 }
 
 /**

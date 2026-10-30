@@ -87,22 +87,49 @@ function dispatchIndex(
   return found;
 }
 
+/** One screenshot of a tester's set: its declared path and the viewport and theme its file name carries. */
+interface ScreenshotEntry {
+  path: string;
+  viewport: string;
+  theme: string;
+}
+
 /**
- * `checkUiux`: the one function both the gate stage and `bs uiux check`
- * (the preflight verb, D4) call, so the two can never disagree about the same
- * fixture. Reads the lineage once and folds both judge turns and the tester's
- * freshness record out of it — no separate dispatch, no separate store.
+ * The screenshot-set test, shared by the gate's uiux stage and the tester's own
+ * pre-hand-back check: all four REQUIRED_COMBOS are present, and every shot
+ * resolves to a file inside the task's artifact home.
  */
-export async function checkUiux(
+export function screenshotSetComplete(
+  taskId: string,
+  shots: readonly ScreenshotEntry[],
+  artifactsDir?: string,
+): boolean {
+  const haveCombos = new Set(shots.map((s) => `${s.viewport}:${s.theme}`));
+  const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
+    haveCombos.has(`${viewport}:${theme}`),
+  );
+  const allOnDisk = shots.every((s) => resolveArtifactPath(taskId, s.path, artifactsDir) !== null);
+  return allCombosPresent && allOnDisk;
+}
+
+/**
+ * The uiux verdict over a given event list, with no I/O but the on-disk
+ * screenshot test. `alsoReported` names judge turns the caller is about to
+ * close: a turn that exists in the log counts as reported, one that was never
+ * dispatched stays missing. Nothing is closed or written here.
+ */
+export function evaluateUiux(
+  events: readonly StoredEvent[],
   input: UiuxCheckInput,
-  ctx: { sessionId: string },
-  opts: EventOpts = {},
-): Promise<UiuxCheckResult> {
-  const events = await readLineage(ctx.sessionId, opts);
+  alsoReported: readonly { role: string; kind?: string | null }[] = [],
+): UiuxCheckResult {
   const turns = foldJudgeTurns(events, input.taskId);
+  const isReported = (turn: { role: string; kind: string | null; reported: boolean }) =>
+    turn.reported ||
+    alsoReported.some((r) => r.role === turn.role && (r.kind ?? null) === turn.kind);
 
   const specTurn = turns.find((t) => t.role === UIUX_ROLE && t.kind === 'spec');
-  if (!specTurn?.reported) {
+  if (specTurn === undefined || !isReported(specTurn)) {
     return { outcome: 'blocked', reason: 'uiux-spec-missing' };
   }
 
@@ -111,14 +138,7 @@ export async function checkUiux(
     return { outcome: 'blocked', reason: 'screenshots-missing' };
   }
 
-  const haveCombos = new Set(tester.screenshots.map((s) => `${s.viewport}:${s.theme}`));
-  const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
-    haveCombos.has(`${viewport}:${theme}`),
-  );
-  const allOnDisk = tester.screenshots.every(
-    (s) => resolveArtifactPath(input.taskId, s.path, input.artifactsDir) !== null,
-  );
-  if (!allCombosPresent || !allOnDisk) {
+  if (!screenshotSetComplete(input.taskId, tester.screenshots, input.artifactsDir)) {
     return { outcome: 'blocked', reason: 'screenshots-missing' };
   }
 
@@ -131,9 +151,27 @@ export async function checkUiux(
     visualTurn === undefined
       ? -1
       : dispatchIndex(events, input.taskId, UIUX_ROLE, 'visual', visualTurn.round);
-  if (!visualTurn?.reported || !(visualDispatchIndex > tester.index)) {
+  if (
+    visualTurn === undefined ||
+    !isReported(visualTurn) ||
+    !(visualDispatchIndex > tester.index)
+  ) {
     return { outcome: 'blocked', reason: 'uiux-visual-missing' };
   }
 
   return { outcome: 'pass' };
+}
+
+/**
+ * `checkUiux`: the one function both the gate stage and `bs uiux check`
+ * (the preflight verb, D4) call, so the two can never disagree about the same
+ * fixture. Reads the lineage once and folds both judge turns and the tester's
+ * freshness record out of it — no separate dispatch, no separate store.
+ */
+export async function checkUiux(
+  input: UiuxCheckInput,
+  ctx: { sessionId: string },
+  opts: EventOpts = {},
+): Promise<UiuxCheckResult> {
+  return evaluateUiux(await readLineage(ctx.sessionId, opts), input);
 }

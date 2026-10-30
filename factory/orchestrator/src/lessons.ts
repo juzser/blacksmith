@@ -828,8 +828,9 @@ export interface DispatchLessonsOptions {
    */
   caseType?: string;
   /**
-   * `error-logged` events (lessonEvents.ts `readRecurrenceEvents`) the class
-   * rule counts. Omitted, there is no recurrence filter: every approved lesson
+   * The events (lessonEvents.ts `readRecurrenceEvents`) the class rule counts:
+   * `error-logged`, and a blocked `gate-outcome` under its reason's class or
+   * its stamped `error_class` (lessonRecurrence.ts `recurrenceClassOf`). Omitted, there is no recurrence filter: every approved lesson
    * for the role splices, as before the class rule, and no withheld line is
    * printed. `[]` is an empty store: only `agent-role` and `claim-path`
    * lessons splice, and the rest are withheld with the trailing line.

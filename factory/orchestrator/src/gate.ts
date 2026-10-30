@@ -1,13 +1,11 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
-import path from 'node:path';
 import { TASK_RESULT_EVENT_TYPE } from './agents-registry.js';
-import { type ArtifactDecl, type ArtifactIssue, checkArtifacts } from './artifacts.js';
+import type { ArtifactIssue } from './artifacts.js';
 import { type RoutedFinding, recordReattribution, routeFindings } from './attribution.js';
 import { readTokenUsage } from './budgetAlarm.js';
 import { type BudgetOverrun, checkTaskBudget, type TaskBudget } from './budgets.js';
 import type { ClaimedTask } from './claims.js';
-import { type CommitCertificate, certifyCommit } from './commit.js';
+import type { CommitCertificate } from './commit.js';
 import { type CoverageEvidence, collectCoverageEvidence } from './coverage.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { DiffstatError, measureDiff } from './diffstat.js';
@@ -21,8 +19,19 @@ import {
   transition,
 } from './findings.js';
 import { runGit } from './git.js';
-import { type JudgeTurn, outstandingJudges, readJudgeTurns } from './judges.js';
+import { type JudgeTurn, readJudgeTurns } from './judges.js';
 import { appendTracked, beginLineageRun, endLineageRun, readLineage } from './lineageSnapshot.js';
+import {
+  artifactsStage,
+  commitStage,
+  declaredArtifacts,
+  depsStage,
+  graderStage,
+  judgesStage,
+  resolveTaxonomyAndSchemas,
+  schemaStage,
+  screenshotsFromArtifacts,
+} from './paperwork.js';
 import type { JudgeBudget } from './providers/types.js';
 import {
   enabledExternalProviders,
@@ -33,17 +42,19 @@ import {
   runQuorumCase,
   type TriggerReason,
 } from './quorum.js';
-import {
-  type CompiledSchemaSet,
-  compileSchemas,
-  type ValidationIssue,
-  validateRecord,
-} from './schemas.js';
+import type { CompiledSchemaSet, ValidationIssue } from './schemas.js';
 import { canEscalate, decide, type LessonRule, type SeverityDecision } from './severity.js';
 import { type AddedTask, readAddedTasks } from './taskEvents.js';
 import { taskIdsMatch } from './taskId.js';
-import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
-import { type CheckCommand, type RunResult, run as runTestgate } from './testgate.js';
+import type { Taxonomy } from './taxonomy.js';
+import {
+  type CheckCommand,
+  type CheckEnvironment,
+  type EnvironmentSources,
+  type RunResult,
+  run as runTestgate,
+  sleptDuringCheck,
+} from './testgate.js';
 import { checkUiux, type UiuxBlockReason } from './uiuxGate.js';
 
 // No GateError: a gate failing is the gate working. Every outcome here comes
@@ -114,6 +125,8 @@ export interface GateInput {
   artifactsDir?: string;
   runAll?: boolean;
   timeoutMs?: number;
+  /** Clock and load sources for the testgate's environment evidence; real ones by default. */
+  environmentSources?: EnvironmentSources;
   crosscheck?: GateCrosscheckOptions;
   /**
    * The gated task's declared budget, straight from its plan entry (P9-18).
@@ -246,6 +259,13 @@ export type GateOutcome =
         | 'findings';
       testResult: RunResult | null;
       /**
+       * Set only on a `tests-failed` block whose failed check's own clock gap
+       * shows the machine slept: the taxonomy class `execution.env-failure`,
+       * with that check's evidence beside it. The block itself is unchanged.
+       */
+      error_class?: 'execution.env-failure';
+      environmentEvidence?: CheckEnvironment[];
+      /**
        * Why the result document failed its schema — inline, exactly as
        * `testResult` carries why the tests failed (P9-21). The block used to
        * name the reason and nothing else, so the one caller who could act on it
@@ -289,20 +309,6 @@ export type GateOutcome =
       /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
       event_id: string;
     };
-
-let cachedTaxonomy: Taxonomy | undefined;
-let cachedSchemas: CompiledSchemaSet | undefined;
-
-function resolveTaxonomyAndSchemas(opts: EventOpts): {
-  taxonomy: Taxonomy;
-  schemas: CompiledSchemaSet;
-} {
-  if (cachedTaxonomy === undefined) cachedTaxonomy = loadTaxonomy();
-  if (cachedSchemas === undefined) cachedSchemas = compileSchemas(cachedTaxonomy);
-  const taxonomy = opts.taxonomy ?? cachedTaxonomy;
-  const schemas = opts.schemas ?? cachedSchemas;
-  return { taxonomy, schemas };
-}
 
 async function emit(
   eventType: string,
@@ -447,23 +453,6 @@ export interface RecordTaskResultInput {
   worktreeDir?: string;
 }
 
-/** `name-desktop-light.png` and the three siblings a visual pass has to cover. */
-const SCREENSHOT_RE = /-(desktop|mobile)-(light|dark)\.png$/;
-
-function screenshotsFromArtifacts(
-  artifacts: readonly ArtifactDecl[],
-): { path: string; viewport: string; theme: string }[] {
-  const shots: { path: string; viewport: string; theme: string }[] = [];
-  for (const a of artifacts) {
-    const match = SCREENSHOT_RE.exec(a.path);
-    const viewport = match?.[1];
-    const theme = match?.[2];
-    if (viewport !== undefined && theme !== undefined)
-      shots.push({ path: a.path, viewport, theme });
-  }
-  return shots;
-}
-
 export type RecordTaskResultOutcome =
   | {
       outcome: 'recorded';
@@ -490,15 +479,9 @@ export async function recordTaskResult(
 ): Promise<RecordTaskResultOutcome> {
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
 
-  const schemaResult = validateRecord(schemas, taxonomy, 'result', input.result);
-  await emit(
-    'schema-check-result',
-    { valid: schemaResult.valid, errors: schemaResult.valid ? [] : schemaResult.errors },
-    input.taskId,
-    ctx,
-    opts,
-  );
-  if (!schemaResult.valid) {
+  const schemaResult = schemaStage(input.result, taxonomy, schemas);
+  await emit('schema-check-result', schemaResult.payload, input.taskId, ctx, opts);
+  if (!schemaResult.ok) {
     return {
       outcome: 'blocked',
       taskId: input.taskId,
@@ -514,8 +497,8 @@ export async function recordTaskResult(
   // the Result even when the artifact check below refuses it.
   const recorded = await recordResult(input.result, input.taskId, ctx, opts);
 
-  const artifacts = (input.result as { artifacts?: ArtifactDecl[] }).artifacts ?? [];
-  const artifactCheck = checkArtifacts(artifacts, {
+  const artifacts = declaredArtifacts(input.result) ?? [];
+  const artifactCheck = artifactsStage(artifacts, {
     taskId: input.taskId,
     artifactsDir: input.artifactsDir,
   });
@@ -528,13 +511,7 @@ export async function recordTaskResult(
       : {};
   await emit(
     'artifact-check-result',
-    {
-      ok: artifactCheck.ok,
-      checked: artifactCheck.checked,
-      home: artifactCheck.home,
-      issues: artifactCheck.issues,
-      ...freshness,
-    },
+    { ...artifactCheck.payload, ...freshness },
     input.taskId,
     ctx,
     opts,
@@ -545,7 +522,7 @@ export async function recordTaskResult(
       taskId: input.taskId,
       reason: 'artifacts-missing',
       schemaErrors: [],
-      artifactIssues: artifactCheck.issues,
+      artifactIssues: artifactCheck.check.issues,
     };
   }
 
@@ -720,18 +697,7 @@ async function crossCheckFinding(
   return overturned;
 }
 
-/** One row of the grader's rubric, once it has validated. */
-interface GradedCriterion {
-  criterion: string;
-  status: 'pass' | 'fail' | 'partial';
-  evidence: string;
-}
-
 type GraderCheck = { ok: true } | { ok: false; reason: 'grader-invalid' | 'grader-fail' };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Read the grader's rubric result and let it gate (D-34/P9-14). The grader
@@ -756,82 +722,10 @@ async function checkGraderVerdict(
   taxonomy: Taxonomy,
   schemas: CompiledSchemaSet,
 ): Promise<GraderCheck> {
-  const emitVerdict = (payload: Record<string, unknown>) =>
-    emit(
-      'grader-verdict',
-      {
-        run_status: null,
-        round: null,
-        overall: null,
-        failed_criteria: [],
-        errors: [],
-        ...payload,
-      },
-      taskId,
-      ctx,
-      opts,
-    );
-
-  if (!isRecord(verdictFile)) {
-    await emitVerdict({
-      verdict: 'invalid',
-      errors: [{ path: '/', message: 'grader verdict file is not a JSON object' }],
-    });
-    return { ok: false, reason: 'grader-invalid' };
-  }
-
-  const runStatus = verdictFile.run_status;
-  // `dead` is the grader's own word for "this task spec has no checkable
-  // acceptance criteria". Reported as its own verdict rather than as a missing
-  // `structured_output`, which is what it would otherwise look like.
-  if (runStatus === 'dead') {
-    await emitVerdict({ verdict: 'not-graded', run_status: runStatus });
-    return { ok: false, reason: 'grader-fail' };
-  }
-
-  const structured = verdictFile.structured_output;
-  if (!isRecord(structured)) {
-    await emitVerdict({
-      verdict: 'invalid',
-      run_status: typeof runStatus === 'string' ? runStatus : null,
-      errors: [
-        {
-          path: '/structured_output',
-          message:
-            'grader verdict must be at .structured_output (round, criteria, overall), per the grader Output contract',
-        },
-      ],
-    });
-    return { ok: false, reason: 'grader-invalid' };
-  }
-
-  const validation = validateRecord(schemas, taxonomy, 'grader-verdict', structured);
-  if (!validation.valid) {
-    await emitVerdict({
-      verdict: 'invalid',
-      run_status: typeof runStatus === 'string' ? runStatus : null,
-      errors: validation.errors,
-    });
-    return { ok: false, reason: 'grader-invalid' };
-  }
-
-  const criteria = structured.criteria as GradedCriterion[];
-  // A `fail` or `partial` criterion under an overall `pass` is the grader
-  // contradicting itself, and the per-criterion verdict is the one carrying
-  // evidence — so it wins. `partial` is what the grader writes when it runs
-  // out of context mid-rubric: a criterion nobody finished grading is not met.
-  const failed = criteria.filter((c) => c.status !== 'pass');
-  const met = structured.overall === 'pass' && failed.length === 0;
-
-  await emitVerdict({
-    verdict: met ? 'met' : 'not-met',
-    run_status: typeof runStatus === 'string' ? runStatus : null,
-    round: structured.round,
-    overall: structured.overall,
-    failed_criteria: failed,
-    ...(Array.isArray(structured.gaps) ? { gaps: structured.gaps } : {}),
-  });
-  return met ? { ok: true } : { ok: false, reason: 'grader-fail' };
+  const grader = graderStage(verdictFile, taxonomy, schemas);
+  await emit('grader-verdict', grader.payload, taskId, ctx, opts);
+  if (grader.shape === 'invalid') return { ok: false, reason: 'grader-invalid' };
+  return grader.rubric === 'met' ? { ok: true } : { ok: false, reason: 'grader-fail' };
 }
 
 async function intakeAndDecide(
@@ -989,16 +883,6 @@ export interface DepsCheck {
   detail: string;
 }
 
-const BIN_DIR = path.join('node_modules', '.bin');
-
-function isDirectory(target: string): boolean {
-  try {
-    return statSync(target).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 const DEFAULT_COVERAGE_CHECK = 'coverage';
 
 /**
@@ -1112,48 +996,7 @@ function loggedClaims(task: AddedTask | undefined): string[] | undefined {
  * that it ran and found nothing to do, rather than staying silent.
  */
 export function checkWorktreeDeps(worktreeDir: string): DepsCheck {
-  let manifest: { dependencies?: unknown; devDependencies?: unknown };
-  try {
-    manifest = JSON.parse(readFileSync(path.join(worktreeDir, 'package.json'), 'utf8'));
-  } catch (err) {
-    // A malformed package.json is a real problem, but it is not THIS problem,
-    // and blocking on it here would file a JSON syntax error under "you forgot
-    // to install". The schema and test gates downstream get to say it.
-    const why = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'has no' : 'has an unreadable';
-    return {
-      ok: true,
-      declaresDependencies: false,
-      detail: `${worktreeDir} ${why} package.json — nothing to install.`,
-    };
-  }
-
-  const counts = (section: unknown): number =>
-    typeof section === 'object' && section !== null ? Object.keys(section).length : 0;
-  const declared = counts(manifest.dependencies) + counts(manifest.devDependencies);
-  if (declared === 0) {
-    return {
-      ok: true,
-      declaresDependencies: false,
-      detail: 'package.json declares no dependencies — nothing to install.',
-    };
-  }
-
-  if (isDirectory(path.join(worktreeDir, BIN_DIR))) {
-    return {
-      ok: true,
-      declaresDependencies: true,
-      detail: `${declared} dependencies declared and ${BIN_DIR} is present.`,
-    };
-  }
-
-  return {
-    ok: false,
-    declaresDependencies: true,
-    detail:
-      `${declared} dependencies declared but ${BIN_DIR} is missing in ${worktreeDir}. ` +
-      'Every check would resolve its binaries from a parent node_modules, so the ' +
-      'result would describe some other tree. Run `pnpm install` in the worktree.',
-  };
+  return depsStage(worktreeDir).deps;
 }
 
 /**
@@ -1189,15 +1032,9 @@ async function runGateStages(
 ): Promise<GateOutcome> {
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
 
-  const schemaResult = validateRecord(schemas, taxonomy, 'result', input.result);
-  await emit(
-    'schema-check-result',
-    { valid: schemaResult.valid, errors: schemaResult.valid ? [] : schemaResult.errors },
-    input.taskId,
-    ctx,
-    opts,
-  );
-  if (!schemaResult.valid) {
+  const schemaResult = schemaStage(input.result, taxonomy, schemas);
+  await emit('schema-check-result', schemaResult.payload, input.taskId, ctx, opts);
+  if (!schemaResult.ok) {
     return finalize(
       {
         outcome: 'blocked',
@@ -1225,23 +1062,11 @@ async function runGateStages(
   // Behind the record above, though: a task blocked for an artifact under /tmp
   // still produced this Result, exactly as one blocked for an uncommitted
   // worktree did (P9-12).
-  const artifacts = (input.result as { artifacts?: ArtifactDecl[] }).artifacts ?? [];
-  const artifactCheck = checkArtifacts(artifacts, {
+  const artifactCheck = artifactsStage(declaredArtifacts(input.result) ?? [], {
     taskId: input.taskId,
     artifactsDir: input.artifactsDir,
   });
-  await emit(
-    'artifact-check-result',
-    {
-      ok: artifactCheck.ok,
-      checked: artifactCheck.checked,
-      home: artifactCheck.home,
-      issues: artifactCheck.issues,
-    },
-    input.taskId,
-    ctx,
-    opts,
-  );
+  await emit('artifact-check-result', artifactCheck.payload, input.taskId, ctx, opts);
   if (!artifactCheck.ok) {
     return finalize(
       {
@@ -1251,7 +1076,7 @@ async function runGateStages(
         testResult: null,
         schemaErrors: [],
         blockingFindings: [],
-        artifactIssues: artifactCheck.issues,
+        artifactIssues: artifactCheck.check.issues,
       },
       ctx,
       opts,
@@ -1262,26 +1087,10 @@ async function runGateStages(
   // The gate scores a worktree, the merge queue merges a branch — when those
   // are two different things, every check below goes green against work the
   // merge will never see (D-30 / P9-8).
-  const commitCheck = certifyCommit(input.worktreeDir, {
-    ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
-  });
-  await emit(
-    'commit-check-result',
-    {
-      certified: commitCheck.certified,
-      reason: commitCheck.reason,
-      head: commitCheck.head,
-      branch: commitCheck.branch,
-      dirty: commitCheck.dirty,
-      base_ref: commitCheck.baseRef,
-      base_sha: commitCheck.baseSha,
-      commits_ahead: commitCheck.commitsAhead,
-    },
-    input.taskId,
-    ctx,
-    opts,
-  );
-  if (!commitCheck.certified) {
+  const commitStageResult = commitStage(input.worktreeDir, input.baseRef);
+  const commitCheck = commitStageResult.certificate;
+  await emit('commit-check-result', commitStageResult.payload, input.taskId, ctx, opts);
+  if (!commitStageResult.ok) {
     return finalize(
       {
         outcome: 'blocked',
@@ -1303,14 +1112,8 @@ async function runGateStages(
   // Behind the commit certificate for the same reason the tests are: a
   // toolchain proved sound in a worktree the merge will never see proves
   // nothing (P9-16d / D-30).
-  const deps = checkWorktreeDeps(input.worktreeDir);
-  await emit(
-    'deps-check-result',
-    { ok: deps.ok, declares_dependencies: deps.declaresDependencies, detail: deps.detail },
-    input.taskId,
-    ctx,
-    opts,
-  );
+  const deps = depsStage(input.worktreeDir);
+  await emit('deps-check-result', deps.payload, input.taskId, ctx, opts);
   if (!deps.ok) {
     return finalize(
       {
@@ -1336,21 +1139,9 @@ async function runGateStages(
   // dispatched no judges through `smith judge dispatch` has an empty dispatch
   // set and is unaffected — this refuses only where there is a promise on
   // record to refuse against.
-  const outstanding = outstandingJudges(await readJudgeTurns(input.taskId, ctx, opts));
-  if (outstanding.length > 0) {
-    await emit(
-      'judges-outstanding',
-      {
-        judges: outstanding.map((j) => ({
-          agent_role: j.role,
-          round: j.round,
-          declared_artifact: j.declaredArtifact,
-        })),
-      },
-      input.taskId,
-      ctx,
-      opts,
-    );
+  const judges = judgesStage(await readJudgeTurns(input.taskId, ctx, opts));
+  if (!judges.ok) {
+    await emit('judges-outstanding', judges.payload, input.taskId, ctx, opts);
     return finalize(
       {
         outcome: 'blocked',
@@ -1361,7 +1152,7 @@ async function runGateStages(
         blockingFindings: [],
         artifactIssues: [],
         commitCheck,
-        outstandingJudges: outstanding,
+        outstandingJudges: judges.outstanding,
       },
       ctx,
       opts,
@@ -1455,10 +1246,19 @@ async function runGateStages(
     cwd: input.worktreeDir,
     runAll: input.runAll ?? false,
     timeoutMs: input.timeoutMs,
+    environmentSources: input.environmentSources,
   });
+  const slept = sleptFailedChecks(testResult);
+  const sleptFields =
+    slept.length > 0 ? { error_class: ENV_FAILURE_CLASS, environment_evidence: slept } : {};
   await emit(
     'testgate-result',
-    { pass: testResult.pass, results: testResult.results },
+    {
+      pass: testResult.pass,
+      results: testResult.results,
+      environment: testResult.environment,
+      ...sleptFields,
+    },
     input.taskId,
     ctx,
     opts,
@@ -1470,6 +1270,7 @@ async function runGateStages(
         taskId: input.taskId,
         reason: 'tests-failed',
         testResult,
+        ...(slept.length > 0 ? { error_class: ENV_FAILURE_CLASS, environmentEvidence: slept } : {}),
         schemaErrors: [],
         blockingFindings: [],
         artifactIssues: [],
@@ -1674,6 +1475,21 @@ type UnfinalizedGateOutcome = GateOutcome extends infer T
     : T
   : never;
 
+const ENV_FAILURE_CLASS = 'execution.env-failure' as const;
+
+/**
+ * The evidence of every failed check whose own window shows the machine slept.
+ * Each failed check is judged by its own entry, so a gap on a check that
+ * passed never classifies another check's failure. Empty when the run passed.
+ */
+function sleptFailedChecks(testResult: RunResult): CheckEnvironment[] {
+  const environment = testResult.environment ?? [];
+  return testResult.results.flatMap((r, i) => {
+    const entry = environment[i];
+    return !r.pass && entry !== undefined && sleptDuringCheck(entry) ? [entry] : [];
+  });
+}
+
 async function finalize(
   outcome: UnfinalizedGateOutcome,
   ctx: GateContext,
@@ -1681,7 +1497,13 @@ async function finalize(
 ): Promise<GateOutcome> {
   const stored = await emit(
     'gate-outcome',
-    { outcome: outcome.outcome, reason: 'reason' in outcome ? outcome.reason : null },
+    {
+      outcome: outcome.outcome,
+      reason: 'reason' in outcome ? outcome.reason : null,
+      ...('error_class' in outcome && outcome.error_class !== undefined
+        ? { error_class: outcome.error_class, environment_evidence: outcome.environmentEvidence }
+        : {}),
+    },
     outcome.taskId,
     ctx,
     opts,

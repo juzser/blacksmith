@@ -64,17 +64,20 @@
         with `claim-overlap`. `wave check` validates only the ids it is
         given and cannot see the conflict.
      4. Dispatch it like any task (independent dispatches go in one message),
-        with these gaps filled by hand. It
-        carries no acceptance criteria and no budget: **write the ACs into
-        the dispatch brief** (the finding's fix, plus the test that proves
-        it). `wave check` prices it at the coder cap, and `gate run` reports
-        its budget as not-declared. It is not in the plan, so
-        `lessons for-dispatch`, `findings for-dispatch` and `coverage check`
-        refuse it with `cli.task-not-in-plan`: splice
-        `bs lessons for-dispatch <role> --case-type bugfix` without
-        `--plan`/`--task` — at the cost of every claim-path lesson, since
-        claims are then `[]` and those lessons drop silently — and replace the findings block with
-        `bs findings list --session <id> --task <epic>/followup-<fp8>`.
+        and compose each follow-up brief with `bs brief compose` as wave.md step 8
+        does, passing the follow-up's id as `--task`; compose reads the follow-up
+        from its `task-added` record, the register `wave next` reads, so the brief
+        carries its claims, the findings it exists to fix (its `scope` section, the
+        read `bs findings list --task <id>` makes), the open findings of other tasks
+        on its claims, the lessons for its claims, its filled hand-back preflight
+        line and the gate check commands; the gaps still filled by hand are the
+        acceptance criteria (the finding's fix plus the test that proves it,
+        written into the composed brief, then `bs dispatch lint` run on it, which
+        must exit 0) and the budget (`wave check` prices it at the coder cap and
+        `gate run` reports it as not-declared); a coder, tester or grader follow-up
+        brief is never hand-built, and `bs dispatch lint` refuses one without the
+        preflight line and the gate checks; `coverage check` still refuses a
+        follow-up with `cli.task-not-in-plan`.
         At its gate, run `gate run` **without** `--plan`. With it, a judge
         finding on the merged owner's file routes to yet another follow-up
         (listed under `reattributedFindings`) instead of blocking this one,

@@ -53,8 +53,8 @@ it builds.
 carries `other.unclassified`. `agent-role` and `claim-path` lessons are
 already narrow and are always spliced. A `stack-wide`, `case-type` or
 `security` lesson is spliced only when its class **recurs** (`error-logged`
-events of that class on at least 3 distinct tasks in the last 30 days, across
-every session in the store) or **repeats** in the dispatch's own epic (at
+events of that class, or blocked gates that map to it, on at least 3 distinct
+tasks in the last 30 days, across every session in the store) or **repeats** in the dispatch's own epic (at
 least one such event there; pass `--epic <epic>` when you run it by hand).
 Every other one is withheld, and the block's last line names each withheld
 class with its count and the command that reads it:
@@ -63,14 +63,21 @@ class with its count and the command that reads it:
 Withheld lessons (class not recurring): spec.spec-gap (0 tasks, read with "bs lessons for-dispatch coder --class spec.spec-gap"); …
 ```
 
-`--class <group.class>` returns exactly that class's approved lessons. Only
-`error-logged` counts toward a class. The merge queue writes one, with its
+`--class <group.class>` returns exactly that class's approved lessons. Two
+kinds of event count toward a class: `error-logged`, and a blocked gate. The merge queue writes one, with its
 class, when a task fails there (a rebase conflict, a red cumulative suite, a
 branch with nothing to merge), and the dispatching session writes one for a
 worker that died or a judge turn that failed; from then on every brief in
 that epic splices that class's lessons without anyone asking for them. A
-gate `blocked` writes only its `gate-outcome`, so a gate bounce does not count
-yet ([limitations](limitations.md#limitations-today)). A security-reviewer
+blocked gate writes its `gate-outcome`, which counts under the class its
+reason maps to (a test failure under `execution.test-failure`, a schema,
+artifact, screenshot or grader-file defect under `contract.schema-violation`,
+uncommitted work under `contract.uncommitted-work`, missing dependencies under
+`execution.env-failure`), or under the `error_class` the gate stamped on it
+when the machine slept. A reason that is the wave-runner's own sequencing, a
+grader verdict, a coverage-evidence gap or a finding maps to no class and
+counts nowhere. A task counts once per class, however many events it has. A
+security-reviewer
 brief withholds nothing, of any scope. A lesson with no
 class, or one whose class has left the taxonomy, is read as
 `other.unclassified` and named in `warnings`. The JSON carries the block as

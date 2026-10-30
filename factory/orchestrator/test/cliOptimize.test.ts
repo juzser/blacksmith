@@ -56,6 +56,24 @@ function cli(args: string[], sb: Sandbox, extraEnv: Record<string, string | unde
   return { stdout: run.stdout, stderr: run.stderr, status: run.status as number };
 }
 
+/** The flags a coder brief now needs; the checks file lives in `scratch`. */
+function workerFlags(): string[] {
+  const checks = path.join(scratch, 'checks.json');
+  writeFileSync(checks, JSON.stringify([{ name: 'unit', cmd: 'run-the-suite' }]));
+  return [
+    '--provider',
+    'claude',
+    '--model-tier',
+    'mid',
+    '--base',
+    'bs/project-a/integration',
+    '--checks',
+    checks,
+    '--work-root',
+    path.join(scratch, 'work root'),
+  ];
+}
+
 function appendEvent(sb: Sandbox, event: Record<string, unknown>): void {
   const run = cli(['event', 'append', JSON.stringify(event)], sb);
   expect(run.status, run.stdout + run.stderr).toBe(0);
@@ -223,6 +241,7 @@ describe('brief compose (criterion 5, CLI half)', () => {
         'project-a/task-1-widget',
         '--worktree',
         worktree,
+        ...workerFlags(),
         '--out',
         out,
       ],
@@ -261,6 +280,7 @@ describe('brief compose (criterion 5, CLI half)', () => {
         'project-a/task-1-widget',
         '--worktree',
         path.join(scratch, 'wt', 'task-1-widget'),
+        ...workerFlags(),
       ],
       sb,
     );
@@ -292,6 +312,257 @@ describe('brief compose (criterion 5, CLI half)', () => {
     );
     expect(run.status).toBe(1);
     expect(errorOf(run.stdout)).toBe('brief.turns-mismatch');
+  });
+});
+
+describe('brief compose preflight lines (task-8 close-review r2, CLI half)', () => {
+  const spaced = () => path.join(scratch, 'work root');
+  const composeRole = (sb: Sandbox, session: string, role: string, extra: string[] = []) => {
+    const out = path.join(scratch, 'preflight-out', `${session}-${role}.md`);
+    const run = cli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        role,
+        '--session',
+        session,
+        '--plan',
+        FIXTURE_PLAN,
+        '--task',
+        'project-a/task-1-widget',
+        '--worktree',
+        path.join(scratch, 'wt', 'task-1-widget'),
+        '--artifact',
+        path.join(scratch, 'artifacts', `${role}.json`),
+        ...(extra.length > 0 ? extra : workerFlags()),
+        '--out',
+        out,
+      ],
+      sb,
+    );
+    return { run, out };
+  };
+
+  it("writes lines whose --artifacts-dir is the gate line's and whose paperwork runs under the spaced work root", () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf');
+    const wave = readFileSync(path.join(REPO_ROOT, '.claude', 'skills', 'bs', 'wave.md'), 'utf8');
+    const gateRun = wave.slice(wave.indexOf('bs gate run <task-id>'));
+    const gateDirFlag = /--artifacts-dir (\S+)/.exec(gateRun)?.[1] as string;
+    expect(gateDirFlag).toBe('<work-root>/state/artifacts');
+    const gateDir = gateDirFlag.replace('<work-root>', spaced());
+    const shim = path.join(scratch, 'shim');
+    mkdirSync(shim, { recursive: true });
+    writeFileSync(path.join(shim, 'bs'), `#!/bin/sh\nexec node '${CLI_PATH}' "$@"\n`, {
+      mode: 0o755,
+    });
+    for (const role of ['coder', 'tester', 'grader']) {
+      const { run, out } = composeRole(sb, 'sess-pf', role);
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const line = readFileSync(out, 'utf8')
+        .split('\n')
+        .find((l) => l.startsWith('bs results check ')) as string;
+      expect(line).toContain(`--artifacts-dir '${gateDir}'`);
+      const ran = runProcess('/bin/sh', ['-c', line], {
+        env: {
+          ...process.env,
+          PATH: `${shim}:${process.env.PATH}`,
+          BS_HOME: sb.home,
+          BS_HEAVY_LOCK_DIR: sb.locks,
+        },
+      });
+      const doc = JSON.parse(ran.stdout);
+      expect(doc.error, ran.stdout).toBeUndefined();
+      expect(doc.as).toBe(role);
+      expect(doc.artifact_home.startsWith(`${gateDir}/`)).toBe(true);
+    }
+  });
+
+  it('refuses a coder brief without --provider by name and writes no --out file', () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf2');
+    const flags = workerFlags();
+    const at = flags.indexOf('--provider');
+    flags.splice(at, 2);
+    const { run, out } = composeRole(sb, 'sess-pf2', 'coder', flags);
+    expect(run.status).toBe(1);
+    expect(errorOf(run.stdout)).toBe('brief.preflight-values-required');
+    expect(run.stdout).toContain('--provider');
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it('bs dispatch lint passes a composed coder brief and fails one carrying a placeholder', () => {
+    const sb = sandbox();
+    startSession(sb, 'sess-pf3');
+    const { run, out } = composeRole(sb, 'sess-pf3', 'coder');
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const lintArgs = (file: string) => [
+      'dispatch',
+      'lint',
+      file,
+      '--role',
+      'coder',
+      '--task',
+      'project-a/task-1-widget',
+      '--session',
+      'sess-pf3',
+    ];
+    expect(cli(lintArgs(out), sb).status).toBe(0);
+    const bad = `${out}.bad.md`;
+    writeFileSync(bad, readFileSync(out, 'utf8').replace('--provider claude', '--provider <name>'));
+    const failed = cli(lintArgs(bad), sb);
+    expect(failed.status).toBe(1);
+    expect(JSON.parse(failed.stdout).preflight.status).toBe('placeholder');
+  });
+});
+
+// ---- follow-up briefs: routing, compose, lint (f-bs-gate-bounce/integration-5c096bd9, -9c1bb4d6) ----
+
+describe('brief compose for a follow-up minted by findings raise (task-9 close-review r3)', () => {
+  const SESSION = 'sess-followup';
+  const EPIC = 'epic-1';
+  const PLAN = {
+    epic_id: EPIC,
+    version: 1,
+    status: 'active',
+    tasks: [
+      {
+        task_id: `${EPIC}/task-1`,
+        epic_id: EPIC,
+        plan_version: 1,
+        objective: 'Own the widget file.',
+        output_schema_ref: 'result.schema.json',
+        acceptance_criteria: ['it works'],
+        claims: ['src/widget.ts'],
+        budget: { tokens: 1000, diff_lines: 100 },
+        contract: { functional_clauses: ['do it'], nonfunctional_clauses: [] },
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+      },
+    ],
+    edges: [],
+  };
+  const AC_BLOCK =
+    '\nAcceptance criteria\n- The widget keeps its last item.\n- A test in test/widget.test.ts proves it.\n';
+
+  function mint() {
+    const sb = sandbox();
+    startSession(sb, SESSION);
+    const planPath = path.join(scratch, `followup-plan-${counter++}.json`);
+    writeFileSync(planPath, JSON.stringify(PLAN));
+    appendEvent(sb, {
+      session_id: SESSION,
+      actor: 'orchestrator',
+      event_type: 'wave-merged',
+      task_id: `${EPIC}/task-1`,
+      plan_version: 1,
+      causal_parent: `${SESSION}#0`,
+      payload: { task_ids: [`${EPIC}/task-1`] },
+    });
+    const evidence = path.join(scratch, `followup-evidence-${counter++}.json`);
+    writeFileSync(
+      evidence,
+      JSON.stringify([
+        {
+          file_path: 'src/widget.ts',
+          finding_category: 'correctness',
+          severity: 'S2-major',
+          summary: 'widget drops the last item',
+          failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
+        },
+      ]),
+    );
+    const raised = cli(
+      [
+        'findings',
+        'raise',
+        '--plan',
+        planPath,
+        '--evidence',
+        evidence,
+        '--found-by',
+        'reviewer',
+        '--session',
+        SESSION,
+        '--plan-version',
+        '1',
+        '--causal-parent',
+        `${SESSION}#0`,
+        '--actor',
+        'operator',
+      ],
+      sb,
+    );
+    expect(raised.status, raised.stdout + raised.stderr).toBe(0);
+    const [row] = JSON.parse(raised.stdout) as { taskId: string; attribution: string }[];
+    expect(row?.attribution).toBe('follow-up');
+    return { sb, planPath, followUpId: (row as { taskId: string }).taskId };
+  }
+
+  const lint = (sb: Sandbox, file: string, followUpId: string) =>
+    cli(
+      ['dispatch', 'lint', file, '--role', 'coder', '--task', followUpId, '--session', SESSION],
+      sb,
+    );
+
+  it('composes the brief with its own findings as scope, and lint refuses one without the line or the checks', () => {
+    const { sb, planPath, followUpId } = mint();
+    expect(followUpId).toMatch(/^epic-1\/followup-[0-9a-f]{8}$/);
+    const out = path.join(scratch, 'followup-brief', `${counter++}.md`);
+    const run = cli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        'coder',
+        '--session',
+        SESSION,
+        '--plan',
+        planPath,
+        '--task',
+        followUpId,
+        '--worktree',
+        path.join(scratch, 'wt', 'followup'),
+        ...workerFlags(),
+        '--out',
+        out,
+      ],
+      sb,
+    );
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const listed = JSON.parse(
+      cli(['findings', 'list', '--session', SESSION, '--task', followUpId], sb).stdout,
+    ) as { finding_id: string; summary: string }[];
+    expect(listed).toHaveLength(1);
+    const text = readFileSync(out, 'utf8');
+    const scope = text.slice(
+      text.indexOf('<!-- BEGIN FOLLOW-UP SCOPE -->'),
+      text.indexOf('<!-- END FOLLOW-UP SCOPE -->'),
+    );
+    expect(scope).toContain(listed[0]?.finding_id);
+    expect(scope).toContain(listed[0]?.summary);
+
+    const good = `${out}.good.md`;
+    writeFileSync(good, text + AC_BLOCK);
+    const ok = lint(sb, good, followUpId);
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    expect(JSON.parse(ok.stdout).preflight.status).toBe('ok');
+
+    const at = text.indexOf('Result file:');
+    const gates = text.indexOf('Gate checks (');
+    const noLine = `${out}.no-line.md`;
+    writeFileSync(noLine, text.slice(0, at) + text.slice(gates) + AC_BLOCK);
+    const missing = lint(sb, noLine, followUpId);
+    expect(missing.status).toBe(1);
+    expect(JSON.parse(missing.stdout).preflight.status).toBe('missing');
+
+    const noChecks = `${out}.no-checks.md`;
+    writeFileSync(noChecks, text.slice(0, gates) + AC_BLOCK);
+    const none = lint(sb, noChecks, followUpId);
+    expect(none.status).toBe(1);
+    expect(JSON.parse(none.stdout).preflight.status).toBe('no-checks');
   });
 });
 
@@ -365,6 +636,7 @@ describe('--state-dir on lessons for-dispatch and brief compose', () => {
           'epic-1/task-1',
           '--worktree',
           path.join(scratch, 'wt', 'task-1-widget'),
+          ...workerFlags(),
           '--out',
           path.join(scratch, 'state-dir-brief', `${stateArgs.length}.md`),
           ...stateArgs,

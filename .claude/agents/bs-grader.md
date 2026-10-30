@@ -130,6 +130,24 @@ clothes, and it lands in the only per-task cost signal the epic has. The
 harness counts the tokens; the dispatcher stamps them.
 <!-- END SHARED:token-usage -->
 
+**Before you return: hand-back preflight.** The preflight checks the shape of
+the grader file only. A well-formed `fail` verdict exits 0 and shows in
+`verdicts.grader`. Fix shape (where the verdict sits, a missing criterion
+field, the round number) and never change a verdict, a criterion's status or
+its evidence to get a clean preflight.
+
+<!-- BEGIN SHARED:handback-preflight -->
+**Hand-back preflight.** Your brief carries a filled `bs results check <task-id> --as <role>` line. As the last step before you return, run it exactly as given. It reads the paperwork the gate reads, runs no test and writes nothing. Fix every problem it lists in your own output, re-run it until it exits 0, and quote its final output in the result `notes`. A problem you cannot fix in your own output, such as a flag your brief got wrong or an environment problem, goes in `notes` as it stands; never work around it. If your brief has no such line, say so in `notes`.
+<!-- END SHARED:handback-preflight -->
+
+Your preflight line, with the brief's values filled in:
+`bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
+
+The line carries `--artifacts-dir` so that every preflight line in a wave
+shares one value. The grader stage reads no artifact, so the preflight prints a
+warning that says the flag only sets the reported `artifact_home`. That warning
+is expected, it is not a problem to fix, and the flag stays on your line.
+
 **2. Return one line** as your final message — this JSON and nothing else:
 
 ```

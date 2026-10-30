@@ -28,6 +28,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
+import { artifactHome } from './artifacts.js';
 import {
   type AuditAxis,
   type AuditDecision,
@@ -145,9 +146,12 @@ import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
+  checkJudgeReport,
   isJudgeKind,
   JudgeError,
   type JudgeKind,
+  type JudgeReportInput,
+  type JudgeTurn,
   outstandingJudges,
   readJudgeArtifact,
   readJudgeTurns,
@@ -1152,6 +1156,316 @@ function uiAffectingFromFlags(flags: Record<string, string>, taskId: string): bo
   }
   const spec = liveSpec(plan, resolved);
   return spec ? isUiAffecting(spec) : undefined;
+}
+
+/** A judge's hand-in on a `gate run` line: its file, the judge that wrote it, and for uiux which pass. */
+interface HandedIn {
+  foundBy: string;
+  file: string;
+  kind?: JudgeKind;
+}
+
+/** The judge files a `gate run` line hands in: `--evidence` sources, `--grader`, `--uiux-visual`. */
+function handedInSources(args: ParsedArgs, flags: Record<string, string>): HandedIn[] {
+  const grader: HandedIn[] = flags.grader ? [{ foundBy: 'grader', file: flags.grader }] : [];
+  const uiuxVisual: HandedIn[] = flags['uiux-visual']
+    ? [{ foundBy: 'uiux', file: flags['uiux-visual'], kind: 'visual' }]
+    : [];
+  return [...evidenceSources(args), ...grader, ...uiuxVisual];
+}
+
+/**
+ * The judge reports a `gate run` line makes before the gate's judges stage, in
+ * order: one close per role and kind, only for an unreported turn of that role
+ * and kind (D-158), then one attestation per `--no-findings` role. `gate run`
+ * records them; `results check` dry-runs them, so the two cannot disagree about
+ * which closes a line makes.
+ */
+function selectJudgeCloses(
+  taskId: string,
+  handedIn: readonly HandedIn[],
+  turns: readonly JudgeTurn[],
+  noFindingsRoles: readonly string[],
+): JudgeReportInput[] {
+  const closes: JudgeReportInput[] = [];
+  const closed = new Set<string>();
+  for (const { foundBy, file, kind } of handedIn) {
+    const closeKey = kind ? `${foundBy}:${kind}` : foundBy;
+    if (closed.has(closeKey)) continue;
+    if (!turns.some((t) => t.role === foundBy && t.kind === (kind ?? null) && !t.reported))
+      continue;
+    closed.add(closeKey);
+    closes.push({ taskId, role: foundBy, artifactPath: file, ...(kind ? { kind } : {}) });
+  }
+  for (const role of noFindingsRoles) closes.push({ taskId, role, noFindings: true });
+  return closes;
+}
+
+/**
+ * `parseArgs` renders a valueless flag as the string 'true'. Attesting a role
+ * called "true" would close nothing (no such dispatch exists) and say so
+ * nowhere, so a bare --no-findings is a usage error instead. Shared by
+ * `gate run` and `results check`, which must fail on the same line alike.
+ */
+function requireNoFindingsRole(close: JudgeReportInput): void {
+  if (close.noFindings && close.role === 'true') {
+    throw new SmithError(
+      'cli.no-findings-needs-role',
+      '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
+      { usage: 'bs gate run <task-id> --no-findings <role>' },
+    );
+  }
+}
+
+const RESULTS_CHECK_ROLES = ['coder', 'tester', 'grader', 'gate'] as const;
+const SESSION_FLAGS = ['session', 'causal-parent', 'plan-version', 'actor', 'state-dir'];
+const ENVELOPE_FLAGS = ['agent', 'provider', 'model-tier', 'input-tokens', 'output-tokens'];
+/** What only a full `gate run` line carries; a role mode names `--as gate` when handed one. */
+const GATE_ONLY_FLAGS = [
+  'checks',
+  'run-all',
+  'evidence',
+  'found-by',
+  'found-by-provider',
+  'findings',
+  'no-findings',
+  'uiux-visual',
+  'lessons',
+];
+const RESULTS_CHECK_FLAGS: Record<(typeof RESULTS_CHECK_ROLES)[number], readonly string[]> = {
+  coder: ['as', 'result', 'worktree', 'base', 'artifacts-dir', ...ENVELOPE_FLAGS, ...SESSION_FLAGS],
+  tester: ['as', 'result', 'plan', 'artifacts-dir', ...ENVELOPE_FLAGS, ...SESSION_FLAGS],
+  // The grader stage reads no artifact, so `--artifacts-dir` only sets the reported home.
+  grader: ['as', 'grader', 'artifacts-dir', ...SESSION_FLAGS],
+  gate: [
+    'as',
+    'result',
+    'worktree',
+    'base',
+    'plan',
+    'grader',
+    'project',
+    'artifacts-dir',
+    ...ENVELOPE_FLAGS,
+    ...GATE_ONLY_FLAGS,
+    ...SESSION_FLAGS,
+  ],
+};
+
+/** A stage the gate evaluates after the paperwork, which a preflight never runs. */
+const RESULTS_CHECK_NOT_RUN = ['tests', 'coverage-evidence', 'findings', 'budget'];
+
+/**
+ * `bs results check`: the gate's paperwork stages, read-only, for the role
+ * named by `--as`. The checks themselves live in paperwork.ts; this reads the
+ * files a `gate run` line names with the gate's own intake functions, dry-runs
+ * the judge closes that line would make, and maps an intake failure to a named
+ * blocked reason instead of a stack.
+ */
+async function runResultsCheck(args: ParsedArgs): Promise<number> {
+  const { positional, flags } = args;
+  const [taskId] = requirePositionals(positional, usageFor('results check')) as [string];
+  const as = requireFlag(flags, 'as') as (typeof RESULTS_CHECK_ROLES)[number];
+  if (!RESULTS_CHECK_ROLES.includes(as)) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      `--as must be one of ${RESULTS_CHECK_ROLES.join(', ')}; got ${JSON.stringify(flags.as)}.`,
+      { flag: 'as', value: flags.as },
+    );
+  }
+  const allowed = RESULTS_CHECK_FLAGS[as];
+  const known = new Set(Object.values(RESULTS_CHECK_FLAGS).flat());
+  for (const { key } of args.ordered) {
+    if (allowed.includes(key) || !known.has(key)) continue;
+    if (GATE_ONLY_FLAGS.includes(key)) {
+      throw new SmithError(
+        'cli.gate-only-flag',
+        `--${key} belongs to a full gate line: use --as gate, not --as ${as}.`,
+        { flag: key, as, accepted: allowed },
+      );
+    }
+    throw new SmithError('cli.flag-not-for-mode', `--${key} is not a flag of --as ${as}.`, {
+      flag: key,
+      as,
+      accepted: allowed,
+    });
+  }
+  if (as !== 'grader') requireFlag(flags, 'result');
+  if (as === 'coder' || as === 'gate') requireFlag(flags, 'worktree');
+  if (as === 'tester') requireFlag(flags, 'plan');
+  if (as === 'grader') requireFlag(flags, 'grader');
+  if (as === 'gate') requireFlag(flags, 'checks');
+  // `gate run` loads the project's crosscheck policy and exits on a malformed
+  // overlay; the preflight surfaces the same SmithError rather than a pass.
+  if (as === 'gate') loadCrosscheckPolicy(undefined, { projectDir: projectDirFromFlags(flags) });
+  const ctx = as === 'gate' ? eventContextFromFlags(flags) : undefined;
+  const envelope = flags.agent
+    ? {
+        taskId,
+        agent: flags.agent,
+        provider: requireFlag(flags, 'provider'),
+        modelTier: requireFlag(flags, 'model-tier'),
+        inputTokens: boundedIntFlag(flags, 'input-tokens', { min: 0 }),
+        outputTokens: boundedIntFlag(flags, 'output-tokens', { min: 0 }),
+      }
+    : undefined;
+  const opts = eventOptsFromFlags(flags);
+  // The verb's own `git status` must not refresh the index.
+  process.env.GIT_OPTIONAL_LOCKS = '0';
+
+  const { checkPaperwork, STAGES_FOR_ROLE } = await import('./paperwork.js');
+  const problems: {
+    stage: string;
+    input?: string;
+    reason: string;
+    detail: Record<string, unknown>;
+  }[] = [];
+  // `input` names where an intake problem came from: a flag's file or value, the
+  // task id and artifacts dir, or a step inside the verb. A judge close splits
+  // by what failed: the judge's file, the wave-runner's own dispatch records, or
+  // the log.
+  const judgeInput = (err: unknown): string => {
+    if (!(err instanceof SmithError) || !err.code.startsWith('judges.')) return 'judge-internal';
+    return err.code.startsWith('judges.artifact-') ? 'judge-artifact' : 'judge-dispatch';
+  };
+  const attempt = async <T>(
+    label: string,
+    fn: () => T | Promise<T>,
+    inputOf: (err: unknown) => string = () => label,
+  ): Promise<T | undefined> => {
+    try {
+      return await fn();
+    } catch (err) {
+      const input = inputOf(err);
+      problems.push(
+        err instanceof SmithError
+          ? {
+              stage: 'intake',
+              input,
+              reason: err.code,
+              detail: { message: err.message, ...err.details },
+            }
+          : {
+              stage: 'intake',
+              input,
+              reason: `${label}-unreadable`,
+              detail: { message: err instanceof Error ? err.message : String(err) },
+            },
+      );
+      return undefined;
+    }
+  };
+
+  const home = await attempt('artifacts', () => artifactHome(taskId, flags['artifacts-dir']));
+  let result: unknown;
+  let resultUsable = as === 'grader';
+  if (as !== 'grader') {
+    const raw = await attempt('result', () => readJsonFile<unknown>(requireFlag(flags, 'result')));
+    if (raw !== undefined) {
+      result = envelope ? await attempt('result', () => stampResultEnvelope(raw, envelope)) : raw;
+      resultUsable = result !== undefined;
+    }
+  }
+  const warnings: string[] = [];
+  const claimed = (result as { task_id?: unknown } | null)?.task_id;
+  if (!envelope && typeof claimed === 'string' && claimed !== taskId) {
+    warnings.push(
+      `The result names task ${claimed}, not ${taskId}; its artifacts are checked against ${taskId}, as the gate checks them.`,
+    );
+  }
+  if (as === 'grader' && flags['artifacts-dir']) {
+    warnings.push(
+      '--artifacts-dir only sets the reported artifact_home: the grader stage reads no artifact.',
+    );
+  }
+  const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  if (as === 'gate' && ctx) {
+    // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
+    await attempt('checks', () => readChecksFile(requireFlag(flags, 'checks')));
+    if (flags.findings)
+      await attempt('findings', () => readFindingsInputFile(flags.findings as string));
+    await attempt('evidence', () => mintFromEvidence(args, taskId));
+    if (flags['uiux-visual']) {
+      await attempt('uiux-visual', () =>
+        mintFromUiuxVisual(flags['uiux-visual'] as string, taskId),
+      );
+    }
+    if (flags.lessons) {
+      await attempt('lessons', () => parseLessons(readFileSync(flags.lessons as string, 'utf8')));
+    }
+    if (problems.length === 0) {
+      const handedIn = handedInSources(args, flags);
+      const noFindings = args.repeated['no-findings'] ?? [];
+      for (const role of noFindings) requireNoFindingsRole({ taskId, role, noFindings: true });
+      const turns =
+        handedIn.length > 0 || noFindings.length > 0
+          ? await attempt(
+              'judges',
+              () => readJudgeTurns(taskId, ctx, opts),
+              () => 'judge-internal',
+            )
+          : [];
+      let simulated: readonly JudgeTurn[] = turns ?? [];
+      for (const close of selectJudgeCloses(taskId, handedIn, simulated, noFindings)) {
+        const checked = await attempt(
+          'judges',
+          () => checkJudgeReport(close, simulated, opts),
+          judgeInput,
+        );
+        if (checked === undefined) continue;
+        alsoReported.push({ role: close.role, kind: checked.turn.kind });
+        simulated = simulated.map((t) => (t === checked.turn ? { ...t, reported: true } : t));
+      }
+    }
+  }
+
+  // Read after the closes, as `gate run` does: a close that fails is the failure it exits on.
+  const graderVerdict = flags.grader
+    ? await attempt('grader', () => readJsonFile<unknown>(requireFlag(flags, 'grader')))
+    : undefined;
+  const uiAffecting =
+    flags.plan && (as === 'tester' || as === 'gate')
+      ? await attempt('plan', () => uiAffectingFromFlags(flags, taskId))
+      : undefined;
+
+  const paperwork =
+    resultUsable && home !== undefined
+      ? await attempt('paperwork', () =>
+          checkPaperwork(
+            {
+              as,
+              taskId,
+              result,
+              ...(flags.worktree ? { worktreeDir: flags.worktree } : {}),
+              ...(flags.base ? { baseRef: flags.base } : {}),
+              ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+              ...(graderVerdict === undefined ? {} : { graderVerdict }),
+              ...(uiAffecting === undefined ? {} : { uiAffecting }),
+              alsoReported,
+            },
+            { sessionId: flags.session },
+            opts,
+          ),
+        )
+      : undefined;
+
+  const all = [...problems, ...(paperwork?.problems ?? [])];
+  const reason = all[0]?.reason;
+  printJson({
+    outcome: reason === undefined ? 'pass' : 'blocked',
+    ...(reason === undefined ? {} : { reason }),
+    as,
+    task_id: taskId,
+    artifact_home: home ?? null,
+    problems: all,
+    skipped:
+      paperwork?.skipped ??
+      STAGES_FOR_ROLE[as].map((stage) => ({ stage, why: 'unreadable-input' })),
+    not_run: RESULTS_CHECK_NOT_RUN,
+    ...(graderVerdict === undefined ? {} : { verdicts: paperwork?.verdicts ?? {} }),
+    warnings,
+  });
+  return reason === undefined ? 0 : 1;
 }
 
 /**
@@ -4322,49 +4636,18 @@ async function main(): Promise<number> {
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.
-    const evidenceGiven: { foundBy: string; file: string; kind?: JudgeKind }[] =
-      evidenceSources(args);
-    const graderGiven: { foundBy: string; file: string; kind?: JudgeKind }[] = flags.grader
-      ? [{ foundBy: 'grader', file: flags.grader }]
-      : [];
-    const uiuxVisualGiven = flags['uiux-visual']
-      ? [{ foundBy: 'uiux', file: flags['uiux-visual'], kind: 'visual' as JudgeKind }]
-      : [];
-    const handedIn = [...evidenceGiven, ...graderGiven, ...uiuxVisualGiven];
-    if (handedIn.length > 0) {
-      const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
-      const closed = new Set<string>();
-      for (const { foundBy, file, kind } of handedIn) {
-        const closeKey = kind ? `${foundBy}:${kind}` : foundBy;
-        if (closed.has(closeKey)) continue;
-        if (!turns.some((t) => t.role === foundBy && t.kind === (kind ?? null) && !t.reported))
-          continue;
-        closed.add(closeKey);
-        await recordJudgeReport(
-          { taskId, role: foundBy, artifactPath: file, ...(kind ? { kind } : {}) },
-          ctx,
-          eventOptsFromFlags(flags),
-        );
-      }
-    }
-
-    // P9-11: the genuinely clean case, said out loud. A judge that found
-    // nothing writes `[]` and reports through `smith judge report`; this flag
-    // is for the operator who ran one outside the factory, and it records an
-    // attestation as an attestation — artifact_path null, attested_by
-    // operator — rather than dressing it up as a file that was never written.
-    for (const role of repeated['no-findings'] ?? []) {
-      // `parseArgs` renders a valueless flag as the string 'true'. Attesting a
-      // role called "true" would close nothing (no such dispatch exists) and
-      // say so nowhere, so a bare --no-findings is a usage error instead.
-      if (role === 'true') {
-        throw new SmithError(
-          'cli.no-findings-needs-role',
-          '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
-          { usage: 'bs gate run <task-id> --no-findings <role>' },
-        );
-      }
-      await recordJudgeReport({ taskId, role, noFindings: true }, ctx, eventOptsFromFlags(flags));
+    const handedIn = handedInSources(args, flags);
+    const turns =
+      handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
+    for (const close of selectJudgeCloses(taskId, handedIn, turns, repeated['no-findings'] ?? [])) {
+      // P9-11: the genuinely clean case, said out loud. A judge that found
+      // nothing writes `[]` and reports through `smith judge report`; this flag
+      // is for the operator who ran one outside the factory, and it records an
+      // attestation as an attestation — artifact_path null, attested_by
+      // operator — rather than dressing it up as a file that was never written.
+      //
+      requireNoFindingsRole(close);
+      await recordJudgeReport(close, ctx, eventOptsFromFlags(flags));
     }
 
     // --grader is the grader's own result file (state/results/<task-id>
@@ -4445,6 +4728,12 @@ async function main(): Promise<number> {
     );
     printJson(outcome);
     return outcome.outcome === 'blocked' ? 1 : 0;
+  }
+
+  // The paperwork the gate would check, asked before hand-back instead of
+  // after a bounce. Read-only; the work is runResultsCheck's.
+  if (namespace === 'results' && action === 'check') {
+    return runResultsCheck(args);
   }
 
   // U2 S3/D4: the preflight for the gate's uiux stage, over the same
@@ -5822,6 +6111,11 @@ async function main(): Promise<number> {
       ...(flags.branch ? { branch: flags.branch } : {}),
       ...(turnBudget !== undefined ? { turnBudget } : {}),
       ...(flags.artifact ? { artifactPath: flags.artifact } : {}),
+      ...(flags.provider ? { provider: flags.provider } : {}),
+      ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
+      ...(flags.base ? { base: flags.base } : {}),
+      ...(flags.checks ? { checks: readChecksFile(flags.checks) } : {}),
+      ...(flags['work-root'] ? { workRoot: flags['work-root'] } : {}),
       events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
         now,
         windowDays: RECUR_WINDOW_DAYS,

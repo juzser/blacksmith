@@ -47,7 +47,7 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
 - **You do not decide what the next wave is, and you do not close an epic.**
   Both are the epic tier's. Hand back what happened and stop.
 - **Return discipline is mandatory.** Every worker writes its full result to
-  `state/results/<task-id>.json` and returns three fields; you read the file
+  `state/results/<task-id>.json` (a tester to `state/results/<task-id>.tester.json`) and returns three fields; you read the file
   when you need detail. A wave of 200 costs 200 short lines, and your window
   is what the epic is buying by dispatching you at all.
 
