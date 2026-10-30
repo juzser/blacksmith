@@ -61,7 +61,7 @@ naming the entry and the file, never guessed.
   operator writes it.
 - Nothing needs GitHub Actions. The tiers are run by `bs` itself, locally.
   CI, when a project has it, is one job per tier fed by the same file.
-- Every git mechanism works on git 2.38, the floor `bs install check` states.
+- Every git mechanism works on git 2.38, the floor the install check states.
 
 ### Learned tiers live in an overlay
 
