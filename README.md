@@ -44,12 +44,9 @@ goal → contracts you sign → one worktree per contract, run in parallel
 
 Demo: NOT MEASURED. No single-run recording is published yet.
 
-Every claim from the tagline to here has a row in the
-[claims matrix](docs/claims-matrix.md) that names the code, test or document
-behind it, and a test fails when one has no row or a row cites a path that
-does not exist. Further down the page, the matrix holds rows only for the
-claims the 0.6.0 docs pass and later edits wrote or changed, kept by hand, and
-the test checks only that the paths they cite exist.
+Every claim above has a row in the [claims matrix](docs/claims-matrix.md)
+naming what backs it, and a test fails when one is missing or names a path
+that does not exist.
 
 ## Why Blacksmith
 
@@ -76,45 +73,15 @@ pull request**. Everything in between runs unattended.
 
 **More agents at once, fewer tokens per merged task, no check skipped**
 
-Quality comes first, speed second, tokens third. After every merge, each task
-whose dependencies are done and whose paths no task in flight claims is
-admitted at once, rather than when the whole wave drains. Once the tester is
-done, the grader, the reviewer and, when its triggers fire, the security
-reviewer are dispatched together. `bs brief compose` builds every brief.
-Full-suite and e2e runs take one lock per machine (`bs heavy run`), so agents
-running at once queue for them instead of running them all together. In a
-clone, or with the [plugin guard](docs/guide/plugin-guard.md) on, the policy
-hook refuses a brief sent to the wrong agent type and a foreground `sleep` of
-2 s or more, and names the fix. No judge, check, review round or verifier pass
-is dropped to save tokens, and no model is downgraded.
+Quality comes first, speed second, tokens third. After each merge, any task
+whose dependencies are done and whose paths are free is admitted at once, a
+task's grader and reviewer are dispatched together, and full-suite and e2e
+runs queue for one lock per machine. Each `/bs` verb loads its own playbook
+only when it runs, and the agents that wait on test runs keep a 1h prompt
+cache. No judge, check, review round or verifier pass is dropped to save
+tokens, and no model is downgraded.
 
-Claude Code is set up for the width. `bs init` raises its caps of 20 subagents
-and 10 parallel tool calls to 1000 each, and sets a 633k compact window, so a
-session on a current 1M-token model compacts at the policy's 60%; `bs doctor`
-warns when the caps are not raised. The wave-runner, the coder and the tester,
-which wait minutes on test runs, keep a 1h prompt cache instead of the default
-five minutes.
-
-How wide it runs can be checked. Before anyone is dispatched,
-`bs wave schedule` replays the plan and reports how many rounds it needs, its
-widest round, and the tasks held back by their claims, a shared hotspot or an
-import edge rather than by a dependency; it exits 1 when the plan stalls and 2
-when tasks are held back that way. Once a wave lands, `bs wave audit` reads the
-log back and says whether a wave admitted N wide ran N wide, and
-`bs epic width` asks the same of every closed epic. All three only read; the
-close records an epic's width without holding on it, though an external
-judge, when one is enabled, may refute a wave that was admitted and shows no
-work.
-
-Only what the turn needs is loaded. Each `/bs` verb loads its own playbook when
-it runs, and only the verbs that dispatch read the dispatch contract. A
-wave-runner reads the wave and dispatch playbooks by slice:
-`bs playbook slice` prints one wave step or one dispatch section.
-
-Merge lanes are opt-in. `bs queue run --batch` groups claim-disjoint tasks
-that do not depend on each other, tests each group once, and bisects a red
-group so the tasks that pass still land. No playbook passes `--batch`, so by
-default the queue tests and merges one task at a time.
+→ [In depth](docs/guide/features.md#more-agents-at-once-fewer-tokens-per-merged-task-no-check-skipped)
 
 </td>
 </tr>
@@ -129,13 +96,7 @@ allowlist, the exact paths it may touch and a token budget. The plan is frozen
 the moment you sign it and versioned in the event log, so a worker cannot
 quietly reinterpret the job. No contract, no dispatch.
 
-A worker can still argue with it out loud. A coder or tester that finds a
-criterion wrong returns a proposed plan diff; `bs plan propose` checks that
-the diff yields a valid plan and records it without touching the plan, and
-`bs plan proposals` lists it, marked stale once a newer plan version overtakes
-the one it was drafted against. The answer is yours: `bs plan approve` cuts
-the next version through `bs plan amend`, and `bs plan reject` requires a
-rationale.
+→ [In depth](docs/guide/features.md#nothing-is-dispatched-without-a-contract)
 
 </td>
 <td width="50%">
@@ -146,6 +107,8 @@ Path claims come from static analysis, not from epic prose. A wave is admitted
 only once its tasks' claims are pairwise disjoint, which is what lets a whole
 column run at the same time in separate worktrees; overlapping work serializes
 instead. An edit outside a claim fails the gate rather than reaching the queue.
+
+→ [In depth](docs/guide/features.md#workers-that-cannot-collide)
 
 </td>
 </tr>
@@ -161,19 +124,7 @@ the reviewer. S1 stops the line, S2 bounces back to the same branch, S3 batches
 into one waiver question per epic, answered with `/bs waivers`. Only S3 and S4
 are ever waivable.
 
-A worker runs its role's `bs results check` as the last step before it hands
-back: the gate's own paperwork checks, read-only and with no test run, so a
-missing file or field is fixed in that turn instead of costing a gate round.
-When the gate still blocks, the wave playbook names one answerer for each
-reason (the worker whose result it is, the uiux pass, a judge turn, the
-wave-runner or the epic session), and a check whose clock shows the machine
-slept is not bounced to the coder.
-
-A judge's verdict counts only if the worktree did not move under it. The
-playbook brackets each judge of a task, and the audit's shared tree, with
-`bs worktree fingerprint` and `bs worktree verify`, gitignored paths aside;
-drift exits 1, and the playbook discards the verdict and dispatches the judge
-again on a clean tree.
+→ [In depth](docs/guide/features.md#gates-decide-what-merges-not-confidence)
 
 </td>
 <td>
@@ -184,9 +135,9 @@ The factory grades its own judgment calls against models from a different
 vendor — Codex over its CLI, DeepSeek over its API, beside the native Claude
 judge. Both external judges ship `enabled: auto`: they join the quorum on a
 machine that holds the credentials and are skipped on one that does not, so
-which of them you get is a fact about your machine, not about this repo. A
-judge earns its vote in **shadow mode** first — every verdict recorded, none
-of them gating anything — and is promoted only once you have read the numbers.
+which of them you get is a fact about your machine, not about this repo.
+
+→ [In depth](docs/guide/features.md#a-second-opinion-from-another-vendor)
 
 </td>
 </tr>
@@ -200,14 +151,9 @@ Every task gate reads text the planner wrote, so they can all pass a plan that
 solves the wrong problem. Before the integration PR, `bs epic goal-check`
 records the plan checked clause by clause against the roadmap goal, the one
 reference the planner did not write, and an uncovered clause raises a spec
-finding. `bs integration check` runs the project's checks on the assembled
-integration branch, not in a worktree, and `bs epic spec-review` records the
-closing spec review read against that branch. `bs epic verdict` holds the epic
-while a task is unfinished, a blocking finding is open, or the integration
-check, the goal check or a closing review the tier requires is missing, failed
-or stale; once those pass and an external judge is enabled, a cross-provider
-quorum decides go or hold. `bs epic close` refuses a hold unless you give a
-rationale, which it records.
+finding.
+
+→ [In depth](docs/guide/features.md#checked-against-your-goal-before-the-pull-request)
 
 </td>
 <td>
@@ -218,12 +164,10 @@ rationale, which it records.
 [`run.md`](.claude/skills/bs/run.md), admits waves and closes the epic; the
 wave tier, [`wave.md`](.claude/skills/bs/wave.md), takes one wave from
 worktrees to the merge queue. A wave that fits the epic session's window runs
-inline. One too wide for that runs in a session of its own, driven by the epic
-session or, when the wave would eat the window the epic needs, by the
-`bs-wave-runner` agent. `bs session start --continues` links a new session to
-the epic's log, `bs event lineage` prints the sessions on that line, and
-`--lineage` makes a `bs stats` read answer for the whole epic rather than the
-window you are in.
+inline, and one too wide for that runs in a session of its own. A new session
+picks the epic up from its log with `bs session start --continues`.
+
+→ [In depth](docs/guide/features.md#an-epic-outlives-one-context-window)
 
 </td>
 </tr>
@@ -234,13 +178,12 @@ window you are in.
 **It learns from its own errors**
 
 Errors are classified against a taxonomy, and a scribe distills them into
-lesson candidates you approve or reject with `/bs lessons`. Each approved
-lesson carries one error class. A brief always carries the lessons for the
-agent's role and for the paths it claims; a broader lesson goes in up front
-only once its class has proven to recur (three tasks in 30 days) or has come up
-in this epic, and the rest are named for the agent to read on demand. The
-same-mistake rate tells you whether that is actually working. A loop you can
-audit, not a memory you have to trust.
+lesson candidates you approve or reject with `/bs lessons`. Each brief then
+carries the approved lessons for its agent's role and for the paths it claims.
+The same-mistake rate tells you whether that is actually working. A loop you
+can audit, not a memory you have to trust.
+
+→ [In depth](docs/guide/features.md#it-learns-from-its-own-errors)
 
 </td>
 <td>
@@ -250,9 +193,9 @@ audit, not a memory you have to trust.
 Planning and judgment go to a frontier model; the bulk of the work goes to
 small, fast tiers, many at once. Every session and every live agent is visible
 with the tier that drew it, and cost breaks down per task, per tier and per
-provider. `bs stats effectiveness` says what that bought: tokens per task and
-per role, defects that escaped a passing gate, and how often each reviewing
-role's findings held up, with NOT MEASURED where nothing was measured.
+provider.
+
+→ [In depth](docs/guide/features.md#a-frontier-planner-cheap-workers)
 
 </td>
 </tr>
@@ -267,10 +210,7 @@ The dashboard is a projection of that log, and `bs db rebuild` reconstructs
 the entire database from the log alone. Nothing the factory did exists only in
 a chat transcript.
 
-Every event but a `session-start` names a parent event, and an append whose
-parent is not already in the log is refused, so any record can be followed
-back to a `session-start`
-(`bs stats timeline --causal-chain-for <event-id>`).
+→ [In depth](docs/guide/features.md#the-log-is-the-source-of-truth)
 
 </td>
 </tr>
@@ -606,6 +546,7 @@ version in
 |---|---|
 | [`INSTALL.md`](INSTALL.md) | Getting it running, per platform |
 | [`docs/guide/quickstart.md`](docs/guide/quickstart.md) | From install to a first epic |
+| [`docs/guide/features.md`](docs/guide/features.md) | What each Features cell above leaves out |
 | [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) | The six steps you actually do |
 | [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) | Every command, end to end, with output |
 | [`docs/guide/status.md`](docs/guide/status.md) | What is real today |
