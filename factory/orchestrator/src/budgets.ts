@@ -670,7 +670,7 @@ export interface TaskBudget {
 export const TASK_BUDGET_FIELD_READERS: Readonly<Record<keyof TaskBudget, string | null>> =
   Object.freeze({
     tokens: 'gate: compared against the result’s token_usage.total_tokens',
-    diff_lines: 'gate: compared against the measured git diff (src/diffstat.ts)',
+    diff_lines: 'gate: compared against the measured non-test git diff (src/diffstat.ts)',
     max_turns: null,
   });
 

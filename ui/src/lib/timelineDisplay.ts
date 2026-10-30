@@ -707,7 +707,7 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
           if (!o || !Number.isFinite(o.measured) || !Number.isFinite(o.cap)) continue;
           const measured = o.measured as number;
           const cap = o.cap as number;
-          if (o.field === 'diff_lines') parts.push(`${measured} lines changed, cap ${cap}`);
+          if (o.field === 'diff_lines') parts.push(`${measured} non-test lines, cap ${cap}`);
           else if (o.field === 'tokens') {
             parts.push(`${formatCompactNumber(measured)} tokens, cap ${formatCompactNumber(cap)}`);
           }

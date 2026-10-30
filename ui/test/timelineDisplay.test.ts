@@ -1585,7 +1585,7 @@ describe('lib/timelineDisplay.ts budget-check-result title and meta', () => {
         { field: 'tokens', cap: 1_000_000, measured: 1_200_000 },
       ],
     });
-    expect(metaFor(e)).toBe('543 lines changed, cap 480 · 1.2M tokens, cap 1M');
+    expect(metaFor(e)).toBe('543 non-test lines, cap 480 · 1.2M tokens, cap 1M');
   });
   it('skips a malformed overrun and prints nothing for none', () => {
     expect(

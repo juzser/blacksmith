@@ -363,7 +363,7 @@ describe('composeBrief error codes and manifest depth', () => {
     expect(manifest.total_bytes).toBe(Buffer.byteLength(text));
     expect(manifest.sections.limits).toBe(
       Buffer.byteLength(
-        `Token cap: 120000\nDiff cap: 300 lines\nTurn budget: ${readTemplateMaxTurns(agentsDir, 'coder')}`,
+        `Token cap: 120000\nDiff cap: 300 non-test lines (test and fixture lines are counted apart, never capped)\nTurn budget: ${readTemplateMaxTurns(agentsDir, 'coder')}`,
       ),
     );
   });

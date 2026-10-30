@@ -33,9 +33,12 @@ branch directly.
   effort tier — 220k on a medium epic). Hitting it is not failure: stop, report what
   is done, return the task to the planner for re-scoping
   (`economy.budget-exceeded`) — never retry at the same scope.
-- **Diff cap: the task's declared diff lines** (700 on a medium epic; excluding lockfiles/generated files).
-  Projected overrun -> stop, return to planner to split. A merged diff over
-  cap fails the gate.
+- **Diff cap: the task's declared non-test diff lines** (700 on a medium epic).
+  Lockfiles/generated files and tests/fixtures are counted apart and never
+  capped. A projected or real overrun is not a reason to stop: the gate only
+  records it. Finish the acceptance criteria, keep strict YAGNI, never cut or
+  thin a test to fit, and report the measured lines and the overrun in the
+  hand-back `notes` so the planner can re-size.
 - **Strict YAGNI.** Code exactly the acceptance criteria. A new abstraction
   needs >=2 real call sites in this epic; no unspecced config options,
   generics, layers, or extension points; new patterns come from the spec,
@@ -175,8 +178,9 @@ with exactly these three keys:
   gone by the time anyone reads the verdict, so evidence left there is not
   evidence
 
-Also set `diff_lines_changed` (excluding lockfiles/generated files), and
-`notes` when you stopped early.
+Also set `diff_lines_changed` (authored lines including tests, excluding
+lockfiles/generated files), and `notes` when you stopped early or the diff ran
+over its cap.
 
 **Never set `task_id`, `agent`, `provider`, `model_tier` or `token_usage`.**
 The dispatcher owns those five and merges them in before validating the file

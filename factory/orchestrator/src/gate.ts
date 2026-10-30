@@ -170,12 +170,20 @@ export interface BudgetCheck {
   overruns: BudgetOverrun[];
   /** From the result's token_usage — real spend, not the plan's estimate. */
   tokensUsed?: number;
-  /** Authored lines changed; absent when the diff could not be measured. */
+  /** Authored non-test lines changed (what the cap is about); absent when the diff could not be measured. */
   diffLines?: number;
   baseRef?: string;
+  /**
+   * Test and fixture lines, counted apart and never capped. A binary test file
+   * is uncapped too, so it drops out of both `testLines` and `unmeasuredFiles`
+   * by design.
+   */
+  testLines?: number;
+  /** The paths counted as tests, so a wrong call is auditable (D-157's way). */
+  testFiles?: string[];
   excludedLines?: number;
   /**
-   * Counted paths git gave no lines for, present only when there are any. A
+   * Capped paths git gave no lines for, present only when there are any. A
    * binary file adds 0 to `diffLines`, so a real diff can pass a cap on a zero
    * that means "could not count" (D-157) — this is what makes that zero
    * readable instead of invisible.
@@ -1446,6 +1454,8 @@ function runBudgetCheck(input: GateInput): BudgetCheck {
       ...(tokensUsed !== undefined && { tokensUsed }),
       diffLines: measured.diffLines,
       baseRef: measured.baseRef,
+      testLines: measured.testLines,
+      testFiles: measured.testFiles,
       excludedLines: measured.excludedLines,
       ...(measured.unmeasuredFiles.length > 0 && { unmeasuredFiles: measured.unmeasuredFiles }),
     };

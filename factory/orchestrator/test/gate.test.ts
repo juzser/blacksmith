@@ -2400,6 +2400,34 @@ describe('gate.ts budget check (P9-18)', () => {
     });
   });
 
+  it('does not count test lines against the cap, and reports them apart', async () => {
+    await mkdir(path.join(repo, 'test'));
+    await writeFile(path.join(repo, 'test', 'src.test.ts'), 't\n'.repeat(300));
+    await writeFile(path.join(repo, 'src.ts'), 'x\n'.repeat(5));
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'work']);
+
+    const outcome = await runGate(
+      budgetInput({ budget: { tokens: 1000, diff_lines: 10 } }),
+      ctx(),
+      { stateDir },
+    );
+
+    expect(outcome.outcome).toBe('pass');
+    expect(outcome.budgetCheck).toMatchObject({
+      status: 'checked',
+      overruns: [],
+      diffLines: 6,
+      testLines: 300,
+      testFiles: ['test/src.test.ts'],
+    });
+    expect(await budgetEvent()).toMatchObject({
+      diffLines: 6,
+      testLines: 300,
+      testFiles: ['test/src.test.ts'],
+    });
+  });
+
   // D-157. A 400-line source change lands in a file that carries a NUL byte
   // (D-155), git calls the file binary, numstat gives it no line counts, and
   // the total it folds into is zero. The `unmeasurable` branch below already
