@@ -125,8 +125,7 @@ the difference between a factory and a queue with extra steps:
   ended. Never a `sleep` loop. Read an output file's tail, not its exit code
   alone: a background command that writes `EXIT=<n>` as its last line says
   when it is done.
-- **A blocked task blocks itself.** Gate outcome `blocked` bounces to
-  *that* task's builder (step 9) while its neighbours carry on. One task
+- **A blocked task blocks itself.** Gate outcome `blocked` goes to the answerer step 9 names for its reason, not to the task's builder, while its neighbours carry on. One task
   escalating to the operator does not stop the other four; report it and
   keep the wave moving.
 
@@ -311,8 +310,8 @@ one thing this playbook never asks you to.
         rules of steps 5 to 7, unchanged. A judge's turn is not a ladder round.
         The answer to `grader-invalid` is the grader's turn: re-poke the grader
         in the same round to rewrite its file in place, or re-run it as a new
-        round only while step 6's `profile.graderRounds` leaves one; with none
-        left the task goes to the epic session. It is never sent to `gate run`
+        round only while step 6's `profile.graderRounds` leaves one; with no grader
+        round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'). It is never sent to `gate run`
         and never to a builder.
      3. **A worker's file the gate blocks on.** `schema-invalid`,
         `artifacts-missing`, `not-committed`, `screenshots-missing` and
@@ -411,8 +410,9 @@ one thing this playbook never asks you to.
      `coverage/coverage-summary.json` instead of scraping the text table,
      which hides every file at 100% — including the file the task exists to
      add (D-40). `blocked` with `reason: "coverage-evidence"` means the run
-     produced no per-file number for a file this task's claims name; fix the
-     reporter or the include glob, not the code. Ask the same question
+     produced no per-file number for a file this task's claims name, or no
+     coverage summary at all, or the gate read no claims for the task id; step 9
+     gives each of the three cases its answerer. Ask the same question
      outside a gate run with `bs coverage check <worktree-dir> --plan
      <plan.json> --task <task-id>` (§5c).
    - Findings come from **`bs-reviewer`**
@@ -458,7 +458,7 @@ one thing this playbook never asks you to.
 
    Slice: `bs playbook slice wave --step 7`.
 8. Build every dispatch in steps 3–7 with `bs brief compose --role <role>
-   --task <task-id> --session <id> --work-root <work-root>` (dispatch.md says
+   --task <task-id> --session <id> --work-root <work-root> --provider <name> --model-tier <tier> --base <ref> --checks <file> --out <file>` (dispatch.md says
    what it emits and what it needs). It carries the compiled lessons block for that role (D2
    selection) and, for a worktree dispatch, the open-findings block for that
    task — dispatch.md's "Splice the compiled lessons into every prompt" and
@@ -482,14 +482,9 @@ one thing this playbook never asks you to.
    - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
    Slice: `bs playbook slice wave --step 8`.
 9. Gate outcome `blocked` → bounce to the builder whose output its reason
-   names, on the **same branch**: the tester for `screenshots-missing` and
-   `screenshots-stale` (it re-shoots at the gate's HEAD, step 5 records the new
-   set, and step 5's uiux visual pass reviews it); for `schema-invalid` and
-   `artifacts-missing` the worker whose result the gate line's `--result` and
-   `--agent` name; the coder for every other reason. A `grader-invalid`
-   `gate-outcome` in the log is still a failed round the ladder counts, is
-   answered by the grader's turn and not by a bounce, and goes to the epic
-   session. The ladder counts every blocked round whichever builder it bounces
+   names, on the **same branch**. Only the reasons and cases the list below
+   gives to a builder are bounced. The tester re-shoots at the gate's HEAD, step 5 records the new
+   set, and step 5's uiux visual pass reviews it. The ladder counts every blocked round whichever builder it bounces
    to, so from the second failed round the bounced builder, a tester included,
    runs on a strictly higher model tier (`checkModelTierRung`).
    After 2 failed rounds on the same task, escalate model tier
@@ -500,7 +495,29 @@ one thing this playbook never asks you to.
    — see dispatch.md's "Round counting and escalation", read with `bs playbook
    slice dispatch --section "Round counting and escalation"`. Then have the log check
    you: `bs escalation check <session-id> --task <task-id>`, which
-   exits 1 if the rung you just climbed is not evidenced.
+   exits 1 if the rung you just climbed is not evidenced. The uiux pass is a builder too (`escalation.ts` `BUILDER_ROLES`), so a bounce to it is a builder dispatch the ladder counts and from the second failed round runs on a strictly higher model tier than the failing round's builder dispatch.
+   Every blocked reason has one answerer, and the list is exhaustive:
+   - `not-committed`: bounce to the coder.
+   - `grader-fail`: bounce to the coder with the payload's `failed_criteria`; a round-2 `fail` re-scopes under step 6 instead.
+   - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
+   - `findings`: bounce to the coder.
+   - `screenshots-missing`: bounce to the tester.
+   - `screenshots-stale`: bounce to the tester.
+   - `schema-invalid`: bounce to the worker whose result it is (the worker the gate line's `--result` and `--agent` name).
+   - `artifacts-missing`: bounce to the worker whose result it is (the worker the gate line's `--result` and `--agent` name).
+   - `uiux-spec-missing`: bounce to the uiux pass (the uiux spec pass).
+   - `uiux-visual-missing`: bounce to the uiux pass (the uiux visual pass).
+   - `grader-invalid`: a judge turn answers it, the grader's turn, re-run as a new round only while step 6's `profile.graderRounds` leaves one, because the gate already closed this round's turn; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation').
+   - `deps-missing`: the wave-runner's own fix answers it (step 7 branch 1).
+   - `judges-outstanding`, keyed on the roles its `outstandingJudges` names:
+     - a uiux turn among them, bounce to the uiux pass (the uiux pass is a builder dispatch; any other judge it names is re-poked beside it under the rules of steps 5 to 7).
+     - no uiux turn among them, a judge turn answers it (each judge it names, re-poked, then `bs judge report`).
+   - `coverage-evidence`, keyed on its `coverageEvidence` (also in the `coverage-evidence` event):
+     - `present` false, the epic session answers it (no summary after the coverage check: the reporter list is project configuration).
+     - `present` true with an `unmeasured` subject, bounce to the coder (a claimed file has no row while files beside it do: either no test loads it or the coverage config skips it, the gate cannot tell which, so the coder adds a test that loads the file or, when the config outside its claims is the cause, says so in `notes`).
+     - `present` true with no `unmeasured` subject, the wave-runner's own fix answers it (the gate read no claims for the task id: its gate line names the id the plan lists, or the follow-up is recorded first).
+
+   Every one of these reasons is a blocked `gate-outcome` and so a failed round `readFailedRounds` counts, whoever answers it. A `grader-invalid` `gate-outcome` in the log is still a failed round the ladder counts, and is answered by the grader's turn, not by a bounce. A block no builder answers (a reason or case the list gives to a judge turn, which is the grader's or another non-builder judge's: `grader-invalid`, and `judges-outstanding` when no uiux turn is outstanding; the wave-runner's own fix; or the epic session; and an env-classified `tests-failed`) is never bounced, while a uiux pass is a builder dispatch (`escalation.ts` `BUILDER_ROLES`), so the uiux reasons and cases (`uiux-spec-missing`, `uiux-visual-missing` and `judges-outstanding` with a uiux turn outstanding) are not among them: after the first failed round its answerer acts and a bare re-gate follows; from the second failed round nothing more runs on that task id, no gate round and no builder dispatch, until the operator's answer is in the log, and the epic session puts it to the operator; the answer, a `user_prompt` event, picks one ladder-clean move: a re-scope under a new task id (dispatch.md 'Round counting and escalation'), whose ledger starts empty; one builder dispatch on a strictly higher model tier whose `dispatch_decision` names that answer as its `causal_parent`; or a waiver or closure of the task. From the third failed round every block, whatever its reason, needs the operator's answer first (`checkOperatorRung`).
    - **An env-failure block.** A `gate-outcome` carrying `error_class:
      execution.env-failure` (the machine slept during a check) is logged as
      `error-logged` with error `execution.env-failure` and the gate's
@@ -512,13 +529,12 @@ one thing this playbook never asks you to.
      other blocked `gate-outcome` (`escalation.ts` `readFailedRounds` counts it
      as today), so the re-gate decision stays inside the ladder: a bare re-gate
      only after the first failed round (the same HEAD, no new builder
-     dispatch), a higher-tier builder
-     dispatch from the second, the operator from the third. An env-classified
+     dispatch); from the second failed round, the operator's answer first and only then, if the answer picks it, one builder dispatch on a strictly higher model tier; the operator from the third. An env-classified
      block never resets, skips or exempts a rung. Here "no coder bounce" means
      no finding against the coder and no fix-round brief; from the second failed
      round another gate round still needs a builder dispatch on a higher model
      tier first, as `checkModelTierRung` and `checkOperatorRung` in
-     `escalation.ts` enforce.
+     `escalation.ts` enforce, and by the rule above that dispatch waits for the operator's answer.
    Slice: `bs playbook slice wave --step 9`.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting to the
     merge queue, audit the wave's own parallelism: `bs wave audit --session <id> --epic
