@@ -351,6 +351,49 @@ describe('providers/cli-transport.ts', () => {
       // Dropping the echo must not cost the judge its own empty answer.
       expect(result.output).toEqual([]);
     });
+
+    // The cap bounds what the judge WROTE. A prompt bigger than the cap is
+    // echoed back by `codex exec`, and must not trip it on its own.
+    it('does not count the echoed prompt against the output cap', async () => {
+      const answerFile = path.join(cwd, 'answer.json');
+      const judgeSaid = { verdict: 'confirm', rationale: 'short answer' };
+      await writeFile(answerFile, JSON.stringify(judgeSaid));
+      const capBytes = 1000;
+
+      const result = await runCliJudge(
+        'fake',
+        { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+        baseRequest({
+          prompt: `judge this finding ${'x'.repeat(capBytes * 3)}`,
+          budget: { timeout_ms: 5000, max_output_bytes: capBytes },
+        }),
+      );
+
+      expect(result.output).toEqual(judgeSaid);
+    });
+
+    it('still refuses an answer past the cap, even when the prompt was echoed too', async () => {
+      const answerFile = path.join(cwd, 'long-answer.json');
+      await writeFile(
+        answerFile,
+        JSON.stringify({ verdict: 'confirm', rationale: 'y'.repeat(5000) }),
+      );
+      const capBytes = 1000;
+
+      await expect(
+        runCliJudge(
+          'fake',
+          { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+          baseRequest({
+            prompt: `judge this finding ${'x'.repeat(capBytes * 3)}`,
+            budget: { timeout_ms: 5000, max_output_bytes: capBytes },
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'provider.output-too-large',
+        message: expect.stringContaining(`${capBytes}-byte cap`),
+      });
+    });
   });
 
   it('enforces the output size cap', async () => {
