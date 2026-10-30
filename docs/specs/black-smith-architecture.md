@@ -479,7 +479,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 12
+version: 13
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -528,8 +528,14 @@ edge_provenance: [observed, declared, inferred]
                   # inferred — reconstructed after the fact (lowest trust)
 graph_event:     [plan-version-created, plan-version-superseded,
                   task-added, task-split, task-superseded, edge-recorded,
-                  wave-admitted, wave-merged,
+                  wave-admitted, wave-merged, wave-reverted,
                   spec-change-proposed, spec-change-decided]
+                  # wave-reverted        — a revert of a merged task landed on
+                  #                      the integration branch. `bounce`
+                  #                      reopens the task; `record-only`
+                  #                      records a revert that stands without
+                  #                      reopening anything. Written only by
+                  #                      revert.ts recordWaveReverted
                   # spec-change-proposed — a worker hit a wrong assumption and
                   #                      returned a spec diff. Data, not a
                   #                      command: no plan file moves (D-33)
