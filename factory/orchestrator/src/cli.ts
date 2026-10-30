@@ -249,7 +249,7 @@ import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
-import type { CheckCommand } from './testgate.js';
+import { assertCheckTier, type CheckCommand, selectGateChecks } from './testgate.js';
 import { assertSelectableTestCmd } from './testSelect.js';
 import {
   COMMANDS,
@@ -370,6 +370,8 @@ function readChecksFile(filePath: string): CheckCommand[] {
         { name: check.name, heavy, file: filePath },
       );
     }
+    assertCheckTier(check, filePath);
+    check.tierSource = check.tier === undefined ? 'default' : 'declared';
     const timeoutMs = check.timeout_ms;
     if (timeoutMs === undefined) continue;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_CHECK_TIMEOUT_MS) {
@@ -1381,7 +1383,13 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
   const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
-    await attempt('checks', () => readChecksFile(requireFlag(flags, 'checks')));
+    await attempt('checks', async () => {
+      const { stageBoundCheckNames } = await import('./gate.js');
+      const checks = readChecksFile(requireFlag(flags, 'checks'));
+      // The same selection and refusals `gate run` makes, with no check run.
+      selectGateChecks(checks, stageBoundCheckNames());
+      return checks;
+    });
     if (flags.findings)
       await attempt('findings', () => readFindingsInputFile(flags.findings as string));
     await attempt('evidence', () => mintFromEvidence(args, taskId));
@@ -6094,6 +6102,7 @@ async function main(): Promise<number> {
   // composeBrief's; this arm only reads the store and routes the output.
   if (namespace === 'brief' && action === 'compose') {
     const { composeBrief } = await import('./briefCompose.js');
+    const { stageBoundCheckNames } = await import('./gate.js');
     const { readRecurrenceEvents } = await import('./lessonEvents.js');
     const { RECUR_WINDOW_DAYS } = await import('./lessonRecurrence.js');
     const eventOpts = eventOptsFromFlags(flags);
@@ -6114,7 +6123,9 @@ async function main(): Promise<number> {
       ...(flags.provider ? { provider: flags.provider } : {}),
       ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
       ...(flags.base ? { base: flags.base } : {}),
-      ...(flags.checks ? { checks: readChecksFile(flags.checks) } : {}),
+      ...(flags.checks
+        ? { checks: readChecksFile(flags.checks), stageBound: stageBoundCheckNames() }
+        : {}),
       ...(flags['work-root'] ? { workRoot: flags['work-root'] } : {}),
       events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
         now,

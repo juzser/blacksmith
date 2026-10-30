@@ -53,7 +53,8 @@ import {
   type EnvironmentSources,
   type RunResult,
   run as runTestgate,
-  sleptDuringCheck,
+  selectGateChecks,
+  sleptFailedChecks,
 } from './testgate.js';
 import { checkUiux, type UiuxBlockReason } from './uiuxGate.js';
 
@@ -893,6 +894,11 @@ export interface DepsCheck {
 
 const DEFAULT_COVERAGE_CHECK = 'coverage';
 
+/** Names of the checks a gate stage reads, which must stay pre-merge (D9). */
+export function stageBoundCheckNames(coverage?: GateCoverageOptions): string[] {
+  return [coverage?.checkName ?? DEFAULT_COVERAGE_CHECK];
+}
+
 /**
  * The per-file numbers a coverage check produced, or null when this gate has
  * no coverage check to speak for (D-40/P9-25).
@@ -1038,6 +1044,11 @@ async function runGateStages(
   ctx: GateContext,
   opts: EventOpts,
 ): Promise<GateOutcome> {
+  // Before any stage or event: a refusal is a throw, never an outcome.
+  const { selected, deferred } = selectGateChecks(
+    input.checks,
+    stageBoundCheckNames(input.coverage),
+  );
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
 
   const schemaResult = schemaStage(input.result, taxonomy, schemas);
@@ -1250,7 +1261,7 @@ async function runGateStages(
   await emit('budget-check-result', { ...budgetCheck }, input.taskId, ctx, opts);
   const budget = { budgetCheck };
 
-  const testResult = await runTestgate(input.checks, {
+  const testResult = await runTestgate(selected, {
     cwd: input.worktreeDir,
     runAll: input.runAll ?? false,
     timeoutMs: input.timeoutMs,
@@ -1265,6 +1276,9 @@ async function runGateStages(
       pass: testResult.pass,
       results: testResult.results,
       environment: testResult.environment,
+      tier: 'pre-merge',
+      tree_sha: runGit(input.worktreeDir, ['rev-parse', 'HEAD^{tree}']),
+      deferred,
       ...sleptFields,
     },
     input.taskId,
@@ -1486,19 +1500,6 @@ type UnfinalizedGateOutcome = GateOutcome extends infer T
   : never;
 
 const ENV_FAILURE_CLASS = 'execution.env-failure' as const;
-
-/**
- * The evidence of every failed check whose own window shows the machine slept.
- * Each failed check is judged by its own entry, so a gap on a check that
- * passed never classifies another check's failure. Empty when the run passed.
- */
-function sleptFailedChecks(testResult: RunResult): CheckEnvironment[] {
-  const environment = testResult.environment ?? [];
-  return testResult.results.flatMap((r, i) => {
-    const entry = environment[i];
-    return !r.pass && entry !== undefined && sleptDuringCheck(entry) ? [entry] : [];
-  });
-}
 
 async function finalize(
   outcome: UnfinalizedGateOutcome,

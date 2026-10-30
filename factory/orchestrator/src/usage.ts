@@ -613,7 +613,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'gate run',
     positionals: '<task-id>',
     flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
-    summary: 'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked.',
+    summary:
+      'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked. It runs the pre-merge tier of --checks: an entry may carry "tier" (pre-merge, post-merge or pre-release; absent means pre-merge), and testgate-result names what it deferred. A non-empty file with no pre-merge entry, or a deferred coverage check, is refused before any stage.',
   },
   {
     command: 'results record',
