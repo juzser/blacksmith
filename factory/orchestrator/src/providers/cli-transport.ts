@@ -62,7 +62,16 @@ function spawnOnce(
   prompt: string,
   budget: { timeout_ms: number; max_output_bytes: number },
 ): Promise<SpawnOutcome> {
-  return spawnCapped({ command: config.command, args: config.args }, prompt, budget);
+  // The cap bounds what the judge WROTE, not the prompt it may echo back (D-195:
+  // `codex exec` copies the whole stdin prompt onto stderr, and spawnCapped
+  // counts every byte on both streams as it arrives). So the in-spawn limit is
+  // the cap plus the bytes this process sent: an echo can use up at most that
+  // much, which leaves the full cap for the answer. withoutEcho() can only
+  // strip the echo after the spawn, too late to keep it off the meter.
+  return spawnCapped({ command: config.command, args: config.args }, prompt, {
+    ...budget,
+    max_output_bytes: budget.max_output_bytes + Buffer.byteLength(prompt, 'utf8'),
+  });
 }
 
 interface AttemptOutcome {
