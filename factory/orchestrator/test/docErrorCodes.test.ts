@@ -95,6 +95,11 @@ const NOT_ERROR_CODES: NotAnErrorCode[] = [
     reason:
       'An invented value: the bs-optimize spec names it as the example of an `error_class` the taxonomy does not declare, which `lessons raise` must refuse. It is the counter-example, so it can never be a raised code.',
   },
+  {
+    token: 'gate.blocked.tests-failed',
+    reason:
+      'An issue-tracker class, not a raised code: `errorIssues.ts` `GATE_BLOCKED_ERROR_CLASSES` files a blocked gate under `gate.blocked.<reason>`, and the bs-gate-bounce spec names the one an env-classified block still lands under. `gate` is an error namespace too, which is the only reason this collides.',
+  },
 ];
 
 const EXCUSED = new Map(NOT_ERROR_CODES.map((entry) => [entry.token, entry.reason]));
