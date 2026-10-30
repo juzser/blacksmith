@@ -1,7 +1,7 @@
 # Features in depth
 
-The README's [Features](../../README.md#features) table gives each feature two
-or three sentences. This page holds the rest: one section per cell, in the
+The README's [Features](../../README.md#features) table gives each feature a
+few sentences. This page holds the rest: one section per cell, in the
 README's order and under the same heading, so the link at the foot of a cell
 lands on its section here. A section starts where its cell stops, so read the
 cell first.
@@ -88,8 +88,11 @@ again on a clean tree.
 
 ## A second opinion from another vendor
 
-A judge earns its vote in **shadow mode** first — every verdict recorded, none
-of them gating anything — and is promoted only once you have read the numbers.
+Codex and DeepSeek ship `mode: active`, so whichever of them your machine has
+the credentials for has gating power from its first verdict. A judge added
+through OpenRouter starts in **shadow mode** — every verdict recorded, none of
+them gating anything — and gates only once you set it to `mode: active`, the
+step to take after you have read the numbers.
 [The providers runbook](../runbooks/providers.md) covers key and auth setup,
 enabling, shadow-mode calibration, promotion and rollback.
 

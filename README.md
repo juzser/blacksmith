@@ -76,8 +76,10 @@ pull request**. Everything in between runs unattended.
 Quality comes first, speed second, tokens third. After each merge, any task
 whose dependencies are done and whose paths are free is admitted at once, a
 task's grader and reviewer are dispatched together, and full-suite and e2e
-runs queue for one lock per machine. No judge, check, review round or verifier
-pass is dropped to save tokens, and no model is downgraded.
+runs queue for one lock per machine. Each `/bs` verb loads its own playbook
+only when it runs, and the agents that wait on test runs keep a 1h prompt
+cache. No judge, check, review round or verifier pass is dropped to save
+tokens, and no model is downgraded.
 
 → [In depth](docs/guide/features.md#more-agents-at-once-fewer-tokens-per-merged-task-no-check-skipped)
 
@@ -162,7 +164,8 @@ finding.
 [`run.md`](.claude/skills/bs/run.md), admits waves and closes the epic; the
 wave tier, [`wave.md`](.claude/skills/bs/wave.md), takes one wave from
 worktrees to the merge queue. A wave that fits the epic session's window runs
-inline, and one too wide for that runs in a session of its own.
+inline, and one too wide for that runs in a session of its own. A new session
+picks the epic up from its log with `bs session start --continues`.
 
 → [In depth](docs/guide/features.md#an-epic-outlives-one-context-window)
 
@@ -175,9 +178,10 @@ inline, and one too wide for that runs in a session of its own.
 **It learns from its own errors**
 
 Errors are classified against a taxonomy, and a scribe distills them into
-lesson candidates you approve or reject with `/bs lessons`. The same-mistake
-rate tells you whether that is actually working. A loop you can audit, not a
-memory you have to trust.
+lesson candidates you approve or reject with `/bs lessons`. Each brief then
+carries the approved lessons for its agent's role and for the paths it claims.
+The same-mistake rate tells you whether that is actually working. A loop you
+can audit, not a memory you have to trust.
 
 → [In depth](docs/guide/features.md#it-learns-from-its-own-errors)
 
@@ -542,7 +546,7 @@ version in
 |---|---|
 | [`INSTALL.md`](INSTALL.md) | Getting it running, per platform |
 | [`docs/guide/quickstart.md`](docs/guide/quickstart.md) | From install to a first epic |
-| [`docs/guide/features.md`](docs/guide/features.md) | Each Features cell above, in full |
+| [`docs/guide/features.md`](docs/guide/features.md) | What each Features cell above leaves out |
 | [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) | The six steps you actually do |
 | [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) | Every command, end to end, with output |
 | [`docs/guide/status.md`](docs/guide/status.md) | What is real today |
