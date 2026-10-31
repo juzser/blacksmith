@@ -248,7 +248,10 @@ describe('the gate script run', () => {
     writeChecks(dir, [
       { name: 'slow', cmd: 'sleep 30 & echo $! > pid.txt; wait', timeout_ms: 300 },
     ]);
+    // A survivor would hold the captured output open until it exits on its own.
+    const groupStarted = Date.now();
     expect(check(dir, []).status).toBe(1);
+    expect(Date.now() - groupStarted).toBeLessThan(5000);
     const pid = Number(readFileSync(path.join(dir, 'pid.txt'), 'utf8'));
     let alive = true;
     for (let i = 0; i < 20 && alive; i++) {
