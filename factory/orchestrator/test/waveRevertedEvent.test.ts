@@ -108,6 +108,74 @@ describe('waveRevertBlocker', () => {
     expect(input([added(), merged(M), superseded()], [])).toBe('superseded');
   });
 
+  describe('epic ownership', () => {
+    const bare = (mergeSha: string, epicId?: string) =>
+      ev(
+        'wave-merged',
+        { task_ids: ['task-1'], merge_sha: mergeSha, ...(epicId ? { epic_id: epicId } : {}) },
+        'task-1',
+      );
+    const other = (events: StoredEvent[], taskId: string, epicId: string, live: string[]) =>
+      waveRevertBlocker(events, taskId, epicId, {
+        revertSha: R,
+        isAncestor,
+        liveTaskIds: live,
+      });
+
+    it("does not let another epic's merge of the same bare id count", () => {
+      expect(other([added(), merged(M)], 'task-1', 'epic-2', ['task-1'])).toBe('not-merged');
+    });
+
+    it('returns not-merged for a task id qualified under a different epic', () => {
+      expect(other([added(), merged(M)], 'epic-1/task-1', 'epic-2', ['epic-1/task-1'])).toBe(
+        'not-merged',
+      );
+    });
+
+    it('reads the epic of a bare wave-merged from its payload', () => {
+      expect(other([bare(M, 'epic-1')], 'task-1', 'epic-2', ['task-1'])).toBe('not-merged');
+      expect(other([bare(M, 'epic-1')], 'task-1', 'epic-1', ['task-1'])).toBeNull();
+    });
+
+    it('counts a bare wave-merged that names no epic anywhere', () => {
+      expect(other([bare(M)], 'task-1', 'epic-1', ['task-1'])).toBeNull();
+    });
+
+    it("does not read another epic's re-merge as this task's", () => {
+      const foreign = ev(
+        'wave-merged',
+        { task_ids: ['epic-2/task-1'], merge_sha: M2 },
+        'epic-2/task-1',
+      );
+      expect(other([added(), merged(M), foreign], 'epic-1/task-1', 'epic-1', live)).toBeNull();
+    });
+  });
+
+  describe('a malformed merge_sha', () => {
+    it.each(['', 'abc', 'z'.repeat(40), 'c'.repeat(41)])(
+      'never counts and never reaches isAncestor: %j',
+      (bad) => {
+        const calls: string[] = [];
+        const probe = (a: string, b: string) => {
+          calls.push(b);
+          return isAncestor(a, b);
+        };
+        const events = [
+          added(),
+          merged(M),
+          ev('wave-merged', { task_ids: [TASK], merge_sha: bad }, TASK),
+        ];
+        const out = waveRevertBlocker(events, TASK, EPIC, {
+          revertSha: R,
+          isAncestor: probe,
+          liveTaskIds: live,
+        });
+        expect(out).toBeNull();
+        expect(calls).toEqual([M]);
+      },
+    );
+  });
+
   describe('re-merged by merge_sha ancestry', () => {
     it('the original merge (M, an ancestor of R) is not a re-merge', () => {
       expect(input([added(), merged(M)])).toBeNull();
@@ -268,6 +336,39 @@ describe('recordWaveReverted', () => {
       () => recordWaveReverted(recordOnly({ revert_sha: 'AB'.repeat(20) }), ctx, opts()),
       'revert.already-recorded',
     );
+  });
+
+  it('stores revert_sha and reverted_merge_sha lower-cased', async () => {
+    const stored = await recordWaveReverted(
+      recordOnly({ revert_sha: 'AB'.repeat(20), reverted_merge_sha: 'CD'.repeat(20) }),
+      ctx,
+      opts(),
+    );
+    expect(stored.record.payload).toMatchObject({
+      revert_sha: 'ab'.repeat(20),
+      reverted_merge_sha: 'cd'.repeat(20),
+    });
+  });
+
+  it('keeps a null reverted_merge_sha and a non-hex one as given', async () => {
+    const stored = await recordWaveReverted(
+      recordOnly({ revert_sha: 'ab'.repeat(20), reverted_merge_sha: null }),
+      ctx,
+      opts(),
+    );
+    expect(stored.record.payload).toMatchObject({ reverted_merge_sha: null });
+  });
+
+  it('lets exactly one of two concurrent calls for one revert_sha through', async () => {
+    const before = await count();
+    const settled = await Promise.allSettled([
+      recordWaveReverted(recordOnly(), ctx, opts()),
+      recordWaveReverted(recordOnly({ revert_sha: R.toUpperCase() }), ctx, opts()),
+    ]);
+    expect(settled.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const lost = settled.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(lost.reason).toMatchObject({ code: 'revert.already-recorded' });
+    expect(await count()).toBe(before + 1);
   });
 
   it('never lets a blocker refuse a record-only call', async () => {

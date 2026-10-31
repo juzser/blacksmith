@@ -1,8 +1,8 @@
 import { foldTasks } from './db/projector.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
+import { appendWithin, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext } from './findings.js';
-import { taskIdsMatch } from './taskId.js';
+import { epicOfTaskId, qualifyTaskId, taskIdsMatch } from './taskId.js';
 import { namesTask } from './taskLifecycle.js';
 
 /** The one event type `recordWaveReverted` writes; it is the only writer. */
@@ -39,33 +39,67 @@ export interface WaveRevertBlockerInput {
   liveTaskIds: readonly string[];
 }
 
+const HEX40 = /^[0-9a-f]{40}$/i;
+
+/**
+ * Whether a `wave-merged` for `taskId` was written for `epicId`. A bare id
+ * matches across epics, so the epic comes from the payload's `epic_id` when
+ * it has one, else from a qualified id the event names; an event that names
+ * no epic anywhere counts, since an old log's bare id has nothing to compare.
+ */
+function mergedUnderEpic(record: StoredEvent['record'], taskId: string, epicId: string): boolean {
+  const payload = record.payload as { epic_id?: unknown; task_ids?: unknown };
+  if (typeof payload.epic_id === 'string') return payload.epic_id === epicId;
+  const named = [record.task_id, ...(Array.isArray(payload.task_ids) ? payload.task_ids : [])]
+    .filter((id): id is string => typeof id === 'string' && taskIdsMatch(id, taskId))
+    .map(epicOfTaskId)
+    .filter((epic): epic is string => epic !== null);
+  return named.length === 0 || named.includes(epicId);
+}
+
 /**
  * The first reason a revert of `taskId`'s merge cannot reopen it, or null.
+ * `taskId` is read as a task of `epicId`: a `wave-merged` written for another
+ * epic's task of the same bare name does not count.
  *
  * Re-merged is decided by `merge_sha` ancestry, never by event order: a
  * `wave-merged` counts only when its merge commit descends from the revert,
- * and one without `merge_sha` (written before the field existed) cannot.
+ * and one without a 40-hex `merge_sha` (written before the field existed, or
+ * malformed) cannot.
+ *
+ * `waived` and `held-by-operator` follow the fold's status, and the fold
+ * (db/projector.ts `foldTasks`) never moves a task off `completed` once a
+ * `wave-merged` names it, so on a real log only `not-merged`, `superseded`,
+ * `re-merged` and `not-in-live-plan` are reachable today. The two are kept
+ * because the decision belongs to the fold; making them fire needs a
+ * projector change, not a second status scan here.
  */
 export function waveRevertBlocker(
   events: readonly StoredEvent[],
   taskId: string,
-  _epicId: string,
+  epicId: string,
   input: WaveRevertBlockerInput,
 ): RecordOnlyReason | null {
+  const own = epicOfTaskId(taskId);
+  if (own !== null && own !== epicId) return 'not-merged';
+  const qualified = qualifyTaskId(epicId, taskId);
   const merges = events.filter(
-    (e) => e.record.event_type === 'wave-merged' && namesTask(e.record, taskId),
+    (e) =>
+      e.record.event_type === 'wave-merged' &&
+      namesTask(e.record, qualified) &&
+      mergedUnderEpic(e.record, qualified, epicId),
   );
   if (merges.length === 0) return 'not-merged';
-  const status = foldTasks(events).find((row) => taskIdsMatch(row.taskId, taskId))?.taskStatus;
+  const status = foldTasks(events).find((row) => taskIdsMatch(row.taskId, qualified))?.taskStatus;
   if (status === 'superseded') return 'superseded';
   if (status === 'waived') return 'waived';
   if (status === 'failed' || status === 'escalated') return 'held-by-operator';
   const reMerged = merges.some((e) => {
     const sha = (e.record.payload as { merge_sha?: unknown }).merge_sha;
-    return typeof sha === 'string' && input.isAncestor(input.revertSha, sha);
+    return typeof sha === 'string' && HEX40.test(sha) && input.isAncestor(input.revertSha, sha);
   });
   if (reMerged) return 're-merged';
-  if (!input.liveTaskIds.some((id) => taskIdsMatch(id, taskId))) return 'not-in-live-plan';
+  if (!input.liveTaskIds.some((id) => taskIdsMatch(id, qualified))) return 'not-in-live-plan';
   return null;
 }
 
@@ -103,8 +137,6 @@ export interface RecordWaveRevertedOpts extends EventOpts {
   liveTaskIds?: readonly string[];
 }
 
-const HEX40 = /^[0-9a-f]{40}$/i;
-
 /**
  * Append the one `wave-reverted` event for a revert, after validating all of
  * it. A `record-only` call with a listed reason and a fresh `revert_sha` is
@@ -138,20 +170,22 @@ export async function recordWaveReverted(
 
   const events = await readLineageEvents(ctx.sessionId, eventOpts);
   const revertSha = input.revert_sha.toLowerCase();
-  const prior = events.find(
-    (e) =>
-      e.record.event_type === WAVE_REVERTED_EVENT &&
-      String((e.record.payload as { revert_sha?: unknown }).revert_sha).toLowerCase() === revertSha,
-  );
-  if (prior !== undefined) {
-    throw new WaveRevertedError(
-      'revert.already-recorded',
-      `Revert ${input.revert_sha} already has a wave-reverted event (${prior.event_id}).`,
-      {
-        event_id: prior.event_id,
-      },
+  const refuseIfRecorded = (log: readonly StoredEvent[]): void => {
+    const prior = log.find(
+      (e) =>
+        e.record.event_type === WAVE_REVERTED_EVENT &&
+        String((e.record.payload as { revert_sha?: unknown }).revert_sha).toLowerCase() ===
+          revertSha,
     );
-  }
+    if (prior !== undefined) {
+      throw new WaveRevertedError(
+        'revert.already-recorded',
+        `Revert ${input.revert_sha} already has a wave-reverted event (${prior.event_id}).`,
+        { event_id: prior.event_id },
+      );
+    }
+  };
+  refuseIfRecorded(events);
 
   let taskId: string | undefined;
   if (input.disposition === 'record-only') {
@@ -207,16 +241,36 @@ export async function recordWaveReverted(
     }
   }
 
-  return appendEvent(
-    {
-      session_id: ctx.sessionId,
-      actor: ctx.actor ?? 'system',
-      event_type: WAVE_REVERTED_EVENT,
-      ...(taskId === undefined ? {} : { task_id: taskId }),
-      plan_version: ctx.planVersion,
-      causal_parent: ctx.causalParent,
-      payload: { ...input },
+  const payload = {
+    ...input,
+    revert_sha: revertSha,
+    ...(typeof input.reverted_merge_sha === 'string' && HEX40.test(input.reverted_merge_sha)
+      ? { reverted_merge_sha: input.reverted_merge_sha.toLowerCase() }
+      : {}),
+  };
+  // The check above spans the whole lineage and cannot be made atomic from
+  // here: the lock `appendWithin` takes is per session log, and there is no
+  // helper that holds every lineage session's lock at once. Repeating the
+  // check inside that lock closes the race between callers that write the
+  // same session's log (a resume and a bounce on one wave session); two
+  // callers on different lineage sessions can still both pass.
+  const [stored] = await appendWithin(
+    ctx.sessionId,
+    (own) => {
+      refuseIfRecorded(own);
+      return [
+        {
+          session_id: ctx.sessionId,
+          actor: ctx.actor ?? 'system',
+          event_type: WAVE_REVERTED_EVENT,
+          ...(taskId === undefined ? {} : { task_id: taskId }),
+          plan_version: ctx.planVersion,
+          causal_parent: ctx.causalParent,
+          payload,
+        },
+      ];
     },
     eventOpts,
   );
+  return stored as StoredEvent;
 }
