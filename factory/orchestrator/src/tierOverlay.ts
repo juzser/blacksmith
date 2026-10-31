@@ -123,39 +123,69 @@ export interface ReconcileOpts extends WriteOverlayOpts {
   events?: EventOpts;
 }
 
+/** The variables that make git look at a repository other than the one `cwd` is in. */
+const GIT_LOCATING_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_NAMESPACE',
+] as const;
+
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const v of GIT_LOCATING_VARS) delete env[v];
+  return env;
+}
+
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync('git', [...args], {
     cwd,
+    env: gitEnv(),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
 /**
+ * The main worktree of a repository whose common dir is `common`, seen from a
+ * linked worktree: the `core.worktree` its config records (a `--separate-git-dir`
+ * copy or a submodule; relative to the common dir), else the directory above a
+ * common dir named `.git` (an ordinary clone). Null for a bare repository and
+ * wherever neither names it.
+ */
+function mainWorktree(common: string): string | null {
+  const config = (key: string): string | null => {
+    try {
+      return git(common, ['config', '--file', path.join(common, 'config'), '--get', key]).trim();
+    } catch {
+      return null;
+    }
+  };
+  if (config('core.bare') === 'true') return null;
+  const wt = config('core.worktree');
+  if (wt !== null && wt !== '') return path.resolve(common, wt);
+  return path.basename(common) === '.git' ? path.dirname(common) : null;
+}
+
+/**
  * The overlay file of the repository holding `dir`: always under the main
  * worktree, so a task worktree, the epic worktree and the clone share one.
- * Null outside a git repository, for a bare one, and wherever git itself cannot
- * name the main worktree (a linked worktree of a `--separate-git-dir` copy).
+ * Null outside a git repository, for a bare one, and wherever the main worktree
+ * cannot be determined.
  */
 export function overlayPath(dir: string): string | null {
   try {
     const common = git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim();
     const own = git(dir, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']).trim();
-    let root: string;
-    if (own === common) {
-      // `dir` is in the main worktree: git names its top level in every layout.
-      root = git(dir, ['rev-parse', '--path-format=absolute', '--show-toplevel']).trim();
-    } else {
-      // A linked worktree: git records no main worktree, only the common dir. The
-      // directory above a `.git` common dir is it for an ordinary clone but the
-      // dir holding the git dir for a `--separate-git-dir` one, so it counts only
-      // when it holds the files of the repository's HEAD.
-      root = path.dirname(common);
-      if (path.basename(common) !== '.git') return null;
-      const tops = git(dir, ['--git-dir', common, 'ls-tree', '--name-only', '-z', 'HEAD']);
-      if (!tops.split('\0').some((n) => n !== '' && existsSync(path.join(root, n)))) return null;
-    }
-    return path.join(realpathSync(root), OVERLAY_DIR, OVERLAY_FILE);
+    // In the main worktree git names its top level in every layout; from a linked
+    // one it records only the common dir.
+    const root =
+      own === common
+        ? git(dir, ['rev-parse', '--path-format=absolute', '--show-toplevel']).trim()
+        : mainWorktree(common);
+    return root === null ? null : path.join(realpathSync(root), OVERLAY_DIR, OVERLAY_FILE);
   } catch {
     return null;
   }
@@ -332,7 +362,16 @@ export function writeOverlay(
     );
   }
   mkdirSync(path.dirname(file), { recursive: true });
-  const excluded = excludeFromGit(root, path.join(path.dirname(file), EXCLUDE_PATTERN));
+  // excludeFromGit spawns git synchronously with the ambient environment, so the
+  // locating variables are removed from it for that one call and put back.
+  const saved = GIT_LOCATING_VARS.map((v) => [v, process.env[v]] as const);
+  for (const v of GIT_LOCATING_VARS) delete process.env[v];
+  let excluded: ReturnType<typeof excludeFromGit>;
+  try {
+    excluded = excludeFromGit(root, path.join(path.dirname(file), EXCLUDE_PATTERN));
+  } finally {
+    for (const [v, val] of saved) if (val !== undefined) process.env[v] = val;
+  }
   if (excluded === 'tracked') {
     throw new OverlayError('checks.overlay-tracked', `${file} is tracked by git.`, { file });
   }
@@ -387,8 +426,14 @@ function readHolder(file: string): number | null {
     throw lockFailure(file, err);
   }
   const m = /^(\d+)\n$/.exec(text);
-  return m === null ? Number.NaN : Number(m[1]);
+  // A pid is a positive integer inside the platform's range; `kill` on anything
+  // else fails with an error that would read as "alive" and the lock never break.
+  const pid = m === null ? Number.NaN : Number(m[1]);
+  return Number.isSafeInteger(pid) && pid >= 1 && pid <= MAX_PID ? pid : Number.NaN;
 }
+
+/** The largest pid a platform hands out (a 32-bit signed integer). */
+const MAX_PID = 2147483647;
 
 /** Errnos of a filesystem that cannot hard-link: the lock is then taken with O_EXCL. */
 const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS']);

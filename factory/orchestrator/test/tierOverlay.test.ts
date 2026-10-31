@@ -219,13 +219,14 @@ describe('location in a bare or separate-git-dir repository', () => {
     const linked = path.join(root, 'linked');
     git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
     expect(overlayPath(wc)).toBe(overlayFile(wc));
-    // git names no main worktree from a linked one here, so none is guessed.
+    // git records no work tree for this layout and the git dir is not named .git,
+    // so no main worktree is determinable from a linked one.
     expect(overlayPath(linked)).toBeNull();
   });
 });
 
 describe('location in a repository whose git dir is itself named .git', () => {
-  it('finds the work tree, never the directory holding the git dir', () => {
+  it('finds the work tree of the main worktree, never the directory holding the git dir', () => {
     const root = tmp();
     const wc = path.join(root, 'sg');
     mkdirSync(path.join(root, 'sgdir'));
@@ -247,8 +248,96 @@ describe('location in a repository whose git dir is itself named .git', () => {
     const linked = path.join(root, 'lk');
     git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
     expect(overlayPath(wc)).toBe(overlayFile(wc));
-    // git records no work tree for this layout, so a linked worktree gets none.
+    // Nothing in git records this work tree either (no core.worktree), so a linked
+    // worktree here is read as an ordinary clone's: a known limit of the layout,
+    // and not asserted.
+    expect(overlayPath(linked)).not.toBeNull();
+  });
+});
+
+describe('location of a linked worktree whose clone has no files at HEAD', () => {
+  it('resolves an empty-tree HEAD and an unborn HEAD to the main clone', () => {
+    for (const commit of [true, false]) {
+      const main = tmp();
+      git(main, 'init', '-q', '-b', 'main');
+      git(main, 'config', 'user.email', 't@example.com');
+      git(main, 'config', 'user.name', 't');
+      if (commit) git(main, 'commit', '-q', '--allow-empty', '-m', 'empty');
+      const linked = path.join(tmp(), 'wt');
+      if (commit) git(main, 'worktree', 'add', '-q', '-b', 'b', linked);
+      else git(main, 'worktree', 'add', '-q', '--orphan', '-b', 'b', linked);
+      expect(overlayPath(linked), `commit=${commit}`).toBe(overlayFile(main));
+      expect(overlayPath(main)).toBe(overlayFile(main));
+    }
+  });
+
+  it('answers null for a linked worktree of a bare repository, even one named .git', () => {
+    const parent = tmp();
+    const bare = path.join(parent, '.git');
+    git(parent, 'init', '-q', '--bare', '-b', 'main', bare);
+    git(bare, 'config', 'user.email', 't@example.com');
+    git(bare, 'config', 'user.name', 't');
+    const sha = git(
+      bare,
+      'commit-tree',
+      '-m',
+      'x',
+      '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+    ).trim();
+    git(bare, 'update-ref', 'refs/heads/main', sha);
+    const linked = path.join(tmp(), 'wt');
+    git(bare, 'worktree', 'add', '-q', '-b', 'b', linked);
     expect(overlayPath(linked)).toBeNull();
+  });
+
+  it('resolves a linked worktree of a submodule to the submodule work tree', () => {
+    const sub = makeRepo();
+    const sup = makeRepo();
+    git(sup, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'mod');
+    const mod = path.join(sup, 'mod');
+    git(mod, 'config', 'user.email', 't@example.com');
+    git(mod, 'config', 'user.name', 't');
+    const linked = path.join(tmp(), 'wt');
+    git(mod, 'worktree', 'add', '-q', '-b', 'b', linked);
+    expect(overlayPath(mod)).toBe(overlayFile(mod));
+    expect(overlayPath(linked)).toBe(overlayFile(mod));
+  });
+});
+
+describe('location with inherited repository-locating variables', () => {
+  const VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE'];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const v of VARS) saved[v] = process.env[v];
+  });
+  afterEach(() => {
+    for (const v of VARS) {
+      if (saved[v] === undefined) delete process.env[v];
+      else process.env[v] = saved[v];
+    }
+  });
+
+  it('ignores GIT_DIR: a plain directory stays null and a subdirectory finds its clone', () => {
+    const main = makeRepo();
+    mkdirSync(path.join(main, 'sub'));
+    const plain = tmp();
+    process.env.GIT_DIR = path.join(main, '.git');
+    expect(overlayPath(plain)).toBeNull();
+    expect(overlayPath(path.join(main, 'sub'))).toBe(overlayFile(main));
+  });
+
+  it('keeps GIT_DIR out of the exclude call and restores the environment after it', () => {
+    const main = makeRepo();
+    const other = makeRepo();
+    process.env.GIT_DIR = path.join(other, '.git');
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    expect(process.env.GIT_DIR).toBe(path.join(other, '.git'));
+    expect(readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8')).toContain(
+      'check-tiers',
+    );
+    expect(readFileSync(path.join(other, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      'check-tiers',
+    );
   });
 });
 
@@ -453,6 +542,18 @@ describe('one writer at a time', () => {
     expect(ran).toBe('ran');
     expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
   });
+
+  it.each(['0\n', '2147483648\n'])(
+    'breaks a lock holding %j, which is not a valid pid, at once',
+    async (content) => {
+      const main = makeRepo();
+      mkdirSync(path.dirname(lockFile(main)), { recursive: true });
+      writeFileSync(lockFile(main), content);
+      const ran = await withOverlayLock(main, () => 'ran', { waitMs: 0 });
+      expect(ran).toBe('ran');
+      expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
+    },
+  );
 
   it('publishes the lock only with its whole content, never as an empty file', async () => {
     const main = makeRepo();
