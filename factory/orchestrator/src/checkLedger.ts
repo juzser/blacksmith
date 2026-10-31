@@ -343,36 +343,32 @@ export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): Chec
     }
   }
 
-  // Unique catch: every faster check that would have run on that tree (a current
-  // identity sharing a tier with the failure) was observed passing at it.
-  const medians = new Map<string, number>();
-  const measuredBy = new Map<string, number[]>();
-  const tiersOf = new Map<string, Set<string>>();
-  const current = new Map<string, { identity: string; seq: number }>();
-  for (const r of live) {
-    if (r.cmd_sha256 === null) continue;
-    tiersOf.set(r.identity, new Set([...(tiersOf.get(r.identity) ?? []), ...r.tiers]));
-    if (r.seq >= (current.get(r.name)?.seq ?? -1))
-      current.set(r.name, { identity: r.identity, seq: r.seq });
-    if (r.duration_ms === null) continue;
-    measuredBy.set(r.identity, [...(measuredBy.get(r.identity) ?? []), r.duration_ms]);
-  }
-  for (const [id, ms] of measuredBy) medians.set(id, median(ms) as number);
-  const currentIdentities = new Set([...current.values()].map((c) => c.identity));
+  // Unique catch: every faster check as of that row (each name's latest identity at or
+  // before it, from a record of the very same tiers) was observed passing at its tree.
+  const measured = live.filter((r) => r.cmd_sha256 !== null);
+  const latestBy = new Map<string, RawRow[]>();
+  for (const r of measured) latestBy.set(r.name, [...(latestBy.get(r.name) ?? []), r]);
+  const tierKey = (r: RawRow): string => [...new Set(r.tiers)].sort().join(',');
+  const medianAt = (id: string, seq: number): number | null =>
+    median(
+      measured
+        .filter((m) => m.identity === id && m.seq <= seq && m.duration_ms !== null)
+        .map((m) => m.duration_ms as number),
+    );
   for (const r of rows) {
     if (r.class !== 'real') continue;
-    const mine = medians.get(r.identity);
-    const faster = [...medians].filter(
-      ([id, m]) =>
-        mine !== undefined &&
-        m < mine &&
-        currentIdentities.has(id) &&
-        r.tiers.some((t) => tiersOf.get(id)?.has(t)),
-    );
+    const mine = medianAt(r.identity, r.seq);
+    const faster = [...latestBy.values()]
+      .map((list) => [...list].reverse().find((m) => m.seq <= r.seq))
+      .filter((m): m is RawRow => {
+        if (m === undefined || mine === null || tierKey(m) !== tierKey(r)) return false;
+        const theirs = medianAt(m.identity, r.seq);
+        return theirs !== null && theirs < mine;
+      });
     const observed = (id: string): boolean =>
       passedIn.has(`${r.event_id}|${id}`) ||
       (r.tree_sha !== null && passedAt.has(`${id}|${r.tree_sha}`));
-    r.catch = faster.every(([id]) => observed(id)) ? 'unique' : 'shadowed';
+    r.catch = faster.every((m) => observed(m.identity)) ? 'unique' : 'shadowed';
   }
 
   // Per identity.

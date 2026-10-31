@@ -777,4 +777,94 @@ describe('checkLedger unknown culprit and faster checks', () => {
     ]);
     expect(rowsOf(ledger, 'slow').find((r) => r.outcome === 'fail')?.catch).toBe('unique');
   });
+
+  it('is not shadowed when a faster check later changes its command', async () => {
+    const ledger = ledgerOf([
+      gateEvent('g-a', {
+        task: 'e/task-1',
+        tree: 'ta',
+        run: await realRun([
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'e2e', pass: false, monotonicMs: 5000 },
+        ]),
+      }),
+      gateEvent('g-b', {
+        task: 'e/task-1',
+        tree: 'tb',
+        run: await realRun([
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'e2e', pass: true, monotonicMs: 5000 },
+        ]),
+      }),
+      gateEvent('g-c', {
+        task: 'e/task-2',
+        tree: 'tc',
+        run: await realRun([{ name: 'unit', pass: true, monotonicMs: 500, variant: 'v2' }]),
+      }),
+    ]);
+    expect(rowsOf(ledger, 'e2e').find((r) => r.outcome === 'fail')).toMatchObject({
+      class: 'real',
+      catch: 'unique',
+    });
+    expect(entryOf(ledger, 'e2e').unique_catches).toBe(1);
+  });
+
+  it('is not shadowed by a check that moved out of the tier', async () => {
+    const ledger = ledgerOf([
+      gateEvent('g1', {
+        task: 'e/task-1',
+        tree: 't1',
+        daysAgo: 5,
+        run: await realRun([
+          { name: 'lint', pass: true, monotonicMs: 500 },
+          { name: 'e2e', pass: true, monotonicMs: 5000 },
+        ]),
+      }),
+      integrationEvent('i1', {
+        epic: 'e',
+        tree: 't9',
+        tiers: ['post-merge'],
+        daysAgo: 4,
+        run: await realRun([{ name: 'lint', pass: true, monotonicMs: 500 }]),
+      }),
+      gateEvent('g2', {
+        task: 'e/task-2',
+        tree: 't2',
+        run: await realRun([{ name: 'e2e', pass: false, monotonicMs: 5000 }]),
+      }),
+      gateEvent('g3', {
+        task: 'e/task-2',
+        tree: 't3',
+        run: await realRun([{ name: 'e2e', pass: true, monotonicMs: 5000 }]),
+      }),
+    ]);
+    expect(rowsOf(ledger, 'e2e').find((r) => r.outcome === 'fail')?.catch).toBe('unique');
+  });
+
+  it('is unique for a post-merge catch against a mixed record pre-merge check', async () => {
+    const ledger = ledgerOf([
+      integrationEvent('i-full', {
+        epic: 'e',
+        tree: 't1',
+        tiers: ['pre-merge', 'post-merge'],
+        run: await realRun([
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'smoke', pass: true, monotonicMs: 3000 },
+        ]),
+      }),
+      integrationEvent('i-pm', {
+        epic: 'e',
+        tree: 't2',
+        tiers: ['post-merge'],
+        run: await realRun([{ name: 'smoke', pass: false, monotonicMs: 3000 }]),
+      }),
+      integrationEvent('i-pm2', {
+        epic: 'e',
+        tree: 't3',
+        tiers: ['post-merge'],
+        run: await realRun([{ name: 'smoke', pass: true, monotonicMs: 3000 }]),
+      }),
+    ]);
+    expect(rowsOf(ledger, 'smoke').find((r) => r.outcome === 'fail')?.catch).toBe('unique');
+  });
 });
