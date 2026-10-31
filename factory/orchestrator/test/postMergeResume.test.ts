@@ -599,6 +599,26 @@ describe('post-merge resume', () => {
       expect(outcomes.map((o) => o.wrote.length).sort()).toEqual([0, 1]);
     });
 
+    it('carries on to the next landed revert after a sibling session recorded one', async () => {
+      await landed('task-1');
+      await landed('task-2');
+      const root = `${repo.sessionId}#0`;
+      await startSession('sess-x1', { ...repo.opts(), continues: root });
+      await startSession('sess-x2', { ...repo.opts(), continues: root });
+      const resumeInput = await input({ events: await repo.events() });
+      const from = (sessionId: string) =>
+        resumeLandedReverts(
+          resumeInput,
+          { sessionId, planVersion: 1, causalParent: `${sessionId}#0`, actor: 'system' },
+          repo.opts(),
+        );
+      const settled = await Promise.allSettled([from('sess-x1'), from('sess-x2')]);
+      expect(settled.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      const recorded = await reverted();
+      expect(recorded).toHaveLength(2);
+      expect(new Set(recorded.map((e) => payloadOf(e).revert_sha)).size).toBe(2);
+    });
+
     it('skips a revert a wave-reverted already names, and finishes the rest', async () => {
       const first = await landed('task-1');
       await landed('task-2');

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   appendEvent,
+  listSessionIds,
   readEvents,
   readLineageEvents,
   type StoredEvent,
@@ -527,6 +528,11 @@ describe('recordWaveReverted across one session tree', () => {
     const lost = settled.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     expect(lost.reason).toMatchObject({ code: 'revert.already-recorded' });
     expect(await wavesRecorded()).toHaveLength(1);
+  });
+
+  it('keeps its lock file out of the session list', async () => {
+    await recordWaveReverted(recordOnly(), ctxOf(W1), opts());
+    expect(listSessionIds(stateDir).sort()).toEqual([ROOT, W1, W2].sort());
   });
 
   it('refuses a sibling session a revert_sha another session of the tree recorded', async () => {
