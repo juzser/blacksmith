@@ -345,13 +345,17 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--batch] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--checks <checks.json>] [--batch] [--state-dir <dir>]',
     summary:
       'Serially rebase, test, and merge task branches into the integration branch. ' +
       'A merge is a fact the log must carry, so --session/--causal-parent/--plan are required — ' +
       'refuses before any git write without them. ' +
       '--batch (roadmap merge-lanes) groups claim-disjoint tasks with groupForBatch and ' +
-      'tests each group once instead of once per task — see queue.ts and the operator guide.',
+      'tests each group once instead of once per task — see queue.ts and the operator guide. ' +
+      '--checks reads the project checks file: with no post-merge or pre-release entry (or an empty file) ' +
+      '--test-cmd and --select-test-cmd run as without it; with one, the pre-merge tier is the pre-landing test ' +
+      'and neither command runs (the flags stay accepted), an empty pre-merge selection is refused. ' +
+      'Every wave-merged carries merge_sha; with --checks, pre_landing says which path ran and a tier run writes a queue-tier-run.',
   },
   {
     command: 'queue adopt',

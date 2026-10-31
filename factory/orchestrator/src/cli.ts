@@ -205,7 +205,15 @@ import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
-import { admit, adopt, type BatchGroupableTask, batchStep, groupForBatch, step } from './queue.js';
+import {
+  admit,
+  adopt,
+  type BatchGroupableTask,
+  batchStep,
+  groupForBatch,
+  resolveQueueChecks,
+  step,
+} from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { FACTORY_PROJECT, isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
@@ -3634,6 +3642,10 @@ async function main(): Promise<number> {
     // lies about its own coverage is worse than a slow one.
     const selectTestCmd = flags['select-test-cmd'] as string | undefined;
     if (selectTestCmd !== undefined) assertSelectableTestCmd(selectTestCmd);
+    // `--checks` is read, and a tiered file with no pre-merge entry refused,
+    // before any git runs; the tier decision itself is queue.ts's.
+    const queueChecks =
+      flags.checks === undefined ? undefined : resolveQueueChecks(readChecksFile(flags.checks));
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
     // D-46/P9-29/#269: the queue is the only component that knows a branch
@@ -3725,6 +3737,7 @@ async function main(): Promise<number> {
       epic,
       testCmd,
       ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
+      ...(queueChecks ? { checks: queueChecks } : {}),
       ...(events ? { events } : {}),
     };
     const outcomes = [];
