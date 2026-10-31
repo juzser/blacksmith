@@ -423,17 +423,27 @@ describe('nothing a project declares is dropped from CI', () => {
     return lists;
   }
 
-  it('leaves `pnpm run test:e2e` to e2e.yml once, and runs every other entry exactly once', () => {
+  /** The command e2e.yml's shard job runs, without the matrix's `--shard=` argument. */
+  const shardCommand = (dir: string): string => {
+    const run = runOf(workflow(dir, 'e2e.yml').jobs.shard, (s) =>
+      String(s.run).includes('test:e2e --shard'),
+    );
+    return run.split(' --shard')[0] ?? run;
+  };
+
+  it('Scenario A: tier jobs plus e2e.yml run every declared command exactly once', () => {
     const dir = fresh(true);
     setScripts(dir, { 'test:e2e': 'playwright test' });
-    writeChecks(dir, declared('pnpm run test:e2e'));
-    const e2e = workflow(dir, 'e2e.yml');
-    const shardRun = runOf(e2e.jobs.shard, (s) => String(s.run).includes('test:e2e --shard'));
+    const entries = declared('pnpm run test:e2e');
+    writeChecks(dir, entries);
 
     const lists = tierJobs(dir);
     expect(lists).toEqual({ 'pre-merge': ['unit'], 'post-merge': [], 'pre-release': ['audit'] });
     expect(trace(dir)).toEqual(['unit', 'audit']);
-    expect(shardRun.startsWith('pnpm run test:e2e')).toBe(true);
+
+    const cmdOf = (name: string) => entries.find((e) => e.name === name)?.cmd ?? `?${name}`;
+    const ran = [...Object.values(lists).flat().map(cmdOf), shardCommand(dir)];
+    expect([...ran].sort()).toEqual(entries.map((e) => e.cmd).sort());
 
     const note = check(dir, ['--tier', 'post-merge', '--ci']);
     expect(note.stdout).toContain('test:e2e');
@@ -442,17 +452,23 @@ describe('nothing a project declares is dropped from CI', () => {
     expect(step.outputs).toEqual(['pre-merge=true', 'post-merge=false', 'pre-release=true']);
   });
 
-  it('runs an e2e entry with another command in its own tier job', () => {
+  it('Scenario B: a changed e2e command runs once in its tier job; only e2e.yml adds `pnpm run test:e2e`', () => {
     const dir = fresh(true);
     setScripts(dir, { 'test:e2e': 'playwright test' });
-    writeChecks(dir, declared(echo('other-e2e')));
-    expect(listOf(dir, ['--tier', 'post-merge', '--ci'])).toEqual(['e2e']);
-    expect(check(dir, ['--tier', 'post-merge', '--ci']).status).toBe(0);
-    expect(trace(dir)).toEqual(['other-e2e']);
-    const shardRun = runOf(workflow(dir, 'e2e.yml').jobs.shard, (s) =>
-      String(s.run).includes('--shard'),
-    );
-    expect(shardRun).toContain('pnpm run test:e2e');
+    const entries = declared(echo('other-e2e'));
+    writeChecks(dir, entries);
+
+    const lists = tierJobs(dir);
+    expect(lists).toEqual({
+      'pre-merge': ['unit'],
+      'post-merge': ['e2e'],
+      'pre-release': ['audit'],
+    });
+    // Every declared entry's command ran exactly once, each in its own tier job.
+    expect(trace(dir).sort()).toEqual(['audit', 'other-e2e', 'unit']);
+    // The one command outside the declaration, by name.
+    expect(shardCommand(dir)).toBe('pnpm run test:e2e');
+    expect(entries.map((e) => e.cmd)).not.toContain('pnpm run test:e2e');
   });
 
   it('leaves nothing out without the e2e workflow', () => {
