@@ -68,6 +68,61 @@ describe('docs/specs/check-tiers-scope.md', () => {
     }
   });
 
+  const flat = (): string => doc().replace(/\s+/g, ' ');
+  const thresholdsSection = (): string =>
+    (doc().split(/^### Thresholds$/m)[1] ?? '').split(/^## /m)[0] ?? '';
+
+  it('states every threshold with its value in the Thresholds section', () => {
+    const section = thresholdsSection().replace(/\s+/g, ' ');
+    expect(section).toMatch(/window is 30 days/i);
+    for (const [name, value] of [
+      ['MIN_RUNS', '20'],
+      ['MIN_MEASURED_MINUTES', '30'],
+      ['POST_MERGE_BATCH', '4'],
+      ['DECLINE_QUIET_DAYS', '90'],
+    ] as const) {
+      expect(section, name).toMatch(new RegExp(`\`${name}\` \\(${value}\\)`));
+    }
+    expect(section).toMatch(/S1 8, S2 4, S3 2, S4 1/);
+  });
+
+  it('says thresholds are named constants in v1', () => {
+    expect(thresholdsSection().replace(/\s+/g, ' ')).toMatch(/named, exported constants in v1/i);
+  });
+
+  it('states every guardrail of D7-D9', () => {
+    const text = flat();
+    const guardrails: Array<[string, RegExp]> = [
+      ['non-operator actor', /a non-operator actor/],
+      ['reply not an array', /a reply that is not an array/],
+      ['shape error', /a shape error/],
+      ['check not in the file', /a check not in the file/],
+      ['declared tier', /a declared tier/],
+      ['stage-bound check', /a stage-bound check/],
+      ['sensitive-path guard', /a sensitive-path guard/],
+      ['S1 or S2 catch', /an S1 or S2 catch in the window/],
+      ['unconfirmed failure', /an unconfirmed failure in the window/],
+      [
+        'overlay unreadable, tracked or un-excludable',
+        /unreadable, tracked or un-excludable overlay/,
+      ],
+      ['whole batch refused, nothing appended', /refuses the whole batch, appending nothing/],
+      ['project file never written', /the project's file is never written/],
+      ['declared tier never moved automatically', /declared tier is never moved automatically/],
+      ['promotion only earlier', /only ever moves a check earlier/],
+      ['red-at-base promotes nothing', /predates the batch promotes nothing/],
+      ['decided never resurfaces', /decided proposal never resurfaces/],
+      ['stage check stays pre-merge', /coverage check stays pre-merge/],
+      [
+        'unknown keys, ids and duplicates refused',
+        /unknown keys, unknown or decided ids and duplicates are refused/,
+      ],
+    ];
+    for (const [name, re] of guardrails) {
+      expect(text, name).toMatch(re);
+    }
+  });
+
   it('is linked from docs/specs/README.md Scopes table and docs/README.md', () => {
     const scopes = read('docs/specs/README.md').split('## Scopes')[1] ?? '';
     expect(scopes.split('## Records')[0]).toContain('](check-tiers-scope.md)');

@@ -282,9 +282,11 @@ one batch-answered event, so the epic is not asked twice.
 
 ### Thresholds
 
-The window is 30 days. Together with `MIN_RUNS`, `MIN_MEASURED_MINUTES`,
-`POST_MERGE_BATCH`, `DECLINE_QUIET_DAYS` and the 8/4/2/1 weights above, they
-are named, exported constants in v1, each with a comment naming this scope.
+The window is 30 days. The thresholds are `MIN_RUNS` (20),
+`MIN_MEASURED_MINUTES` (30), `POST_MERGE_BATCH` (4) and `DECLINE_QUIET_DAYS`
+(90), and the severity weights are S1 8, S2 4, S3 2, S4 1. Together with the
+window they are named, exported constants in v1, each with a comment naming
+this scope.
 A policy file waits until a second project tunes them.
 
 The dashboard stays display-only: decisions go through the CLI and the
