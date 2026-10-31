@@ -1327,7 +1327,6 @@ function declaredIntegrationLines(
   ];
 }
 
-/** The judge-prompt lines for a declared-checks close. */
 /**
  * Whether a recorded sha still covers the branch. Every caller here runs after
  * the matching blocker has already passed, so `(the current head)` is the
