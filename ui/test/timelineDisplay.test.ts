@@ -1200,6 +1200,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'edge-recorded': ['Edge:  depends on ', ''],
       'wave-admitted': ['Wave admitted: 0 tasks', ''],
       'wave-merged': ['Merged ', 'not measured'],
+      'wave-reverted': ['Wave reverted', ''],
       'spec-change-proposed': [
         'Spec change proposed by worker on :  (non-blocking, 0 sites)',
         'Spec change proposed',
