@@ -221,13 +221,15 @@ export async function resumeLandedReverts(
       { epicId, given: input.integration.branch, scanned: branch },
     );
   }
-  const events = [...input.events];
+  const { events } = input;
   const isAncestor = (a: string, b: string): boolean => {
     try {
       git(projectDir, ['merge-base', '--is-ancestor', a, b]);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      // Only exit 1 means "not an ancestor"; any other failure is no verdict.
+      if (err instanceof GitCommandError && err.status === 1) return false;
+      throw err;
     }
   };
   const recorded = (sha: string): boolean =>
@@ -237,7 +239,9 @@ export async function resumeLandedReverts(
         String(payloadOf(e).revert_sha).toLowerCase() === sha,
     );
 
-  const wrote: ResumeWrite[] = [];
+  // Every decision is made before the first write, so a git fault on any
+  // commit writes nothing and the next run sees every commit again.
+  const planned: { write: ResumeWrite; event: WaveRevertedInput }[] = [];
   for (const commit of landedBsReverts(projectDir, epicId)) {
     const sha = commit.sha.toLowerCase();
     if (recorded(sha)) continue;
@@ -286,8 +290,6 @@ export async function resumeLandedReverts(
         evidence: tail === null ? 'unreadable' : 'record',
       };
     }
-    events.push(await recordWaveReverted(input_, ctx, { ...opts, isAncestor, liveTaskIds }));
-
     const write: ResumeWrite = {
       task: t.task,
       revert_sha: sha,
@@ -302,6 +304,20 @@ export async function resumeLandedReverts(
         red_record_event_id: t.redRecord as string,
         reproduced: true,
       };
+    }
+    planned.push({ write, event: input_ });
+  }
+
+  // A write can still fail (the log, or the bounce preflight's own git call).
+  // The writes already appended ride on the error as `wrote`, so the caller
+  // never loses their culprits: the next run skips those commits.
+  const wrote: ResumeWrite[] = [];
+  for (const { write, event } of planned) {
+    try {
+      await recordWaveReverted(event, ctx, { ...opts, isAncestor, liveTaskIds });
+    } catch (err) {
+      if (err instanceof Error) Object.assign(err, { wrote });
+      throw err;
     }
     wrote.push(write);
   }

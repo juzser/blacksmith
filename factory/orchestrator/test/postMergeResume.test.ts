@@ -43,13 +43,18 @@ vi.mock('../src/db/projector.js', async (importOriginal) => {
 
 // A switch to make one git subcommand fail the way an infrastructure fault does
 // (an unwritable object store, a lock): exit 128 with no claim about the data.
-const gitFault = vi.hoisted(() => ({ subcommand: null as string | null }));
+// `passes` lets that many matching calls through before the fault starts.
+const gitFault = vi.hoisted(() => ({ subcommand: null as string | null, passes: 0 }));
 vi.mock('../src/git.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/git.js')>();
   return {
     ...actual,
     runGit: (cwd: string, args: string[]) => {
       if (gitFault.subcommand !== null && args.includes(gitFault.subcommand)) {
+        if (gitFault.passes > 0) {
+          gitFault.passes -= 1;
+          return actual.runGit(cwd, args);
+        }
         throw new actual.GitCommandError(cwd, args, 128, 'fatal: unable to write object');
       }
       return actual.runGit(cwd, args);
@@ -74,11 +79,13 @@ describe('post-merge resume', () => {
   beforeEach(async () => {
     override.status = null;
     gitFault.subcommand = null;
+    gitFault.passes = 0;
     repo = await createIntegrationRepo();
   });
   afterEach(async () => {
     override.status = null;
     gitFault.subcommand = null;
+    gitFault.passes = 0;
     await repo.dispose();
   });
 
@@ -699,6 +706,71 @@ describe('post-merge resume', () => {
         /unable to write object/,
       );
       expect(await reverted()).toHaveLength(0);
+    });
+
+    it('a failing merge-base --is-ancestor is not "not an ancestor" (finding d4d2a973)', async () => {
+      await landed('task-1');
+      const again = repo.merge('task-1-again', { 'again.txt': 'again\n' });
+      await recordMerge(T1, again);
+      gitFault.subcommand = '--is-ancestor';
+      const before = snapshot();
+      await expect(
+        resumeLandedReverts(await input(), repo.ctx(), repo.opts()),
+      ).rejects.toBeInstanceOf(GitCommandError);
+      expect(await reverted()).toHaveLength(0);
+      expect(snapshot()).toEqual(before);
+      gitFault.subcommand = null;
+      await expectRecordOnly('re-merged');
+    });
+
+    it('a fault on a later revert writes nothing for the earlier one (finding 1b666dbe)', async () => {
+      const a = await landed('task-1');
+      const b = await landed('task-2');
+      // The first revert's proof passes, the second one's commit-tree faults.
+      gitFault.subcommand = 'commit-tree';
+      gitFault.passes = 1;
+      await expect(
+        resumeLandedReverts(await input(), repo.ctx(), repo.opts()),
+      ).rejects.toBeInstanceOf(GitCommandError);
+      expect(await reverted()).toHaveLength(0);
+      gitFault.subcommand = null;
+      const next = await resume();
+      expect(next.wrote.map((w) => [w.task, w.disposition, w.culprit?.merge_sha])).toEqual([
+        [T1, 'bounce', a.merge],
+        [T2, 'bounce', b.merge],
+      ]);
+    });
+
+    it('a fault while writing a later revert hands back the earlier write with its culprit', async () => {
+      const a = await landed('task-1');
+      const b = await landed('task-2');
+      // One ancestry call per bounce to decide it, one more inside each write:
+      // the fourth call, the second write's own preflight, faults.
+      gitFault.subcommand = '--is-ancestor';
+      gitFault.passes = 3;
+      const err = await resumeLandedReverts(await input(), repo.ctx(), repo.opts()).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(GitCommandError);
+      expect((err as { wrote?: unknown }).wrote).toEqual([
+        {
+          task: T1,
+          revert_sha: a.revert,
+          disposition: 'bounce',
+          culprit: {
+            task: T1,
+            merge_sha: a.merge,
+            failing_checks: ['post-a'],
+            red_record_event_id: a.red,
+            reproduced: true,
+          },
+        },
+      ]);
+      expect((await reverted()).map((e) => payloadOf(e).revert_sha)).toEqual([a.revert]);
+      gitFault.subcommand = null;
+      const next = await resume();
+      expect(next.wrote.map((w) => [w.task, w.culprit?.merge_sha])).toEqual([[T2, b.merge]]);
     });
 
     it('a claimed revert whose revert-merge conflicts is record-only, not a failure', async () => {
