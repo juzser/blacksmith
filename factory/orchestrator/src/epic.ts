@@ -32,7 +32,14 @@ import {
   goalCheckBlockers,
   latestGoalCheck,
 } from './goalCheck.js';
-import { type IntegrationCheckRecord, latestIntegrationCheck } from './integration.js';
+import {
+  type CheckCertification,
+  certifyChecks,
+  type IntegrationCheckRecord,
+  lastTieredRecordId,
+  latestIntegrationCheck,
+  latestIntegrationCheckAt,
+} from './integration.js';
 import { type McpSurfaceStatus, mcpBlockers } from './mcp.js';
 import {
   bareTaskId,
@@ -56,6 +63,7 @@ import {
   taskSuccessors,
 } from './spec.js';
 import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from './taskStatus.js';
+import type { CheckTier } from './testgate.js';
 import { TASK_WAIVER_APPROVED_EVENT } from './waivers.js';
 import {
   auditWaveConcurrency,
@@ -687,6 +695,33 @@ export interface EpicPlanRoster {
   creditableTaskIds?: readonly string[];
 }
 
+/** One check the caller declares the epic must have certified (spec D5). */
+export interface DeclaredCheck {
+  name: string;
+  tier: CheckTier;
+  checkSha256: string;
+}
+
+export interface DeclaredCheckStatus extends DeclaredCheck {
+  /** `certifyChecks` at the head; null when the head could not be read. */
+  certification: CheckCertification | null;
+}
+
+/** The reason text for an uncertified check, or null when `c` is certified. */
+export function certificationReasonText(c: CheckCertification): string | null {
+  if (c.certified) return null;
+  switch (c.reason) {
+    case 'failed':
+      return `its last result failed (exit ${c.result?.exitCode}, record ${c.recordId})`;
+    case 'not-run':
+      return `its last result did not run (heavy.wait-timeout, record ${c.recordId})`;
+    case 'changed':
+      return 'its results there exist only under another check_sha256 (its name, command, heavy flag or timeout changed since they ran)';
+    default:
+      return 'no non-probe record there has a result for its check_sha256';
+  }
+}
+
 /**
  * What is known about the epic's assembled branch: the last recorded
  * integration-root check (integration.ts's fold) and where the branch head
@@ -699,6 +734,18 @@ export interface EpicPlanRoster {
 export interface IntegrationStatus {
   check: IntegrationCheckRecord | null;
   headSha: string | null;
+  /**
+   * The checks declaration with each check's certification at `headSha` (spec
+   * D5). Set exactly when the caller passed a declaration; it then decides
+   * the blockers and `check` is the last non-probe record at the head. Never
+   * set to `undefined`.
+   */
+  declared?: readonly DeclaredCheckStatus[];
+  /**
+   * The last record of this epic that uses tiers, set only without a
+   * declaration and only when there is one, so the close asks for `--checks`.
+   */
+  tieredRecordId?: string;
   /**
    * `<prefix>/<epic>/integration` — `bs/` for a new epic, `smith/` for one
    * that already integrates there. Resolved by cli.ts (epicBranchPrefix
@@ -718,7 +765,35 @@ export interface IntegrationStatus {
  * against the commit the branch is on now.
  */
 function integrationBlockers(epicId: string, integration: IntegrationStatus): string[] {
-  const { check, headSha, branch } = integration;
+  const { check, headSha, branch, declared, tieredRecordId } = integration;
+
+  // With a declaration the required set is the declaration and nothing else.
+  if (declared !== undefined) {
+    if (declared.length === 0) {
+      return [
+        `Epic "${epicId}" has an empty checks declaration, so no check can be shown certified at ${branch}.`,
+      ];
+    }
+    if (headSha === null) {
+      return [
+        `Could not read the head of ${branch}, so no declared check can be shown certified at it.`,
+      ];
+    }
+    return declared.flatMap((d) => {
+      const reason = d.certification === null ? null : certificationReasonText(d.certification);
+      return reason === null
+        ? []
+        : [
+            `Check "${d.name}" (${d.tier}) is not certified at ${headSha.slice(0, 8)} of ${branch}: ${reason}.`,
+          ];
+    });
+  }
+
+  if (tieredRecordId !== undefined) {
+    return [
+      `Epic "${epicId}" has integration-check records written under check tiers (latest: ${tieredRecordId}), so its close needs the checks declaration: pass --checks <file> to bs epic close and bs epic verdict.`,
+    ];
+  }
 
   if (check === null) {
     return [
@@ -1233,6 +1308,31 @@ const listOr = (lines: string[], empty = '  (none)'): string[] =>
  * a judge without covering anything says so rather than showing a bare sha the
  * judge has no way to place.
  */
+function declaredIntegrationLines(
+  declared: readonly DeclaredCheckStatus[],
+  headSha: string | null,
+  branch: string,
+): string[] {
+  if (declared.length === 0) {
+    return [`  Branch: ${branch}`, '  Declared checks: none (the checks declaration is empty).'];
+  }
+  if (headSha === null) return [`  Branch: ${branch}`, `  Could not read the head of ${branch}.`];
+  return [
+    `  Branch: ${branch}`,
+    `  Declared checks: ${declared.length}, read at commit ${headSha.slice(0, 8)}:`,
+    ...declared.map((d) => {
+      const reason = d.certification === null ? null : certificationReasonText(d.certification);
+      if (reason !== null) return `  ${d.name} (${d.tier}): NOT certified: ${reason}`;
+      const cmd = d.certification?.result?.cmd;
+      const cmdPart =
+        typeof cmd === 'string' && cmd.replace(/\s+/g, ' ').trim() !== ''
+          ? ` (\`${cmd.replace(/\s+/g, ' ').trim()}\`)`
+          : '';
+      return `  ${d.name} (${d.tier})${cmdPart}: passed (exit ${d.certification?.result?.exitCode}), record ${d.certification?.recordId}`;
+    }),
+  ];
+}
+
 function coverage(recorded: string, current: string | null): string {
   if (current === null) return ' (the current head could not be read)';
   if (current === recorded) return ' (the current head)';
@@ -1326,25 +1426,27 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
   // The assembled branch. `integrationBlockers` above holds the epic on every
   // shape but this one, so by the time a judge runs the check is present,
   // passing, and current — the refutable question left is what it RAN.
-  const { check, headSha, branch } = summary.integration;
+  const { check, headSha, branch, declared } = summary.integration;
   const integrationLines =
-    check === null
-      ? [`  There is no integration-root check on record for ${branch}.`]
-      : [
-          `  Branch: ${branch}`,
-          `  Checked at commit ${check.headSha.slice(0, 8)}${coverage(check.headSha, headSha)}, recorded ${check.ts}`,
-          `  Result: ${check.pass ? 'passed' : 'FAILED'} — ${check.results.length} command${check.results.length === 1 ? '' : 's'} ran:`,
-          // Name, command and exit code — never tail; see this function's header.
-          ...listOr(
-            check.results.map((r) => {
-              // The payload is read back untyped, so the field is checked, not
-              // trusted, and a multi-line command is kept to its one line here.
-              const cmd = typeof r.cmd === 'string' ? r.cmd.replace(/\s+/g, ' ').trim() : '';
-              return `  ${r.name}${cmd === '' ? '' : ` (\`${cmd}\`)`}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`;
-            }),
-            '  (none — the check recorded no commands at all)',
-          ),
-        ];
+    declared !== undefined
+      ? declaredIntegrationLines(declared, headSha, branch)
+      : check === null
+        ? [`  There is no integration-root check on record for ${branch}.`]
+        : [
+            `  Branch: ${branch}`,
+            `  Checked at commit ${check.headSha.slice(0, 8)}${coverage(check.headSha, headSha)}, recorded ${check.ts}`,
+            `  Result: ${check.pass ? 'passed' : 'FAILED'} — ${check.results.length} command${check.results.length === 1 ? '' : 's'} ran:`,
+            // Name, command and exit code — never tail; see this function's header.
+            ...listOr(
+              check.results.map((r) => {
+                // The payload is read back untyped, so the field is checked, not
+                // trusted, and a multi-line command is kept to its one line here.
+                const cmd = typeof r.cmd === 'string' ? r.cmd.replace(/\s+/g, ' ').trim() : '';
+                return `  ${r.name}${cmd === '' ? '' : ` (\`${cmd}\`)`}: ${r.pass ? 'passed' : 'FAILED'} (exit ${r.exitCode})`;
+              }),
+              '  (none — the check recorded no commands at all)',
+            ),
+          ];
 
   const review = summary.specReview.review;
   const specReviewLines =
@@ -1559,6 +1661,11 @@ export interface EpicCrosscheckOptions {
 export interface EpicVerdictInput {
   epicId: string;
   /**
+   * The checks the epic must have certified at the head (spec D5). Absent
+   * means no declaration, main's rule; `[]` is an empty declaration and blocks.
+   */
+  checks?: readonly DeclaredCheck[];
+  /**
    * Where `smith/<epic>/integration` is right now, or null if it could not be
    * read. REQUIRED (D-42/P9-26): this module never shells out to git, so the
    * caller states the precondition, and null is fail-closed — an unreadable
@@ -1707,6 +1814,30 @@ interface EpicSummaryComputation {
   summary: EpicSummary;
 }
 
+/** The integration status of the epic, by the one rule `input.checks` selects (spec D5). */
+function integrationStatus(
+  events: Awaited<ReturnType<typeof readLineageEvents>>,
+  input: EpicVerdictInput,
+): IntegrationStatus {
+  const { epicId, integrationHeadSha: head, integrationBranch: branch, checks } = input;
+  if (checks !== undefined) {
+    const certs = head === null ? null : certifyChecks(events, epicId, head, checks);
+    return {
+      check: head === null ? null : latestIntegrationCheckAt(events, epicId, head),
+      headSha: head,
+      branch,
+      declared: checks.map((c, i) => ({ ...c, certification: certs?.[i] ?? null })),
+    };
+  }
+  const tieredRecordId = lastTieredRecordId(events, epicId);
+  return {
+    check: latestIntegrationCheck(events, epicId),
+    headSha: head,
+    branch,
+    ...(tieredRecordId === null ? {} : { tieredRecordId }),
+  };
+}
+
 /**
  * The read-only half of `runEpicVerdict`: fold the lineage into the one
  * `EpicSummary` every verdict is computed from. Split out so `closeEpic` can
@@ -1746,11 +1877,7 @@ async function computeEpicSummary(
     input.epicId,
     tasks,
     findings,
-    {
-      check: latestIntegrationCheck(events, input.epicId),
-      headSha: input.integrationHeadSha,
-      branch: input.integrationBranch,
-    },
+    integrationStatus(events, input),
     input.mcp,
     // Folded from the log this call already read, and pinned to the same head
     // as the integration check: the closing spec review reads the assembled
@@ -1984,7 +2111,7 @@ export interface EpicCloseRecord {
  * reader of a close most often needs.
  */
 function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
-  const { check, headSha } = summary.integration;
+  const { check, headSha, declared, tieredRecordId } = summary.integration;
   const { review } = summary.specReview;
   const taskRef = (t: EpicTaskSummary) => ({ task_id: t.taskId, task_status: t.taskStatus });
   const findingRef = (f: EpicFindingSummary) => ({
@@ -2058,6 +2185,19 @@ function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
       head_sha: headSha,
       check:
         check === null ? null : { branch: check.branch, head_sha: check.headSha, pass: check.pass },
+      ...(declared !== undefined
+        ? {
+            declared: declared.map((d) => ({
+              name: d.name,
+              tier: d.tier,
+              check_sha256: d.checkSha256,
+              certified: d.certification?.certified === true,
+              reason: d.certification?.reason ?? null,
+              record_id: d.certification?.recordId ?? null,
+            })),
+          }
+        : {}),
+      ...(tieredRecordId !== undefined ? { tiered_record_id: tieredRecordId } : {}),
     },
     // The blockers list already names a broken rule, but it does not say the
     // surface was checked, which manifest was read, or whether the epic was in
