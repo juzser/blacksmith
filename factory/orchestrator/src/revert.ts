@@ -206,6 +206,9 @@ export async function recordWaveReverted(
       );
     }
     taskId = input.task_ids[0] as string;
+    if (typeof input.epic_id !== 'string' || input.epic_id === '') {
+      throw new WaveRevertedError('revert.epic-required', 'A bounce needs the epic_id.');
+    }
     if (isAncestor === undefined || liveTaskIds === undefined) {
       throw new WaveRevertedError(
         'revert.preflight-required',

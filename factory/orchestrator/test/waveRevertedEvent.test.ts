@@ -436,6 +436,19 @@ describe('recordWaveReverted', () => {
       await refused(() => recordWaveReverted(bounce(), ctx, callOpts()), 'revert.blocked');
     });
 
+    it('is refused for a missing or empty epic_id, and record-only does not need one', async () => {
+      await refused(
+        () => recordWaveReverted(bounce({ epic_id: undefined }), ctx, callOpts()),
+        'revert.epic-required',
+      );
+      await refused(
+        () => recordWaveReverted(bounce({ epic_id: '' }), ctx, callOpts()),
+        'revert.epic-required',
+      );
+      const stored = await recordWaveReverted(recordOnly({ epic_id: undefined }), ctx, opts());
+      expect(stored.record.payload).toMatchObject({ disposition: 'record-only' });
+    });
+
     it('is refused for an empty failing_checks', async () => {
       await refused(
         () => recordWaveReverted(bounce({ failing_checks: [] }), ctx, callOpts()),
