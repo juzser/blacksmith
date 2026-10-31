@@ -19,6 +19,7 @@ import { recordJudgeDispatch } from '../src/judges.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { sliceSection } from '../src/playbookSlice.js';
 import { ORCHESTRATOR_OWNED_RESULT_FIELDS } from '../src/results.js';
+import { runCli } from './helpers/cliHarness.js';
 
 // Epic bs-optimize criterion 5 (module half): composed briefs lint clean and
 // carry the shared text sliced from the real dispatch.md.
@@ -879,5 +880,54 @@ describe('composeBrief for a follow-up the log added (f-bs-gate-bounce/integrati
     expect(await codeOf(composeBrief({ ...base(), taskId: 'project-a/nope', role: 'coder' }))).toBe(
       'brief.task-not-in-plan',
     );
+  });
+});
+
+describe('bs brief compose --checks through the built binary', () => {
+  it('refuses a deferred stage-bound check with gate.stage-check-deferred and writes no brief or manifest', async () => {
+    const checks = path.join(dir, 'checks.json');
+    await writeFile(
+      checks,
+      JSON.stringify([
+        { name: 'unit', cmd: 'run-the-suite' },
+        { name: 'coverage', cmd: 'run-coverage', tier: 'post-merge' },
+      ]),
+    );
+    const out = path.join(dir, 'cli-brief.md');
+    const run = runCli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        'coder',
+        '--session',
+        sessionId,
+        '--plan',
+        fixturePlan,
+        '--task',
+        TASK,
+        '--worktree',
+        worktree,
+        '--provider',
+        'claude',
+        '--model-tier',
+        'mid',
+        '--base',
+        'bs/project-a/integration',
+        '--checks',
+        checks,
+        '--work-root',
+        path.join(dir, 'work'),
+        '--out',
+        out,
+      ],
+      { BS_HOME: dir },
+    );
+    expect(run.status, run.stdout + run.stderr).toBe(1);
+    expect(JSON.parse(run.stdout).error.code).toBe('gate.stage-check-deferred');
+    expect(run.stdout).toContain('coverage');
+    const written = await readdir(dir);
+    expect(written).not.toContain('cli-brief.md');
+    expect(written).not.toContain('cli-brief.md.manifest.json');
   });
 });
