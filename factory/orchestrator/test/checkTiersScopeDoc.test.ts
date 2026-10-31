@@ -37,6 +37,12 @@ describe('docs/specs/check-tiers-scope.md', () => {
     expect(decisions[0]?.to_tier).toBe('post-merge');
   });
 
+  it('states the D7 refusals for a mismatched check and an out-of-options to_tier', () => {
+    const text = doc().replace(/\s+/g, ' ');
+    expect(text).toMatch(/a check that does not match the proposal/i);
+    expect(text).toMatch(/to_tier[^.]*one of that item's non-keep options/i);
+  });
+
   it('says every option shows runs covered, minutes spent and minutes saved', () => {
     const text = doc().replace(/\s+/g, ' ');
     expect(text).toMatch(

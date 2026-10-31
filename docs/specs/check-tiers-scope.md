@@ -254,9 +254,10 @@ is always keep, which declines; silence is never assent. The playbook writes
 ]
 ```
 
-`decision` is `approve` or `decline`; `to_tier` is required on approve and
-absent on decline; unknown keys, unknown or decided ids and duplicates are
-refused.
+`decision` is `approve` or `decline`; `to_tier` is required on approve,
+must be one of that item's non-keep options, and is absent on decline;
+unknown keys, unknown or decided ids and duplicates are refused, and so is
+a check that does not match the proposal.
 
 ### Guardrails the apply verb enforces
 
