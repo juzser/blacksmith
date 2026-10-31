@@ -260,6 +260,23 @@ describe('gatherLedgerInputs', () => {
     expect(out.taskClaims.get('eb/task-1')).toEqual(['b/**']);
   });
 
+  it('skips a plan path that cannot be read, naming it, and keeps the readable plans and events', async () => {
+    mkdirSync(path.join(specsDir, 'ea', 'plan.json'), { recursive: true });
+    plan('eb', 'plan.json', { project: 'proj', tasks: [task('eb/task-1', ['b/**'])] });
+    session('s-a', [{ type: 'session-start' }, { type: 'testgate-result', task: 'ea/task-1' }]);
+
+    const out = await gather();
+
+    expect(out.warnings).toEqual([
+      expect.objectContaining({
+        code: 'checks.plan-skipped',
+        path: path.join(specsDir, 'ea', 'plan.json'),
+      }),
+    ]);
+    expect(out.taskClaims.get('eb/task-1')).toEqual(['b/**']);
+    expect(out.events.map((e) => e.event_id)).toContain('s-a#1');
+  });
+
   it('skips a plan that lacks a field it needs', async () => {
     plan('ea', 'plan.json', { project: 'proj', tasks: [{ task_id: 'ea/task-1' }] });
     plan('eb', 'plan.json', { project: 'proj', tasks: [task('eb/task-1', ['b'])] });

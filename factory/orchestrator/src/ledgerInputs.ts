@@ -158,7 +158,18 @@ export async function gatherLedgerInputs(opts: LedgerInputsOptions): Promise<Led
     const epicDir = path.join(opts.specsDir, epic);
     for (const { file, rank } of planFiles(epicDir)) {
       const filePath = path.join(epicDir, file);
-      const plan = parsePlan(readFileSync(filePath, 'utf8'), epic, rank);
+      let text: string;
+      try {
+        text = readFileSync(filePath, 'utf8');
+      } catch (err) {
+        warnings.push({
+          code: 'checks.plan-skipped',
+          path: filePath,
+          reason: `unreadable: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        continue;
+      }
+      const plan = parsePlan(text, epic, rank);
       if (typeof plan === 'string') {
         warnings.push({ code: 'checks.plan-skipped', path: filePath, reason: plan });
         continue;
