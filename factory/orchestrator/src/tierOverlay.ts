@@ -318,34 +318,61 @@ export function writeOverlay(
   return state;
 }
 
-function readHolder(lock: string): number {
+// Invariants of the lock section (a file here is the lock or the breaker gate):
+//  1. A file is removed only by the release of the process that published it, or
+//     by a breaker that read it EXISTING with a dead pid (or content that is not
+//     a pid) while holding the gate. Absent is never stale: it means publish again.
+//  2. A release removes only the file it published, told by inode against the
+//     temp link it keeps until release (a held link's inode cannot be reused).
+//  3. A live pid's lock is never broken, so under the gate an existing dead lock
+//     cannot change between the re-read and the unlink: its owner is dead and
+//     every other remover is held out by the gate. The one exception is a gate
+//     evicted for age while its live owner stalls; the owner then releases
+//     nothing of a newer gate (2), and the re-read still guards the lock.
+
+/** The pid a file holds: NaN when its content is not `<pid>\n`, null when absent. */
+function readHolder(file: string): number | null {
   try {
-    const m = /^(\d+)\n$/.exec(readFileSync(lock, 'utf8'));
+    const m = /^(\d+)\n$/.exec(readFileSync(file, 'utf8'));
     return m === null ? Number.NaN : Number(m[1]);
-  } catch {
-    return Number.NaN;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? null : Number.NaN;
   }
 }
 
 let tempSeq = 0;
 
+interface Held {
+  /** Remove the published file if it is still ours, and the temp link. */
+  release(): void;
+}
+
 /**
- * Create `file` holding `<pid>\n`, or return false when it exists. The content
+ * Create `file` holding `<pid>\n`, or return null when it exists. The content
  * is written to a private temp file and linked into place, so `file` appears
  * whole or not at all: a crash between create and write cannot leave it empty.
+ * The temp link stays until `release`, which is how the file is known as ours.
  */
-function publish(file: string): boolean {
+function publish(file: string): Held | null {
   const temp = `${file}.${process.pid}-${tempSeq++}.tmp`;
   writeFileSync(temp, `${process.pid}\n`);
   try {
     linkSync(temp, file);
-    return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    return false;
-  } finally {
     unlinkSync(temp);
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    return null;
   }
+  return {
+    release() {
+      try {
+        if (statSync(file).ino === statSync(temp).ino) unlinkSync(file);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+      unlinkIfPresent(temp);
+    },
+  };
 }
 
 /** Remove `file`, which may already be gone. */
@@ -391,35 +418,39 @@ function evictStaleBreaker(gate: string, pid: number): void {
 
 /**
  * Remove the lock of a dead (or unreadable) holder `pid`, alone: breakers take
- * a second lock, and under it the lock is removed only if it still holds that
- * same dead holder, so a lock another writer took meanwhile is never touched
- * (nothing else removes a dead holder's lock). Returns the pid of a live
- * breaker to wait for, or null when the caller may look at the lock again.
+ * a second lock, and under it the lock is removed only if it still EXISTS and
+ * holds that same dead holder, so an absent lock, or one another writer took
+ * meanwhile, is never touched. Returns the pid of a live breaker to wait for,
+ * or null when the caller may look at the lock again.
  */
 function breakStale(lock: string, pid: number): number | null {
   const gate = `${lock}.breaker`;
-  if (!publish(gate)) {
+  const held = publish(gate);
+  if (held === null) {
     const other = readHolder(gate);
+    if (other === null) return null;
     if (!Number.isNaN(other) && pidIsAlive(other) && gateIsFresh(gate)) return other;
     evictStaleBreaker(gate, other);
     return null;
   }
   try {
-    if (Object.is(readHolder(lock), pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
+    const now = readHolder(lock);
+    if (Object.is(now, pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
       unlinkIfPresent(lock);
     }
   } finally {
-    // An evictor may have moved the gate aside; it puts a live one back.
-    unlinkIfPresent(gate);
+    held.release();
   }
   return null;
 }
 
 /** Take the lock now, or return the pid to wait for (a live holder or breaker). */
-function tryAcquire(lock: string): number | null {
+function tryAcquire(lock: string): Held | number {
   for (;;) {
-    if (publish(lock)) return null;
+    const held = publish(lock);
+    if (held !== null) return held;
     const holder = readHolder(lock);
+    if (holder === null) continue;
     if (!Number.isNaN(holder) && pidIsAlive(holder)) return holder;
     const breaker = breakStale(lock, holder);
     if (breaker !== null) return breaker;
@@ -443,14 +474,18 @@ export async function withOverlayLock<T>(
   const lock = path.join(path.dirname(file), LOCK_FILE);
   mkdirSync(path.dirname(file), { recursive: true });
   const deadline = Date.now() + waitMs;
+  let held: Held;
   for (;;) {
-    const holder = tryAcquire(lock);
-    if (holder === null) break;
+    const got = tryAcquire(lock);
+    if (typeof got !== 'number') {
+      held = got;
+      break;
+    }
     if (Date.now() >= deadline) {
       throw new OverlayError(
         'checks.overlay-busy',
-        `${lock} is held by pid ${holder}; gave up after ${waitMs} ms. Nothing was written.`,
-        { lock, holder, wait_ms: waitMs },
+        `${lock} is held by pid ${got}; gave up after ${waitMs} ms. Nothing was written.`,
+        { lock, holder: got, wait_ms: waitMs },
       );
     }
     await new Promise<void>((resolve) => setTimeout(resolve, OVERLAY_LOCK_POLL_MS));
@@ -458,11 +493,7 @@ export async function withOverlayLock<T>(
   try {
     return await fn();
   } finally {
-    try {
-      unlinkSync(lock);
-    } catch {
-      // Already gone.
-    }
+    held.release();
   }
 }
 

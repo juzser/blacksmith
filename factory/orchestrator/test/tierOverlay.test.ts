@@ -39,6 +39,8 @@ const seams = vi.hoisted(() => ({
   afterProbe: null as null | ((pid: number) => void),
   afterRename: null as null | (() => void),
   beforeLink: null as null | ((from: string, to: string) => void),
+  beforeRead: null as null | ((file: string) => void),
+  afterRead: null as null | ((file: string) => void),
 }));
 vi.mock('../src/heavyLock.js', async (orig) => {
   const real = await orig<typeof import('../src/heavyLock.js')>();
@@ -55,6 +57,14 @@ vi.mock('node:fs', async (orig) => {
   const real = await orig<typeof import('node:fs')>();
   return {
     ...real,
+    readFileSync: (...args: Parameters<typeof real.readFileSync>) => {
+      seams.beforeRead?.(String(args[0]));
+      try {
+        return real.readFileSync(...args);
+      } finally {
+        seams.afterRead?.(String(args[0]));
+      }
+    },
     linkSync: (from: string, to: string): void => {
       seams.beforeLink?.(from, to);
       real.linkSync(from, to);
@@ -420,6 +430,48 @@ describe('one writer at a time', () => {
     expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
   });
 
+  it('treats a lock released between its failed publish and its read as absent, never as stale', async () => {
+    const main = makeRepo();
+    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
+    writeFileSync(lockFile(main), `${process.ppid}\n`);
+    let reads = 0;
+    let readsDone = 0;
+    let linksToLock = 0;
+    let gateLinks = 0;
+    // The holder releases right before the waiter reads it, and a third writer
+    // publishes before the waiter's next publish.
+    seams.beforeRead = (file) => {
+      if (file === lockFile(main) && reads++ === 0) rmSync(lockFile(main));
+    };
+    seams.beforeLink = (_from, to) => {
+      if (to === gateFile(main)) gateLinks++;
+      if (to === lockFile(main) && linksToLock++ === 1) {
+        writeFileSync(lockFile(main), `${process.ppid}\n`);
+      }
+    };
+    // Were the absent lock judged stale, the waiter would re-read it under the
+    // gate and unlink the third writer's lock after this read.
+    seams.afterRead = (file) => {
+      if (file === lockFile(main) && readsDone++ === 1)
+        writeFileSync(lockFile(main), `${process.ppid}\n`);
+    };
+    const fn = vi.fn();
+    try {
+      await expect(withOverlayLock(main, fn, { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+        message: expect.stringContaining(`pid ${process.ppid}`),
+      });
+    } finally {
+      seams.beforeRead = null;
+      seams.beforeLink = null;
+      seams.afterRead = null;
+    }
+    expect(fn).not.toHaveBeenCalled();
+    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+    expect(gateLinks).toBe(0);
+    expect(existsSync(gateFile(main))).toBe(false);
+  });
+
   describe('the breaker gate', () => {
     const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
     const dirOf = (main: string): string => path.dirname(lockFile(main));
@@ -502,6 +554,60 @@ describe('one writer at a time', () => {
       } finally {
         seams.afterProbe = null;
       }
+      expect(existsSync(lockFile(main))).toBe(false);
+    });
+
+    it('retries at once, moving no gate aside, when the gate vanishes between its failed publish and its read', async () => {
+      const main = makeRepo();
+      staleLock(main);
+      writeFileSync(gateFile(main), `${process.ppid}\n`);
+      let renames = 0;
+      let reads = 0;
+      // The gate holder releases right before the read, and a new breaker
+      // publishes its own right after it.
+      seams.beforeRead = (file) => {
+        if (file === gateFile(main) && reads++ === 0) rmSync(gateFile(main));
+      };
+      seams.afterRead = (file) => {
+        if (file === gateFile(main) && reads === 1) {
+          reads++;
+          writeFileSync(gateFile(main), `${process.ppid}\n`);
+        }
+      };
+      seams.afterRename = () => {
+        renames++;
+      };
+      try {
+        await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+          code: 'checks.overlay-busy',
+          message: expect.stringContaining(`pid ${process.ppid}`),
+        });
+      } finally {
+        seams.beforeRead = null;
+        seams.afterRead = null;
+        seams.afterRename = null;
+      }
+      expect(renames).toBe(0);
+      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+    });
+
+    it('releases only the gate it published when an evictor replaced it meanwhile', async () => {
+      const main = makeRepo();
+      const dead = staleLock(main);
+      let probes = 0;
+      // While this breaker holds the gate, an evictor takes it for stale and a
+      // newer breaker publishes its own.
+      seams.afterProbe = (pid) => {
+        if (pid !== dead || probes++ !== 1) return;
+        rmSync(gateFile(main));
+        writeFileSync(gateFile(main), `${process.ppid}\n`);
+      };
+      try {
+        expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      } finally {
+        seams.afterProbe = null;
+      }
+      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
       expect(existsSync(lockFile(main))).toBe(false);
     });
 
