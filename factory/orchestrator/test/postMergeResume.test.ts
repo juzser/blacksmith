@@ -681,7 +681,7 @@ describe('post-merge resume', () => {
 
   describe('an unexpected git failure is not a verdict', () => {
     it.each(['commit-tree', 'rev-list'])(
-      'a failing %s records nothing and the next run retries',
+      'a failing %s records nothing and the next run records it',
       async (subcommand) => {
         await landed('task-1');
         gitFault.subcommand = subcommand;
