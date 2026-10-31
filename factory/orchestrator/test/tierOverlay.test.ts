@@ -189,6 +189,41 @@ describe('location', () => {
   });
 });
 
+describe('location in a bare or separate-git-dir repository', () => {
+  it('answers not-a-repo for a bare repository and creates nothing beside it', async () => {
+    const parent = tmp();
+    const bare = path.join(parent, 'x.git');
+    git(parent, 'init', '-q', '--bare', bare);
+    const before = readdirSync(parent);
+    expect(overlayPath(bare)).toBeNull();
+    expect(overlayWritable(bare)).toBe('not-a-repo');
+    expect(() => writeOverlay(bare, { entries: [], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-not-a-repo' }),
+    );
+    await expect(withOverlayLock(bare, () => 1)).rejects.toMatchObject({
+      code: 'checks.overlay-not-a-repo',
+    });
+    expect(readdirSync(parent)).toEqual(before);
+  });
+
+  it('puts the overlay in the working copy of a separate-git-dir repository', () => {
+    const root = tmp();
+    const wc = path.join(root, 'wc');
+    const gitdir = path.join(root, 'gitdir');
+    git(root, 'init', '-q', '-b', 'main', '--separate-git-dir', gitdir, wc);
+    git(wc, 'config', 'user.email', 't@example.com');
+    git(wc, 'config', 'user.name', 't');
+    writeFileSync(path.join(wc, 'README.md'), 'x\n');
+    git(wc, 'add', '.');
+    git(wc, 'commit', '-q', '-m', 'init');
+    const linked = path.join(root, 'linked');
+    git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
+    expect(overlayPath(wc)).toBe(overlayFile(wc));
+    // git names no main worktree from a linked one here, so none is guessed.
+    expect(overlayPath(linked)).toBeNull();
+  });
+});
+
 describe('validity', () => {
   const cases: [string, unknown, string][] = [
     ['a non-object', [], 'JSON object'],
