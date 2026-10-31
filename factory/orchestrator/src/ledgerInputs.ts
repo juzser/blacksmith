@@ -98,9 +98,15 @@ function parsePlan(text: string, epic: string, fileRank: number): ReadPlan | str
   return { project: plan.project, rank, tasks };
 }
 
-function planFiles(epicDir: string): Array<{ file: string; rank: number }> {
+function planFiles(epicDir: string): Array<{ file: string; rank: number }> | string {
   const found: Array<{ file: string; rank: number }> = [];
-  for (const name of readdirSync(epicDir).sort()) {
+  let names: string[];
+  try {
+    names = readdirSync(epicDir).sort();
+  } catch (err) {
+    return `unlistable: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  for (const name of names) {
     if (name === 'plan.json') found.push({ file: name, rank: 0 });
     const versioned = /^plan-v(\d+)\.json$/.exec(name);
     if (versioned) found.push({ file: name, rank: Number(versioned[1]) });
@@ -156,7 +162,12 @@ export async function gatherLedgerInputs(opts: LedgerInputsOptions): Promise<Led
   let readable = 0;
   for (const epic of epics) {
     const epicDir = path.join(opts.specsDir, epic);
-    for (const { file, rank } of planFiles(epicDir)) {
+    const files = planFiles(epicDir);
+    if (typeof files === 'string') {
+      warnings.push({ code: 'checks.plan-skipped', path: epicDir, reason: files });
+      continue;
+    }
+    for (const { file, rank } of files) {
       const filePath = path.join(epicDir, file);
       let text: string;
       try {

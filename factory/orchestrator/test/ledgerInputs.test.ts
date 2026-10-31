@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -275,6 +276,30 @@ describe('gatherLedgerInputs', () => {
     ]);
     expect(out.taskClaims.get('eb/task-1')).toEqual(['b/**']);
     expect(out.events.map((e) => e.event_id)).toContain('s-a#1');
+  });
+
+  it('skips an epic directory that cannot be listed, naming it, and keeps the other epics and every event', async () => {
+    plan('ea', 'plan.json', { project: 'proj', tasks: [task('ea/task-1', ['a/**'])] });
+    plan('eb', 'plan.json', { project: 'proj', tasks: [task('eb/task-1', ['b/**'])] });
+    plan('ec', 'plan.json', { project: 'proj', tasks: [task('ec/task-1', ['c/**'])] });
+    session('s-a', [{ type: 'session-start' }, { type: 'testgate-result', task: 'ea/task-1' }]);
+    const locked = path.join(specsDir, 'ea');
+    chmodSync(locked, 0o000);
+    try {
+      // The precondition: the listing really fails here (it would not as root).
+      expect(() => readdirSync(locked)).toThrow();
+
+      const out = await gather();
+
+      expect(out.warnings).toEqual([
+        expect.objectContaining({ code: 'checks.plan-skipped', path: locked }),
+      ]);
+      expect(out.taskClaims.get('eb/task-1')).toEqual(['b/**']);
+      expect(out.taskClaims.get('ec/task-1')).toEqual(['c/**']);
+      expect(out.events.map((e) => e.event_id)).toContain('s-a#1');
+    } finally {
+      chmodSync(locked, 0o755);
+    }
   });
 
   it('skips a plan that lacks a field it needs', async () => {
