@@ -1,15 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync,
   existsSync,
   linkSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -318,42 +315,83 @@ function readHolder(lock: string): number {
   }
 }
 
-/** Move a dead holder's lock aside; put it back if it was re-taken meanwhile. */
-function breakStale(lock: string, pid: number): void {
-  const tomb = `${lock}.stale-${process.pid}`;
+let tempSeq = 0;
+
+/**
+ * Create `file` holding `<pid>\n`, or return false when it exists. The content
+ * is written to a private temp file and linked into place, so `file` appears
+ * whole or not at all: a crash between create and write cannot leave it empty.
+ */
+function publish(file: string): boolean {
+  const temp = `${file}.${process.pid}-${tempSeq++}.tmp`;
+  writeFileSync(temp, `${process.pid}\n`);
   try {
-    renameSync(lock, tomb);
+    linkSync(temp, file);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    return false;
+  } finally {
+    unlinkSync(temp);
+  }
+}
+
+/** Move a dead holder's breaker lock aside; put it back if it was re-taken meanwhile. */
+function evictDeadBreaker(gate: string, pid: number): void {
+  const tomb = `${gate}.stale-${process.pid}`;
+  try {
+    renameSync(gate, tomb);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw err;
   }
-  if (readHolder(tomb) !== pid) {
+  if (!Object.is(readHolder(tomb), pid)) {
     try {
-      linkSync(tomb, lock);
+      linkSync(tomb, gate);
     } catch {
-      // Another writer already holds the lock again; nothing to restore.
+      // Another breaker already holds the gate again; nothing to restore.
     }
   }
   unlinkSync(tomb);
 }
 
-/** Take the lock now, or return the live holder's pid (NaN when unreadable). */
+/**
+ * Remove the lock of a dead (or unreadable) holder `pid`, alone: breakers take
+ * a second lock, and under it the lock is removed only if it still holds that
+ * same dead holder, so a lock another writer took meanwhile is never touched
+ * (nothing else removes a dead holder's lock). Returns the pid of a live
+ * breaker to wait for, or null when the caller may look at the lock again.
+ */
+function breakStale(lock: string, pid: number): number | null {
+  const gate = `${lock}.breaker`;
+  if (!publish(gate)) {
+    const other = readHolder(gate);
+    if (!Number.isNaN(other) && pidIsAlive(other)) return other;
+    evictDeadBreaker(gate, other);
+    return null;
+  }
+  try {
+    if (Object.is(readHolder(lock), pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
+      try {
+        unlinkSync(lock);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
+  } finally {
+    unlinkSync(gate);
+  }
+  return null;
+}
+
+/** Take the lock now, or return the pid to wait for (a live holder or breaker). */
 function tryAcquire(lock: string): number | null {
   for (;;) {
-    try {
-      const fd = openSync(lock, 'wx');
-      try {
-        writeSync(fd, `${process.pid}\n`);
-      } finally {
-        closeSync(fd);
-      }
-      return null;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
+    if (publish(lock)) return null;
     const holder = readHolder(lock);
-    if (Number.isNaN(holder) || pidIsAlive(holder)) return holder;
-    breakStale(lock, holder);
+    if (!Number.isNaN(holder) && pidIsAlive(holder)) return holder;
+    const breaker = breakStale(lock, holder);
+    if (breaker !== null) return breaker;
   }
 }
 

@@ -31,6 +31,39 @@ import {
   writeOverlay,
 } from '../src/tierOverlay.js';
 
+// Seams for the lock-breaking interleavings: a hook that runs inside the module's
+// liveness probe, and one that runs right after one of its renames.
+const seams = vi.hoisted(() => ({
+  afterProbe: null as null | ((pid: number) => void),
+  afterRename: null as null | (() => void),
+  beforeLink: null as null | ((from: string, to: string) => void),
+}));
+vi.mock('../src/heavyLock.js', async (orig) => {
+  const real = await orig<typeof import('../src/heavyLock.js')>();
+  return {
+    ...real,
+    pidIsAlive: (pid: number): boolean => {
+      const alive = real.pidIsAlive(pid);
+      seams.afterProbe?.(pid);
+      return alive;
+    },
+  };
+});
+vi.mock('node:fs', async (orig) => {
+  const real = await orig<typeof import('node:fs')>();
+  return {
+    ...real,
+    linkSync: (from: string, to: string): void => {
+      seams.beforeLink?.(from, to);
+      real.linkSync(from, to);
+    },
+    renameSync: (from: string, to: string): void => {
+      real.renameSync(from, to);
+      seams.afterRename?.();
+    },
+  };
+});
+
 const roots: string[] = [];
 const tmp = (): string => {
   const d = realpathSync(mkdtempSync(path.join(tmpdir(), 'smith-overlay-')));
@@ -305,6 +338,60 @@ describe('one writer at a time', () => {
     expect(ran).toBe('ran');
     expect(existsSync(lockFile(main))).toBe(false);
     expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
+  });
+
+  it('breaks a lock whose content is not a pid (an empty file) at once', async () => {
+    const main = makeRepo();
+    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
+    writeFileSync(lockFile(main), '');
+    const ran = await withOverlayLock(main, () => 'ran', { waitMs: 0 });
+    expect(ran).toBe('ran');
+    expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
+  });
+
+  it('publishes the lock only with its whole content, never as an empty file', async () => {
+    const main = makeRepo();
+    const atLink: { lockExisted: boolean; tempBytes: string }[] = [];
+    seams.beforeLink = (from, to) => {
+      if (to === lockFile(main)) {
+        atLink.push({ lockExisted: existsSync(to), tempBytes: readFileSync(from, 'utf8') });
+      }
+    };
+    try {
+      await withOverlayLock(main, () => undefined);
+    } finally {
+      seams.beforeLink = null;
+    }
+    expect(atLink).toEqual([{ lockExisted: false, tempBytes: `${process.pid}\n` }]);
+    expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
+  });
+
+  it('does not take a live holder lock that replaced the dead one it was about to break', async () => {
+    const main = makeRepo();
+    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid as number;
+    writeFileSync(lockFile(main), `${dead}\n`);
+    let probes = 0;
+    // Between the waiter's verdict (the holder is dead) and its break, another
+    // writer broke the dead lock and took a new, live one (this process).
+    seams.afterProbe = (pid) => {
+      if (pid !== dead || probes++ > 0) return;
+      rmSync(lockFile(main));
+      writeFileSync(lockFile(main), `${process.pid}\n`);
+    };
+    // Should a break rename the lock aside, a third writer takes it in the gap.
+    seams.afterRename = () => {
+      if (!existsSync(lockFile(main))) writeFileSync(lockFile(main), `${process.ppid}\n`);
+    };
+    try {
+      await expect(withOverlayLock(main, () => 'ran', { waitMs: 150 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+      });
+    } finally {
+      seams.afterProbe = null;
+      seams.afterRename = null;
+    }
+    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
   });
 
   it('makes a second call in the holder process wait, then throw busy with waitMs', async () => {
