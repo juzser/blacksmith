@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -40,6 +41,7 @@ const seams = vi.hoisted(() => ({
   afterRename: null as null | (() => void),
   beforeLink: null as null | ((from: string, to: string) => void),
   beforeRead: null as null | ((file: string) => void),
+  beforeStat: null as null | ((file: string) => void),
   afterRead: null as null | ((file: string) => void),
 }));
 vi.mock('../src/heavyLock.js', async (orig) => {
@@ -64,6 +66,10 @@ vi.mock('node:fs', async (orig) => {
       } finally {
         seams.afterRead?.(String(args[0]));
       }
+    },
+    statSync: (...args: Parameters<typeof real.statSync>) => {
+      seams.beforeStat?.(String(args[0]));
+      return real.statSync(...args);
     },
     linkSync: (from: string, to: string): void => {
       seams.beforeLink?.(from, to);
@@ -883,4 +889,184 @@ describe('no write, no lock', () => {
 
 beforeEach(() => {
   vi.useRealTimers();
+});
+
+const errno = (code: string): Error => Object.assign(new Error(code), { code });
+const blacksmithDir = (main: string): string => path.join(main, '.blacksmith');
+const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
+
+describe('lock robustness', () => {
+  it('never breaks a live holder lock because reading it failed (EMFILE)', async () => {
+    const main = makeRepo();
+    mkdirSync(blacksmithDir(main), { recursive: true });
+    writeFileSync(lockFile(main), `${process.ppid}\n`);
+    seams.beforeRead = (file) => {
+      if (file === lockFile(main)) throw errno('EMFILE');
+    };
+    try {
+      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-lock-failed',
+      });
+    } finally {
+      seams.beforeRead = null;
+    }
+    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+  });
+
+  it('never evicts a gate or breaks a lock because reading the gate failed (EIO)', async () => {
+    const main = makeRepo();
+    mkdirSync(blacksmithDir(main), { recursive: true });
+    writeFileSync(lockFile(main), `${deadPid()}\n`);
+    writeFileSync(gateFile(main), `${process.ppid}\n`);
+    seams.beforeRead = (file) => {
+      if (file === gateFile(main)) throw errno('EIO');
+    };
+    try {
+      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-lock-failed',
+      });
+    } finally {
+      seams.beforeRead = null;
+    }
+    expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+    expect(existsSync(lockFile(main))).toBe(true);
+  });
+
+  it('never evicts a live gate because its age could not be read (EIO)', async () => {
+    const main = makeRepo();
+    mkdirSync(blacksmithDir(main), { recursive: true });
+    writeFileSync(lockFile(main), `${deadPid()}\n`);
+    writeFileSync(gateFile(main), `${process.ppid}\n`);
+    seams.beforeStat = (file) => {
+      if (file === gateFile(main)) throw errno('EIO');
+    };
+    try {
+      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-lock-failed',
+      });
+    } finally {
+      seams.beforeStat = null;
+    }
+    expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+  });
+
+  it('puts a gate back when it cannot read the one it moved aside, and says so', async () => {
+    const main = makeRepo();
+    mkdirSync(blacksmithDir(main), { recursive: true });
+    writeFileSync(lockFile(main), `${deadPid()}\n`);
+    writeFileSync(gateFile(main), 'junk');
+    seams.beforeRead = (file) => {
+      if (file.includes('.stale-')) throw errno('EIO');
+    };
+    try {
+      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-lock-failed',
+      });
+    } finally {
+      seams.beforeRead = null;
+    }
+    expect(readFileSync(gateFile(main), 'utf8')).toBe('junk');
+    expect(readdirSync(blacksmithDir(main)).sort()).toEqual([
+      'check-tiers.lock',
+      'check-tiers.lock.breaker',
+    ]);
+  });
+
+  for (const code of ['ENOTSUP', 'EPERM']) {
+    it(`takes the lock with O_EXCL when the volume cannot hard-link (${code})`, async () => {
+      const main = makeRepo();
+      seams.beforeLink = (_from, to) => {
+        if (to === lockFile(main)) throw errno(code);
+      };
+      try {
+        const seen = await withOverlayLock(main, async () => {
+          const content = readFileSync(lockFile(main), 'utf8');
+          await expect(withOverlayLock(main, () => 1, { waitMs: 0 })).rejects.toMatchObject({
+            code: 'checks.overlay-busy',
+          });
+          return content;
+        });
+        expect(seen).toBe(`${process.pid}\n`);
+      } finally {
+        seams.beforeLink = null;
+      }
+      expect(readdirSync(blacksmithDir(main))).toEqual([]);
+    });
+  }
+
+  it('the O_EXCL fallback releases only a lock that still holds its own pid', async () => {
+    const main = makeRepo();
+    seams.beforeLink = (_from, to) => {
+      if (to === lockFile(main)) throw errno('ENOTSUP');
+    };
+    try {
+      await withOverlayLock(main, () => {
+        rmSync(lockFile(main));
+        writeFileSync(lockFile(main), `${process.ppid}\n`);
+      });
+    } finally {
+      seams.beforeLink = null;
+    }
+    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+  });
+
+  it('names any other link failure and leaves no temp behind', async () => {
+    const main = makeRepo();
+    seams.beforeLink = (_from, to) => {
+      if (to === lockFile(main)) throw errno('EIO');
+    };
+    try {
+      await expect(withOverlayLock(main, () => 1)).rejects.toMatchObject({
+        code: 'checks.overlay-lock-failed',
+      });
+    } finally {
+      seams.beforeLink = null;
+    }
+    expect(readdirSync(blacksmithDir(main))).toEqual([]);
+  });
+
+  it('removes the temp links a dead holder and a dead breaker left once it breaks the lock', async () => {
+    const main = makeRepo();
+    mkdirSync(blacksmithDir(main), { recursive: true });
+    const dead = deadPid();
+    const lockTemp = `${lockFile(main)}.${dead}-0.tmp`;
+    writeFileSync(lockTemp, `${dead}\n`);
+    linkSync(lockTemp, lockFile(main));
+    writeFileSync(`${gateFile(main)}.${dead}-3.tmp`, `${dead}\n`);
+    const liveTemp = `${lockFile(main)}.${process.ppid}-0.tmp`;
+    writeFileSync(liveTemp, `${process.ppid}\n`);
+    await withOverlayLock(main, () => undefined, { waitMs: 0 });
+    expect(readdirSync(blacksmithDir(main))).toEqual([path.basename(liveTemp)]);
+  });
+});
+
+describe('what the overlay is written from is validated', () => {
+  const bad = [
+    ['an empty check', { check: '', cmd_sha256: commandDigest(CMD), to_tier: 'post-merge' }],
+    ['a non-hex cmd_sha256', { check: 'e2e', cmd_sha256: 'xyz', to_tier: 'post-merge' }],
+  ] as const;
+  for (const [name, payload] of bad) {
+    it(`skips an approved decision with ${name}; overlayOwes agrees and the file stays readable`, async () => {
+      const main = makeRepo();
+      const ev = stored('s#9', 'check-tier-decided', { ...payload, decision: 'approve' });
+      const good = decided('s#10', 'lint', 'post-merge');
+      expect(overlayOwes(readOverlay(main), [ev]).missing).toEqual([]);
+      expect(overlayOwes(readOverlay(main), [ev, good]).missing.map((e) => e.check)).toEqual([
+        'lint',
+      ]);
+      const ctx = { session_id: 's', actor: 'operator', plan_version: 1, causal_parent: null };
+      await withOverlayLock(main, () => reconcileOverlay(main, [ev, good], ctx));
+      expect(state(main).entries.map((e) => e.check)).toEqual(['lint']);
+    });
+  }
+
+  it('writeOverlay refuses an entry that would make the file unreadable, writing nothing', () => {
+    const main = makeRepo();
+    const broken = { ...entry('e2e'), cmd_sha256: 'xyz' };
+    expect(() => writeOverlay(main, { entries: [broken], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-invalid' }),
+    );
+    expect(existsSync(overlayFile(main))).toBe(false);
+    expect(existsSync(blacksmithDir(main))).toBe(false);
+  });
 });

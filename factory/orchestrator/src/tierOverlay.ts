@@ -1,13 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import {
+  closeSync,
   existsSync,
   linkSync,
   mkdirSync,
+  openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -298,6 +302,18 @@ export function writeOverlay(
       { file, revision: current.revision, expected: next.expectedRevision },
     );
   }
+  const invalid = violation({
+    version: 1,
+    revision: next.expectedRevision + 1,
+    entries: next.entries,
+  });
+  if (invalid !== null) {
+    throw new OverlayError(
+      'checks.overlay-invalid',
+      `Refusing to write ${file}: ${invalid}. Nothing was written.`,
+      { file, reason: invalid },
+    );
+  }
   mkdirSync(path.dirname(file), { recursive: true });
   const excluded = excludeFromGit(root, path.join(path.dirname(file), EXCLUDE_PATTERN));
   if (excluded === 'tracked') {
@@ -330,15 +346,35 @@ export function writeOverlay(
 //     evicted for age while its live owner stalls; the owner then releases
 //     nothing of a newer gate (2), and the re-read still guards the lock.
 
-/** The pid a file holds: NaN when its content is not `<pid>\n`, null when absent. */
-function readHolder(file: string): number | null {
-  try {
-    const m = /^(\d+)\n$/.exec(readFileSync(file, 'utf8'));
-    return m === null ? Number.NaN : Number(m[1]);
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? null : Number.NaN;
-  }
+/** A failure to look at a lock file other than its absence: never read as "stale". */
+function lockFailure(file: string, err: unknown): OverlayError {
+  const code = (err as NodeJS.ErrnoException).code;
+  return new OverlayError(
+    'checks.overlay-lock-failed',
+    `Could not inspect or take ${file} (${code ?? (err as Error).message}); nothing was written.`,
+    { file, errno: code },
+  );
 }
+
+/**
+ * The pid a file holds: NaN when it was read and its content is not `<pid>\n`,
+ * null when absent. Any other read error throws: a file that could not be read
+ * is not known to be stale.
+ */
+function readHolder(file: string): number | null {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw lockFailure(file, err);
+  }
+  const m = /^(\d+)\n$/.exec(text);
+  return m === null ? Number.NaN : Number(m[1]);
+}
+
+/** Errnos of a filesystem that cannot hard-link: the lock is then taken with O_EXCL. */
+const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS']);
 
 let tempSeq = 0;
 
@@ -360,8 +396,10 @@ function publish(file: string): Held | null {
     linkSync(temp, file);
   } catch (err) {
     unlinkSync(temp);
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    return null;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return null;
+    if (code === undefined || !NO_HARD_LINKS.has(code)) throw lockFailure(file, err);
+    return publishExclusive(file);
   }
   return {
     release() {
@@ -371,6 +409,33 @@ function publish(file: string): Held | null {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       }
       unlinkIfPresent(temp);
+    },
+  };
+}
+
+/**
+ * The fallback for a volume without hard links: create `file` with O_EXCL and
+ * write the pid. A crash between create and write leaves an empty file, which is
+ * non-pid content and is broken. With no temp link to tell the file by, release
+ * removes it only while it still holds this process's pid, which no other live
+ * process can hold.
+ */
+function publishExclusive(file: string): Held | null {
+  let fd: number;
+  try {
+    fd = openSync(file, 'wx');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
+    throw lockFailure(file, err);
+  }
+  try {
+    writeSync(fd, `${process.pid}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  return {
+    release() {
+      if (readHolder(file) === process.pid) unlinkIfPresent(file);
     },
   };
 }
@@ -387,8 +452,25 @@ function unlinkIfPresent(file: string): void {
 function gateIsFresh(gate: string): boolean {
   try {
     return Date.now() - statSync(gate).mtimeMs < BREAKER_STALE_MS;
-  } catch {
-    return false;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw lockFailure(gate, err);
+  }
+}
+
+/**
+ * Remove the temp links a dead holder or breaker left (`<lock>[.breaker].<pid>-<n>.tmp`).
+ * Called under the gate; a live pid's temp, this process's included, stays.
+ */
+function sweepDeadTemps(lock: string): void {
+  const base = path.basename(lock);
+  const mine = new RegExp(`^${base.replace(/\./g, '\\.')}(\\.breaker)?\\.(\\d+)-\\d+\\.tmp$`);
+  for (const name of readdirSync(path.dirname(lock))) {
+    const m = mine.exec(name);
+    const pid = m === null ? 0 : Number(m[2]);
+    if (m !== null && pid !== process.pid && !pidIsAlive(pid)) {
+      unlinkIfPresent(path.join(path.dirname(lock), name));
+    }
   }
 }
 
@@ -406,7 +488,14 @@ function evictStaleBreaker(gate: string, pid: number): void {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw err;
   }
-  if (!Object.is(readHolder(tomb), pid)) {
+  let same = false;
+  let failure: unknown;
+  try {
+    same = Object.is(readHolder(tomb), pid);
+  } catch (err) {
+    failure = err;
+  }
+  if (!same) {
     try {
       linkSync(tomb, gate);
     } catch {
@@ -414,6 +503,7 @@ function evictStaleBreaker(gate: string, pid: number): void {
     }
   }
   unlinkSync(tomb);
+  if (failure !== undefined) throw failure;
 }
 
 /**
@@ -438,6 +528,7 @@ function breakStale(lock: string, pid: number): number | null {
     if (Object.is(now, pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
       unlinkIfPresent(lock);
     }
+    sweepDeadTemps(lock);
   } finally {
     held.release();
   }
@@ -543,15 +634,16 @@ function impliedEntries(events: readonly StoredEvent[]): Map<string, OverlayEntr
     const p = record.payload;
     const decided = record.event_type === DECIDED_EVENT && p.decision === 'approve';
     if (!decided && record.event_type !== PROMOTED_EVENT) continue;
-    if (typeof p.check !== 'string' || typeof p.cmd_sha256 !== 'string') continue;
-    if (!CHECK_TIERS.includes(p.to_tier as CheckTier)) continue;
-    implied.set(entryKey(p.check, p.cmd_sha256), {
+    const next = {
       check: p.check,
       cmd_sha256: p.cmd_sha256,
-      tier: p.to_tier as CheckTier,
+      tier: p.to_tier,
       decided_by_event_id: event_id,
       decided_at: record.ts,
-    });
+    };
+    // The rules readOverlay applies: an event that would make the file unreadable is skipped.
+    if (entryViolation(next, 'event') !== null) continue;
+    implied.set(entryKey(next.check as string, next.cmd_sha256 as string), next as OverlayEntry);
   }
   return implied;
 }
