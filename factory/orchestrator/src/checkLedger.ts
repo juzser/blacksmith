@@ -338,23 +338,36 @@ export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): Chec
     else r.class = 'unconfirmed';
     if (reverted && r.class === 'real' && revert !== undefined) r.tasks = [...revert.tasks];
     if (r.class === 'real' || r.class === 'unconfirmed') {
-      r.severity = r.tasks.some(sensitive) ? 'S1' : 'S2';
+      // A culprit nobody named is unknown, and an unknown culprit may touch a sensitive path.
+      r.severity = (r.tasks.length === 0 ? [UNATTRIBUTED] : r.tasks).some(sensitive) ? 'S1' : 'S2';
     }
   }
 
-  // Unique catch: every faster check was observed passing at the same tree.
+  // Unique catch: every faster check that would have run on that tree (a current
+  // identity sharing a tier with the failure) was observed passing at it.
   const medians = new Map<string, number>();
   const measuredBy = new Map<string, number[]>();
+  const tiersOf = new Map<string, Set<string>>();
+  const current = new Map<string, { identity: string; seq: number }>();
   for (const r of live) {
-    if (r.cmd_sha256 === null || r.duration_ms === null) continue;
+    if (r.cmd_sha256 === null) continue;
+    tiersOf.set(r.identity, new Set([...(tiersOf.get(r.identity) ?? []), ...r.tiers]));
+    if (r.seq >= (current.get(r.name)?.seq ?? -1))
+      current.set(r.name, { identity: r.identity, seq: r.seq });
+    if (r.duration_ms === null) continue;
     measuredBy.set(r.identity, [...(measuredBy.get(r.identity) ?? []), r.duration_ms]);
   }
   for (const [id, ms] of measuredBy) medians.set(id, median(ms) as number);
+  const currentIdentities = new Set([...current.values()].map((c) => c.identity));
   for (const r of rows) {
     if (r.class !== 'real') continue;
     const mine = medians.get(r.identity);
     const faster = [...medians].filter(
-      ([id, m]) => mine !== undefined && m < mine && id !== r.identity,
+      ([id, m]) =>
+        mine !== undefined &&
+        m < mine &&
+        currentIdentities.has(id) &&
+        r.tiers.some((t) => tiersOf.get(id)?.has(t)),
     );
     const observed = (id: string): boolean =>
       passedIn.has(`${r.event_id}|${id}`) ||

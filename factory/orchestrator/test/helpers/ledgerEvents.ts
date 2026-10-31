@@ -195,6 +195,27 @@ export function mergedEvent(
   });
 }
 
+/** A queue block: the `error-logged` that names its run through `pre_landing_run_id` and adds no run. */
+export function blockedEvent(
+  id: string,
+  o: { task: string; preLandingRunId: string; daysAgo?: number },
+): StoredEvent {
+  return event({
+    id,
+    type: 'error-logged',
+    task: o.task,
+    daysAgo: o.daysAgo,
+    payload: {
+      error: 'execution.test-failure',
+      severity: 'S2-major',
+      task_ref: o.task,
+      detail: 'tail',
+      pre_landing: 'pre-merge-tier',
+      pre_landing_run_id: o.preLandingRunId,
+    },
+  });
+}
+
 /** A `wave-reverted` that confirms a culprit from a red record. */
 export function revertedEvent(
   id: string,

@@ -10,6 +10,7 @@ import {
 import type { StoredEvent } from '../src/events.js';
 import { SLEEP_GAP_MS } from '../src/testgate.js';
 import {
+  blockedEvent,
   gateEvent,
   integrationEvent,
   ledgerInputs,
@@ -641,6 +642,29 @@ describe('checkLedger across record types', () => {
     expect(c.real_catches).toBe(1);
   });
 
+  it('adds no second run for a blocked event that names a queue run', async () => {
+    const base = [
+      queueEvent('q-red', {
+        epic: 'e',
+        taskIds: ['e/task-1'],
+        tree: 'ta',
+        runId: 'run-b',
+        run: await realRun([{ name: 'bchk', pass: false, monotonicMs: 3000 }]),
+      }),
+    ];
+    const before = entryOf(ledgerOf(base), 'bchk');
+    const ledger = ledgerOf([
+      ...base,
+      blockedEvent('b-1', { task: 'e/task-1', preLandingRunId: 'run-b' }),
+    ]);
+    const c = entryOf(ledger, 'bchk');
+    expect(ledger.rows.filter((r) => r.name === 'bchk')).toHaveLength(1);
+    expect(c.runs).toBe(1);
+    expect(c.by_source.queue.runs).toBe(1);
+    expect(c.runs).toBe(before.runs);
+    expect(c.event_ids.runs).toEqual(['q-red']);
+  });
+
   it('reports post-merge runs, task merges, epics with merges and merges per post-merge run', async () => {
     const pm = (id: string, tree: string) =>
       realRun([{ name: 'pm', pass: true }]).then((run) =>
@@ -669,5 +693,88 @@ describe('checkLedger across record types', () => {
       epics_with_merges: 2,
       merges_per_post_merge_run: 2,
     });
+  });
+});
+
+describe('checkLedger unknown culprit and faster checks', () => {
+  it('fails closed on a task-less red: S1 and guarding however old', async () => {
+    const ledger = ledgerOf(
+      [
+        integrationEvent('i-red', {
+          epic: 'e',
+          tree: 't-red',
+          daysAgo: 40,
+          run: await realRun([{ name: 'secchk', pass: false }]),
+        }),
+      ],
+      { claims: { ...CLAIMS, 'e/task-3': ['src/auth/session.ts'] } },
+    );
+    expect(rowsOf(ledger, 'secchk')[0]).toMatchObject({ class: 'unconfirmed', severity: 'S1' });
+    expect(entryOf(ledger, 'secchk').guards_sensitive).toBe(true);
+    expect(entryOf(ledger, 'secchk').event_ids.guards_sensitive).toEqual(['i-red']);
+  });
+
+  it('fails closed on a record-only revert with no task ids', async () => {
+    const reverted = revertedEvent('r-1', {
+      task: 'e/task-1',
+      epic: 'e',
+      evidence: ['i-red'],
+      failingChecks: ['secchk'],
+    });
+    (reverted.record.payload as Record<string, unknown>).task_ids = [];
+    const ledger = ledgerOf([
+      integrationEvent('i-red', {
+        epic: 'e',
+        tree: 't-red',
+        daysAgo: 40,
+        run: await realRun([{ name: 'secchk', pass: false }]),
+      }),
+      reverted,
+    ]);
+    expect(rowsOf(ledger, 'secchk')[0]).toMatchObject({ class: 'real', severity: 'S1' });
+    expect(entryOf(ledger, 'secchk').guards_sensitive).toBe(true);
+  });
+
+  it('is not shadowed by a retired identity of another check', async () => {
+    const ledger = ledgerOf([
+      gateEvent('g-old', {
+        task: 'e/task-1',
+        tree: 't0',
+        run: await realRun([{ name: 'unit', pass: true, monotonicMs: 500, variant: 'v1' }]),
+      }),
+      gateEvent('g-a', {
+        task: 'e/task-1',
+        tree: 'ta',
+        run: await realRun([
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'e2e', pass: false, monotonicMs: 5000 },
+        ]),
+      }),
+      gateEvent('g-b', {
+        task: 'e/task-1',
+        tree: 'tb',
+        run: await realRun([
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'e2e', pass: true, monotonicMs: 5000 },
+        ]),
+      }),
+    ]);
+    expect(rowsOf(ledger, 'e2e').find((r) => r.outcome === 'fail')).toMatchObject({
+      class: 'real',
+      catch: 'unique',
+    });
+  });
+
+  it('is not shadowed by a check of a tier that never runs on that tree', async () => {
+    const ledger = ledgerOf([
+      integrationEvent('i-pm', {
+        epic: 'e',
+        tree: 't9',
+        tiers: ['post-merge'],
+        run: await realRun([{ name: 'smoke', pass: true, monotonicMs: 100 }]),
+      }),
+      ...(await failThenPass('slow', 'e/task-1', ['ta', 'tb'], { failMs: 5000 })),
+    ]);
+    expect(rowsOf(ledger, 'slow').find((r) => r.outcome === 'fail')?.catch).toBe('unique');
   });
 });
