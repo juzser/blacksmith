@@ -129,7 +129,8 @@ export function selectGateChecks(
     .map((c) => ({
       name: c.name,
       tier: checkTier(c),
-      tier_source: c.tierSource ?? ('default' as const),
+      tier_source:
+        c.tierSource ?? (c.tier === undefined ? ('default' as const) : ('declared' as const)),
     }));
   const bound = deferred.find((d) => stageBound.includes(d.name));
   if (bound !== undefined) {

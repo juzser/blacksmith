@@ -92,8 +92,8 @@ describe('tier selection', () => {
     const { selected, deferred } = selectGateChecks([a, b, c, d], ['coverage']);
     expect(selected.map((x) => x.name)).toEqual(['a', 'd']);
     expect(deferred).toEqual([
-      { name: 'b', tier: 'post-merge', tier_source: 'default' },
-      { name: 'c', tier: 'pre-release', tier_source: 'default' },
+      { name: 'b', tier: 'post-merge', tier_source: 'declared' },
+      { name: 'c', tier: 'pre-release', tier_source: 'declared' },
     ]);
   });
 
