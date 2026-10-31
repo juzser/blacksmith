@@ -1,15 +1,17 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
   realpathSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -140,6 +142,10 @@ function git(cwd: string, args: readonly string[]): string {
  * itself the entry must be the top level git reports. One layout stays
  * ambiguous for git too: seen from a linked worktree, a `--separate-git-dir`
  * named `.git` looks like an ordinary clone's directory.
+ *
+ * Known wrong case: a linked worktree of a `--separate-git-dir` layout whose git
+ * dir is named `.git` resolves to that git dir's parent (e.g. `sgdir`) instead of
+ * the work tree, because git reports nothing that tells it from an ordinary clone.
  */
 export function overlayPath(dir: string): string | null {
   try {
@@ -371,6 +377,9 @@ export function writeOverlay(
 // pid's lock, this process's included, is never broken. A lock whose content is
 // not a pid, or that cannot be read, is refused and never broken.
 
+/** A reclaim mutex older than this was leaked by a breaker that died inside (heavyLock.ts's value). */
+const RECLAIM_BREAK_MS = 10_000;
+
 /** The largest pid a platform hands out (a 32-bit signed integer). */
 const MAX_PID = 2147483647;
 
@@ -409,25 +418,24 @@ function unlinkIfPresent(file: string): void {
   }
 }
 
-/** Create the lock holding this pid; false when it exists. */
+/**
+ * Create the lock holding this pid; false when it exists. The pid goes to a
+ * private temp file first and `link()` publishes it (EEXIST when held, the
+ * pattern heavyLock.ts uses), so the lock is never visible without its content.
+ */
 function createLock(lock: string): boolean {
-  let fd: number;
+  const tmp = `${lock}.${randomUUID()}.tmp`;
   try {
-    fd = openSync(lock, 'wx');
+    writeFileSync(tmp, `${process.pid}\n`, { flag: 'wx' });
+    linkSync(tmp, lock);
+    return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'EEXIST') return false;
     throw lockRefused(lock, `could not be created (${code ?? (err as Error).message})`);
-  }
-  try {
-    writeSync(fd, `${process.pid}\n`);
-  } catch (err) {
-    unlinkIfPresent(lock);
-    throw err;
   } finally {
-    closeSync(fd);
+    unlinkIfPresent(tmp);
   }
-  return true;
 }
 
 /**
@@ -440,8 +448,16 @@ function reclaim(lock: string, pid: number): boolean {
   try {
     fd = openSync(mutex, 'wx');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw lockRefused(mutex, `could not be created (${(err as NodeJS.ErrnoException).code})`);
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw lockRefused(mutex, `could not be created (${(err as NodeJS.ErrnoException).code})`);
+    }
+    // A mutex older than RECLAIM_BREAK_MS was leaked by a breaker that died inside.
+    try {
+      if (Date.now() - statSync(mutex).mtimeMs > RECLAIM_BREAK_MS) unlinkIfPresent(mutex);
+    } catch {
+      // gone already
+    }
+    return false;
   }
   try {
     if (readHolder(lock) === pid) unlinkIfPresent(lock);

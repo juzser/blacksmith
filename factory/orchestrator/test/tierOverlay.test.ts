@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,6 +37,7 @@ import {
 const seams = vi.hoisted(() => ({
   afterProbe: null as null | ((pid: number) => void),
   beforeRead: null as null | ((file: string) => void),
+  beforeLink: null as null | ((from: string, to: string) => void),
 }));
 vi.mock('../src/heavyLock.js', async (orig) => {
   const real = await orig<typeof import('../src/heavyLock.js')>();
@@ -55,6 +57,10 @@ vi.mock('node:fs', async (orig) => {
     readFileSync: (...args: Parameters<typeof real.readFileSync>) => {
       seams.beforeRead?.(String(args[0]));
       return real.readFileSync(...args);
+    },
+    linkSync: (from: string, to: string) => {
+      seams.beforeLink?.(from, to);
+      return real.linkSync(from, to);
     },
   };
 });
@@ -574,6 +580,46 @@ describe('one writer at a time', () => {
       expect(fn).not.toHaveBeenCalled();
       expect(readFileSync(lockFile(main), 'utf8')).toBe(`${dead}\n`);
       expect(readFileSync(`${lockFile(main)}.reclaim`, 'utf8')).toBe('');
+    });
+
+    it('publishes the lock through a temp file and link, never visible empty', async () => {
+      const main = makeRepo();
+      const seen: { lockExisted: boolean; temp: string }[] = [];
+      seams.beforeLink = (from, to) => {
+        if (to !== lockFile(main)) return;
+        seen.push({ lockExisted: existsSync(to), temp: readFileSync(from, 'utf8') });
+      };
+      try {
+        await withOverlayLock(main, () => {
+          expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
+        });
+      } finally {
+        seams.beforeLink = null;
+      }
+      expect(seen).toEqual([{ lockExisted: false, temp: `${process.pid}\n` }]);
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('leaves no temp file behind when the lock is held', async () => {
+      const main = makeRepo();
+      put(main, `${process.ppid}\n`);
+      await expect(withOverlayLock(main, () => 1, { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+      });
+      expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+    });
+
+    it('breaks a leaked reclaim mutex and reclaims the dead lock without waiting out the wait', async () => {
+      const main = makeRepo();
+      put(main, `${deadPid()}\n`);
+      const mutex = `${lockFile(main)}.reclaim`;
+      writeFileSync(mutex, '');
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(mutex, old, old);
+      const started = Date.now();
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 5000 })).toBe('ran');
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(readdirSync(dirOf(main))).toEqual([]);
     });
 
     it('releases only a lock that still holds its own pid, and tolerates one already gone', async () => {
