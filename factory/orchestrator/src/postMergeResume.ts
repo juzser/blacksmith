@@ -223,6 +223,16 @@ export async function resumeLandedReverts(
   }
   const { events } = input;
   const isAncestor = (a: string, b: string): boolean => {
+    // A full object name the clone lacks (a rebuilt branch, a log read on
+    // another clone) has no ancestors here: `cat-file -e` exits 1 for it. The
+    // `^{commit}` form would exit 128 for that case, so the plain name is
+    // probed; any other exit is a fault, not an answer.
+    try {
+      git(projectDir, ['cat-file', '-e', b]);
+    } catch (err) {
+      if (err instanceof GitCommandError && err.status === 1) return false;
+      throw err;
+    }
     try {
       git(projectDir, ['merge-base', '--is-ancestor', a, b]);
       return true;

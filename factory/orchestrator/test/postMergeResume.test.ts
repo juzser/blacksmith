@@ -723,6 +723,30 @@ describe('post-merge resume', () => {
       await expectRecordOnly('re-merged');
     });
 
+    it('a later wave-merged naming a commit absent from the clone is not re-merge evidence (finding 27981ad9)', async () => {
+      await landed('task-1');
+      // A 40-hex merge_sha this clone does not contain: `merge-base` would exit 128.
+      await recordMerge(T1, 'f'.repeat(40));
+      const result = await resume();
+      expect(result.outcome).toBe('reverted');
+      expect(result.wrote.map((w) => [w.task, w.disposition, w.reason])).toEqual([
+        [T1, 'bounce', undefined],
+      ]);
+      expect(await reverted()).toHaveLength(1);
+    });
+
+    it('a faulting presence probe is not "absent" either (finding 27981ad9)', async () => {
+      await landed('task-1');
+      await recordMerge(T1, 'f'.repeat(40));
+      gitFault.subcommand = 'cat-file';
+      const before = snapshot();
+      await expect(
+        resumeLandedReverts(await input(), repo.ctx(), repo.opts()),
+      ).rejects.toBeInstanceOf(GitCommandError);
+      expect(await reverted()).toHaveLength(0);
+      expect(snapshot()).toEqual(before);
+    });
+
     it('a fault on a later revert writes nothing for the earlier one (finding 1b666dbe)', async () => {
       const a = await landed('task-1');
       const b = await landed('task-2');
