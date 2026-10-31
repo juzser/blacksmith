@@ -291,7 +291,7 @@ export interface RunChecksAtResult {
   pass: boolean;
 }
 
-const SCRATCH_NAME = /^scratch-(\d+)-/;
+const SCRATCH_NAME = /^scratch-(\d+)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** The `.wt/<project>/` root queue.ts puts batch candidates under. */
 function scratchRoot(projectDir: string): string {
@@ -307,14 +307,15 @@ const realOrSelf = (p: string): string => {
   }
 };
 
-/** Remove registered `scratch-<pid>-*` worktrees under `root` whose pid is dead, then prune. */
+/** Remove detached `scratch-<pid>-<uuid>` worktrees under `root` whose pid is dead, then prune. */
 function sweepDeadScratch(projectDir: string, root: string): void {
   const realRoot = realOrSelf(root);
   for (const entry of parseWorktreePorcelain(
     git(projectDir, ['worktree', 'list', '--porcelain']),
   )) {
     const match = SCRATCH_NAME.exec(path.basename(entry.worktree));
-    if (match === null || realOrSelf(path.dirname(entry.worktree)) !== realRoot) continue;
+    if (!entry.detached || match === null || realOrSelf(path.dirname(entry.worktree)) !== realRoot)
+      continue;
     if (pidIsAlive(Number(match[1]))) continue;
     try {
       git(projectDir, ['worktree', 'remove', '--force', entry.worktree]);
