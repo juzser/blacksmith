@@ -7,8 +7,10 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,6 +89,7 @@ function makeRepo(): string {
 
 const overlayFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.json');
 const lockFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.lock');
+const gateFile = (main: string): string => `${lockFile(main)}.breaker`;
 const CMD = 'pnpm run e2e';
 const entry = (
   check: string,
@@ -268,11 +271,34 @@ describe('exclusion', () => {
     writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
     expect(git(main, 'status', '--porcelain')).toBe('');
     const exclude = readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8');
-    expect(exclude.split('\n').filter((l) => l.includes('check-tiers.json'))).toHaveLength(1);
+    expect(exclude.split('\n').filter((l) => l.includes('check-tiers'))).toHaveLength(1);
     expect(existsSync(path.join(main, '.gitignore'))).toBe(false);
     expect(state(main).revision).toBe(1);
     writeOverlay(main, { entries: [], expectedRevision: 1 });
     expect(readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8')).toBe(exclude);
+  });
+
+  it('keeps the lock, breaker gate, temp and tomb files bs leaves in .blacksmith out of git status', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    const dir = path.dirname(overlayFile(main));
+    for (const f of [
+      'check-tiers.lock',
+      'check-tiers.lock.breaker',
+      `check-tiers.lock.${process.pid}-0.tmp`,
+      'check-tiers.lock.breaker.stale-1-0',
+      'check-tiers.json.tmp',
+    ]) {
+      writeFileSync(path.join(dir, f), '1\n');
+    }
+    expect(git(main, 'status', '--porcelain')).toBe('');
+  });
+
+  it('leaves another file in .blacksmith visible to git', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [], expectedRevision: 0 });
+    writeFileSync(path.join(path.dirname(overlayFile(main)), 'notes.txt'), 'x\n');
+    expect(git(main, 'status', '--porcelain')).toContain('.blacksmith/');
   });
 
   it('refuses a tracked overlay and leaves the file unchanged', () => {
@@ -392,6 +418,102 @@ describe('one writer at a time', () => {
       seams.afterRename = null;
     }
     expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
+  });
+
+  describe('the breaker gate', () => {
+    const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
+    const dirOf = (main: string): string => path.dirname(lockFile(main));
+    const staleLock = (main: string): number => {
+      mkdirSync(dirOf(main), { recursive: true });
+      const dead = deadPid();
+      writeFileSync(lockFile(main), `${dead}\n`);
+      return dead;
+    };
+
+    it('waits for a live breaker, then throws busy naming its pid, touching nothing', async () => {
+      const main = makeRepo();
+      const dead = staleLock(main);
+      writeFileSync(gateFile(main), `${process.ppid}\n`);
+      const fn = vi.fn();
+      await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+        message: expect.stringContaining(`pid ${process.ppid}`),
+      });
+      expect(fn).not.toHaveBeenCalled();
+      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${dead}\n`);
+    });
+
+    it('evicts a dead breaker gate and breaks the lock with no wait', async () => {
+      const main = makeRepo();
+      staleLock(main);
+      writeFileSync(gateFile(main), `${deadPid()}\n`);
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('evicts a gate whose content is not a pid with no wait', async () => {
+      const main = makeRepo();
+      staleLock(main);
+      writeFileSync(gateFile(main), '');
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('puts back a live gate that replaced the dead one it was evicting, and waits for it', async () => {
+      const main = makeRepo();
+      staleLock(main);
+      const dead = deadPid();
+      writeFileSync(gateFile(main), `${dead}\n`);
+      // Between the verdict (the gate holder is dead) and the eviction, another
+      // evictor removed the dead gate and a live breaker published its own.
+      seams.afterProbe = (pid) => {
+        if (pid !== dead) return;
+        seams.afterProbe = null;
+        rmSync(gateFile(main));
+        writeFileSync(gateFile(main), `${process.ppid}\n`);
+      };
+      try {
+        await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+          code: 'checks.overlay-busy',
+          message: expect.stringContaining(`pid ${process.ppid}`),
+        });
+      } finally {
+        seams.afterProbe = null;
+      }
+      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+      expect(readdirSync(dirOf(main)).sort()).toEqual([
+        'check-tiers.lock',
+        'check-tiers.lock.breaker',
+      ]);
+    });
+
+    it('does not throw when its own gate was moved away before it released it', async () => {
+      const main = makeRepo();
+      const dead = staleLock(main);
+      // An evictor that mistook this breaker's live gate for a dead one moved it.
+      seams.afterProbe = (pid) => {
+        if (pid !== dead || !existsSync(gateFile(main))) return;
+        seams.afterProbe = null;
+        renameSync(gateFile(main), `${gateFile(main)}.moved`);
+      };
+      try {
+        expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      } finally {
+        seams.afterProbe = null;
+      }
+      expect(existsSync(lockFile(main))).toBe(false);
+    });
+
+    it('evicts a live-pid gate that has outlived any breaker, so a leaked one never blocks', async () => {
+      const main = makeRepo();
+      staleLock(main);
+      writeFileSync(gateFile(main), `${process.ppid}\n`);
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(gateFile(main), old, old);
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
   });
 
   it('makes a second call in the holder process wait, then throw busy with waitMs', async () => {

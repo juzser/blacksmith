@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -32,8 +33,19 @@ const OVERLAY_DIR = '.blacksmith';
 const OVERLAY_FILE = 'check-tiers.json';
 const LOCK_FILE = 'check-tiers.lock';
 const TEMP_FILE = 'check-tiers.json.tmp';
+// One pattern for everything bs keeps in .blacksmith/: the overlay, its temp, the
+// lock, the breaker gate and their temp and tomb files, so a crash leaves none
+// of them visible to git.
+const EXCLUDE_PATTERN = 'check-tiers.*';
 const PROMOTED_EVENT = 'check-tier-promoted';
 const DECIDED_EVENT = 'check-tier-decided';
+
+/**
+ * A breaker holds its gate for a few file operations. A gate older than this
+ * is leaked (a live evictor that mistook it for a dead one can put it back after
+ * its owner released it), so it is evicted whatever its pid says.
+ */
+const BREAKER_STALE_MS = 5000;
 
 /** How often a waiting writer looks at the lock again. */
 export const OVERLAY_LOCK_POLL_MS = 100;
@@ -287,7 +299,7 @@ export function writeOverlay(
     );
   }
   mkdirSync(path.dirname(file), { recursive: true });
-  const excluded = excludeFromGit(root, file);
+  const excluded = excludeFromGit(root, path.join(path.dirname(file), EXCLUDE_PATTERN));
   if (excluded === 'tracked') {
     throw new OverlayError('checks.overlay-tracked', `${file} is tracked by git.`, { file });
   }
@@ -336,9 +348,31 @@ function publish(file: string): boolean {
   }
 }
 
-/** Move a dead holder's breaker lock aside; put it back if it was re-taken meanwhile. */
-function evictDeadBreaker(gate: string, pid: number): void {
-  const tomb = `${gate}.stale-${process.pid}`;
+/** Remove `file`, which may already be gone. */
+function unlinkIfPresent(file: string): void {
+  try {
+    unlinkSync(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
+function gateIsFresh(gate: string): boolean {
+  try {
+    return Date.now() - statSync(gate).mtimeMs < BREAKER_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Move a stale breaker gate aside, checking it is still the one judged stale
+ * (holding `pid`); if another evictor and a new breaker replaced it meanwhile,
+ * link it back (never over a newer gate) so a live gate is only ever held aside
+ * for an instant.
+ */
+function evictStaleBreaker(gate: string, pid: number): void {
+  const tomb = `${gate}.stale-${process.pid}-${tempSeq++}`;
   try {
     renameSync(gate, tomb);
   } catch (err) {
@@ -366,20 +400,17 @@ function breakStale(lock: string, pid: number): number | null {
   const gate = `${lock}.breaker`;
   if (!publish(gate)) {
     const other = readHolder(gate);
-    if (!Number.isNaN(other) && pidIsAlive(other)) return other;
-    evictDeadBreaker(gate, other);
+    if (!Number.isNaN(other) && pidIsAlive(other) && gateIsFresh(gate)) return other;
+    evictStaleBreaker(gate, other);
     return null;
   }
   try {
     if (Object.is(readHolder(lock), pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
-      try {
-        unlinkSync(lock);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      }
+      unlinkIfPresent(lock);
     }
   } finally {
-    unlinkSync(gate);
+    // An evictor may have moved the gate aside; it puts a live one back.
+    unlinkIfPresent(gate);
   }
   return null;
 }
