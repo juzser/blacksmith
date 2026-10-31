@@ -281,6 +281,8 @@ export interface PostMergeResult {
   commit?: string;
   /** `batch-has-foreign-commit`: the commits that are neither task merges nor bs reverts. */
   foreign?: string[];
+  /** `red-at-base` on a revert-only red: the landed bs revert shas after the last task merge, oldest first. */
+  redAfterRevert?: string[];
 }
 
 export interface PostMergeInput extends BaseInput {
@@ -436,7 +438,12 @@ export async function findPostMergeCulprit(
     if (culpritMerge === undefined) {
       // Green at every task merge, red only at the head: a landed bs revert made it red, and
       // no task of this batch did. `red-at-base` is the nearest outcome that blames no task.
-      return done('red-at-base');
+      const lastMerge = base.commits.findLastIndex((c) => merged.has(c.sha));
+      const redAfterRevert = base.commits
+        .slice(lastMerge + 1)
+        .filter((c) => reverts.has(c.sha))
+        .map((c) => c.sha);
+      return done('red-at-base', { redAfterRevert });
     }
     const culprit: Culprit = {
       task: culpritMerge.task,

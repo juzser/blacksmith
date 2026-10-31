@@ -213,6 +213,7 @@ describe('post-merge batch', () => {
       expect(result.outcome).toBe('red-at-base');
       expect(result.culprit).toBeUndefined();
       expect(result.baseObserved).toBe(false);
+      expect(result.redAfterRevert).toBeUndefined();
     });
 
     it('does not probe the base when a record certifies it', async () => {
@@ -282,6 +283,7 @@ describe('post-merge batch', () => {
       expect(result.culprit).toBeUndefined();
       expect(result.foreign).toBeUndefined();
       expect(result.head).toBe(revert);
+      expect(result.redAfterRevert).toEqual([revert]);
     });
   });
 
