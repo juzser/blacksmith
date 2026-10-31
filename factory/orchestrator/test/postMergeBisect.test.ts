@@ -501,7 +501,7 @@ describe('post-merge batch', () => {
     it('recognises the trailer only in the final paragraph', () => {
       expect(isBsRevertCommit('Revert x\n\nBs-Revert-Of: abc\nBs-Task: t')).toBe(true);
       expect(isBsRevertCommit('Revert x\n\nBs-Task: t')).toBe(false);
-      expect(isBsRevertCommit('about Bs-Revert-Of: abc\n\nnothing else')).toBe(false);
+      expect(isBsRevertCommit('Bs-Revert-Of: abc\n\nnothing else')).toBe(false);
       expect(isBsRevertCommit('Revert x\n\nBs-Revert-Of: \n')).toBe(true);
     });
   });
