@@ -868,3 +868,134 @@ describe('checkLedger unknown culprit and faster checks', () => {
     expect(rowsOf(ledger, 'smoke').find((r) => r.outcome === 'fail')?.catch).toBe('unique');
   });
 });
+
+describe('checkLedger faster checks across tiers', () => {
+  it('is shadowed by a faster check the short-circuit skipped after a full-tier close', async () => {
+    const ledger = ledgerOf([
+      gateEvent('g0', {
+        task: 'e/task-1',
+        tree: 't0',
+        daysAgo: 6,
+        run: await realRun([
+          { name: 'e2e', pass: true, monotonicMs: 5000 },
+          { name: 'unit', pass: true, monotonicMs: 500 },
+        ]),
+      }),
+      integrationEvent('i-all', {
+        epic: 'e',
+        tree: 't8',
+        tiers: ['pre-merge', 'post-merge'],
+        daysAgo: 5,
+        run: await realRun([
+          { name: 'e2e', pass: true, monotonicMs: 5000 },
+          { name: 'unit', pass: true, monotonicMs: 500 },
+          { name: 'smoke', pass: true, monotonicMs: 3000 },
+        ]),
+      }),
+      ...(await failThenPass('e2e', 'e/task-2', ['ta', 'tb'], { failMs: 5000 })),
+    ]);
+    expect(rowsOf(ledger, 'e2e').find((r) => r.outcome === 'fail')).toMatchObject({
+      class: 'real',
+      catch: 'shadowed',
+    });
+    expect(entryOf(ledger, 'e2e').unique_catches).toBe(0);
+  });
+
+  it('judges a faster check by the median of its durations so far, in any order', async () => {
+    const quick = async (id: string, tree: string, ms: number) =>
+      gateEvent(id, {
+        task: 'e/task-1',
+        tree,
+        run: await realRun([{ name: 'quick', pass: true, monotonicMs: ms }]),
+      });
+    const ledger = ledgerOf([
+      await quick('q1', 't1', 100),
+      await quick('q2', 't2', 9000),
+      await quick('q3', 't3', 200),
+      ...(await failThenPass('slow', 'e/task-2', ['ta', 'tb'], { failMs: 5000 })),
+    ]);
+    expect(rowsOf(ledger, 'slow').find((r) => r.outcome === 'fail')?.catch).toBe('shadowed');
+  });
+
+  // The failing record's tiers against the tiers of the record a faster check last ran
+  // in. A check whose record ran the pre-merge tier is taken as pre-merge, the default
+  // tier, so it shadows any catch whose record ran that tier and never a catch of a
+  // record that did not (D6: a post-merge catch is unique against the pre-merge tier).
+  // A record with no tiers is from before tiers, so it ran the pre-merge tier.
+  const PRE = ['pre-merge'];
+  const POST = ['post-merge'];
+  const MIXED = ['pre-merge', 'post-merge'];
+  it.each([
+    { f: 'pre', t: 'same', failing: PRE, faster: PRE, expected: 'shadowed' },
+    { f: 'pre', t: 'subset (no tiers)', failing: PRE, faster: [], expected: 'shadowed' },
+    { f: 'pre', t: 'superset', failing: PRE, faster: MIXED, expected: 'shadowed' },
+    { f: 'pre', t: 'disjoint', failing: PRE, faster: POST, expected: 'unique' },
+    {
+      f: 'pre',
+      t: 'disjoint (pre-release)',
+      failing: PRE,
+      faster: ['pre-release'],
+      expected: 'unique',
+    },
+    { f: 'post', t: 'same', failing: POST, faster: POST, expected: 'shadowed' },
+    { f: 'post', t: 'subset (no tiers)', failing: POST, faster: [], expected: 'unique' },
+    { f: 'post', t: 'superset', failing: POST, faster: MIXED, expected: 'unique' },
+    {
+      f: 'post',
+      t: 'superset without pre-merge',
+      failing: POST,
+      faster: ['post-merge', 'pre-release'],
+      expected: 'shadowed',
+    },
+    { f: 'post', t: 'disjoint', failing: POST, faster: PRE, expected: 'unique' },
+    {
+      f: 'post',
+      t: 'disjoint (pre-release)',
+      failing: POST,
+      faster: ['pre-release'],
+      expected: 'unique',
+    },
+    { f: 'mixed', t: 'same', failing: MIXED, faster: MIXED, expected: 'shadowed' },
+    { f: 'mixed', t: 'subset pre', failing: MIXED, faster: PRE, expected: 'shadowed' },
+    { f: 'mixed', t: 'subset post', failing: MIXED, faster: POST, expected: 'shadowed' },
+    { f: 'mixed', t: 'subset (no tiers)', failing: MIXED, faster: [], expected: 'shadowed' },
+    {
+      f: 'mixed',
+      t: 'superset',
+      failing: MIXED,
+      faster: [...MIXED, 'pre-release'],
+      expected: 'shadowed',
+    },
+    { f: 'mixed', t: 'disjoint', failing: MIXED, faster: ['pre-release'], expected: 'unique' },
+    { f: 'no tiers', t: 'pre', failing: [], faster: PRE, expected: 'shadowed' },
+    { f: 'no tiers', t: 'post', failing: [], faster: POST, expected: 'unique' },
+  ])(
+    'a $f catch against a faster check last run in a $t record is $expected',
+    async ({ failing, faster, expected }) => {
+      const ledger = ledgerOf([
+        integrationEvent('i-fast', {
+          epic: 'e',
+          tree: 't0',
+          tiers: faster,
+          run: await realRun([{ name: 'quick', pass: true, monotonicMs: 500 }]),
+        }),
+        integrationEvent('i-red', {
+          epic: 'e',
+          tree: 'ta',
+          tiers: failing,
+          run: await realRun([{ name: 'slow', pass: false, monotonicMs: 5000 }]),
+        }),
+        integrationEvent('i-green', {
+          epic: 'e',
+          tree: 'tb',
+          tiers: failing,
+          run: await realRun([{ name: 'slow', pass: true, monotonicMs: 5000 }]),
+        }),
+      ]);
+      expect(rowsOf(ledger, 'slow').find((r) => r.outcome === 'fail')).toMatchObject({
+        class: 'real',
+        catch: expected,
+      });
+    },
+  );
+});

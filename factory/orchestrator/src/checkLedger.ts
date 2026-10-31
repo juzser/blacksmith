@@ -196,14 +196,29 @@ function rowsOfEvent(ev: StoredEvent, taskIdOf: ReadonlyMap<string, string>, seq
   return out;
 }
 
-const median = (xs: number[]): number | null => {
-  if (xs.length === 0) return null;
-  const s = [...xs].sort((a, b) => a - b);
+/** The median of an ascending list. */
+const sortedMedian = (s: readonly number[]): number | null => {
+  if (s.length === 0) return null;
   const mid = s.length >> 1;
   return s.length % 2 === 1
     ? (s[mid] as number)
     : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
 };
+const median = (xs: number[]): number | null => sortedMedian([...xs].sort((a, b) => a - b));
+
+/** A record with no tiers is from before tiers: it ran the pre-merge tier. */
+const tiersOf = (r: RawRow): string[] => (r.tiers.length === 0 ? ['pre-merge'] : r.tiers);
+
+/**
+ * Whether a check last seen in `m`'s record would have run in `r`'s. One whose record
+ * ran the pre-merge tier is taken as pre-merge, the default tier: it runs wherever the
+ * pre-merge tier does, and a catch of a record without that tier is unique against it,
+ * as that tier passed on the landed tree (D6). Any other runs where its tiers do.
+ */
+const runsBeside = (m: RawRow, r: RawRow): boolean =>
+  tiersOf(m).includes('pre-merge')
+    ? tiersOf(r).includes('pre-merge')
+    : tiersOf(m).some((t) => tiersOf(r).includes(t));
 
 const uniq = (ids: string[]): string[] => [...new Set(ids)];
 
@@ -343,28 +358,34 @@ export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): Chec
     }
   }
 
-  // Unique catch: every faster check as of that row (each name's latest identity at or
-  // before it, from a record of the very same tiers) was observed passing at its tree.
-  const measured = live.filter((r) => r.cmd_sha256 !== null);
-  const latestBy = new Map<string, RawRow[]>();
-  for (const r of measured) latestBy.set(r.name, [...(latestBy.get(r.name) ?? []), r]);
-  const tierKey = (r: RawRow): string => [...new Set(r.tiers)].sort().join(',');
-  const medianAt = (id: string, seq: number): number | null =>
-    median(
-      measured
-        .filter((m) => m.identity === id && m.seq <= seq && m.duration_ms !== null)
-        .map((m) => m.duration_ms as number),
-    );
+  // Unique catch: every faster check that would have run beside that row (each name's
+  // latest identity at or before it, by its median so far) was observed passing at its
+  // tree. One sweep in log order keeps both facts current, so no row rescans the log.
+  const latest = new Map<string, RawRow>();
+  const durations = new Map<string, number[]>();
+  const medianNow = (id: string): number | null => sortedMedian(durations.get(id) ?? []);
   for (const r of rows) {
+    if (r.outcome !== 'not-run' && r.cmd_sha256 !== null) {
+      latest.set(r.name, r);
+      if (r.duration_ms !== null) {
+        const s = durations.get(r.identity) ?? [];
+        let lo = 0;
+        for (let hi = s.length; lo < hi; ) {
+          const mid = (lo + hi) >> 1;
+          if ((s[mid] as number) <= r.duration_ms) lo = mid + 1;
+          else hi = mid;
+        }
+        s.splice(lo, 0, r.duration_ms);
+        durations.set(r.identity, s);
+      }
+    }
     if (r.class !== 'real') continue;
-    const mine = medianAt(r.identity, r.seq);
-    const faster = [...latestBy.values()]
-      .map((list) => [...list].reverse().find((m) => m.seq <= r.seq))
-      .filter((m): m is RawRow => {
-        if (m === undefined || mine === null || tierKey(m) !== tierKey(r)) return false;
-        const theirs = medianAt(m.identity, r.seq);
-        return theirs !== null && theirs < mine;
-      });
+    const mine = medianNow(r.identity);
+    const faster = [...latest.values()].filter((m) => {
+      if (mine === null || !runsBeside(m, r)) return false;
+      const theirs = medianNow(m.identity);
+      return theirs !== null && theirs < mine;
+    });
     const observed = (id: string): boolean =>
       passedIn.has(`${r.event_id}|${id}`) ||
       (r.tree_sha !== null && passedAt.has(`${id}|${r.tree_sha}`));
