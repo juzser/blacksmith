@@ -298,6 +298,23 @@ describe('post-merge resume', () => {
       expect(result.wrote[0]?.culprit).toBeUndefined();
     });
 
+    it('not-merged: a task known only by its task-added event', async () => {
+      await append('task-added', { epic_id: repo.epicId }, T1);
+      const merge = repo.merge('task-1', { 'a.txt': 'a\n' });
+      const red = await redRecord();
+      await certify(repo.revert(merge, { redRecord: red, failingChecks: 'post-a' }));
+      const { result } = await expectRecordOnly('not-merged');
+      expect(result.wrote[0]?.task).toBe(T1);
+    });
+
+    it('unknown-task: the name is known only to a different epic', async () => {
+      await append('wave-admitted', { epic_id: 'epic-other', task_ids: [T1] }, T1);
+      const merge = repo.merge('task-1', { 'a.txt': 'a\n' });
+      const red = await redRecord();
+      await certify(repo.revert(merge, { redRecord: red, failingChecks: 'post-a' }));
+      await expectRecordOnly('unknown-task');
+    });
+
     it('not-in-live-plan: merged and completed, but the plan dropped it', async () => {
       await landed('task-1');
       const { result } = await expectRecordOnly('not-in-live-plan', { liveTaskIds: [T2] });
