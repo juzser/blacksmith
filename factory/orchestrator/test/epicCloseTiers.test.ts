@@ -293,7 +293,7 @@ describe('epic close and verdict certify every declared check at the head', () =
     });
 
     it('lets a malformed record certify nothing', async () => {
-      await record('not-an-array');
+      await record(pass(P));
       await record([pass(Q)], {}, 12345);
       expect((await verdict([P, Q])).blockers).toEqual([
         notCertified(P, NO_RESULT),
@@ -510,6 +510,20 @@ describe('epic close and verdict certify every declared check at the head', () =
       const integration = await closedIntegration();
       expect(integration.tiered_record_id).toBe(id);
       expect('declared' in integration).toBe(false);
+    });
+
+    it('closes a no-declaration epic with main integration payload shape', async () => {
+      await closeEpic({ ...input(), overrideRationale: 'accepted' }, ctx(), { stateDir });
+      expect(await closedIntegration()).toEqual({ head_sha: HEAD, check: null });
+    });
+
+    it('closes a no-declaration epic on a pre-epic passing record with main payload shape', async () => {
+      await record([{ name: 'lint', pass: true, exitCode: 0, tail: '' }]);
+      await closeEpic({ ...input(), overrideRationale: 'accepted' }, ctx(), { stateDir });
+      const integration = await closedIntegration();
+      expect(Object.keys(integration).sort()).toEqual(['check', 'head_sha']);
+      expect(integration.head_sha).toBe(HEAD);
+      expect(integration.check).toMatchObject({ head_sha: HEAD });
     });
 
     async function closedIntegration(): Promise<Record<string, unknown>> {

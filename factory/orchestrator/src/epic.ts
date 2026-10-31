@@ -1301,13 +1301,7 @@ const findingLine = (f: EpicFindingSummary): string =>
 const listOr = (lines: string[], empty = '  (none)'): string[] =>
   lines.length > 0 ? lines : [empty];
 
-/**
- * Whether a recorded sha still covers the branch. Every caller here runs after
- * the matching blocker has already passed, so `(the current head)` is the
- * expected answer — the other two exist so that a record which somehow reached
- * a judge without covering anything says so rather than showing a bare sha the
- * judge has no way to place.
- */
+/** The judge-prompt lines for a declared-checks close. */
 function declaredIntegrationLines(
   declared: readonly DeclaredCheckStatus[],
   headSha: string | null,
@@ -1333,6 +1327,14 @@ function declaredIntegrationLines(
   ];
 }
 
+/** The judge-prompt lines for a declared-checks close. */
+/**
+ * Whether a recorded sha still covers the branch. Every caller here runs after
+ * the matching blocker has already passed, so `(the current head)` is the
+ * expected answer — the other two exist so that a record which somehow reached
+ * a judge without covering anything says so rather than showing a bare sha the
+ * judge has no way to place.
+ */
 function coverage(recorded: string, current: string | null): string {
   if (current === null) return ' (the current head could not be read)';
   if (current === recorded) return ' (the current head)';
