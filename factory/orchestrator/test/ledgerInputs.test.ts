@@ -343,6 +343,39 @@ describe('gatherLedgerInputs', () => {
     expect(out.sessionsRead).toBe(1);
   });
 
+  it('refuses a specs dir that exists but cannot be listed, with checks.no-plans', async () => {
+    rmSync(specsDir, { recursive: true });
+    writeFileSync(specsDir, 'not a directory');
+
+    await expect(gather()).rejects.toMatchObject({ code: 'checks.no-plans' });
+  });
+
+  it('degrades with a named warning on a state dir that exists but cannot be listed', async () => {
+    plan('ea', 'plan.json', { project: 'proj', tasks: [task('ea/task-1', ['x'])] });
+    rmSync(stateDir, { recursive: true });
+    writeFileSync(stateDir, 'not a directory');
+
+    const out = await gather();
+
+    expect(out.degraded).toBe(true);
+    expect(out.warnings).toEqual([
+      expect.objectContaining({ code: 'checks.session-unreadable', path: stateDir }),
+    ]);
+    expect(out.sessionsRead).toBe(0);
+    expect(out.events).toEqual([]);
+  });
+
+  it('treats a state dir that does not exist as no sessions, not as degraded', async () => {
+    plan('ea', 'plan.json', { project: 'proj', tasks: [task('ea/task-1', ['x'])] });
+    rmSync(stateDir, { recursive: true });
+
+    const out = await gather();
+
+    expect(out.degraded).toBe(false);
+    expect(out.warnings).toEqual([]);
+    expect(out.sessionsRead).toBe(0);
+  });
+
   it('changes nothing in the state dir or the specs dir', async () => {
     plan('ea', 'plan.json', { project: 'proj', tasks: [task('ea/task-1', ['x'])] });
     session('s-a', [{ type: 'session-start' }, { type: 'testgate-result', task: 'ea/task-1' }]);

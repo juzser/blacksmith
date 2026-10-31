@@ -151,12 +151,21 @@ export async function gatherLedgerInputs(opts: LedgerInputsOptions): Promise<Led
   const warnings: LedgerWarning[] = [];
 
   // Plans: only what the ledger needs; anything else is a named skip.
-  const epics: string[] = existsSync(opts.specsDir)
-    ? readdirSync(opts.specsDir, { withFileTypes: true })
+  let epics: string[] = [];
+  if (existsSync(opts.specsDir)) {
+    try {
+      epics = readdirSync(opts.specsDir, { withFileTypes: true })
         .filter((d) => d.isDirectory())
         .map((d) => d.name)
-        .sort()
-    : [];
+        .sort();
+    } catch (err) {
+      throw new LedgerInputsError(
+        'checks.no-plans',
+        `No readable plan under ${opts.specsDir}: the directory cannot be listed (${err instanceof Error ? err.message : String(err)}).`,
+        { specs_dir: opts.specsDir },
+      );
+    }
+  }
   const projects = new Set<string>();
   const latest = new Map<string, { rank: number; claims: string[] }>();
   let readable = 0;
@@ -214,7 +223,18 @@ export async function gatherLedgerInputs(opts: LedgerInputsOptions): Promise<Led
   // Sessions: every log in the state dir; an unreadable one degrades the result.
   const logs: SessionLog[] = [];
   let degraded = false;
-  for (const sessionId of listSessionIds(opts.stateDir)) {
+  let sessionIds: string[] = [];
+  try {
+    sessionIds = listSessionIds(opts.stateDir);
+  } catch (err) {
+    degraded = true;
+    warnings.push({
+      code: 'checks.session-unreadable',
+      path: opts.stateDir,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
+  for (const sessionId of sessionIds) {
     try {
       logs.push({ sessionId, events: await readEvents(sessionId, { stateDir: opts.stateDir }) });
     } catch (err) {
