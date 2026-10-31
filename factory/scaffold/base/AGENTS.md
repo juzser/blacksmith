@@ -6,7 +6,7 @@ preload this repo's whole context.
 ## Stack
 
 TypeScript, `strict: true`. pnpm. Biome (lint + format). Vitest (unit tests).
-GitHub Actions CI runs lint + typecheck + test + build on every PR
+GitHub Actions CI runs `scripts/check.mjs`, one job per tier, on every PR
 (`.github/workflows/ci.yml`).
 
 ## Layout
@@ -27,7 +27,11 @@ GitHub Actions CI runs lint + typecheck + test + build on every PR
 
 ## Gate
 
-Every change clears the same five steps CI runs, and clears them locally
-first: `pnpm run lint`, `pnpm run typecheck`, `pnpm run typecheck:test`,
-`pnpm run test:coverage`, `pnpm run build`. Green here or it is not ready to
-propose.
+Every change clears the same gate CI runs, and clears it locally first:
+`pnpm run check`, which runs `pnpm run lint`, `pnpm run typecheck`,
+`pnpm run typecheck:test`, `pnpm run test:coverage` and `pnpm run build` in
+that order. Nothing here needs GitHub Actions: the script is the gate, locally
+and in CI. A committed `checks.json` replaces that list and may place a check
+in the `post-merge` or `pre-release` tier (default `pre-merge`); CI runs a job
+per tier and skips a tier with nothing to run. Green here or it is not ready
+to propose.

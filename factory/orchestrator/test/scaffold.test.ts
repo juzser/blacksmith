@@ -177,6 +177,7 @@ describe('scaffold.ts', () => {
       'AGENTS.md',
       'README.md',
       '.github/workflows/ci.yml',
+      'scripts/check.mjs',
       'src/index.ts',
       'test/index.test.ts',
     ];
@@ -636,8 +637,14 @@ describe('the scaffold can run its own gates (P9-19)', () => {
       result.branch,
     );
 
-    const runs: string[] = ci.jobs.check.steps.map((s: { run?: string }) => s.run ?? '');
-    expect(runs.some((r) => r.includes('test:coverage'))).toBe(true);
+    // The coverage run lives in the gate script now, which every tier job
+    // calls; ci.yml itself holds no check step beside it.
+    const script = readFileSync(path.join(targetDir, 'scripts/check.mjs'), 'utf8');
+    expect(script).toContain('test:coverage');
+    const runs: string[] = Object.values<{ steps: { run?: string }[] }>(ci.jobs).flatMap((job) =>
+      job.steps.map((s) => s.run ?? ''),
+    );
+    expect(runs).toContain('node scripts/check.mjs --tier pre-merge --ci');
     // The coverage run runs the suite; a separate `pnpm run test` step would
     // only pay for it twice.
     expect(runs).not.toContain('pnpm run test');

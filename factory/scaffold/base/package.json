@@ -12,6 +12,7 @@
     "typecheck:test": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "check": "node scripts/check.mjs",
     "lint": "biome check ."
   },
   "dependencies": {},

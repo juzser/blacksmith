@@ -10,8 +10,51 @@ on:
     # the first merge.
     branches: [main, setup]
 
+# One run per branch: a new push to a pull request supersedes the one before
+# it. A commit that lands on a branch is never cancelled, and it takes a group
+# of its own (its sha) so that a quick second push cannot displace its run.
+# Concurrency groups are shared by every workflow in the repository, so each
+# workflow names its own prefix.
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+permissions:
+  contents: read
+
 jobs:
-  check:
+  # Asks the gate script which tiers have anything to run. A tier with nothing
+  # to run is skipped as a whole job, which GitHub shows as skipped, never as
+  # passed. Only an explicit `false` from this job skips one: if this job
+  # fails (an invalid checks.json), every tier job still starts, and the gate
+  # script's own refusal turns it red.
+  tiers:
+    runs-on: ubuntu-latest
+    outputs:
+      pre-merge: ${{ steps.list.outputs.pre-merge }}
+      post-merge: ${{ steps.list.outputs.post-merge }}
+      pre-release: ${{ steps.list.outputs.pre-release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          for tier in pre-merge post-merge pre-release; do
+            names=$(node scripts/check.mjs --tier "$tier" --ci --list)
+            if [ "$names" = "[]" ]; then
+              echo "$tier=false" >> "$GITHUB_OUTPUT"
+              echo "$tier: nothing to run, its job is skipped"
+            else
+              echo "$tier=true" >> "$GITHUB_OUTPUT"
+              echo "$tier: runs $names"
+            fi
+          done
+
+  # Every tier that holds a check runs on every pull request and every push,
+  # in parallel. `node` runs the gate script directly, so no package manager
+  # rewrites its arguments. The script is the same one `pnpm run check` runs.
+  pre-merge:
+    needs: tiers
+    if: ${{ !cancelled() && needs.tiers.outputs.pre-merge != 'false' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,12 +71,34 @@ jobs:
       # --frozen-lockfile is safe here: the install runs before the first
       # commit, so pnpm-lock.yaml is already in it.
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run lint
-      - run: pnpm run typecheck
-      - run: pnpm run typecheck:test
-      # Runs the suite AND enforces the coverage floor vitest.config.ts
-      # declares — a separate `pnpm run test` step would only pay for the suite
-      # twice, and leaving coverage out is how a declared floor ends up enforced
-      # by nothing at all.
-      - run: pnpm run test:coverage
-      - run: pnpm run build
+      - run: node scripts/check.mjs --tier pre-merge --ci
+
+  post-merge:
+    needs: tiers
+    if: ${{ !cancelled() && needs.tiers.outputs.post-merge != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          check-latest: true
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check.mjs --tier post-merge --ci
+
+  pre-release:
+    needs: tiers
+    if: ${{ !cancelled() && needs.tiers.outputs.pre-release != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          check-latest: true
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/check.mjs --tier pre-release --ci
