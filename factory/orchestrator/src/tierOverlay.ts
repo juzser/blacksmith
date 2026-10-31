@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -133,23 +134,28 @@ function git(cwd: string, args: readonly string[]): string {
 /**
  * The overlay file of the repository holding `dir`: always under the main
  * worktree, so a task worktree, the epic worktree and the clone share one.
- * Null outside a git repository and for a bare one and for a linked worktree of a
- * `--separate-git-dir` copy, where no main worktree can be determined.
+ * Null outside a git repository, for a bare one, and wherever git itself cannot
+ * name the main worktree (a linked worktree of a `--separate-git-dir` copy).
  */
 export function overlayPath(dir: string): string | null {
   try {
     const common = git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim();
-    // A `.git` directory sits in its main worktree. Any other common dir (a
-    // bare repository, `--separate-git-dir`) names no worktree and `git
-    // worktree list` reports the git dir itself as main there, so the main
-    // worktree is known only when `dir` is in it; otherwise there is none.
-    let root = path.dirname(common);
-    if (path.basename(common) !== '.git') {
-      const own = git(dir, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']).trim();
-      if (own !== common) return null;
+    const own = git(dir, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']).trim();
+    let root: string;
+    if (own === common) {
+      // `dir` is in the main worktree: git names its top level in every layout.
       root = git(dir, ['rev-parse', '--path-format=absolute', '--show-toplevel']).trim();
+    } else {
+      // A linked worktree: git records no main worktree, only the common dir. The
+      // directory above a `.git` common dir is it for an ordinary clone but the
+      // dir holding the git dir for a `--separate-git-dir` one, so it counts only
+      // when it holds the files of the repository's HEAD.
+      root = path.dirname(common);
+      if (path.basename(common) !== '.git') return null;
+      const tops = git(dir, ['--git-dir', common, 'ls-tree', '--name-only', '-z', 'HEAD']);
+      if (!tops.split('\0').some((n) => n !== '' && existsSync(path.join(root, n)))) return null;
     }
-    return path.join(root, OVERLAY_DIR, OVERLAY_FILE);
+    return path.join(realpathSync(root), OVERLAY_DIR, OVERLAY_FILE);
   } catch {
     return null;
   }

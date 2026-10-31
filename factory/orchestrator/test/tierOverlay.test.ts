@@ -224,6 +224,34 @@ describe('location in a bare or separate-git-dir repository', () => {
   });
 });
 
+describe('location in a repository whose git dir is itself named .git', () => {
+  it('finds the work tree, never the directory holding the git dir', () => {
+    const root = tmp();
+    const wc = path.join(root, 'sg');
+    mkdirSync(path.join(root, 'sgdir'));
+    git(
+      root,
+      'init',
+      '-q',
+      '-b',
+      'main',
+      '--separate-git-dir',
+      path.join(root, 'sgdir', '.git'),
+      wc,
+    );
+    git(wc, 'config', 'user.email', 't@example.com');
+    git(wc, 'config', 'user.name', 't');
+    writeFileSync(path.join(wc, 'README.md'), 'x\n');
+    git(wc, 'add', '.');
+    git(wc, 'commit', '-q', '-m', 'init');
+    const linked = path.join(root, 'lk');
+    git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
+    expect(overlayPath(wc)).toBe(overlayFile(wc));
+    // git records no work tree for this layout, so a linked worktree gets none.
+    expect(overlayPath(linked)).toBeNull();
+  });
+});
+
 describe('validity', () => {
   const cases: [string, unknown, string][] = [
     ['a non-object', [], 'JSON object'],
