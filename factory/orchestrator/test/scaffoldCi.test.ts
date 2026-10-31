@@ -2,6 +2,7 @@
 // check`), one CI job per tier, and a dormant sharded e2e workflow in the `ui`
 // layer. Every test runs the real scaffold output: the gate script with `node`
 // against stub commands, and the workflows' own `run:` lines with `bash`.
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -234,6 +235,42 @@ describe('the gate script run', () => {
     const green = check(dir, []);
     expect(green.status, green.stderr).toBe(0);
     expect(trace(dir)).toEqual(['one', 'two', 'x1', 'x2']);
+  });
+
+  it('forwards an interrupt to a timed check instead of orphaning it', async () => {
+    const dir = fresh(false);
+    writeChecks(dir, [
+      { name: 'slow', cmd: 'echo $$ > pid.txt; exec sleep 47', timeout_ms: 60000 },
+    ]);
+    const child = spawn('node', ['scripts/check.mjs'], { cwd: dir, stdio: 'ignore' });
+    const exited = new Promise<number | null>((resolve) =>
+      child.on('close', (code) => resolve(code)),
+    );
+    const pidFile = path.join(dir, 'pid.txt');
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    let pid = 0;
+    try {
+      for (let i = 0; i < 50 && pid === 0; i++) {
+        if (existsSync(pidFile)) pid = Number(readFileSync(pidFile, 'utf8'));
+        else await wait(100);
+      }
+      expect(pid, 'the check never started').toBeGreaterThan(0);
+      child.kill('SIGINT');
+      expect(await exited).toBe(130);
+      for (let i = 0; i < 30 && alive(pid); i++) await wait(100);
+      expect(alive(pid), `pid ${pid} outlived an interrupted check.mjs`).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+      if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL');
+    }
   });
 
   it('ends a check at its timeout_ms and kills its process group', () => {

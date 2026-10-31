@@ -132,8 +132,23 @@ function runCheck(entry) {
               child.kill('SIGKILL');
             }
           }, entry.timeoutMs);
+    // The detached group no longer shares our terminal, so pass an interrupt on to it.
+    const CONVENTIONAL = { SIGINT: 130, SIGTERM: 143 };
+    let interrupted;
+    const forward = (sig) => {
+      interrupted = sig;
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        child.kill(sig);
+      }
+    };
+    const handlers = entry.timeoutMs === undefined ? [] : Object.keys(CONVENTIONAL);
+    for (const sig of handlers) process.on(sig, forward);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
+      for (const sig of handlers) process.off(sig, forward);
+      if (interrupted) process.exit(CONVENTIONAL[interrupted]);
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       if (timedOut) resolve(`timed out after ${entry.timeoutMs} ms`);
       else if (code === 0) resolve(null);
