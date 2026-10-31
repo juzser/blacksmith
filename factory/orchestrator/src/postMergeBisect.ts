@@ -290,8 +290,22 @@ export interface PostMergeInput extends BaseInput {
   setupCmd?: string;
   /** Default `runIntegrationCheck`; always called with `workspace: 'scratch'`. */
   runner?: typeof runIntegrationCheck;
-  /** The folded status of a task; default the plan record's own. */
+  /** The status of a task; default the folded status of the epic's event lineage. */
   statusOf?: (taskId: string) => string;
+}
+
+/**
+ * The status the epic's event lineage folds to, as `bs wave admit` reads it. A
+ * task the lineage has no row for yet has only its plan record's initial status.
+ * Imported here so the db layer stays out of the graph a bare `bs` run loads.
+ */
+async function foldedStatusOf(input: PostMergeInput): Promise<(taskId: string) => string> {
+  const { foldTasks } = await import('./db/projector.js');
+  const rows = foldTasks(input.events);
+  return (id) =>
+    rows.find((r) => taskIdsMatch(r.taskId, id))?.taskStatus ??
+    input.tasks.find((t) => taskIdsMatch(t.task_id, id))?.task_status ??
+    '';
 }
 
 /** Ends the call with an outcome from anywhere inside it. */
@@ -331,9 +345,7 @@ export async function findPostMergeCulprit(
   });
   if (base.observed && base.base === base.head) return done('no-new-merges');
 
-  const statusOf =
-    input.statusOf ??
-    ((id: string) => input.tasks.find((t) => taskIdsMatch(t.task_id, id))?.task_status ?? '');
+  const statusOf = input.statusOf ?? (await foldedStatusOf(input));
   if (!input.final) {
     const held = heldByPostMerge({
       tasks: input.tasks,
@@ -422,11 +434,9 @@ export async function findPostMergeCulprit(
     }
     const culpritMerge = merges[hi];
     if (culpritMerge === undefined) {
-      // Green at every task merge, red only at the head: a bs revert commit made it red.
-      const last = base.commits.findIndex((c) => c.sha === merges.at(-1)?.merge_sha);
-      return done('batch-has-foreign-commit', {
-        foreign: base.commits.slice(last + 1).map((c) => c.sha),
-      });
+      // Green at every task merge, red only at the head: a landed bs revert made it red, and
+      // no task of this batch did. `red-at-base` is the nearest outcome that blames no task.
+      return done('red-at-base');
     }
     const culprit: Culprit = {
       task: culpritMerge.task,

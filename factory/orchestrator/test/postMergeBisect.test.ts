@@ -19,7 +19,11 @@ import {
   postMergeBase,
 } from '../src/postMergeBisect.js';
 import { type CheckCommand, type CheckResult, checkDigest, SLEEP_GAP_MS } from '../src/testgate.js';
-import { createIntegrationRepo, type IntegrationRepo } from './helpers/integrationRepo.js';
+import {
+  createIntegrationRepo,
+  type IntegrationRepo,
+  type RevertTrailers,
+} from './helpers/integrationRepo.js';
 import { git as runGit } from './helpers/process.js';
 
 type Runner = typeof runIntegrationCheck;
@@ -54,6 +58,28 @@ describe('post-merge batch', () => {
         payload: { epic_id: repo.epicId, task_ids: [taskId] },
       },
     }) as unknown as StoredEvent;
+
+  const lineage = (event_type: string, payload: Record<string, unknown>, n: number): StoredEvent =>
+    ({
+      event_id: `${repo.sessionId}#${910 + n}`,
+      record: {
+        event_type,
+        plan_version: 1,
+        ts: `2026-01-01T00:00:0${n}.000Z`,
+        session_id: repo.sessionId,
+        payload,
+      },
+    }) as unknown as StoredEvent;
+  const admitted = (taskId: string) =>
+    lineage('wave-admitted', { epic_id: repo.epicId, task_ids: [taskId] }, 1);
+  const escalated = (taskId: string) =>
+    lineage(
+      'error-logged',
+      { task_ref: taskId, error: 'coordination.deadlock', severity: 'S1-blocker' },
+      2,
+    );
+  const mergedEvent = (taskId: string) =>
+    lineage('wave-merged', { epic_id: repo.epicId, task_ids: [taskId] }, 3);
 
   const input = async (extra: Partial<PostMergeInput> = {}): Promise<PostMergeInput> => ({
     epicId: repo.epicId,
@@ -239,6 +265,24 @@ describe('post-merge batch', () => {
       expect(result.foreign).not.toContain(revert);
       expect(result.culprit).toBeUndefined();
     });
+
+    it('blames no task, and names no foreign commit, when only a landed bs revert turns the head red', async () => {
+      const needs: CheckCommand = {
+        name: 'post-needs',
+        cmd: 'test -f needed.txt',
+        tier: 'post-merge',
+      };
+      const m0 = repo.merge('task-0', { 'needed.txt': 'n\n' });
+      await certify(m0, [needs]);
+      repo.merge('task-1', { 'a.txt': 'a\n' });
+      repo.merge('task-2', { 'b.txt': 'b\n' });
+      const revert = repo.revert(m0);
+      const result = await call({ checks: [needs] });
+      expect(result.outcome).toBe('red-at-base');
+      expect(result.culprit).toBeUndefined();
+      expect(result.foreign).toBeUndefined();
+      expect(result.head).toBe(revert);
+    });
   });
 
   describe('lock and environment', () => {
@@ -362,10 +406,38 @@ describe('post-merge batch', () => {
       repo.merge('task-1', { 'a.txt': 'a\n' });
       repo.merge('task-2', { 'b.txt': 'b\n' });
       const result = await call({
-        tasks: [...planTasks(2), { task_id: 'task-9', task_status: 'escalated', plan_version: 1 }],
-        events: [inFlight('task-9')],
+        tasks: [
+          ...planTasks(2),
+          { task_id: 'task-9', task_status: 'in-progress', plan_version: 1 },
+        ],
+        events: [admitted('task-9'), escalated('task-9')],
       });
       expect(result.outcome).toBe('green');
+    });
+
+    it('reads the folded status, not the plan record: an admitted task is not idle', async () => {
+      repo.merge('task-1', { 'a.txt': 'a\n' });
+      repo.merge('task-2', { 'b.txt': 'b\n' });
+      const result = await call({
+        tasks: [...planTasks(2), { task_id: 'task-9', task_status: 'escalated', plan_version: 1 }],
+        events: [admitted('task-9')],
+      });
+      expect(result.outcome).toBe('batch-not-ready');
+    });
+
+    it('does not hold a merged task whose plan record still says todo', async () => {
+      repo.merge('task-1', { 'a.txt': 'a\n' });
+      repo.merge('task-5', { 'b.txt': 'b\n' });
+      const result = await call({
+        tasks: [
+          { task_id: 'task-1', task_status: 'completed', plan_version: 1 },
+          { task_id: 'task-5', task_status: 'todo', plan_version: 1 },
+          { task_id: 'task-9', task_status: 'in-progress', plan_version: 1 },
+        ],
+        edges: [{ task: 'task-5', dependsOn: 'task-1' }],
+        events: [admitted('task-9'), mergedEvent('task-5')],
+      });
+      expect(result.outcome).toBe('batch-not-ready');
     });
 
     it('runs at the batch size even with a task in flight', async () => {
@@ -519,20 +591,35 @@ describe('post-merge batch', () => {
     });
 
     it('writes exactly the one trailer a call overrides or omits', () => {
-      const m = repo.merge('task-1', { 'a.txt': 'a\n' });
-      const base = message(repo.revert(m));
-      const m2 = repo.merge('task-2', { 'b.txt': 'b\n' });
-      const overridden = message(repo.revert(m2, { revertOf: 'xyz' }));
-      expect(overridden).toContain('Bs-Revert-Of: xyz');
-      expect(overridden).toContain('Bs-Task: task-2');
-      const m3 = repo.merge('task-3', { 'c.txt': 'c\n' });
-      const omitted = message(repo.revert(m3, { task: null }));
-      expect(omitted).not.toContain('Bs-Task');
-      expect(omitted).toContain(`Bs-Revert-Of: ${m3}`);
-      expect(base).toContain('Bs-Failing-Checks:');
-      expect(
-        message(repo.revert(repo.merge('task-4', { 'd.txt': 'd' }), { failingChecks: '' })),
-      ).toMatch(/^Bs-Failing-Checks:$/m);
+      const whole = (merge: string, task: string, trailers: Record<string, string | null> = {}) => {
+        const values: Record<string, string | null> = {
+          'Bs-Revert-Of': merge,
+          'Bs-Task': task,
+          'Bs-Red-Record': `${repo.sessionId}#0`,
+          'Bs-Failing-Checks': 'post-check',
+          ...trailers,
+        };
+        const lines = Object.entries(values).flatMap(([k, v]) =>
+          v === null ? [] : [`${k}: ${v}`],
+        );
+        return [`Revert "Merge ${task} into ${repo.branch}"`, '', ...lines].join('\n');
+      };
+      const trimmed = (sha: string) => message(sha).trimEnd();
+      const cases: [string, Record<string, string | null>, RevertTrailers][] = [
+        ['Bs-Revert-Of', { 'Bs-Revert-Of': 'xyz' }, { revertOf: 'xyz' }],
+        ['Bs-Task', { 'Bs-Task': 'task-ghost' }, { task: 'task-ghost' }],
+        ['Bs-Red-Record', { 'Bs-Red-Record': 'nope' }, { redRecord: 'nope' }],
+        ['Bs-Failing-Checks', { 'Bs-Failing-Checks': '' }, { failingChecks: '' }],
+        ['Bs-Revert-Of', { 'Bs-Revert-Of': null }, { revertOf: null }],
+        ['Bs-Task', { 'Bs-Task': null }, { task: null }],
+        ['Bs-Red-Record', { 'Bs-Red-Record': null }, { redRecord: null }],
+        ['Bs-Failing-Checks', { 'Bs-Failing-Checks': null }, { failingChecks: null }],
+      ];
+      cases.forEach(([, expected, given], i) => {
+        const task = `task-${i + 1}`;
+        const m = repo.merge(task, { [`f${i}.txt`]: 'x' });
+        expect(trimmed(repo.revert(m, given))).toBe(whole(m, task, expected).trimEnd());
+      });
     });
   });
 
