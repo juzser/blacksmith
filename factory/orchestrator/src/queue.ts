@@ -4,15 +4,21 @@ import path from 'node:path';
 import { claimsOverlap, collectCommittedChanges, touchesSerializeAlways } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
-import { type EventOpts, validateEventEnvelope } from './events.js';
+import { appendEvent, type EventOpts, validateEventEnvelope } from './events.js';
 import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { type HeavyLease, type HeavyLockOptions, withHeavyLock } from './heavyLock.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
-import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
-import { heavyChildEnv } from './testgate.js';
+import { emitTaskBlockedWith, emitWaveMergedWith, type TaskEventContext } from './taskEvents.js';
+import {
+  type CheckCommand,
+  declaresLaterTier,
+  heavyChildEnv,
+  run as runChecks,
+  selectTier,
+} from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
-import { epicBranchPrefix, integrationBranchName } from './worktree.js';
+import { epicBranchPrefix, integrationBranchName, RESERVED_TASK_ID } from './worktree.js';
 
 export class QueueError extends SmithError {}
 
@@ -117,6 +123,39 @@ export function groupForBatch(
   return groups;
 }
 
+/**
+ * What `queue run --checks` decided from the checks file (spec D2): keep the
+ * `--test-cmd` path, or test the file's pre-merge tier instead.
+ */
+export type QueueChecks =
+  | { preLanding: 'test-cmd' }
+  | { preLanding: 'pre-merge-tier'; preMerge: CheckCommand[] };
+
+/**
+ * An unlabelled or empty file keeps today's commands; a file declaring a later
+ * tier makes its pre-merge entries the pre-landing test, and refuses to when
+ * that selection is empty so a tier filter never reads as a pass.
+ */
+export function resolveQueueChecks(checks: readonly CheckCommand[]): QueueChecks {
+  if (!declaresLaterTier(checks)) return { preLanding: 'test-cmd' };
+  const preMerge = selectTier(checks, 'pre-merge');
+  if (preMerge.length === 0) {
+    throw new QueueError(
+      'queue.no-pre-merge-checks',
+      'The checks file declares post-merge or pre-release checks but no pre-merge one, so the queue has nothing to test before landing; an empty selection must never read as a pass.',
+    );
+  }
+  return { preLanding: 'pre-merge-tier', preMerge };
+}
+
+/** Writes one blocked `error-logged`; `extra` is additive payload (the pre-landing record). */
+type LogBlocked = (
+  taskId: string,
+  error: string,
+  detail: string,
+  extra?: Record<string, unknown>,
+) => Promise<void>;
+
 export interface QueueTask {
   taskId: string;
   branch: string;
@@ -147,6 +186,11 @@ export interface StepOptions {
    * none, so the suite waits on the real machine lock with the defaults.
    */
   heavyLock?: Pick<HeavyLockOptions, 'lockDir' | 'pollMs' | 'maxWaitMs' | 'isPidAlive'>;
+  /**
+   * Set when `--checks` was given (`resolveQueueChecks`); absent, the queue
+   * writes the base's events and nothing about a pre-landing path.
+   */
+  checks?: QueueChecks;
 }
 
 /**
@@ -241,7 +285,7 @@ type EarlyOutcome = Extract<StepOutcome, { outcome: 'nothing-to-merge' | 'rebase
 async function certifyAndRebase(
   task: QueueTask,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
   hold?: { env: NodeJS.ProcessEnv; onto: string },
 ): Promise<EarlyOutcome | null> {
   // Before the rebase, because a rebase, a test run and a merge all "succeed"
@@ -323,10 +367,10 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
    * ahead of it: an event written before the merge that the merge then
    * falsifies is exactly the phantom row D-46 is about.
    */
-  const logBlocked = async (taskId: string, error: string, detail: string): Promise<void> => {
+  const logBlocked: LogBlocked = async (taskId, error, detail, extra = {}) => {
     if (!events) return;
     const { ctx, ...opt } = events;
-    await emitTaskBlocked(taskId, { error, severity: 'S2-major', detail }, ctx, opt);
+    await emitTaskBlockedWith(taskId, { error, severity: 'S2-major', detail }, ctx, opt, extra);
   };
 
   return withHeavyLock((lease) => stepUnderLock(task, opts, integrationBranch, logBlocked, lease), {
@@ -341,7 +385,7 @@ async function stepUnderLock(
   task: QueueTask,
   opts: StepOptions,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
   lease: HeavyLease,
 ): Promise<StepOutcome> {
   const events = opts.events;
@@ -362,11 +406,19 @@ async function stepUnderLock(
     return { outcome: 'integration-moved', taskId: task.taskId };
   };
 
-  const plan = planTestRun(task.worktreeDir, opts);
-  const testOutcome = runSuite(plan.cmd, task.worktreeDir, lease);
+  const tier = opts.checks?.preLanding === 'pre-merge-tier' ? opts.checks : undefined;
+  const plan = tier ? { cmd: opts.testCmd } : planTestRun(task.worktreeDir, opts);
+  const testOutcome: { passed: boolean; output: string; runId?: string } = tier
+    ? await runPreMergeTier(tier, task.worktreeDir, [task.taskId], 'step', opts, lease)
+    : runSuite(plan.cmd, task.worktreeDir, lease);
   if (!testOutcome.passed) {
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
-    await logBlocked(task.taskId, 'execution.test-failure', outputTail);
+    await logBlocked(
+      task.taskId,
+      'execution.test-failure',
+      outputTail,
+      blockedFields(opts, testOutcome.runId),
+    );
     return {
       outcome: 'tests-failed',
       taskId: task.taskId,
@@ -383,10 +435,19 @@ async function stepUnderLock(
   const now = runGit(opts.projectDir, ['rev-parse', '--verify', `${ref}^{commit}`]);
   if (now !== tested) return moved(now);
   const holder = worktreeHolding(opts.projectDir, integrationBranch);
+  let mergeSha: string;
   if (holder === null) {
-    if (!mergeWithoutWorktree(opts.projectDir, integrationBranch, task.branch, message, tested)) {
+    const landed = mergeWithoutWorktree(
+      opts.projectDir,
+      integrationBranch,
+      task.branch,
+      message,
+      tested,
+    );
+    if (landed === false) {
       return moved(runGit(opts.projectDir, ['rev-parse', '--verify', `${ref}^{commit}`]));
     }
+    mergeSha = landed;
   } else {
     // A merge into a worktree with edits in it either stops half-way or folds
     // someone's unfinished work into the merge's checkout; neither is ours.
@@ -412,11 +473,18 @@ async function stepUnderLock(
       stdio: 'pipe',
       env,
     });
+    mergeSha = runGit(holder, ['rev-parse', '--verify', 'HEAD^{commit}']);
   }
 
   if (events) {
     const { ctx, ...opt } = events;
-    await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir, integrationBranch));
+    await emitWaveMergedWith(
+      task.taskId,
+      ctx,
+      opt,
+      mergedFiles(opts.projectDir, integrationBranch),
+      { merge_sha: mergeSha, ...landingFields(opts, testOutcome.runId) },
+    );
   }
 
   return { outcome: 'merged', taskId: task.taskId, ...(plan.report ? { tests: plan.report } : {}) };
@@ -491,7 +559,7 @@ function mergeWithoutWorktree(
   source: string,
   message: string,
   base: string,
-): boolean {
+): string | false {
   const head = runGit(projectDir, ['rev-parse', '--verify', `${source}^{commit}`]);
   const commit = buildMergeCommit(projectDir, base, head, message);
   try {
@@ -499,7 +567,7 @@ function mergeWithoutWorktree(
   } catch (error) {
     return rethrowUnlessMoved(projectDir, branch, base, error);
   }
-  return true;
+  return commit;
 }
 
 /**
@@ -592,7 +660,7 @@ async function dirtyOutcomes(
   tasks: QueueTask[],
   landing: DirtyLanding,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
 ): Promise<StepOutcome[]> {
   const outcomes: StepOutcome[] = [];
   for (const task of tasks) {
@@ -633,7 +701,7 @@ async function attemptCandidate(
   readyTasks: QueueTask[],
   opts: StepOptions,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
   /**
    * Set by the caller when it already knows this exact set is guilty of a
    * red parent — the sibling half of a bisection whose other half landed
@@ -673,14 +741,26 @@ async function attemptCandidate(
 
   const worktreeDir = batchCandidateWorktreeDir(projectDir);
   runGit(projectDir, ['worktree', 'add', '--detach', worktreeDir, candidate]);
-  let testOutcome: { passed: boolean; output: string };
+  let testOutcome: { passed: boolean; output: string; runId?: string };
+  const label = `queue-batch-${(readyTasks[0] as QueueTask).taskId}`;
+  const tier = opts.checks?.preLanding === 'pre-merge-tier' ? opts.checks : undefined;
   try {
-    testOutcome = await runTestCmd(
-      opts.testCmd,
-      worktreeDir,
-      `queue-batch-${(readyTasks[0] as QueueTask).taskId}`,
-      opts,
-    );
+    // A tier run takes the lock once for the whole run, as `runTestCmd` does,
+    // and hands its lease to every heavy check so each re-enters it.
+    testOutcome = tier
+      ? await withHeavyLock(
+          (lease) =>
+            runPreMergeTier(
+              tier,
+              worktreeDir,
+              readyTasks.map((t) => t.taskId),
+              'batch',
+              opts,
+              lease,
+            ),
+          { ...opts.heavyLock, label, cwd: worktreeDir, env: process.env },
+        )
+      : await runTestCmd(opts.testCmd, worktreeDir, label, opts);
   } finally {
     // Always removed, including on error — this worktree exists only to run
     // one suite once and has no meaning once that suite has an answer.
@@ -725,7 +805,10 @@ async function attemptCandidate(
         const { ctx, ...opt } = opts.events;
         // This task's own merge commit against its own first parent — not
         // the integration tip, which by now carries every task in the batch.
-        await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(projectDir, commit));
+        await emitWaveMergedWith(task.taskId, ctx, opt, mergedFiles(projectDir, commit), {
+          merge_sha: commit,
+          ...landingFields(opts, testOutcome.runId),
+        });
       }
       outcomes.push({ outcome: 'merged', taskId: task.taskId });
     }
@@ -746,7 +829,12 @@ async function attemptCandidate(
   if (readyTasks.length === 1) {
     const task = readyTasks[0] as QueueTask;
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
-    await logBlocked(task.taskId, 'execution.test-failure', outputTail);
+    await logBlocked(
+      task.taskId,
+      'execution.test-failure',
+      outputTail,
+      blockedFields(opts, testOutcome.runId),
+    );
     return {
       outcomes: [{ outcome: 'tests-failed', taskId: task.taskId, outputTail }],
       suiteRuns: 1,
@@ -770,7 +858,7 @@ async function bisectGroup(
   readyTasks: QueueTask[],
   opts: StepOptions,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
 ): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
   const mid = Math.ceil(readyTasks.length / 2);
   const left = await runGroup(readyTasks.slice(0, mid), opts, integrationBranch, logBlocked);
@@ -819,7 +907,7 @@ async function runGroup(
   tasks: QueueTask[],
   opts: StepOptions,
   integrationBranch: string,
-  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  logBlocked: LogBlocked,
   knownRed = false,
 ): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
   if (tasks.length === 0) return { outcomes: [], suiteRuns: 0 };
@@ -876,10 +964,10 @@ export async function batchStep(tasks: QueueTask[], opts: StepOptions): Promise<
     );
   }
 
-  const logBlocked = async (taskId: string, error: string, detail: string): Promise<void> => {
+  const logBlocked: LogBlocked = async (taskId, error, detail, extra = {}) => {
     if (!events) return;
     const { ctx, ...opt } = events;
-    await emitTaskBlocked(taskId, { error, severity: 'S2-major', detail }, ctx, opt);
+    await emitTaskBlockedWith(taskId, { error, severity: 'S2-major', detail }, ctx, opt, extra);
   };
   return runGroup(tasks, opts, integrationBranch, logBlocked);
 }
@@ -1018,7 +1106,7 @@ export async function adopt(task: AdoptTask, opts: AdoptOptions): Promise<AdoptO
   const filesChanged = mergedFiles(projectDir, merge);
   if (opts.events) {
     const { ctx, ...opt } = opts.events;
-    await emitWaveMerged(task.taskId, ctx, opt, filesChanged);
+    await emitWaveMergedWith(task.taskId, ctx, opt, filesChanged, { merge_sha: merge });
   }
 
   return {
@@ -1135,4 +1223,79 @@ function runSuite(
     const output = `${e.stdout ?? ''}${e.stderr ?? ''}` || e.message;
     return { passed: false, output };
   }
+}
+
+/** The `--checks` record a red pre-landing test writes: which path ran, and for a tier, which run. */
+function blockedFields(opts: StepOptions, runId?: string): Record<string, unknown> {
+  if (opts.checks === undefined) return {};
+  return opts.checks.preLanding === 'test-cmd'
+    ? { pre_landing: 'test-cmd' }
+    : { pre_landing: 'pre-merge-tier', pre_landing_run_id: runId };
+}
+
+/** `blockedFields` plus, for a tier, the flags that were accepted and not run (spec D2). */
+function landingFields(opts: StepOptions, runId?: string): Record<string, unknown> {
+  if (opts.checks?.preLanding !== 'pre-merge-tier') return blockedFields(opts, runId);
+  return {
+    ...blockedFields(opts, runId),
+    test_cmd_not_run: true,
+    ...(opts.selectTestCmd === undefined ? {} : { select_test_cmd_not_run: true }),
+  };
+}
+
+/**
+ * Run the pre-merge tier through `testgate.run` (short-circuit) under a lease
+ * the caller already holds, and record it as one `queue-tier-run` before the
+ * landing or blocked event it leads to. `heavyLock` re-enters that lease:
+ * `heavyChildEnv`'s token is what lets each heavy check's own lock take the
+ * queue's at once instead of waiting on it until `heavy.wait-timeout`.
+ */
+async function runPreMergeTier(
+  tier: Extract<QueueChecks, { preLanding: 'pre-merge-tier' }>,
+  cwd: string,
+  taskIds: string[],
+  mode: 'step' | 'batch',
+  opts: StepOptions,
+  lease: HeavyLease,
+): Promise<{ passed: boolean; output: string; runId: string }> {
+  const result = await runChecks(tier.preMerge, {
+    cwd,
+    heavyLock: {
+      ...opts.heavyLock,
+      lockDir: lease.lockDir,
+      env: heavyChildEnv(process.env, lease),
+    },
+  });
+  const runId = randomUUID();
+  if (opts.events) {
+    const { ctx, ...opt } = opts.events;
+    await appendEvent(
+      {
+        session_id: ctx.sessionId,
+        actor: ctx.actor ?? 'system',
+        event_type: 'queue-tier-run',
+        task_id: `${opts.epic}/${RESERVED_TASK_ID}`,
+        plan_version: ctx.planVersion,
+        causal_parent: ctx.causalParent,
+        payload: {
+          epic_id: opts.epic,
+          task_ids: taskIds,
+          mode,
+          run_id: runId,
+          tree_sha: runGit(cwd, ['rev-parse', 'HEAD^{tree}']),
+          pass: result.pass,
+          results: result.results,
+          environment: result.environment,
+        },
+        ...(ctx.project ? { project: ctx.project } : {}),
+      },
+      opt,
+    );
+  }
+  const failed = result.results.find((r) => !r.pass);
+  return {
+    passed: result.pass,
+    output: failed === undefined ? '' : `Pre-merge check "${failed.name}" failed:\n${failed.tail}`,
+    runId,
+  };
 }

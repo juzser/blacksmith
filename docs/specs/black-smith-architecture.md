@@ -479,7 +479,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 13
+version: 14
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -549,6 +549,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   commit-check-result, deps-check-result,
                   judges-outstanding, grader-verdict, budget-check-result,
                   testgate-result, coverage-evidence, integration-check,
+                  queue-tier-run,
                   spec-review-recorded, goal-check-recorded, quorum-decision,
                   finding-raised, finding-reverified, finding-suppressed,
                   finding-transitioned, finding-reattributed,
@@ -613,6 +614,13 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       the only one about the assembled
                   #                       branch, and epic verdict holds
                   #                       without a current passing one (D-42)
+                  # queue-tier-run      — one pre-merge tier run by the merge queue
+                  #                       (`bs queue run --checks`): the task ids
+                  #                       it tested, the tree it ran on, each
+                  #                       check's result and the machine evidence
+                  #                       beside it. Written when the run
+                  #                       finishes, before the landing or blocked
+                  #                       event that names it by run id
                   # spec-review-recorded— a spec-reviewer dispatch finished,
                   #                       pinned to the head sha it read.
                   #                       Recorded even when it found nothing,

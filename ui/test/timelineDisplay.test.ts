@@ -1178,6 +1178,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'testgate-result': ['Test gate: no verdict recorded', 'Unit tests'],
       'coverage-evidence': ['Coverage evidence', ''],
       'integration-check': ['Integration check', ''],
+      'queue-tier-run': ['Queue tier run', ''],
       'spec-review-recorded': ['Spec review recorded', ''],
       'goal-check-recorded': ['Goal check recorded', ''],
       'quorum-decision': ['Quorum decision', ''],
