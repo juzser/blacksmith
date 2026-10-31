@@ -503,9 +503,11 @@ describe('queue --checks', () => {
   });
 
   describe('heavy re-entry', () => {
-    const heavyChecks = (): CheckCommand[] =>
+    // The heavy check fails unless its own lock ran in the queue's lock dir,
+    // so a tier run handed no heavyLock (the default machine dir) fails too.
+    const heavyChecks = (lockDir: string): CheckCommand[] =>
       tiered([
-        ['unit', undefined],
+        ['unit', undefined, `${logging('unit')} && test "$BS_HEAVY_LOCK_DIR" = "${lockDir}"`],
         ['test-e2e', 'post-merge'],
       ]);
 
@@ -528,7 +530,7 @@ describe('queue --checks', () => {
     it('lets a heavy check re-enter the lease step holds', async () => {
       const lockDir = path.join(root, 'locks');
       const task = makeTask('task-1', 'a.txt', 'a-1\n');
-      const checks = resolveQueueChecks(heavyChecks());
+      const checks = resolveQueueChecks(heavyChecks(lockDir));
       const outcome = await step(
         task,
         stepOpts({ checks, heavyLock: { lockDir, maxWaitMs: 2000 } }),
@@ -541,7 +543,7 @@ describe('queue --checks', () => {
     it('lets a heavy check re-enter the lease a --batch candidate takes', async () => {
       const lockDir = path.join(root, 'locks');
       const tasks = [makeTask('task-1', 'a.txt', 'a-1\n'), makeTask('task-2', 'b.txt', 'b-1\n')];
-      const checks = resolveQueueChecks(heavyChecks());
+      const checks = resolveQueueChecks(heavyChecks(lockDir));
       const result = await batchStep(
         tasks,
         stepOpts({ checks, heavyLock: { lockDir, maxWaitMs: 2000 } }),
