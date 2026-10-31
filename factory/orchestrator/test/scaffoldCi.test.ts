@@ -241,6 +241,7 @@ describe('the gate script run', () => {
     ['SIGINT', 130],
     ['SIGTERM', 143],
     ['SIGHUP', 129],
+    ['SIGQUIT', 131],
   ] as const)('forwards %s to a timed check instead of orphaning it', async (sig, code) => {
     const dir = fresh(false);
     writeChecks(dir, [

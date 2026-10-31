@@ -29,6 +29,7 @@
 // leading `--` is dropped before the arguments are read.
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { constants } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -133,7 +134,8 @@ function runCheck(entry) {
             }
           }, entry.timeoutMs);
     // The detached group no longer shares our terminal, so pass an interrupt on to it.
-    const CONVENTIONAL = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+    // Every signal a terminal or supervisor sends a foreground job; exit 128 + its number.
+    const FORWARDED = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'];
     let interrupted;
     const forward = (sig) => {
       interrupted = sig;
@@ -143,12 +145,12 @@ function runCheck(entry) {
         child.kill(sig);
       }
     };
-    const handlers = entry.timeoutMs === undefined ? [] : Object.keys(CONVENTIONAL);
+    const handlers = entry.timeoutMs === undefined ? [] : FORWARDED;
     for (const sig of handlers) process.on(sig, forward);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
       for (const sig of handlers) process.off(sig, forward);
-      if (interrupted) process.exit(CONVENTIONAL[interrupted]);
+      if (interrupted) process.exit(128 + constants.signals[interrupted]);
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       if (timedOut) resolve(`timed out after ${entry.timeoutMs} ms`);
       else if (code === 0) resolve(null);
