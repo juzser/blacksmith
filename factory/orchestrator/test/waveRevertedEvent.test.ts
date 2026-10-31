@@ -1,34 +1,20 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  appendEvent,
+  readEvents,
+  readLineageEvents,
+  type StoredEvent,
+  startSession,
+} from '../src/events.js';
 import {
   RECORD_ONLY_REASONS,
   recordWaveReverted,
   WAVE_REVERTED_EVENT,
   waveRevertBlocker,
 } from '../src/revert.js';
-
-// The projector never folds a task to `waived`, `failed` or `escalated` once a
-// `wave-merged` names it (`wave-merged` completes the row unconditionally and
-// a terminal row is never overwritten), so those two blockers cannot be
-// reached through a real log today. The fold is replaced for the tests that
-// pin the mapping from a folded status to its reason; every other test folds
-// the real log.
-const override = vi.hoisted(() => ({ status: null as string | null }));
-vi.mock('../src/db/projector.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/db/projector.js')>();
-  return {
-    ...actual,
-    foldTasks: (...args: Parameters<typeof actual.foldTasks>) => {
-      const rows = actual.foldTasks(...args);
-      return override.status === null
-        ? rows
-        : rows.map((r) => ({ ...r, taskStatus: override.status as string }));
-    },
-  };
-});
 
 const EPIC = 'epic-1';
 const TASK = 'epic-1/task-1';
@@ -69,10 +55,6 @@ const input = (events: StoredEvent[], liveTaskIds: string[] = live) =>
   waveRevertBlocker(events, TASK, EPIC, { revertSha: R, isAncestor, liveTaskIds });
 
 describe('waveRevertBlocker', () => {
-  beforeEach(() => {
-    override.status = null;
-  });
-
   it('returns null for a completed merged task in the live plan', () => {
     expect(input([added(), merged(M)])).toBeNull();
   });
@@ -83,16 +65,6 @@ describe('waveRevertBlocker', () => {
 
   it('returns superseded for a task a later task-superseded replaced', () => {
     expect(input([added(), merged(M), superseded()])).toBe('superseded');
-  });
-
-  it('returns waived for a task whose folded status is waived', () => {
-    override.status = 'waived';
-    expect(input([added(), merged(M)])).toBe('waived');
-  });
-
-  it.each(['failed', 'escalated'])('returns held-by-operator for a %s task', (status) => {
-    override.status = status;
-    expect(input([added(), merged(M)])).toBe('held-by-operator');
   });
 
   it('returns not-in-live-plan when an amendment dropped the finished task', () => {
@@ -202,7 +174,6 @@ describe('recordWaveReverted', () => {
   let ctx: { sessionId: string; planVersion: number; causalParent: string | null };
 
   beforeEach(async () => {
-    override.status = null;
     stateDir = await mkdtemp(path.join(tmpdir(), 'smith-wave-reverted-'));
     let parent: string | null = null;
     const append = async (
@@ -273,11 +244,9 @@ describe('recordWaveReverted', () => {
     expect(await count()).toBe(before);
   }
 
-  it('declares the eight record-only reasons', () => {
+  it('declares the six record-only reasons', () => {
     expect([...RECORD_ONLY_REASONS]).toEqual([
       'superseded',
-      'waived',
-      'held-by-operator',
       're-merged',
       'not-merged',
       'not-in-live-plan',
@@ -477,5 +446,108 @@ describe('recordWaveReverted', () => {
     it('is refused when the caller passes no isAncestor or liveTaskIds', async () => {
       await refused(() => recordWaveReverted(bounce(), ctx, opts()), 'revert.preflight-required');
     });
+  });
+});
+
+describe('recordWaveReverted across one session tree', () => {
+  let stateDir: string;
+  const opts = () => ({ stateDir });
+  const ROOT = 'sess-tree-root';
+  const W1 = 'sess-tree-w1';
+  const W2 = 'sess-tree-w2';
+  const ctxOf = (sessionId: string) => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+  });
+  const recordOnly = (over: Record<string, unknown> = {}) =>
+    ({
+      epic_id: EPIC,
+      integration_branch: 'bs/epic-1/integration',
+      revert_sha: R,
+      disposition: 'record-only',
+      reason: 'superseded',
+      task_ids: [TASK],
+      reverted_merge_sha: M,
+      failing_checks: [],
+      evidence_event_ids: [],
+      log_tail: '',
+      evidence: 'unreadable',
+      ...over,
+    }) as never;
+  const bounce = () =>
+    ({
+      epic_id: EPIC,
+      integration_branch: 'bs/epic-1/integration',
+      revert_sha: R,
+      disposition: 'bounce',
+      task_ids: [TASK],
+      reverted_merge_sha: M,
+      failing_checks: ['unit'],
+      red_record_event_id: 's#1',
+      evidence_event_ids: ['s#1'],
+      log_tail: 'boom',
+      evidence: 'record',
+      resumed: false,
+    }) as never;
+  const wavesRecorded = async () =>
+    (await readLineageEvents(ROOT, opts())).filter(
+      (e) => e.record.event_type === WAVE_REVERTED_EVENT,
+    );
+  const log = (sessionId: string, event_type: string, payload: Record<string, unknown>) =>
+    appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type,
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: `${sessionId}#0`,
+        payload,
+      },
+      opts(),
+    );
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-wave-reverted-tree-'));
+    const root = await startSession(ROOT, opts());
+    await startSession(W1, { ...opts(), continues: root.event_id });
+    await startSession(W2, { ...opts(), continues: root.event_id });
+  });
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('lets exactly one of two sibling sessions record one revert_sha at the same time', async () => {
+    const settled = await Promise.allSettled([
+      recordWaveReverted(recordOnly(), ctxOf(W1), opts()),
+      recordWaveReverted(recordOnly(), ctxOf(W2), opts()),
+    ]);
+    expect(settled.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const lost = settled.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(lost.reason).toMatchObject({ code: 'revert.already-recorded' });
+    expect(await wavesRecorded()).toHaveLength(1);
+  });
+
+  it('refuses a sibling session a revert_sha another session of the tree recorded', async () => {
+    await recordWaveReverted(recordOnly(), ctxOf(W2), opts());
+    const before = (await readEvents(W1, opts())).length;
+    await expect(recordWaveReverted(recordOnly(), ctxOf(W1), opts())).rejects.toMatchObject({
+      code: 'revert.already-recorded',
+    });
+    expect((await readEvents(W1, opts())).length).toBe(before);
+    expect(await wavesRecorded()).toHaveLength(1);
+  });
+
+  it("reads the blocker over the caller's lineage, not the root's tree", async () => {
+    await log(W1, 'wave-admitted', { epic_id: EPIC, task_ids: [TASK] });
+    await log(W1, 'wave-merged', { epic_id: EPIC, task_ids: [TASK], merge_sha: M });
+    await log(W2, 'wave-merged', { epic_id: EPIC, task_ids: [TASK], merge_sha: M2 });
+    const stored = await recordWaveReverted(bounce(), ctxOf(W1), {
+      ...opts(),
+      isAncestor,
+      liveTaskIds: live,
+    });
+    expect(stored.record.event_type).toBe(WAVE_REVERTED_EVENT);
   });
 });

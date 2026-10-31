@@ -243,7 +243,7 @@ function requireSessionIdShape(sessionId: string): void {
   );
 }
 
-function logPath(sessionId: string, opts: EventOpts): string {
+export function logPath(sessionId: string, opts: EventOpts): string {
   requireSessionIdShape(sessionId);
   const dir = opts.stateDir ?? STATE_EVENTS_DIR;
   return path.join(dir, `${sessionId}.jsonl`);
@@ -363,7 +363,7 @@ async function lockAgeMs(lockPath: string): Promise<number | undefined> {
   }
 }
 
-async function withLogLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+export async function withLogLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
   const lockPath = `${filePath}.lock`;
   await mkdir(path.dirname(lockPath), { recursive: true });
   const deadline = Date.now() + LOCK_TIMEOUT_MS;

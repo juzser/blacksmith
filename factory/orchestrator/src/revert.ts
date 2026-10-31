@@ -1,6 +1,15 @@
 import { foldTasks } from './db/projector.js';
 import { SmithError } from './errors.js';
-import { appendWithin, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
+import {
+  appendWithin,
+  type EventOpts,
+  logPath,
+  readLineageEvents,
+  requireSession,
+  type StoredEvent,
+  sessionTree,
+  withLogLock,
+} from './events.js';
 import type { EventContext } from './findings.js';
 import { epicOfTaskId, qualifyTaskId, taskIdsMatch } from './taskId.js';
 import { namesTask } from './taskLifecycle.js';
@@ -15,8 +24,6 @@ export const WAVE_REVERTED_EVENT = 'wave-reverted';
  */
 export const RECORD_ONLY_REASONS = [
   'superseded',
-  'waived',
-  'held-by-operator',
   're-merged',
   'not-merged',
   'not-in-live-plan',
@@ -67,12 +74,7 @@ function mergedUnderEpic(record: StoredEvent['record'], taskId: string, epicId: 
  * and one without a 40-hex `merge_sha` (written before the field existed, or
  * malformed) cannot.
  *
- * `waived` and `held-by-operator` follow the fold's status, and the fold
- * (db/projector.ts `foldTasks`) never moves a task off `completed` once a
- * `wave-merged` names it, so on a real log only `not-merged`, `superseded`,
- * `re-merged` and `not-in-live-plan` are reachable today. The two are kept
- * because the decision belongs to the fold; making them fire needs a
- * projector change, not a second status scan here.
+ * `superseded` is the only folded status the blocker reads.
  */
 export function waveRevertBlocker(
   events: readonly StoredEvent[],
@@ -92,8 +94,6 @@ export function waveRevertBlocker(
   if (merges.length === 0) return 'not-merged';
   const status = foldTasks(events).find((row) => taskIdsMatch(row.taskId, qualified))?.taskStatus;
   if (status === 'superseded') return 'superseded';
-  if (status === 'waived') return 'waived';
-  if (status === 'failed' || status === 'escalated') return 'held-by-operator';
   const reMerged = merges.some((e) => {
     const sha = (e.record.payload as { merge_sha?: unknown }).merge_sha;
     return typeof sha === 'string' && HEX40.test(sha) && input.isAncestor(input.revertSha, sha);
@@ -135,6 +135,16 @@ export interface RecordWaveRevertedOpts extends EventOpts {
   isAncestor?: WaveRevertBlockerInput['isAncestor'];
   /** Required for `bounce`: the live plan's non-superseded ids. */
   liveTaskIds?: readonly string[];
+}
+
+/** The first session of `sessionId`'s tree, or the session itself when it has no log yet. */
+async function treeRoot(sessionId: string, opts: EventOpts): Promise<string> {
+  try {
+    requireSession(sessionId, opts);
+  } catch {
+    return sessionId;
+  }
+  return (await sessionTree(sessionId, opts)).ancestry[0] ?? sessionId;
 }
 
 /**
@@ -185,7 +195,6 @@ export async function recordWaveReverted(
       );
     }
   };
-  refuseIfRecorded(events);
 
   let taskId: string | undefined;
   if (input.disposition === 'record-only') {
@@ -251,17 +260,15 @@ export async function recordWaveReverted(
       ? { reverted_merge_sha: input.reverted_merge_sha.toLowerCase() }
       : {}),
   };
-  // The check above spans the whole lineage and cannot be made atomic from
-  // here: the lock `appendWithin` takes is per session log, and there is no
-  // helper that holds every lineage session's lock at once. Repeating the
-  // check inside that lock closes the race between callers that write the
-  // same session's log (a resume and a bounce on one wave session); two
-  // callers on different lineage sessions can still both pass.
-  const [stored] = await appendWithin(
-    ctx.sessionId,
-    (own) => {
-      refuseIfRecorded(own);
-      return [
+  // The duplicate check reads the whole session tree from its root and the
+  // append happens under the same lock, so two sessions of one tree can never
+  // both record one `revert_sha`. Only this check reads the root's tree.
+  const root = await treeRoot(ctx.sessionId, eventOpts);
+  const [stored] = await withLogLock(`${logPath(root, eventOpts)}.wave-reverted`, async () => {
+    refuseIfRecorded(await readLineageEvents(root, eventOpts));
+    return appendWithin(
+      ctx.sessionId,
+      () => [
         {
           session_id: ctx.sessionId,
           actor: ctx.actor ?? 'system',
@@ -271,9 +278,9 @@ export async function recordWaveReverted(
           causal_parent: ctx.causalParent,
           payload,
         },
-      ];
-    },
-    eventOpts,
-  );
+      ],
+      eventOpts,
+    );
+  });
   return stored as StoredEvent;
 }
