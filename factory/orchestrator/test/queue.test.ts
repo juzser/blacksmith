@@ -548,7 +548,11 @@ describe('step', () => {
         {
           type: 'wave-merged',
           taskId: 'epic-1/task-1',
-          payload: { task_ids: ['epic-1/task-1'], files_changed: ['a.txt'] },
+          payload: {
+            task_ids: ['epic-1/task-1'],
+            files_changed: ['a.txt'],
+            merge_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+          },
         },
       ]);
     });
@@ -802,12 +806,20 @@ describe('batchStep', () => {
       {
         type: 'wave-merged',
         taskId: 'epic-1/task-a',
-        payload: { task_ids: ['epic-1/task-a'], files_changed: ['a.txt'] },
+        payload: {
+          task_ids: ['epic-1/task-a'],
+          files_changed: ['a.txt'],
+          merge_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+        },
       },
       {
         type: 'wave-merged',
         taskId: 'epic-1/task-b',
-        payload: { task_ids: ['epic-1/task-b'], files_changed: ['b.txt'] },
+        payload: {
+          task_ids: ['epic-1/task-b'],
+          files_changed: ['b.txt'],
+          merge_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+        },
       },
     ]);
   });
@@ -1249,7 +1261,11 @@ describe('adopt', () => {
       {
         type: 'wave-merged',
         taskId: 'epic-1/task-1',
-        payload: { task_ids: ['epic-1/task-1'], files_changed: ['a.txt'] },
+        payload: {
+          task_ids: ['epic-1/task-1'],
+          files_changed: ['a.txt'],
+          merge_sha: sha,
+        },
       },
     ]);
   });

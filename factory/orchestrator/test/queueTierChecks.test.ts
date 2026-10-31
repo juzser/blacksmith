@@ -460,6 +460,23 @@ describe('queue --checks', () => {
         expect(secondParent(sha as string)).toBe(git(projectDir, ['rev-parse', task.branch]));
       });
 
+      it(`is the merge commit made in the worktree holding the branch (${label})`, async () => {
+        const task = makeTask('task-1', 'a.txt', 'a-1\n');
+        const holder = path.join(root, 'holder');
+        git(projectDir, ['worktree', 'add', '-q', holder, INTEGRATION]);
+        const checks = resolveQueueChecks(
+          tiered([
+            ['A', undefined],
+            ['B', 'post-merge'],
+          ]),
+        );
+        await step(task, stepOpts(withChecks ? { checks } : {}));
+        const sha = (ofType(await logged(), 'wave-merged')[0] as Logged).payload.merge_sha;
+        expect(sha).toMatch(SHA40);
+        expect(sha).toBe(git(holder, ['rev-parse', 'HEAD']));
+        expect(secondParent(sha as string)).toBe(git(projectDir, ['rev-parse', task.branch]));
+      });
+
       it(`is each task's own fold commit in attemptCandidate (${label})`, async () => {
         const tasks = [makeTask('task-1', 'a.txt', 'a-1\n'), makeTask('task-2', 'b.txt', 'b-1\n')];
         const checks = resolveQueueChecks(
@@ -516,8 +533,8 @@ describe('queue --checks', () => {
         task,
         stepOpts({ checks, heavyLock: { lockDir, maxWaitMs: 2000 } }),
       );
-      expect(outcome.outcome).toBe('merged');
       await expectReentered();
+      expect(outcome.outcome).toBe('merged');
       expect(existsSync(path.join(lockDir, 'heavy.lock'))).toBe(false);
     });
 
@@ -529,8 +546,8 @@ describe('queue --checks', () => {
         tasks,
         stepOpts({ checks, heavyLock: { lockDir, maxWaitMs: 2000 } }),
       );
-      expect(result.outcomes.every((o) => o.outcome === 'merged')).toBe(true);
       await expectReentered();
+      expect(result.outcomes.every((o) => o.outcome === 'merged')).toBe(true);
       expect(
         existsSync(lockDir) ? readdirSync(lockDir).filter((f) => f === 'heavy.lock') : [],
       ).toEqual([]);
