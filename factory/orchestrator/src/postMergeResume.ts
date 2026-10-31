@@ -8,6 +8,7 @@ import {
   type RecordOnlyReason,
   recordWaveReverted,
   WAVE_REVERTED_EVENT,
+  WaveRevertedError,
   type WaveRevertedInput,
   waveRevertBlocker,
 } from './revert.js';
@@ -326,6 +327,8 @@ export async function resumeLandedReverts(
     try {
       await recordWaveReverted(event, ctx, { ...opts, isAncestor, liveTaskIds });
     } catch (err) {
+      // Another session of the tree recorded this revert first: it is recorded.
+      if (err instanceof WaveRevertedError && err.code === 'revert.already-recorded') continue;
       if (err instanceof Error) Object.assign(err, { wrote });
       throw err;
     }

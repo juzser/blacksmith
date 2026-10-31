@@ -257,7 +257,7 @@ describe('integration tiers', () => {
     };
 
     it('removes a registered scratch worktree of a dead pid before the next run', async () => {
-      const stale = path.join(scratchRoot(), `scratch-${deadPid()}-old`);
+      const stale = path.join(scratchRoot(), `scratch-${deadPid()}-${randomUUID()}`);
       git(projectDir, ['worktree', 'add', '--detach', stale, 'HEAD']);
       const result = await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
       expect(result.pass).toBe(true);
@@ -265,8 +265,30 @@ describe('integration tiers', () => {
       expect(worktrees()).toHaveLength(1);
     });
 
+    it('leaves a worktree on a branch alone though its name has the scratch shape', async () => {
+      const task = path.join(scratchRoot(), `scratch-${deadPid()}-${randomUUID()}`);
+      git(projectDir, ['worktree', 'add', '-b', 'scratch-task-branch', task, 'HEAD']);
+      await writeFile(path.join(task, 'work.txt'), 'uncommitted\n');
+      await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
+      expect(await readFile(path.join(task, 'work.txt'), 'utf8')).toBe('uncommitted\n');
+    });
+
+    it('leaves a detached worktree alone when its name does not end in a uuid', async () => {
+      const other = path.join(scratchRoot(), `scratch-${deadPid()}-notauuid`);
+      git(projectDir, ['worktree', 'add', '--detach', other, 'HEAD']);
+      await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
+      expect(existsSync(other)).toBe(true);
+    });
+
+    it('removes a detached dead-pid worktree named scratch-<pid>-<uuid>', async () => {
+      const own = path.join(scratchRoot(), `scratch-${deadPid()}-${randomUUID()}`);
+      git(projectDir, ['worktree', 'add', '--detach', own, 'HEAD']);
+      await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
+      expect(existsSync(own)).toBe(false);
+    });
+
     it('carries on when removing a dead pid scratch worktree fails', async () => {
-      const stuck = path.join(scratchRoot(), `scratch-${deadPid()}-stuck`);
+      const stuck = path.join(scratchRoot(), `scratch-${deadPid()}-${randomUUID()}`);
       git(projectDir, ['worktree', 'add', '--detach', stuck, 'HEAD']);
       git(projectDir, ['worktree', 'lock', stuck]);
       const result = await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
@@ -277,7 +299,7 @@ describe('integration tiers', () => {
     it('leaves a scratch worktree of a live pid alone', async () => {
       const child = spawn('sleep', ['30']);
       children.push(child);
-      const live = path.join(scratchRoot(), `scratch-${child.pid}-mine`);
+      const live = path.join(scratchRoot(), `scratch-${child.pid}-${randomUUID()}`);
       git(projectDir, ['worktree', 'add', '--detach', live, 'HEAD']);
       await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
       expect(existsSync(live)).toBe(true);

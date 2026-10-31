@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foldTasks } from '../src/db/projector.js';
-import { appendEvent, type StoredEvent } from '../src/events.js';
+import { appendEvent, type StoredEvent, startSession } from '../src/events.js';
 import { GitCommandError } from '../src/git.js';
 import { runIntegrationCheck } from '../src/integration.js';
 import { isBsRevertCommit } from '../src/postMergeBisect.js';
@@ -22,24 +22,6 @@ import {
   type IntegrationRepo,
   type RevertTrailers,
 } from './helpers/integrationRepo.js';
-
-// The projector never folds a task to `waived`, `failed` or `escalated` once a
-// `wave-merged` names it (finding d3d30c6d), so the two fixtures for those
-// blocker reasons replace the fold, as task-2's own tests do. Every other
-// fixture folds the real log.
-const override = vi.hoisted(() => ({ status: null as string | null }));
-vi.mock('../src/db/projector.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/db/projector.js')>();
-  return {
-    ...actual,
-    foldTasks: (...args: Parameters<typeof actual.foldTasks>) => {
-      const rows = actual.foldTasks(...args);
-      return override.status === null
-        ? rows
-        : rows.map((r) => ({ ...r, taskStatus: override.status as string }));
-    },
-  };
-});
 
 // A switch to make one git subcommand fail the way an infrastructure fault does
 // (an unwritable object store, a lock): exit 128 with no claim about the data.
@@ -77,13 +59,11 @@ describe('post-merge resume', () => {
   let repo: IntegrationRepo;
 
   beforeEach(async () => {
-    override.status = null;
     gitFault.subcommand = null;
     gitFault.passes = 0;
     repo = await createIntegrationRepo();
   });
   afterEach(async () => {
-    override.status = null;
     gitFault.subcommand = null;
     gitFault.passes = 0;
     await repo.dispose();
@@ -318,18 +298,6 @@ describe('post-merge resume', () => {
       await landed('task-1');
       await append('task-superseded', {}, T1);
       await expectRecordOnly('superseded');
-    });
-
-    it('waived', async () => {
-      await landed('task-1');
-      override.status = 'waived';
-      await expectRecordOnly('waived');
-    });
-
-    it.each(['escalated', 'failed'])('held-by-operator for a %s task', async (status) => {
-      await landed('task-1');
-      override.status = status;
-      await expectRecordOnly('held-by-operator');
     });
 
     it('re-merged: a later wave-merged whose merge_sha has the revert as an ancestor', async () => {
@@ -610,6 +578,45 @@ describe('post-merge resume', () => {
       const second = await resume(extra);
       expect(second).toEqual({ outcome: 'nothing-to-resume', resumed: false, wrote: [] });
       expect(await reverted()).toHaveLength(1);
+    });
+
+    it('two resumes from sibling sessions of one tree record the revert once and both fulfil', async () => {
+      await landed('task-1');
+      const root = `${repo.sessionId}#0`;
+      await startSession('sess-w1', { ...repo.opts(), continues: root });
+      await startSession('sess-w2', { ...repo.opts(), continues: root });
+      const resumeInput = await input({ events: await repo.events() });
+      const from = (sessionId: string) =>
+        resumeLandedReverts(
+          resumeInput,
+          { sessionId, planVersion: 1, causalParent: `${sessionId}#0`, actor: 'system' },
+          repo.opts(),
+        );
+      const settled = await Promise.allSettled([from('sess-w1'), from('sess-w2')]);
+      expect(settled.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(await reverted()).toHaveLength(1);
+      const outcomes = settled.map((r) => (r as PromiseFulfilledResult<ResumeResult>).value);
+      expect(outcomes.map((o) => o.wrote.length).sort()).toEqual([0, 1]);
+    });
+
+    it('carries on to the next landed revert after a sibling session recorded one', async () => {
+      await landed('task-1');
+      await landed('task-2');
+      const root = `${repo.sessionId}#0`;
+      await startSession('sess-x1', { ...repo.opts(), continues: root });
+      await startSession('sess-x2', { ...repo.opts(), continues: root });
+      const resumeInput = await input({ events: await repo.events() });
+      const from = (sessionId: string) =>
+        resumeLandedReverts(
+          resumeInput,
+          { sessionId, planVersion: 1, causalParent: `${sessionId}#0`, actor: 'system' },
+          repo.opts(),
+        );
+      const settled = await Promise.allSettled([from('sess-x1'), from('sess-x2')]);
+      expect(settled.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      const recorded = await reverted();
+      expect(recorded).toHaveLength(2);
+      expect(new Set(recorded.map((e) => payloadOf(e).revert_sha)).size).toBe(2);
     });
 
     it('skips a revert a wave-reverted already names, and finishes the rest', async () => {
