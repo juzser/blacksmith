@@ -2,14 +2,11 @@ import { execFileSync } from 'node:child_process';
 import {
   closeSync,
   existsSync,
-  linkSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -39,18 +36,10 @@ const OVERLAY_FILE = 'check-tiers.json';
 const LOCK_FILE = 'check-tiers.lock';
 const TEMP_FILE = 'check-tiers.json.tmp';
 // One pattern for everything bs keeps in .blacksmith/: the overlay, its temp, the
-// lock, the breaker gate and their temp and tomb files, so a crash leaves none
-// of them visible to git.
+// lock and its reclaim mutex, so a crash leaves none of them visible to git.
 const EXCLUDE_PATTERN = 'check-tiers.*';
 const PROMOTED_EVENT = 'check-tier-promoted';
 const DECIDED_EVENT = 'check-tier-decided';
-
-/**
- * A breaker holds its gate for a few file operations. A gate older than this
- * is leaked (a live evictor that mistook it for a dead one can put it back after
- * its owner released it), so it is evicted whatever its pid says.
- */
-const BREAKER_STALE_MS = 5000;
 
 /** How often a waiting writer looks at the lock again. */
 export const OVERLAY_LOCK_POLL_MS = 100;
@@ -124,14 +113,7 @@ export interface ReconcileOpts extends WriteOverlayOpts {
 }
 
 /** The variables that make git look at a repository other than the one `cwd` is in. */
-const GIT_LOCATING_VARS = [
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_COMMON_DIR',
-  'GIT_INDEX_FILE',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_NAMESPACE',
-] as const;
+const GIT_LOCATING_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE'] as const;
 
 function gitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -149,43 +131,36 @@ function git(cwd: string, args: readonly string[]): string {
 }
 
 /**
- * The main worktree of a repository whose common dir is `common`, seen from a
- * linked worktree: the `core.worktree` its config records (a `--separate-git-dir`
- * copy or a submodule; relative to the common dir), else the directory above a
- * common dir named `.git` (an ordinary clone). Null for a bare repository and
- * wherever neither names it.
- */
-function mainWorktree(common: string): string | null {
-  const config = (key: string): string | null => {
-    try {
-      return git(common, ['config', '--file', path.join(common, 'config'), '--get', key]).trim();
-    } catch {
-      return null;
-    }
-  };
-  if (config('core.bare') === 'true') return null;
-  const wt = config('core.worktree');
-  if (wt !== null && wt !== '') return path.resolve(common, wt);
-  return path.basename(common) === '.git' ? path.dirname(common) : null;
-}
-
-/**
  * The overlay file of the repository holding `dir`: always under the main
- * worktree, so a task worktree, the epic worktree and the clone share one.
- * Null outside a git repository, for a bare one, and wherever the main worktree
- * cannot be determined.
+ * worktree, which is git's own answer: the first entry of `git worktree list`.
+ * Null outside a git repository and when that entry is not a work tree (a bare
+ * repository's entry is not one). A layout whose git dir records its work tree
+ * elsewhere (a `--separate-git-dir` copy, a submodule) makes git list the git
+ * dir or its parent first: git must call the entry a work tree, and from the main worktree
+ * itself the entry must be the top level git reports. One layout stays
+ * ambiguous for git too: seen from a linked worktree, a `--separate-git-dir`
+ * named `.git` looks like an ordinary clone's directory.
  */
 export function overlayPath(dir: string): string | null {
   try {
-    const common = git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim();
-    const own = git(dir, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']).trim();
-    // In the main worktree git names its top level in every layout; from a linked
-    // one it records only the common dir.
-    const root =
-      own === common
-        ? git(dir, ['rev-parse', '--path-format=absolute', '--show-toplevel']).trim()
-        : mainWorktree(common);
-    return root === null ? null : path.join(realpathSync(root), OVERLAY_DIR, OVERLAY_FILE);
+    const [first = ''] = git(dir, ['worktree', 'list', '--porcelain']).split('\n\n');
+    const root = realpathSync((first.split('\n')[0] ?? '').slice('worktree '.length));
+    if (git(root, ['rev-parse', '--is-inside-work-tree']).trim() !== 'true') return null;
+    const [own = '', common = ''] = git(dir, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--absolute-git-dir',
+      '--git-common-dir',
+    ])
+      .trim()
+      .split('\n');
+    if (
+      own === common &&
+      realpathSync(git(dir, ['rev-parse', '--show-toplevel']).trim()) !== root
+    ) {
+      return null;
+    }
+    return path.join(root, OVERLAY_DIR, OVERLAY_FILE);
   } catch {
     return null;
   }
@@ -390,116 +365,39 @@ export function writeOverlay(
   return state;
 }
 
-// Invariants of the lock section (a file here is the lock or the breaker gate):
-//  1. A file is removed only by the release of the process that published it, or
-//     by a breaker that read it EXISTING with a dead pid (or content that is not
-//     a pid) while holding the gate. Absent is never stale: it means publish again.
-//  2. A release removes only the file it published, told by inode against the
-//     temp link it keeps until release (a held link's inode cannot be reused).
-//  3. A live pid's lock is never broken, so under the gate an existing dead lock
-//     cannot change between the re-read and the unlink: its owner is dead and
-//     every other remover is held out by the gate. The one exception is a gate
-//     evicted for age while its live owner stalls; the owner then releases
-//     nothing of a newer gate (2), and the re-read still guards the lock.
+// The lock: `check-tiers.lock` created with `wx`, whose whole content is the
+// holder's pid. A lock whose pid is dead is removed under a short `wx` mutex and
+// only while it still holds that same pid (the rule heavyLock.ts uses); a live
+// pid's lock, this process's included, is never broken. A lock whose content is
+// not a pid, or that cannot be read, is refused and never broken.
 
-/** A failure to look at a lock file other than its absence: never read as "stale". */
-function lockFailure(file: string, err: unknown): OverlayError {
-  const code = (err as NodeJS.ErrnoException).code;
+/** The largest pid a platform hands out (a 32-bit signed integer). */
+const MAX_PID = 2147483647;
+
+function lockRefused(file: string, why: string): OverlayError {
   return new OverlayError(
-    'checks.overlay-lock-failed',
-    `Could not inspect or take ${file} (${code ?? (err as Error).message}); nothing was written.`,
-    { file, errno: code },
+    'checks.overlay-lock-unusable',
+    `${file} ${why}; nothing was written. Check no bs process is using it, then remove it.`,
+    { file },
   );
 }
 
-/**
- * The pid a file holds: NaN when it was read and its content is not `<pid>\n`,
- * null when absent. Any other read error throws: a file that could not be read
- * is not known to be stale.
- */
+/** The pid a lock file holds, or null when it is absent. Anything unreadable is refused. */
 function readHolder(file: string): number | null {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw lockFailure(file, err);
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    throw lockRefused(file, `could not be read (${code ?? (err as Error).message})`);
   }
   const m = /^(\d+)\n$/.exec(text);
-  // A pid is a positive integer inside the platform's range; `kill` on anything
-  // else fails with an error that would read as "alive" and the lock never break.
   const pid = m === null ? Number.NaN : Number(m[1]);
-  return Number.isSafeInteger(pid) && pid >= 1 && pid <= MAX_PID ? pid : Number.NaN;
-}
-
-/** The largest pid a platform hands out (a 32-bit signed integer). */
-const MAX_PID = 2147483647;
-
-/** Errnos of a filesystem that cannot hard-link: the lock is then taken with O_EXCL. */
-const NO_HARD_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS']);
-
-let tempSeq = 0;
-
-interface Held {
-  /** Remove the published file if it is still ours, and the temp link. */
-  release(): void;
-}
-
-/**
- * Create `file` holding `<pid>\n`, or return null when it exists. The content
- * is written to a private temp file and linked into place, so `file` appears
- * whole or not at all: a crash between create and write cannot leave it empty.
- * The temp link stays until `release`, which is how the file is known as ours.
- */
-function publish(file: string): Held | null {
-  const temp = `${file}.${process.pid}-${tempSeq++}.tmp`;
-  writeFileSync(temp, `${process.pid}\n`);
-  try {
-    linkSync(temp, file);
-  } catch (err) {
-    unlinkSync(temp);
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'EEXIST') return null;
-    if (code === undefined || !NO_HARD_LINKS.has(code)) throw lockFailure(file, err);
-    return publishExclusive(file);
+  if (!Number.isSafeInteger(pid) || pid < 1 || pid > MAX_PID) {
+    throw lockRefused(file, 'does not hold a pid');
   }
-  return {
-    release() {
-      try {
-        if (statSync(file).ino === statSync(temp).ino) unlinkSync(file);
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      }
-      unlinkIfPresent(temp);
-    },
-  };
-}
-
-/**
- * The fallback for a volume without hard links: create `file` with O_EXCL and
- * write the pid. A crash between create and write leaves an empty file, which is
- * non-pid content and is broken. With no temp link to tell the file by, release
- * removes it only while it still holds this process's pid, which no other live
- * process can hold.
- */
-function publishExclusive(file: string): Held | null {
-  let fd: number;
-  try {
-    fd = openSync(file, 'wx');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
-    throw lockFailure(file, err);
-  }
-  try {
-    writeSync(fd, `${process.pid}\n`);
-  } finally {
-    closeSync(fd);
-  }
-  return {
-    release() {
-      if (readHolder(file) === process.pid) unlinkIfPresent(file);
-    },
-  };
+  return pid;
 }
 
 /** Remove `file`, which may already be gone. */
@@ -511,103 +409,62 @@ function unlinkIfPresent(file: string): void {
   }
 }
 
-function gateIsFresh(gate: string): boolean {
+/** Create the lock holding this pid; false when it exists. */
+function createLock(lock: string): boolean {
+  let fd: number;
   try {
-    return Date.now() - statSync(gate).mtimeMs < BREAKER_STALE_MS;
+    fd = openSync(lock, 'wx');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw lockFailure(gate, err);
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return false;
+    throw lockRefused(lock, `could not be created (${code ?? (err as Error).message})`);
   }
-}
-
-/**
- * Remove the temp links a dead holder or breaker left (`<lock>[.breaker].<pid>-<n>.tmp`).
- * Called under the gate; a live pid's temp, this process's included, stays.
- */
-function sweepDeadTemps(lock: string): void {
-  const base = path.basename(lock);
-  const mine = new RegExp(`^${base.replace(/\./g, '\\.')}(\\.breaker)?\\.(\\d+)-\\d+\\.tmp$`);
-  for (const name of readdirSync(path.dirname(lock))) {
-    const m = mine.exec(name);
-    const pid = m === null ? 0 : Number(m[2]);
-    if (m !== null && pid !== process.pid && !pidIsAlive(pid)) {
-      unlinkIfPresent(path.join(path.dirname(lock), name));
-    }
-  }
-}
-
-/**
- * Move a stale breaker gate aside, checking it is still the one judged stale
- * (holding `pid`); if another evictor and a new breaker replaced it meanwhile,
- * link it back (never over a newer gate) so a live gate is only ever held aside
- * for an instant.
- */
-function evictStaleBreaker(gate: string, pid: number): void {
-  const tomb = `${gate}.stale-${process.pid}-${tempSeq++}`;
   try {
-    renameSync(gate, tomb);
+    writeSync(fd, `${process.pid}\n`);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    unlinkIfPresent(lock);
     throw err;
+  } finally {
+    closeSync(fd);
   }
-  let same = false;
-  let failure: unknown;
-  try {
-    same = Object.is(readHolder(tomb), pid);
-  } catch (err) {
-    failure = err;
-  }
-  if (!same) {
-    try {
-      linkSync(tomb, gate);
-    } catch {
-      // Another breaker already holds the gate again; nothing to restore.
-    }
-  }
-  unlinkSync(tomb);
-  if (failure !== undefined) throw failure;
+  return true;
 }
 
 /**
- * Remove the lock of a dead (or unreadable) holder `pid`, alone: breakers take
- * a second lock, and under it the lock is removed only if it still EXISTS and
- * holds that same dead holder, so an absent lock, or one another writer took
- * meanwhile, is never touched. Returns the pid of a live breaker to wait for,
- * or null when the caller may look at the lock again.
+ * Remove the lock of dead holder `pid`, only while it still holds `pid`, under a
+ * short mutex so two breakers cannot both win. False when the mutex is taken.
  */
-function breakStale(lock: string, pid: number): number | null {
-  const gate = `${lock}.breaker`;
-  const held = publish(gate);
-  if (held === null) {
-    const other = readHolder(gate);
-    if (other === null) return null;
-    if (!Number.isNaN(other) && pidIsAlive(other) && gateIsFresh(gate)) return other;
-    evictStaleBreaker(gate, other);
-    return null;
+function reclaim(lock: string, pid: number): boolean {
+  const mutex = `${lock}.reclaim`;
+  let fd: number;
+  try {
+    fd = openSync(mutex, 'wx');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw lockRefused(mutex, `could not be created (${(err as NodeJS.ErrnoException).code})`);
   }
   try {
-    const now = readHolder(lock);
-    if (Object.is(now, pid) && (Number.isNaN(pid) || !pidIsAlive(pid))) {
-      unlinkIfPresent(lock);
-    }
-    sweepDeadTemps(lock);
+    if (readHolder(lock) === pid) unlinkIfPresent(lock);
   } finally {
-    held.release();
+    closeSync(fd);
+    unlinkIfPresent(mutex);
   }
-  return null;
+  return true;
 }
 
-/** Take the lock now, or return the pid to wait for (a live holder or breaker). */
-function tryAcquire(lock: string): Held | number {
+/** Take the lock now (null), or return the pid to wait for. */
+function tryAcquire(lock: string): number | null {
   for (;;) {
-    const held = publish(lock);
-    if (held !== null) return held;
+    if (createLock(lock)) return null;
     const holder = readHolder(lock);
     if (holder === null) continue;
-    if (!Number.isNaN(holder) && pidIsAlive(holder)) return holder;
-    const breaker = breakStale(lock, holder);
-    if (breaker !== null) return breaker;
+    if (pidIsAlive(holder) || !reclaim(lock, holder)) return holder;
   }
+}
+
+/** Remove the lock only while it still holds this process's pid. */
+function release(lock: string): void {
+  if (readHolder(lock) === process.pid) unlinkIfPresent(lock);
 }
 
 /**
@@ -627,18 +484,14 @@ export async function withOverlayLock<T>(
   const lock = path.join(path.dirname(file), LOCK_FILE);
   mkdirSync(path.dirname(file), { recursive: true });
   const deadline = Date.now() + waitMs;
-  let held: Held;
   for (;;) {
-    const got = tryAcquire(lock);
-    if (typeof got !== 'number') {
-      held = got;
-      break;
-    }
+    const holder = tryAcquire(lock);
+    if (holder === null) break;
     if (Date.now() >= deadline) {
       throw new OverlayError(
         'checks.overlay-busy',
-        `${lock} is held by pid ${got}; gave up after ${waitMs} ms. Nothing was written.`,
-        { lock, holder: got, wait_ms: waitMs },
+        `${lock} is held by pid ${holder}; gave up after ${waitMs} ms. Nothing was written.`,
+        { lock, holder, wait_ms: waitMs },
       );
     }
     await new Promise<void>((resolve) => setTimeout(resolve, OVERLAY_LOCK_POLL_MS));
@@ -646,7 +499,7 @@ export async function withOverlayLock<T>(
   try {
     return await fn();
   } finally {
-    held.release();
+    release(lock);
   }
 }
 

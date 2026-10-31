@@ -2,16 +2,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
-  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,14 +32,10 @@ import {
 } from '../src/tierOverlay.js';
 
 // Seams for the lock-breaking interleavings: a hook that runs inside the module's
-// liveness probe, and one that runs right after one of its renames.
+// liveness probe, and one that runs before it reads a file.
 const seams = vi.hoisted(() => ({
   afterProbe: null as null | ((pid: number) => void),
-  afterRename: null as null | (() => void),
-  beforeLink: null as null | ((from: string, to: string) => void),
   beforeRead: null as null | ((file: string) => void),
-  beforeStat: null as null | ((file: string) => void),
-  afterRead: null as null | ((file: string) => void),
 }));
 vi.mock('../src/heavyLock.js', async (orig) => {
   const real = await orig<typeof import('../src/heavyLock.js')>();
@@ -61,23 +54,7 @@ vi.mock('node:fs', async (orig) => {
     ...real,
     readFileSync: (...args: Parameters<typeof real.readFileSync>) => {
       seams.beforeRead?.(String(args[0]));
-      try {
-        return real.readFileSync(...args);
-      } finally {
-        seams.afterRead?.(String(args[0]));
-      }
-    },
-    statSync: (...args: Parameters<typeof real.statSync>) => {
-      seams.beforeStat?.(String(args[0]));
-      return real.statSync(...args);
-    },
-    linkSync: (from: string, to: string): void => {
-      seams.beforeLink?.(from, to);
-      real.linkSync(from, to);
-    },
-    renameSync: (from: string, to: string): void => {
-      real.renameSync(from, to);
-      seams.afterRename?.();
+      return real.readFileSync(...args);
     },
   };
 });
@@ -105,7 +82,6 @@ function makeRepo(): string {
 
 const overlayFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.json');
 const lockFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.lock');
-const gateFile = (main: string): string => `${lockFile(main)}.breaker`;
 const CMD = 'pnpm run e2e';
 const entry = (
   check: string,
@@ -206,56 +182,37 @@ describe('location in a bare or separate-git-dir repository', () => {
     expect(readdirSync(parent)).toEqual(before);
   });
 
-  it('puts the overlay in the working copy of a separate-git-dir repository', () => {
-    const root = tmp();
-    const wc = path.join(root, 'wc');
-    const gitdir = path.join(root, 'gitdir');
-    git(root, 'init', '-q', '-b', 'main', '--separate-git-dir', gitdir, wc);
-    git(wc, 'config', 'user.email', 't@example.com');
-    git(wc, 'config', 'user.name', 't');
-    writeFileSync(path.join(wc, 'README.md'), 'x\n');
-    git(wc, 'add', '.');
-    git(wc, 'commit', '-q', '-m', 'init');
-    const linked = path.join(root, 'linked');
-    git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
-    expect(overlayPath(wc)).toBe(overlayFile(wc));
-    // git records no work tree for this layout and the git dir is not named .git,
-    // so no main worktree is determinable from a linked one.
-    expect(overlayPath(linked)).toBeNull();
-  });
-});
-
-describe('location in a repository whose git dir is itself named .git', () => {
-  it('finds the work tree of the main worktree, never the directory holding the git dir', () => {
+  const separate = (gitdir: (root: string) => string): { root: string; wc: string } => {
     const root = tmp();
     const wc = path.join(root, 'sg');
-    mkdirSync(path.join(root, 'sgdir'));
-    git(
-      root,
-      'init',
-      '-q',
-      '-b',
-      'main',
-      '--separate-git-dir',
-      path.join(root, 'sgdir', '.git'),
-      wc,
-    );
+    mkdirSync(path.dirname(gitdir(root)), { recursive: true });
+    git(root, 'init', '-q', '-b', 'main', '--separate-git-dir', gitdir(root), wc);
     git(wc, 'config', 'user.email', 't@example.com');
     git(wc, 'config', 'user.name', 't');
     writeFileSync(path.join(wc, 'README.md'), 'x\n');
     git(wc, 'add', '.');
     git(wc, 'commit', '-q', '-m', 'init');
-    const linked = path.join(root, 'lk');
-    git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
-    expect(overlayPath(wc)).toBe(overlayFile(wc));
-    // Nothing in git records this work tree either (no core.worktree), so a linked
-    // worktree here is read as an ordinary clone's: a known limit of the layout,
-    // and not asserted.
-    expect(overlayPath(linked)).not.toBeNull();
-  });
+    return { root, wc };
+  };
+
+  it.each([
+    ['sgdir/.git', (r: string) => path.join(r, 'sgdir', '.git')],
+    ['gitdir', (r: string) => path.join(r, 'gitdir')],
+  ])(
+    'fails closed for a --separate-git-dir layout (%s): null, never a wrong path',
+    (name, gitdir) => {
+      const { root, wc } = separate(gitdir);
+      const linked = path.join(root, 'linked');
+      git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
+      expect(overlayPath(wc)).toBeNull();
+      expect(overlayWritable(wc)).toBe('not-a-repo');
+      // From a linked worktree git itself cannot tell `sgdir/.git` from a clone's own.
+      if (name !== 'sgdir/.git') expect(overlayPath(linked)).toBeNull();
+    },
+  );
 });
 
-describe('location of a linked worktree whose clone has no files at HEAD', () => {
+describe('location of a main worktree whatever its HEAD holds', () => {
   it('resolves an empty-tree HEAD and an unborn HEAD to the main clone', () => {
     for (const commit of [true, false]) {
       const main = tmp();
@@ -290,7 +247,7 @@ describe('location of a linked worktree whose clone has no files at HEAD', () =>
     expect(overlayPath(linked)).toBeNull();
   });
 
-  it('resolves a linked worktree of a submodule to the submodule work tree', () => {
+  it('fails closed for a submodule, whose git dir git lists first', () => {
     const sub = makeRepo();
     const sup = makeRepo();
     git(sup, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'mod');
@@ -299,8 +256,8 @@ describe('location of a linked worktree whose clone has no files at HEAD', () =>
     git(mod, 'config', 'user.name', 't');
     const linked = path.join(tmp(), 'wt');
     git(mod, 'worktree', 'add', '-q', '-b', 'b', linked);
-    expect(overlayPath(mod)).toBe(overlayFile(mod));
-    expect(overlayPath(linked)).toBe(overlayFile(mod));
+    expect(overlayPath(mod)).toBeNull();
+    expect(overlayPath(linked)).toBeNull();
   });
 });
 
@@ -446,17 +403,11 @@ describe('exclusion', () => {
     expect(readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8')).toBe(exclude);
   });
 
-  it('keeps the lock, breaker gate, temp and tomb files bs leaves in .blacksmith out of git status', () => {
+  it('keeps the lock, its reclaim mutex and the temp bs leaves in .blacksmith out of git status', () => {
     const main = makeRepo();
     writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
     const dir = path.dirname(overlayFile(main));
-    for (const f of [
-      'check-tiers.lock',
-      'check-tiers.lock.breaker',
-      `check-tiers.lock.${process.pid}-0.tmp`,
-      'check-tiers.lock.breaker.stale-1-0',
-      'check-tiers.json.tmp',
-    ]) {
+    for (const f of ['check-tiers.lock', 'check-tiers.lock.reclaim', 'check-tiers.json.tmp']) {
       writeFileSync(path.join(dir, f), '1\n');
     }
     expect(git(main, 'status', '--porcelain')).toBe('');
@@ -523,275 +474,120 @@ describe('one writer at a time', () => {
     );
   });
 
-  it('breaks a lock whose pid is dead, without waiting', async () => {
-    const main = makeRepo();
-    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
-    const dead = spawnSync(process.execPath, ['-e', '0']).pid;
-    writeFileSync(lockFile(main), `${dead}\n`);
-    const ran = await withOverlayLock(main, () => 'ran', { waitMs: 0 });
-    expect(ran).toBe('ran');
-    expect(existsSync(lockFile(main))).toBe(false);
-    expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
-  });
-
-  it('breaks a lock whose content is not a pid (an empty file) at once', async () => {
-    const main = makeRepo();
-    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
-    writeFileSync(lockFile(main), '');
-    const ran = await withOverlayLock(main, () => 'ran', { waitMs: 0 });
-    expect(ran).toBe('ran');
-    expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
-  });
-
-  it.each(['0\n', '2147483648\n'])(
-    'breaks a lock holding %j, which is not a valid pid, at once',
-    async (content) => {
-      const main = makeRepo();
-      mkdirSync(path.dirname(lockFile(main)), { recursive: true });
-      writeFileSync(lockFile(main), content);
-      const ran = await withOverlayLock(main, () => 'ran', { waitMs: 0 });
-      expect(ran).toBe('ran');
-      expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
-    },
-  );
-
-  it('publishes the lock only with its whole content, never as an empty file', async () => {
-    const main = makeRepo();
-    const atLink: { lockExisted: boolean; tempBytes: string }[] = [];
-    seams.beforeLink = (from, to) => {
-      if (to === lockFile(main)) {
-        atLink.push({ lockExisted: existsSync(to), tempBytes: readFileSync(from, 'utf8') });
-      }
-    };
-    try {
-      await withOverlayLock(main, () => undefined);
-    } finally {
-      seams.beforeLink = null;
-    }
-    expect(atLink).toEqual([{ lockExisted: false, tempBytes: `${process.pid}\n` }]);
-    expect(readdirSync(path.dirname(lockFile(main)))).toEqual([]);
-  });
-
-  it('does not take a live holder lock that replaced the dead one it was about to break', async () => {
-    const main = makeRepo();
-    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
-    const dead = spawnSync(process.execPath, ['-e', '0']).pid as number;
-    writeFileSync(lockFile(main), `${dead}\n`);
-    let probes = 0;
-    // Between the waiter's verdict (the holder is dead) and its break, another
-    // writer broke the dead lock and took a new, live one (this process).
-    seams.afterProbe = (pid) => {
-      if (pid !== dead || probes++ > 0) return;
-      rmSync(lockFile(main));
-      writeFileSync(lockFile(main), `${process.pid}\n`);
-    };
-    // Should a break rename the lock aside, a third writer takes it in the gap.
-    seams.afterRename = () => {
-      if (!existsSync(lockFile(main))) writeFileSync(lockFile(main), `${process.ppid}\n`);
-    };
-    try {
-      await expect(withOverlayLock(main, () => 'ran', { waitMs: 150 })).rejects.toMatchObject({
-        code: 'checks.overlay-busy',
-      });
-    } finally {
-      seams.afterProbe = null;
-      seams.afterRename = null;
-    }
-    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
-  });
-
-  it('treats a lock released between its failed publish and its read as absent, never as stale', async () => {
-    const main = makeRepo();
-    mkdirSync(path.dirname(lockFile(main)), { recursive: true });
-    writeFileSync(lockFile(main), `${process.ppid}\n`);
-    let reads = 0;
-    let readsDone = 0;
-    let linksToLock = 0;
-    let gateLinks = 0;
-    // The holder releases right before the waiter reads it, and a third writer
-    // publishes before the waiter's next publish.
-    seams.beforeRead = (file) => {
-      if (file === lockFile(main) && reads++ === 0) rmSync(lockFile(main));
-    };
-    seams.beforeLink = (_from, to) => {
-      if (to === gateFile(main)) gateLinks++;
-      if (to === lockFile(main) && linksToLock++ === 1) {
-        writeFileSync(lockFile(main), `${process.ppid}\n`);
-      }
-    };
-    // Were the absent lock judged stale, the waiter would re-read it under the
-    // gate and unlink the third writer's lock after this read.
-    seams.afterRead = (file) => {
-      if (file === lockFile(main) && readsDone++ === 1)
-        writeFileSync(lockFile(main), `${process.ppid}\n`);
-    };
-    const fn = vi.fn();
-    try {
-      await expect(withOverlayLock(main, fn, { waitMs: 0 })).rejects.toMatchObject({
-        code: 'checks.overlay-busy',
-        message: expect.stringContaining(`pid ${process.ppid}`),
-      });
-    } finally {
-      seams.beforeRead = null;
-      seams.beforeLink = null;
-      seams.afterRead = null;
-    }
-    expect(fn).not.toHaveBeenCalled();
-    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-    expect(gateLinks).toBe(0);
-    expect(existsSync(gateFile(main))).toBe(false);
-  });
-
-  describe('the breaker gate', () => {
-    const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
+  describe('the lock file', () => {
     const dirOf = (main: string): string => path.dirname(lockFile(main));
-    const staleLock = (main: string): number => {
+    const put = (main: string, content: string): void => {
       mkdirSync(dirOf(main), { recursive: true });
-      const dead = deadPid();
-      writeFileSync(lockFile(main), `${dead}\n`);
-      return dead;
+      writeFileSync(lockFile(main), content);
     };
 
-    it('waits for a live breaker, then throws busy naming its pid, touching nothing', async () => {
+    it('breaks a lock whose pid is dead, without waiting', async () => {
       const main = makeRepo();
-      const dead = staleLock(main);
-      writeFileSync(gateFile(main), `${process.ppid}\n`);
-      const fn = vi.fn();
-      await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
-        code: 'checks.overlay-busy',
-        message: expect.stringContaining(`pid ${process.ppid}`),
-      });
-      expect(fn).not.toHaveBeenCalled();
-      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${dead}\n`);
-    });
-
-    it('evicts a dead breaker gate and breaks the lock with no wait', async () => {
-      const main = makeRepo();
-      staleLock(main);
-      writeFileSync(gateFile(main), `${deadPid()}\n`);
+      put(main, `${deadPid()}\n`);
       expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
       expect(readdirSync(dirOf(main))).toEqual([]);
     });
 
-    it('evicts a gate whose content is not a pid with no wait', async () => {
-      const main = makeRepo();
-      staleLock(main);
-      writeFileSync(gateFile(main), '');
-      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
-      expect(readdirSync(dirOf(main))).toEqual([]);
-    });
-
-    it('puts back a live gate that replaced the dead one it was evicting, and waits for it', async () => {
-      const main = makeRepo();
-      staleLock(main);
-      const dead = deadPid();
-      writeFileSync(gateFile(main), `${dead}\n`);
-      // Between the verdict (the gate holder is dead) and the eviction, another
-      // evictor removed the dead gate and a live breaker published its own.
-      seams.afterProbe = (pid) => {
-        if (pid !== dead) return;
-        seams.afterProbe = null;
-        rmSync(gateFile(main));
-        writeFileSync(gateFile(main), `${process.ppid}\n`);
-      };
-      try {
-        await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-          code: 'checks.overlay-busy',
-          message: expect.stringContaining(`pid ${process.ppid}`),
+    it.each(['', 'garbage\n', '0\n', '2147483648\n', '123', '123\n\n', '-5\n'])(
+      'refuses a lock holding %j, which is not a pid, and breaks nothing',
+      async (content) => {
+        const main = makeRepo();
+        put(main, content);
+        const fn = vi.fn();
+        await expect(withOverlayLock(main, fn, { waitMs: 0 })).rejects.toMatchObject({
+          code: 'checks.overlay-lock-unusable',
+          message: expect.stringContaining(lockFile(main)),
         });
-      } finally {
-        seams.afterProbe = null;
-      }
-      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-      expect(readdirSync(dirOf(main)).sort()).toEqual([
-        'check-tiers.lock',
-        'check-tiers.lock.breaker',
-      ]);
-    });
+        expect(fn).not.toHaveBeenCalled();
+        expect(readFileSync(lockFile(main), 'utf8')).toBe(content);
+        expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+      },
+    );
 
-    it('does not throw when its own gate was moved away before it released it', async () => {
+    it('refuses, never breaks, a live holder lock it could not read (EMFILE)', async () => {
       const main = makeRepo();
-      const dead = staleLock(main);
-      // An evictor that mistook this breaker's live gate for a dead one moved it.
-      seams.afterProbe = (pid) => {
-        if (pid !== dead || !existsSync(gateFile(main))) return;
-        seams.afterProbe = null;
-        renameSync(gateFile(main), `${gateFile(main)}.moved`);
-      };
-      try {
-        expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
-      } finally {
-        seams.afterProbe = null;
-      }
-      expect(existsSync(lockFile(main))).toBe(false);
-    });
-
-    it('retries at once, moving no gate aside, when the gate vanishes between its failed publish and its read', async () => {
-      const main = makeRepo();
-      staleLock(main);
-      writeFileSync(gateFile(main), `${process.ppid}\n`);
-      let renames = 0;
-      let reads = 0;
-      // The gate holder releases right before the read, and a new breaker
-      // publishes its own right after it.
+      put(main, `${process.ppid}\n`);
       seams.beforeRead = (file) => {
-        if (file === gateFile(main) && reads++ === 0) rmSync(gateFile(main));
-      };
-      seams.afterRead = (file) => {
-        if (file === gateFile(main) && reads === 1) {
-          reads++;
-          writeFileSync(gateFile(main), `${process.ppid}\n`);
-        }
-      };
-      seams.afterRename = () => {
-        renames++;
+        if (file === lockFile(main)) throw errno('EMFILE');
       };
       try {
         await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-          code: 'checks.overlay-busy',
-          message: expect.stringContaining(`pid ${process.ppid}`),
+          code: 'checks.overlay-lock-unusable',
         });
       } finally {
         seams.beforeRead = null;
-        seams.afterRead = null;
-        seams.afterRename = null;
       }
-      expect(renames).toBe(0);
-      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
     });
 
-    it('releases only the gate it published when an evictor replaced it meanwhile', async () => {
+    it('treats a lock released between its failed create and its read as absent', async () => {
       const main = makeRepo();
-      const dead = staleLock(main);
-      let probes = 0;
-      // While this breaker holds the gate, an evictor takes it for stale and a
-      // newer breaker publishes its own.
-      seams.afterProbe = (pid) => {
-        if (pid !== dead || probes++ !== 1) return;
-        rmSync(gateFile(main));
-        writeFileSync(gateFile(main), `${process.ppid}\n`);
+      put(main, `${process.ppid}\n`);
+      let reads = 0;
+      seams.beforeRead = (file) => {
+        if (file === lockFile(main) && reads++ === 0) rmSync(lockFile(main));
       };
       try {
         expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
       } finally {
-        seams.afterProbe = null;
+        seams.beforeRead = null;
       }
-      expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-      expect(existsSync(lockFile(main))).toBe(false);
+      expect(readdirSync(dirOf(main))).toEqual([]);
     });
 
-    it('evicts a live-pid gate that has outlived any breaker, so a leaked one never blocks', async () => {
+    it('does not remove a live lock that replaced the dead one it was about to break', async () => {
       const main = makeRepo();
-      staleLock(main);
-      writeFileSync(gateFile(main), `${process.ppid}\n`);
-      const old = new Date(Date.now() - 60_000);
-      utimesSync(gateFile(main), old, old);
-      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      const dead = deadPid();
+      put(main, `${dead}\n`);
+      // Between the verdict (the holder is dead) and the reclaim, another writer
+      // broke the dead lock and took a new, live one (this process).
+      seams.afterProbe = (pid) => {
+        if (pid !== dead) return;
+        seams.afterProbe = null;
+        rmSync(lockFile(main));
+        writeFileSync(lockFile(main), `${process.pid}\n`);
+      };
+      const fn = vi.fn();
+      try {
+        await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+          code: 'checks.overlay-busy',
+          message: expect.stringContaining(`pid ${process.pid}`),
+        });
+      } finally {
+        seams.afterProbe = null;
+      }
+      expect(fn).not.toHaveBeenCalled();
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
+      expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+    });
+
+    it('waits, then throws busy naming the dead holder, while another breaker holds the mutex', async () => {
+      const main = makeRepo();
+      const dead = deadPid();
+      put(main, `${dead}\n`);
+      writeFileSync(`${lockFile(main)}.reclaim`, '');
+      const fn = vi.fn();
+      await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+        message: expect.stringContaining(`pid ${dead}`),
+      });
+      expect(fn).not.toHaveBeenCalled();
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${dead}\n`);
+      expect(readFileSync(`${lockFile(main)}.reclaim`, 'utf8')).toBe('');
+    });
+
+    it('releases only a lock that still holds its own pid, and tolerates one already gone', async () => {
+      const main = makeRepo();
+      await withOverlayLock(main, () => {
+        rmSync(lockFile(main));
+        writeFileSync(lockFile(main), `${process.ppid}\n`);
+      });
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+      rmSync(lockFile(main));
+      await withOverlayLock(main, () => rmSync(lockFile(main)));
       expect(readdirSync(dirOf(main))).toEqual([]);
     });
   });
-
   it('makes a second call in the holder process wait, then throw busy with waitMs', async () => {
     const main = makeRepo();
     let release: () => void = () => {};
@@ -1058,151 +854,6 @@ beforeEach(() => {
 const errno = (code: string): Error => Object.assign(new Error(code), { code });
 const blacksmithDir = (main: string): string => path.join(main, '.blacksmith');
 const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
-
-describe('lock robustness', () => {
-  it('never breaks a live holder lock because reading it failed (EMFILE)', async () => {
-    const main = makeRepo();
-    mkdirSync(blacksmithDir(main), { recursive: true });
-    writeFileSync(lockFile(main), `${process.ppid}\n`);
-    seams.beforeRead = (file) => {
-      if (file === lockFile(main)) throw errno('EMFILE');
-    };
-    try {
-      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-        code: 'checks.overlay-lock-failed',
-      });
-    } finally {
-      seams.beforeRead = null;
-    }
-    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-  });
-
-  it('never evicts a gate or breaks a lock because reading the gate failed (EIO)', async () => {
-    const main = makeRepo();
-    mkdirSync(blacksmithDir(main), { recursive: true });
-    writeFileSync(lockFile(main), `${deadPid()}\n`);
-    writeFileSync(gateFile(main), `${process.ppid}\n`);
-    seams.beforeRead = (file) => {
-      if (file === gateFile(main)) throw errno('EIO');
-    };
-    try {
-      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-        code: 'checks.overlay-lock-failed',
-      });
-    } finally {
-      seams.beforeRead = null;
-    }
-    expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-    expect(existsSync(lockFile(main))).toBe(true);
-  });
-
-  it('never evicts a live gate because its age could not be read (EIO)', async () => {
-    const main = makeRepo();
-    mkdirSync(blacksmithDir(main), { recursive: true });
-    writeFileSync(lockFile(main), `${deadPid()}\n`);
-    writeFileSync(gateFile(main), `${process.ppid}\n`);
-    seams.beforeStat = (file) => {
-      if (file === gateFile(main)) throw errno('EIO');
-    };
-    try {
-      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-        code: 'checks.overlay-lock-failed',
-      });
-    } finally {
-      seams.beforeStat = null;
-    }
-    expect(readFileSync(gateFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-  });
-
-  it('puts a gate back when it cannot read the one it moved aside, and says so', async () => {
-    const main = makeRepo();
-    mkdirSync(blacksmithDir(main), { recursive: true });
-    writeFileSync(lockFile(main), `${deadPid()}\n`);
-    writeFileSync(gateFile(main), 'junk');
-    seams.beforeRead = (file) => {
-      if (file.includes('.stale-')) throw errno('EIO');
-    };
-    try {
-      await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
-        code: 'checks.overlay-lock-failed',
-      });
-    } finally {
-      seams.beforeRead = null;
-    }
-    expect(readFileSync(gateFile(main), 'utf8')).toBe('junk');
-    expect(readdirSync(blacksmithDir(main)).sort()).toEqual([
-      'check-tiers.lock',
-      'check-tiers.lock.breaker',
-    ]);
-  });
-
-  for (const code of ['ENOTSUP', 'EPERM']) {
-    it(`takes the lock with O_EXCL when the volume cannot hard-link (${code})`, async () => {
-      const main = makeRepo();
-      seams.beforeLink = (_from, to) => {
-        if (to === lockFile(main)) throw errno(code);
-      };
-      try {
-        const seen = await withOverlayLock(main, async () => {
-          const content = readFileSync(lockFile(main), 'utf8');
-          await expect(withOverlayLock(main, () => 1, { waitMs: 0 })).rejects.toMatchObject({
-            code: 'checks.overlay-busy',
-          });
-          return content;
-        });
-        expect(seen).toBe(`${process.pid}\n`);
-      } finally {
-        seams.beforeLink = null;
-      }
-      expect(readdirSync(blacksmithDir(main))).toEqual([]);
-    });
-  }
-
-  it('the O_EXCL fallback releases only a lock that still holds its own pid', async () => {
-    const main = makeRepo();
-    seams.beforeLink = (_from, to) => {
-      if (to === lockFile(main)) throw errno('ENOTSUP');
-    };
-    try {
-      await withOverlayLock(main, () => {
-        rmSync(lockFile(main));
-        writeFileSync(lockFile(main), `${process.ppid}\n`);
-      });
-    } finally {
-      seams.beforeLink = null;
-    }
-    expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
-  });
-
-  it('names any other link failure and leaves no temp behind', async () => {
-    const main = makeRepo();
-    seams.beforeLink = (_from, to) => {
-      if (to === lockFile(main)) throw errno('EIO');
-    };
-    try {
-      await expect(withOverlayLock(main, () => 1)).rejects.toMatchObject({
-        code: 'checks.overlay-lock-failed',
-      });
-    } finally {
-      seams.beforeLink = null;
-    }
-    expect(readdirSync(blacksmithDir(main))).toEqual([]);
-  });
-
-  it('removes the temp links a dead holder and a dead breaker left once it breaks the lock', async () => {
-    const main = makeRepo();
-    mkdirSync(blacksmithDir(main), { recursive: true });
-    const dead = deadPid();
-    const lockTemp = `${lockFile(main)}.${dead}-0.tmp`;
-    writeFileSync(lockTemp, `${dead}\n`);
-    linkSync(lockTemp, lockFile(main));
-    writeFileSync(`${gateFile(main)}.${dead}-3.tmp`, `${dead}\n`);
-    const liveTemp = `${lockFile(main)}.${process.ppid}-0.tmp`;
-    writeFileSync(liveTemp, `${process.ppid}\n`);
-    await withOverlayLock(main, () => undefined, { waitMs: 0 });
-    expect(readdirSync(blacksmithDir(main))).toEqual([path.basename(liveTemp)]);
-  });
-});
 
 describe('what the overlay is written from is validated', () => {
   const bad = [
