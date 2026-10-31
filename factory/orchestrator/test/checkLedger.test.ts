@@ -917,18 +917,18 @@ describe('checkLedger faster checks across tiers', () => {
     expect(rowsOf(ledger, 'slow').find((r) => r.outcome === 'fail')?.catch).toBe('shadowed');
   });
 
-  // The failing record's tiers against the tiers of the record a faster check last ran
-  // in. A check whose record ran the pre-merge tier is taken as pre-merge, the default
-  // tier, so it shadows any catch whose record ran that tier and never a catch of a
-  // record that did not (D6: a post-merge catch is unique against the pre-merge tier).
-  // A record with no tiers is from before tiers, so it ran the pre-merge tier.
+  // The failing record's tiers against the tier of the record a faster check last ran
+  // in. A single-tier record puts the check in that tier, and it shadows a catch whose
+  // record ran that tier (D6: a post-merge catch is unique against the pre-merge tier).
+  // A record with no tiers is from before tiers, so it ran the pre-merge tier. A record
+  // that ran more than one tier settles no tier, so its check does not shadow.
   const PRE = ['pre-merge'];
   const POST = ['post-merge'];
   const MIXED = ['pre-merge', 'post-merge'];
   it.each([
     { f: 'pre', t: 'same', failing: PRE, faster: PRE, expected: 'shadowed' },
     { f: 'pre', t: 'subset (no tiers)', failing: PRE, faster: [], expected: 'shadowed' },
-    { f: 'pre', t: 'superset', failing: PRE, faster: MIXED, expected: 'shadowed' },
+    { f: 'pre', t: 'superset', failing: PRE, faster: MIXED, expected: 'unique' },
     { f: 'pre', t: 'disjoint', failing: PRE, faster: POST, expected: 'unique' },
     {
       f: 'pre',
@@ -945,7 +945,7 @@ describe('checkLedger faster checks across tiers', () => {
       t: 'superset without pre-merge',
       failing: POST,
       faster: ['post-merge', 'pre-release'],
-      expected: 'shadowed',
+      expected: 'unique',
     },
     { f: 'post', t: 'disjoint', failing: POST, faster: PRE, expected: 'unique' },
     {
@@ -955,7 +955,7 @@ describe('checkLedger faster checks across tiers', () => {
       faster: ['pre-release'],
       expected: 'unique',
     },
-    { f: 'mixed', t: 'same', failing: MIXED, faster: MIXED, expected: 'shadowed' },
+    { f: 'mixed', t: 'same', failing: MIXED, faster: MIXED, expected: 'unique' },
     { f: 'mixed', t: 'subset pre', failing: MIXED, faster: PRE, expected: 'shadowed' },
     { f: 'mixed', t: 'subset post', failing: MIXED, faster: POST, expected: 'shadowed' },
     { f: 'mixed', t: 'subset (no tiers)', failing: MIXED, faster: [], expected: 'shadowed' },
@@ -964,7 +964,7 @@ describe('checkLedger faster checks across tiers', () => {
       t: 'superset',
       failing: MIXED,
       faster: [...MIXED, 'pre-release'],
-      expected: 'shadowed',
+      expected: 'unique',
     },
     { f: 'mixed', t: 'disjoint', failing: MIXED, faster: ['pre-release'], expected: 'unique' },
     { f: 'no tiers', t: 'pre', failing: [], faster: PRE, expected: 'shadowed' },
@@ -998,4 +998,60 @@ describe('checkLedger faster checks across tiers', () => {
       });
     },
   );
+});
+
+// A check's tier, for a catch, is read from its latest single-tier record at or before
+// that catch: a record that ran more than one tier cannot say which one the check is in.
+describe('checkLedger tier membership', () => {
+  const fullClose = async (daysAgo: number) =>
+    integrationEvent('i-all', {
+      epic: 'e',
+      tree: 't8',
+      tiers: ['pre-merge', 'post-merge'],
+      daysAgo,
+      run: await realRun([
+        { name: 'e2e', pass: true, monotonicMs: 5000 },
+        { name: 'smoke', pass: true, monotonicMs: 300 },
+      ]),
+    });
+  const headRun = async (daysAgo: number) =>
+    integrationEvent('i-post', {
+      epic: 'e',
+      tree: 't9',
+      tiers: ['post-merge'],
+      daysAgo,
+      run: await realRun([{ name: 'smoke', pass: true, monotonicMs: 300 }]),
+    });
+  const catchOf = (ledger: CheckLedger) =>
+    rowsOf(ledger, 'e2e').find((r) => r.outcome === 'fail')?.catch;
+
+  it('gives a gate catch the same verdict whichever of a full close and a head run came first', async () => {
+    const tail = await failThenPass('e2e', 'e/task-2', ['ta', 'tb'], { failMs: 5000 });
+    const closeFirst = ledgerOf([await fullClose(5), await headRun(4), ...tail]);
+    const headFirst = ledgerOf([await headRun(6), await fullClose(5), ...tail]);
+    expect(catchOf(closeFirst)).toBe('unique');
+    expect(catchOf(headFirst)).toBe('unique');
+    expect(entryOf(headFirst, 'e2e').unique_catches).toBe(1);
+  });
+
+  it('is not shadowed by a check seen only in a record that ran more than one tier', async () => {
+    const ledger = ledgerOf([
+      await fullClose(5),
+      ...(await failThenPass('e2e', 'e/task-2', ['ta', 'tb'], { failMs: 5000 })),
+    ]);
+    expect(catchOf(ledger)).toBe('unique');
+  });
+
+  it('keeps a catch shadowed when the faster check later moves out of its tier', async () => {
+    const before = [
+      gateEvent('g0', {
+        task: 'e/task-1',
+        tree: 't0',
+        run: await realRun([{ name: 'smoke', pass: true, monotonicMs: 300 }]),
+      }),
+      ...(await failThenPass('e2e', 'e/task-2', ['ta', 'tb'], { failMs: 5000 })),
+    ];
+    expect(catchOf(ledgerOf(before))).toBe('shadowed');
+    expect(catchOf(ledgerOf([...before, await headRun(0)]))).toBe('shadowed');
+  });
 });

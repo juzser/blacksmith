@@ -209,17 +209,6 @@ const median = (xs: number[]): number | null => sortedMedian([...xs].sort((a, b)
 /** A record with no tiers is from before tiers: it ran the pre-merge tier. */
 const tiersOf = (r: RawRow): string[] => (r.tiers.length === 0 ? ['pre-merge'] : r.tiers);
 
-/**
- * Whether a check last seen in `m`'s record would have run in `r`'s. One whose record
- * ran the pre-merge tier is taken as pre-merge, the default tier: it runs wherever the
- * pre-merge tier does, and a catch of a record without that tier is unique against it,
- * as that tier passed on the landed tree (D6). Any other runs where its tiers do.
- */
-const runsBeside = (m: RawRow, r: RawRow): boolean =>
-  tiersOf(m).includes('pre-merge')
-    ? tiersOf(r).includes('pre-merge')
-    : tiersOf(m).some((t) => tiersOf(r).includes(t));
-
 const uniq = (ids: string[]): string[] => [...new Set(ids)];
 
 export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): CheckLedger {
@@ -360,13 +349,20 @@ export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): Chec
 
   // Unique catch: every faster check that would have run beside that row (each name's
   // latest identity at or before it, by its median so far) was observed passing at its
-  // tree. One sweep in log order keeps both facts current, so no row rescans the log.
+  // tree. One sweep in log order keeps every fact current, so no row rescans the log and
+  // no later run changes an earlier verdict. A check is in the tier of its latest
+  // single-tier record so far: a record that ran several tiers cannot say which one is its.
+  // A check seen in no single-tier record yet shadows nothing. This is the one place the
+  // ledger can over-count a unique catch: such a check may be in the catch's tier, but a
+  // shadow on a guess would take a catch from a check no tier is known to cover.
   const latest = new Map<string, RawRow>();
+  const tierOf = new Map<string, string>();
   const durations = new Map<string, number[]>();
   const medianNow = (id: string): number | null => sortedMedian(durations.get(id) ?? []);
   for (const r of rows) {
     if (r.outcome !== 'not-run' && r.cmd_sha256 !== null) {
       latest.set(r.name, r);
+      if (tiersOf(r).length === 1) tierOf.set(r.name, tiersOf(r)[0] as string);
       if (r.duration_ms !== null) {
         const s = durations.get(r.identity) ?? [];
         let lo = 0;
@@ -382,7 +378,8 @@ export function checkLedger(inputs: LedgerFoldInputs, opts: LedgerOptions): Chec
     if (r.class !== 'real') continue;
     const mine = medianNow(r.identity);
     const faster = [...latest.values()].filter((m) => {
-      if (mine === null || !runsBeside(m, r)) return false;
+      const tier = tierOf.get(m.name);
+      if (mine === null || tier === undefined || !tiersOf(r).includes(tier)) return false;
       const theirs = medianNow(m.identity);
       return theirs !== null && theirs < mine;
     });
