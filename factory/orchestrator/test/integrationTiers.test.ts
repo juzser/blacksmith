@@ -265,6 +265,15 @@ describe('integration tiers', () => {
       expect(worktrees()).toHaveLength(1);
     });
 
+    it('carries on when removing a dead pid scratch worktree fails', async () => {
+      const stuck = path.join(scratchRoot(), `scratch-${deadPid()}-stuck`);
+      git(projectDir, ['worktree', 'add', '--detach', stuck, 'HEAD']);
+      git(projectDir, ['worktree', 'lock', stuck]);
+      const result = await runChecksAt(projectDir, 'HEAD', [count('lint-a')]);
+      expect(result.pass).toBe(true);
+      expect(existsSync(stuck)).toBe(true);
+    });
+
     it('leaves a scratch worktree of a live pid alone', async () => {
       const child = spawn('sleep', ['30']);
       children.push(child);

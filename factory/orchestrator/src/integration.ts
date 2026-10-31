@@ -316,7 +316,11 @@ function sweepDeadScratch(projectDir: string, root: string): void {
     const match = SCRATCH_NAME.exec(path.basename(entry.worktree));
     if (match === null || realOrSelf(path.dirname(entry.worktree)) !== realRoot) continue;
     if (pidIsAlive(Number(match[1]))) continue;
-    git(projectDir, ['worktree', 'remove', '--force', entry.worktree]);
+    try {
+      git(projectDir, ['worktree', 'remove', '--force', entry.worktree]);
+    } catch {
+      // A concurrent run may have removed it first; the run carries on.
+    }
   }
   git(projectDir, ['worktree', 'prune']);
 }
