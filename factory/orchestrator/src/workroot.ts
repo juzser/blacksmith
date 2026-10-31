@@ -269,7 +269,7 @@ function git(cwd: string, args: readonly string[]): string {
  * Keep the local settings file out of git without touching a tracked
  * `.gitignore`: `.git/info/exclude` is this clone's own and is never shared.
  */
-function excludeFromGit(projectDir: string, file: string): ClaudeCapsReport['gitExclude'] {
+export function excludeFromGit(projectDir: string, file: string): ClaudeCapsReport['gitExclude'] {
   // Never let a git or filesystem hiccup take `bs init` down after the
   // settings file is already written.
   try {
