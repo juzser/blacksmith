@@ -1,14 +1,19 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foldTasks } from '../src/db/projector.js';
 import { appendEvent, type StoredEvent } from '../src/events.js';
+import { GitCommandError } from '../src/git.js';
 import { runIntegrationCheck } from '../src/integration.js';
+import { isBsRevertCommit } from '../src/postMergeBisect.js';
 import {
   type ResumeInput,
   type ResumeResult,
   resumeLandedReverts,
+  trailerValues,
 } from '../src/postMergeResume.js';
 import { RECORD_ONLY_REASONS, WAVE_REVERTED_EVENT } from '../src/revert.js';
 import type { CheckCommand } from '../src/testgate.js';
@@ -36,6 +41,28 @@ vi.mock('../src/db/projector.js', async (importOriginal) => {
   };
 });
 
+// A switch to make one git subcommand fail the way an infrastructure fault does
+// (an unwritable object store, a lock): exit 128 with no claim about the data.
+const gitFault = vi.hoisted(() => ({ subcommand: null as string | null }));
+vi.mock('../src/git.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/git.js')>();
+  return {
+    ...actual,
+    runGit: (cwd: string, args: string[]) => {
+      if (gitFault.subcommand !== null && args.includes(gitFault.subcommand)) {
+        throw new actual.GitCommandError(cwd, args, 128, 'fatal: unable to write object');
+      }
+      return actual.runGit(cwd, args);
+    },
+    writeMergeTree: (cwd: string, base: string, head: string) => {
+      if (gitFault.subcommand === 'merge-tree') {
+        throw new actual.GitCommandError(cwd, ['merge-tree'], 128, 'fatal: unable to write object');
+      }
+      return actual.writeMergeTree(cwd, base, head);
+    },
+  };
+});
+
 const PRE: CheckCommand = { name: 'pre-a', cmd: 'true' };
 const POST: CheckCommand = { name: 'post-a', cmd: 'true', tier: 'post-merge' };
 const T1 = 'epic-1/task-1';
@@ -46,10 +73,12 @@ describe('post-merge resume', () => {
 
   beforeEach(async () => {
     override.status = null;
+    gitFault.subcommand = null;
     repo = await createIntegrationRepo();
   });
   afterEach(async () => {
     override.status = null;
+    gitFault.subcommand = null;
     await repo.dispose();
   });
 
@@ -151,15 +180,38 @@ describe('post-merge resume', () => {
     ...extra,
   });
 
-  const snapshot = () => ({
-    ref: repo.git(['rev-parse', repo.branch]),
-    main: repo.git(['rev-parse', 'main']),
-    head: repo.git(['symbolic-ref', 'HEAD']),
-    status: repo.git(['status', '--porcelain']),
-    index: createHash('sha256')
-      .update(readFileSync(path.join(repo.projectDir, '.git', 'index')))
-      .digest('hex'),
-  });
+  /**
+   * Everything a resume must leave alone: the integration ref, main, every ref,
+   * the clone's HEAD, its status, the tree its index writes and the tree of its
+   * worktree. The worktree tree is hashed through a throwaway copy of the
+   * index, so taking the snapshot touches nothing.
+   */
+  const snapshot = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'resume-snap-'));
+    try {
+      const tmpIndex = path.join(dir, 'index');
+      copyFileSync(path.join(repo.projectDir, '.git', 'index'), tmpIndex);
+      const env = { ...process.env, GIT_INDEX_FILE: tmpIndex };
+      const inTmp = (...args: string[]) =>
+        execFileSync('git', args, { cwd: repo.projectDir, env, encoding: 'utf8' }).trim();
+      inTmp('add', '--all');
+      return {
+        ref: repo.git(['rev-parse', repo.branch]),
+        main: repo.git(['rev-parse', 'main']),
+        refs: repo.git(['for-each-ref']),
+        head: repo.git(['symbolic-ref', 'HEAD']),
+        headSha: repo.git(['rev-parse', 'HEAD']),
+        status: repo.git(['status', '--porcelain=v2', '--branch']),
+        indexTree: repo.git(['write-tree']),
+        worktreeTree: inTmp('write-tree'),
+        index: createHash('sha256')
+          .update(readFileSync(path.join(repo.projectDir, '.git', 'index')))
+          .digest('hex'),
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
 
   /** One call, with the integration ref and the clone compared before and after. */
   const resume = async (extra: Partial<ResumeInput> = {}): Promise<ResumeResult> => {
@@ -617,6 +669,89 @@ describe('post-merge resume', () => {
       const result = await resume();
       expect(result.wrote[0]?.task).toBe(T1);
       expect(result.wrote[0]?.culprit?.task).toBe(T1);
+    });
+  });
+
+  describe('an unexpected git failure is not a verdict', () => {
+    it.each(['commit-tree', 'rev-list'])(
+      'a failing %s records nothing and the next run retries',
+      async (subcommand) => {
+        await landed('task-1');
+        gitFault.subcommand = subcommand;
+        const before = snapshot();
+        await expect(
+          resumeLandedReverts(await input(), repo.ctx(), repo.opts()),
+        ).rejects.toBeInstanceOf(GitCommandError);
+        expect(await reverted()).toHaveLength(0);
+        expect(snapshot()).toEqual(before);
+        gitFault.subcommand = null;
+        const retry = await resume();
+        expect(retry.outcome).toBe('reverted');
+        expect(retry.wrote[0]?.disposition).toBe('bounce');
+        expect(await reverted()).toHaveLength(1);
+      },
+    );
+
+    it('a failing merge-tree exit other than a conflict is not a verdict either', async () => {
+      await landed('task-1');
+      gitFault.subcommand = 'merge-tree';
+      await expect(resumeLandedReverts(await input(), repo.ctx(), repo.opts())).rejects.toThrow(
+        /unable to write object/,
+      );
+      expect(await reverted()).toHaveLength(0);
+    });
+
+    it('a claimed revert whose revert-merge conflicts is record-only, not a failure', async () => {
+      // A later commit rewrites the merge's file, so reverting the merge over
+      // the claimed revert's parent conflicts (merge-tree exit 1).
+      await admit(T1);
+      const merge = repo.merge('task-1', { 'a.txt': 'a\n' });
+      await recordMerge(T1, merge);
+      repo.merge('task-2', { 'a.txt': 'changed later\n' });
+      const red = await redRecord();
+      const fake = repo.handCommit(
+        { 'x.txt': 'x\n' },
+        [
+          'Revert "Merge task-1"',
+          '',
+          `Bs-Revert-Of: ${merge}`,
+          'Bs-Task: task-1',
+          `Bs-Red-Record: ${red}`,
+          'Bs-Failing-Checks: post-a',
+        ].join('\n'),
+      );
+      await certify(fake);
+      await expectRecordOnly('invalid-trailers');
+    });
+  });
+
+  describe('the branch the scan reads is the branch that is written', () => {
+    it('refuses an integration branch that is not the one scanned', async () => {
+      await landed('task-1');
+      await expect(
+        resume({ integration: { branch: 'bs/epic-1/elsewhere' } }),
+      ).rejects.toMatchObject({ code: 'postmerge.not-integration-branch' });
+      expect(await reverted()).toHaveLength(0);
+    });
+
+    it('writes the scanned branch into every event', async () => {
+      await landed('task-1');
+      await resume();
+      const [event] = await reverted();
+      expect(payloadOf(event as StoredEvent).integration_branch).toBe(repo.branch);
+    });
+  });
+
+  describe('trailer parsing mirrors isBsRevertCommit', () => {
+    it.each([
+      ['a single paragraph', 'Bs-Revert-Of: abc'],
+      ['a trailer in a non-final paragraph', 'Bs-Revert-Of: abc\n\nsubject line'],
+      ['an indented trailer', 'subject\n\n Bs-Revert-Of: abc'],
+      ['a final-paragraph trailer', 'subject\n\nBs-Revert-Of: abc\nBs-Task: t'],
+      ['trailing blank lines', 'subject\n\nBs-Revert-Of: abc\n\n\n'],
+      ['a different key sharing the prefix', 'subject\n\nBs-Revert-Of-X: abc'],
+    ])('agrees on %s', (_name, message) => {
+      expect(trailerValues(message).has('Bs-Revert-Of')).toBe(isBsRevertCommit(message));
     });
   });
 

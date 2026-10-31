@@ -1,9 +1,9 @@
 import type { EventOpts, StoredEvent } from './events.js';
 import { parseEventId } from './events.js';
 import type { EventContext } from './findings.js';
-import { GitCommandError, runGit as git } from './git.js';
+import { GitCommandError, runGit as git, writeMergeTree } from './git.js';
 import { INTEGRATION_CHECK_EVENT, latestIntegrationCheckAt } from './integration.js';
-import { landedBsReverts } from './postMergeBisect.js';
+import { assertIntegrationBranch, landedBsReverts, PostMergeError } from './postMergeBisect.js';
 import {
   type RecordOnlyReason,
   recordWaveReverted,
@@ -68,8 +68,12 @@ interface Trailers {
   valid: boolean;
 }
 
-/** The `Key: value` lines of the final paragraph, as `isBsRevertCommit` reads them. */
-function trailerValues(message: string): Map<string, string> {
+/**
+ * The `Key: value` lines of the final paragraph. Mirrors the final-paragraph
+ * split of `isBsRevertCommit` in postMergeBisect.ts, which exports no shared
+ * helper; a test pins the two to agree.
+ */
+export function trailerValues(message: string): Map<string, string> {
   const paragraphs = message.trim().split(/\n\s*\n/);
   const block = paragraphs.length > 1 ? (paragraphs.at(-1) ?? '') : '';
   const values = new Map<string, string>();
@@ -126,35 +130,38 @@ function provesRevert(
   revertOf: string,
   events: readonly StoredEvent[],
 ): boolean {
+  // A root commit has no parent to revert over: the claim is false.
+  if (git(projectDir, ['rev-list', '--parents', '-n', '1', sha]).split(' ').length < 2)
+    return false;
+  const merges = git(projectDir, ['rev-list', '--first-parent', '--min-parents=2', sha]);
+  if (!merges.split('\n').includes(revertOf)) return false;
+  // `git revert -m 1 M` on P is the three-way merge of P with M^1 over base
+  // M. A commit with M^1's tree and M as its only parent gives merge-tree
+  // that base without a worktree; the object is never referenced.
+  const theirs = git(projectDir, [
+    '-c',
+    'commit.gpgsign=false',
+    '-c',
+    'user.name=bs',
+    '-c',
+    'user.email=bs@localhost',
+    'commit-tree',
+    `${revertOf}^1^{tree}`,
+    '-p',
+    revertOf,
+    '-m',
+    'revert preview',
+  ]);
+  let wanted: string;
   try {
-    const merges = git(projectDir, ['rev-list', '--first-parent', '--min-parents=2', sha]);
-    if (!merges.split('\n').includes(revertOf)) return false;
-    // `git revert -m 1 M` on P is the three-way merge of P with M^1 over base
-    // M. A commit with M^1's tree and M as its only parent gives merge-tree
-    // that base without a worktree; the object is never referenced.
-    const theirs = git(projectDir, [
-      '-c',
-      'commit.gpgsign=false',
-      '-c',
-      'user.name=bs',
-      '-c',
-      'user.email=bs@localhost',
-      'commit-tree',
-      `${revertOf}^1^{tree}`,
-      '-p',
-      revertOf,
-      '-m',
-      'revert preview',
-    ]);
-    const wanted = git(projectDir, ['merge-tree', '--write-tree', `${sha}^`, theirs]).split(
-      '\n',
-    )[0];
-    if (wanted !== git(projectDir, ['rev-parse', `${sha}^{tree}`])) return false;
+    wanted = writeMergeTree(projectDir, `${sha}^`, theirs);
   } catch (err) {
-    // A conflict, an unknown commit or a root commit: the claim is not borne out.
-    if (err instanceof GitCommandError) return false;
+    // Exit 1 is a conflict: the revert does not apply, so the claim is false.
+    // Any other failure says nothing about the commit and must not be recorded.
+    if (err instanceof GitCommandError && err.status === 1) return false;
     throw err;
   }
+  if (wanted !== git(projectDir, ['rev-parse', `${sha}^{tree}`])) return false;
   return TIERS.every((tier) => {
     const covering = events.filter((e) => {
       const tiers = payloadOf(e).tiers;
@@ -205,7 +212,15 @@ export async function resumeLandedReverts(
   opts: EventOpts = {},
 ): Promise<ResumeResult> {
   const { projectDir, epicId, liveTaskIds } = input;
-  const branch = input.integration.branch;
+  // The scan below reads this branch, so it is the one every event names.
+  const { branch } = assertIntegrationBranch(projectDir, epicId);
+  if (branch !== input.integration.branch) {
+    throw new PostMergeError(
+      'postmerge.not-integration-branch',
+      `"${input.integration.branch}" is not the integration branch "${branch}" of epic "${epicId}" that the scan reads.`,
+      { epicId, given: input.integration.branch, scanned: branch },
+    );
+  }
   const events = [...input.events];
   const isAncestor = (a: string, b: string): boolean => {
     try {
