@@ -1124,6 +1124,13 @@ describe('bs results check (built binary)', () => {
         expect(run.json.problems[0].reason).toBe('gate.invalid-check-tier');
       });
 
+      it('still refuses a string heavy beside a valid tier', async () => {
+        const run = checkGate(
+          await withChecks([touching('a', { tier: 'post-merge', heavy: 'false' })]),
+        );
+        expect(run.json.problems[0].reason).toBe('gate.invalid-check-heavy');
+      });
+
       it('leaves an unlabelled file passing', async () => {
         const run = checkGate(await withChecks([touching('a'), touching('b')]));
         expect(run.json.outcome).toBe('pass');
