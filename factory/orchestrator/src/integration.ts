@@ -10,7 +10,7 @@ import {
   validateEventEnvelope,
 } from './events.js';
 import type { EventContext } from './findings.js';
-import { checkWorktreeDeps, type DepsCheck } from './gate.js';
+import type { DepsCheck } from './gate.js';
 import { runGit as git } from './git.js';
 import { pidIsAlive } from './heavyLock.js';
 import {
@@ -358,6 +358,9 @@ export async function runChecksAt(
       setup = { ...(out.results[0] as CheckResult), cmd: maskCommandCredentials(opts.setupCmd) };
       if (!setup.pass) return setupFailed(setup, null);
     }
+    // Loaded here, not at the top: gate.ts reaches the database layer, which
+    // cliBoot.test.ts keeps out of every invocation's boot.
+    const { checkWorktreeDeps } = await import('./gate.js');
     const deps = checkWorktreeDeps(dir);
     if (!deps.ok) return setupFailed(setup, deps);
     const outcome = await run([...checks], { ...runOpts, runAll: opts.runAll ?? true });
