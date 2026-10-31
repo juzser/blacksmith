@@ -685,9 +685,9 @@ describe('post-merge resume', () => {
         expect(await reverted()).toHaveLength(0);
         expect(snapshot()).toEqual(before);
         gitFault.subcommand = null;
-        const retry = await resume();
-        expect(retry.outcome).toBe('reverted');
-        expect(retry.wrote[0]?.disposition).toBe('bounce');
+        const again = await resume();
+        expect(again.outcome).toBe('reverted');
+        expect(again.wrote[0]?.disposition).toBe('bounce');
         expect(await reverted()).toHaveLength(1);
       },
     );
