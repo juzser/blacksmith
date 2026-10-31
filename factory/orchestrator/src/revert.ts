@@ -105,10 +105,6 @@ export interface RecordWaveRevertedOpts extends EventOpts {
 
 const HEX40 = /^[0-9a-f]{40}$/i;
 
-function refuse(code: string, message: string, details: Record<string, unknown> = {}): never {
-  throw new WaveRevertedError(`revert.${code}`, message, details);
-}
-
 /**
  * Append the one `wave-reverted` event for a revert, after validating all of
  * it. A `record-only` call with a listed reason and a fresh `revert_sha` is
@@ -122,14 +118,20 @@ export async function recordWaveReverted(
 ): Promise<StoredEvent> {
   const { isAncestor, liveTaskIds, ...eventOpts } = opts;
   if (typeof input.revert_sha !== 'string' || !HEX40.test(input.revert_sha)) {
-    refuse('invalid-sha', `revert_sha must be a full 40-hex commit id, got "${input.revert_sha}".`);
+    throw new WaveRevertedError(
+      'revert.invalid-sha',
+      `revert_sha must be a full 40-hex commit id, got "${input.revert_sha}".`,
+    );
   }
   if (typeof input.integration_branch !== 'string' || input.integration_branch === '') {
-    refuse('integration-branch-required', 'integration_branch is required.');
+    throw new WaveRevertedError(
+      'revert.integration-branch-required',
+      'integration_branch is required.',
+    );
   }
   if (input.disposition !== 'bounce' && input.disposition !== 'record-only') {
-    refuse(
-      'invalid-disposition',
+    throw new WaveRevertedError(
+      'revert.invalid-disposition',
       `disposition must be "bounce" or "record-only", got "${String((input as { disposition?: unknown }).disposition)}".`,
     );
   }
@@ -142,8 +144,8 @@ export async function recordWaveReverted(
       String((e.record.payload as { revert_sha?: unknown }).revert_sha).toLowerCase() === revertSha,
   );
   if (prior !== undefined) {
-    refuse(
-      'already-recorded',
+    throw new WaveRevertedError(
+      'revert.already-recorded',
       `Revert ${input.revert_sha} already has a wave-reverted event (${prior.event_id}).`,
       {
         event_id: prior.event_id,
@@ -154,21 +156,25 @@ export async function recordWaveReverted(
   let taskId: string | undefined;
   if (input.disposition === 'record-only') {
     if (!(RECORD_ONLY_REASONS as readonly string[]).includes(input.reason)) {
-      refuse(
-        'invalid-reason',
+      throw new WaveRevertedError(
+        'revert.invalid-reason',
         `reason "${input.reason}" is not one of: ${RECORD_ONLY_REASONS.join(', ')}.`,
       );
     }
   } else {
     if (!Array.isArray(input.task_ids) || input.task_ids.length !== 1) {
-      refuse('one-task-required', 'A bounce names exactly one task id.', {
-        task_ids: input.task_ids,
-      });
+      throw new WaveRevertedError(
+        'revert.one-task-required',
+        'A bounce names exactly one task id.',
+        {
+          task_ids: input.task_ids,
+        },
+      );
     }
     taskId = input.task_ids[0] as string;
     if (isAncestor === undefined || liveTaskIds === undefined) {
-      refuse(
-        'preflight-required',
+      throw new WaveRevertedError(
+        'revert.preflight-required',
         'A bounce needs the isAncestor and liveTaskIds its preflight reads.',
       );
     }
@@ -178,16 +184,26 @@ export async function recordWaveReverted(
       liveTaskIds,
     });
     if (reason !== null) {
-      refuse('blocked', `Task "${taskId}" cannot be reopened by this revert: ${reason}.`, {
-        reason,
-        taskId,
-      });
+      throw new WaveRevertedError(
+        'revert.blocked',
+        `Task "${taskId}" cannot be reopened by this revert: ${reason}.`,
+        {
+          reason,
+          taskId,
+        },
+      );
     }
     if (!Array.isArray(input.failing_checks) || input.failing_checks.length === 0) {
-      refuse('failing-checks-required', 'A bounce needs at least one failing check.');
+      throw new WaveRevertedError(
+        'revert.failing-checks-required',
+        'A bounce needs at least one failing check.',
+      );
     }
     if (!Array.isArray(input.evidence_event_ids) || input.evidence_event_ids.length === 0) {
-      refuse('evidence-required', 'A bounce needs at least one evidence event id.');
+      throw new WaveRevertedError(
+        'revert.evidence-required',
+        'A bounce needs at least one evidence event id.',
+      );
     }
   }
 
