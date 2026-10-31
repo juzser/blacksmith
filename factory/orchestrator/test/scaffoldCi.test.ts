@@ -237,7 +237,11 @@ describe('the gate script run', () => {
     expect(trace(dir)).toEqual(['one', 'two', 'x1', 'x2']);
   });
 
-  it('forwards an interrupt to a timed check instead of orphaning it', async () => {
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+  ] as const)('forwards %s to a timed check instead of orphaning it', async (sig, code) => {
     const dir = fresh(false);
     writeChecks(dir, [
       { name: 'slow', cmd: 'echo $$ > pid.txt; exec sleep 47', timeout_ms: 60000 },
@@ -263,10 +267,10 @@ describe('the gate script run', () => {
         else await wait(100);
       }
       expect(pid, 'the check never started').toBeGreaterThan(0);
-      child.kill('SIGINT');
-      expect(await exited).toBe(130);
+      child.kill(sig);
+      expect(await exited).toBe(code);
       for (let i = 0; i < 30 && alive(pid); i++) await wait(100);
-      expect(alive(pid), `pid ${pid} outlived an interrupted check.mjs`).toBe(false);
+      expect(alive(pid), `pid ${pid} outlived check.mjs after ${sig}`).toBe(false);
     } finally {
       child.kill('SIGKILL');
       if (pid > 0 && alive(pid)) process.kill(pid, 'SIGKILL');

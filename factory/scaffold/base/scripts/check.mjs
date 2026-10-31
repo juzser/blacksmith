@@ -133,7 +133,7 @@ function runCheck(entry) {
             }
           }, entry.timeoutMs);
     // The detached group no longer shares our terminal, so pass an interrupt on to it.
-    const CONVENTIONAL = { SIGINT: 130, SIGTERM: 143 };
+    const CONVENTIONAL = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
     let interrupted;
     const forward = (sig) => {
       interrupted = sig;
