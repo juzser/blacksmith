@@ -262,6 +262,23 @@ describe('recordWaveReverted', () => {
     await refused(() => recordWaveReverted(bounce(), ctx, callOpts()), 'revert.already-recorded');
   });
 
+  it('treats an upper-case revert_sha as the same revert, leaving the log unchanged', async () => {
+    await recordWaveReverted(recordOnly({ revert_sha: 'ab'.repeat(20) }), ctx, opts());
+    await refused(
+      () => recordWaveReverted(recordOnly({ revert_sha: 'AB'.repeat(20) }), ctx, opts()),
+      'revert.already-recorded',
+    );
+  });
+
+  it('never lets a blocker refuse a record-only call', async () => {
+    const stored = await recordWaveReverted(
+      recordOnly({ reason: 'not-merged', task_ids: ['epic-1/never-merged'] }),
+      ctx,
+      opts(),
+    );
+    expect(stored.record.payload).toMatchObject({ reason: 'not-merged' });
+  });
+
   it('refuses a record-only reason outside the list', async () => {
     await refused(
       () => recordWaveReverted(recordOnly({ reason: 'because' }), ctx, opts()),
