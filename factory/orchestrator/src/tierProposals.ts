@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { isOperatorActor } from './actors.js';
 import { type CheckLedger, LEDGER_WINDOW_DAYS, type LedgerRow } from './checkLedger.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type StoredEvent } from './events.js';
+import { appendEvent, mergeSessionLogs, type StoredEvent } from './events.js';
 import { stageBoundCheckNames } from './gate.js';
 import { gatherLedgerInputs, type LedgerInputsOptions } from './ledgerInputs.js';
 import {
@@ -407,11 +407,12 @@ interface Decision {
  * caller's earlier read, so a write the previous lock holder made is seen.
  * It is task-13's gather with the caller's own options: one project's events,
  * every session of its epics, and no time filter, so an approve older than the
- * ledger window is still read. Snapshot events the gather does not return come
- * first: the log is append-only, so they can only be events it cannot attribute.
+ * ledger window is still read. Snapshot events the gather does not return are
+ * kept, and the union is ordered as `mergeSessionLogs` orders sessions: by `ts`,
+ * ties by append order within a session, each event once by `event_id`.
  * A degraded or refused gather answers `null`, never a throw.
  */
-async function currentProjectLog(
+export async function currentProjectLog(
   snapshot: readonly StoredEvent[],
   gather: LedgerInputsOptions,
 ): Promise<StoredEvent[] | null> {
@@ -423,8 +424,15 @@ async function currentProjectLog(
     throw err;
   }
   if (read.degraded) return null;
-  const seen = new Set(read.events.map((e) => e.event_id));
-  return [...snapshot.filter((e) => !seen.has(e.event_id)), ...read.events];
+  const sessions = new Map<string, StoredEvent[]>();
+  const seen = new Set<string>();
+  for (const e of [...read.events, ...snapshot]) {
+    if (seen.has(e.event_id)) continue;
+    seen.add(e.event_id);
+    const id = e.record.session_id;
+    sessions.set(id, [...(sessions.get(id) ?? []), e]);
+  }
+  return mergeSessionLogs([...sessions].map(([sessionId, events]) => ({ sessionId, events })));
 }
 
 const UNREADABLE_LOG_WHY =
@@ -532,6 +540,7 @@ export async function applyTierDecisions(
             ...ctx,
             event_type: CHECK_TIER_DECIDED_EVENT,
             payload: {
+              epic_id: input.epicId,
               proposal_id: item.proposal_id,
               check: item.check,
               cmd_sha256: item.cmd_sha256,
@@ -660,7 +669,9 @@ export async function promoteAfterCatch(
     const results = Array.isArray(payload?.results) ? (payload.results as unknown[]) : [];
     const i = results.findIndex((r) => isObj(r) && r.name === name);
     const own = results[i];
-    if (!isObj(own) || own.pass !== false) {
+    // The epic whose post-merge run caught it: the epic the promotion is recorded under.
+    const epicId = payload?.epic_id;
+    if (!isObj(own) || own.pass !== false || typeof epicId !== 'string' || epicId === '') {
       return answer(name, 'promotion-skipped', 'red-record-unreadable');
     }
     const check = input.checks.find((c) => c.name === name);
@@ -705,6 +716,7 @@ export async function promoteAfterCatch(
           return answer(name, 'not-promoted', 'not-demoted');
         }
         const promoted = {
+          epic_id: epicId,
           check: name,
           cmd_sha256: cur.cmd_sha256,
           from_tier: cur.tier,

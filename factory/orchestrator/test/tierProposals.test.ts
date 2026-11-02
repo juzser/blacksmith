@@ -14,7 +14,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkLedger } from '../src/checkLedger.js';
 import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
-import type { LedgerInputsOptions } from '../src/ledgerInputs.js';
+import { gatherLedgerInputs, type LedgerInputsOptions } from '../src/ledgerInputs.js';
 import { type CheckCommand, commandDigest, type RunResult } from '../src/testgate.js';
 import {
   OVERLAY_LOCK_WAIT_MS,
@@ -31,6 +31,7 @@ import {
   CHECK_TIER_BATCH_ANSWERED_EVENT,
   CHECK_TIER_DECIDED_EVENT,
   CHECK_TIER_PROMOTED_EVENT,
+  currentProjectLog,
   DECLINE_QUIET_DAYS,
   itemBlocker,
   MIN_MEASURED_MINUTES,
@@ -962,6 +963,7 @@ describe('applyTierDecisions: a valid batch', () => {
     ]);
     const log = await readEvents('s', { stateDir: w.stateDir });
     expect(log[1]?.record.payload).toEqual({
+      epic_id: 'e',
       proposal_id: a.proposal_id,
       check: a.check,
       cmd_sha256: a.cmd_sha256,
@@ -1211,6 +1213,7 @@ describe('promoteAfterCatch', () => {
         CHECK_TIER_PROMOTED_EVENT,
       ]);
       expect(log[1]?.record.payload).toEqual({
+        epic_id: 'e',
         check: 'unit',
         cmd_sha256: shaOf('unit'),
         from_tier: 'post-merge',
@@ -1848,6 +1851,147 @@ describe('under the lock, apply and promotion read the project log task-13 gathe
     ]);
     expect(await typesOf(p.w)).toEqual(['session-start']);
     expect(overlayBytes(p.w.repo)).toBe(overlay);
+  });
+});
+
+describe('every write carries the epic id, and the under-lock log is in time order', () => {
+  /** Two overlay-demoted checks whose approves sit in project session `s`, and one red run failing both. */
+  async function twoDemoted() {
+    const w = await world(['unit', 'lint']);
+    const ids: Record<string, string> = {};
+    for (const check of ['unit', 'lint']) {
+      ids[check] = (
+        await appendEvent(
+          {
+            ...w.ctx,
+            event_type: CHECK_TIER_DECIDED_EVENT,
+            payload: decidedPayload(`p-${check}`, check),
+          },
+          { stateDir: w.stateDir },
+        )
+      ).event_id;
+    }
+    writeOverlay(w.repo, {
+      entries: [
+        entryOf('unit', 'post-merge', ids.unit as string),
+        entryOf('lint', 'post-merge', ids.lint as string),
+      ],
+      expectedRevision: 0,
+    });
+    const u = fakeRun('unit', false, 5);
+    const l = fakeRun('lint', false, 5);
+    const run = {
+      pass: false,
+      results: [...u.results, ...l.results],
+      environment: [...(u.environment ?? []), ...(l.environment ?? [])],
+    } as unknown as RunResult;
+    const red = integrationEvent('rr#2', { epic: 'e', run, tree: 'rt2', tiers: ['post-merge'] });
+    return { w, red };
+  }
+  /** Session `g`: its own root, chained to nothing, naming no epic. */
+  const noEpicCtx = async (w: World) => {
+    const start = await appendEvent(
+      {
+        session_id: 'g',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir: w.stateDir },
+    );
+    return { ...w.ctx, session_id: 'g', causal_parent: start.event_id };
+  };
+
+  it('promotes both checks from a session that names no epic, and a later apply keeps both promoted', async () => {
+    const { w, red } = await twoDemoted();
+    const snapshot = [red, ...(await readEvents('s', { stateDir: w.stateDir }))];
+    const answers = await promoteAfterCatch(
+      { failing_checks: ['unit', 'lint'], red_record_event_id: 'rr#2', reproduced: true },
+      { dir: w.repo, checks: w.checks, events: snapshot, gather: w.gather },
+      await noEpicCtx(w),
+      { events: { stateDir: w.stateDir } },
+    );
+    expect(answers.map((a) => a.result)).toEqual(['promoted', 'promoted']);
+    expect(overlayTiers(w.repo).sort()).toEqual([
+      ['lint', 'pre-merge'],
+      ['unit', 'pre-merge'],
+    ]);
+    const g = (await readEvents('g', { stateDir: w.stateDir })).slice(1);
+    expect(g.map((e) => e.record.event_type)).toEqual([
+      CHECK_TIER_PROMOTED_EVENT,
+      CHECK_TIER_PROMOTED_EVENT,
+    ]);
+    expect(g.map((e) => e.record.payload.epic_id)).toEqual(['e', 'e']);
+    // A later caller whose snapshot never held `g` still reads both promotions.
+    await applyIn(w, [], { snapshot: [...w.events, ...(await readEvents('s', w.gather))] });
+    expect(overlayTiers(w.repo).sort()).toEqual([
+      ['lint', 'pre-merge'],
+      ['unit', 'pre-merge'],
+    ]);
+  });
+
+  it("an apply's decision and batch events in a session that names no epic are the project's", async () => {
+    const w = await world(['unit']);
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    w.ctx = await noEpicCtx(w);
+    await applyIn(w, [approve(item)]);
+    const g = (await readEvents('g', { stateDir: w.stateDir })).slice(1);
+    expect(g.map((e) => e.record.payload.epic_id)).toEqual(['e', 'e']);
+    const gathered = (await gatherLedgerInputs(w.gather)).events.map((e) => e.event_id);
+    expect(gathered).toEqual(expect.arrayContaining(g.map((e) => e.event_id)));
+  });
+
+  it('skips a promotion whose red record names no epic, changing nothing', async () => {
+    const p = await promoWorld();
+    delete (p.events[1] as StoredEvent).record.payload.epic_id;
+    const overlay = overlayBytes(p.w.repo);
+    expect(await promote(p)).toEqual([
+      { check: 'unit', result: 'promotion-skipped', reason: 'red-record-unreadable' },
+    ]);
+    expect(await typesOf(p.w)).toEqual(['session-start']);
+    expect(overlayBytes(p.w.repo)).toBe(overlay);
+  });
+
+  it('orders snapshot-only and gathered events by ts, session order on ties, each event once', async () => {
+    const w = await world(['unit']);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const at = (iso: string) => vi.setSystemTime(Date.parse(iso));
+      const add = (type: string) =>
+        appendEvent(
+          { ...w.ctx, event_type: type, payload: { epic_id: 'e' } },
+          { stateDir: w.stateDir },
+        );
+      at('2027-01-01T00:00:00Z');
+      const a = await add(CHECK_TIER_BATCH_ANSWERED_EVENT);
+      at('2027-01-03T00:00:00Z');
+      const b1 = await add(CHECK_TIER_BATCH_ANSWERED_EVENT);
+      const b2 = await add(CHECK_TIER_BATCH_ANSWERED_EVENT);
+      const early = logged(
+        CHECK_TIER_BATCH_ANSWERED_EVENT,
+        {},
+        { id: 'lg#early', ts: '2020-01-01T00:00:00.000Z' },
+      );
+      const mid = logged(
+        CHECK_TIER_BATCH_ANSWERED_EVENT,
+        {},
+        { id: 'lg#mid', ts: '2027-01-02T00:00:00.000Z' },
+      );
+      const s0 = (await readEvents('s', w.gather))[0] as StoredEvent;
+      const log = await currentProjectLog([early, a, mid], w.gather);
+      expect(log?.map((e) => e.event_id)).toEqual([
+        'lg#early',
+        s0.event_id,
+        a.event_id,
+        'lg#mid',
+        b1.event_id,
+        b2.event_id,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
