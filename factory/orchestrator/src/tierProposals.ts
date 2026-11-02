@@ -9,8 +9,8 @@ import { type CheckLedger, LEDGER_WINDOW_DAYS, type LedgerRow } from './checkLed
 import { SmithError } from './errors.js';
 import {
   appendEvent,
-  type EventOpts,
   EventError,
+  type EventOpts,
   mergeSessionLogs,
   readEvents,
   type StoredEvent,
