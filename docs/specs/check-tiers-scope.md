@@ -3,7 +3,7 @@
 This file specifies the `bs checks` verbs. `bs checks ledger`,
 `bs checks proposals`, `bs checks apply` and `bs checks post-merge` ship. It is a predefined architecture: the mechanism is written down
 first and becomes a feature as it ships, one task at a time.
-Every part below says `Status: planned.` until it has landed on main.
+Every part below says `Status: shipped.` because each has landed on main.
 
 The flags that existing verbs gained are written as invocations:
 `bs integration check --epic <id> --project <dir> --checks <checks.json> --tier <pre-merge|post-merge|pre-release|all|remaining> ...`,
@@ -36,7 +36,7 @@ epic pull request opens only when every tier is green.
 
 ## 1. Tier declaration
 
-Status: planned.
+Status: shipped.
 
 Each entry in a project's `checks.json` may carry a `tier`, one of
 `pre-merge`, `post-merge` or `pre-release`. `tier` sits beside `heavy`: heavy
@@ -89,7 +89,7 @@ and the queue can read without the event store.
 
 ## 2. Where each tier runs
 
-Status: planned.
+Status: shipped.
 
 - The gate runs the pre-merge tier only, names every deferred check in its
   result, and keeps every stage it has today.
@@ -192,7 +192,7 @@ decided.
 
 ## 3. The learning loop
 
-Status: planned.
+Status: shipped.
 
 The loop is a read-only fold over events the factory already writes. It adds
 no table.

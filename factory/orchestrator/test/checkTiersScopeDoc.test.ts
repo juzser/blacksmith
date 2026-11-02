@@ -63,7 +63,7 @@ describe('docs/specs/check-tiers-scope.md', () => {
     );
   });
 
-  it('follows each of the three parts heading with Status: planned.', () => {
+  it('follows each of the three parts heading with Status: shipped.', () => {
     const lines = doc().split('\n');
     const headings = lines.flatMap((line, i) =>
       /^## .*(tier declaration|where each tier runs|learning loop)/i.test(line) ? [i] : [],
@@ -71,7 +71,7 @@ describe('docs/specs/check-tiers-scope.md', () => {
     expect(headings).toHaveLength(3);
     for (const i of headings) {
       const next = lines.slice(i + 1).find((line) => line.trim() !== '');
-      expect(next).toBe('Status: planned.');
+      expect(next).toBe('Status: shipped.');
     }
   });
 
