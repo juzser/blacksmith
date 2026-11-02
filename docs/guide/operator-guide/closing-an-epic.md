@@ -145,7 +145,7 @@ afterwards makes it stale — and `bs epic verdict` then holds with
 `is stale: it ran against <sha>, and … is now at <sha>` rather than trusting
 a green that has outlived its truth.
 
-**Per-tier close.** With a checks file that labels tiers (§5 of
+**Per-tier close.** With checks in tiers, declared in the file or from the tier overlay (§5 of
 [the queue and gate guide](queue-and-gate.md)), `--tier` picks what runs:
 `pre-merge`, `post-merge` or `pre-release` runs that tier, `all` runs every
 tier, and `--tier remaining` runs every check the head is not yet certified for, which

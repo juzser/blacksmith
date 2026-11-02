@@ -35,9 +35,10 @@ The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.
 
 - **Check tiers** (`bs-check-tiers`). A check in `checks.json` may carry a
-  `tier`: `pre-merge`, `post-merge` or `pre-release`. Absent means `pre-merge`,
-  so a file that labels nothing behaves as before, and nothing is guessed from
-  a stack or a command name. `bs gate run` runs only the pre-merge tier and
+  `tier`: `pre-merge`, `post-merge` or `pre-release`. Absent means `pre-merge`
+  unless an approved move in the tier overlay (below) applies to that check, so
+  a file that labels nothing behaves as before only while no approved overlay
+  move applies, and nothing is guessed from a stack or a command name. `bs gate run` runs only the pre-merge tier and
   records what it deferred, `bs results check --as gate` applies the same
   selection, and `bs brief compose` lists only the pre-merge checks in a
   worker's brief and names the deferred ones. What `bs` learns lives in a
@@ -45,8 +46,8 @@ belongs. One entry.
   never rewritten, a tier it declares always wins, and an overlay that is
   missing, tracked or outside a repository leaves every undeclared check in
   `pre-merge`. `bs queue run --checks` makes the pre-merge tier the
-  pre-landing test; with no later-tier entry `--test-cmd` and
-  `--select-test-cmd` run as before, and with one they are accepted but not
+  pre-landing test; with no later-tier entry in the effective tiers (declared
+  plus overlay) `--test-cmd` and `--select-test-cmd` run as before, and with one they are accepted but not
   run. Every `wave-merged` now carries `merge_sha`. The post-merge batch,
   `bs checks post-merge`, runs on the integration branch when a batch is due,
   bisects a red that reproduces to the one task that broke it, tests a
