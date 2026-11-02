@@ -460,7 +460,9 @@ export async function applyTierDecisions(
         });
       }
       if (ledger.degraded === true) {
-        throw new TierApplyRefusal(DEGRADED_CODE, `Cannot apply: ${DEGRADED_WHY}.`, { items: [] });
+        throw new TierApplyRefusal('checks.session-unreadable', `Cannot apply: ${DEGRADED_WHY}.`, {
+          items: [],
+        });
       }
       const cands = candidates(ledger, events, now);
       const failures = validateDecisions(decisions, cands);
