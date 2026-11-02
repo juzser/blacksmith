@@ -311,8 +311,14 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-function readJsonFile<T>(filePath: string): T {
-  return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+function readJsonFile<T>(filePath: string, onSyntaxError?: T): T {
+  const text = readFileSync(filePath, 'utf8');
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    if (err instanceof SyntaxError && onSyntaxError !== undefined) return onSyntaxError;
+    throw err;
+  }
 }
 
 /**
@@ -5620,7 +5626,8 @@ async function main(): Promise<number> {
     try {
       printJson(
         await applyTierDecisions(
-          readJsonFile<unknown>(decisionsFile),
+          // Unparseable JSON is not an array either: the library refuses it, with a code and `items`.
+          readJsonFile<unknown>(decisionsFile, null),
           {
             dir,
             checksFile,

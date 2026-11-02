@@ -470,7 +470,7 @@ describe('bs checks proposals', () => {
     expect(out.items).toEqual([]);
   });
 
-  it('refuses a session with no log before it locks or repairs anything', async () => {
+  it('refuses a session with no log and leaves the log and the overlay unchanged', async () => {
     const fx = makeFx(['unit']);
     const payload = {
       epic_id: 'e',
@@ -676,6 +676,25 @@ describe('bs checks apply', () => {
         decisions_path: file,
         event_id: printed.event_id,
       });
+    });
+
+    it('refuses a decisions file that is not valid JSON with a code and empty items, and hands it off', () => {
+      const fx = makeFx(['unit']);
+      const file = path.join(fx.root, 'decisions-broken.json');
+      writeFileSync(file, '[');
+      const lines = logLines(fx);
+      const bytes = overlayBytes(fx.project);
+      const refused = applyCli(fx, file);
+      expect(refused.status).toBe(1);
+      const out = json(refused);
+      expect(out.error.code).toBe('checks.decisions-not-array');
+      expect(out.items).toEqual([]);
+      expect(logLines(fx)).toBe(lines);
+      expect(overlayBytes(fx.project)).toBe(bytes);
+
+      const hand = applyCli(fx, file, ['--hand-off', out.error.code]);
+      expect(hand.status, hand.stdout + hand.stderr).toBe(0);
+      expect(logLines(fx)).toBe(lines + 1);
     });
 
     it('names --hand-off when it has no value, and writes nothing', () => {
