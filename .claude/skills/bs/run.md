@@ -312,62 +312,65 @@ playbooks are written to prevent.
     the reply does not name gets no decision. Then run apply until one call is
     accepted, at most twice, with `[]` when nothing was decided:
 
-    - **Apply.** `bs checks apply <decisions.json> --project <project-dir>
-      --specs-dir <specs-dir> --checks <checks.json> --epic <epic> --actor
-      operator --session <session-id> --plan-version <n> --causal-parent
-      <event-id>` is the first call. An accepted call records the decisions and
-      the batch's `check-tier-batch-answered`, and the batch is not asked again.
+- **Apply.** `bs checks apply <decisions.json> --project <project-dir>
+  --specs-dir <specs-dir> --checks <checks.json> --epic <epic> --actor
+  operator --session <session-id> --plan-version <n> --causal-parent
+  <event-id>` is the first call. An accepted call records the decisions and
+  the batch's `check-tier-batch-answered`, and the batch is not asked again.
 
-    - **Re-run.** A first call refused with `items` (each item whose guardrail
-      or shape now fails, which only a change to the log between question and
-      answer causes) is reported item by item: the playbook reports each item
-      and its reason to the operator, then runs `bs checks apply
-      <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
-      <checks.json> --epic <epic> --actor operator --session <session-id>
-      --plan-version <n> --causal-parent <event-id>` once more with the same
-      decisions minus those items (`[]` if none remain), because guardrails win
-      over a reply and the batch is never asked twice.
+- **Re-run.** A first call refused with `items` (each item whose guardrail
+  or shape now fails, which only a change to the log between question and
+  answer causes) is reported item by item: the playbook reports each item
+  and its reason to the operator, then runs `bs checks apply
+  <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
+  <checks.json> --epic <epic> --actor operator --session <session-id>
+  --plan-version <n> --causal-parent <event-id>` once more with the same
+  decisions minus those items (`[]` if none remain), because guardrails win
+  over a reply and the batch is never asked twice.
 
-    - **Hand-off.** A refusal with `items: []` (the actor, the overlay, the
-      lock, a failed repair), or a second refusal, goes to the operator with the
-      JSON and the decisions.json path. The playbook then runs `bs checks apply
-      <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
-      <checks.json> --epic <epic> --session <session-id> --plan-version <n>
-      --causal-parent <event-id> --hand-off <refusal-code>`, which records the
-      hand-off as the epic's `check-tier-batch-answered`, decides nothing, and
-      turns `answered_in_epic` true, so no later entry to this step asks again.
-      The hand-off ends when the operator runs `bs checks apply` with that
-      decisions.json once the cause is fixed, or leaves the tiers as they are,
-      which moves nothing.
+- **Hand-off.** A refusal with `items: []` (the actor, the overlay, the
+  lock, a failed repair), or a second refusal, goes to the operator with the
+  JSON and the decisions.json path. The playbook then runs `bs checks apply
+  <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
+  <checks.json> --epic <epic> --session <session-id> --plan-version <n>
+  --causal-parent <event-id> --hand-off <refusal-code>`, which records the
+  hand-off as the epic's `check-tier-batch-answered`, decides nothing, and
+  turns `answered_in_epic` true, so no later entry to this step asks again.
+  The hand-off ends when the operator runs `bs checks apply` with that
+  decisions.json once the cause is fixed, or leaves the tiers as they are,
+  which moves nothing.
 
-    Notices are reported, not asked; silence changes nothing. Then run the
-    post-merge tier's final batch, so every landing is certified, and then
-    every check the head is not yet certified for:
+Notices are reported, not asked; silence changes nothing. Then run the
+post-merge tier's final batch, so every landing is certified, and then
+every check the head is not yet certified for:
 
-    ```bash
-    bs checks post-merge --final --epic <epic> --project <project-dir> --checks <checks.json> --plan factory/specs/active/<epic>/plan-vN.json --setup-cmd "<install command>" --session <session-id> --plan-version <n> --causal-parent <event-id>
-    bs integration check --epic <epic> --project <project-dir> --checks <checks.json> --tier remaining --session <session-id> --plan-version <n> --causal-parent <event-id>
-    ```
+```bash
+bs checks post-merge --final --epic <epic> --project <project-dir> --checks <checks.json> --plan factory/specs/active/<epic>/plan-vN.json --setup-cmd "<install command>" --session <session-id> --plan-version <n> --causal-parent <event-id>
+bs integration check --epic <epic> --project <project-dir> --checks <checks.json> --tier remaining --session <session-id> --plan-version <n> --causal-parent <event-id>
+```
 
-    Handle the first as the post-merge block above does. When the second
-    refuses with `integration.nothing-remaining`, every check is already
-    certified at the head, so step 12 goes on to `bs epic verdict` and
-    `bs epic close` exactly as after a green run; any other refusal stops the
-    close.
+Handle the first as the post-merge block above does. When the second
+refuses with `integration.nothing-remaining`, every check is already
+certified at the head, so step 12 goes on to `bs epic verdict` and
+`bs epic close` exactly as after a green run; any other refusal stops the
+close.
 
-    An exit 1 from either means the assembled branch is broken. Raise a
-    finding, fix it as a task, and run it again — each pins its result to the
-    head sha, so any merge after it lands makes the record stale and the
-    verdict below will say so.
+Only a red check outcome, and any refusal not named here, means the
+assembled branch is broken, whatever the exit code; the named outcomes
+follow their own rules instead (`integration.nothing-remaining` above, and
+each outcome the post-merge block handles). For a broken branch, raise a
+finding, fix it as a task, and run it again — each pins its result to the
+head sha, so any merge after it lands makes the record stale and the
+verdict below will say so.
 
-    `--plan-version <n>` is the live version, here and on every record steps
-    13-16 write. The envelope leaves the flag optional, and an omitted one
-    stamps the record `plan_version: 1` — so on an epic that amended, the
-    check, the review and the close all claim to have verified a plan that
-    no longer exists. One dogfooded product epic closed at v3 with its
-    integration check and its closing spec review both stamped v1; the goal
-    check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
-    pass it every time.
+`--plan-version <n>` is the live version, here and on every record steps
+13-16 write. The envelope leaves the flag optional, and an omitted one
+stamps the record `plan_version: 1` — so on an epic that amended, the
+check, the review and the close all claim to have verified a plan that
+no longer exists. One dogfooded product epic closed at v3 with its
+integration check and its closing spec review both stamped v1; the goal
+check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
+pass it every time.
 13. Dispatch the **`bs-spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
     this one reads it against the assembled branch, which is the only reading

@@ -344,6 +344,22 @@ describe('run.md step 12', () => {
     expect(hand).toMatch(/`answered_in_epic` true/);
   });
 
+  it('writes the three apply items as column-0 bullets', () => {
+    for (const l of ['**Apply.**', '**Re-run.**', '**Hand-off.**'])
+      expect(
+        lines.filter((x) => x.startsWith(`- ${l} `)),
+        l,
+      ).toHaveLength(1);
+  });
+
+  it('gives one instruction on what an exit 1 means: only a red check, named outcomes follow their own rules', () => {
+    expect(f12).not.toMatch(/An exit 1 from either means the assembled branch is broken/);
+    expect(f12).toMatch(
+      /Only a red check outcome[^.]*(any refusal[^.]*not named)[^.]*means the assembled branch is broken/,
+    );
+    expect(f12).toMatch(/named outcomes[^.]*follow their own rules/);
+  });
+
   it('runs --final, then --tier remaining, then verdict and close with --checks', () => {
     const handEnd = itemEnd(run, '**Hand-off.**');
     const lineAfter = (from: number, pred: (l: string) => boolean): number => {
