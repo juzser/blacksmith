@@ -497,9 +497,16 @@ async function postMergeHold(input: {
   plan: PlanFile;
   events: StoredEvent[];
 }) {
-  const { postMergeBase, heldByPostMerge } = await import('./postMergeBisect.js');
+  const { postMergeBase, heldByPostMerge, PostMergeError } = await import('./postMergeBisect.js');
   const { foldTasks } = await import('./db/projector.js');
-  const base = postMergeBase(input);
+  const hasPostMergeChecks = selectTier(input.checks, 'post-merge').length > 0;
+  // A fresh epic has no integration branch before `worktree create`: no merges, nothing held.
+  let merges: ReturnType<typeof postMergeBase>['merges'] = [];
+  try {
+    if (hasPostMergeChecks) merges = postMergeBase(input).merges;
+  } catch (e) {
+    if (!(e instanceof PostMergeError && e.code === 'postmerge.branch-missing')) throw e;
+  }
   const rows = foldTasks(input.events);
   const held = heldByPostMerge({
     tasks: input.plan.tasks,
@@ -508,10 +515,10 @@ async function postMergeHold(input: {
       rows.find((r) => taskIdsMatch(r.taskId, id))?.taskStatus ??
       input.plan.tasks.find((t) => taskIdsMatch(t.task_id, id))?.task_status ??
       '',
-    uncertifiedMerges: base.merges,
-    hasPostMergeChecks: selectTier(input.checks, 'post-merge').length > 0,
+    uncertifiedMerges: merges,
+    hasPostMergeChecks,
   });
-  return { held, merges: base.merges };
+  return { held, merges };
 }
 
 /**

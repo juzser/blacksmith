@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -255,6 +256,45 @@ describe('bs checks post-merge --held and bs wave check --checks', () => {
   it('holds nothing on a project with no post-merge entry', () => {
     const out = JSON.parse(held(['--checks', emptyChecksPath]).stdout);
     expect(out.held).toEqual([]);
+  });
+
+  describe('a fresh epic whose integration branch does not exist yet', () => {
+    const dropBranch = () => {
+      execFileSync('git', ['branch', '-D', repo.branch], { cwd: repo.projectDir });
+    };
+
+    it('holds nothing with a post-merge entry: --held exits 0 with no merges', () => {
+      dropBranch();
+      const run = held();
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout)).toEqual({ held: [], uncertified_merges: [] });
+    });
+
+    it('holds nothing with a post-merge entry: wave check admits', () => {
+      dropBranch();
+      expect(waveCheck('task-c').status).toBe(0);
+    });
+
+    it('reads no git state without a post-merge entry', () => {
+      dropBranch();
+      const run = held(['--checks', emptyChecksPath]);
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout)).toEqual({ held: [], uncertified_merges: [] });
+      expect(
+        waveCheck('task-c', ['--checks', emptyChecksPath, '--project', repo.projectDir]).status,
+      ).toBe(0);
+    });
+
+    it('reads no git state without a post-merge entry, not even a repository', () => {
+      const run = held(['--checks', emptyChecksPath, '--project', scratch]);
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout)).toEqual({ held: [], uncertified_merges: [] });
+    });
+
+    it('does not swallow other errors: a non-integration project is still refused', () => {
+      const run = held(['--epic', 'no-such-shape/../x']);
+      expect(run.status).toBe(1);
+    });
   });
 
   describe('wave check --session without --checks', () => {
