@@ -89,6 +89,10 @@ export interface ProposalNotice {
   message: string;
 }
 
+/** A degraded ledger blocks both the proposal fold and apply, so neither side asks or applies blind. */
+const DEGRADED_CODE = 'checks.session-unreadable';
+const DEGRADED_WHY = 'a session log could not be read, so a catch may be hidden';
+
 /** The ledger, plus the `degraded` mark task-13's inputs carry when a session log was unreadable. */
 export type ProposalLedger = CheckLedger & { degraded?: boolean };
 
@@ -277,8 +281,8 @@ export function pendingProposals(
   }
   if (ledger.degraded === true) {
     notices.push({
-      code: 'checks.session-unreadable',
-      message: 'No proposals: a session log could not be read, so a catch may be hidden.',
+      code: DEGRADED_CODE,
+      message: `No proposals: ${DEGRADED_WHY}.`,
     });
   }
   for (const c of effectiveChecks) {
@@ -375,7 +379,7 @@ export interface ApplyInput {
   epicId: string;
   effectiveChecks: readonly EffectiveCheck[];
   actor: string;
-  ledger: CheckLedger;
+  ledger: ProposalLedger;
   events: readonly StoredEvent[];
   now: Date;
 }
@@ -455,10 +459,14 @@ export async function applyTierDecisions(
           items: [],
         });
       }
+      if (ledger.degraded === true) {
+        throw new TierApplyRefusal(DEGRADED_CODE, `Cannot apply: ${DEGRADED_WHY}.`, { items: [] });
+      }
       const cands = candidates(ledger, events, now);
       const failures = validateDecisions(decisions, cands);
       const shapeFailed = new Set(failures.map((f) => f.proposal_id));
       for (const d of decisions as Decision[]) {
+        if (!isObj(d)) continue;
         const item = cands.find((c) => c.proposal_id === d.proposal_id);
         if (item === undefined || shapeFailed.has(d.proposal_id)) continue;
         const why = itemBlocker(item, ledger, input.effectiveChecks, now);

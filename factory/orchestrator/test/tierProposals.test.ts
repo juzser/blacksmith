@@ -559,7 +559,13 @@ const passOf = (name: string, task: string, tree: string, id: string): StoredEve
 async function applyIn(
   w: World,
   decisions: unknown,
-  o: { extra?: StoredEvent[]; actor?: string; repo?: string; epicId?: string } = {},
+  o: {
+    extra?: StoredEvent[];
+    actor?: string;
+    repo?: string;
+    epicId?: string;
+    degraded?: boolean;
+  } = {},
 ) {
   const log = await readEvents('s', { stateDir: w.stateDir });
   const events = [...w.events, ...(o.extra ?? []), ...log];
@@ -571,7 +577,7 @@ async function applyIn(
       epicId: o.epicId ?? 'e',
       effectiveChecks: effective(w.checks, readOverlay(o.repo ?? w.repo)),
       actor: o.actor ?? 'operator',
-      ledger: ledgerOf(events, w.claims),
+      ledger: { ...ledgerOf(events, w.claims), degraded: o.degraded },
       events,
       now,
     },
@@ -668,6 +674,35 @@ describe('itemBlocker', () => {
 });
 
 describe('applyTierDecisions: refusals', () => {
+  it('refuses a non-object element as a shape failure, never a TypeError', async () => {
+    const w = await world();
+    const before = await logCount(w);
+    const bytes = overlayBytes(w.repo);
+    for (const bad of [null, 7, 'x', [1], true]) {
+      const err = await applyIn(w, [bad]).catch((e) => e);
+      expect(err.code).toBe('checks.apply-refused');
+      expect(err.items).toEqual([
+        { proposal_id: '', check: '', reason: 'a decision must be an object' },
+      ]);
+    }
+    expect(await logCount(w)).toBe(before);
+    expect(overlayBytes(w.repo)).toBe(bytes);
+  });
+
+  it('refuses on a degraded ledger as the call own cause, appending nothing', async () => {
+    const w = await world();
+    const items = (await pendingNow(w)).items;
+    const before = await logCount(w);
+    const bytes = overlayBytes(w.repo);
+    const err = await applyIn(w, [approve(items[0] as ProposalItem)], { degraded: true }).catch(
+      (e) => e,
+    );
+    expect(err.code).toBe('checks.session-unreadable');
+    expect(err.items).toEqual([]);
+    expect(await logCount(w)).toBe(before);
+    expect(overlayBytes(w.repo)).toBe(bytes);
+  });
+
   it('refuses a whole batch naming an item that gained an S2 catch, and an unconfirmed one', async () => {
     const w = await world();
     const items = (await pendingNow(w)).items;
