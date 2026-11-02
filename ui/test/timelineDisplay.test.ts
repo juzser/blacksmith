@@ -1242,6 +1242,29 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     }
   });
 
+  it('prints a readable check name, never a raw slug, for the tier gate events', () => {
+    const gates: Record<string, [string, string]> = {
+      'queue-tier-run': ['Queue tier run', 'Pre-merge checks'],
+      'check-tier-decided': ['Check tier decided', 'Check tier decision'],
+      'check-tier-promoted': ['Check tier promoted', 'Check tier promotion'],
+      'check-tier-batch-answered': ['Check tier batch answered', 'Check tier proposals'],
+    };
+    for (const [eventType, [title, meta]] of Object.entries(gates)) {
+      const e = entry({ eventType, kind: 'Gate', payload: {} } as Partial<TimelineEntry>);
+      expect(kindFor(e), `kindFor(${eventType})`).toBe('gate');
+      expect(titleFor(e), `titleFor(${eventType})`).toBe(title);
+      expect(metaFor(e, { now: e.ts }), `metaFor(${eventType})`).toBe(meta);
+      expect(`${titleFor(e)} ${metaFor(e, { now: e.ts })}`).not.toContain(eventType);
+    }
+    const reverted = entry({
+      eventType: 'wave-reverted',
+      kind: 'System',
+      payload: {},
+    } as Partial<TimelineEntry>);
+    expect(metaFor(reverted, { now: reverted.ts })).toBe('');
+    expect(titleFor(reverted)).toBe('Wave reverted');
+  });
+
   // Item 2 of the fix brief: a raw kebab-case type slug (e.g. one titleFor()
   // has no dedicated case for) must still read as a sentence.
   it('humanizes an unmapped event type instead of printing its raw slug', () => {
