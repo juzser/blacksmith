@@ -5751,7 +5751,13 @@ async function main(): Promise<number> {
       const culprits =
         (err as { culprits?: (PromotionCulprit & { task: string })[] }).culprits ?? [];
       // A promotion that fails here must not hide the error of the run itself.
-      if (culprits.length > 0) await promote(culprits).catch(() => undefined);
+      if (culprits.length > 0) {
+        await promote(culprits).catch((promotionErr) => {
+          process.stderr.write(
+            `bs: promotion failed for the post-merge run: ${promotionErr instanceof Error ? promotionErr.message : String(promotionErr)}\n`,
+          );
+        });
+      }
       throw err;
     }
     const promotions = result.culprits.length > 0 ? await promote(result.culprits) : undefined;

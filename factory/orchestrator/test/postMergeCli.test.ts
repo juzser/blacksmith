@@ -440,6 +440,7 @@ describe('bs checks post-merge', () => {
       expect(run.status).toBe(1);
       expect(JSON.parse(run.stdout).error.message).toBe('log fault');
       expect(await eventsOfType('check-tier-promoted')).toHaveLength(0);
+      expect(run.stderr).toMatch(/promotion failed for the post-merge run/);
     });
 
     it('answers declared-tier-wins for a declared post-merge check', async () => {
