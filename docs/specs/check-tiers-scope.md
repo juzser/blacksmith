@@ -46,8 +46,10 @@ naming the entry and the file, never guessed.
 
 ### Defaults
 
-- An absent `tier` means `pre-merge`. A project that labels nothing behaves
-  exactly as it does today, with the same checks in the same order.
+- An absent `tier` means `pre-merge` unless the overlay (next section) has
+  moved that check. A project that labels nothing, and whose overlay moves none
+  of its checks, behaves exactly as it does today, with the same checks in the
+  same order.
 - An empty `checks.json` stays today's behaviour: the gate passes it, and no
   tier filter reads as a pass. A file with entries whose pre-merge selection
   is empty is refused before any stage, and so is a deferred check a gate

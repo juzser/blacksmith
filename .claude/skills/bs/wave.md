@@ -393,10 +393,10 @@ one thing this playbook never asks you to.
      a queue-tier flag `--batch` refuses; it does not reach `checks.json`. A
      scoped-down unit check is how red tests have merged before. The rule holds
      in whatever tier the full suite sits: an entry may carry a `"tier"`
-     (`pre-merge`, `post-merge` or `pre-release`; absent means `pre-merge`), and
-     the gate runs only the pre-merge tier of a tiered file and names what it
-     deferred, so the full suite is the full test command in whichever tier the
-     file puts it.
+     (`pre-merge`, `post-merge` or `pre-release`; absent means `pre-merge`
+     unless the tier overlay has moved that check), and the gate runs only the
+     effective pre-merge tier and names what it deferred, so the full suite is
+     the full test command in whichever tier the file or the overlay puts it.
    - **Heavy checks.** `gate run` and `bs integration check` hold the machine's
      heavy lock for a check that is heavy and for no other. `checks.json` marks
      a check with `"heavy": true` (or `"heavy": false`, which wins); unmarked,
@@ -487,7 +487,8 @@ one thing this playbook never asks you to.
    - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
    With a tiered checks file the composed brief lists only the pre-merge checks
    the gate runs and names the deferred ones, so a worker is never told to run a
-   check the gate will not.
+   check the gate will not. Tiers from the tier overlay count too: the brief
+   reads the overlay of its `--worktree`, as the gate does.
    Slice: `bs playbook slice wave --step 8`.
 9. Gate outcome `blocked` → bounce to the builder whose output its reason
    names, on the **same branch**. Only the reasons and cases the list below
@@ -587,11 +588,12 @@ one thing this playbook never asks you to.
     --causal-parent <event-id>` — the same write triple as every other
     dispatch above; a merge that lands with no session to log it into is a
     fact the timeline never gets. `--checks` is the file step 7's gate line
-    takes. The queue keeps today's command for an unlabelled file (one with no
-    post-merge or pre-release entry, or an empty one): `--test-cmd`, and
-    `--select-test-cmd` where it is used, run as before. Once a later tier
-    exists the pre-merge tier is the pre-landing test and the queue runs neither
-    command, without refusing either flag.
+    takes. The queue keeps today's command for an unlabelled file (one whose
+    effective tiers, declared or from the tier overlay, hold no post-merge or
+    pre-release entry, or an empty one): `--test-cmd`, and `--select-test-cmd`
+    where it is used, run as before. Once the effective tiers hold one, the
+    pre-merge tier is the pre-landing test and the queue runs neither command,
+    without refusing either flag.
 
     **The queue takes turns.** `bs queue run` holds the heavy lock for each
     task from its rebase through its merge, so queue runs of one epic take turns

@@ -162,8 +162,9 @@ session the epic session drives itself, never as a blocking runner: a session
 blocked on a runner cannot see a landing, so admission would wait for the whole
 wave again.
 
-**Post-merge and held tasks.** When the checks file holds a post-merge entry,
-a landing is not yet certified: `bs checks post-merge` certifies a batch of
+**Post-merge and held tasks.** When the effective checks (the declared tiers
+of the checks file plus the tier overlay) hold a post-merge entry, a landing
+is not yet certified: `bs checks post-merge` certifies a batch of
 landings later, and a task that depends on an uncertified merge is held. The
 epic session runs the four steps below on every landing, in either shape above
 (inline, a `bs queue run` it ran returned `merged`; dispatched, a `wave-merged`

@@ -354,14 +354,16 @@ bs gate run epic-1/task-1 \
 - `"tier"` — an entry may also carry `tier`, beside `heavy`: `heavy` says a
   check runs under the machine lock, `tier` says *when* it runs. One of
   `pre-merge`, `post-merge` or `pre-release`; an unknown value is refused at
-  read time, naming the entry and the file. **Absent means `pre-merge`**, so a
-  file that labels nothing behaves exactly as before, and an empty file still
-  passes. `bs gate run` runs the pre-merge tier only and names what it
+  read time, naming the entry and the file. **Absent means `pre-merge`**
+  unless the tier overlay (the next bullet) has moved that check, so a file
+  that labels nothing behaves exactly as before while the overlay moves none
+  of its checks, and an empty file still passes. `bs gate run` runs the pre-merge tier only and names what it
   deferred in the `testgate-result`; a non-empty file with no pre-merge entry
   is refused before any stage (`gate.no-pre-merge-checks`), and so is a
   deferred check a gate stage depends on (`gate.stage-check-deferred`). The
   merge queue reads the same file (`bs queue run --checks`, §4): with no
-  later-tier entry it runs `--test-cmd` as it always did, and with one the
+  later-tier entry, declared or from the overlay, it runs `--test-cmd` as it
+  always did, and with one the
   pre-merge tier is the pre-landing test and neither `--test-cmd` nor
   `--select-test-cmd` runs, though both flags are still accepted. The
   post-merge tier runs on the integration branch after landings
@@ -380,11 +382,12 @@ bs gate run epic-1/task-1 \
   check falls back to `pre-merge`), otherwise `active`. An overlay that is
   missing, unreadable or tracked by git leaves every undeclared check in
   `pre-merge` and `bs` asks no question it could not apply. Four layouts have
-  no overlay at all: outside a git repository; a bare repository; an absorbed
-  submodule, whose git dir lives in the superproject's `.git/modules/` (a
-  submodule whose `.git` is its own directory is an ordinary repository and
-  keeps its overlay at its own root); and a `--separate-git-dir` layout. In
-  each, writes are refused with `checks.overlay-not-a-repo` and proposals carry
+  no overlay: outside a git repository; a bare repository and its linked
+  worktrees; an absorbed submodule, whose git dir lives in the superproject's
+  `.git/modules/`, and its linked worktrees (a submodule whose `.git` is its
+  own directory is an ordinary repository and keeps its overlay at its own
+  root); and a `--separate-git-dir` layout's main work tree and its linked
+  worktrees, except the one known wrong case below. In each, writes are refused with `checks.overlay-not-a-repo` and proposals carry
   no items, so no tier is learned there. The one known wrong case: every linked
   worktree of a `--separate-git-dir` layout whose git dir is named `.git`
   resolves the overlay to that git dir's parent, not to the work tree. The mechanism, its thresholds and its guardrails are specified in
