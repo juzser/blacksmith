@@ -569,8 +569,11 @@ async function applyIn(
     snapshot?: StoredEvent[];
   } = {},
 ) {
-  const log = await readEvents('s', { stateDir: w.stateDir });
-  const events = o.snapshot ?? [...w.events, ...(o.extra ?? []), ...log];
+  const events = o.snapshot ?? [
+    ...w.events,
+    ...(o.extra ?? []),
+    ...(await readEvents('s', { stateDir: w.stateDir })),
+  ];
   return applyTierDecisions(
     decisions,
     {
@@ -1518,6 +1521,121 @@ describe('under the lock, apply and promotion read the current log', () => {
     ]);
     expect(overlayTiers(p.w.repo)).toEqual([['unit', 'pre-merge']]);
     expect(await typesOf(p.w)).toEqual(['session-start', CHECK_TIER_PROMOTED_EVENT]);
+  });
+});
+
+// Another project's session log in the same state directory.
+async function foreignLog(
+  stateDir: string,
+  sessionId: string,
+  events: { type: string; payload: Record<string, unknown> }[],
+) {
+  let parent = (
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    )
+  ).event_id;
+  for (const e of events) {
+    parent = (
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'operator',
+          event_type: e.type,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: e.payload,
+        },
+        { stateDir },
+      )
+    ).event_id;
+  }
+}
+
+describe('under the lock, apply and promotion read only their own sessions', () => {
+  it("project A's apply neither sees nor acts on project B's decision in the shared state dir", async () => {
+    const w = await world();
+    const item = (await pendingNow(w)).items.find((i) => i.check === 'unit') as ProposalItem;
+    await foreignLog(w.stateDir, 'b', [
+      {
+        type: CHECK_TIER_DECIDED_EVENT,
+        payload: {
+          proposal_id: item.proposal_id,
+          check: 'unit',
+          cmd_sha256: shaOf('unit'),
+          from_tier: 'pre-merge',
+          to_tier: 'post-merge',
+          decision: 'approve',
+          note: null,
+        },
+      },
+    ]);
+    // A third project's log that cannot be read: none of A's business either.
+    writeFileSync(path.join(w.stateDir, 'b2.jsonl'), 'not json\n');
+    const empty = await applyIn(w, []);
+    expect(empty.decided).toEqual([]);
+    expect(overlayBytes(w.repo)).toBeNull();
+    expect(empty.pending).toContain(item.proposal_id);
+    const res = await applyIn(w, [approve(item, 'post-merge')]);
+    expect(res.decided).toEqual([item.proposal_id]);
+    const o = readOverlay(w.repo);
+    const by = 'entries' in o ? o.entries.map((e) => e.decided_by_event_id) : [];
+    expect(by).toHaveLength(1);
+    expect(by[0]?.startsWith('s#')).toBe(true);
+  });
+
+  it("project A's promotion is not stopped by project B's promotion of the same check", async () => {
+    const p = await promoWorld();
+    await foreignLog(p.w.stateDir, 'b', [
+      {
+        type: CHECK_TIER_PROMOTED_EVENT,
+        payload: {
+          check: 'unit',
+          cmd_sha256: shaOf('unit'),
+          from_tier: 'post-merge',
+          to_tier: 'pre-merge',
+          catch_event_id: 'rr#9',
+          decided_by_event_id: 'lg#d',
+        },
+      },
+    ]);
+    expect(await promote(p)).toEqual([{ check: 'unit', result: 'promoted', reason: null }]);
+    expect(await typesOf(p.w)).toEqual(['session-start', CHECK_TIER_PROMOTED_EVENT]);
+  });
+
+  it('an unreadable line in its own session refuses apply as checks.session-unreadable, changing nothing', async () => {
+    const w = await world();
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    const snapshot = [...w.events, ...(await readEvents('s', { stateDir: w.stateDir }))];
+    const file = path.join(w.stateDir, 's.jsonl');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}not json\n`);
+    const bytes = readFileSync(file, 'utf8');
+    const err = await applyIn(w, [approve(item)], { snapshot }).catch((e) => e);
+    expect(err.code).toBe('checks.session-unreadable');
+    expect(err.items).toEqual([]);
+    expect(readFileSync(file, 'utf8')).toBe(bytes);
+    expect(overlayBytes(w.repo)).toBeNull();
+  });
+
+  it('an unreadable line in its own session answers promotion-skipped, never a throw', async () => {
+    const p = await promoWorld();
+    const file = path.join(p.w.stateDir, 's.jsonl');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}not json\n`);
+    const bytes = readFileSync(file, 'utf8');
+    const overlay = overlayBytes(p.w.repo);
+    expect(await promote(p)).toEqual([
+      { check: 'unit', result: 'promotion-skipped', reason: 'checks.session-unreadable' },
+    ]);
+    expect(readFileSync(file, 'utf8')).toBe(bytes);
+    expect(overlayBytes(p.w.repo)).toBe(overlay);
   });
 });
 

@@ -10,7 +10,7 @@ import { SmithError } from './errors.js';
 import {
   appendEvent,
   type EventOpts,
-  listSessionIds,
+  EventError,
   mergeSessionLogs,
   readEvents,
   type StoredEvent,
@@ -408,20 +408,33 @@ interface Decision {
 /**
  * Spec D7/D8: once the lock is held, the log as it stands rather than the
  * caller's earlier read, so a write the previous lock holder made is seen.
- * `snapshot` in its own order, then every event of the store this module
- * appends to (`opts.stateDir`) that the snapshot lacks, in causal order.
+ * Only the sessions the caller's snapshot came from, plus `ownSession` (where
+ * this module appends), are re-read: the snapshot is already scoped to one
+ * project, and another project's log in a shared state directory is never
+ * opened. Snapshot events no re-read log holds come first, then those logs in
+ * their own order. A log that cannot be read answers `null`, never a throw.
  */
 async function currentLog(
   snapshot: readonly StoredEvent[],
+  ownSession: string,
   opts: EventOpts = {},
-): Promise<StoredEvent[]> {
-  const seen = new Set(snapshot.map((e) => e.event_id));
+): Promise<StoredEvent[] | null> {
+  const ids = new Set([...snapshot.map((e) => e.record.session_id), ownSession]);
   const logs = [];
-  for (const sessionId of listSessionIds(opts.stateDir)) {
-    logs.push({ sessionId, events: await readEvents(sessionId, opts) });
+  try {
+    for (const sessionId of ids) {
+      logs.push({ sessionId, events: await readEvents(sessionId, opts) });
+    }
+  } catch (err) {
+    if (err instanceof EventError && err.code === 'events.unreadable-session-log') return null;
+    throw err;
   }
-  return [...snapshot, ...mergeSessionLogs(logs).filter((e) => !seen.has(e.event_id))];
+  const fresh = mergeSessionLogs(logs);
+  const seen = new Set(fresh.map((e) => e.event_id));
+  return [...snapshot.filter((e) => !seen.has(e.event_id)), ...fresh];
 }
+
+const UNREADABLE_LOG_WHY = 'one of its own session logs cannot be read, so the log is not current';
 
 /** An overlay refusal (busy lock, failed repair) is the call's own state, so it names no item. */
 const noItems = (err: OverlayError): OverlayError & { items: ItemFailure[] } =>
@@ -467,7 +480,15 @@ export async function applyTierDecisions(
   try {
     return await withOverlayLock(dir, async () => {
       entered = true;
-      const events = await currentLog(input.events, opts.events);
+      const events = await currentLog(input.events, ctx.session_id, opts.events);
+      // Reconcile needs the current log, so with none no repair is made either.
+      if (events === null) {
+        throw new TierApplyRefusal(
+          'checks.session-unreadable',
+          `Cannot apply: ${UNREADABLE_LOG_WHY}.`,
+          { items: [] },
+        );
+      }
       try {
         await reconcileOverlay(dir, events, ctx, opts);
       } catch (err) {
@@ -672,7 +693,9 @@ export async function promoteAfterCatch(
       return await withOverlayLock(input.dir, async () => {
         // Each lock reads the log afresh, so a promotion made while this call waited is
         // seen and never undone by the reconcile.
-        log.splice(0, log.length, ...(await currentLog(log, opts.events)));
+        const fresh = await currentLog(log, ctx.session_id, opts.events);
+        if (fresh === null) return answer(name, 'promotion-skipped', 'checks.session-unreadable');
+        log.splice(0, log.length, ...fresh);
         await reconcileOverlay(input.dir, log, ctx, opts);
         const now = readOverlay(input.dir);
         const cur =
