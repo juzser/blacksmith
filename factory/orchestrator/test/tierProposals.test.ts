@@ -793,6 +793,36 @@ describe('applyTierDecisions: refusals', () => {
     expect(existsSync(path.join(w.repo, '.blacksmith', 'check-tiers.lock'))).toBe(false);
   });
 
+  it('refuses a lock still busy when the wait ends as checks.overlay-busy with no items', async () => {
+    const w = await world();
+    let release: () => void = () => undefined;
+    const held = withOverlayLock(
+      w.repo,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    let settled = false;
+    const call = applyIn(w, [])
+      .catch((e) => e)
+      .finally(() => {
+        settled = true;
+      });
+    for (let i = 0; i < 60 && !settled; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    vi.useRealTimers();
+    const err = await call;
+    expect(err.code).toBe('checks.overlay-busy');
+    expect(err.items).toEqual([]);
+    expect(await logCount(w)).toBe(1);
+    release();
+    await held;
+  });
+
   it('refuses outside a repository without creating anything', async () => {
     const w = await world();
     const plain = tmp();

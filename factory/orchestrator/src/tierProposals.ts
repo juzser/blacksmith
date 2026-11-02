@@ -4,6 +4,7 @@
 // events, and the automatic promotion of an overlay-demoted check after a catch.
 // The project's checks file is never opened for writing here.
 import { createHash } from 'node:crypto';
+import { isOperatorActor } from './actors.js';
 import { type CheckLedger, LEDGER_WINDOW_DAYS, type LedgerRow } from './checkLedger.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type StoredEvent } from './events.js';
@@ -362,10 +363,8 @@ export function validateDecisions(json: unknown, pending: readonly ProposalItem[
 
 /** A refused apply. `items` names every item with its own cause, and is empty when the call's own state is the cause. */
 export class TierApplyRefusal extends SmithError {
-  readonly items: ItemFailure[];
-  constructor(code: string, message: string, items: ItemFailure[] = []) {
-    super(code, message, { items });
-    this.items = items;
+  get items(): ItemFailure[] {
+    return (this.details.items as ItemFailure[] | undefined) ?? [];
   }
 }
 
@@ -395,8 +394,9 @@ interface Decision {
   note?: string;
 }
 
-const refuse = (code: string, message: string, items: ItemFailure[] = []): TierApplyRefusal =>
-  new TierApplyRefusal(code, message, items);
+/** An overlay refusal (busy lock, failed repair) is the call's own state, so it names no item. */
+const noItems = (err: OverlayError): OverlayError & { items: ItemFailure[] } =>
+  Object.assign(err, { items: [] as ItemFailure[] });
 
 /**
  * Spec D7/D8, apply: validate the whole array, then append one decision per item,
@@ -412,13 +412,27 @@ export async function applyTierDecisions(
 ): Promise<ApplyResult> {
   const { dir, events, ledger, now } = input;
   if (overlayPath(dir) === null) {
-    throw refuse('checks.overlay-not-a-repo', `"${dir}" is not inside a git repository.`);
+    throw new TierApplyRefusal(
+      'checks.overlay-not-a-repo',
+      `"${dir}" is not inside a git repository.`,
+      { items: [] },
+    );
   }
-  if (input.actor !== 'operator') {
-    throw refuse('checks.apply-not-operator', 'Only the operator may apply a tier decision.');
+  if (!isOperatorActor(input.actor)) {
+    throw new TierApplyRefusal(
+      'checks.apply-not-operator',
+      'Only the operator may apply a tier decision.',
+      { items: [] },
+    );
   }
   if (!Array.isArray(decisions)) {
-    throw refuse('checks.decisions-not-array', 'The decisions must be a JSON array.');
+    throw new TierApplyRefusal(
+      'checks.decisions-not-array',
+      'The decisions must be a JSON array.',
+      {
+        items: [],
+      },
+    );
   }
   let entered = false;
   try {
@@ -427,12 +441,19 @@ export async function applyTierDecisions(
       try {
         await reconcileOverlay(dir, events, ctx, opts);
       } catch (err) {
-        if (err instanceof OverlayError) throw refuse(err.code, err.message);
+        if (err instanceof OverlayError) throw noItems(err);
         throw err;
       }
       const writable = overlayWritable(dir);
+      if (writable === 'tracked') {
+        throw new TierApplyRefusal('checks.overlay-tracked', 'git tracks the overlay file.', {
+          items: [],
+        });
+      }
       if (writable !== 'ok') {
-        throw refuse(`checks.overlay-${writable}`, `The overlay is not writable (${writable}).`);
+        throw new TierApplyRefusal('checks.overlay-unreadable', 'The overlay is unreadable.', {
+          items: [],
+        });
       }
       const cands = candidates(ledger, events, now);
       const failures = validateDecisions(decisions, cands);
@@ -445,10 +466,10 @@ export async function applyTierDecisions(
           failures.push({ proposal_id: item.proposal_id, check: item.check, reason: why });
       }
       if (failures.length > 0) {
-        throw refuse(
+        throw new TierApplyRefusal(
           'checks.apply-refused',
           `${failures.length} decision(s) cannot be applied: ${failures.map((f) => `${f.check || f.proposal_id}: ${f.reason}`).join('; ')}`,
-          failures,
+          { items: failures },
         );
       }
 
@@ -514,7 +535,7 @@ export async function applyTierDecisions(
     });
   } catch (err) {
     // A lock that could not be taken is the call's own state, never an item's.
-    if (!entered && err instanceof OverlayError) throw refuse(err.code, err.message);
+    if (!entered && err instanceof OverlayError) throw noItems(err);
     throw err;
   }
 }
