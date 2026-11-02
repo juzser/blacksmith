@@ -463,7 +463,7 @@ one thing this playbook never asks you to.
 
    Slice: `bs playbook slice wave --step 7`.
 8. Build every dispatch in steps 3–7 with `bs brief compose --role <role>
-   --task <task-id> --session <id> --work-root <work-root> --provider <name> --model-tier <tier> --base <ref> --checks <file> --out <file>` (dispatch.md says
+   --task <task-id> --session <id> --work-root <work-root> --worktree <absolute worktree path> --artifact <absolute path> --provider <name> --model-tier <tier> --base <ref> --checks <file> --out <file>` (dispatch.md says
    what it emits and what it needs). It carries the compiled lessons block for that role (D2
    selection) and, for a worktree dispatch, the open-findings block for that
    task — dispatch.md's "Splice the compiled lessons into every prompt" and
@@ -481,7 +481,8 @@ one thing this playbook never asks you to.
    commands, from the flags `--provider`, `--model-tier`, `--base` (the coder),
    `--checks` (the file step 7's gate line takes) and `--work-root <work-root>`
    (the value of steps 5 and 7); it refuses to compose such a brief without
-   them, and `bs dispatch lint` exits 1 on a brief that lacks them:
+   them, without an absolute `--worktree` or, for a grader brief, without an
+   absolute `--artifact`, and `bs dispatch lint` exits 1 on a brief that lacks them:
    - coder: `bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts`
    - tester: `bs results check <task-id> --as tester --result <result.json> --agent tester --provider <name> --model-tier <tier> --plan <plan.json> --artifacts-dir <work-root>/state/artifacts`
    - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`

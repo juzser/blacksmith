@@ -19,7 +19,7 @@ tools, turn cap and lessons markers live, and an untyped agent has none of them.
 ## Carry into the prompt
 
 Build every brief with `bs brief compose --role <role> --session <id>
-[--task <task-id>] [--worktree <dir>] [--artifact <file>] [--provider <name> --model-tier <tier> --checks <file>] [--base <ref>] [--work-root <work-root>] --out <file>`. Compose requires `--work-root` for a coder, tester or grader; `--provider`, `--model-tier` and `--checks` for a coder or tester; `--base` for the coder. It
+[--task <task-id>] [--worktree <dir>] [--artifact <file>] [--provider <name> --model-tier <tier> --checks <file>] [--base <ref>] [--work-root <work-root>] --out <file>`. Compose requires an absolute `--worktree` for a coder, a tester and every judge turn but the spec-reviewer's and the auditor's; an absolute `--artifact` for every judge turn; `--work-root` for a coder, tester or grader; `--provider`, `--model-tier` and `--checks` for a coder or tester; `--base` for the coder. It
 writes the brief and a manifest beside it (`<file>.manifest.json`), and the
 brief passes `bs dispatch lint`. The list below is what compose emits, kept as
 the description of it — and the check for the one case it cannot cover.
