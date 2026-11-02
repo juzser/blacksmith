@@ -1955,10 +1955,12 @@ describe('every write carries the epic id, and the under-lock log is in time ord
   });
 
   it('orders snapshot-only and gathered events by ts, session order on ties, each event once', async () => {
-    const w = await world(['unit']);
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const at = (iso: string) => vi.setSystemTime(Date.parse(iso));
+      // world() writes s0, the session-start; pin it before 'a' so the order holds on any clock.
+      at('2026-12-31T00:00:00Z');
+      const w = await world(['unit']);
       const add = (type: string) =>
         appendEvent(
           { ...w.ctx, event_type: type, payload: { epic_id: 'e' } },
