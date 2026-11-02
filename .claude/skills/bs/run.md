@@ -371,6 +371,7 @@ no longer exists. One dogfooded product epic closed at v3 with its
 integration check and its closing spec review both stamped v1; the goal
 check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
 pass it every time.
+
 13. Dispatch the **`bs-spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
     this one reads it against the assembled branch, which is the only reading

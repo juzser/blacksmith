@@ -646,6 +646,17 @@ describe('step 12 re-entry after a refusal', () => {
     expect(json(later).answered_in_epic).toBe(true);
   });
 
+  it('no numbered step of run.md directly follows column-0 prose, which a renderer would fold into that paragraph', () => {
+    const l = run.split('\n');
+    const bad = l
+      .map((x, i) => ({ x, i }))
+      .filter(({ x, i }) => /^\d+\. /.test(x) && i > 0)
+      .filter(({ i }) => /^\S/.test(l[i - 1] as string))
+      .filter(({ x }) => !/^1\. /.test(x))
+      .map(({ x, i }) => `${i + 1}: ${x.slice(0, 40)}`);
+    expect(bad).toEqual([]);
+  });
+
   function commandOf(prefix: string): string {
     const l = run.split('\n');
     const at = l.findIndex((x) => x.trim().startsWith(prefix));
