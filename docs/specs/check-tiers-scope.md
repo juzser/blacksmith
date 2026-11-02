@@ -144,12 +144,15 @@ refuses a held task.
      passes, the red did not reproduce: nothing is bisected or reverted, and
      the two records are the ledger's flaky evidence. A probe never
      certifies.
-  4. A base that is not yet observed green is probed first; red there means
-     the failure predates the batch and no task is blamed.
+  4. A base that is not yet observed green is probed first; red there is
+     `red-at-base`, and the failure predates the batch, so no task is blamed.
   5. A reproduced red is bisected over the per-task merge commits between the
      base and the head, re-running only the failed checks at each prefix.
      A foreign commit in the range, or a later merge that depends on the
-     culprit, ends the run without a revert.
+     culprit, ends the run without a revert. When every task merge in the
+     range is green and only a landed bs revert commit after them turns the
+     head red, the outcome is also `red-at-base`: no task is blamed, nothing
+     is promoted, and the result names the revert in `red_after_revert`.
 - **A tested and recorded revert.** The revert is built with a merge-aware
   `git revert` in a scratch worktree, with trailers naming the reverted merge,
   the task, the red record and the failing checks, so the evidence survives in
@@ -157,7 +160,11 @@ refuses a held task.
   pre-merge tier and the whole post-merge tier, both recorded at the revert
   commit, before the ref moves. It lands through the same path every queue
   landing uses (compare-and-swap, or a fast-forward of a clean holder). Only
-  then is a `wave-reverted` event written.
+  then is a `wave-reverted` event written. When the effective checks hold no pre-merge
+  entry, the revert cannot be tested, so none is built and no ref moves: the
+  outcome is `revert-not-applicable` with reason `no-pre-merge-checks`, the
+  culprit is still named, and automatic promotion still runs for its failing
+  checks.
 - **Resume.** Every run first scans the integration branch from its fork
   point for bs revert commits with no `wave-reverted` naming them, validates
   their trailers, and ends each case terminally: a bounce when the task is

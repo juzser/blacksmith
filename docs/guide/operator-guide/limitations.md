@@ -27,9 +27,13 @@ does wherever else this repo cites it.
   CLI-accessible; only the "always-on daemon that needs no human in the loop
   at all" framing from architecture §16's later phases is still ahead, and it
   is not a line the watcher is allowed to cross on its own.
-- **Nothing runs the integration-root check for you, and it is the only
-  check that sees the assembled branch.** Every automatic gate runs inside a
-  task worktree (§7a). `bs integration check` is operator-invoked, and it
+- **Nothing runs the integration-root check for you, and close requires
+  it.** Every automatic task gate runs inside a task worktree (§7a). When the
+  effective checks hold a post-merge entry, `/bs run` starts
+  `bs checks post-merge` after each landing, and a batch that is due runs that
+  tier at the integration head in a detached scratch worktree.
+  `bs integration check` is the clone-root run that close requires,
+  operator-invoked, and it
   needs the project already checked out on `bs/<epic>/integration` — it
   refuses to move or clean your working tree. Skipping it no longer buys you
   a green epic, though: `bs epic verdict` holds without a current passing

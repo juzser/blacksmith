@@ -29,7 +29,7 @@ reads the finding.
 | [`phase-10-scope.md`](phase-10-scope.md) | 31 kB | Phase 10 |
 | [`audit-command-scope.md`](audit-command-scope.md) | 22 kB | the `audit` verb — a whole-project audit as a command, not a conversation |
 | [`continuous-loop-scope.md`](continuous-loop-scope.md) | 19 kB | the continuous loop — the factory running epic after epic without an operator turn between them |
-| [`check-tiers-scope.md`](check-tiers-scope.md) | 17 kB | check tiers — a check declares when it runs, each tier runs where it belongs, and the factory learns which checks to move later (status: planned) |
+| [`check-tiers-scope.md`](check-tiers-scope.md) | 17 kB | check tiers — a check declares when it runs, each tier runs where it belongs, and the factory learns which checks to move later (status: shipped) |
 | [`plugin-port-scope.md`](plugin-port-scope.md) | 21 kB | the plugin port (status: partly shipped) |
 
 A scope is not a contract: once its work has shipped, the architecture and
