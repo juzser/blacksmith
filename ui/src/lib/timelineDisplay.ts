@@ -77,6 +77,10 @@ const GATE_CHECK_NAME: Record<string, string> = {
   'quorum-decision': 'Quorum decision',
   'gate-outcome': 'Gate outcome',
   'issue-reported': 'Issue reported',
+  'queue-tier-run': 'Pre-merge checks',
+  'check-tier-decided': 'Check tier decision',
+  'check-tier-promoted': 'Check tier promotion',
+  'check-tier-batch-answered': 'Check tier proposals',
 };
 
 function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
