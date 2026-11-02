@@ -145,6 +145,24 @@ afterwards makes it stale — and `bs epic verdict` then holds with
 `is stale: it ran against <sha>, and … is now at <sha>` rather than trusting
 a green that has outlived its truth.
 
+**Per-tier close.** With a checks file that labels tiers (§5 of
+[the queue and gate guide](queue-and-gate.md)), `--tier` picks what runs:
+`pre-merge`, `post-merge` or `pre-release` runs that tier, `all` runs every
+tier, and `--tier remaining` runs every check the head is not yet certified for, which
+is what `/bs run` runs at close after the post-merge batch's final run
+(`bs checks post-merge --final`). When nothing remains the verb refuses with
+`integration.nothing-remaining`: every check is already certified at the head,
+and the close goes on to the verdict as after a green run. A pass is certified
+per check, so a record that ran only some tiers never certifies another's,
+and a probe never certifies. `bs epic verdict` and `bs epic close` take the
+same `--checks` file and require every declared check of every tier certified
+at the head, with one blocker per uncovered check naming it, its tier and
+why. **`bs epic close` without `--checks` on an epic whose records use tiers is
+refused with one blocker that asks for `--checks`**; an epic with no tiered
+record closes exactly as before. The proposal batch, which moves slow checks to
+a later tier, is asked and applied first
+([`docs/specs/check-tiers-scope.md`](../../specs/check-tiers-scope.md)).
+
 ## 7b. `bs epic close` — the verdict, written down
 
 `epic verdict` is a probe: free, read-only, re-runnable, and it writes nothing

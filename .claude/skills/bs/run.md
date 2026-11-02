@@ -61,7 +61,8 @@ docs/runbooks/providers.md §9d.
 
    Then put that proposal through the gate that actually admits it:
 
-   `bs wave check factory/specs/active/<epic>/plan-vN.json <task-id>...`
+   `bs wave check factory/specs/active/<epic>/plan-vN.json <task-id>...
+   --session <session-id> --checks <checks.json> --project <project-dir>`
    — claims must be pairwise disjoint and share no `worktree.yml`
    `serialize_always_globs` hotspot. A violation means cut a dependency
    edge and run the pair serially instead of forcing the wave.
@@ -161,6 +162,78 @@ session the epic session drives itself, never as a blocking runner: a session
 blocked on a runner cannot see a landing, so admission would wait for the whole
 wave again.
 
+**Post-merge and held tasks.** When the checks file holds a post-merge entry,
+a landing is not yet certified: `bs checks post-merge` certifies a batch of
+landings later, and a task that depends on an uncertified merge is held. The
+epic session runs the four steps below on every landing, in either shape above
+(inline, a `bs queue run` it ran returned `merged`; dispatched, a `wave-merged`
+appeared on the tail it watches), and never the runner, which never admits.
+
+- **(a)** Start the batch as a background task (`run_in_background`, the
+  command ending `; echo EXIT=$?`), waited on by its completion notification or
+  the Monitor tool, and never wrapped in `bs heavy run`: its checks take the
+  heavy lock themselves, and a lock wait can outlast a foreground call's
+  10-minute cap. The command is `bs checks post-merge --epic <epic> --project
+  <project-dir> --checks <checks.json> --plan
+  factory/specs/active/<epic>/plan-vN.json --setup-cmd "<install command>"
+  --session <session-id> --plan-version <n> --causal-parent <event-id>`, where
+  `--setup-cmd` is the install command this playbook runs in task worktrees
+  and `--session` is the epic session's own id, so the record the batch writes
+  lands in the log the hold reads.
+
+- **(b)** Read the hold without waiting for the batch, and ask the graph:
+  `bs checks post-merge --held --epic <epic> --project <project-dir> --checks
+  <checks.json> --plan factory/specs/active/<epic>/plan-vN.json --session
+  <session-id>` is read-only and returns at once with `{held,
+  uncertified_merges}`, each held entry naming the merges it waits on; then
+  `bs wave next factory/specs/active/<epic>/plan-vN.json --session
+  <session-id> --repo <project-dir>`, as step 1 does.
+
+- **(c)** Admit at once every task `bs wave next` returns that `--held` does
+  not list, without waiting for the batch to return.
+
+- **(d)** When the batch returns a proceed outcome, meaning one of the five
+  outcomes the verb exits 0 on (`green`, `reverted`, `no-checks-in-tier`,
+  `no-new-merges`, `batch-not-ready`), run `bs checks post-merge --held` and
+  `bs wave next` again with the flags item (b) gives, and admit every task
+  `bs wave next` returns that `--held` no longer lists. No outcome releases a
+  held task by itself: the re-read of `--held`, not the outcome, decides,
+  because it recomputes the hold from the records, so after `no-new-merges` it
+  admits what an earlier call's record already certified, and after any
+  outcome it admits only what the records no longer hold.
+
+'right away' and 'at once' in the rolling-admission sentences above apply to
+every task `--held` does not list, and to no other. `bs wave check` itself
+refuses a held task (`wave.held-by-post-merge`) and, on an epic whose records
+use tiers (a post-merge, a pre-release-only or a probe `integration-check`
+record alike), a `wave check` line without `--checks` (`wave.checks-required`),
+so the sentences above stay as they are and this block is the one instruction
+per landing. Every `bs wave check` line carries `--session <session-id>`,
+`--checks <checks.json>` and `--project <project-dir>`, because the hold is
+read from that session's lineage and a session-less check reads no log.
+
+Only `green` means the post-merge tier ran and passed; `no-checks-in-tier`,
+`no-new-merges` and `batch-not-ready` mean no batch was due and nothing ran, so
+none of them is ever reported as a passed tier. `reverted` logs the revert and
+lets rolling admission re-admit the task; wave.md step 9 reopens it.
+`env-failure`, `not-reproduced` and `lock-timeout` are logged as
+`error-logged` with `execution.env-failure`, `execution.flaky-test` and
+`execution.env-failure` respectively, and the verb is called once more; a
+second such outcome at the same head goes to the operator. `revert-recorded`
+(a revert that stands without a bounce) and every other outcome
+(`setup-failed`, `red-at-base`, `batch-has-foreign-commit`,
+`revert-has-dependents`, `revert-conflict`, `revert-red`, `integration-dirty`,
+`integration-moved`) go to the operator with the JSON. For
+`revert-not-applicable` with reason `not-in-live-plan` the operator gets three
+ways out: an amendment that re-adds the task, an amendment adding a task that
+fixes the defect, or an edit to the failing check; the playbook offers no
+waiver, because no verb waives a red tier. With reason `no-pre-merge-checks`
+it goes to the operator with the JSON. A result that names culprits also
+prints a `promotions` list, each entry `{task, check, result, reason}`;
+`promotion-skipped` and `declared-tier-wins` are `result` values of those
+entries, not outcomes, so the outcome's own rule applies and the playbook also
+reports each entry with either value to the operator once.
+
 **Then check that it did.** Once the wave's tasks reach a terminal state,
 `bs wave audit --session <id> --epic <epic>` reads the log back and
 reports the width the wave actually ran at, not the width it was admitted
@@ -195,32 +268,110 @@ playbooks are written to prevent.
     creates it as a bare row (D-46, D-254). It is idempotent: the tasks the
     version carried forward are skipped, and the output's `added` should
     equal what the amendment's `diff` added.
-12. Run the full check suite **at the project root, on the assembled
-    branch**. Every gate up to here ran inside a task worktree, so every
-    green you have so far is a green about a worktree — the envkit epic
-    shipped six green lint gates on a branch whose `pnpm lint` exited 1
-    (D-42). Check out `bs/<epic>/integration` in the project first (this
-    command refuses to move your working tree, and refuses a dirty one):
+12. Settle the check tiers, then run what is left **at the project root, on
+    the assembled branch**. Every gate up to here ran inside a task worktree,
+    so every green you have so far is a green about a worktree — the envkit
+    epic shipped six green lint gates on a branch whose `pnpm lint` exited 1
+    (D-42). Check out `bs/<epic>/integration` in the project first (the
+    commands below that run there refuse to move your working tree, and refuse
+    a dirty one).
+
+    First the proposal batch: what bs would move to a later tier, asked once
+    per epic.
 
     ```bash
-    bs integration check --epic <epic> --project <project-dir> \
+    bs checks proposals --epic <epic> --project <project-dir> --specs-dir <specs-dir> \
       --checks <checks.json> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
-    Exit 1 means the assembled branch is broken. Raise a finding, fix it as
-    a task, and run this again — it pins its result to the head sha, so any
-    merge after it lands makes the record stale and the verdict below will
-    say so.
+    `<specs-dir>` is the directory that holds `<epic>/plan-vN.json`. If that
+    call exits 1 (for example `checks.overlay-busy`), the playbook reports its
+    error JSON to the operator once and goes on to `--final` without asking: bs
+    never asks what it cannot apply, and nothing has moved. Only when it has
+    items and `answered_in_epic` is false (the first pass through this step)
+    does the playbook ask ONE question for the whole batch, never one per
+    check: it numbers the items 1..n, letters each item's options (`a` is
+    keep), and shows for every option its runs covered, minutes spent and
+    minutes saved. It states the reply grammar: one or more `<n><letter>`
+    tokens, such as `1b 3c`, or the word `none`. A missing reply is no answer,
+    and no answer changes nothing. An unparseable reply decides nothing: a
+    token that does not parse, an unknown item or letter, or a repeated item
+    leaves no decision at all. Any other reply becomes decisions.json, a bare
+    array: with item 1 `e2e` and item 3 `unit`, each offering keep,
+    post-merge and pre-release as `a`, `b` and `c`, the reply `1b 3c` becomes
 
-    `--plan-version <n>` is the live version, here and on every record steps
-    13-16 write. The envelope leaves the flag optional, and an omitted one
-    stamps the record `plan_version: 1` — so on an epic that amended, the
-    check, the review and the close all claim to have verified a plan that
-    no longer exists. One dogfooded product epic closed at v3 with its
-    integration check and its closing spec review both stamped v1; the goal
-    check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
-    pass it every time.
+    ```json
+    [
+      {"proposal_id": "3f9a0c1d2b4e5f60", "check": "e2e", "decision": "approve", "to_tier": "post-merge"},
+      {"proposal_id": "8b7c6d5e4f3a2b1c", "check": "unit", "decision": "approve", "to_tier": "pre-release"}
+    ]
+    ```
+
+    and a `1a` token becomes `"decision": "decline"` with no `to_tier`. An item
+    the reply does not name gets no decision. Then run apply until one call is
+    accepted, at most twice, with `[]` when nothing was decided:
+
+- **Apply.** `bs checks apply <decisions.json> --project <project-dir>
+  --specs-dir <specs-dir> --checks <checks.json> --epic <epic> --actor
+  operator --session <session-id> --plan-version <n> --causal-parent
+  <event-id>` is the first call. An accepted call records the decisions and
+  the batch's `check-tier-batch-answered`, and the batch is not asked again.
+
+- **Re-run.** A first call refused with `items` (each item whose guardrail
+  or shape now fails, which only a change to the log between question and
+  answer causes) is reported item by item: the playbook reports each item
+  and its reason to the operator, then runs `bs checks apply
+  <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
+  <checks.json> --epic <epic> --actor operator --session <session-id>
+  --plan-version <n> --causal-parent <event-id>` once more with the same
+  decisions minus those items (`[]` if none remain), because guardrails win
+  over a reply and the batch is never asked twice.
+
+- **Hand-off.** A refusal with `items: []` (the actor, the overlay, the
+  lock, a failed repair), or a second refusal, goes to the operator with the
+  JSON and the decisions.json path. The playbook then runs `bs checks apply
+  <decisions.json> --project <project-dir> --specs-dir <specs-dir> --checks
+  <checks.json> --epic <epic> --session <session-id> --plan-version <n>
+  --causal-parent <event-id> --hand-off <refusal-code>`, which records the
+  hand-off as the epic's `check-tier-batch-answered`, decides nothing, and
+  turns `answered_in_epic` true, so no later entry to this step asks again.
+  The hand-off ends when the operator runs `bs checks apply` with that
+  decisions.json once the cause is fixed, or leaves the tiers as they are,
+  which moves nothing.
+
+Notices are reported, not asked; silence changes nothing. Then run the
+post-merge tier's final batch, so every landing is certified, and then
+every check the head is not yet certified for:
+
+```bash
+bs checks post-merge --final --epic <epic> --project <project-dir> --checks <checks.json> --plan factory/specs/active/<epic>/plan-vN.json --setup-cmd "<install command>" --session <session-id> --plan-version <n> --causal-parent <event-id>
+bs integration check --epic <epic> --project <project-dir> --checks <checks.json> --tier remaining --session <session-id> --plan-version <n> --causal-parent <event-id>
+```
+
+Handle the first as the post-merge block above does. When the second
+refuses with `integration.nothing-remaining`, every check is already
+certified at the head, so step 12 goes on to `bs epic verdict` and
+`bs epic close` exactly as after a green run; any other refusal stops the
+close.
+
+Only a red check outcome, and any refusal not named here, means the
+assembled branch is broken, whatever the exit code; the named outcomes
+follow their own rules instead (`integration.nothing-remaining` above, and
+each outcome the post-merge block handles). For a broken branch, raise a
+finding, fix it as a task, and run it again — each pins its result to the
+head sha, so any merge after it lands makes the record stale and the
+verdict below will say so.
+
+`--plan-version <n>` is the live version, here and on every record steps
+13-16 write. The envelope leaves the flag optional, and an omitted one
+stamps the record `plan_version: 1` — so on an epic that amended, the
+check, the review and the close all claim to have verified a plan that
+no longer exists. One dogfooded product epic closed at v3 with its
+integration check and its closing spec review both stamped v1; the goal
+check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
+pass it every time.
+
 13. Dispatch the **`bs-spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
     this one reads it against the assembled branch, which is the only reading
@@ -324,7 +475,7 @@ playbooks are written to prevent.
     integrable at all:
 
     ```bash
-    bs epic verdict --epic <epic> --project <project-dir> \
+    bs epic verdict --epic <epic> --project <project-dir> --checks <checks.json> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
@@ -355,7 +506,7 @@ playbooks are written to prevent.
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
     ```bash
-    bs epic close --epic <epic> --project <project-dir> \
+    bs epic close --epic <epic> --project <project-dir> --checks <checks.json> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 

@@ -391,7 +391,12 @@ one thing this playbook never asks you to.
      literally, with no narrowing of its own. Narrowing by changed files is
      `bs queue run --select-test-cmd` (`factory/orchestrator/src/testSelect.ts`),
      a queue-tier flag `--batch` refuses; it does not reach `checks.json`. A
-     scoped-down unit check is how red tests have merged before.
+     scoped-down unit check is how red tests have merged before. The rule holds
+     in whatever tier the full suite sits: an entry may carry a `"tier"`
+     (`pre-merge`, `post-merge` or `pre-release`; absent means `pre-merge`), and
+     the gate runs only the pre-merge tier of a tiered file and names what it
+     deferred, so the full suite is the full test command in whichever tier the
+     file puts it.
    - **Heavy checks.** `gate run` and `bs integration check` hold the machine's
      heavy lock for a check that is heavy and for no other. `checks.json` marks
      a check with `"heavy": true` (or `"heavy": false`, which wins); unmarked,
@@ -480,6 +485,9 @@ one thing this playbook never asks you to.
    - coder: `bs results check <task-id> --as coder --result <result.json> --agent coder --provider <name> --model-tier <tier> --worktree <dir> --base <ref> --artifacts-dir <work-root>/state/artifacts`
    - tester: `bs results check <task-id> --as tester --result <result.json> --agent tester --provider <name> --model-tier <tier> --plan <plan.json> --artifacts-dir <work-root>/state/artifacts`
    - grader: `bs results check <task-id> --as grader --grader state/results/<task-id>.grader-r<round>.json --artifacts-dir <work-root>/state/artifacts`
+   With a tiered checks file the composed brief lists only the pre-merge checks
+   the gate runs and names the deferred ones, so a worker is never told to run a
+   check the gate will not.
    Slice: `bs playbook slice wave --step 8`.
 9. Gate outcome `blocked` → bounce to the builder whose output its reason
    names, on the **same branch**. Only the reasons and cases the list below
@@ -535,6 +543,19 @@ one thing this playbook never asks you to.
      round another gate round still needs a builder dispatch on a higher model
      tier first, as `checkModelTierRung` and `checkOperatorRung` in
      `escalation.ts` enforce, and by the rule above that dispatch waits for the operator's answer.
+   - **A reverted task.** A task a post-merge `wave-reverted` (`disposition:
+     bounce`) reopened is admitted again by rolling admission and goes to its
+     coder like a blocked round. Reopen it with `bs worktree create <project>
+     <epic> <task> --reopen --revert <revert-sha>`, where `<revert-sha>` is the
+     latest `wave-reverted`'s `revert_sha` for that task. Put that event's
+     `failing_checks`, `log_tail` and `red_record_event_id` into the coder's
+     brief, and the round counts on the S2 ladder above like any other. When the
+     reopen refuses (`worktree.reopen-dirty`, `worktree.reopen-not-ancestor`,
+     `worktree.reopen-revert-not-on-integration` or
+     `worktree.reopen-revert-conflict`), step 9 hands the refusal to the operator
+     once and the task is not admitted again until the operator answers; the way
+     out is a plan amendment that supersedes the task with one cut from the
+     integration head.
    Slice: `bs playbook slice wave --step 9`.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting to the
     merge queue, audit the wave's own parallelism: `bs wave audit --session <id> --epic
@@ -561,11 +582,16 @@ one thing this playbook never asks you to.
     `breaks` exits 0 and is a note: the scanner reads text, not types
     (operator-guide/wave.md §2). Then admit into the
     merge queue: `bs queue run <epic> --project <project-dir>
-    --test-cmd "<cumulative test command>" --tasks tasks.json --plan
-    <plan.json> --session <id> --plan-version <n> --causal-parent
-    <event-id>` — the same write triple as every other dispatch above; a
-    merge that lands with no session to log it into is a fact the
-    timeline never gets.
+    --test-cmd "<cumulative test command>" --checks <checks.json>
+    --tasks tasks.json --plan <plan.json> --session <id> --plan-version <n>
+    --causal-parent <event-id>` — the same write triple as every other
+    dispatch above; a merge that lands with no session to log it into is a
+    fact the timeline never gets. `--checks` is the file step 7's gate line
+    takes. The queue keeps today's command for an unlabelled file (one with no
+    post-merge or pre-release entry, or an empty one): `--test-cmd`, and
+    `--select-test-cmd` where it is used, run as before. Once a later tier
+    exists the pre-merge tier is the pre-landing test and the queue runs neither
+    command, without refusing either flag.
 
     **The queue takes turns.** `bs queue run` holds the heavy lock for each
     task from its rebase through its merge, so queue runs of one epic take turns
@@ -577,6 +603,11 @@ one thing this playbook never asks you to.
     is the runner's job; admitting tasks to work (`bs wave next`, `bs wave
     check`) is the epic session's, so the runner never runs `bs wave next` to
     admit.
+
+    The post-merge batch is the epic session's, never the runner's, because the
+    runner never admits: after a landing the epic session starts `bs checks
+    post-merge` and reads the hold before it asks `bs wave next` (run.md,
+    rolling admission). The runner reports its merges and goes on.
 
     **Run `bs queue run` as a background task** (`run_in_background`, the
     command ending `; echo EXIT=$?`) and wait on its completion notification
