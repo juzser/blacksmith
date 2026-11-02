@@ -253,6 +253,21 @@ describe('post-merge revert landing', () => {
       expect(await reverted()).toHaveLength(1);
     });
 
+    it('reads an older wave-merged whose sha the clone lacks as not re-merged', async () => {
+      // An earlier landing on a rebuilt branch, or a log written on another clone.
+      await append(
+        'wave-merged',
+        { epic_id: repo.epicId, task_ids: [T(2)], merge_sha: 'a'.repeat(40) },
+        T(2),
+      );
+      await threeMerges();
+      repo.release();
+      const result = await run();
+      expect(result.outcome).toBe('reverted');
+      expect(result.culprits.map((c) => c.task)).toEqual(['task-2']);
+      expect(await reverted()).toHaveLength(1);
+    });
+
     it('fast-forwards a clean worktree that holds the branch', async () => {
       await threeMerges();
       const result = await run();
@@ -604,13 +619,28 @@ describe('post-merge revert landing', () => {
     it('throws postmerge.not-integration-branch before any worktree, leaving main alone', async () => {
       const lone = path.join(repo.root, 'lone');
       runGit(repo.root, ['init', '-q', '-b', repo.branch, lone]);
-      const main = repo.git(['rev-parse', 'main']);
-      const before = repo.worktreeCount();
+      runGit(lone, [
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init',
+      ]);
+      runGit(lone, ['branch', 'main']);
+      const main = repo.git(['rev-parse', 'main'], lone);
+      const tip = repo.git(['rev-parse', repo.branch], lone);
+      const worktrees = () => repo.git(['worktree', 'list', '--porcelain'], lone);
+      const before = worktrees();
       await expect(run({ projectDir: lone })).rejects.toMatchObject({
         code: 'postmerge.not-integration-branch',
       });
-      expect(repo.worktreeCount()).toBe(before);
-      expect(repo.git(['rev-parse', 'main'])).toBe(main);
+      expect(worktrees()).toBe(before);
+      expect(repo.git(['rev-parse', 'main'], lone)).toBe(main);
+      expect(repo.git(['rev-parse', repo.branch], lone)).toBe(tip);
     });
   });
 

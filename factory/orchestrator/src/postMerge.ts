@@ -63,8 +63,18 @@ function scratchRoot(projectDir: string): string {
   return path.join(path.dirname(project), '.wt', path.basename(project));
 }
 
-/** Whether `a` is an ancestor of `b`; only git's exit 1 is "no", any other fault throws. */
+/**
+ * Whether `a` is an ancestor of `b`; only git's exit 1 is "no", any other fault throws.
+ * A `b` the clone lacks has no ancestors here (`cat-file -e` exits 1 for a full name),
+ * the rule the resume follows.
+ */
 function isAncestor(projectDir: string, a: string, b: string): boolean {
+  try {
+    git(projectDir, ['cat-file', '-e', b]);
+  } catch (err) {
+    if (err instanceof GitCommandError && err.status === 1) return false;
+    throw err;
+  }
   try {
     git(projectDir, ['merge-base', '--is-ancestor', a, b]);
     return true;
@@ -171,7 +181,8 @@ export async function runPostMerge(
   }
   if (resume.resumed) {
     return {
-      outcome: resume.outcome === 'nothing-to-resume' ? 'reverted' : resume.outcome,
+      // `resumed` is true exactly when something was written, so never `nothing-to-resume`.
+      outcome: resume.outcome as RevertOutcome,
       resumed: true,
       culprits: resume.wrote.flatMap((w) => (w.culprit === undefined ? [] : [w.culprit])),
       event_ids: [],
