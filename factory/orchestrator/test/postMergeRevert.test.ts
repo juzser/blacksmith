@@ -11,7 +11,7 @@ import { runPostMerge } from '../src/postMerge.js';
 import { isBsRevertCommit, type PostMergeInput } from '../src/postMergeBisect.js';
 import { trailerValues } from '../src/postMergeResume.js';
 import { recordWaveReverted, WAVE_REVERTED_EVENT } from '../src/revert.js';
-import type { CheckCommand, CheckResult } from '../src/testgate.js';
+import { type CheckCommand, type CheckResult, SLEEP_GAP_MS } from '../src/testgate.js';
 import { createIntegrationRepo, type IntegrationRepo } from './helpers/integrationRepo.js';
 import { git as runGit } from './helpers/process.js';
 
@@ -503,6 +503,71 @@ describe('post-merge revert landing', () => {
       expect(result.red_after_revert).toEqual([R]);
       expect(result.reason).toContain(R);
       expect(repo.head()).toBe(R);
+    });
+
+    it('keeps culprits empty and builds nothing when the head red does not reproduce', async () => {
+      await threeMerges();
+      repo.release();
+      const oldHead = repo.head();
+      const flaky = path.join(repo.root, 'flaky.txt');
+      const cmd = `n=$(cat ${flaky} 2>/dev/null || echo 0); echo $((n+1)) > ${flaky}; test $n -ge 1`;
+      const seen: string[] = [];
+      const result = await run(
+        { checks: [PRE, { name: 'post-a', cmd, tier: 'post-merge' }] },
+        { onScratch: (p) => seen.push(p) },
+      );
+      expect(result.outcome).toBe('not-reproduced');
+      expect(result.culprits).toEqual([]);
+      expect(result.dependents).toBeUndefined();
+      expect(result.revert_sha).toBeUndefined();
+      expect(seen).toHaveLength(0);
+      expect(repo.head()).toBe(oldHead);
+      expect(await reverted()).toHaveLength(0);
+    });
+
+    it('keeps culprits empty and builds nothing on an env-failure', async () => {
+      await threeMerges();
+      repo.release();
+      const oldHead = repo.head();
+      const sleptEntry = {
+        name: 'post-a',
+        window: 'command' as const,
+        wall_ms: 1,
+        monotonic_ms: 1,
+        clock_gap_ms: SLEEP_GAP_MS,
+        load_1m_start: 0,
+        load_1m_end: 0,
+        cpus: 1,
+      };
+      const seen: string[] = [];
+      const result = await run(
+        {
+          runner: runner(() =>
+            Promise.resolve({ ...failedRecord('post-a'), environment: [sleptEntry] }),
+          ),
+        },
+        { onScratch: (p) => seen.push(p) },
+      );
+      expect(result.outcome).toBe('env-failure');
+      expect(result.culprits).toEqual([]);
+      expect(result.dependents).toBeUndefined();
+      expect(seen).toHaveLength(0);
+      expect(repo.head()).toBe(oldHead);
+      expect(await reverted()).toHaveLength(0);
+    });
+
+    it('sets dependents on no outcome but revert-has-dependents', async () => {
+      await threeMerges();
+      repo.release();
+      const result = await run({ tasks: planTasks([1, 3]) });
+      expect(result.outcome).toBe('revert-not-applicable');
+      expect(result.dependents).toBeUndefined();
+      expect(result.culprits[0]?.failing_checks).toEqual(['post-a']);
+      expect(result.culprits[0]?.red_record_event_id).toMatch(/#\d+$/);
+      expect(result.culprits[0]?.reproduced).toBe(true);
+      const landed = await run();
+      expect(landed.outcome).toBe('reverted');
+      expect(landed.dependents).toBeUndefined();
     });
 
     describe('amended away', () => {
