@@ -479,7 +479,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 14
+version: 15
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -550,6 +550,8 @@ gate_event:      [schema-check-result, artifact-check-result,
                   judges-outstanding, grader-verdict, budget-check-result,
                   testgate-result, coverage-evidence, integration-check,
                   queue-tier-run,
+                  check-tier-decided, check-tier-promoted,
+                  check-tier-batch-answered,
                   spec-review-recorded, goal-check-recorded, quorum-decision,
                   finding-raised, finding-reverified, finding-suppressed,
                   finding-transitioned, finding-reattributed,
@@ -621,6 +623,20 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       beside it. Written when the run
                   #                       finishes, before the landing or blocked
                   #                       event that names it by run id
+                  # check-tier-decided — the operator's answer for one tier-move
+                  #                       proposal (`bs checks apply`): approve
+                  #                       moves the check to `to_tier` in the
+                  #                       overlay, decline keeps it for a quiet
+                  #                       period. Written before the overlay, so
+                  #                       the log stays the source of truth
+                  # check-tier-promoted — an overlay-demoted check moved back to
+                  #                       pre-merge after it failed a reproduced
+                  #                       post-merge run; names the catch and
+                  #                       the decision it undoes
+                  # check-tier-batch-answered — one proposal batch settled for an
+                  #                       epic: the items decided and the items
+                  #                       left pending, or a hand-off to the
+                  #                       operator that decided nothing
                   # spec-review-recorded— a spec-reviewer dispatch finished,
                   #                       pinned to the head sha it read.
                   #                       Recorded even when it found nothing,
