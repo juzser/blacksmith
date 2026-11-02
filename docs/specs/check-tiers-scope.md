@@ -1,10 +1,8 @@
 # Check tiers — scope
 
-<!-- PLANNED-NAMESPACE: checks -->
-
-This file specifies the `bs checks` verbs before they exist; the marker above
-tells `docCommands.test.ts` so, and fails the day the CLI declares the
-namespace. It is a predefined architecture: the mechanism is written down
+This file specifies the `bs checks` verbs. `bs checks ledger`,
+`bs checks proposals` and `bs checks apply` ship; the post-merge verb ships
+with task-14. It is a predefined architecture: the mechanism is written down
 first and becomes a feature as it ships, one task at a time.
 Every part below says `Status: planned.` until it has landed on main.
 
@@ -115,7 +113,7 @@ Status: planned.
 ### The post-merge batch
 
 The queue rule above is the pre-landing half. The post-merge half is
-`bs checks post-merge`, and it obeys these rules.
+the post-merge verb, which ships with task-14, and it obeys these rules.
 
 - **Pinned branch.** The only ref it reads, probes or moves is the epic's
   integration branch. Any other branch, the default branch included, is
@@ -298,5 +296,5 @@ playbooks.
 No check is skipped, quarantined, retried or loosened, and no timeout is
 raised: a tier changes when a check runs, never whether it runs before
 release. main's merge rule, the gate's stages, the judges and the review
-rounds are unchanged. The `checks` verbs are `bs checks post-merge`,
+rounds are unchanged. The `checks` verbs are the post-merge verb (shipping with task-14),
 `bs checks ledger`, `bs checks proposals` and `bs checks apply`.

@@ -17,8 +17,9 @@ describe('docs/specs/check-tiers-scope.md', () => {
 
   const doc = (): string => readFileSync(DOC, 'utf8');
 
-  it('carries the PLANNED-NAMESPACE: checks marker on its own line', () => {
-    expect(doc().split('\n')).toContain('<!-- PLANNED-NAMESPACE: checks -->');
+  it('carries no PLANNED-NAMESPACE: checks marker, because the namespace has shipped', () => {
+    expect(doc().split('\n')).not.toContain('<!-- PLANNED-NAMESPACE: checks -->');
+    expect(doc()).not.toMatch(/PLANNED-NAMESPACE:\s*checks/);
   });
 
   it('names the three tier values and the pre-merge default', () => {

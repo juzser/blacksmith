@@ -670,6 +670,30 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Run the checks against the assembled integration branch, not a worktree. Exit 1 on red.',
   },
   {
+    command: 'checks ledger',
+    positionals: '',
+    flags:
+      '--project <dir> --specs-dir <dir> [--checks <checks.json>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Print the check ledger folded from the project’s epics under --specs-dir, with the gather warnings and the degraded flag. With --checks it adds the overlay report (active, shadowed, orphaned). Read-only.',
+  },
+  {
+    command: 'checks proposals',
+    positionals: '',
+    flags:
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --session <id> --plan-version <n> --causal-parent <event-id> [--actor <name>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Print the pending tier proposals, notices, overlay report and answered_in_epic. Writes only the repair the overlay and the log already owe each other, under the envelope flags.',
+  },
+  {
+    command: 'checks apply',
+    positionals: '<decisions.json>',
+    flags:
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --actor <name> --session <id> --plan-version <n> --causal-parent <event-id> [--hand-off <refusal-code>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Apply the operator’s tier decisions, or refuse the whole batch with the failing items. Exit 1 on a refusal. With --hand-off <refusal-code> it records that the reply went to the operator instead (decides nothing, validates nothing, takes no lock).',
+  },
+  {
     command: 'epic verdict',
     positionals: '',
     flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
