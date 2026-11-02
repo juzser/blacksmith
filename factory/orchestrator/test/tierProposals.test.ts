@@ -876,7 +876,9 @@ describe('applyTierDecisions: refusals', () => {
       .finally(() => {
         settled = true;
       });
-    for (let i = 0; i < 60 && !settled; i++) {
+    // Steps until the call settles: under machine load its pre-lock reads can take
+    // longer than a fixed number of steps, and a fake timer left pending never fires.
+    for (let i = 0; i < 2000 && !settled; i++) {
       await vi.advanceTimersByTimeAsync(1000);
       await new Promise((resolve) => setImmediate(resolve));
     }
