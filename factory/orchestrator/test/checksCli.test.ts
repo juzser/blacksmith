@@ -663,7 +663,9 @@ describe('bs checks apply', () => {
         decided: [],
         handed_off: { code: 'checks.decisions-not-array', decisions_path: file },
       });
-      expect(events.at(-1)?.record.payload.pending).toEqual([pid16('unit')]);
+      expect(((events.at(-1)?.record.payload ?? {}) as { pending?: string[] }).pending).toEqual([
+        pid16('unit'),
+      ]);
       expect(overlayBytes(fx.project)).toBe(bytes);
 
       const later = json(proposalsCli(fx));
@@ -770,6 +772,14 @@ describe('the overlay, resolved wherever a checks file is read', () => {
     expect(run.status, run.stdout + run.stderr).toBe(0);
     expect(ran(w.elsewhereDir)).toEqual(['noop', 'e2e']);
     expect(await deferredOf(w)).toEqual([]);
+    const preflight = runCli(
+      ['results', 'check', w.taskId, '--as', 'gate', ...line],
+      {},
+      undefined,
+      task,
+    );
+    expect(preflight.status, preflight.stdout + preflight.stderr).toBe(0);
+    expect('selection' in json(preflight)).toBe(false);
 
     const fx = makeFx(['unit']);
     const proposals = runCli([

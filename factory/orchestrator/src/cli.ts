@@ -1551,7 +1551,8 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       paperwork?.skipped ??
       STAGES_FOR_ROLE[as].map((stage) => ({ stage, why: 'unreadable-input' })),
     not_run: RESULTS_CHECK_NOT_RUN,
-    ...(selection === undefined ? {} : { selection }),
+    // Present only when a later tier defers something, as `verdicts` is present only when a grader file was read.
+    ...(selection === undefined || selection.deferred.length === 0 ? {} : { selection }),
     ...(graderVerdict === undefined ? {} : { verdicts: paperwork?.verdicts ?? {} }),
     warnings,
   });
