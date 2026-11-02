@@ -83,7 +83,7 @@
     "@hono/node-server": "2.1.5",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4",
-    "hono": "4.13.13",
+    "hono": "4.13.14",
     "picomatch": "4.0.7",
     "yaml": "2.9.1"
   },
