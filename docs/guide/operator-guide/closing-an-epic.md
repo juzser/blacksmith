@@ -101,11 +101,11 @@ shows up as a kanban card.
 verdict reads the current head of `bs/<epic>/integration` so it can tell
 whether the recorded integration-root check still covers the branch.
 
-## 7a. `bs integration check` — the only command that sees the branch
+## 7a. `bs integration check` — the clone-root run that close requires
 
-Every gate in this factory runs inside a task worktree. Schema, tests, lint,
-review: all of them are claims about a worktree, none about the branch those
-worktrees merge into. The envkit dogfood epic closed with six green per-task
+Every task gate in this factory runs inside a task worktree. Schema, tests,
+lint, review: all of them are claims about a worktree, none about the branch
+those worktrees merge into. When the effective checks hold a post-merge entry, `/bs run` starts `bs checks post-merge` after each landing, and a batch that is due runs that tier at the integration head in a detached scratch worktree. `bs integration check` stays the clone-root run that close requires. The envkit dogfood epic closed with six green per-task
 lint gates on an integration branch whose `pnpm lint` exited 1 without
 reading a source file (D-42). The run that caught it took eleven seconds and
 happened because a human typed it.

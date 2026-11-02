@@ -13,6 +13,7 @@ merge queue for one epic:
 bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
+  --checks checks.json \
   --tasks tasks.json \
   --plan plans/epic-1.json \
   --session sess-7 --causal-parent sess-7#0
@@ -28,9 +29,13 @@ unwritten.
 admitted one at a time: certify there is a commit to merge → rebase onto
 the current integration-branch head → run the cumulative regression gate
 (`--test-cmd`, standing in for "every previously merged task's tests in
-this epic") → merge on green, bounce on red. The command stops at the
-first non-`merged` outcome and exits `1`; prints the full outcome array
-either way.
+this epic") → merge on green, bounce on red. With `--checks` and an entry
+whose effective tier is later than pre-merge (declared or from the overlay),
+the pre-merge tier is the pre-landing test and neither `--test-cmd` nor
+`--select-test-cmd` runs; the landing records `pre_landing: pre-merge-tier`
+and names its `queue-tier-run` record by `pre_landing_run_id` (§5). The
+command stops at the first non-`merged` outcome and exits `1`; prints the full
+outcome array either way.
 
 Each task's step holds the machine's heavy lock (§5e), under the label
 `queue-<task id>`, from the rebase through the merge and its `wave-merged`.
@@ -373,9 +378,16 @@ bs gate run epic-1/task-1 \
   tier for that name (the declaration wins), `orphaned` when no entry has that
   name or the command changed since the decision (it matches nothing, so the
   check falls back to `pre-merge`), otherwise `active`. An overlay that is
-  missing, unreadable, tracked by git or outside a repository leaves every
-  undeclared check in `pre-merge` and `bs` asks no question it could not
-  apply. The mechanism, its thresholds and its guardrails are specified in
+  missing, unreadable or tracked by git leaves every undeclared check in
+  `pre-merge` and `bs` asks no question it could not apply. Four layouts have
+  no overlay at all: outside a git repository; a bare repository; an absorbed
+  submodule, whose git dir lives in the superproject's `.git/modules/` (a
+  submodule whose `.git` is its own directory is an ordinary repository and
+  keeps its overlay at its own root); and a `--separate-git-dir` layout. In
+  each, writes are refused with `checks.overlay-not-a-repo` and proposals carry
+  no items, so no tier is learned there. The one known wrong case: every linked
+  worktree of a `--separate-git-dir` layout whose git dir is named `.git`
+  resolves the overlay to that git dir's parent, not to the work tree. The mechanism, its thresholds and its guardrails are specified in
   [`docs/specs/check-tiers-scope.md`](../../specs/check-tiers-scope.md).
 - `--grader` — the grader's own result file for this task
   (`state/results/<task-id>.grader-r<round>.json`). Its `structured_output` is
