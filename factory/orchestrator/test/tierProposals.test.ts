@@ -14,6 +14,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkLedger } from '../src/checkLedger.js';
 import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
+import type { LedgerInputsOptions } from '../src/ledgerInputs.js';
 import { type CheckCommand, commandDigest, type RunResult } from '../src/testgate.js';
 import {
   OVERLAY_LOCK_WAIT_MS,
@@ -524,11 +525,26 @@ interface World {
   claims: Record<string, string[]>;
   checks: CheckCommand[];
   ctx: { session_id: string; actor: string; plan_version: number; causal_parent: string | null };
+  /** What the caller gathered its ledger with: project A's plans, epic `e`, the shared state dir. */
+  gather: LedgerInputsOptions;
+}
+
+/** A plan file under the specs dir, which is what makes an epic (and its sessions) a project's. */
+function planFor(specsDir: string, epic: string, project: string): void {
+  mkdirSync(path.join(specsDir, epic), { recursive: true });
+  writeFileSync(
+    path.join(specsDir, epic, 'plan.json'),
+    JSON.stringify({ project, version: 1, tasks: [] }),
+  );
 }
 
 async function world(names = ['unit', 'lint', 'build']): Promise<World> {
   const repo = makeRepo();
   const stateDir = tmp();
+  const specsDir = tmp();
+  planFor(specsDir, 'e', 'A');
+  const sensitivePathsFile = path.join(specsDir, 'sensitive.yml');
+  writeFileSync(sensitivePathsFile, 'globs:\n  - "src/auth/**"\n');
   const start = await appendEvent(
     {
       session_id: 's',
@@ -536,7 +552,7 @@ async function world(names = ['unit', 'lint', 'build']): Promise<World> {
       event_type: 'session-start',
       plan_version: 1,
       causal_parent: null,
-      payload: {},
+      payload: { epic_id: 'e' },
     },
     { stateDir },
   );
@@ -544,6 +560,7 @@ async function world(names = ['unit', 'lint', 'build']): Promise<World> {
   return {
     repo,
     stateDir,
+    gather: { stateDir, specsDir, sensitivePathsFile, now, windowDays: 30 },
     events: h.events,
     claims: h.claims,
     checks: rawChecks(...names),
@@ -584,6 +601,7 @@ async function applyIn(
       actor: o.actor ?? 'operator',
       ledger: { ...ledgerOf(events, w.claims), degraded: o.degraded },
       events,
+      gather: w.gather,
       now,
     },
     w.ctx,
@@ -1171,9 +1189,12 @@ async function promoWorld(
 }
 
 const promote = (p: Promo, culprit = p.culprit, events = p.events) =>
-  promoteAfterCatch(culprit, { dir: p.w.repo, checks: p.w.checks, events }, PROMO_CTX(p.w), {
-    events: { stateDir: p.w.stateDir },
-  });
+  promoteAfterCatch(
+    culprit,
+    { dir: p.w.repo, checks: p.w.checks, events, gather: p.w.gather },
+    PROMO_CTX(p.w),
+    { events: { stateDir: p.w.stateDir } },
+  );
 
 describe('promoteAfterCatch', () => {
   it.each(['reverted', 'revert-has-dependents', 'revert-red'])(
@@ -1367,7 +1388,7 @@ describe('promoteAfterCatch', () => {
         reproduced: true as const,
       });
       const p = (c: ReturnType<typeof culprit>) =>
-        promoteAfterCatch(c, { dir: w.repo, checks: w.checks, events }, w.ctx, {
+        promoteAfterCatch(c, { dir: w.repo, checks: w.checks, events, gather: w.gather }, w.ctx, {
           events: { stateDir: w.stateDir },
         });
       const lock = path.join(w.repo, '.blacksmith', 'check-tiers.lock');
@@ -1430,7 +1451,7 @@ describe('promoteAfterCatch', () => {
     const go = (check: string, rec: string) =>
       promoteAfterCatch(
         { failing_checks: [check], red_record_event_id: rec, reproduced: true },
-        { dir: w.repo, checks: w.checks, events: [red, lintRed] },
+        { dir: w.repo, checks: w.checks, events: [red, lintRed], gather: w.gather },
         w.ctx,
         { events: { stateDir: w.stateDir } },
       );
@@ -1526,11 +1547,13 @@ describe('under the lock, apply and promotion read the current log', () => {
   });
 });
 
-// Another project's session log in the same state directory.
+// A session log in the same state directory: by default another project's (epic `eb`,
+// whose plan is not under project A's specs dir); with epic `e`, one of project A's.
 async function foreignLog(
   stateDir: string,
   sessionId: string,
   events: { type: string; payload: Record<string, unknown> }[],
+  epic = 'eb',
 ) {
   let parent = (
     await appendEvent(
@@ -1540,7 +1563,7 @@ async function foreignLog(
         event_type: 'session-start',
         plan_version: 1,
         causal_parent: null,
-        payload: {},
+        payload: { epic_id: epic },
       },
       { stateDir },
     )
@@ -1562,7 +1585,7 @@ async function foreignLog(
   }
 }
 
-describe('under the lock, apply and promotion read only their own sessions', () => {
+describe("under the lock, apply and promotion read only their own project's sessions", () => {
   it("project A's apply neither sees nor acts on project B's decision in the shared state dir", async () => {
     const w = await world();
     const item = (await pendingNow(w)).items.find((i) => i.check === 'unit') as ProposalItem;
@@ -1580,8 +1603,6 @@ describe('under the lock, apply and promotion read only their own sessions', () 
         },
       },
     ]);
-    // A third project's log that cannot be read: none of A's business either.
-    writeFileSync(path.join(w.stateDir, 'b2.jsonl'), 'not json\n');
     const empty = await applyIn(w, []);
     expect(empty.decided).toEqual([]);
     expect(overlayBytes(w.repo)).toBeNull();
@@ -1637,6 +1658,195 @@ describe('under the lock, apply and promotion read only their own sessions', () 
       { check: 'unit', result: 'promotion-skipped', reason: 'checks.session-unreadable' },
     ]);
     expect(readFileSync(file, 'utf8')).toBe(bytes);
+    expect(overlayBytes(p.w.repo)).toBe(overlay);
+  });
+});
+
+const decidedPayload = (proposal_id: string, check = 'unit') => ({
+  proposal_id,
+  check,
+  cmd_sha256: shaOf(check),
+  from_tier: 'pre-merge',
+  to_tier: 'post-merge',
+  decision: 'approve',
+  note: null,
+});
+const promotedPayload = (decidedBy: string, catchId = 'rr#0') => ({
+  check: 'unit',
+  cmd_sha256: shaOf('unit'),
+  from_tier: 'post-merge',
+  to_tier: 'pre-merge',
+  catch_event_id: catchId,
+  decided_by_event_id: decidedBy,
+});
+const typesIn = async (stateDir: string, sessionId: string): Promise<string[]> =>
+  (await readEvents(sessionId, { stateDir })).map((e) => e.record.event_type);
+
+describe('under the lock, apply and promotion read the project log task-13 gathers', () => {
+  it('an apply sees a promotion made in a project session its snapshot never held, and neither undoes nor repeats it', async () => {
+    const p = await promoWorld();
+    const snapshot = [
+      ...p.w.events,
+      ...p.events,
+      ...(await readEvents('s', { stateDir: p.w.stateDir })),
+    ];
+    // The previous lock holder, in session `p` (absent from the snapshot), promoted unit.
+    writeOverlay(p.w.repo, {
+      entries: [entryOf('unit', 'pre-merge', 'lg#d')],
+      expectedRevision: 1,
+    });
+    await foreignLog(
+      p.w.stateDir,
+      'p',
+      [{ type: CHECK_TIER_PROMOTED_EVENT, payload: promotedPayload('lg#d') }],
+      'e',
+    );
+    const res = await applyIn(p.w, [], { snapshot });
+    expect(res.decided).toEqual([]);
+    expect(overlayTiers(p.w.repo)).toEqual([['unit', 'pre-merge']]);
+    expect(await typesOf(p.w)).toEqual(['session-start', CHECK_TIER_BATCH_ANSWERED_EVENT]);
+    expect(await typesIn(p.w.stateDir, 'p')).toEqual(['session-start', CHECK_TIER_PROMOTED_EVENT]);
+  });
+
+  it('a promotion waiting on the lock sees a promotion made in a project session its snapshot never held', async () => {
+    const p = await promoWorld();
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = withOverlayLock(
+      p.w.repo,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          entered();
+        }),
+    );
+    await inside;
+    const waiting = promote(p);
+    writeOverlay(p.w.repo, {
+      entries: [entryOf('unit', 'pre-merge', 'lg#d')],
+      expectedRevision: 1,
+    });
+    await foreignLog(
+      p.w.stateDir,
+      'p',
+      [{ type: CHECK_TIER_PROMOTED_EVENT, payload: promotedPayload('lg#d') }],
+      'e',
+    );
+    release();
+    await held;
+    expect(await waiting).toEqual([
+      { check: 'unit', result: 'not-promoted', reason: 'not-demoted' },
+    ]);
+    expect(overlayTiers(p.w.repo)).toEqual([['unit', 'pre-merge']]);
+    expect(await typesOf(p.w)).toEqual(['session-start']);
+    expect(await typesIn(p.w.stateDir, 'p')).toEqual(['session-start', CHECK_TIER_PROMOTED_EVENT]);
+  });
+
+  it('an apply sees a race written into a snapshot session other than its own', async () => {
+    const w = await world(['unit']);
+    // Session `t`, a real log of project A, holds the approve the overlay entry names.
+    await foreignLog(
+      w.stateDir,
+      't',
+      [{ type: CHECK_TIER_DECIDED_EVENT, payload: decidedPayload('p-unit') }],
+      'e',
+    );
+    const tLog = await readEvents('t', { stateDir: w.stateDir });
+    const decided = tLog[1] as StoredEvent;
+    writeOverlay(w.repo, {
+      entries: [entryOf('unit', 'post-merge', decided.event_id)],
+      expectedRevision: 0,
+    });
+    const snapshot = [...w.events, ...(await readEvents('s', { stateDir: w.stateDir })), ...tLog];
+    // After the snapshot, the lock holder in `t` promoted unit.
+    writeOverlay(w.repo, {
+      entries: [entryOf('unit', 'pre-merge', decided.event_id)],
+      expectedRevision: 1,
+    });
+    await appendEvent(
+      {
+        session_id: 't',
+        actor: 'operator',
+        event_type: CHECK_TIER_PROMOTED_EVENT,
+        plan_version: 1,
+        causal_parent: decided.event_id,
+        payload: promotedPayload(decided.event_id),
+      },
+      { stateDir: w.stateDir },
+    );
+    const res = await applyIn(w, [], { snapshot });
+    expect(res.decided).toEqual([]);
+    expect(overlayTiers(w.repo)).toEqual([['unit', 'pre-merge']]);
+    expect(await typesOf(w)).toEqual(['session-start', CHECK_TIER_BATCH_ANSWERED_EVENT]);
+    expect(await typesIn(w.stateDir, 't')).toEqual([
+      'session-start',
+      CHECK_TIER_DECIDED_EVENT,
+      CHECK_TIER_PROMOTED_EVENT,
+    ]);
+  });
+
+  it('keeps an approve older than the ledger window: a 200-day-old decision the snapshot lacks is written, not re-proposed', async () => {
+    const w = await world(['unit']);
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    const snapshot = [...w.events, ...(await readEvents('s', { stateDir: w.stateDir }))];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW - 200 * DAY_MS);
+    await foreignLog(
+      w.stateDir,
+      't',
+      [{ type: CHECK_TIER_DECIDED_EVENT, payload: decidedPayload(item.proposal_id) }],
+      'e',
+    );
+    vi.useRealTimers();
+    const old = (await readEvents('t', { stateDir: w.stateDir }))[1] as StoredEvent;
+    expect(Date.parse(old.record.ts)).toBeLessThan(NOW - w.gather.windowDays * DAY_MS);
+    const res = await applyIn(w, [], { snapshot });
+    expect(res.pending).toEqual([]);
+    expect(overlayTiers(w.repo)).toEqual([['unit', 'post-merge']]);
+    const o = readOverlay(w.repo);
+    expect('entries' in o && o.entries[0]?.decided_by_event_id).toBe(old.event_id);
+  });
+
+  it('refuses apply and skips promotion when any session log in the state dir is unreadable, changing nothing', async () => {
+    const w = await world();
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    writeFileSync(path.join(w.stateDir, 'b2.jsonl'), 'not json\n');
+    const err = await applyIn(w, [approve(item)]).catch((e) => e);
+    expect(err.code).toBe('checks.session-unreadable');
+    expect(err.items).toEqual([]);
+    expect(await typesOf(w)).toEqual(['session-start']);
+    expect(overlayBytes(w.repo)).toBeNull();
+
+    const p = await promoWorld();
+    writeFileSync(path.join(p.w.stateDir, 'b2.jsonl'), 'not json\n');
+    const overlay = overlayBytes(p.w.repo);
+    expect(await promote(p)).toEqual([
+      { check: 'unit', result: 'promotion-skipped', reason: 'checks.session-unreadable' },
+    ]);
+    expect(await typesOf(p.w)).toEqual(['session-start']);
+    expect(overlayBytes(p.w.repo)).toBe(overlay);
+  });
+
+  it('refuses apply and skips promotion when the plans name two projects, changing nothing', async () => {
+    const w = await world();
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    planFor(w.gather.specsDir, 'x', 'B');
+    const err = await applyIn(w, [approve(item)]).catch((e) => e);
+    expect(err.code).toBe('checks.session-unreadable');
+    expect(err.items).toEqual([]);
+    expect(await typesOf(w)).toEqual(['session-start']);
+    expect(overlayBytes(w.repo)).toBeNull();
+
+    const p = await promoWorld();
+    planFor(p.w.gather.specsDir, 'x', 'B');
+    const overlay = overlayBytes(p.w.repo);
+    expect(await promote(p)).toEqual([
+      { check: 'unit', result: 'promotion-skipped', reason: 'checks.session-unreadable' },
+    ]);
+    expect(await typesOf(p.w)).toEqual(['session-start']);
     expect(overlayBytes(p.w.repo)).toBe(overlay);
   });
 });

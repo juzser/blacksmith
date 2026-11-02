@@ -7,15 +7,9 @@ import { createHash } from 'node:crypto';
 import { isOperatorActor } from './actors.js';
 import { type CheckLedger, LEDGER_WINDOW_DAYS, type LedgerRow } from './checkLedger.js';
 import { SmithError } from './errors.js';
-import {
-  appendEvent,
-  EventError,
-  type EventOpts,
-  mergeSessionLogs,
-  readEvents,
-  type StoredEvent,
-} from './events.js';
+import { appendEvent, type StoredEvent } from './events.js';
 import { stageBoundCheckNames } from './gate.js';
+import { gatherLedgerInputs, type LedgerInputsOptions } from './ledgerInputs.js';
 import {
   type CheckCommand,
   type CheckTier,
@@ -387,7 +381,10 @@ export interface ApplyInput {
   effectiveChecks: readonly EffectiveCheck[];
   actor: string;
   ledger: ProposalLedger;
+  /** The caller's earlier read of the project's events (task-13's `events`). */
   events: readonly StoredEvent[];
+  /** The options the caller gathered `ledger` and `events` with; re-gathered under the lock. */
+  gather: LedgerInputsOptions;
   now: Date;
 }
 
@@ -408,33 +405,30 @@ interface Decision {
 /**
  * Spec D7/D8: once the lock is held, the log as it stands rather than the
  * caller's earlier read, so a write the previous lock holder made is seen.
- * Only the sessions the caller's snapshot came from, plus `ownSession` (where
- * this module appends), are re-read: the snapshot is already scoped to one
- * project, and another project's log in a shared state directory is never
- * opened. Snapshot events no re-read log holds come first, then those logs in
- * their own order. A log that cannot be read answers `null`, never a throw.
+ * It is task-13's gather with the caller's own options: one project's events,
+ * every session of its epics, and no time filter, so an approve older than the
+ * ledger window is still read. Snapshot events the gather does not return come
+ * first: the log is append-only, so they can only be events it cannot attribute.
+ * A degraded or refused gather answers `null`, never a throw.
  */
-async function currentLog(
+async function currentProjectLog(
   snapshot: readonly StoredEvent[],
-  ownSession: string,
-  opts: EventOpts = {},
+  gather: LedgerInputsOptions,
 ): Promise<StoredEvent[] | null> {
-  const ids = new Set([...snapshot.map((e) => e.record.session_id), ownSession]);
-  const logs = [];
+  let read: Awaited<ReturnType<typeof gatherLedgerInputs>>;
   try {
-    for (const sessionId of ids) {
-      logs.push({ sessionId, events: await readEvents(sessionId, opts) });
-    }
+    read = await gatherLedgerInputs(gather);
   } catch (err) {
-    if (err instanceof EventError && err.code === 'events.unreadable-session-log') return null;
+    if (err instanceof SmithError) return null;
     throw err;
   }
-  const fresh = mergeSessionLogs(logs);
-  const seen = new Set(fresh.map((e) => e.event_id));
-  return [...snapshot.filter((e) => !seen.has(e.event_id)), ...fresh];
+  if (read.degraded) return null;
+  const seen = new Set(read.events.map((e) => e.event_id));
+  return [...snapshot.filter((e) => !seen.has(e.event_id)), ...read.events];
 }
 
-const UNREADABLE_LOG_WHY = 'one of its own session logs cannot be read, so the log is not current';
+const UNREADABLE_LOG_WHY =
+  "the project's log cannot be gathered (an unreadable session log or plans naming more than one project), so it is not current";
 
 /** An overlay refusal (busy lock, failed repair) is the call's own state, so it names no item. */
 const noItems = (err: OverlayError): OverlayError & { items: ItemFailure[] } =>
@@ -480,7 +474,7 @@ export async function applyTierDecisions(
   try {
     return await withOverlayLock(dir, async () => {
       entered = true;
-      const events = await currentLog(input.events, ctx.session_id, opts.events);
+      const events = await currentProjectLog(input.events, input.gather);
       // Reconcile needs the current log, so with none no repair is made either.
       if (events === null) {
         throw new TierApplyRefusal(
@@ -644,7 +638,12 @@ export interface PromotionAnswer {
  */
 export async function promoteAfterCatch(
   culprit: PromotionCulprit,
-  input: { dir: string; checks: readonly CheckCommand[]; events: readonly StoredEvent[] },
+  input: {
+    dir: string;
+    checks: readonly CheckCommand[];
+    events: readonly StoredEvent[];
+    gather: LedgerInputsOptions;
+  },
   ctx: ReconcileCtx,
   opts: ReconcileOpts = {},
 ): Promise<PromotionAnswer[]> {
@@ -693,7 +692,7 @@ export async function promoteAfterCatch(
       return await withOverlayLock(input.dir, async () => {
         // Each lock reads the log afresh, so a promotion made while this call waited is
         // seen and never undone by the reconcile.
-        const fresh = await currentLog(log, ctx.session_id, opts.events);
+        const fresh = await currentProjectLog(log, input.gather);
         if (fresh === null) return answer(name, 'promotion-skipped', 'checks.session-unreadable');
         log.splice(0, log.length, ...fresh);
         await reconcileOverlay(input.dir, log, ctx, opts);
