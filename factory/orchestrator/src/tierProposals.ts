@@ -7,7 +7,14 @@ import { createHash } from 'node:crypto';
 import { isOperatorActor } from './actors.js';
 import { type CheckLedger, LEDGER_WINDOW_DAYS, type LedgerRow } from './checkLedger.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type StoredEvent } from './events.js';
+import {
+  appendEvent,
+  type EventOpts,
+  listSessionIds,
+  mergeSessionLogs,
+  readEvents,
+  type StoredEvent,
+} from './events.js';
 import { stageBoundCheckNames } from './gate.js';
 import {
   type CheckCommand,
@@ -398,6 +405,24 @@ interface Decision {
   note?: string;
 }
 
+/**
+ * Spec D7/D8: once the lock is held, the log as it stands rather than the
+ * caller's earlier read, so a write the previous lock holder made is seen.
+ * `snapshot` in its own order, then every event of the store this module
+ * appends to (`opts.stateDir`) that the snapshot lacks, in causal order.
+ */
+async function currentLog(
+  snapshot: readonly StoredEvent[],
+  opts: EventOpts = {},
+): Promise<StoredEvent[]> {
+  const seen = new Set(snapshot.map((e) => e.event_id));
+  const logs = [];
+  for (const sessionId of listSessionIds(opts.stateDir)) {
+    logs.push({ sessionId, events: await readEvents(sessionId, opts) });
+  }
+  return [...snapshot, ...mergeSessionLogs(logs).filter((e) => !seen.has(e.event_id))];
+}
+
 /** An overlay refusal (busy lock, failed repair) is the call's own state, so it names no item. */
 const noItems = (err: OverlayError): OverlayError & { items: ItemFailure[] } =>
   Object.assign(err, { items: [] as ItemFailure[] });
@@ -414,7 +439,7 @@ export async function applyTierDecisions(
   ctx: ReconcileCtx,
   opts: ReconcileOpts = {},
 ): Promise<ApplyResult> {
-  const { dir, events, ledger, now } = input;
+  const { dir, ledger, now } = input;
   if (overlayPath(dir) === null) {
     throw new TierApplyRefusal(
       'checks.overlay-not-a-repo',
@@ -442,6 +467,7 @@ export async function applyTierDecisions(
   try {
     return await withOverlayLock(dir, async () => {
       entered = true;
+      const events = await currentLog(input.events, opts.events);
       try {
         await reconcileOverlay(dir, events, ctx, opts);
       } catch (err) {
@@ -603,9 +629,6 @@ export async function promoteAfterCatch(
 ): Promise<PromotionAnswer[]> {
   const log = [...input.events];
   const red = log.find((e) => e.event_id === culprit.red_record_event_id);
-  // One reconcile per call: it may append events this call cannot see, so a second one
-  // from the same stale log could undo a promotion made since.
-  let reconciled = false;
   const answer = (
     check: string,
     result: PromotionAnswer['result'],
@@ -647,10 +670,10 @@ export async function promoteAfterCatch(
     }
     try {
       return await withOverlayLock(input.dir, async () => {
-        if (!reconciled) {
-          await reconcileOverlay(input.dir, log, ctx, opts);
-          reconciled = true;
-        }
+        // Each lock reads the log afresh, so a promotion made while this call waited is
+        // seen and never undone by the reconcile.
+        log.splice(0, log.length, ...(await currentLog(log, opts.events)));
+        await reconcileOverlay(input.dir, log, ctx, opts);
         const now = readOverlay(input.dir);
         const cur =
           'entries' in now

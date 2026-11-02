@@ -565,10 +565,12 @@ async function applyIn(
     repo?: string;
     epicId?: string;
     degraded?: boolean;
+    /** A log read before an earlier call wrote, standing in for the caller's pre-lock read. */
+    snapshot?: StoredEvent[];
   } = {},
 ) {
   const log = await readEvents('s', { stateDir: w.stateDir });
-  const events = [...w.events, ...(o.extra ?? []), ...log];
+  const events = o.snapshot ?? [...w.events, ...(o.extra ?? []), ...log];
   return applyTierDecisions(
     decisions,
     {
@@ -1437,6 +1439,85 @@ describe('promoteAfterCatch', () => {
       { check: 'unit', result: 'promotion-skipped', reason: 'red-record-unreadable' },
     ]);
     expect(existsSync(path.join(w.repo, '.blacksmith'))).toBe(false);
+  });
+});
+
+describe('under the lock, apply and promotion read the current log', () => {
+  it('a second apply of one decisions.json from one stale read is refused and appends nothing', async () => {
+    const w = await world();
+    const snapshot = [...w.events, ...(await readEvents('s', { stateDir: w.stateDir }))];
+    const item = (await pendingNow(w)).items[0] as ProposalItem;
+    const first = await applyIn(w, [approve(item)], { snapshot });
+    expect(first.decided).toEqual([item.proposal_id]);
+    const before = await typesOf(w);
+    const bytes = overlayBytes(w.repo);
+    const second = await applyIn(w, [approve(item)], { snapshot }).catch((e) => e);
+    expect(second.code).toBe('checks.apply-refused');
+    expect(second.items.map((i: { reason: string }) => i.reason)).toEqual([
+      'unknown or decided proposal_id',
+    ]);
+    expect(await typesOf(w)).toEqual(before);
+    expect(before.filter((t) => t === CHECK_TIER_DECIDED_EVENT)).toHaveLength(1);
+    expect(before.filter((t) => t === CHECK_TIER_BATCH_ANSWERED_EVENT)).toHaveLength(1);
+    expect(overlayBytes(w.repo)).toBe(bytes);
+  });
+
+  it('an apply from a read taken before a promotion leaves the promoted check at pre-merge', async () => {
+    const p = await promoWorld();
+    const snapshot = [...p.w.events, ...p.events];
+    expect(await promote(p)).toEqual([{ check: 'unit', result: 'promoted', reason: null }]);
+    const res = await applyIn(p.w, [], { snapshot });
+    expect(res.decided).toEqual([]);
+    expect(overlayTiers(p.w.repo)).toEqual([['unit', 'pre-merge']]);
+    expect(await typesOf(p.w)).toEqual([
+      'session-start',
+      CHECK_TIER_PROMOTED_EVENT,
+      CHECK_TIER_BATCH_ANSWERED_EVENT,
+    ]);
+  });
+
+  it('a promotion waiting on the lock sees the promotion made while it waited and appends no second one', async () => {
+    const p = await promoWorld();
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = withOverlayLock(
+      p.w.repo,
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          entered();
+        }),
+    );
+    await inside;
+    // Passes its unlocked reads (the overlay still says post-merge), then waits for the lock.
+    const waiting = promote(p);
+    const payload = {
+      check: 'unit',
+      cmd_sha256: shaOf('unit'),
+      from_tier: 'post-merge',
+      to_tier: 'pre-merge',
+      catch_event_id: 'rr#0',
+      decided_by_event_id: 'lg#d',
+    };
+    // What the lock holder's own promotion leaves: overlay at pre-merge, its event logged.
+    writeOverlay(p.w.repo, {
+      entries: [entryOf('unit', 'pre-merge', 'lg#d')],
+      expectedRevision: 1,
+    });
+    await appendEvent(
+      { ...p.w.ctx, event_type: CHECK_TIER_PROMOTED_EVENT, payload },
+      { stateDir: p.w.stateDir },
+    );
+    release();
+    await held;
+    expect(await waiting).toEqual([
+      { check: 'unit', result: 'not-promoted', reason: 'not-demoted' },
+    ]);
+    expect(overlayTiers(p.w.repo)).toEqual([['unit', 'pre-merge']]);
+    expect(await typesOf(p.w)).toEqual(['session-start', CHECK_TIER_PROMOTED_EVENT]);
   });
 });
 
