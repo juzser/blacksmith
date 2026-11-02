@@ -1,16 +1,15 @@
 # Check tiers — scope
 
 This file specifies the `bs checks` verbs. `bs checks ledger`,
-`bs checks proposals` and `bs checks apply` ship; the post-merge verb ships
-with task-14. It is a predefined architecture: the mechanism is written down
+`bs checks proposals`, `bs checks apply` and `bs checks post-merge` ship. It is a predefined architecture: the mechanism is written down
 first and becomes a feature as it ships, one task at a time.
 Every part below says `Status: planned.` until it has landed on main.
 
-Flags that existing verbs gain (the integration check's tier option, the
-queue's checks file, epic close's checks file, worktree create's reopen, the
-integration check's `remaining` selection) and error codes that are not in
-source yet are described in prose on purpose. The doc guards check flags and
-error codes, and a marker covers only a namespace.
+The flags that existing verbs gained are written as invocations:
+`bs integration check --epic <id> --project <dir> --checks <checks.json> --tier <pre-merge|post-merge|pre-release|all|remaining> ...`,
+`bs epic close --epic <id> --project <dir> --checks <checks.json> ...`,
+`bs epic verdict --epic <id> --project <dir> --checks <checks.json>` and
+`bs worktree create <project-dir> <epic> <task-id> --reopen --revert <sha>`.
 
 The mechanism is one thing in three parts: a check declares when it runs, the
 factory runs each tier where it belongs, and the factory learns from the runs
@@ -113,7 +112,14 @@ Status: planned.
 ### The post-merge batch
 
 The queue rule above is the pre-landing half. The post-merge half is
-the post-merge verb, which ships with task-14, and it obeys these rules.
+`bs checks post-merge --epic <id> --project <dir> --checks <checks.json> --plan <plan.json> [--setup-cmd <cmd>] [--final] --session <id> --plan-version <n> --causal-parent <event-id>`,
+and it obeys these rules. It prints one JSON document with the outcome and exits
+0 only for `green`, `reverted`, `no-checks-in-tier`, `no-new-merges` and
+`batch-not-ready`; the last three run no check and certify nothing.
+`bs checks post-merge --held --epic <id> --project <dir> --checks <checks.json> --plan <plan.json> --session <id>`
+is its read-only form: it lists the tasks held by an uncertified merge and writes
+nothing, and `bs wave check <plan.json> <task-id>... --session <id> --checks <checks.json> --project <dir>`
+refuses a held task.
 
 - **Pinned branch.** The only ref it reads, probes or moves is the epic's
   integration branch. Any other branch, the default branch included, is
@@ -296,5 +302,5 @@ playbooks.
 No check is skipped, quarantined, retried or loosened, and no timeout is
 raised: a tier changes when a check runs, never whether it runs before
 release. main's merge rule, the gate's stages, the judges and the review
-rounds are unchanged. The `checks` verbs are the post-merge verb (shipping with task-14),
+rounds are unchanged. The `checks` verbs are `bs checks post-merge`,
 `bs checks ledger`, `bs checks proposals` and `bs checks apply`.

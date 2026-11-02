@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { runGit as git } from './git.js';
@@ -364,4 +365,141 @@ export function listStale(projectDir: string, epic: string): StaleWorktree[] {
     }
   }
   return stale;
+}
+
+/** The `.wt/<project>/` root every scratch worktree (integration.ts, postMerge.ts) is named under. */
+function scratchRoot(projectDir: string): string {
+  const project = path.resolve(projectDir);
+  return path.join(path.dirname(project), '.wt', path.basename(project));
+}
+
+function isAncestor(projectDir: string, ancestor: string, descendant: string): boolean {
+  try {
+    git(projectDir, ['merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reopen a reverted task's branch (spec D1): the task branch fast-forwards to
+ * the integration head and gains one commit, `git revert <revertSha>`, so the
+ * original change returns as new history. Never a reset, a rebase or a force.
+ *
+ * Everything that can refuse is read from refs and the existing worktree's
+ * status first; the revert is then built in a scratch worktree detached at the
+ * head, so a conflict leaves no worktree, ref or commit behind. Only after the
+ * commit exists is the task worktree reused or attached (no `-b` when the
+ * branch exists) and the branch fast-forwarded to it. `opts.onScratch` is a
+ * test seam called with the scratch worktree's path right after it is created.
+ */
+export function reopenTaskWorktree(
+  projectDir: string,
+  epicId: string,
+  taskId: string,
+  revertSha: string,
+  opts: { onScratch?: (scratchPath: string) => void } = {},
+): TaskWorktree {
+  if (taskId === RESERVED_TASK_ID) {
+    throw new WorktreeError(
+      'worktree.reserved-task-id',
+      `Task id "${RESERVED_TASK_ID}" is reserved for the integration branch itself.`,
+      { taskId },
+    );
+  }
+  const prefix = epicBranchPrefix(projectDir, epicId);
+  const branch = taskBranchName(epicId, taskId, prefix);
+  const integration = integrationBranchName(epicId, prefix);
+  const branchExists = localBranchExists(projectDir, branch);
+  const existing = parseWorktreePorcelain(
+    git(projectDir, ['worktree', 'list', '--porcelain']),
+  ).find((entry) => entry.branch === branch);
+
+  if (existing !== undefined && git(existing.worktree, ['status', '--porcelain']) !== '') {
+    throw new WorktreeError(
+      'worktree.reopen-dirty',
+      `The worktree ${existing.worktree} of ${branch} has uncommitted changes; commit or discard them before reopening.`,
+      { worktreeDir: existing.worktree, branch },
+    );
+  }
+  if (branchExists && !isAncestor(projectDir, branch, integration)) {
+    throw new WorktreeError(
+      'worktree.reopen-not-ancestor',
+      `${branch} is not an ancestor of ${integration}; it cannot be fast-forwarded to the head.`,
+      { branch, integration },
+    );
+  }
+  let revert: string | null = null;
+  try {
+    revert = git(projectDir, ['rev-parse', '--verify', '--quiet', `${revertSha}^{commit}`]);
+  } catch {
+    // Not a commit this clone knows: not on the integration branch either.
+  }
+  if (
+    revert === null ||
+    !localBranchExists(projectDir, integration) ||
+    !isAncestor(projectDir, revert, integration)
+  ) {
+    throw new WorktreeError(
+      'worktree.reopen-revert-not-on-integration',
+      `${revertSha} is not on ${integration}.`,
+      { revertSha, integration },
+    );
+  }
+
+  const commit = buildReopenCommit(projectDir, integration, revert, opts.onScratch);
+  if (existing !== undefined) {
+    git(existing.worktree, ['merge', '--ff-only', commit]);
+    return { worktreeDir: existing.worktree, branch, epic: epicId, taskId };
+  }
+  const worktreeDir = taskWorktreeDir(projectDir, epicId, taskId);
+  if (branchExists) {
+    git(projectDir, ['worktree', 'add', worktreeDir, branch]);
+    git(worktreeDir, ['merge', '--ff-only', commit]);
+  } else {
+    git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, commit]);
+  }
+  return { worktreeDir, branch, epic: epicId, taskId };
+}
+
+/** `git revert --no-edit <revert>` on the integration head in a throwaway worktree; returns the commit. */
+function buildReopenCommit(
+  projectDir: string,
+  integration: string,
+  revert: string,
+  onScratch: ((scratchPath: string) => void) | undefined,
+): string {
+  const dir = path.join(scratchRoot(projectDir), `scratch-${process.pid}-${randomUUID()}`);
+  git(projectDir, ['worktree', 'add', '--detach', dir, integration]);
+  try {
+    onScratch?.(dir);
+    try {
+      git(dir, ['revert', '--no-edit', revert]);
+    } catch (error) {
+      let inProgress = true;
+      try {
+        git(dir, ['rev-parse', '-q', '--verify', 'REVERT_HEAD']);
+      } catch {
+        inProgress = false;
+      }
+      if (!inProgress) throw error;
+      const paths = git(dir, ['diff', '--name-only', '--diff-filter=U'])
+        .split('\n')
+        .filter(Boolean);
+      git(dir, ['revert', '--abort']);
+      throw new WorktreeError(
+        'worktree.reopen-revert-conflict',
+        `Reverting ${revert} on ${integration} conflicts in ${paths.join(', ')}; the change no longer applies cleanly, so supersede the task with one cut from the integration head.`,
+        { revertSha: revert, paths },
+      );
+    }
+    return git(dir, ['rev-parse', 'HEAD']);
+  } finally {
+    try {
+      git(projectDir, ['worktree', 'remove', '--force', dir]);
+    } catch {
+      // The next run's dead-pid sweep removes whatever is left.
+    }
+  }
 }
