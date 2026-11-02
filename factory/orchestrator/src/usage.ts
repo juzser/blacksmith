@@ -180,12 +180,16 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'wave check',
     positionals: '<plan.json> <task-id>...',
-    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] [--repo <dir>] ${EVENTS_DIR}`,
+    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] [--repo <dir>] [--checks <checks.json> --project <dir>] ${EVENTS_DIR}`,
     summary:
       'Admit a wave whose claims are disjoint, whose files share no import edge, and whose ' +
       'declared cost fits under the epic token cap. --dry asks without writing the admission; ' +
       '--override-rationale admits a cost-refused wave and records the machine verdict beside ' +
-      'the human reason; --repo names the checkout the symbol graph is read from.',
+      'the human reason; --repo names the checkout the symbol graph is read from. ' +
+      "--checks and --project (together, and only with --session) read the epic session lineage's " +
+      'integration-check records and refuse a task that waits on an uncertified merge with ' +
+      '`wave.held-by-post-merge`; with --session and no --checks, an epic whose records use ' +
+      'tiers is refused with `wave.checks-required`.',
   },
   {
     command: 'wave next',
@@ -313,8 +317,10 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'worktree create',
     positionals: '<project-dir> <epic> <task-id>',
-    flags: '[--from <predecessor-task-id> --session <id> [--state-dir <dir>]]',
+    flags:
+      '[--from <predecessor-task-id> --session <id> [--state-dir <dir>]] [--reopen --revert <sha>]',
     summary:
+      'With --reopen --revert <sha>, reopen a reverted task instead: the task branch (reusing a clean worktree, attaching one, or cut from the head when deleted) fast-forwards to the integration head and gains one `git revert <sha>` commit, so the original change returns as new history; refused when the worktree is dirty, the branch tip is not an ancestor of the head, or the sha is not on the integration branch, and when the revert conflicts. ' +
       'Cut the isolated worktree and task branch one task is allowed to write in. --from cuts it from a predecessor branch instead of integration, and requires --session (which supplies the log --from is checked against): refused unless that session records <epic>/<task-id> as the logged successor of <epic>/<predecessor-task-id>.',
   },
   {
@@ -665,9 +671,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'integration check',
     positionals: '',
-    flags: `--epic <id> --project <dir> --checks <checks.json> [--run-all <true|false>] ${EVENTS_DIR}`,
+    flags: `--epic <id> --project <dir> --checks <checks.json> [--tier <pre-merge|post-merge|pre-release|all|remaining>] [--run-all <true|false>] ${EVENTS_DIR}`,
     summary:
-      'Run the checks against the assembled integration branch, not a worktree. Exit 1 on red.',
+      'Run the checks against the assembled integration branch, not a worktree. --tier runs one tier, all of them, or every check the head is not yet certified for (remaining). Exit 1 on red.',
   },
   {
     command: 'checks ledger',
@@ -694,9 +700,17 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Apply the operator’s tier decisions, or refuse the whole batch with the failing items. Exit 1 on a refusal. With --hand-off <refusal-code> it records that the reply went to the operator instead (decides nothing, validates nothing, takes no lock).',
   },
   {
+    command: 'checks post-merge',
+    positionals: '',
+    flags: `--epic <id> --project <dir> --checks <checks.json> --plan <plan.json> [--setup-cmd <cmd>] [--final] [--held] [--now <iso>] ${EVENTS_DIR}`,
+    summary:
+      'Run the post-merge tier on the integration branch when a batch is due, bisect a red that reproduces, and land a tested revert of the culprit (spec D4). Prints one JSON document with the outcome, its reason, culprits, dependents, setup_failed, promotions (automatic tier promotion for each culprit) and the overlay report. Exit 0 only for green, reverted, no-checks-in-tier, no-new-merges and batch-not-ready; none of the last three certifies a check. ' +
+      'With --held it is read-only: it needs --epic, --project, --checks, --plan and --session, and prints {held, uncertified_merges}, the tasks waiting on an uncertified merge.',
+  },
+  {
     command: 'epic verdict',
     positionals: '',
-    flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--epic <id> --project <dir> [--checks <checks.json>] [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary: 'Render the read-only epic verdict without writing a close. Exit 1 on hold.',
   },
   {
@@ -722,8 +736,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'epic close',
     positionals: '',
-    flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] [--override-rationale <text>] ${EVENTS_DIR}`,
-    summary: 'Write the close down. A hold closes only with an operator rationale, recorded.',
+    flags: `--epic <id> --project <dir> [--checks <checks.json>] [--roadmap-path <file>] [--specs-dir <dir>] [--override-rationale <text>] ${EVENTS_DIR}`,
+    summary:
+      'Write the close down. A hold closes only with an operator rationale, recorded. With --checks every declared check of every tier must be certified at the integration head.',
   },
   {
     command: 'epic width',
