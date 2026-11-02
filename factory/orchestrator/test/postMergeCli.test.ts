@@ -103,28 +103,32 @@ describe('bs checks post-merge', () => {
     m3: await mergeTask(3, { 'c.txt': 'c\n' }),
   });
 
-  const post = (...extra: string[]) =>
-    runCli([
-      'checks',
-      'post-merge',
-      '--epic',
-      EPIC,
-      '--project',
-      repo.projectDir,
-      '--checks',
-      checksPath,
-      '--plan',
-      planPath,
-      '--session',
-      repo.sessionId,
-      '--state-dir',
-      repo.stateDir,
-      '--plan-version',
-      '1',
-      '--causal-parent',
-      `${repo.sessionId}#0`,
-      ...extra,
-    ]);
+  const postWith = (env: Record<string, string> | undefined, ...extra: string[]) =>
+    runCli(
+      [
+        'checks',
+        'post-merge',
+        '--epic',
+        EPIC,
+        '--project',
+        repo.projectDir,
+        '--checks',
+        checksPath,
+        '--plan',
+        planPath,
+        '--session',
+        repo.sessionId,
+        '--state-dir',
+        repo.stateDir,
+        '--plan-version',
+        '1',
+        '--causal-parent',
+        `${repo.sessionId}#0`,
+        ...extra,
+      ],
+      env,
+    );
+  const post = (...extra: string[]) => postWith(undefined, ...extra);
   const out = (run: ReturnType<typeof runCli>) => JSON.parse(run.stdout) as PostMergeDoc;
   const logLines = (): number =>
     readdirSync(repo.stateDir)
@@ -354,6 +358,88 @@ describe('bs checks post-merge', () => {
         },
       ]);
       expect(overlayTier()).toBe('post-merge');
+    });
+
+    /**
+     * Two landed, proven reverts of task 2, so the resume writes two wave-reverted events, and a
+     * preload that makes the CLI process fail the append of the second one, after the first
+     * landed, the way a log fault would. With `promoteFault` it also fails every
+     * check-tier-promoted append, so promotion itself throws.
+     */
+    const rejectingResume = async (promoteFault: boolean) => {
+      writePlan([1, 2, 3]);
+      writeChecks([PRE, POST_UNDECLARED]);
+      await demote();
+      const mA = await mergeTask(2, { ...BROKEN, 'lib.txt': 'lib\n' });
+      const mB = await mergeTask(2, { 'again.txt': 'again\n' });
+      const red = await append('integration-check', {
+        epic_id: EPIC,
+        branch: repo.branch,
+        head_sha: repo.head(),
+        pass: false,
+        results: [{ name: 'post-a', pass: false, exitCode: 1, tail: 'boom' }],
+      });
+      const landed = [mA, mB].map((m) =>
+        repo.revert(m, { redRecord: red.event_id, failingChecks: 'post-a' }),
+      );
+      repo.release();
+      for (const commit of landed) {
+        for (const tier of ['pre-merge', 'post-merge'] as const) {
+          await runIntegrationCheck(
+            {
+              epicId: EPIC,
+              projectDir: repo.projectDir,
+              checks: [PRE, POST],
+              tier,
+              workspace: 'scratch',
+              commit,
+            },
+            repo.ctx(),
+            repo.opts(),
+          );
+        }
+      }
+      const fault = path.join(scratch, 'fault-appends.mjs');
+      writeFileSync(
+        fault,
+        [
+          "import { readFileSync } from 'node:fs';",
+          "import fsp from 'node:fs/promises';",
+          "import { syncBuiltinESMExports } from 'node:module';",
+          'const real = fsp.appendFile;',
+          'const reverted = \'"event_type":"wave-reverted"\';',
+          'const promoted = \'"event_type":"check-tier-promoted"\';',
+          'fsp.appendFile = async (file, data, ...rest) => {',
+          '  const text = String(data);',
+          "  if (text.includes(reverted) && readFileSync(file, 'utf8').includes(reverted))",
+          "    throw new Error('log fault');",
+          "  if (process.env.FAULT_PROMOTE === '1' && text.includes(promoted))",
+          "    throw new Error('promotion fault');",
+          '  return real(file, data, ...rest);',
+          '};',
+          'syncBuiltinESMExports();',
+        ].join('\n'),
+      );
+      return postWith(
+        { NODE_OPTIONS: `--import ${fault}`, FAULT_PROMOTE: promoteFault ? '1' : '0' },
+        '--final',
+      );
+    };
+
+    it('promotes the culprits of the writes a rejecting resume made, then rethrows its error', async () => {
+      const run = await rejectingResume(false);
+      expect(run.status).toBe(1);
+      expect(JSON.parse(run.stdout).error.message).toBe('log fault');
+      expect(await eventsOfType('wave-reverted')).toHaveLength(1);
+      expect(await eventsOfType('check-tier-promoted')).toHaveLength(1);
+      expect(overlayTier()).toBe('pre-merge');
+    });
+
+    it('still shows the error of the run when promotion itself throws', async () => {
+      const run = await rejectingResume(true);
+      expect(run.status).toBe(1);
+      expect(JSON.parse(run.stdout).error.message).toBe('log fault');
+      expect(await eventsOfType('check-tier-promoted')).toHaveLength(0);
     });
 
     it('answers declared-tier-wins for a declared post-merge check', async () => {

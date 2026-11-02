@@ -5750,7 +5750,8 @@ async function main(): Promise<number> {
       // A resume that failed mid-write still names the culprits of what it wrote.
       const culprits =
         (err as { culprits?: (PromotionCulprit & { task: string })[] }).culprits ?? [];
-      if (culprits.length > 0) await promote(culprits);
+      // A promotion that fails here must not hide the error of the run itself.
+      if (culprits.length > 0) await promote(culprits).catch(() => undefined);
       throw err;
     }
     const promotions = result.culprits.length > 0 ? await promote(result.culprits) : undefined;
