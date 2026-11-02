@@ -257,6 +257,17 @@ describe('flagSpecFor', () => {
     expect(spec?.get('run-all')).toBe(false);
   });
 
+  it('documents --hand-off as a value flag of checks apply, and the checks flags every handler reads', () => {
+    expect(flagSpecFor('checks', 'apply')?.get('hand-off')).toBe(true);
+    expect(usageFor('checks apply').flags).toContain('--hand-off <refusal-code>');
+    for (const verb of ['ledger', 'proposals', 'apply']) {
+      const spec = flagSpecFor('checks', verb);
+      for (const flag of ['project', 'specs-dir', 'state-dir', 'now']) {
+        expect(spec?.get(flag), `checks ${verb} --${flag}`).toBe(true);
+      }
+    }
+  });
+
   it('allows --help everywhere, because every command answers it', () => {
     expect(flagSpecFor('plan', 'validate')?.get('help')).toBe(false);
   });

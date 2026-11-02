@@ -168,6 +168,7 @@ import {
   lessonsReadPath,
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
+  SENSITIVE_PATHS_POLICY_PATH,
   STATE_DB_PATH,
   STATE_EVENTS_DIR,
   WORK_ROOT,
@@ -260,6 +261,17 @@ import { checkTesterIsolation } from './testerAudit.js';
 import { assertCheckTier, type CheckCommand, selectGateChecks } from './testgate.js';
 import { assertSelectableTestCmd } from './testSelect.js';
 import {
+  overlayOwes,
+  overlayPath,
+  overlayReport,
+  overlayWritable,
+  readOverlay,
+  reconcileOverlay,
+  resolveEffectiveTiers,
+  withOverlayLock,
+} from './tierOverlay.js';
+import type { EffectiveCheck } from './tierProposals.js';
+import {
   COMMANDS,
   type CommandDoc,
   flagSpecFor,
@@ -299,8 +311,14 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-function readJsonFile<T>(filePath: string): T {
-  return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+function readJsonFile<T>(filePath: string, onSyntaxError?: T): T {
+  const text = readFileSync(filePath, 'utf8');
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    if (err instanceof SyntaxError && onSyntaxError !== undefined) return onSyntaxError;
+    throw err;
+  }
 }
 
 /**
@@ -365,7 +383,14 @@ function readFindingsInputFile(filePath: string): RaiseFindingInput[] {
   return items as RaiseFindingInput[];
 }
 
-function readChecksFile(filePath: string): CheckCommand[] {
+/**
+ * Read a checks file with its effective tiers (spec D8). `dir` names the
+ * directory whose repository's overlay fills the entries the file leaves
+ * undeclared; with none, only declared tiers apply, as before the overlay.
+ * An overlay that cannot be read resolves every undeclared entry to
+ * `pre-merge`, and says so on stderr.
+ */
+function readChecksFile(filePath: string, opts: { dir?: string } = {}): CheckCommand[] {
   const checks = readJsonFile<CheckCommand[]>(filePath);
   for (const check of checks) {
     // Epic bs-optimize criterion 10: `"heavy": "false"` is truthy in a loose
@@ -390,7 +415,57 @@ function readChecksFile(filePath: string): CheckCommand[] {
       );
     }
   }
-  return checks;
+  if (opts.dir === undefined) return checks;
+  const overlay = readOverlay(opts.dir);
+  if ('unreadable' in overlay) {
+    process.stderr.write(
+      `The tier overlay is unreadable (${overlay.unreadable}), so every undeclared check resolves to pre-merge.\n`,
+    );
+  }
+  return resolveEffectiveTiers(checks, overlay);
+}
+
+/**
+ * What every `checks` verb reads (spec D6): the project's events under
+ * `--specs-dir`, folded into the ledger. `proposalLedger` is the same ledger
+ * carrying the `degraded` mark the proposal fold and apply refuse on.
+ */
+async function gatherChecks(flags: Record<string, string>) {
+  const { gatherLedgerInputs } = await import('./ledgerInputs.js');
+  const { checkLedger, LEDGER_WINDOW_DAYS } = await import('./checkLedger.js');
+  const projectDir = requireFlag(flags, 'project');
+  const gather = {
+    stateDir: flags['state-dir'] ?? STATE_EVENTS_DIR,
+    specsDir: requireFlag(flags, 'specs-dir'),
+    sensitivePathsFile: SENSITIVE_PATHS_POLICY_PATH,
+    now: isoDateFlag(flags, 'now') ?? new Date(),
+    windowDays: LEDGER_WINDOW_DAYS,
+  };
+  const inputs = await gatherLedgerInputs(gather);
+  const ledger = checkLedger(inputs, {
+    window: inputs.window,
+    projectDir,
+    ...(flags.checks ? { checksFile: path.relative(projectDir, path.resolve(flags.checks)) } : {}),
+  });
+  return {
+    projectDir,
+    gather,
+    inputs,
+    ledger,
+    proposalLedger: { ...ledger, degraded: inputs.degraded },
+  };
+}
+
+/** The event envelope the writing `checks` verbs share, as the overlay module takes it. */
+function checksEnvelope(flags: Record<string, string>, actor: string) {
+  requireFlag(flags, 'plan-version');
+  const ctx = eventContextFromFlags(flags);
+  return {
+    session_id: ctx.sessionId,
+    actor,
+    plan_version: ctx.planVersion,
+    causal_parent: ctx.causalParent,
+  };
 }
 
 /** A task spec's `budget.tokens` when it is a usable positive number, else null. */
@@ -1389,13 +1464,17 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
     );
   }
   const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  let selection: { selected: string[]; deferred: unknown[] } | undefined;
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
     await attempt('checks', async () => {
       const { stageBoundCheckNames } = await import('./gate.js');
-      const checks = readChecksFile(requireFlag(flags, 'checks'));
+      const checks = readChecksFile(requireFlag(flags, 'checks'), {
+        dir: requireFlag(flags, 'worktree'),
+      });
       // The same selection and refusals `gate run` makes, with no check run.
-      selectGateChecks(checks, stageBoundCheckNames());
+      const { selected, deferred } = selectGateChecks(checks, stageBoundCheckNames());
+      selection = { selected: selected.map((c) => c.name), deferred };
       return checks;
     });
     if (flags.findings)
@@ -1478,6 +1557,8 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       paperwork?.skipped ??
       STAGES_FOR_ROLE[as].map((stage) => ({ stage, why: 'unreadable-input' })),
     not_run: RESULTS_CHECK_NOT_RUN,
+    // Present only when a later tier defers something, as `verdicts` is present only when a grader file was read.
+    ...(selection === undefined || selection.deferred.length === 0 ? {} : { selection }),
     ...(graderVerdict === undefined ? {} : { verdicts: paperwork?.verdicts ?? {} }),
     warnings,
   });
@@ -3645,7 +3726,9 @@ async function main(): Promise<number> {
     // `--checks` is read, and a tiered file with no pre-merge entry refused,
     // before any git runs; the tier decision itself is queue.ts's.
     const queueChecks =
-      flags.checks === undefined ? undefined : resolveQueueChecks(readChecksFile(flags.checks));
+      flags.checks === undefined
+        ? undefined
+        : resolveQueueChecks(readChecksFile(flags.checks, { dir: projectDir }));
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
     // D-46/P9-29/#269: the queue is the only component that knows a branch
@@ -4587,7 +4670,7 @@ async function main(): Promise<number> {
     // judges) governs the quorum a gate run can trigger, not just the
     // shipped policy.
     const projectDir = projectDirFromFlags(flags);
-    const checks = readChecksFile(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'), { dir: worktreeDir });
     // The result file has the same two intake shapes as findings below, and for
     // the same reason. With `--agent`, `--result` is the worker's half —
     // run_status/structured_output/artifacts — and the dispatcher stamps the
@@ -4890,7 +4973,7 @@ async function main(): Promise<number> {
   if (namespace === 'integration' && action === 'check') {
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
-    const checks = readChecksFile(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'), { dir: projectDir });
     const ctx = eventContextFromFlags(flags);
     const record = await runIntegrationCheck(
       {
@@ -5460,6 +5543,115 @@ async function main(): Promise<number> {
     );
     printJson(event);
     return 0;
+  }
+
+  if (namespace === 'checks' && action === 'ledger') {
+    const read = await gatherChecks(flags);
+    printJson({
+      project: read.inputs.project,
+      epics: read.inputs.epics,
+      ledger: read.ledger,
+      warnings: read.inputs.warnings,
+      degraded: read.inputs.degraded,
+      // The report compares the overlay with the file's own declarations, so no `dir` here.
+      ...(flags.checks
+        ? { overlay: overlayReport(readChecksFile(flags.checks), readOverlay(read.projectDir)) }
+        : {}),
+    });
+    return 0;
+  }
+
+  if (namespace === 'checks' && action === 'proposals') {
+    const checksFile = requireFlag(flags, 'checks');
+    const epicId = requireFlag(flags, 'epic');
+    const ctx = checksEnvelope(flags, flags.actor ?? 'system');
+    const { currentProjectLog, pendingProposals } = await import('./tierProposals.js');
+    const eventOpts = eventOptsFromFlags(flags);
+    const read = await gatherChecks(flags);
+    const dir = read.projectDir;
+    // Outside a repository there is no overlay: no lock, no repair, nothing created.
+    if (overlayPath(dir) !== null) {
+      const owes = overlayOwes(readOverlay(dir), read.inputs.events);
+      if (owes.missing.length + owes.pending.length + owes.settled.length > 0) {
+        await withOverlayLock(dir, async () => {
+          const fresh = await currentProjectLog(read.inputs.events, read.gather);
+          if (fresh !== null) await reconcileOverlay(dir, fresh, ctx, { events: eventOpts });
+        });
+      }
+    }
+    const result = pendingProposals(
+      read.proposalLedger,
+      read.inputs.events,
+      readChecksFile(checksFile, { dir }) as EffectiveCheck[],
+      readOverlay(dir),
+      { epicId, writable: overlayWritable(dir), now: read.gather.now },
+    );
+    printJson({ ...result, writable: overlayWritable(dir) });
+    return 0;
+  }
+
+  if (namespace === 'checks' && action === 'apply') {
+    const [decisionsFile] = requirePositionals(positional, usageFor('checks apply')) as [string];
+    const checksFile = requireFlag(flags, 'checks');
+    const epicId = requireFlag(flags, 'epic');
+    const handOff = flags['hand-off'];
+    const ctx = checksEnvelope(
+      flags,
+      handOff === undefined ? requireFlag(flags, 'actor') : (flags.actor ?? 'system'),
+    );
+    const { applyTierDecisions, pendingProposals, recordBatchHandOff } = await import(
+      './tierProposals.js'
+    );
+    const eventOpts = eventOptsFromFlags(flags);
+    const read = await gatherChecks(flags);
+    const dir = read.projectDir;
+    const effective = readChecksFile(checksFile, { dir }) as EffectiveCheck[];
+    if (handOff !== undefined) {
+      const pending = pendingProposals(
+        read.proposalLedger,
+        read.inputs.events,
+        effective,
+        readOverlay(dir),
+        { epicId, writable: overlayWritable(dir), now: read.gather.now },
+      ).items.map((item) => item.proposal_id);
+      const { eventId } = await recordBatchHandOff(
+        epicId,
+        { code: handOff, decisionsPath: path.resolve(decisionsFile), pending },
+        ctx,
+        { events: eventOpts },
+      );
+      printJson({ event_id: eventId });
+      return 0;
+    }
+    try {
+      printJson(
+        await applyTierDecisions(
+          // Unparseable JSON is not an array either: the library refuses it, with a code and `items`.
+          readJsonFile<unknown>(decisionsFile, null),
+          {
+            dir,
+            checksFile,
+            epicId,
+            effectiveChecks: effective,
+            actor: ctx.actor,
+            ledger: read.proposalLedger,
+            events: read.inputs.events,
+            gather: read.gather,
+            now: read.gather.now,
+          },
+          ctx,
+          { events: eventOpts },
+        ),
+      );
+      return 0;
+    } catch (err) {
+      // A refusal names every failing item (empty when the cause is not an item): run.md step 12 reads them.
+      if (err instanceof SmithError && 'items' in err) {
+        printJson({ error: { code: err.code, message: err.message }, items: err.items });
+        return 1;
+      }
+      throw err;
+    }
   }
 
   if (namespace === 'waivers' && action === 'apply') {
@@ -6122,6 +6314,14 @@ async function main(): Promise<number> {
     const now = new Date();
     const out = flags.out;
     const turnBudget = boundedIntFlag(flags, 'turns', { min: 1 });
+    // The overlay is the worktree's repository's: with no --worktree none is read,
+    // so undeclared checks stay pre-merge and the brief lists no fewer than a gate runs.
+    const briefOverlayDir = flags.worktree ? { dir: flags.worktree } : {};
+    if (flags.checks && !flags.worktree) {
+      process.stderr.write(
+        'The tier overlay was not applied: no --worktree names the repository, so undeclared checks stay pre-merge.\n',
+      );
+    }
     const { text, manifest } = await composeBrief({
       role: requireFlag(flags, 'role'),
       sessionId: requireFlag(flags, 'session'),
@@ -6137,7 +6337,10 @@ async function main(): Promise<number> {
       ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
       ...(flags.base ? { base: flags.base } : {}),
       ...(flags.checks
-        ? { checks: readChecksFile(flags.checks), stageBound: stageBoundCheckNames() }
+        ? {
+            checks: readChecksFile(flags.checks, briefOverlayDir),
+            stageBound: stageBoundCheckNames(),
+          }
         : {}),
       ...(flags['work-root'] ? { workRoot: flags['work-root'] } : {}),
       events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
