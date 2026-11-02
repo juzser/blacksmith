@@ -36,6 +36,8 @@ export interface IntegrationRepo {
   epicId: string;
   sessionId: string;
   branch: string;
+  /** The private worktree every integration commit is made in; it holds the branch until `release`. */
+  builderDir: string;
   /** `<root>/.wt/project`, where scratch worktrees are made. */
   scratchRoot: string;
   git(args: string[], cwd?: string): string;
@@ -48,6 +50,8 @@ export interface IntegrationRepo {
   handCommit(files: FileChanges, message: string): string;
   /** Revert the merge `mergeSha` with a bs revert commit carrying the four trailers. */
   revert(mergeSha: string, trailers?: RevertTrailers): string;
+  /** Detach the builder so no worktree holds the integration branch; merge/revert are over after this. */
+  release(): void;
   head(): string;
   forkPoint(): string;
   worktreeCount(): number;
@@ -113,6 +117,7 @@ export async function createIntegrationRepo(
     epicId,
     sessionId,
     branch,
+    builderDir,
     scratchRoot: path.join(root, '.wt', 'project'),
     git,
     ctx: () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0`, actor: 'system' }),
@@ -150,6 +155,7 @@ export async function createIntegrationRepo(
       inBuilder(['commit', '-q', '-m', body.join('\n').trimEnd()]);
       return inBuilder(['rev-parse', 'HEAD']);
     },
+    release: () => void inBuilder(['checkout', '-q', '--detach']),
     head: () => git(['rev-parse', branch]),
     forkPoint: () => forkPoint,
     worktreeCount: () =>

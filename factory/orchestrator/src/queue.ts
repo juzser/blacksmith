@@ -608,7 +608,7 @@ type LandOutcome =
   | { outcome: 'integration-dirty'; worktree: string; dirty: string[] }
   | { outcome: 'integration-moved' };
 
-function landCandidate(
+export function landCandidate(
   projectDir: string,
   integrationBranch: string,
   base: string,
