@@ -26,6 +26,8 @@ import { isNotRun, selectTier } from './testgate.js';
  * build its revert with `git revert -m 1`, test and record that exact commit
  * with the pre-merge and post-merge tiers, land it through the queue's landing
  * path, and only then write `wave-reverted`. The ref moves only in `landCandidate`.
+ * A culprit whose revert cannot be tested that way (no pre-merge check) is reported
+ * as `revert-not-applicable` with reason `no-pre-merge-checks`: nothing is built or landed.
  */
 export type RevertOutcome =
   | PostMergeOutcome
@@ -229,6 +231,11 @@ export async function runPostMerge(
     liveTaskIds,
   });
   if (blocked !== null) return stop('revert-not-applicable', { reason: blocked });
+  // D4 tests R with the pre-merge tier before it lands (D10 refuses that tier empty
+  // elsewhere): with no pre-merge check R cannot be tested, so nothing is built or landed.
+  if (selectTier(input.checks, 'pre-merge').length === 0) {
+    return stop('revert-not-applicable', { reason: 'no-pre-merge-checks' });
+  }
 
   // (3) Build.
   const revert = buildRevert(projectDir, head, culprit.merge_sha, culprit, onScratch);
@@ -253,9 +260,8 @@ export async function runPostMerge(
     event_ids.push(record.eventId);
     return record;
   };
+  // Both tiers are non-empty here: the culprit came from a post-merge run, and step (2) refused an empty pre-merge tier.
   for (const tier of ['pre-merge', 'post-merge'] as const) {
-    // A project with no pre-merge check has no pre-merge tier to run.
-    if (selectTier(input.checks, tier).length === 0) continue;
     let record: IntegrationCheckRecord;
     try {
       record = await test(tier);

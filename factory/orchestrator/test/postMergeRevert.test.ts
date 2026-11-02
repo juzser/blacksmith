@@ -613,6 +613,31 @@ describe('post-merge revert landing', () => {
         expect(result.outcome).toBe('reverted');
       });
     });
+
+    describe('no pre-merge checks', () => {
+      it('lands no revert it cannot test with the pre-merge tier, and still names the culprit', async () => {
+        await threeMerges();
+        repo.release();
+        const oldHead = repo.head();
+        const worktreesBefore = repo.git(['worktree', 'list', '--porcelain']);
+        const seen: string[] = [];
+        const result = await run({ checks: [POST()] }, { onScratch: (p) => seen.push(p) });
+        expect(result.outcome).toBe('revert-not-applicable');
+        expect(result.reason).toBe('no-pre-merge-checks');
+        expect(result.culprits).toHaveLength(1);
+        expect(result.culprits[0]).toMatchObject({
+          task: 'task-2',
+          failing_checks: ['post-a'],
+          reproduced: true,
+        });
+        expect(result.revert_sha).toBeUndefined();
+        expect(seen).toHaveLength(0);
+        expect(calls.some((c) => isR(c.commit))).toBe(false);
+        expect(repo.git(['worktree', 'list', '--porcelain'])).toBe(worktreesBefore);
+        expect(repo.head()).toBe(oldHead);
+        expect(await reverted()).toHaveLength(0);
+      });
+    });
   });
 
   describe('pinned branch', () => {
