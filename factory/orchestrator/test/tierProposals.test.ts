@@ -482,6 +482,32 @@ describe('validateDecisions', () => {
     expect(out[0]).toMatch(reason);
   });
 
+  it('reports every failing item, not only the first, and keeps the valid ones out', () => {
+    const out = validateDecisions(
+      [{ ...good, extra: 1 }, good, { ...good, proposal_id: 'ffffffffffffffff' }],
+      pending,
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]?.reason).toMatch(/unknown key/);
+    expect(out[0]?.proposal_id).toBe(item.proposal_id);
+    expect(out[1]?.proposal_id).toBe('ffffffffffffffff');
+  });
+
+  it('accepts a string note on approve and refuses a note that is not a string', () => {
+    expect(validateDecisions([{ ...good, note: 'ok' }], pending)).toEqual([]);
+    expect(reasons([{ ...good, note: 5 }])[0]).toMatch(/note must be a string/);
+  });
+
+  it('refuses an approve to a tier outside the vocabulary and an id that is not a string', () => {
+    expect(reasons([{ ...good, to_tier: 'whenever' }])[0]).toMatch(/not one of the options/);
+    expect(reasons([{ ...good, proposal_id: 7 }])[0]).toMatch(/unknown or decided proposal_id/);
+  });
+
+  it('refuses an item that is decided, since a decided item is no longer pending', () => {
+    const decided = { ...good, decision: 'decline', to_tier: undefined };
+    expect(validateDecisions([decided], [])[0]?.reason).toMatch(/unknown or decided/);
+  });
+
   it('refuses a duplicate and a value that is not an array', () => {
     expect(reasons([good, good])).toHaveLength(1);
     expect(reasons([good, good])[0]).toMatch(/duplicate/);
