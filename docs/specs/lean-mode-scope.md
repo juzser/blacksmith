@@ -54,6 +54,11 @@ The reading: the work that produced the quality (coder, tester, reviewer) is che
 | O-5 | Keep the security, convention, optimize and audit rules. |
 | O-6 | The grader is an option, off by default ("4A"). |
 | O-7 | The planner is an option, switched on automatically when the work splits into two or more independent parts ("5A"). |
+| O-8 | A new verb, `/bs do`. `/bs plan` + `/bs run` stay runnable next to it (Q-1 A). |
+| O-9 | The cross-check blocks only on a finding the session reproduces (Q-2 A). |
+| O-10 | When the planner is on, it keeps opus/xhigh (Q-3 A). |
+| O-11 | §18 rule 8 is met by hooks and CLI output, not by hand (Q-4 A). |
+| O-12 | The other verbs (`audit`, `new`, `mcp`, `use`, `status`, `ui`, `waivers`, `lessons`, `report`) and the `SKILL.md` router lose their redundant flow too (§6a). |
 
 ## 3. The lean path — `/bs do <request>`
 
@@ -122,7 +127,41 @@ The lean cross-check is one review, not a vote:
   - the guard and policy hooks (§18 rule 10);
   - `sensitive-paths.yml` triggers;
   - lint, typecheck and the full suite at the gate.
-- **On demand, unchanged:** `/bs audit` with its four axes (security, code-quality, performance, architecture), and `/bs lessons` for candidate review. Neither runs per task.
+- **On demand, trimmed per §6a:** `/bs audit` with its four axes (security, code-quality, performance, architecture), and `/bs lessons` for candidate review. Neither runs per task.
+
+## 6a. The other verbs (O-12)
+
+The same principle applies to every verb:
+- keep text rules, mechanical checks and the one operator stop that sets scope;
+- cut steps that exist only to thread the envelope by hand, steps that duplicate a check the CLI already makes, and stops that could be a line in a summary.
+
+None of these verbs ran in the trial, so the costs and values below are **unmeasured**. The line counts are targets for the playbook.
+
+| Verb | Today | Lean version | Lines | What is lost |
+|---|---|---|---|---|
+| `SKILL.md` (router, loaded by every `/bs` turn) | ~56 of its lines exist only for hand-written events: the envelope, the prompt-capture parse, the event-id rules, the compaction rule. `audit`, `lessons` and `report` also load the 578-line `dispatch.md`. | Keep the role, the CLI spelling, the project-dir rule, "Talking to the operator" and the verb table (with `do`). The rest moves to `plan.md`/`run.md`. Split `dispatch.md` into an ~80-line core; the rest moves to `run.md`/`wave.md`. | 203 → ~90 | Nothing on the lean path. |
+| `audit` | ~22 + N hand-written envelopes. A separate `worktree fingerprint`, although `audit open` already fingerprints (`audit.ts:794`). A judge dispatch/report pair per axis. One `decide` per finding. A `.gitignore` question. A roadmap block. A hand-off to `/bs plan` + `/bs run`. | `open` prints 4 briefs → the 4 axis judges in one message → `record` per axis, which re-verifies the tree and refuses a stale file → `consolidate` → **one batch stop** (where the operator sets scope) → `decide --batch` → `cut` writes a `/bs do` request → `close`. | 275 → ~100 | `judge outstanding` for audits; the audit milestone on the dashboard; `resolve` keyed by plan claims. Because a one-part `/bs do` has no plan, `resolve` must key on the merged diff's paths. Risk (unmeasured): a multi-part cut puts the plan sign-off right after the audit stop, which is two stops back to back. |
+| `new` | Scaffold + gates + commit + a bootstrap roadmap milestone; a toolchain verdict; the push commands. | The same, without the bootstrap milestone and the inline history. | 35 → ~22 | The milestone `bs projects list` reads. That reader moves to the event log. |
+| `mcp` | `mcp init` + milestone. Approval rule (already checked in code, `mcp.ts` MCP-T4) and MCP-S3 rule. `mcp check` runs only at `epic close`. | `mcp check` runs in the gate whenever `mcp.manifest.json` exists, because `/bs do` has no epic close and the check would otherwise be silently dropped. Keep "never sign an approval yourself" and MCP-S3; MCP-S3 has no code check. | 29 → ~12 | Nothing; the check moves earlier. |
+| `use` | The hook writes the binding; the session relays it; the small-change bypass question. | Already lean. The hook text and playbook point at `/bs do` instead of "/bs plan and /bs run" (`sessionBinding.ts`). Keep the small-change bypass: a one-line change through `/bs do` still costs 3 dispatches. | 54 → ~35 | Nothing. |
+| `status` | `daemon status` + `stats overview`, each rendered as prose by the session. It also restates `budgets.yml` caps, which the router forbids. | `bs status` prints the readable digest itself; the playbook relays it. | 61 → ~25 | The waiver and milestone lines, whose sources the lean path no longer produces. |
+| `ui` | `ui serve`, a build on `ui.not-built`, the URL. Lines 24–29 are stale: they say installs ship no dashboard, but `package.json` `files` includes `ui/dist` and `ui/server/dist`. | Fix the stale lines; keep it to the command and the URL. | 35 → ~8 | Nothing. |
+| `waivers` | `pending` → one batch → `apply` → `approve-task` → about 10 commands to route a denial. It exists because S3/S4 findings block the epic verdict, and the lean path has no verdict. | On the lean path, open S3/S4 findings are one line in the `/bs do` summary. A yes runs `waivers apply`, which is kept so a waived finding is suppressed in later reviews. A no becomes a follow-up `/bs do`. The verb stays for the full path, trimmed. | 93 → ~25 (full path) | On the lean path, the record of a denied finding carried forward. |
+| `lessons` | `candidates`, each presented singly, approve/edit/reject plus a novelty read, `db apply`, `dream` + scribe, `compile` + commit, `lessons audit`. | Run `dream` first. Present one batch. `compile` reads the db, so `db apply` folds into it. The scribe becomes optional, which also skips loading `dispatch.md`. Add reviewer bounces as a `dream` source, since the lean path makes fewer sign-offs, waivers and escalations. | 85 → ~40 | With the scribe off, a fresh-context drafter. |
+| `report` | `projects list`, scheduler `run`/`admit`, two stats reads, `judge escalations`, `wave audit`, provider stats, scribe prose, Slack, export. | A CLI render instead of scribe prose; this also enforces "never paraphrase numbers". Drop `judge escalations`, which reads quorum events only; drop `wave audit`, which exits 2 with no waves; drop provider agreement rates, which mean nothing for an advisory cross-check. Point "auto → /bs run" at `/bs do`. Keep: a person merges every PR, and the auto-dispatch whitelist is never widened mid-run. | 139 → ~40 | The scribe's prose summary. |
+
+Cross-verb changes:
+
+1. **Envelope defaults (O-11).**
+   - `eventContextFromFlags` (`cli.ts`) requires `--session` and `--causal-parent` today. Change it so the session defaults to `CLAUDE_CODE_SESSION_ID` and the parent to the session's last event.
+   - Keep the explicit flags for parallel writes, where "last event" could name a sibling's event (§18 rule 8's original hazard). Hooks always pass the parent they observed.
+2. **Hooks write dispatch events for every verb,** not only `/bs do`.
+3. **Every "/bs plan → /bs run" hand-off becomes `/bs do`.** This covers `audit`, `use` and `report`, and the session-binding hook text.
+4. **Every lean run gets an id,** so `bs stats`, the dashboard and `status` can group by run as they group by epic today.
+5. **Verb retirements (operator decision, §12):**
+   - merge `status` into `report`;
+   - reduce `/bs ui` to the bare `bs ui serve` command;
+   - retire `/bs waivers` on the lean path.
 
 ## 7. Event log and the load-bearing rules (§18)
 
@@ -174,21 +213,25 @@ Run each three ways: plain, `/bs do` with parallel parts, and the full `/bs run`
 | Phase | Content | Gate to the next phase |
 |---|---|---|
 | 0 | The four fixes in §8 | merged, CI green |
-| 1 | `/bs do` playbook, target ≤ 200 lines; test-strength rule in `bs-coder`/`bs-tester`; two-stage `bs-reviewer`; `--grader`; usage hook; one-shot advisory cross-check | the operator approves the PRs |
+| 1a | Envelope defaults and dispatch-event hook (§6a 1–2); `/bs do` playbook, target ≤ 200 lines; test-strength rule in `bs-coder`/`bs-tester`; two-stage `bs-reviewer`; `--grader`; usage hook; one-shot advisory cross-check; `mcp check` in the gate | the operator approves the PRs |
+| 1b | Trims in §6a: `SKILL.md` and `dispatch.md` split, `audit`, `new`, `use`, `status`, `ui`, `waivers`, `lessons`, `report`; hand-offs to `/bs do` | the operator approves the PRs |
 | 2 | §9 measurement, including the two large kinds | the numbers go to the operator |
 | 3 | If §9 is met: `/bs do` becomes the documented default, `/bs plan` + `/bs run` move under "advanced", and unused machinery (quorum, epic verdict, goal check, roadmap requirement, tier overlay, …) is removed one PR at a time. If not met: back to the operator with the numbers. | operator decision |
 
 ## 11. Out of scope
 
 - Deleting any module, policy or playbook. That is phase 3, by separate decision.
-- Changing `/bs plan`, `/bs run`, `/bs audit`, `/bs lessons`, the dashboard or the daemon.
+- Changing `/bs plan`, `/bs run`, the dashboard or the daemon. The other verbs are in scope; see §6a.
 - The earlier cost work (read-time budget join, planner cache, lesson gating). The lean path replaces it.
 
-## 12. Open questions for the operator
+## 12. Questions
+
+The operator answered Q-1..Q-4 "A" on 2026-11-03. They are recorded as O-8..O-11 in §2.
+
+Still open, from §6a:
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q-1 | A new verb `/bs do`, or make `/bs run` itself lean behind a `--full` flag? | New verb: both stay runnable for the measurement. |
-| Q-2 | Should the cross-check block only on a reproduced finding, or on any codex S1/S2? | Reproduced only. Codex refuted twice on a label in the trial. |
-| Q-3 | When the planner is on, should it keep opus/xhigh? | Yes. It now runs only on multi-part work, where splitting quality matters most. |
-| Q-4 | Is meeting §18 rule 8 through hooks and CLI output, not by hand, acceptable? | Yes. The rule's guarantee is unchanged. |
+| Q-5 | Merge `/bs status` into `/bs report`? | No. Keep `status` as the quick live view that `bs status` renders, about 25 lines. A merged verb would make every "where are we?" pay for the digest. |
+| Q-6 | Reduce `/bs ui` to the bare command? | Yes. The playbook only runs one command and prints a URL. |
+| Q-7 | Retire `/bs waivers` on the lean path, so S3/S4 become a summary line with yes/no? | Yes. Keep the verb for the full path, trimmed. |
