@@ -137,16 +137,28 @@ export function artifactsStage(
 /** `name-desktop-light.png` and the three siblings a visual pass has to cover. */
 export const SCREENSHOT_RE = /-(desktop|mobile)-(light|dark)\.png$/;
 
-export function screenshotsFromArtifacts(
-  artifacts: readonly ArtifactDecl[],
-): { path: string; viewport: string; theme: string }[] {
-  const shots: { path: string; viewport: string; theme: string }[] = [];
+type ScreenshotRecord = {
+  path: string;
+  viewport: string;
+  theme: string;
+  inner_width?: number;
+  client_width?: number;
+};
+
+export function screenshotsFromArtifacts(artifacts: readonly ArtifactDecl[]): ScreenshotRecord[] {
+  const shots: ScreenshotRecord[] = [];
   for (const a of artifacts) {
     const match = SCREENSHOT_RE.exec(a.path);
     const viewport = match?.[1];
     const theme = match?.[2];
     if (viewport !== undefined && theme !== undefined)
-      shots.push({ path: a.path, viewport, theme });
+      shots.push({
+        path: a.path,
+        viewport,
+        theme,
+        ...(a.inner_width === undefined ? {} : { inner_width: a.inner_width }),
+        ...(a.client_width === undefined ? {} : { client_width: a.client_width }),
+      });
   }
   return shots;
 }
@@ -156,7 +168,7 @@ export function screenshotsStage(
   taskId: string,
   artifacts: readonly ArtifactDecl[],
   artifactsDir?: string,
-): { ok: boolean; shots: { path: string; viewport: string; theme: string }[] } {
+): { ok: boolean; shots: ScreenshotRecord[] } {
   const shots = screenshotsFromArtifacts(artifacts);
   return { ok: screenshotSetComplete(taskId, shots, artifactsDir), shots };
 }

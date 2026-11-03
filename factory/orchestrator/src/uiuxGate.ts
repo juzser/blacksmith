@@ -34,6 +34,8 @@ interface RecordedScreenshot {
   path: string;
   viewport: string;
   theme: string;
+  inner_width?: number;
+  client_width?: number;
 }
 
 /** The latest `results record --worktree` call for this task — the gate's freshness evidence (U2 D2). */
@@ -92,19 +94,42 @@ interface ScreenshotEntry {
   path: string;
   viewport: string;
   theme: string;
+  /** `window.innerWidth` the tester measured in the page when it took the shot. */
+  inner_width?: number;
+  /** `document.documentElement.clientWidth`, measured the same way. */
+  client_width?: number;
+}
+
+/** The CSS width a `mobile` shot is declared at; headless `--window-size` cannot go below ~500 and crops instead. */
+const MOBILE_WIDTH = 390;
+/** Narrowest width a `desktop` shot may report. */
+const DESKTOP_MIN_WIDTH = 768;
+
+/**
+ * A shot is genuine only when the widths measured in the page match the
+ * viewport its name declares. No record is no proof: a crop of a wider layout
+ * looks like clipping and must not reach the visual judge as evidence.
+ */
+function shotWidthMatches(s: ScreenshotEntry): boolean {
+  const { inner_width: inner, client_width: client } = s;
+  if (typeof inner !== 'number' || typeof client !== 'number') return false;
+  if (s.viewport === 'mobile') return inner === MOBILE_WIDTH && client <= MOBILE_WIDTH;
+  return inner >= DESKTOP_MIN_WIDTH && client >= DESKTOP_MIN_WIDTH;
 }
 
 /**
  * The screenshot-set test, shared by the gate's uiux stage and the tester's own
  * pre-hand-back check: all four REQUIRED_COMBOS are present, and every shot
- * resolves to a file inside the task's artifact home.
+ * resolves to a file inside the task's artifact home. A shot whose recorded
+ * in-page width does not match its declared viewport does not count toward
+ * its combo.
  */
 export function screenshotSetComplete(
   taskId: string,
   shots: readonly ScreenshotEntry[],
   artifactsDir?: string,
 ): boolean {
-  const haveCombos = new Set(shots.map((s) => `${s.viewport}:${s.theme}`));
+  const haveCombos = new Set(shots.filter(shotWidthMatches).map((s) => `${s.viewport}:${s.theme}`));
   const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
     haveCombos.has(`${viewport}:${theme}`),
   );

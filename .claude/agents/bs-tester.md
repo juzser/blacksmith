@@ -36,6 +36,17 @@ for a runner the project does not have.
   too, not only the task's own screens — derive that list from the
   screenshot suite already on disk or from the primitive's importers, and
   record which you used.
+- Take every mobile or other narrow shot with viewport emulation — Playwright's
+  `viewport` / `page.setViewportSize`, or CDP
+  `Emulation.setDeviceMetricsOverride` — never headless Chrome's
+  `--window-size`: it will not render narrower than about 500 px, so a
+  "390px" shot taken that way is a crop of a wider layout, with clipping that
+  is not there. Measure `window.innerWidth` and
+  `document.documentElement.clientWidth` in the page for each shot and declare
+  them on that shot's entry in the Result's `artifacts` as `inner_width` and
+  `client_width`. The gate counts a shot toward its set only when they match
+  its viewport (mobile: `inner_width` 390; desktop: at least 768), and a shot
+  with no record counts for nothing.
 - Touch-target measurement for every UI-affecting task: at the mobile
   viewport, measure the bounding box of every interactive element (`button`,
   `a[href]`, `input`, `select`, `[role=button]`, and the project's own

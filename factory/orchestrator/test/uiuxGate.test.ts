@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendEvent } from '../src/events.js';
 import { recordJudgeDispatch, recordJudgeReport } from '../src/judges.js';
-import { checkUiux } from '../src/uiuxGate.js';
+import { checkUiux, screenshotSetComplete } from '../src/uiuxGate.js';
 
 describe('uiuxGate.ts checkUiux', () => {
   let stateDir: string;
@@ -57,11 +57,13 @@ describe('uiuxGate.ts checkUiux', () => {
     );
   }
 
+  const D = { inner_width: 1280, client_width: 1280 };
+  const M = { inner_width: 390, client_width: 390 };
   const SCREENSHOTS = [
-    { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
-    { path: 'home-desktop-dark.png', viewport: 'desktop', theme: 'dark' },
-    { path: 'home-mobile-light.png', viewport: 'mobile', theme: 'light' },
-    { path: 'home-mobile-dark.png', viewport: 'mobile', theme: 'dark' },
+    { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light', ...D },
+    { path: 'home-desktop-dark.png', viewport: 'desktop', theme: 'dark', ...D },
+    { path: 'home-mobile-light.png', viewport: 'mobile', theme: 'light', ...M },
+    { path: 'home-mobile-dark.png', viewport: 'mobile', theme: 'dark', ...M },
   ];
 
   async function writeScreenshotsToDisk(entries = SCREENSHOTS) {
@@ -115,6 +117,33 @@ describe('uiuxGate.ts checkUiux', () => {
     await recordTester('sha-1');
     const missingOnDisk = await checkUiux({ taskId, head: 'sha-1', artifactsDir }, ctx(), opts());
     expect(missingOnDisk).toEqual({ outcome: 'blocked', reason: 'screenshots-missing' });
+  });
+
+  it('blocks screenshots-missing when a mobile shot was rendered wider than 390px (a cropped window)', async () => {
+    await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
+    await reportUiux('spec');
+    const cropped = SCREENSHOTS.map((s) =>
+      s.path === 'home-mobile-dark.png' ? { ...s, inner_width: 500, client_width: 500 } : s,
+    );
+    await writeScreenshotsToDisk(cropped);
+    await recordTester('sha-1', cropped);
+    const result = await checkUiux({ taskId, head: 'sha-1', artifactsDir }, ctx(), opts());
+    expect(result).toEqual({ outcome: 'blocked', reason: 'screenshots-missing' });
+  });
+
+  it('screenshotSetComplete refuses a shot with no recorded width, and a narrow shot whose widths disagree', async () => {
+    await writeScreenshotsToDisk();
+    expect(screenshotSetComplete(taskId, SCREENSHOTS, artifactsDir)).toBe(true);
+    const noRecord = SCREENSHOTS.map(({ path: p, viewport, theme }) => ({
+      path: p,
+      viewport,
+      theme,
+    }));
+    expect(screenshotSetComplete(taskId, noRecord, artifactsDir)).toBe(false);
+    const skewed = SCREENSHOTS.map((s) =>
+      s.viewport === 'mobile' ? { ...s, client_width: 500 } : s,
+    );
+    expect(screenshotSetComplete(taskId, skewed, artifactsDir)).toBe(false);
   });
 
   it('blocks screenshots-stale when the latest tester head does not match the gate head', async () => {
