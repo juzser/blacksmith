@@ -673,6 +673,19 @@ describe('post-merge batch', () => {
     it('refuses when the derived branch is the default branch', async () => {
       const lone = path.join(repo.root, 'lone');
       runGit(repo.root, ['init', '-q', '-b', repo.branch, lone]);
+      runGit(lone, [
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init',
+      ]);
+      // The only way a remote-less project names a factory branch its default.
+      runGit(lone, ['config', 'init.defaultBranch', repo.branch]);
       expect(() => assertIntegrationBranch(lone, repo.epicId)).toThrow(
         expect.objectContaining({ code: 'postmerge.not-integration-branch' }),
       );

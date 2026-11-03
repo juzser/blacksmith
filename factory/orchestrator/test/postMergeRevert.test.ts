@@ -656,6 +656,8 @@ describe('post-merge revert landing', () => {
         'init',
       ]);
       runGit(lone, ['branch', 'main']);
+      // The only way a remote-less project names a factory branch its default.
+      runGit(lone, ['config', 'init.defaultBranch', repo.branch]);
       const main = repo.git(['rev-parse', 'main'], lone);
       const tip = repo.git(['rev-parse', repo.branch], lone);
       const worktrees = () => repo.git(['worktree', 'list', '--porcelain'], lone);
