@@ -259,7 +259,23 @@ function diffStats(deps: HarnessDeps, dir: string): TrialRecord['diff'] {
   if (!root) throw new Error('diff failed: no start commit');
   // The install directory is created after the start commit; keep it out of the numbers.
   const skip = `:(exclude)${INSTALL_DIR}`;
-  git(deps, dir, ['add', '-N', '--', '.', skip], 'diff (marking new files)');
+  // Name the new files ourselves: `git add -N . :(exclude)x` exits 1 when x is git-ignored.
+  const fresh = git(
+    deps,
+    dir,
+    ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', skip],
+    'diff (listing new files)',
+  )
+    .stdout.split('\0')
+    .filter((f) => f !== '');
+  for (let i = 0; i < fresh.length; i += 200) {
+    git(
+      deps,
+      dir,
+      ['add', '-N', '--', ...fresh.slice(i, i + 200).map((f) => `:(literal)${f}`)],
+      'diff (marking new files)',
+    );
+  }
   const out = git(deps, dir, ['diff', '--numstat', '-z', root, '--', '.', skip], 'diff');
   const stats = parseNumstat(out.stdout);
   return {

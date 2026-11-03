@@ -346,6 +346,40 @@ describe('record', () => {
     expect(rec.diff).toEqual({ files: 1, added: 1, removed: 0 });
   });
 
+  const gitIn = (args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], {
+      cwd: work,
+      encoding: 'utf8',
+    });
+
+  it.each([
+    ['absent', false, false, false],
+    ['present and untracked', true, false, false],
+    ['present and ignored', true, true, false],
+    ['present and partly tracked', true, false, true],
+  ])(
+    'record counts the project and not the install directory when it is %s (real git)',
+    async (_n, present, ignored, tracked) => {
+      writeTask('kind-a', {});
+      prepare({ task: 'kind-a', arm: 'plain', dir: work }, deps(nodeSpawner));
+      if (present) put(path.join(work, '.blacksmith/factory/policies/stack.yml'), 'a\nb\nc\n');
+      if (tracked) {
+        gitIn(['add', '-f', '.blacksmith/factory/policies/stack.yml']);
+        gitIn(['commit', '-qm', 'track']);
+        put(path.join(work, '.blacksmith/untracked.txt'), 'u\n');
+      }
+      if (ignored) writeFileSync(path.join(work, '.git/info/exclude'), '.blacksmith\n');
+      put(path.join(work, 'src/new.js'), 'export const two = 2;\n');
+      const rec = await record(base(), deps(nodeSpawner));
+      expect(rec.diff).toEqual({ files: 1, added: 1, removed: 0 });
+      const indexed = gitIn(['ls-files']).split('\n');
+      expect(indexed).not.toContain('.blacksmith/untracked.txt');
+      if (present && !tracked) {
+        expect(indexed.some((f) => f.startsWith('.blacksmith'))).toBe(false);
+      }
+    },
+  );
+
   it('record with no transcript stores tokens null and wall_clock_ms null', async () => {
     writeTask('kind-a', {});
     const rec = await record(base(), deps(fakeSpawner().spawn));
