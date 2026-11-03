@@ -42,21 +42,6 @@ goal → contracts you sign → one worktree per contract, run in parallel
 | Course change | You or the session change the plan in chat, and the change lives in the conversation | A worker that finds a criterion wrong proposes a plan diff; you approve or reject it, and an approval cuts a new plan version |
 | Lessons | You or the session record what to avoid in CLAUDE.md or memory, and later sessions read it | Errors are classified, a scribe drafts lesson candidates you approve, and each brief carries the lessons for its role and paths |
 
-**Blacksmith 0.6.0 against its own earlier builds**
-
-Measured once, on 2026-11-03. This compares Blacksmith with its own earlier version, not with plain Claude Code.
-
-- Share of active wave time with only one agent busy: 67.6% before, 29.8% after.
-- Merge to next wave admitted, median: 14.7 min before, 2.6 min after.
-- Share of gate runs that blocked: 43.7% before, 11.6% after.
-- Check command, median: 469 s before, 181 s after.
-- Tokens per agent dispatch, median, without output tokens: 160k before, 182k after.
-- Reviewer rounds per task, mean: 1.49 before, 2.55 after.
-
-The samples are small, 38 tasks after against 243 before, and the two epics after were about the factory itself. The [benchmark](docs/benchmarks/0.6.0-before-after.md) has the method and every caveat.
-
-The comparison of plain Claude Code with Blacksmith is still NOT MEASURED; [`docs/trial/methodology.md`](docs/trial/methodology.md) says how it would be run.
-
 Demo: NOT MEASURED. No single-run recording is published yet.
 
 Every claim from the tagline to here has a row in the
@@ -633,7 +618,6 @@ version in
 | [`docs/guide/mods.md`](docs/guide/mods.md) | The optional bs-mod HUD and pr-mod |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `bs daemon` unattended |
-| [`docs/benchmarks/0.6.0-before-after.md`](docs/benchmarks/0.6.0-before-after.md) | How 0.6.0 compares with Blacksmith's own earlier builds, and the caveats |
 | [`docs/trial/methodology.md`](docs/trial/methodology.md) | How to compare plain Claude Code with Blacksmith, and what one run can show |
 | [`docs/claims-matrix.md`](docs/claims-matrix.md) | What backs each claim this page makes |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
