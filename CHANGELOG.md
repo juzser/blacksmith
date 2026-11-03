@@ -335,6 +335,15 @@ before hand-off. One entry per task.
   numbers and out of the index whether it is absent, untracked, ignored or
   partly tracked.
 
+- **A project with no remote no longer takes its checked-out integration
+  branch for the default branch.** `detectDefaultBranch` fell back to
+  whatever was checked out, so `bs checks post-merge` run from
+  `bs/<epic>/integration` saw the integration branch as the default and
+  refused, and a new integration branch could be cut from itself. Without a
+  remote it now uses `init.defaultBranch` if that branch exists, else the one
+  of `main`/`master` that exists, and never a `bs/…` or `smith/…` branch. If
+  both `main` and `master` exist and nothing says which, it refuses with
+  `worktree.default-branch-ambiguous`. A project with a remote is unchanged.
 - **`--no-findings` is an attestation only the operator can make.** It
   records `attested_by: operator` and closes a judge turn or a closing spec
   review with no findings file. Until now, any actor could write one, so a

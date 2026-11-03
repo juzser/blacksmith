@@ -37,10 +37,11 @@ export function taskBranchExists(projectDir: string, epic: string, taskId: strin
 }
 
 /**
- * Best-effort default-branch detection: origin/HEAD symbolic ref first (the
- * normal case after a clone), then whatever branch is currently checked out,
- * then the conventional main/master names. Exported for cleanup.ts (epic
- * bs-optimize criterion 14).
+ * Default-branch detection: origin/HEAD symbolic ref first (the normal case
+ * after a clone). Without a remote: git's `init.defaultBranch` if that branch
+ * exists, else the one of main/master that exists (both = refused as
+ * ambiguous, not guessed), else the checked-out branch — never a factory
+ * branch (`bs/…`, legacy `smith/…`), where a session usually stands.
  */
 export function detectDefaultBranch(projectDir: string): string {
   try {
@@ -52,14 +53,27 @@ export function detectDefaultBranch(projectDir: string): string {
   }
 
   try {
-    const current = git(projectDir, ['branch', '--show-current']);
-    if (current) return current;
+    const configured = git(projectDir, ['config', '--get', 'init.defaultBranch']);
+    if (configured && localBranchExists(projectDir, configured)) return configured;
   } catch {
-    // detached or no commits yet — fall through
+    // init.defaultBranch unset — fall through
   }
 
-  for (const candidate of ['main', 'master']) {
-    if (localBranchExists(projectDir, candidate)) return candidate;
+  const conventional = ['main', 'master'].filter((c) => localBranchExists(projectDir, c));
+  if (conventional.length === 1) return conventional[0] as string;
+  if (conventional.length > 1) {
+    throw new WorktreeError(
+      'worktree.default-branch-ambiguous',
+      `Both ${conventional.join(' and ')} exist in ${projectDir} and neither a remote nor init.defaultBranch says which is the default branch.`,
+      { projectDir, candidates: conventional },
+    );
+  }
+
+  try {
+    const current = git(projectDir, ['branch', '--show-current']);
+    if (current && !isFactoryBranch(current)) return current;
+  } catch {
+    // detached or no commits yet — fall through
   }
 
   throw new WorktreeError(
@@ -67,6 +81,10 @@ export function detectDefaultBranch(projectDir: string): string {
     `Could not detect a default branch in ${projectDir}.`,
     { projectDir },
   );
+}
+
+function isFactoryBranch(branch: string): boolean {
+  return [BRANCH_PREFIX, LEGACY_BRANCH_PREFIX].some((p) => branch.startsWith(`${p}/`));
 }
 
 /**
