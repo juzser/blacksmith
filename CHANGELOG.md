@@ -335,6 +335,15 @@ before hand-off. One entry per task.
   numbers and out of the index whether it is absent, untracked, ignored or
   partly tracked.
 
+- **`bs integration check` no longer refuses a fresh project over its own
+  declarations.** On a project that has not yet committed `.blacksmith/`
+  (`bs init` ignores only `state/`, `workspaces/` and `.env` there), the
+  untracked plans, roadmap and policies read as a dirty tree and the check
+  stopped with `integration.dirty-tree`, so operators hid the whole directory
+  in `.git/info/exclude`. Untracked files under the work root now stay out of
+  that read; tracked changes anywhere, and untracked files elsewhere, still
+  refuse.
+
 - **`--no-findings` is an attestation only the operator can make.** It
   records `attested_by: operator` and closes a judge turn or a closing spec
   review with no findings file. Until now, any actor could write one, so a

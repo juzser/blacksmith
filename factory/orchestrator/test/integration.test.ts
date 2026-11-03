@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -168,6 +168,51 @@ describe('integration.ts', () => {
         stateDir,
       }),
     ).rejects.toThrow(/dirty|uncommitted/i);
+  });
+
+  // A fresh project has `.blacksmith/factory/...` declarations the operator has
+  // not committed yet. They are untracked and cannot change what a check runs,
+  // so they must not read as a dirty tree.
+  describe('work root under the project', () => {
+    const run = (extra: { workRoot?: string } = {}) =>
+      runIntegrationCheck(
+        {
+          epicId,
+          projectDir,
+          checks: [{ name: 'lint', cmd: 'true' }],
+          ...extra,
+        },
+        ctx(),
+        { stateDir },
+      );
+    const workRoot = () => path.join(projectDir, '.blacksmith');
+
+    it('ignores untracked files under the work root', async () => {
+      await mkdir(path.join(workRoot(), 'factory', 'specs'), { recursive: true });
+      await writeFile(path.join(workRoot(), 'factory', 'specs', 'roadmap.md'), '# roadmap\n');
+      await expect(run({ workRoot: workRoot() })).resolves.toBeDefined();
+    });
+
+    it('refuses a modified tracked file under the work root', async () => {
+      await mkdir(path.join(workRoot(), 'factory'), { recursive: true });
+      await writeFile(path.join(workRoot(), 'factory', 'stack.yml'), 'a: 1\n');
+      git(projectDir, ['add', '.blacksmith']);
+      git(projectDir, ['commit', '-q', '-m', 'declarations']);
+      await writeFile(path.join(workRoot(), 'factory', 'stack.yml'), 'a: 2\n');
+      await expect(run({ workRoot: workRoot() })).rejects.toThrow(/uncommitted/i);
+    });
+
+    it('refuses an untracked file outside the work root', async () => {
+      await mkdir(workRoot(), { recursive: true });
+      await writeFile(path.join(workRoot(), 'plan.json'), '{}\n');
+      await writeFile(path.join(projectDir, 'stray.txt'), 'x\n');
+      await expect(run({ workRoot: workRoot() })).rejects.toThrow(/uncommitted/i);
+    });
+
+    it('is unchanged when the project has no work root', async () => {
+      await writeFile(path.join(projectDir, 'stray.txt'), 'x\n');
+      await expect(run({ workRoot: workRoot() })).rejects.toThrow(/uncommitted/i);
+    });
   });
 
   it('refuses when the epic has no integration branch at all', async () => {
