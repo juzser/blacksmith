@@ -465,7 +465,9 @@ recent dispatches, the dispatch audit. The tiers are taxonomy.yml's three —
 `frontier`, `mid`, `small` — and the flag is the only thing that puts the
 true one on the record. `--no-findings` records an operator
 *attestation* rather than a review — use it only for a judge that ran outside
-the factory; a judge that genuinely found nothing writes `[]` and reports.
+the factory, and only with `--actor operator`: any other actor is refused
+(`cli.no-findings-needs-operator`). A judge that genuinely found nothing writes
+`[]` and reports with `--artifact` / `--evidence`.
 
 Tell the judge the exact path on its own line, verbatim —
 `Declared artifact: /abs/path/<task-id>.reviewer.json` — the spelling `bs

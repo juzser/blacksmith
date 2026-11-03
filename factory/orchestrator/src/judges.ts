@@ -99,6 +99,21 @@ const DEFAULT_MODEL_TIER = 'frontier';
 /** `--no-findings`: an operator attesting that a judge ran clean, recorded as an attestation and never as an artifact. */
 const ATTESTED_BY = 'operator';
 
+/**
+ * An attestation says the operator read a review nobody else saw, so only an
+ * envelope whose actor is the operator may write one. `actor` is the one the
+ * event will carry. An agent with a clean result writes `[]` to its declared
+ * artifact and closes the turn with --artifact / --evidence instead.
+ */
+export function requireOperatorAttestation(actor: string): void {
+  if (actor === ATTESTED_BY) return;
+  throw new SmithError(
+    'cli.no-findings-needs-operator',
+    `--no-findings is the operator's attestation, and this command's actor is "${actor}". An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. The operator passes --actor operator.`,
+    { actor },
+  );
+}
+
 export interface EventContext {
   sessionId: string;
   planVersion: number;
@@ -987,6 +1002,7 @@ export async function recordJudgeReport(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<JudgeReport> {
+  if (input.noFindings) requireOperatorAttestation(ctx.actor ?? 'operator');
   const turns = await readJudgeTurns(input.taskId, ctx, opts);
   const { turn, artifactPath, findingCount } = checkJudgeReport(input, turns, opts);
 

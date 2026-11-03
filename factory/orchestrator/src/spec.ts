@@ -24,6 +24,7 @@ import {
   SPEC_FINDING_SCOPE,
   transition,
 } from './findings.js';
+import { requireOperatorAttestation } from './judges.js';
 import {
   bareTaskId,
   diffPlans,
@@ -381,6 +382,7 @@ export async function recordSpecReview(
   opts: EventOpts = {},
 ): Promise<SpecReviewRecord> {
   const { epicId, planVersion, headSha, reviewedBy } = input;
+  if (input.noFindings === true) requireOperatorAttestation(ctx.actor ?? 'system');
 
   const drafts = mintFindings(
     input.evidence,

@@ -157,6 +157,7 @@ import {
   readJudgeTurns,
   recordJudgeDispatch,
   recordJudgeReport,
+  requireOperatorAttestation,
   type UiuxDeviation,
   uiuxDeviationsToEvidence,
 } from './judges.js';
@@ -5212,6 +5213,8 @@ async function main(): Promise<number> {
         { epicId, flag: 'evidence' },
       );
     }
+    // Before anything is read: the attestation is the operator's alone.
+    if (noFindings) requireOperatorAttestation(flags.actor ?? 'system');
     const evidence = flags.evidence ? readJsonFile<FindingEvidence[]>(flags.evidence) : [];
     // No branch, no review. The whole point of this dispatch is that it reads
     // the code that now exists; recording one against a head that could not be

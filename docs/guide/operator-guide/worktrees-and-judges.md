@@ -270,9 +270,18 @@ Two shortcuts, both on `gate run` (§5):
   an attestation is "the agent said something" relayed by a human — the exact
   class of evidence this section exists to stop trusting. Use it for a judge
   that ran outside the factory; a judge that genuinely found nothing writes
-  `[]` and reports normally. A bare `--no-findings` with no role is a usage
+  `[]` and reports normally. The attestation is the operator's alone: it
+  needs `--actor operator` (the default when `--actor` is omitted), and any
+  other actor, a wave-runner session included, is refused with
+  `cli.no-findings-needs-operator`. An agent with a clean result writes `[]` to
+  its declared artifact and closes the turn with `--artifact` / `--evidence`.
+  A bare `--no-findings` with no role is a usage
   error (`cli.no-findings-needs-role`), not an attestation for a role called
   "true".
+
+| Error code | What it means | What to do |
+|---|---|---|
+| `cli.no-findings-needs-operator` | `--no-findings` came from an envelope whose actor is not `operator`; no event was written | Write `[]` to the declared artifact and close with `--artifact` / `--evidence`. Only the operator passes `--actor operator` |
 
 ### Three judges, one message
 

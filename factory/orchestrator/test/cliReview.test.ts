@@ -504,6 +504,68 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // The attestation says the operator read a review nobody else saw, so only
+    // the operator's own envelope may write it. An agent with a clean result
+    // writes `[]` and closes with --artifact / --evidence.
+    describe("--no-findings is the operator's alone", () => {
+      const owed = (sessionId: string, eventsDir: string) =>
+        JSON.parse(
+          judgeCli('outstanding', sessionId, eventsDir, ['--task', 'epic-1/task-1']).stdout,
+        ).count;
+
+      it('judge report refuses a non-operator actor and writes nothing', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        const reported = judgeCli('report', sessionId, eventsDir, [
+          '--task',
+          'epic-1/task-1',
+          '--role',
+          'reviewer',
+          '--no-findings',
+          '--actor',
+          'wave-runner',
+        ]);
+        expect(reported.status).toBe(1);
+        const error = JSON.parse(reported.stdout).error;
+        expect(error.code).toBe('cli.no-findings-needs-operator');
+        expect(error.message).toContain('--actor operator');
+        expect(error.message).toContain('[]');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+      });
+
+      it('judge report with --actor operator still records the attestation', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        const reported = judgeCli('report', sessionId, eventsDir, [
+          '--task',
+          'epic-1/task-1',
+          '--role',
+          'reviewer',
+          '--no-findings',
+          '--actor',
+          'operator',
+        ]);
+        expect(reported.status).toBe(0);
+        expect(JSON.parse(reported.stdout)).toMatchObject({ attested: true });
+        expect(owed(sessionId, eventsDir)).toBe(0);
+      });
+
+      it('gate run --no-findings <role> refuses a non-operator actor and writes nothing', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'security-reviewer', artifact);
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--no-findings',
+          'security-reviewer',
+          '--actor',
+          'wave-runner',
+        ]);
+        expect(gated.status).toBe(1);
+        expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+      });
+    });
+
     it('gate run refuses to score a task whose judge is still owed', async () => {
       const { sessionId, eventsDir, artifact } = await judgeSession();
       const files = await gateFiles(sessionId);

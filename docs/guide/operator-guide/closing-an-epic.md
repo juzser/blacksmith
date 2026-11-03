@@ -296,7 +296,9 @@ Exactly one of `--evidence` or `--no-findings`, the way `judge report` takes
 them (worktrees-and-judges.md §3c). A reviewer that found nothing writes `[]`
 and you hand that file over; `--no-findings` is the operator attesting a
 review that ran outside the factory, and the event records it as
-`attested_by: operator`. Passing neither is refused with `cli.missing-flag`,
+`attested_by: operator`. It requires `--actor operator`: with no `--actor` the
+actor is `system`, and any actor but `operator` is refused with
+`cli.no-findings-needs-operator` before anything is written. Passing neither is refused with `cli.missing-flag`,
 passing both with `cli.incompatible-flags`: an absent `--evidence` used to read as a clean
 review, which is how a reviewer that never wrote its file closed clean.
 
