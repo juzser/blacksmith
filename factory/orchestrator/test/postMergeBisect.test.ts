@@ -705,8 +705,12 @@ describe('post-merge batch', () => {
         '-m',
         'init',
       ]);
-      // The only way a remote-less project names a factory branch its default.
-      runGit(lone, ['config', 'init.defaultBranch', repo.branch]);
+      // A project whose origin/HEAD names the factory branch is the only way it is the default.
+      runGit(lone, [
+        'symbolic-ref',
+        'refs/remotes/origin/HEAD',
+        `refs/remotes/origin/${repo.branch}`,
+      ]);
       expect(() => assertIntegrationBranch(lone, repo.epicId)).toThrow(
         expect.objectContaining({ code: 'postmerge.not-integration-branch' }),
       );
