@@ -1,6 +1,6 @@
 # Lean mode scope — one command, a few agents, the same gates
 
-Status: **draft for operator sign-off**, 2026-11-03.
+Status: **decisions recorded (O-1..O-16), text awaiting operator sign-off**, 2026-11-03.
 
 This scope covers a new default path through Blacksmith. It does the work with a small fixed crew of agents and the factory's mechanical gates, and drops most of the ceremony around them. The full factory (`/bs plan` + `/bs run`) stays available and unchanged until the lean path has been measured against it. Nothing is deleted under this scope.
 
@@ -59,6 +59,10 @@ The reading: the work that produced the quality (coder, tester, reviewer) is che
 | O-10 | When the planner is on, it keeps opus/xhigh (Q-3 A). |
 | O-11 | §18 rule 8 is met by hooks and CLI output, not by hand (Q-4 A). |
 | O-12 | The other verbs (`audit`, `new`, `mcp`, `use`, `status`, `ui`, `waivers`, `lessons`, `report`) and the `SKILL.md` router lose their redundant flow too (§6a). |
+| O-13 | `/bs status` stays a separate quick view, about 25 lines. A new CLI verb renders the digest (Q-5 A). |
+| O-14 | The dashboard goes entirely: the `/bs ui` verb, `bs ui serve`, the `ui/` package, its e2e CI jobs and its docs (Q-6, §6b). |
+| O-15 | `/bs waivers` is retired on the lean path. Open S3/S4 findings become one yes/no line in the `/bs do` summary (Q-7 A). |
+| O-16 | **North star:** Blacksmith is a repo of harness and skills that raise quality and enable parallel work with subagents. Anything that serves neither is a removal candidate (§10 phase 3). |
 
 ## 3. The lean path — `/bs do <request>`
 
@@ -144,8 +148,8 @@ None of these verbs ran in the trial, so the costs and values below are **unmeas
 | `new` | Scaffold + gates + commit + a bootstrap roadmap milestone; a toolchain verdict; the push commands. | The same, without the bootstrap milestone and the inline history. | 35 → ~22 | The milestone `bs projects list` reads. That reader moves to the event log. |
 | `mcp` | `mcp init` + milestone. Approval rule (already checked in code, `mcp.ts` MCP-T4) and MCP-S3 rule. `mcp check` runs only at `epic close`. | `mcp check` runs in the gate whenever `mcp.manifest.json` exists, because `/bs do` has no epic close and the check would otherwise be silently dropped. Keep "never sign an approval yourself" and MCP-S3; MCP-S3 has no code check. | 29 → ~12 | Nothing; the check moves earlier. |
 | `use` | The hook writes the binding; the session relays it; the small-change bypass question. | Already lean. The hook text and playbook point at `/bs do` instead of "/bs plan and /bs run" (`sessionBinding.ts`). Keep the small-change bypass: a one-line change through `/bs do` still costs 3 dispatches. | 54 → ~35 | Nothing. |
-| `status` | `daemon status` + `stats overview`, each rendered as prose by the session. It also restates `budgets.yml` caps, which the router forbids. | `bs status` prints the readable digest itself; the playbook relays it. | 61 → ~25 | The waiver and milestone lines, whose sources the lean path no longer produces. |
-| `ui` | `ui serve`, a build on `ui.not-built`, the URL. Lines 24–29 are stale: they say installs ship no dashboard, but `package.json` `files` includes `ui/dist` and `ui/server/dist`. | Fix the stale lines; keep it to the command and the URL. | 35 → ~8 | Nothing. |
+| `status` | `daemon status` + `stats overview`, each rendered as prose by the session. It also restates `budgets.yml` caps, which the router forbids. | A new CLI verb prints the readable digest itself (its name is settled in phase 1b); the playbook relays it. | 61 → ~25 | The waiver and milestone lines, whose sources the lean path no longer produces. |
+| `ui` | `ui serve`, a build on `ui.not-built`, the URL. | **Removed with the dashboard (O-14, §6b).** | 35 → 0 | The dashboard; see §6b. |
 | `waivers` | `pending` → one batch → `apply` → `approve-task` → about 10 commands to route a denial. It exists because S3/S4 findings block the epic verdict, and the lean path has no verdict. | On the lean path, open S3/S4 findings are one line in the `/bs do` summary. A yes runs `waivers apply`, which is kept so a waived finding is suppressed in later reviews. A no becomes a follow-up `/bs do`. The verb stays for the full path, trimmed. | 93 → ~25 (full path) | On the lean path, the record of a denied finding carried forward. |
 | `lessons` | `candidates`, each presented singly, approve/edit/reject plus a novelty read, `db apply`, `dream` + scribe, `compile` + commit, `lessons audit`. | Run `dream` first. Present one batch. `compile` reads the db, so `db apply` folds into it. The scribe becomes optional, which also skips loading `dispatch.md`. Add reviewer bounces as a `dream` source, since the lean path makes fewer sign-offs, waivers and escalations. | 85 → ~40 | With the scribe off, a fresh-context drafter. |
 | `report` | `projects list`, scheduler `run`/`admit`, two stats reads, `judge escalations`, `wave audit`, provider stats, scribe prose, Slack, export. | A CLI render instead of scribe prose; this also enforces "never paraphrase numbers". Drop `judge escalations`, which reads quorum events only; drop `wave audit`, which exits 2 with no waves; drop provider agreement rates, which mean nothing for an advisory cross-check. Point "auto → /bs run" at `/bs do`. Keep: a person merges every PR, and the auto-dispatch whitelist is never widened mid-run. | 139 → ~40 | The scribe's prose summary. |
@@ -158,10 +162,31 @@ Cross-verb changes:
 2. **Hooks write dispatch events for every verb,** not only `/bs do`.
 3. **Every "/bs plan → /bs run" hand-off becomes `/bs do`.** This covers `audit`, `use` and `report`, and the session-binding hook text.
 4. **Every lean run gets an id,** so `bs stats`, the dashboard and `status` can group by run as they group by epic today.
-5. **Verb retirements (operator decision, §12):**
-   - merge `status` into `report`;
-   - reduce `/bs ui` to the bare `bs ui serve` command;
-   - retire `/bs waivers` on the lean path.
+5. **Verb changes (O-13..O-15):**
+   - `status` stays separate;
+   - `/bs ui` is removed with the dashboard;
+   - `/bs waivers` is retired on the lean path.
+
+## 6b. Removing the dashboard (O-14)
+
+The dashboard serves neither quality nor parallel work (O-16), so it is removed in one change:
+
+- the `ui/` package (518 tracked files, about 13 MB): app, server and tests;
+- the `bs ui serve` verb and `.claude/skills/bs/ui.md`;
+- `ui/dist` and `ui/server/dist` from `package.json` `files`;
+- the dashboard docs: `docs/guide/dashboard.md`, and the dashboard parts of `README.md`, `INSTALL.md`, `docs/guide/status.md`, `docs/guide/operator-loop.md`, `docs/runbooks/ops.md`, `SECURITY.md` and `docs/claims-matrix.md`;
+- the e2e CI jobs (`e2e-shard`, `e2e (Playwright, Chromium)`), which test only the dashboard.
+
+**Ordering constraint:**
+- The `main` ruleset (26017656) requires the check named `e2e (Playwright, Chromium)`. A PR that deletes that job would wait forever for a check that never reports.
+- So **the operator removes that required check from the ruleset first**; ruleset changes are the operator's. The removal PR merges after that.
+- `gate (scripts/check.sh)` stays required.
+
+Kept, because `bs stats`, the `/bs status` digest and the gate read them:
+- the event log;
+- the projection tables (`db/projector.ts`, `db/queries.ts`).
+
+Queries that only the dashboard read are phase-3 candidates (O-16). They are not removed in this change.
 
 ## 7. Event log and the load-bearing rules (§18)
 
@@ -214,24 +239,30 @@ Run each three ways: plain, `/bs do` with parallel parts, and the full `/bs run`
 |---|---|---|
 | 0 | The four fixes in §8 | merged, CI green |
 | 1a | Envelope defaults and dispatch-event hook (§6a 1–2); `/bs do` playbook, target ≤ 200 lines; test-strength rule in `bs-coder`/`bs-tester`; two-stage `bs-reviewer`; `--grader`; usage hook; one-shot advisory cross-check; `mcp check` in the gate | the operator approves the PRs |
-| 1b | Trims in §6a: `SKILL.md` and `dispatch.md` split, `audit`, `new`, `use`, `status`, `ui`, `waivers`, `lessons`, `report`; hand-offs to `/bs do` | the operator approves the PRs |
+| 1b | Trims in §6a: `SKILL.md` and `dispatch.md` split, `audit`, `new`, `use`, `status`, `waivers`, `lessons`, `report`; hand-offs to `/bs do` | the operator approves the PRs |
+| 1c | Dashboard removal (§6b) | the operator first drops `e2e (Playwright, Chromium)` from ruleset 26017656 |
 | 2 | §9 measurement, including the two large kinds | the numbers go to the operator |
-| 3 | If §9 is met: `/bs do` becomes the documented default, `/bs plan` + `/bs run` move under "advanced", and unused machinery (quorum, epic verdict, goal check, roadmap requirement, tier overlay, …) is removed one PR at a time. If not met: back to the operator with the numbers. | operator decision |
+| 3 | If §9 is met: `/bs do` becomes the documented default, `/bs plan` + `/bs run` move under "advanced", and machinery that fails the O-16 test is removed one PR at a time. If not met: back to the operator with the numbers. | operator decision, per candidate |
+
+Phase-3 candidates under O-16, listed but not decided. Each will go to the operator with what reads it and what its removal loses:
+- the quorum vote, epic verdict, goal check, roadmap requirement and tier overlay;
+- the daemon and scheduler;
+- the Slack digest in `report`;
+- the `bs new` scaffolder and `mcp` layer;
+- the project registry;
+- the lessons `dream` miner;
+- projection queries only the dashboard read.
 
 ## 11. Out of scope
 
 - Deleting any module, policy or playbook. That is phase 3, by separate decision.
-- Changing `/bs plan`, `/bs run`, the dashboard or the daemon. The other verbs are in scope; see §6a.
+- Changing `/bs plan`, `/bs run` or the daemon. The other verbs are in scope (§6a), and so is the dashboard's removal (§6b).
 - The earlier cost work (read-time budget join, planner cache, lesson gating). The lean path replaces it.
 
 ## 12. Questions
 
-The operator answered Q-1..Q-4 "A" on 2026-11-03. They are recorded as O-8..O-11 in §2.
-
-Still open, from §6a:
-
-| # | Question | Recommendation |
-|---|---|---|
-| Q-5 | Merge `/bs status` into `/bs report`? | No. Keep `status` as the quick live view that `bs status` renders, about 25 lines. A merged verb would make every "where are we?" pay for the digest. |
-| Q-6 | Reduce `/bs ui` to the bare command? | Yes. The playbook only runs one command and prints a URL. |
-| Q-7 | Retire `/bs waivers` on the lean path, so S3/S4 become a summary line with yes/no? | Yes. Keep the verb for the full path, trimmed. |
+All resolved on 2026-11-03:
+- Q-1..Q-4 were answered A, recorded as O-8..O-11.
+- Q-5 was answered A (O-13).
+- On Q-6 the operator went further than the question and removed the dashboard entirely, stating the north star (O-14, O-16).
+- Q-7 was answered A (O-15).
