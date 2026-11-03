@@ -1,7 +1,8 @@
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { detectDefaultBranch, type WorktreeError } from '../src/worktree.js';
 import { git } from './helpers/process.js';
 
@@ -12,6 +13,15 @@ function codeOf(fn: () => unknown): string | undefined {
     return (e as WorktreeError).code;
   }
   return undefined;
+}
+
+/** No contributor's global or system git config may change an outcome. */
+function hermetic(dir: string): string {
+  const globalConfig = path.join(dir, 'global.gitconfig');
+  writeFileSync(globalConfig, '');
+  vi.stubEnv('GIT_CONFIG_GLOBAL', globalConfig);
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+  return globalConfig;
 }
 
 describe('detectDefaultBranch on a project without a remote', () => {
@@ -30,10 +40,12 @@ describe('detectDefaultBranch on a project without a remote', () => {
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'smith-defbranch-'));
+    hermetic(root);
     projectDir = path.join(root, 'project');
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -52,12 +64,51 @@ describe('detectDefaultBranch on a project without a remote', () => {
     expect(detectDefaultBranch(projectDir)).toBe('master');
   });
 
-  it('prefers init.defaultBranch when that branch exists', async () => {
+  it('stands on main with main and master both present: main', async () => {
+    await initRepo('main');
+    git(projectDir, ['branch', 'master']);
+    expect(detectDefaultBranch(projectDir)).toBe('main');
+  });
+
+  it('stands on master with both present: master', async () => {
+    await initRepo('master');
+    git(projectDir, ['branch', 'main']);
+    expect(detectDefaultBranch(projectDir)).toBe('master');
+  });
+
+  it('breaks the both-exist tie with init.defaultBranch', async () => {
     await initRepo('main');
     git(projectDir, ['branch', 'master']);
     git(projectDir, ['config', 'init.defaultBranch', 'master']);
     git(projectDir, ['checkout', '-q', '-b', 'bs/x/integration']);
     expect(detectDefaultBranch(projectDir)).toBe('master');
+  });
+
+  it('breaks the tie from a global init.defaultBranch too, and only then', async () => {
+    const globalConfig = hermetic(root);
+    await initRepo('master');
+    writeFileSync(globalConfig, '[init]\n\tdefaultBranch = main\n');
+    git(projectDir, ['checkout', '-q', '-b', 'bs/x/integration']);
+    // one of main/master: the global setting is not consulted
+    expect(detectDefaultBranch(projectDir)).toBe('master');
+    git(projectDir, ['branch', 'main']);
+    expect(detectDefaultBranch(projectDir)).toBe('main');
+  });
+
+  it('ignores an init.defaultBranch naming a branch that does not exist', async () => {
+    await initRepo('master');
+    git(projectDir, ['config', 'init.defaultBranch', 'trunk']);
+    git(projectDir, ['checkout', '-q', '-b', 'bs/x/integration']);
+    expect(detectDefaultBranch(projectDir)).toBe('master');
+  });
+
+  it('ignores an init.defaultBranch naming a non-conventional existing branch', async () => {
+    await initRepo('master');
+    git(projectDir, ['branch', 'main']);
+    git(projectDir, ['branch', 'trunk']);
+    git(projectDir, ['config', 'init.defaultBranch', 'trunk']);
+    git(projectDir, ['checkout', '-q', '-b', 'bs/x/integration']);
+    expect(codeOf(() => detectDefaultBranch(projectDir))).toBe('worktree.default-branch-ambiguous');
   });
 
   it('refuses with a coded error when main and master both exist and nothing says which', async () => {
@@ -81,6 +132,7 @@ describe('detectDefaultBranch on a project without a remote', () => {
 describe('detectDefaultBranch with a remote', () => {
   it('keeps origin/HEAD ahead of everything else', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'smith-defbranch-r-'));
+    hermetic(root);
     try {
       const originDir = path.join(root, 'origin.git');
       const projectDir = path.join(root, 'project');
@@ -98,6 +150,7 @@ describe('detectDefaultBranch with a remote', () => {
       git(projectDir, ['checkout', '-q', '-b', 'bs/x/integration']);
       expect(detectDefaultBranch(projectDir)).toBe('trunk');
     } finally {
+      vi.unstubAllEnvs();
       await rm(root, { recursive: true, force: true });
     }
   });
