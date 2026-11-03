@@ -109,12 +109,21 @@ const ATTESTED_BY = 'operator';
  * An agent with a clean result writes `[]` to its declared artifact and closes
  * the turn with --artifact / --evidence instead.
  */
-export function requireOperatorAttestation(actor: string | null | undefined): void {
-  if (isOperatorActor(actor)) return;
+export function requireOperatorAttestation(
+  actor: unknown,
+  how: 'flag' | 'raw-event' = 'flag',
+): void {
+  if (isOperatorActor(actor as string | null | undefined)) return;
+  const who = actor;
+  const named = typeof who === 'string' && who !== '' ? `"${who}"` : null;
+  const fix =
+    how === 'flag'
+      ? 'The operator passes --actor operator.'
+      : 'The operator sets "actor":"operator" in the event JSON.';
   throw new SmithError(
     'cli.no-findings-needs-operator',
-    `--no-findings is the operator's attestation, and this command's actor is ${actor ? `"${actor}"` : 'not set'}. An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. The operator passes --actor operator.`,
-    { actor: actor ?? null },
+    `--no-findings is the operator's attestation, and this command's actor is ${named ?? 'not set'}. An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. ${fix}`,
+    { actor: named === null ? null : String(who) },
   );
 }
 
@@ -943,7 +952,9 @@ export interface JudgeReportCheck {
  * Everything `recordJudgeReport` checks before it appends: the kind, the turn
  * the report belongs to, the artifact's freshness and its shape. Throws the
  * same JudgeError codes and writes nothing, so a preflight can ask whether a
- * report would be accepted without making it.
+ * report would be accepted without making it. It does not check who is
+ * attesting: for `--no-findings` that is the caller's job
+ * (`requireOperatorAttestation`), before it asks for a close.
  */
 export function checkJudgeReport(
   input: JudgeReportInput,

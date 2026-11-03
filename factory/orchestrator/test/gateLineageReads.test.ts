@@ -115,12 +115,7 @@ describe('gate lineage reads', () => {
   let worktreeDir: string;
   let artifactsDir: string;
   const sessionId = 'sess-lineage-reads';
-  const ctx = () => ({
-    sessionId,
-    planVersion: 1,
-    causalParent: `${sessionId}#0`,
-    actor: 'operator',
-  });
+  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
   const originalKey = process.env[API_KEY_ENV];
 
   function git(args: string[]) {
@@ -193,7 +188,11 @@ describe('gate lineage reads', () => {
         ctx(),
         opts,
       );
-      await recordJudgeReport({ taskId: TASK, role: 'uiux', noFindings: true, kind }, ctx(), opts);
+      await recordJudgeReport(
+        { taskId: TASK, role: 'uiux', noFindings: true, kind },
+        { ...ctx(), actor: 'operator' },
+        opts,
+      );
     }
   }
 

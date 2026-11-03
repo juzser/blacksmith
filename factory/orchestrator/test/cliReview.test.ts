@@ -600,6 +600,29 @@ describe('cli.ts (built binary)', () => {
         expect(events.filter((r) => r.event_type === 'judge-reported')).toEqual([]);
       });
 
+      it('gate run refuses a bad --no-findings role before closing the evidence on the line', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        await writeFile(artifact, JSON.stringify([]));
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--evidence',
+          artifact,
+          '--found-by',
+          'reviewer',
+          '--no-findings',
+          'true',
+          '--actor',
+          'operator',
+        ]);
+        expect(gated.status).toBe(1);
+        expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-role');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+        expect(
+          tailEvents(sessionId, eventsDir).filter((r) => r.event_type === 'judge-reported'),
+        ).toEqual([]);
+      });
+
       it('gate run with --actor operator records the attestation', async () => {
         const { sessionId, eventsDir, artifact } = await judgeSession();
         const files = await gateFiles(sessionId);
@@ -647,6 +670,14 @@ describe('cli.ts (built binary)', () => {
         expect(
           tailEvents(sessionId, eventsDir).filter((r) => r.payload?.attested_by !== undefined),
         ).toEqual([]);
+        // The raw path has no --actor flag, so the message says where the actor is set,
+        // and an array actor is not rendered as a name.
+        const viaArray = append(['operator'] as unknown as string, 'judge-reported');
+        expect(viaArray.status).toBe(1);
+        const message = JSON.parse(viaArray.stdout).error.message as string;
+        expect(message).toContain('"actor":"operator" in the event JSON');
+        expect(message).toContain('actor is not set');
+        expect(message).not.toContain('--actor operator');
         expect(append('operator', 'judge-reported').status).toBe(0);
       });
 

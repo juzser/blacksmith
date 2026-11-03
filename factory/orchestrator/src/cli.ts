@@ -4133,7 +4133,7 @@ async function main(): Promise<number> {
         typeof body === 'object' &&
         Object.hasOwn(body, 'attested_by')
       ) {
-        requireOperatorAttestation(raw.actor as string | undefined);
+        requireOperatorAttestation(raw.actor, 'raw-event');
       }
     }
     const result = await appendEvent(input, eventOptsFromFlags(flags));
@@ -4869,6 +4869,9 @@ async function main(): Promise<number> {
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
     // The actor is checked once, before any close is written: a line that mixes
     // evidence closes with an attestation must not leave the evidence behind.
+    // Roles first, as `results check` does, so one line fails on one code in both verbs.
+    for (const role of repeated['no-findings'] ?? [])
+      requireNoFindingsRole({ taskId, role, noFindings: true });
     if ((repeated['no-findings'] ?? []).length > 0) requireOperatorAttestation(flags.actor);
     for (const close of selectJudgeCloses(taskId, handedIn, turns, repeated['no-findings'] ?? [])) {
       // P9-11: the genuinely clean case, said out loud. A judge that found
