@@ -80,13 +80,14 @@ describe('bs results check (built binary)', () => {
     return file;
   };
 
-  const sessionFlags = () => [
+  const sessionFlags = (actor: string | null = null) => [
     '--session',
     w.sessionId,
     '--causal-parent',
     `${w.sessionId}#0`,
     '--state-dir',
     w.stateDir,
+    ...(actor === null ? [] : ['--actor', actor]),
   ];
 
   const planFile = (uiAffecting: boolean) =>
@@ -114,7 +115,12 @@ describe('bs results check (built binary)', () => {
     });
 
   /** The `gate run` line a fixture implies, minus the positional and the verb. */
-  async function gateLine(input: GateInput, extra: string[] = []): Promise<string[]> {
+  async function gateLine(
+    input: GateInput,
+    extra: string[] = [],
+    // Only a line that attests names the operator; every other line names no actor.
+    actor: string | null = extra.includes('--no-findings') ? 'operator' : null,
+  ): Promise<string[]> {
     return [
       '--worktree',
       w.worktreeDir,
@@ -130,7 +136,7 @@ describe('bs results check (built binary)', () => {
       ...(input.uiAffecting === undefined ? [] : ['--plan', await planFile(input.uiAffecting)]),
       '--artifacts-dir',
       w.artifactsDir,
-      ...sessionFlags(),
+      ...sessionFlags(actor),
       ...extra,
     ];
   }
@@ -295,16 +301,50 @@ describe('bs results check (built binary)', () => {
       expect(snapshot(w.stateDir)).toEqual(before);
     });
 
+    // The same line fails alike in both verbs, and neither writes.
+    it.each([
+      ['a wave-runner actor', 'wave-runner'],
+      ['no actor at all', null],
+    ])('refuses --no-findings under %s the way gate run does', async (_name, actor) => {
+      await dispatchWithArtifact('reviewer', path.join(scratch, 'reviewer.json'));
+      const base = await gateLine(await clean(w), ['--no-findings', 'reviewer']);
+      const line = [
+        ...base.slice(0, base.indexOf('--session')),
+        '--no-findings',
+        'reviewer',
+        ...sessionFlags(actor),
+      ];
+      const before = snapshot(w.stateDir);
+      const preflight = checkGate(line);
+      expect(snapshot(w.stateDir)).toEqual(before);
+      const real = gate(line);
+      expect(snapshot(w.stateDir)).toEqual(before);
+      expect(real.json.error.code).toBe('cli.no-findings-needs-operator');
+      expect(preflight.json.error.code).toBe('cli.no-findings-needs-operator');
+      expect(preflight.status).toBe(real.status);
+      expect(preflight.json.error.message).toBe(real.json.error.message);
+    });
+
     // A bare --no-findings is refused upstream by the generic missing-value check
     // in both verbs; the form that reaches gate run's own guard is a role named "true".
-    it.each([
-      ['a role named "true"', ['--no-findings', 'true'], 'cli.no-findings-needs-role'],
-      ['an inline "true"', ['--no-findings=true'], 'cli.no-findings-needs-role'],
-      ['a bare flag', ['--no-findings'], 'cli.missing-flag-value'],
-    ])(
+    // The role is checked before the actor in both verbs, so a line that is wrong
+    // twice fails on the same code whoever runs it.
+    it.each(
+      [
+        ['a role named "true"', ['--no-findings', 'true'], 'cli.no-findings-needs-role'],
+        ['an inline "true"', ['--no-findings=true'], 'cli.no-findings-needs-role'],
+        ['a bare flag', ['--no-findings'], 'cli.missing-flag-value'],
+      ].flatMap(([name, extra, code]) =>
+        [
+          ['operator', 'operator'],
+          ['a wave-runner actor', 'wave-runner'],
+          ['no actor', null],
+        ].map(([who, actor]) => [`${name} under ${who}`, extra, code, actor]),
+      ) as [string, string[], string, string | null][],
+    )(
       'refuses %s with the code and exit status gate run fails with',
-      async (_name, extra, code) => {
-        const line = [...extra, ...(await gateLine(await clean(w)))];
+      async (_name, extra, code, actor) => {
+        const line = [...extra, ...(await gateLine(await clean(w), [], actor))];
         const real = gate(line);
         const before = snapshot(w.stateDir);
         const preflight = checkGate(line);

@@ -100,7 +100,12 @@ describe('gate.ts (integration)', () => {
     await rm(artifactsDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   function baseInput(overrides: Partial<GateInput> = {}): GateInput {
     return {

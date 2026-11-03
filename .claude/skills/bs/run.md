@@ -393,7 +393,8 @@ pass it every time.
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
-    `--evidence` is required unless you pass `--no-findings` instead, and
+    `--evidence` is required unless you pass `--no-findings` instead (the operator's
+    attestation, which needs `--actor operator`; an agent writes `[]`), and
     the two are exclusive: a reviewer that found nothing writes `[]` to that
     path, and `--no-findings` is the operator attesting a review that ran
     outside the factory — recorded as `attested_by: operator`, never read as

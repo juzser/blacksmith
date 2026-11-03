@@ -1272,7 +1272,7 @@ describe('spec-scoped findings (P9-9)', () => {
           evidence: [],
           noFindings: true,
         },
-        rootCtx(),
+        { ...rootCtx(), actor: 'operator' },
         { stateDir },
       );
       const events = await readEvents(ctx.sessionId, { stateDir });
@@ -1281,6 +1281,27 @@ describe('spec-scoped findings (P9-9)', () => {
         .map((e) => e.record.payload);
       expect(payloads[0]).not.toHaveProperty('attested_by');
       expect(payloads[1]).toMatchObject({ attested_by: 'operator', finding_count: 0 });
+    });
+
+    it('refuses a no-findings review whose actor is not the operator, writing nothing', async () => {
+      for (const actor of ['wave-runner', undefined]) {
+        await expect(
+          recordSpecReview(
+            {
+              epicId: 'envkit',
+              planVersion: 2,
+              headSha: HEAD_SHA,
+              reviewedBy: 'spec-reviewer',
+              evidence: [],
+              noFindings: true,
+            },
+            { ...rootCtx(), ...(actor === undefined ? {} : { actor }) },
+            { stateDir },
+          ),
+        ).rejects.toMatchObject({ code: 'cli.no-findings-needs-operator' });
+      }
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      expect(events.filter((e) => e.record.event_type === SPEC_REVIEW_EVENT)).toEqual([]);
     });
 
     it('raises the review evidence as spec findings and names them on the record', async () => {

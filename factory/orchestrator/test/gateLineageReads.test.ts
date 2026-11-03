@@ -188,7 +188,11 @@ describe('gate lineage reads', () => {
         ctx(),
         opts,
       );
-      await recordJudgeReport({ taskId: TASK, role: 'uiux', noFindings: true, kind }, ctx(), opts);
+      await recordJudgeReport(
+        { taskId: TASK, role: 'uiux', noFindings: true, kind },
+        { ...ctx(), actor: 'operator' },
+        opts,
+      );
     }
   }
 
