@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { isOperatorActor } from './actors.js';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { isAuditAxisTaskId } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
@@ -101,16 +102,19 @@ const ATTESTED_BY = 'operator';
 
 /**
  * An attestation says the operator read a review nobody else saw, so only an
- * envelope whose actor is the operator may write one. `actor` is the one the
- * event will carry. An agent with a clean result writes `[]` to its declared
- * artifact and closes the turn with --artifact / --evidence instead.
+ * envelope that names an operator actor may write one. `actor` is the
+ * envelope's `--actor`, as given: an omitted one is refused too, because the
+ * event would carry `system` and the orchestrator shares the operator's CLI
+ * session, so only an explicit `--actor operator` is a deliberate statement.
+ * An agent with a clean result writes `[]` to its declared artifact and closes
+ * the turn with --artifact / --evidence instead.
  */
-export function requireOperatorAttestation(actor: string): void {
-  if (actor === ATTESTED_BY) return;
+export function requireOperatorAttestation(actor: string | null | undefined): void {
+  if (isOperatorActor(actor)) return;
   throw new SmithError(
     'cli.no-findings-needs-operator',
-    `--no-findings is the operator's attestation, and this command's actor is "${actor}". An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. The operator passes --actor operator.`,
-    { actor },
+    `--no-findings is the operator's attestation, and this command's actor is ${actor ? `"${actor}"` : 'not set'}. An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. The operator passes --actor operator.`,
+    { actor: actor ?? null },
   );
 }
 
@@ -1002,7 +1006,7 @@ export async function recordJudgeReport(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<JudgeReport> {
-  if (input.noFindings) requireOperatorAttestation(ctx.actor ?? 'operator');
+  if (input.noFindings) requireOperatorAttestation(ctx.actor);
   const turns = await readJudgeTurns(input.taskId, ctx, opts);
   const { turn, artifactPath, findingCount } = checkJudgeReport(input, turns, opts);
 

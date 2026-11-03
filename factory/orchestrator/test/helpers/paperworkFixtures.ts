@@ -25,7 +25,7 @@ export interface World {
   elsewhereDir: string;
   sessionId: string;
   taskId: string;
-  ctx(): { sessionId: string; planVersion: number; causalParent: string };
+  ctx(): { sessionId: string; planVersion: number; causalParent: string; actor: string };
   opts(): { stateDir: string };
   git(args: string[]): string;
   /** The artifact home of this task: where declared artifacts have to live. */
@@ -98,7 +98,12 @@ export async function createWorld(): Promise<World> {
     elsewhereDir,
     sessionId: SESSION_ID,
     taskId: TASK_ID,
-    ctx: () => ({ sessionId: SESSION_ID, planVersion: 1, causalParent: `${SESSION_ID}#0` }),
+    ctx: () => ({
+      sessionId: SESSION_ID,
+      planVersion: 1,
+      causalParent: `${SESSION_ID}#0`,
+      actor: 'operator',
+    }),
     opts: () => ({ stateDir }),
     git,
     home: () => path.join(artifactsDir, TASK_ID),

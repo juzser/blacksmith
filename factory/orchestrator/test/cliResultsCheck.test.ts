@@ -80,13 +80,14 @@ describe('bs results check (built binary)', () => {
     return file;
   };
 
-  const sessionFlags = () => [
+  const sessionFlags = (actor: string | null = 'operator') => [
     '--session',
     w.sessionId,
     '--causal-parent',
     `${w.sessionId}#0`,
     '--state-dir',
     w.stateDir,
+    ...(actor === null ? [] : ['--actor', actor]),
   ];
 
   const planFile = (uiAffecting: boolean) =>
@@ -293,6 +294,29 @@ describe('bs results check (built binary)', () => {
       const ok = checkGate(line);
       expect(ok.json.outcome).toBe('pass');
       expect(snapshot(w.stateDir)).toEqual(before);
+    });
+
+    // The same line fails alike in both verbs, and neither writes.
+    it.each([
+      ['a wave-runner actor', 'wave-runner'],
+      ['no actor at all', null],
+    ])('refuses --no-findings under %s the way gate run does', async (_name, actor) => {
+      await dispatchWithArtifact('reviewer', path.join(scratch, 'reviewer.json'));
+      const base = await gateLine(await clean(w), ['--no-findings', 'reviewer']);
+      const line = [
+        ...base.slice(0, base.indexOf('--session')),
+        '--no-findings',
+        'reviewer',
+        ...sessionFlags(actor),
+      ];
+      const before = snapshot(w.stateDir);
+      const preflight = checkGate(line);
+      expect(snapshot(w.stateDir)).toEqual(before);
+      const real = gate(line);
+      expect(real.json.error.code).toBe('cli.no-findings-needs-operator');
+      expect(preflight.json.error.code).toBe('cli.no-findings-needs-operator');
+      expect(preflight.status).toBe(real.status);
+      expect(preflight.json.error.message).toBe(real.json.error.message);
     });
 
     // A bare --no-findings is refused upstream by the generic missing-value check

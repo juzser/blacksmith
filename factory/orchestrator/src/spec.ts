@@ -382,7 +382,7 @@ export async function recordSpecReview(
   opts: EventOpts = {},
 ): Promise<SpecReviewRecord> {
   const { epicId, planVersion, headSha, reviewedBy } = input;
-  if (input.noFindings === true) requireOperatorAttestation(ctx.actor ?? 'system');
+  if (input.noFindings === true) requireOperatorAttestation(ctx.actor);
 
   const drafts = mintFindings(
     input.evidence,

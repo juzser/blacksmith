@@ -624,7 +624,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<task-id>',
     flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
     summary:
-      'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked. It runs the pre-merge tier of --checks: an entry may carry "tier" (pre-merge, post-merge or pre-release; absent means pre-merge), and testgate-result names what it deferred. A non-empty file with no pre-merge entry, or a deferred coverage check, is refused before any stage.',
+      'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked. It runs the pre-merge tier of --checks: an entry may carry "tier" (pre-merge, post-merge or pre-release; absent means pre-merge), and testgate-result names what it deferred. A non-empty file with no pre-merge entry, or a deferred coverage check, is refused before any stage. --no-findings <role> attests the clean case for the operator and needs --actor operator; any other actor is refused before any close is written.',
   },
   {
     command: 'results record',
@@ -718,7 +718,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--epic <id> --project <dir> --plan <plan.json> --reviewed-by <role> [--reviewed-by-provider <name>] [--evidence <file>] [--no-findings] ${EVENTS_DIR}`,
     summary:
-      'Record the closing spec review, pinned to the integration head it was read at. Exactly one of --evidence or --no-findings; --no-findings attests the clean case.',
+      'Record the closing spec review, pinned to the integration head it was read at. Exactly one of --evidence or --no-findings; --no-findings attests the clean case and needs --actor operator.',
   },
   {
     command: 'epic goal',
@@ -937,7 +937,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--task <task-id> --role <role> [--round <n>] [--artifact <file>] [--no-findings] [--kind <spec|visual>] ${EVENTS_DIR}`,
     summary:
-      "Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case. --kind picks which of uiux's two open turns to close when both are open.",
+      "Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case and needs --actor operator. --kind picks which of uiux's two open turns to close when both are open.",
   },
   {
     command: 'judge outstanding',

@@ -40,7 +40,12 @@ describe('checkJudgeReport', () => {
     await rm(artifactDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
   const opts = () => ({ stateDir });
   const reviewerPath = () => path.join(artifactDir, 'reviewer.json');
   const anHourAgo = () => new Date(Date.now() - 60 * 60 * 1000);

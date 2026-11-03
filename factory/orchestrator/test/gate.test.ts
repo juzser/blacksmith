@@ -100,7 +100,12 @@ describe('gate.ts (integration)', () => {
     await rm(artifactsDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   function baseInput(overrides: Partial<GateInput> = {}): GateInput {
     return {
@@ -1833,7 +1838,12 @@ describe('gate.ts cross-provider quorum (Phase 8)', () => {
     await rm(worktreeDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   function gateInput(overrides: Partial<GateInput> = {}): GateInput {
     return {
@@ -2208,7 +2218,12 @@ describe('deps precondition (P9-16d)', () => {
     await rm(worktreeDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   /** A check that WOULD pass, so a block can only have come from the precondition. */
   function input(): GateInput {
@@ -2335,7 +2350,12 @@ describe('gate.ts budget check (P9-18)', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   function budgetInput(overrides: Partial<GateInput> = {}): GateInput {
     return {
@@ -2590,7 +2610,12 @@ describe('recordTaskResult', () => {
     await rm(artifactsDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
 
   it('records a valid result and reports the event id it was written under', async () => {
     const outcome = await recordTaskResult(

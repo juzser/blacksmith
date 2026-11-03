@@ -12,7 +12,12 @@ describe('uiuxGate.ts checkUiux', () => {
   const sessionId = 'sess-uiux';
   const taskId = 'epic-1/task-1';
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
   const opts = () => ({ stateDir });
 
   beforeEach(async () => {

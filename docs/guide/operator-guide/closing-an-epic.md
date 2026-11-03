@@ -288,7 +288,7 @@ epic close, against composite behaviour:
 bs epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
-  (--evidence spec-findings.json | --no-findings) \
+  (--evidence spec-findings.json | --no-findings --actor operator) \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
@@ -296,8 +296,8 @@ Exactly one of `--evidence` or `--no-findings`, the way `judge report` takes
 them (worktrees-and-judges.md §3c). A reviewer that found nothing writes `[]`
 and you hand that file over; `--no-findings` is the operator attesting a
 review that ran outside the factory, and the event records it as
-`attested_by: operator`. It requires `--actor operator`: with no `--actor` the
-actor is `system`, and any actor but `operator` is refused with
+`attested_by: operator`. It requires an explicit `--actor operator`: no `--actor`, or any
+other actor, is refused with
 `cli.no-findings-needs-operator` before anything is written. Passing neither is refused with `cli.missing-flag`,
 passing both with `cli.incompatible-flags`: an absent `--evidence` used to read as a clean
 review, which is how a reviewer that never wrote its file closed clean.

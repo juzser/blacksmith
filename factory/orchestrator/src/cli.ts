@@ -26,6 +26,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
 import { artifactHome } from './artifacts.js';
@@ -235,7 +236,13 @@ import {
 } from './security.js';
 import { HOOK_ONLY_EVENT_TYPES } from './sessionBinding.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, recordSpecReview, successorChainPath, taskSuccessors } from './spec.js';
+import {
+  amendPlan,
+  recordSpecReview,
+  SPEC_REVIEW_EVENT,
+  successorChainPath,
+  taskSuccessors,
+} from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -1561,6 +1568,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       const handedIn = handedInSources(args, flags);
       const noFindings = args.repeated['no-findings'] ?? [];
       for (const role of noFindings) requireNoFindingsRole({ taskId, role, noFindings: true });
+      if (noFindings.length > 0) requireOperatorAttestation(flags.actor);
       const turns =
         handedIn.length > 0 || noFindings.length > 0
           ? await attempt(
@@ -4114,6 +4122,20 @@ async function main(): Promise<number> {
         );
       }
     }
+    // A raw append must not forge what --no-findings refuses: an attestation
+    // written under an actor that is not the operator's.
+    if (input !== null && typeof input === 'object') {
+      const raw = input as { event_type?: unknown; actor?: unknown; payload?: unknown };
+      const body = raw.payload;
+      if (
+        (raw.event_type === JUDGE_REPORT_EVENT_TYPE || raw.event_type === SPEC_REVIEW_EVENT) &&
+        body !== null &&
+        typeof body === 'object' &&
+        Object.hasOwn(body, 'attested_by')
+      ) {
+        requireOperatorAttestation(raw.actor as string | undefined);
+      }
+    }
     const result = await appendEvent(input, eventOptsFromFlags(flags));
     // D-163. `event_type` is open here and closed in timeline(): the schema
     // keeps the write side free so an unknown type is never rejected and lost,
@@ -4845,6 +4867,9 @@ async function main(): Promise<number> {
     const handedIn = handedInSources(args, flags);
     const turns =
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
+    // The actor is checked once, before any close is written: a line that mixes
+    // evidence closes with an attestation must not leave the evidence behind.
+    if ((repeated['no-findings'] ?? []).length > 0) requireOperatorAttestation(flags.actor);
     for (const close of selectJudgeCloses(taskId, handedIn, turns, repeated['no-findings'] ?? [])) {
       // P9-11: the genuinely clean case, said out loud. A judge that found
       // nothing writes `[]` and reports through `smith judge report`; this flag
@@ -5214,7 +5239,7 @@ async function main(): Promise<number> {
       );
     }
     // Before anything is read: the attestation is the operator's alone.
-    if (noFindings) requireOperatorAttestation(flags.actor ?? 'system');
+    if (noFindings) requireOperatorAttestation(flags.actor);
     const evidence = flags.evidence ? readJsonFile<FindingEvidence[]>(flags.evidence) : [];
     // No branch, no review. The whole point of this dispatch is that it reads
     // the code that now exists; recording one against a head that could not be
