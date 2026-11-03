@@ -326,6 +326,24 @@ before hand-off. One entry per task.
 
 ### Fixed
 
+- **`--no-findings` is an attestation only the operator can make.** It
+  records `attested_by: operator` and closes a judge turn or a closing spec
+  review with no findings file. Until now, any actor could write one, so a
+  wave-runner's `bs judge report --no-findings` was logged as the operator
+  attesting reviews the operator never saw. `bs judge report`, `bs gate run`
+  and `bs epic spec-review` now refuse `--no-findings` unless the command
+  names an operator actor (`--actor operator`; `operator-skill` and `user`
+  also count). A missing `--actor` is refused too. The refusal is
+  `cli.no-findings-needs-operator`, exit 1, and nothing is written: `gate
+  run` checks every `--no-findings` role and the actor before it closes any
+  turn. `bs results check --as gate` refuses the same lines with the same
+  code. `bs event append` refuses a `judge-reported` or
+  `spec-review-recorded` event that carries `attested_by` unless the event's
+  own actor is an operator actor. An agent with a clean result writes `[]` to
+  its declared artifact and closes the turn with `--artifact` or
+  `--evidence`, as before. An operator who uses `--no-findings` now adds
+  `--actor operator`.
+
 - **A CLI judge's echoed prompt no longer counts against its output cap.**
   A CLI that echoes its whole stdin prompt onto stderr, as plain `codex exec`
   does (D-195), had every byte counted by `spawnCapped`, so `bs plan quorum`
