@@ -230,6 +230,7 @@ so a command chained after it (e.g. `audit record --causal-parent`, §5 of
 | `judges.artifact-not-a-list` | Parses, but is not a findings array | It wrote some other shape. An empty review is `[]`, written out |
 | `judges.artifact-stale` | The file was not written during this turn: its mtime is not later than the turn's `dispatch_decision`, or it was already there at dispatch and its mtime has not moved since | An earlier round's report, or a placeholder left behind — the judge did not report. Re-poke it; never `touch` the file to get past this. The same check runs when `gate run --evidence` closes the turn, and a `--no-findings` attestation reads no file so skips it |
 | `judges.artifact-invalid-evidence` | A list, but one or more items don't match `finding-evidence.schema.json` — only checked for `reviewer`, `grader`'s `--found-by grader` evidence path, and `security-reviewer` when the task id is an ordinary per-task id, not an audit axis (`<audit-id>.<axis>`) | Named by index and field in the error; the agent guessed field names instead of reporting the real shape. `[]` always passes — an empty review has nothing to validate |
+| `cli.no-findings-needs-operator` | `--no-findings` (on `judge report`, `gate run`, `results check`, `epic spec-review`) came with no `--actor`, or one that is not the operator's; a hand-appended attestation event is refused the same way. No event was written | An agent writes `[]` to the declared artifact and closes with `--artifact` / `--evidence`. Only the operator passes `--actor operator`. The operator spellings `isOperatorActor` accepts are `operator`, `operator-skill` and `user` |
 
 The grader is the exception the table allows for: its declared artifact is
 its result document (`state/results/<task-id>.grader-r<round>.json`, the file
@@ -270,7 +271,12 @@ Two shortcuts, both on `gate run` (§5):
   an attestation is "the agent said something" relayed by a human — the exact
   class of evidence this section exists to stop trusting. Use it for a judge
   that ran outside the factory; a judge that genuinely found nothing writes
-  `[]` and reports normally. A bare `--no-findings` with no role is a usage
+  `[]` and reports normally. The attestation is the operator's alone: it
+  needs an explicit `--actor operator`, and an omitted `--actor` or any
+  other actor, a wave-runner session included, is refused with
+  `cli.no-findings-needs-operator`. An agent with a clean result writes `[]` to
+  its declared artifact and closes the turn with `--artifact` / `--evidence`.
+  A bare `--no-findings` with no role is a usage
   error (`cli.no-findings-needs-role`), not an attestation for a role called
   "true".
 

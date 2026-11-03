@@ -180,12 +180,16 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'wave check',
     positionals: '<plan.json> <task-id>...',
-    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] [--repo <dir>] ${EVENTS_DIR}`,
+    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] [--repo <dir>] [--checks <checks.json> --project <dir>] ${EVENTS_DIR}`,
     summary:
       'Admit a wave whose claims are disjoint, whose files share no import edge, and whose ' +
       'declared cost fits under the epic token cap. --dry asks without writing the admission; ' +
       '--override-rationale admits a cost-refused wave and records the machine verdict beside ' +
-      'the human reason; --repo names the checkout the symbol graph is read from.',
+      'the human reason; --repo names the checkout the symbol graph is read from. ' +
+      "--checks and --project (together, and only with --session) read the epic session lineage's " +
+      'integration-check records and refuse a task that waits on an uncertified merge with ' +
+      '`wave.held-by-post-merge`; with --session and no --checks, an epic whose records use ' +
+      'tiers is refused with `wave.checks-required`.',
   },
   {
     command: 'wave next',
@@ -313,8 +317,10 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'worktree create',
     positionals: '<project-dir> <epic> <task-id>',
-    flags: '[--from <predecessor-task-id> --session <id> [--state-dir <dir>]]',
+    flags:
+      '[--from <predecessor-task-id> --session <id> [--state-dir <dir>]] [--reopen --revert <sha>]',
     summary:
+      'With --reopen --revert <sha>, reopen a reverted task instead: the task branch (reusing a clean worktree, attaching one, or cut from the head when deleted) fast-forwards to the integration head and gains one `git revert <sha>` commit, so the original change returns as new history; refused when the worktree is dirty, the branch tip is not an ancestor of the head, or the sha is not on the integration branch, and when the revert conflicts. ' +
       'Cut the isolated worktree and task branch one task is allowed to write in. --from cuts it from a predecessor branch instead of integration, and requires --session (which supplies the log --from is checked against): refused unless that session records <epic>/<task-id> as the logged successor of <epic>/<predecessor-task-id>.',
   },
   {
@@ -345,13 +351,17 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--batch] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--checks <checks.json>] [--batch] [--state-dir <dir>]',
     summary:
       'Serially rebase, test, and merge task branches into the integration branch. ' +
       'A merge is a fact the log must carry, so --session/--causal-parent/--plan are required — ' +
       'refuses before any git write without them. ' +
       '--batch (roadmap merge-lanes) groups claim-disjoint tasks with groupForBatch and ' +
-      'tests each group once instead of once per task — see queue.ts and the operator guide.',
+      'tests each group once instead of once per task — see queue.ts and the operator guide. ' +
+      '--checks reads the project checks file: with no post-merge or pre-release entry (or an empty file) ' +
+      '--test-cmd and --select-test-cmd run as without it; with one, the pre-merge tier is the pre-landing test ' +
+      'and neither command runs (the flags stay accepted), an empty pre-merge selection is refused. ' +
+      'Every wave-merged carries merge_sha; with --checks, pre_landing says which path ran and a tier run writes a queue-tier-run.',
   },
   {
     command: 'queue adopt',
@@ -613,7 +623,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'gate run',
     positionals: '<task-id>',
     flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
-    summary: 'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked.',
+    summary:
+      'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked. It runs the pre-merge tier of --checks: an entry may carry "tier" (pre-merge, post-merge or pre-release; absent means pre-merge), and testgate-result names what it deferred. A non-empty file with no pre-merge entry, or a deferred coverage check, is refused before any stage. --no-findings <role> attests the clean case for the operator and needs --actor operator; any other actor is refused before any close is written.',
   },
   {
     command: 'results record',
@@ -660,14 +671,46 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'integration check',
     positionals: '',
-    flags: `--epic <id> --project <dir> --checks <checks.json> [--run-all <true|false>] ${EVENTS_DIR}`,
+    flags: `--epic <id> --project <dir> --checks <checks.json> [--tier <pre-merge|post-merge|pre-release|all|remaining>] [--run-all <true|false>] ${EVENTS_DIR}`,
     summary:
-      'Run the checks against the assembled integration branch, not a worktree. Exit 1 on red.',
+      'Run the checks against the assembled integration branch, not a worktree. --tier runs one tier, all of them, or every check the head is not yet certified for (remaining). Exit 1 on red.',
+  },
+  {
+    command: 'checks ledger',
+    positionals: '',
+    flags:
+      '--project <dir> --specs-dir <dir> [--checks <checks.json>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Print the check ledger folded from the project’s epics under --specs-dir, with the gather warnings and the degraded flag. With --checks it adds the overlay report (active, shadowed, orphaned). Read-only.',
+  },
+  {
+    command: 'checks proposals',
+    positionals: '',
+    flags:
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --session <id> --plan-version <n> --causal-parent <event-id> [--actor <name>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Print the pending tier proposals, notices, overlay report and answered_in_epic. Writes only the repair the overlay and the log already owe each other, under the envelope flags.',
+  },
+  {
+    command: 'checks apply',
+    positionals: '<decisions.json>',
+    flags:
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --actor <name> --session <id> --plan-version <n> --causal-parent <event-id> [--hand-off <refusal-code>] [--state-dir <dir>] [--now <iso>]',
+    summary:
+      'Apply the operator’s tier decisions, or refuse the whole batch with the failing items. Exit 1 on a refusal. With --hand-off <refusal-code> it records that the reply went to the operator instead (decides nothing, validates nothing, takes no lock).',
+  },
+  {
+    command: 'checks post-merge',
+    positionals: '',
+    flags: `--epic <id> --project <dir> --checks <checks.json> --plan <plan.json> [--setup-cmd <cmd>] [--final] [--held] [--now <iso>] ${EVENTS_DIR}`,
+    summary:
+      'Run the post-merge tier on the integration branch when a batch is due, bisect a red that reproduces, and land a tested revert of the culprit (spec D4). Prints one JSON document with the outcome, its reason, culprits, dependents, setup_failed, promotions (automatic tier promotion for each culprit) and the overlay report. Exit 0 only for green, reverted, no-checks-in-tier, no-new-merges and batch-not-ready; none of the last three certifies a check. ' +
+      'With --held it is read-only: it needs --epic, --project, --checks, --plan and --session, and prints {held, uncertified_merges}, the tasks waiting on an uncertified merge.',
   },
   {
     command: 'epic verdict',
     positionals: '',
-    flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--epic <id> --project <dir> [--checks <checks.json>] [--roadmap-path <file>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary: 'Render the read-only epic verdict without writing a close. Exit 1 on hold.',
   },
   {
@@ -675,7 +718,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--epic <id> --project <dir> --plan <plan.json> --reviewed-by <role> [--reviewed-by-provider <name>] [--evidence <file>] [--no-findings] ${EVENTS_DIR}`,
     summary:
-      'Record the closing spec review, pinned to the integration head it was read at. Exactly one of --evidence or --no-findings; --no-findings attests the clean case.',
+      'Record the closing spec review, pinned to the integration head it was read at. Exactly one of --evidence or --no-findings; --no-findings attests the clean case and needs --actor operator.',
   },
   {
     command: 'epic goal',
@@ -693,8 +736,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'epic close',
     positionals: '',
-    flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] [--override-rationale <text>] ${EVENTS_DIR}`,
-    summary: 'Write the close down. A hold closes only with an operator rationale, recorded.',
+    flags: `--epic <id> --project <dir> [--checks <checks.json>] [--roadmap-path <file>] [--specs-dir <dir>] [--override-rationale <text>] ${EVENTS_DIR}`,
+    summary:
+      'Write the close down. A hold closes only with an operator rationale, recorded. With --checks every declared check of every tier must be certified at the integration head.',
   },
   {
     command: 'epic width',
@@ -893,7 +937,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--task <task-id> --role <role> [--round <n>] [--artifact <file>] [--no-findings] [--kind <spec|visual>] ${EVENTS_DIR}`,
     summary:
-      "Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case. --kind picks which of uiux's two open turns to close when both are open.",
+      "Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case and needs --actor operator. --kind picks which of uiux's two open turns to close when both are open.",
   },
   {
     command: 'judge outstanding',

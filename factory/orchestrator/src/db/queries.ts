@@ -2829,6 +2829,10 @@ export function eventKind(eventType: string, _payload: Record<string, unknown>):
     case 'budget-check-result':
     case 'coverage-evidence':
     case 'integration-check':
+    case 'queue-tier-run':
+    case 'check-tier-decided':
+    case 'check-tier-promoted':
+    case 'check-tier-batch-answered':
     case 'spec-review-recorded':
     case 'goal-check-recorded':
     case 'quorum-decision':

@@ -351,6 +351,100 @@ describe('providers/cli-transport.ts', () => {
       // Dropping the echo must not cost the judge its own empty answer.
       expect(result.output).toEqual([]);
     });
+
+    // The cap bounds what the judge WROTE. A prompt bigger than the cap is
+    // echoed back by `codex exec`, and must not trip it on its own.
+    it('does not count the echoed prompt against the output cap', async () => {
+      const answerFile = path.join(cwd, 'answer.json');
+      const judgeSaid = { verdict: 'confirm', rationale: 'short answer' };
+      await writeFile(answerFile, JSON.stringify(judgeSaid));
+      const capBytes = 1000;
+
+      const result = await runCliJudge(
+        'fake',
+        { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+        baseRequest({
+          prompt: `judge this finding ${'x'.repeat(capBytes * 3)}`,
+          budget: { timeout_ms: 5000, max_output_bytes: capBytes },
+        }),
+      );
+
+      expect(result.output).toEqual(judgeSaid);
+    });
+
+    // The boundary itself: P is the prompt's size in BYTES, and the prompt is
+    // multibyte so that its character count differs from it. The fixture
+    // answers with `{"verdict":"confirm","rationale":"<pad>"}`.
+    const ANSWER_OVERHEAD = JSON.stringify({ verdict: 'confirm', rationale: '' }).length;
+    const multibytePrompt = `judge this finding ${'\u2014'.repeat(1500)}`;
+    async function runWithAnswerOf(answerBytes: number): Promise<unknown> {
+      const answerFile = path.join(cwd, `answer-${answerBytes}.json`);
+      await writeFile(
+        answerFile,
+        JSON.stringify({
+          verdict: 'confirm',
+          rationale: 'z'.repeat(answerBytes - ANSWER_OVERHEAD),
+        }),
+      );
+      return runCliJudge(
+        'fake',
+        { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+        baseRequest({
+          prompt: multibytePrompt,
+          budget: { timeout_ms: 5000, max_output_bytes: 1000 },
+        }),
+      );
+    }
+
+    it('accepts an answer just under the cap when a multibyte prompt was echoed', async () => {
+      expect(Buffer.byteLength(multibytePrompt)).toBeGreaterThan(1000);
+      await expect(runWithAnswerOf(950)).resolves.toMatchObject({ output: { verdict: 'confirm' } });
+    });
+
+    it('refuses an answer just over the cap when a multibyte prompt was echoed', async () => {
+      await expect(runWithAnswerOf(1050)).rejects.toMatchObject({
+        code: 'provider.output-too-large',
+      });
+    });
+
+    it('strips an echo whose multibyte characters straddle pipe chunks', async () => {
+      const answerFile = path.join(cwd, 'answer.json');
+      const judgeSaid = { verdict: 'confirm', rationale: 'short answer' };
+      await writeFile(answerFile, JSON.stringify(judgeSaid));
+      // A decoy answer inside the prompt wins if the echo is not stripped.
+      const prompt = `${'\u2014 plan text '.repeat(20_000)} {"verdict": "refute", "rationale": "decoy"}`;
+
+      const result = await runCliJudge(
+        'fake',
+        { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+        baseRequest({ prompt, budget: { timeout_ms: 20_000, max_output_bytes: 10_000 } }),
+      );
+
+      expect(result.output).toEqual(judgeSaid);
+    });
+
+    it('still refuses an answer past the cap, even when the prompt was echoed too', async () => {
+      const answerFile = path.join(cwd, 'long-answer.json');
+      await writeFile(
+        answerFile,
+        JSON.stringify({ verdict: 'confirm', rationale: 'y'.repeat(5000) }),
+      );
+      const capBytes = 1000;
+
+      await expect(
+        runCliJudge(
+          'fake',
+          { command: 'node', args: [FIXTURE, 'echo-prompt', answerFile] },
+          baseRequest({
+            prompt: `judge this finding ${'x'.repeat(capBytes * 3)}`,
+            budget: { timeout_ms: 5000, max_output_bytes: capBytes },
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'provider.output-too-large',
+        message: expect.stringContaining(`${capBytes}-byte cap`),
+      });
+    });
   });
 
   it('enforces the output size cap', async () => {

@@ -35,6 +35,10 @@
 //                        `--json` (D-118 stopped passing it). The answer is
 //                        the file named by argv[3], so a test can pick which
 //                        schema the judge is answering under.
+//   split-char        -> writes the three bytes of an em dash as two separate
+//                        writes, 50 ms apart, on the stream named by argv[3]
+//                        ('stdout' or 'stderr'), so the pipe delivers one
+//                        multibyte character split across two chunks.
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 
@@ -43,6 +47,8 @@ const mode = process.argv[2] ?? 'success';
 function readStdin() {
   return new Promise((resolve) => {
     let data = '';
+    // Decode across chunk boundaries, or this fixture corrupts the prompt it echoes.
+    process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk) => {
       data += chunk;
     });
@@ -140,6 +146,15 @@ async function main() {
   if (mode === 'echo-prompt') {
     process.stderr.write(stdin);
     process.stdout.write(await readFile(process.argv[3], 'utf8'));
+    return;
+  }
+
+  if (mode === 'split-char') {
+    const stream = process.argv[3] === 'stderr' ? process.stderr : process.stdout;
+    const bytes = Buffer.from('\u2014');
+    stream.write(Buffer.concat([Buffer.from('a'), bytes.subarray(0, 1)]));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stream.write(Buffer.concat([bytes.subarray(1), Buffer.from('b')]));
     return;
   }
 

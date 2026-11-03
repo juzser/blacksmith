@@ -26,6 +26,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
 import { artifactHome } from './artifacts.js';
@@ -142,7 +143,7 @@ import {
 import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
 import { doctorExitCode, formatChecks, realDeps, runChecks } from './installCheck.js';
 import { initGuidance, uiNotBuiltMessage } from './installGuidance.js';
-import { integrationHeadSha, runIntegrationCheck } from './integration.js';
+import { integrationHeadSha, lastTieredRecordId, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
@@ -157,6 +158,7 @@ import {
   readJudgeTurns,
   recordJudgeDispatch,
   recordJudgeReport,
+  requireOperatorAttestation,
   type UiuxDeviation,
   uiuxDeviationsToEvidence,
 } from './judges.js';
@@ -168,6 +170,7 @@ import {
   lessonsReadPath,
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
+  SENSITIVE_PATHS_POLICY_PATH,
   STATE_DB_PATH,
   STATE_EVENTS_DIR,
   WORK_ROOT,
@@ -205,7 +208,15 @@ import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
-import { admit, adopt, type BatchGroupableTask, batchStep, groupForBatch, step } from './queue.js';
+import {
+  admit,
+  adopt,
+  type BatchGroupableTask,
+  batchStep,
+  groupForBatch,
+  resolveQueueChecks,
+  step,
+} from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { FACTORY_PROJECT, isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
@@ -225,7 +236,13 @@ import {
 } from './security.js';
 import { HOOK_ONLY_EVENT_TYPES } from './sessionBinding.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, recordSpecReview, successorChainPath, taskSuccessors } from './spec.js';
+import {
+  amendPlan,
+  recordSpecReview,
+  SPEC_REVIEW_EVENT,
+  successorChainPath,
+  taskSuccessors,
+} from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -249,8 +266,26 @@ import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
-import type { CheckCommand } from './testgate.js';
+import {
+  assertCheckTier,
+  type CheckCommand,
+  type CheckTier,
+  checkDigest,
+  selectGateChecks,
+  selectTier,
+} from './testgate.js';
 import { assertSelectableTestCmd } from './testSelect.js';
+import {
+  overlayOwes,
+  overlayPath,
+  overlayReport,
+  overlayWritable,
+  readOverlay,
+  reconcileOverlay,
+  resolveEffectiveTiers,
+  withOverlayLock,
+} from './tierOverlay.js';
+import type { EffectiveCheck, PromotionCulprit } from './tierProposals.js';
 import {
   COMMANDS,
   type CommandDoc,
@@ -283,6 +318,7 @@ import {
   listStale,
   RESERVED_TASK_ID,
   removeTaskWorktree,
+  reopenTaskWorktree,
   taskBranchExists,
   taskBranchName,
 } from './worktree.js';
@@ -291,8 +327,14 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-function readJsonFile<T>(filePath: string): T {
-  return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+function readJsonFile<T>(filePath: string, onSyntaxError?: T): T {
+  const text = readFileSync(filePath, 'utf8');
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    if (err instanceof SyntaxError && onSyntaxError !== undefined) return onSyntaxError;
+    throw err;
+  }
 }
 
 /**
@@ -357,7 +399,14 @@ function readFindingsInputFile(filePath: string): RaiseFindingInput[] {
   return items as RaiseFindingInput[];
 }
 
-function readChecksFile(filePath: string): CheckCommand[] {
+/**
+ * Read a checks file with its effective tiers (spec D8). `dir` names the
+ * directory whose repository's overlay fills the entries the file leaves
+ * undeclared; with none, only declared tiers apply, as before the overlay.
+ * An overlay that cannot be read resolves every undeclared entry to
+ * `pre-merge`, and says so on stderr.
+ */
+function readChecksFile(filePath: string, opts: { dir?: string } = {}): CheckCommand[] {
   const checks = readJsonFile<CheckCommand[]>(filePath);
   for (const check of checks) {
     // Epic bs-optimize criterion 10: `"heavy": "false"` is truthy in a loose
@@ -370,6 +419,8 @@ function readChecksFile(filePath: string): CheckCommand[] {
         { name: check.name, heavy, file: filePath },
       );
     }
+    assertCheckTier(check, filePath);
+    check.tierSource = check.tier === undefined ? 'default' : 'declared';
     const timeoutMs = check.timeout_ms;
     if (timeoutMs === undefined) continue;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_CHECK_TIMEOUT_MS) {
@@ -380,7 +431,117 @@ function readChecksFile(filePath: string): CheckCommand[] {
       );
     }
   }
-  return checks;
+  if (opts.dir === undefined) return checks;
+  const overlay = readOverlay(opts.dir);
+  if ('unreadable' in overlay) {
+    process.stderr.write(
+      `The tier overlay is unreadable (${overlay.unreadable}), so every undeclared check resolves to pre-merge.\n`,
+    );
+  }
+  return resolveEffectiveTiers(checks, overlay);
+}
+
+/**
+ * What every `checks` verb reads (spec D6): the project's events under
+ * `--specs-dir`, folded into the ledger. `proposalLedger` is the same ledger
+ * carrying the `degraded` mark the proposal fold and apply refuse on.
+ */
+async function gatherChecks(flags: Record<string, string>) {
+  const { gatherLedgerInputs } = await import('./ledgerInputs.js');
+  const { checkLedger, LEDGER_WINDOW_DAYS } = await import('./checkLedger.js');
+  const projectDir = requireFlag(flags, 'project');
+  const gather = {
+    stateDir: flags['state-dir'] ?? STATE_EVENTS_DIR,
+    specsDir: requireFlag(flags, 'specs-dir'),
+    sensitivePathsFile: SENSITIVE_PATHS_POLICY_PATH,
+    now: isoDateFlag(flags, 'now') ?? new Date(),
+    windowDays: LEDGER_WINDOW_DAYS,
+  };
+  const inputs = await gatherLedgerInputs(gather);
+  const ledger = checkLedger(inputs, {
+    window: inputs.window,
+    projectDir,
+    ...(flags.checks ? { checksFile: path.relative(projectDir, path.resolve(flags.checks)) } : {}),
+  });
+  return {
+    projectDir,
+    gather,
+    inputs,
+    ledger,
+    proposalLedger: { ...ledger, degraded: inputs.degraded },
+  };
+}
+
+/** The outcomes `bs checks post-merge` exits 0 on; none but `green` and `reverted` ran a check that passed. */
+const POST_MERGE_PROCEEDS: ReadonlySet<string> = new Set([
+  'green',
+  'reverted',
+  'no-checks-in-tier',
+  'no-new-merges',
+  'batch-not-ready',
+]);
+
+/** The event envelope the writing `checks` verbs share, as the overlay module takes it. */
+function checksEnvelope(flags: Record<string, string>, actor: string) {
+  requireFlag(flags, 'plan-version');
+  const ctx = eventContextFromFlags(flags);
+  return {
+    session_id: ctx.sessionId,
+    actor,
+    plan_version: ctx.planVersion,
+    causal_parent: ctx.causalParent,
+  };
+}
+
+/**
+ * The tasks held back by a post-merge batch (spec D4): `heldByPostMerge` over the
+ * plan, the lineage's folded task status and the merges no record certifies. A
+ * project with no post-merge check holds nothing and reads no git state.
+ */
+async function postMergeHold(input: {
+  epicId: string;
+  projectDir: string;
+  checks: CheckCommand[];
+  plan: PlanFile;
+  events: StoredEvent[];
+}) {
+  const { postMergeBase, heldByPostMerge, PostMergeError } = await import('./postMergeBisect.js');
+  const { foldTasks } = await import('./db/projector.js');
+  const hasPostMergeChecks = selectTier(input.checks, 'post-merge').length > 0;
+  // A fresh epic has no integration branch before `worktree create`: no merges, nothing held.
+  let merges: ReturnType<typeof postMergeBase>['merges'] = [];
+  try {
+    if (hasPostMergeChecks) merges = postMergeBase(input).merges;
+  } catch (e) {
+    if (!(e instanceof PostMergeError && e.code === 'postmerge.branch-missing')) throw e;
+  }
+  const rows = foldTasks(input.events);
+  const held = heldByPostMerge({
+    tasks: input.plan.tasks,
+    edges: input.plan.edges,
+    statusOf: (id) =>
+      rows.find((r) => taskIdsMatch(r.taskId, id))?.taskStatus ??
+      input.plan.tasks.find((t) => taskIdsMatch(t.task_id, id))?.task_status ??
+      '',
+    uncertifiedMerges: merges,
+    hasPostMergeChecks,
+  });
+  return { held, merges };
+}
+
+/**
+ * `epic close|verdict --checks`: one declared check per effective entry, in file
+ * order, as task-6's certification names it (spec D5).
+ */
+function declaredChecksFrom(flags: Record<string, string>, projectDir: string) {
+  if (flags.checks === undefined) return {};
+  return {
+    checks: readChecksFile(flags.checks, { dir: projectDir }).map((c) => ({
+      name: c.name,
+      tier: c.tier ?? 'pre-merge',
+      checkSha256: checkDigest(c),
+    })),
+  };
 }
 
 /** A task spec's `budget.tokens` when it is a usable positive number, else null. */
@@ -1379,9 +1540,19 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
     );
   }
   const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  let selection: { selected: string[]; deferred: unknown[] } | undefined;
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
-    await attempt('checks', () => readChecksFile(requireFlag(flags, 'checks')));
+    await attempt('checks', async () => {
+      const { stageBoundCheckNames } = await import('./gate.js');
+      const checks = readChecksFile(requireFlag(flags, 'checks'), {
+        dir: requireFlag(flags, 'worktree'),
+      });
+      // The same selection and refusals `gate run` makes, with no check run.
+      const { selected, deferred } = selectGateChecks(checks, stageBoundCheckNames());
+      selection = { selected: selected.map((c) => c.name), deferred };
+      return checks;
+    });
     if (flags.findings)
       await attempt('findings', () => readFindingsInputFile(flags.findings as string));
     await attempt('evidence', () => mintFromEvidence(args, taskId));
@@ -1397,6 +1568,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       const handedIn = handedInSources(args, flags);
       const noFindings = args.repeated['no-findings'] ?? [];
       for (const role of noFindings) requireNoFindingsRole({ taskId, role, noFindings: true });
+      if (noFindings.length > 0) requireOperatorAttestation(flags.actor);
       const turns =
         handedIn.length > 0 || noFindings.length > 0
           ? await attempt(
@@ -1462,6 +1634,8 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       paperwork?.skipped ??
       STAGES_FOR_ROLE[as].map((stage) => ({ stage, why: 'unreadable-input' })),
     not_run: RESULTS_CHECK_NOT_RUN,
+    // Present only when a later tier defers something, as `verdicts` is present only when a grader file was read.
+    ...(selection === undefined || selection.deferred.length === 0 ? {} : { selection }),
     ...(graderVerdict === undefined ? {} : { verdicts: paperwork?.verdicts ?? {} }),
     warnings,
   });
@@ -2675,6 +2849,12 @@ async function main(): Promise<number> {
   if (namespace === 'wave' && action === 'check') {
     // `required: 1` — the variadic tail has its own, better message below.
     const [planFile] = requirePositionals(positional, usageFor('wave check'), 1) as [string];
+    // The hold is decided by the records in the log, so its flags travel together with --session.
+    if (flags.checks !== undefined || flags.project !== undefined) {
+      requireFlag(flags, 'session');
+      requireFlag(flags, 'checks');
+      requireFlag(flags, 'project');
+    }
     const plan = readJsonFile<PlanFile>(planFile);
     // D-46/P9-29: every id is minted from the plan, not taken as typed. The
     // old code filtered the plan's tasks by `taskIds.includes(t.task_id)`,
@@ -2708,12 +2888,27 @@ async function main(): Promise<number> {
       await refuseUnadmissibleTasks(plan, taskIds, flags);
       // Epic bs-optimize criterion 9: a task the log says is running cannot
       // join a second wave.
-      const { assertNotInFlight, inFlightTasks } = await import('./admission.js');
-      const inFlight = inFlightTasks(
-        await readLineageEvents(flags.session as string, eventOptsFromFlags(flags)),
-        { epicId: plan.epic_id, planVersion: plan.version },
-      );
+      const { assertNotHeld, assertNotInFlight, inFlightTasks } = await import('./admission.js');
+      const lineage = await readLineageEvents(flags.session as string, eventOptsFromFlags(flags));
+      const inFlight = inFlightTasks(lineage, { epicId: plan.epic_id, planVersion: plan.version });
       for (const id of taskIds) assertNotInFlight(id, inFlight);
+      if (flags.checks !== undefined) {
+        // Spec D4: a task that waits on a merge no post-merge record certifies is held.
+        const { held } = await postMergeHold({
+          epicId: plan.epic_id,
+          projectDir: requireFlag(flags, 'project'),
+          checks: readChecksFile(flags.checks, { dir: requireFlag(flags, 'project') }),
+          plan,
+          events: lineage,
+        });
+        for (const id of taskIds) assertNotHeld(id, held);
+      } else if (lastTieredRecordId(lineage, plan.epic_id) !== null) {
+        throw new SmithError(
+          'wave.checks-required',
+          `The log of epic ${plan.epic_id} holds tiered integration records, so the post-merge hold cannot be skipped: pass --checks and --project.`,
+          { epicId: plan.epic_id },
+        );
+      }
     }
     // Neither register is narrowed on the way in. `?? []` used to stand here
     // and on the line above, and it fires on a missing claims field but not on
@@ -3320,6 +3515,18 @@ async function main(): Promise<number> {
       positional,
       usageFor('worktree create'),
     ) as [string, string, string];
+    if (flags.reopen === 'true' || flags.revert !== undefined) {
+      // D1: reopening is its own path; mixing it with --from has no meaning.
+      if (flags.reopen !== 'true') requireFlag(flags, 'reopen');
+      const revertSha = requireFlag(flags, 'revert');
+      if (flags.from !== undefined) {
+        throw new SmithError('cli.invalid-flag', '--reopen cannot be combined with --from.', {
+          flag: 'from',
+        });
+      }
+      printJson(reopenTaskWorktree(projectDir, epic, taskId, revertSha));
+      return 0;
+    }
     if (flags.from !== undefined) {
       // `--from` reuses a predecessor's commits, so it may only be spent on a
       // task the log actually names as that predecessor's successor — never
@@ -3626,6 +3833,12 @@ async function main(): Promise<number> {
     // lies about its own coverage is worse than a slow one.
     const selectTestCmd = flags['select-test-cmd'] as string | undefined;
     if (selectTestCmd !== undefined) assertSelectableTestCmd(selectTestCmd);
+    // `--checks` is read, and a tiered file with no pre-merge entry refused,
+    // before any git runs; the tier decision itself is queue.ts's.
+    const queueChecks =
+      flags.checks === undefined
+        ? undefined
+        : resolveQueueChecks(readChecksFile(flags.checks, { dir: projectDir }));
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
     // D-46/P9-29/#269: the queue is the only component that knows a branch
@@ -3717,6 +3930,7 @@ async function main(): Promise<number> {
       epic,
       testCmd,
       ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
+      ...(queueChecks ? { checks: queueChecks } : {}),
       ...(events ? { events } : {}),
     };
     const outcomes = [];
@@ -3906,6 +4120,20 @@ async function main(): Promise<number> {
           'events.hook-only-event-type',
           'user_prompt with source hook or bound_to is written by the capture hook; bs event append refuses it. Use bs prompt record for a hand-written prompt.',
         );
+      }
+    }
+    // A raw append must not forge what --no-findings refuses: an attestation
+    // written under an actor that is not the operator's.
+    if (input !== null && typeof input === 'object') {
+      const raw = input as { event_type?: unknown; actor?: unknown; payload?: unknown };
+      const body = raw.payload;
+      if (
+        (raw.event_type === JUDGE_REPORT_EVENT_TYPE || raw.event_type === SPEC_REVIEW_EVENT) &&
+        body !== null &&
+        typeof body === 'object' &&
+        Object.hasOwn(body, 'attested_by')
+      ) {
+        requireOperatorAttestation(raw.actor, 'raw-event');
       }
     }
     const result = await appendEvent(input, eventOptsFromFlags(flags));
@@ -4566,7 +4794,7 @@ async function main(): Promise<number> {
     // judges) governs the quorum a gate run can trigger, not just the
     // shipped policy.
     const projectDir = projectDirFromFlags(flags);
-    const checks = readChecksFile(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'), { dir: worktreeDir });
     // The result file has the same two intake shapes as findings below, and for
     // the same reason. With `--agent`, `--result` is the worker's half —
     // run_status/structured_output/artifacts — and the dispatcher stamps the
@@ -4639,6 +4867,12 @@ async function main(): Promise<number> {
     const handedIn = handedInSources(args, flags);
     const turns =
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
+    // The actor is checked once, before any close is written: a line that mixes
+    // evidence closes with an attestation must not leave the evidence behind.
+    // Roles first, as `results check` does, so one line fails on one code in both verbs.
+    for (const role of repeated['no-findings'] ?? [])
+      requireNoFindingsRole({ taskId, role, noFindings: true });
+    if ((repeated['no-findings'] ?? []).length > 0) requireOperatorAttestation(flags.actor);
     for (const close of selectJudgeCloses(taskId, handedIn, turns, repeated['no-findings'] ?? [])) {
       // P9-11: the genuinely clean case, said out loud. A judge that found
       // nothing writes `[]` and reports through `smith judge report`; this flag
@@ -4869,13 +5103,25 @@ async function main(): Promise<number> {
   if (namespace === 'integration' && action === 'check') {
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
-    const checks = readChecksFile(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'), { dir: projectDir });
     const ctx = eventContextFromFlags(flags);
+    const tier = flags.tier;
+    if (
+      tier !== undefined &&
+      !['pre-merge', 'post-merge', 'pre-release', 'all', 'remaining'].includes(tier)
+    ) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--tier must be pre-merge, post-merge, pre-release, all or remaining, got "${tier}".`,
+        { flag: 'tier', value: tier },
+      );
+    }
     const record = await runIntegrationCheck(
       {
         epicId,
         projectDir,
         checks,
+        ...(tier === undefined ? {} : { tier: tier as CheckTier | 'all' | 'remaining' }),
         // Unlike the per-task gate, the default here is the whole picture:
         // --run-all false opts back into short-circuiting.
         runAll: flags['run-all'] !== 'false',
@@ -4902,6 +5148,7 @@ async function main(): Promise<number> {
         integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
+        ...declaredChecksFrom(flags, projectDir),
         // D-126: the live plan is a voter. Without this the roster is the
         // event-log fold alone, and a task an amendment added but nobody
         // dispatched is invisible rather than unfinished.
@@ -4943,6 +5190,7 @@ async function main(): Promise<number> {
         integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
+        ...declaredChecksFrom(flags, projectDir),
         planOpts: planOptsFromFlags(flags),
         // See `epic verdict` above: same tier resolution, so a close can
         // never waive a review its own verdict would have blocked on.
@@ -4993,6 +5241,8 @@ async function main(): Promise<number> {
         { epicId, flag: 'evidence' },
       );
     }
+    // Before anything is read: the attestation is the operator's alone.
+    if (noFindings) requireOperatorAttestation(flags.actor);
     const evidence = flags.evidence ? readJsonFile<FindingEvidence[]>(flags.evidence) : [];
     // No branch, no review. The whole point of this dispatch is that it reads
     // the code that now exists; recording one against a head that could not be
@@ -5439,6 +5689,208 @@ async function main(): Promise<number> {
     );
     printJson(event);
     return 0;
+  }
+
+  if (namespace === 'checks' && action === 'ledger') {
+    const read = await gatherChecks(flags);
+    printJson({
+      project: read.inputs.project,
+      epics: read.inputs.epics,
+      ledger: read.ledger,
+      warnings: read.inputs.warnings,
+      degraded: read.inputs.degraded,
+      // The report compares the overlay with the file's own declarations, so no `dir` here.
+      ...(flags.checks
+        ? { overlay: overlayReport(readChecksFile(flags.checks), readOverlay(read.projectDir)) }
+        : {}),
+    });
+    return 0;
+  }
+
+  if (namespace === 'checks' && action === 'post-merge') {
+    const sessionId = requireFlag(flags, 'session');
+    const epicId = requireFlag(flags, 'epic');
+    const projectDir = requireFlag(flags, 'project');
+    const checksFile = requireFlag(flags, 'checks');
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const eventOpts = eventOptsFromFlags(flags);
+    const events = await readLineageEvents(sessionId, eventOpts);
+    const effective = readChecksFile(checksFile, { dir: projectDir });
+    if (flags.held === 'true') {
+      // Read-only: no worktree, no lock, no event.
+      const { held, merges } = await postMergeHold({
+        epicId,
+        projectDir,
+        checks: effective,
+        plan,
+        events,
+      });
+      printJson({
+        held: [...held].map(([task, waits_on]) => ({ task, waits_on })),
+        uncertified_merges: merges,
+      });
+      return 0;
+    }
+    requireFlag(flags, 'plan-version');
+    const ctx = eventContextFromFlags(flags);
+    const { runPostMerge } = await import('./postMerge.js');
+    const { promoteAfterCatch } = await import('./tierProposals.js');
+    // The ledger's own options: promotion re-reads the project's log through them. The specs dir
+    // is the plan's parent's parent (`<specs>/<epic>/plan.json`), so the verb takes no --specs-dir.
+    const gather = {
+      stateDir: flags['state-dir'] ?? STATE_EVENTS_DIR,
+      specsDir: path.dirname(path.dirname(path.resolve(requireFlag(flags, 'plan')))),
+      sensitivePathsFile: SENSITIVE_PATHS_POLICY_PATH,
+      now: isoDateFlag(flags, 'now') ?? new Date(),
+      windowDays: 30,
+    };
+    const declared = readChecksFile(checksFile);
+    const promote = async (culprits: readonly (PromotionCulprit & { task: string })[]) => {
+      const promotions: { task: string; check: string; result: string; reason: string | null }[] =
+        [];
+      // The red record was written by the run itself, so the log is read again.
+      const fresh = await readLineageEvents(sessionId, eventOpts);
+      for (const culprit of culprits) {
+        const answers = await promoteAfterCatch(
+          culprit,
+          { dir: projectDir, checks: declared, events: fresh, gather },
+          checksEnvelope(flags, flags.actor ?? 'system'),
+          { events: eventOpts },
+        );
+        for (const a of answers) promotions.push({ task: culprit.task, ...a });
+      }
+      return promotions;
+    };
+    let result: Awaited<ReturnType<typeof runPostMerge>>;
+    try {
+      result = await runPostMerge(
+        {
+          epicId,
+          projectDir,
+          checks: effective,
+          events,
+          tasks: plan.tasks,
+          edges: plan.edges,
+          final: flags.final === 'true',
+          ...(flags['setup-cmd'] === undefined ? {} : { setupCmd: flags['setup-cmd'] }),
+        },
+        ctx,
+        eventOpts,
+      );
+    } catch (err) {
+      // A resume that failed mid-write still names the culprits of what it wrote.
+      const culprits =
+        (err as { culprits?: (PromotionCulprit & { task: string })[] }).culprits ?? [];
+      // A promotion that fails here must not hide the error of the run itself.
+      if (culprits.length > 0) {
+        await promote(culprits).catch((promotionErr) => {
+          process.stderr.write(
+            `bs: promotion failed for the post-merge run: ${promotionErr instanceof Error ? promotionErr.message : String(promotionErr)}\n`,
+          );
+        });
+      }
+      throw err;
+    }
+    const promotions = result.culprits.length > 0 ? await promote(result.culprits) : undefined;
+    printJson({
+      ...result,
+      ...(promotions === undefined ? {} : { promotions }),
+      overlay: overlayReport(readChecksFile(checksFile), readOverlay(projectDir)),
+    });
+    return POST_MERGE_PROCEEDS.has(result.outcome) ? 0 : 1;
+  }
+
+  if (namespace === 'checks' && action === 'proposals') {
+    const checksFile = requireFlag(flags, 'checks');
+    const epicId = requireFlag(flags, 'epic');
+    const ctx = checksEnvelope(flags, flags.actor ?? 'system');
+    const { currentProjectLog, pendingProposals } = await import('./tierProposals.js');
+    const eventOpts = eventOptsFromFlags(flags);
+    const read = await gatherChecks(flags);
+    const dir = read.projectDir;
+    // Outside a repository there is no overlay: no lock, no repair, nothing created.
+    if (overlayPath(dir) !== null) {
+      const owes = overlayOwes(readOverlay(dir), read.inputs.events);
+      if (owes.missing.length + owes.pending.length + owes.settled.length > 0) {
+        await withOverlayLock(dir, async () => {
+          const fresh = await currentProjectLog(read.inputs.events, read.gather);
+          if (fresh !== null) await reconcileOverlay(dir, fresh, ctx, { events: eventOpts });
+        });
+      }
+    }
+    const result = pendingProposals(
+      read.proposalLedger,
+      read.inputs.events,
+      readChecksFile(checksFile, { dir }) as EffectiveCheck[],
+      readOverlay(dir),
+      { epicId, writable: overlayWritable(dir), now: read.gather.now },
+    );
+    printJson({ ...result, writable: overlayWritable(dir) });
+    return 0;
+  }
+
+  if (namespace === 'checks' && action === 'apply') {
+    const [decisionsFile] = requirePositionals(positional, usageFor('checks apply')) as [string];
+    const checksFile = requireFlag(flags, 'checks');
+    const epicId = requireFlag(flags, 'epic');
+    const handOff = flags['hand-off'];
+    const ctx = checksEnvelope(
+      flags,
+      handOff === undefined ? requireFlag(flags, 'actor') : (flags.actor ?? 'system'),
+    );
+    const { applyTierDecisions, pendingProposals, recordBatchHandOff } = await import(
+      './tierProposals.js'
+    );
+    const eventOpts = eventOptsFromFlags(flags);
+    const read = await gatherChecks(flags);
+    const dir = read.projectDir;
+    const effective = readChecksFile(checksFile, { dir }) as EffectiveCheck[];
+    if (handOff !== undefined) {
+      const pending = pendingProposals(
+        read.proposalLedger,
+        read.inputs.events,
+        effective,
+        readOverlay(dir),
+        { epicId, writable: overlayWritable(dir), now: read.gather.now },
+      ).items.map((item) => item.proposal_id);
+      const { eventId } = await recordBatchHandOff(
+        epicId,
+        { code: handOff, decisionsPath: path.resolve(decisionsFile), pending },
+        ctx,
+        { events: eventOpts },
+      );
+      printJson({ event_id: eventId });
+      return 0;
+    }
+    try {
+      printJson(
+        await applyTierDecisions(
+          // Unparseable JSON is not an array either: the library refuses it, with a code and `items`.
+          readJsonFile<unknown>(decisionsFile, null),
+          {
+            dir,
+            checksFile,
+            epicId,
+            effectiveChecks: effective,
+            actor: ctx.actor,
+            ledger: read.proposalLedger,
+            events: read.inputs.events,
+            gather: read.gather,
+            now: read.gather.now,
+          },
+          ctx,
+          { events: eventOpts },
+        ),
+      );
+      return 0;
+    } catch (err) {
+      // A refusal names every failing item (empty when the cause is not an item): run.md step 12 reads them.
+      if (err instanceof SmithError && 'items' in err) {
+        printJson({ error: { code: err.code, message: err.message }, items: err.items });
+        return 1;
+      }
+      throw err;
+    }
   }
 
   if (namespace === 'waivers' && action === 'apply') {
@@ -6094,12 +6546,21 @@ async function main(): Promise<number> {
   // composeBrief's; this arm only reads the store and routes the output.
   if (namespace === 'brief' && action === 'compose') {
     const { composeBrief } = await import('./briefCompose.js');
+    const { stageBoundCheckNames } = await import('./gate.js');
     const { readRecurrenceEvents } = await import('./lessonEvents.js');
     const { RECUR_WINDOW_DAYS } = await import('./lessonRecurrence.js');
     const eventOpts = eventOptsFromFlags(flags);
     const now = new Date();
     const out = flags.out;
     const turnBudget = boundedIntFlag(flags, 'turns', { min: 1 });
+    // The overlay is the worktree's repository's: with no --worktree none is read,
+    // so undeclared checks stay pre-merge and the brief lists no fewer than a gate runs.
+    const briefOverlayDir = flags.worktree ? { dir: flags.worktree } : {};
+    if (flags.checks && !flags.worktree) {
+      process.stderr.write(
+        'The tier overlay was not applied: no --worktree names the repository, so undeclared checks stay pre-merge.\n',
+      );
+    }
     const { text, manifest } = await composeBrief({
       role: requireFlag(flags, 'role'),
       sessionId: requireFlag(flags, 'session'),
@@ -6114,7 +6575,12 @@ async function main(): Promise<number> {
       ...(flags.provider ? { provider: flags.provider } : {}),
       ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
       ...(flags.base ? { base: flags.base } : {}),
-      ...(flags.checks ? { checks: readChecksFile(flags.checks) } : {}),
+      ...(flags.checks
+        ? {
+            checks: readChecksFile(flags.checks, briefOverlayDir),
+            stageBound: stageBoundCheckNames(),
+          }
+        : {}),
       ...(flags['work-root'] ? { workRoot: flags['work-root'] } : {}),
       events: await readRecurrenceEvents(eventOpts.stateDir ?? STATE_EVENTS_DIR, {
         now,

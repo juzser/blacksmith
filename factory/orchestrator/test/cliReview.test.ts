@@ -495,12 +495,205 @@ describe('cli.ts (built binary)', () => {
         '--role',
         'reviewer',
         '--no-findings',
+        '--actor',
+        'operator',
       ]);
       expect(reported.status).toBe(0);
       expect(JSON.parse(reported.stdout)).toMatchObject({
         artifactPath: null,
         findingCount: 0,
         attested: true,
+      });
+    });
+
+    // The attestation says the operator read a review nobody else saw, so only
+    // the operator's own envelope may write it. An agent with a clean result
+    // writes `[]` and closes with --artifact / --evidence.
+    describe("--no-findings is the operator's alone", () => {
+      const owed = (sessionId: string, eventsDir: string) =>
+        JSON.parse(
+          judgeCli('outstanding', sessionId, eventsDir, ['--task', 'epic-1/task-1']).stdout,
+        ).count;
+
+      const tailEvents = (sessionId: string, eventsDir: string) =>
+        (
+          JSON.parse(
+            runCli(['event', 'tail', sessionId, '--n', '100', '--state-dir', eventsDir]).stdout,
+          ) as {
+            record: { event_type: string; actor: string; payload?: Record<string, unknown> };
+          }[]
+        ).map((e) => e.record);
+
+      it('judge report refuses a non-operator actor and writes nothing', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        const reported = judgeCli('report', sessionId, eventsDir, [
+          '--task',
+          'epic-1/task-1',
+          '--role',
+          'reviewer',
+          '--no-findings',
+          '--actor',
+          'wave-runner',
+        ]);
+        expect(reported.status).toBe(1);
+        const error = JSON.parse(reported.stdout).error;
+        expect(error.code).toBe('cli.no-findings-needs-operator');
+        expect(error.message).toContain('--actor operator');
+        expect(error.message).toContain('[]');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+      });
+
+      it('judge report with --actor operator still records the attestation', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        const reported = judgeCli('report', sessionId, eventsDir, [
+          '--task',
+          'epic-1/task-1',
+          '--role',
+          'reviewer',
+          '--no-findings',
+          '--actor',
+          'operator',
+        ]);
+        expect(reported.status).toBe(0);
+        expect(JSON.parse(reported.stdout)).toMatchObject({ attested: true });
+        expect(owed(sessionId, eventsDir)).toBe(0);
+      });
+
+      it('judge report refuses --no-findings with no --actor and writes nothing', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        const reported = judgeCli('report', sessionId, eventsDir, [
+          '--task',
+          'epic-1/task-1',
+          '--role',
+          'reviewer',
+          '--no-findings',
+        ]);
+        expect(reported.status).toBe(1);
+        expect(JSON.parse(reported.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+      });
+
+      it('gate run refuses a line mixing evidence and an attestation before closing either', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        await writeFile(artifact, JSON.stringify([]));
+        const secArtifact = `${artifact}.sec`;
+        dispatchJudge(sessionId, eventsDir, 'security-reviewer', secArtifact);
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--evidence',
+          artifact,
+          '--found-by',
+          'reviewer',
+          '--no-findings',
+          'security-reviewer',
+          '--actor',
+          'wave-runner',
+        ]);
+        expect(gated.status).toBe(1);
+        expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        expect(owed(sessionId, eventsDir)).toBe(2);
+        const events = tailEvents(sessionId, eventsDir);
+        expect(events.filter((r) => r.event_type === 'judge-reported')).toEqual([]);
+      });
+
+      it('gate run refuses a bad --no-findings role before closing the evidence on the line', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
+        await writeFile(artifact, JSON.stringify([]));
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--evidence',
+          artifact,
+          '--found-by',
+          'reviewer',
+          '--no-findings',
+          'true',
+          '--actor',
+          'operator',
+        ]);
+        expect(gated.status).toBe(1);
+        expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-role');
+        expect(owed(sessionId, eventsDir)).toBe(1);
+        expect(
+          tailEvents(sessionId, eventsDir).filter((r) => r.event_type === 'judge-reported'),
+        ).toEqual([]);
+      });
+
+      it('gate run with --actor operator records the attestation', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'security-reviewer', artifact);
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--no-findings',
+          'security-reviewer',
+          '--actor',
+          'operator',
+        ]);
+        expect(gated.status).toBe(0);
+        const reports = tailEvents(sessionId, eventsDir).filter(
+          (r) => r.event_type === 'judge-reported',
+        );
+        expect(reports).toHaveLength(1);
+        expect(reports[0]).toMatchObject({
+          actor: 'operator',
+          payload: { attested_by: 'operator' },
+        });
+      });
+
+      it('event append refuses a forged attestation, and takes an operator one', async () => {
+        const { sessionId, eventsDir } = await judgeSession();
+        const append = (actor: string, type: string) =>
+          runCli([
+            'event',
+            'append',
+            JSON.stringify({
+              session_id: sessionId,
+              actor,
+              event_type: type,
+              task_id: 'epic-1/task-1',
+              plan_version: 1,
+              causal_parent: `${sessionId}#0`,
+              payload: { attested_by: 'operator', finding_count: 0 },
+            }),
+            '--state-dir',
+            eventsDir,
+          ]);
+        for (const type of ['judge-reported', 'spec-review-recorded']) {
+          const forged = append('wave-runner', type);
+          expect(forged.status).toBe(1);
+          expect(JSON.parse(forged.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        }
+        expect(
+          tailEvents(sessionId, eventsDir).filter((r) => r.payload?.attested_by !== undefined),
+        ).toEqual([]);
+        // The raw path has no --actor flag, so the message says where the actor is set,
+        // and an array actor is not rendered as a name.
+        const viaArray = append(['operator'] as unknown as string, 'judge-reported');
+        expect(viaArray.status).toBe(1);
+        const message = JSON.parse(viaArray.stdout).error.message as string;
+        expect(message).toContain('"actor":"operator" in the event JSON');
+        expect(message).toContain('actor is not set');
+        expect(message).not.toContain('--actor operator');
+        expect(append('operator', 'judge-reported').status).toBe(0);
+      });
+
+      it('gate run --no-findings <role> refuses a non-operator actor and writes nothing', async () => {
+        const { sessionId, eventsDir, artifact } = await judgeSession();
+        const files = await gateFiles(sessionId);
+        dispatchJudge(sessionId, eventsDir, 'security-reviewer', artifact);
+        const gated = gateRun(sessionId, eventsDir, files, [
+          '--no-findings',
+          'security-reviewer',
+          '--actor',
+          'wave-runner',
+        ]);
+        expect(gated.status).toBe(1);
+        expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        expect(owed(sessionId, eventsDir)).toBe(1);
       });
     });
 
@@ -523,7 +716,12 @@ describe('cli.ts (built binary)', () => {
       const files = await gateFiles(sessionId);
       dispatchJudge(sessionId, eventsDir, 'security-reviewer', artifact);
 
-      const gated = gateRun(sessionId, eventsDir, files, ['--no-findings', 'security-reviewer']);
+      const gated = gateRun(sessionId, eventsDir, files, [
+        '--no-findings',
+        'security-reviewer',
+        '--actor',
+        'operator',
+      ]);
       expect(gated.status).toBe(0);
       expect(JSON.parse(gated.stdout).outcome).not.toBe('blocked');
     });
@@ -675,7 +873,12 @@ describe('cli.ts (built binary)', () => {
     it('still refuses --no-findings true, which no parser can tell from a role', async () => {
       const { sessionId, eventsDir } = await judgeSession();
       const files = await gateFiles(sessionId);
-      const gated = gateRun(sessionId, eventsDir, files, ['--no-findings', 'true']);
+      const gated = gateRun(sessionId, eventsDir, files, [
+        '--no-findings',
+        'true',
+        '--actor',
+        'operator',
+      ]);
       expect(gated.status).toBe(1);
       expect(JSON.parse(gated.stdout).error.code).toBe('cli.no-findings-needs-role');
     });

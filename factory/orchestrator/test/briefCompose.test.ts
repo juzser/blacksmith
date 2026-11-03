@@ -6,6 +6,7 @@ import { readTemplateMaxTurns } from '../src/agentsSync.js';
 import { composeBrief } from '../src/briefCompose.js';
 import { parseBriefMarker } from '../src/briefMarker.js';
 import {
+  checkPreflight,
   GATE_CHECKS_HEADING,
   lintDispatchPrompt,
   parseDeclaredArtifactLine,
@@ -18,6 +19,7 @@ import { recordJudgeDispatch } from '../src/judges.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { sliceSection } from '../src/playbookSlice.js';
 import { ORCHESTRATOR_OWNED_RESULT_FIELDS } from '../src/results.js';
+import { runCli } from './helpers/cliHarness.js';
 
 // Epic bs-optimize criterion 5 (module half): composed briefs lint clean and
 // carry the shared text sliced from the real dispatch.md.
@@ -515,6 +517,66 @@ describe('composeBrief preflight and gate_checks sections', () => {
     );
   });
 
+  describe('tiered checks', () => {
+    const tiered = [
+      { name: 'lint', cmd: 'run-unit' },
+      { name: 'e2e', cmd: 'run-e2e', tier: 'post-merge' as const },
+    ];
+
+    it.each(['coder', 'tester'])(
+      'lists only the checks the gate runs in a %s brief and names the deferred one',
+      async (role) => {
+        const { text } = await composeBrief({
+          ...base(),
+          role,
+          checks: tiered,
+          stageBound: ['coverage'],
+        });
+        expect(text).toContain(
+          `${GATE_CHECKS_HEADING}\n- lint:\n    run-unit\nDeferred by tier, not run before hand-back: e2e (post-merge)\n`,
+        );
+        expect(text).not.toContain('run-e2e');
+        expect(checkPreflight(text, role, TASK).gate_checks).toBe(1);
+      },
+    );
+
+    it('refuses a file whose every entry is later, writing no brief or manifest', async () => {
+      const out = path.join(dir, 'refused-brief.md');
+      const err = await composeBrief({
+        ...base(),
+        role: 'coder',
+        checks: [{ name: 'e2e', cmd: 'x', tier: 'post-merge' }],
+        stageBound: ['coverage'],
+        manifestPath: `${out}.manifest.json`,
+      }).catch((e) => e as { code: string });
+      expect((err as { code: string }).code).toBe('gate.no-pre-merge-checks');
+      expect(await readdir(dir)).not.toContain('refused-brief.md.manifest.json');
+    });
+
+    it('refuses a deferred stage-bound check as the gate does', async () => {
+      const err = await composeBrief({
+        ...base(),
+        role: 'coder',
+        checks: [
+          { name: 'unit', cmd: 'x' },
+          { name: 'coverage', cmd: 'y', tier: 'pre-release' },
+        ],
+        stageBound: ['coverage'],
+      }).catch((e) => e as { code: string });
+      expect((err as { code: string }).code).toBe('gate.stage-check-deferred');
+    });
+
+    it('composes an unlabelled file with no deferred line', async () => {
+      const { text } = await composeBrief({
+        ...base(),
+        role: 'coder',
+        checks: [{ name: 'unit', cmd: 'a' }],
+        stageBound: ['coverage'],
+      });
+      expect(text).not.toContain('Deferred by tier');
+    });
+  });
+
   it.each([
     ['missing', { name: 'x' }],
     ['numeric', { name: 'x', cmd: 7 }],
@@ -818,5 +880,54 @@ describe('composeBrief for a follow-up the log added (f-bs-gate-bounce/integrati
     expect(await codeOf(composeBrief({ ...base(), taskId: 'project-a/nope', role: 'coder' }))).toBe(
       'brief.task-not-in-plan',
     );
+  });
+});
+
+describe('bs brief compose --checks through the built binary', () => {
+  it('refuses a deferred stage-bound check with gate.stage-check-deferred and writes no brief or manifest', async () => {
+    const checks = path.join(dir, 'checks.json');
+    await writeFile(
+      checks,
+      JSON.stringify([
+        { name: 'unit', cmd: 'run-the-suite' },
+        { name: 'coverage', cmd: 'run-coverage', tier: 'post-merge' },
+      ]),
+    );
+    const out = path.join(dir, 'cli-brief.md');
+    const run = runCli(
+      [
+        'brief',
+        'compose',
+        '--role',
+        'coder',
+        '--session',
+        sessionId,
+        '--plan',
+        fixturePlan,
+        '--task',
+        TASK,
+        '--worktree',
+        worktree,
+        '--provider',
+        'claude',
+        '--model-tier',
+        'mid',
+        '--base',
+        'bs/project-a/integration',
+        '--checks',
+        checks,
+        '--work-root',
+        path.join(dir, 'work'),
+        '--out',
+        out,
+      ],
+      { BS_HOME: dir },
+    );
+    expect(run.status, run.stdout + run.stderr).toBe(1);
+    expect(JSON.parse(run.stdout).error.code).toBe('gate.stage-check-deferred');
+    expect(run.stdout).toContain('coverage');
+    const written = await readdir(dir);
+    expect(written).not.toContain('cli-brief.md');
+    expect(written).not.toContain('cli-brief.md.manifest.json');
   });
 });

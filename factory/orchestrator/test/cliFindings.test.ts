@@ -2130,6 +2130,39 @@ describe('cli.ts (built binary)', () => {
         ).toEqual([]);
       });
 
+      // The attestation is the operator's; any other envelope actor is refused
+      // before the integration branch is even read, and nothing is written.
+      it('refuses --no-findings from a non-operator actor', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'spec-review',
+          '--epic',
+          'epic-1',
+          '--project',
+          scratchDir,
+          '--plan',
+          planPath,
+          '--reviewed-by',
+          'spec-reviewer',
+          '--no-findings',
+          '--actor',
+          'wave-runner',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.no-findings-needs-operator');
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === SPEC_REVIEW_EVENT),
+        ).toEqual([]);
+      });
+
       it('refuses a closing spec review it cannot pin to an integration head', async () => {
         const { sessionId, eventsDir, planPath } = await session();
 
@@ -2147,6 +2180,8 @@ describe('cli.ts (built binary)', () => {
           '--reviewed-by',
           'spec-reviewer',
           '--no-findings',
+          '--actor',
+          'operator',
           '--session',
           sessionId,
           '--causal-parent',

@@ -139,10 +139,17 @@ bs new my-app --target-dir ~/code/my-app        # --ui adds the frontend
 One call copies `factory/scaffold/` (TypeScript strict, Biome, Vitest, a CI
 workflow), layers the frontend if `--ui`, vendors a design system if
 `stack.yml` names a source for one, then runs `pnpm install`, `lint`,
-`typecheck`, `test:coverage` and `build` — `ci.yml`'s order, so the lockfile
-lands in the first commit and no epic ever needs a serial `task-0-toolchain`
-(P9-19). It commits the result on a `setup` branch and appends a bootstrap
-milestone to `factory/specs/roadmap.md`.
+`typecheck`, `test:coverage` and `build` — the gate script's order, so the
+lockfile lands in the first commit and no epic ever needs a serial
+`task-0-toolchain` (P9-19). It commits the result on a `setup` branch and
+appends a bootstrap milestone to `factory/specs/roadmap.md`.
+
+The scaffolded CI runs one gate script, `pnpm run check`, the same way on a
+laptop and on the runner, with one job per tier of a committed `checks.json`
+(none is scaffolded; every check is `pre-merge` until the project says
+otherwise). The gate needs no GitHub Actions. With `--ui` the project also gets
+a sharded e2e workflow that stays dormant until `package.json` has a `test:e2e`
+script.
 
 Read `toolchain.status`:
 

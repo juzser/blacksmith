@@ -41,7 +41,12 @@ describe('judges.ts', () => {
     await rm(artifactDir, { recursive: true, force: true });
   });
 
-  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+  const ctx = () => ({
+    sessionId,
+    planVersion: 1,
+    causalParent: `${sessionId}#0`,
+    actor: 'operator',
+  });
   const opts = () => ({ stateDir });
 
   // The shape `finding-evidence.schema.json` requires — the same shape

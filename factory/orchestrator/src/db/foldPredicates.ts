@@ -13,6 +13,7 @@ const TASK_TYPES: ReadonlySet<string> = new Set([
   'task-added',
   'wave-admitted',
   'wave-merged',
+  'wave-reverted',
   'dispatch_decision',
   'task-result-recorded',
   'judge-reported',

@@ -34,7 +34,7 @@ import { ORCHESTRATOR_OWNED_RESULT_FIELDS } from './results.js';
 import { type AddedTask, readAddedTasks } from './taskEvents.js';
 import { epicOfTaskId, isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 import { loadTaxonomy } from './taxonomy.js';
-import { type CheckCommand, isHeavyCheck } from './testgate.js';
+import { type CheckCommand, isHeavyCheck, selectGateChecks } from './testgate.js';
 
 export class BriefError extends SmithError {}
 
@@ -103,6 +103,8 @@ export interface ComposeBriefOptions {
   base?: string;
   /** The checks the gate line takes (cli.ts `readChecksFile`); a coder or tester brief lists them. */
   checks?: readonly CheckCommand[];
+  /** Names a gate stage reads (gate.ts `stageBoundCheckNames`); the same refusals as `gate run` apply. */
+  stageBound?: readonly string[];
   /** Absolute work root `bs init` printed; every worker brief with a preflight line needs it. */
   workRoot?: string;
   /** Where the taxonomy's `provider` and `model_tier` are read; defaults to taxonomy.yml. */
@@ -261,6 +263,7 @@ function preflightSections(opts: ComposeBriefOptions, input: PreflightInput): [s
       );
     }
   }
+  const { selected, deferred } = selectGateChecks(checks, opts.stageBound ?? []);
   const artifactsDir = path.join(workRoot, 'state', 'artifacts');
   const resultFile = path.join(
     workRoot,
@@ -292,10 +295,15 @@ function preflightSections(opts: ComposeBriefOptions, input: PreflightInput): [s
   ].join('\n');
   const out: [string, string][] = [['preflight', preflight]];
   if (listed) {
-    const body = checks.flatMap((check) => [
+    const body = selected.flatMap((check) => [
       `- ${check.name}${isHeavyCheck(check) ? ' (heavy)' : ''}:`,
       ...check.cmd.split('\n').map((l) => `    ${l}`),
     ]);
+    if (deferred.length > 0) {
+      body.push(
+        `Deferred by tier, not run before hand-back: ${deferred.map((d) => `${d.name} (${d.tier})`).join(', ')}`,
+      );
+    }
     out.push(['gate_checks', [GATE_CHECKS_HEADING, ...body].join('\n')]);
   }
   return out;

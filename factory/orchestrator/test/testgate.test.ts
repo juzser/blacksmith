@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readHeavyLock, withHeavyLock } from '../src/heavyLock.js';
 import {
   type CheckEnvironment,
+  checkDigest,
+  commandDigest,
   heavyChildEnv,
   isHeavyCheck,
   maskCommandCredentials,
@@ -88,7 +90,15 @@ describe('testgate.ts', () => {
     const result = await run([{ name: 'ok', cmd: 'true' }], { cwd });
     expect(result.pass).toBe(true);
     expect(result.results).toEqual([
-      { name: 'ok', pass: true, exitCode: 0, tail: '', lock_wait_ms: 0 },
+      {
+        name: 'ok',
+        pass: true,
+        exitCode: 0,
+        tail: '',
+        lock_wait_ms: 0,
+        cmd_sha256: commandDigest('true'),
+        check_sha256: checkDigest({ name: 'ok', cmd: 'true' }),
+      },
     ]);
   });
 
@@ -577,7 +587,15 @@ describe('testgate.ts environment evidence', () => {
     ]);
     expect(result.results).toHaveLength(2);
     for (const r of result.results)
-      expect(Object.keys(r).sort()).toEqual(['exitCode', 'lock_wait_ms', 'name', 'pass', 'tail']);
+      expect(Object.keys(r).sort()).toEqual([
+        'check_sha256',
+        'cmd_sha256',
+        'exitCode',
+        'lock_wait_ms',
+        'name',
+        'pass',
+        'tail',
+      ]);
   });
 
   it('sets environment from the real sources when none are injected', async () => {

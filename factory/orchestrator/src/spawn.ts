@@ -5,6 +5,7 @@
 // implementation that drift the way SpawnOnce's original inline copy would
 // have, the day a second caller needed it.
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 export interface SpawnConfig {
   command: string;
@@ -82,25 +83,34 @@ export function spawnCapped(
       killGroup();
     }, budget.timeout_ms);
 
-    const onChunk = (chunk: Buffer): void => {
+    // One decoder per stream: a pipe chunk can end inside a multibyte character,
+    // and decoding each chunk alone would turn its halves into U+FFFD. Bytes are
+    // still counted from the raw Buffer length.
+    const outDecoder = new StringDecoder('utf8');
+    const errDecoder = new StringDecoder('utf8');
+
+    const onChunk = (chunk: Buffer, decoder: StringDecoder): string => {
       totalBytes += chunk.length;
       if (totalBytes > budget.max_output_bytes) {
         if (!sizeExceeded) {
           sizeExceeded = true;
           killGroup();
         }
-        return;
+        return '';
       }
-      combined += chunk.toString('utf8');
+      const text = decoder.write(chunk);
+      combined += text;
+      return text;
     };
 
-    child.stdout?.on('data', onChunk);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      onChunk(chunk, outDecoder);
+    });
     child.stderr?.on('data', (chunk: Buffer) => {
       // Still folded into `combined` for extraction — a judge that writes its
       // verdict to stderr has always worked and must keep working. The second
       // copy exists only so a refusal reason can be reported on its own.
-      stderr += chunk.toString('utf8');
-      onChunk(chunk);
+      stderr += onChunk(chunk, errDecoder);
     });
 
     child.stdin?.on('error', () => {
@@ -115,6 +125,8 @@ export function spawnCapped(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // A stream that ended mid-character: emit what the decoder still holds.
+      combined += outDecoder.end() + errDecoder.end();
       resolve({ combined, stderr, exitCode, signal, spawnError, timedOut, sizeExceeded });
     };
 

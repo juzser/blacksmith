@@ -1,0 +1,1349 @@
+{
+  "epic_id": "bs-check-tiers",
+  "version": 1,
+  "status": "draft",
+  "effort": "huge",
+  "project": "blacksmith",
+  "tasks": [
+    {
+      "task_id": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "checks.json gets a tier, and the gate runs the pre-merge tier",
+      "summary": "Spec AC1, AC2, D6, D9, D10. `tier` on CheckCommand, validated fail-closed; absent means pre-merge; `bs gate run` runs only the pre-merge tier, records what it deferred, keeps stage-bound checks pre-merge, and refuses an empty selection; every result carries a command digest; a lock-wait timeout is recognisable as not-run.",
+      "objective": "In factory/orchestrator/src/testgate.ts add `export type CheckTier = 'pre-merge' | 'post-merge' | 'pre-release'`, `export const CHECK_TIERS` (that order), optional `tier?: CheckTier` and `tierSource?: 'declared' | 'overlay' | 'default'` on CheckCommand beside `heavy` (`tierSource` is set by `readChecksFile`; task-10 adds the overlay source), `checkTier(check)` (absent -> 'pre-merge'), `selectTier(checks, tier)` (keeps file order), `declaresLaterTier(checks)` (true when any entry's tier is post-merge or pre-release), `assertCheckTier(check, file)` (throws SmithError `gate.invalid-check-tier` naming the entry, the value and the file for anything but one of the three exact strings), `commandDigest(cmd)` (sha256 hex of the raw command string), `checkDigest(check)` (sha256 hex of the canonical JSON of the entry's name, cmd, heavy and timeout_ms; never its tier; spec D5), and `isNotRun(result)` (true exactly when `reason === 'heavy.wait-timeout'`; spec D6). `run()` sets `cmd_sha256 = commandDigest(cmd)` and `check_sha256 = checkDigest(check)` on every CheckResult it returns; the command itself is never stored by this field. Call `assertCheckTier` from cli.ts `readChecksFile` beside the unchanged `heavy` and `timeout_ms` checks, and set `tierSource` to `declared` or `default`. In gate.ts export `stageBoundCheckNames(coverage?: GateCoverageOptions): string[]` (today: the coverage check name, default `coverage`). In `runGate`, before any stage runs or any event is written: when the file has at least one entry and its pre-merge selection is empty, throw `gate.no-pre-merge-checks`; when a stage-bound check's tier is later, throw `gate.stage-check-deferred` naming it (spec D9). A file with zero entries keeps today's behaviour (spec D10). Otherwise run exactly the selected checks and add to the `testgate-result` payload `tier: 'pre-merge'`, `tree_sha` (the tested worktree's `HEAD^{tree}`) and `deferred: [{name, tier, tier_source}]`. Document `tier` in usage.ts's `gate run` text.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/checkTiers.test.ts (write first; fails today because `assertCheckTier` does not exist): `assertCheckTier` accepts each of the three strings and absent; it refuses `\"post_merge\"`, `\"Pre-merge\"`, `\"\"`, `null`, `1` and `true` with `gate.invalid-check-tier`, and the message names the entry and the file. `checkTier` of an entry with no `tier` is `pre-merge`; `selectTier` keeps file order; `declaresLaterTier` is false for an unlabelled file and for `[]`.",
+        "An entry with `\"heavy\": true, \"tier\": \"post-merge\", \"timeout_ms\": 600000` is accepted and `isHeavyCheck` still returns true for it; an entry with a valid tier and `\"heavy\": \"false\"` is still refused with `gate.invalid-check-heavy`.",
+        "Every CheckResult from `run` carries `cmd_sha256` equal to `commandDigest` of its command; two entries with the same name and different commands get different digests. Every result also carries `check_sha256` equal to `checkDigest` of its entry; `checkDigest` changes when the command, heavy or timeout changes and stays equal when only the tier changes.",
+        "`isNotRun` is true for the result `runHeavy` returns on a lock-wait timeout (test with an injected lock that never frees and a 1 ms wait) and false for a failed check whose command ran and exited 1.",
+        "test/gateTierFilter.test.ts: on a file of A (no tier), B (post-merge), C (pre-release), D (pre-merge), the gate runs A then D only (a fixture command appends its name to a file; afterwards it holds exactly `A`, `D`), and `testgate-result` carries `tier: 'pre-merge'`, a 40-hex `tree_sha` equal to the worktree's `HEAD^{tree}`, and `deferred` naming B and C with their tiers and `tier_source: 'declared'`.",
+        "A non-empty file whose every entry is post-merge or pre-release makes `runGate` throw `gate.no-pre-merge-checks`, and the log holds no `testgate-result` and no `gate-outcome` for that call. Under the null hypothesis (no filter guard) the same call returns pass because `run([])` passes; the test asserts the throw and the absent events, which differ from that.",
+        "A file where `coverage` carries `tier: post-merge` makes `runGate` throw `gate.stage-check-deferred` naming `coverage`, before any event; with `coverage` pre-merge the coverage-evidence stage runs as today.",
+        "An empty file `[]` passes the gate exactly as on the base (spec D10), and an unlabelled fixture yields the same check names, order, pass values and outcome as on the base; the only payload difference is `tier`, `tree_sha`, `deferred: []` and each result's `cmd_sha256`.",
+        "Every existing assertion in test/testgate.test.ts, test/gate.test.ts, test/heavyLock.test.ts and test/usage.test.ts still holds; an exact-payload assertion gains only the new fields.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/testgate.ts",
+        "factory/orchestrator/src/gate.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/checkTiers.test.ts",
+        "factory/orchestrator/test/gateTierFilter.test.ts",
+        "factory/orchestrator/test/testgate.test.ts",
+        "factory/orchestrator/test/gate.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 400000,
+        "diff_lines": 1150
+      },
+      "contract": {
+        "functional_clauses": [
+          "`tier` is validated in one function (`assertCheckTier`) that `readChecksFile` calls; no second validator.",
+          "One digest function per purpose (`commandDigest`, `checkDigest`), exported for every other task; no other module computes either.",
+          "The tier filter and both refusals live in `runGate`, so every gate caller gets them; `testgate.run` stays tier-agnostic.",
+          "Refusals are thrown before any stage, never outcomes.",
+          "Changes to exported declarations are additive: new exports and optional fields only."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-2-wave-reverted-event",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The wave-reverted event: vocabulary, preflight and the one writer",
+      "summary": "Spec D1, D4, AC6, AC14. Adds `wave-reverted` to the taxonomy (the one event name this task writes) and `revert.ts`: `RECORD_ONLY_REASONS`, a pure `waveRevertBlocker` that decides re-merged by `merge_sha` ancestry, and `recordWaveReverted`, which a record-only call can always satisfy.",
+      "objective": "Add `wave-reverted` to `graph_event` in factory/policies/taxonomy.yml with a comment in the file's style, and bump the file's `version` by one from the base's value (the header's rule: a taxonomy change bumps `version`). Mirror the value and the version in docs/specs/black-smith-architecture.md §8's yaml block (test/taxonomy.test.ts 'architecture §8 mirrors taxonomy.yml' compares them value for value and in order), and update the pinned version and its history comment in test/taxonomy.test.ts; change nothing else in those three files. The three `check-tier-*` names are not added here: test/eventTypes.test.ts ('every taxonomy event value is emitted, or says why it is not') fails a taxonomy value that no source literal writes, its excuse list (test/helpers/eventTypeScan.ts `UNEMITTED_EVENT_TYPES`) is claimed by no task, and nothing writes those names before task-9, which adds them. `wave-reverted` is written in this task by `recordWaveReverted` through an `event_type:` property naming `WAVE_REVERTED_EVENT`, which that scan reads. New module factory/orchestrator/src/revert.ts exporting `WAVE_REVERTED_EVENT`, `RECORD_ONLY_REASONS = ['superseded', 'waived', 'held-by-operator', 're-merged', 'not-merged', 'not-in-live-plan', 'unknown-task', 'invalid-trailers']` (the one list task-16 uses), `waveRevertBlocker(events, taskId, epicId, {revertSha, isAncestor, liveTaskIds})` and `recordWaveReverted(input, ctx, opts)`, the only writer of the event. `waveRevertBlocker` is pure with an injected `isAncestor(a, b)`; it returns null, or the first reason that holds: `not-merged` (no `wave-merged` names the task), `superseded`, `waived`, `held-by-operator` (`failed` or `escalated`), `re-merged` (some `wave-merged` for the task carries a `merge_sha` that has `revertSha` as an ancestor; a `wave-merged` without `merge_sha` never counts, spec D4), `not-in-live-plan` (no id in `liveTaskIds` matches the task by taskId.ts `taskIdsMatch`; `liveTaskIds` is the ids of the live plan's records whose `task_status` is not `superseded`, read by the caller from the same plan file `bs wave next` reads, because a plan amendment drops a finished task from v(n+1) (plan.ts `draftNextVersion`) and a bounce could then reopen it only in the projector, spec D4). It folds the task status with db/projector.ts `foldTasks`. Payload: `epic_id`, `task_ids`, `integration_branch`, `revert_sha`, `disposition` (`bounce` | `record-only`), and for `bounce`: `reverted_merge_sha`, `failing_checks`, `red_record_event_id`, `evidence_event_ids`, `log_tail`, `evidence` (`record` | `trailers-only`), `resumed`; for `record-only`: `reason` (one of `RECORD_ONLY_REASONS`), `task_ids` (the named task or `[]`), `reverted_merge_sha` (40-hex or null), and `failing_checks`, `evidence_event_ids`, `log_tail` possibly empty with `evidence: 'unreadable'`. `recordWaveReverted` refuses before writing, each with its own SmithError code: a non-40-hex `revert_sha`, a missing `integration_branch` or `disposition`, a second `wave-reverted` for the same `revert_sha`; for `bounce` also exactly one task id, a blocker from `waveRevertBlocker` (called with the `isAncestor` and `liveTaskIds` the caller passes in `opts`), an empty `failing_checks` or `evidence_event_ids`; for `record-only` a reason outside the list. Nothing else can refuse a record-only call.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/waveRevertedEvent.test.ts (write first; fails today because the module does not exist): `waveRevertBlocker` returns null for a completed merged task in `liveTaskIds`, and each of `not-merged`, `superseded`, `waived`, `held-by-operator` for its fixture; the same completed merged task absent from `liveTaskIds` (an amendment dropped it) returns `not-in-live-plan`, and a superseded task absent from it still returns `superseded`.",
+        "Re-merged by ancestry (a fake `isAncestor` over a small commit graph): the task's original `wave-merged` with `merge_sha` M, where M is an ancestor of R, does not make it `re-merged`; a later `wave-merged` with `merge_sha` M2, where R is an ancestor of M2, does; a `wave-merged` with no `merge_sha` never does. The mislabel case (only the original merge on the log) returns null.",
+        "`recordWaveReverted` accepts a `record-only` call for each reason in `RECORD_ONLY_REASONS`, including one with `task_ids: []`, `reverted_merge_sha: null`, empty `failing_checks`, `evidence_event_ids` and `log_tail` and `evidence: 'unreadable'`; it refuses a second record for the same `revert_sha`, a reason outside the list, and a 7-hex `revert_sha`, and the log is unchanged after each refusal.",
+        "A `bounce` call is refused for a blocker (including `not-in-live-plan`), an empty `failing_checks`, an empty `evidence_event_ids` and two task ids, each with its own code.",
+        "`wave-reverted` is in taxonomy.yml's `graph_event` and in architecture §8, the version is one higher than the base's in taxonomy.yml, §8 and test/taxonomy.test.ts, no `check-tier-*` name is in either file, and test/eventTypes.test.ts and test/taxonomy.test.ts pass. Mutations, with their failing lines in `notes`: with `recordWaveReverted`'s append removed, eventTypes.test.ts fails with `taxonomy declares 'wave-reverted' and nothing emits it`; with the taxonomy entry removed, it fails naming revert.ts's line as emitting an undeclared type. (`appendEvent` accepts any event-type string before and after this change, events.ts:26 `event_type: string`, so it is not the test.)",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/policies/taxonomy.yml",
+        "factory/orchestrator/src/revert.ts",
+        "docs/specs/black-smith-architecture.md",
+        "factory/orchestrator/test/taxonomy.test.ts",
+        "factory/orchestrator/test/waveRevertedEvent.test.ts"
+      ],
+      "budget": {
+        "tokens": 320000,
+        "diff_lines": 850
+      },
+      "contract": {
+        "functional_clauses": [
+          "`recordWaveReverted` is the only writer of `wave-reverted`; it validates everything before appending.",
+          "A `record-only` call with a listed reason and a fresh `revert_sha` is always accepted, so a resume can always end.",
+          "Re-merged is decided by `merge_sha` ancestry through the injected `isAncestor`, never by event order."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "The only policy file this task edits is factory/policies/taxonomy.yml, and only to add `wave-reverted` with its comment and bump `version`."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-3-check-tiers-scope-doc",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Scope doc: check tiers as a predefined architecture",
+      "summary": "Spec AC12. docs/specs/check-tiers-scope.md describes the three parts as one mechanism, indexed in both READMEs, with a PLANNED-NAMESPACE marker for the new `checks` namespace.",
+      "objective": "Write docs/specs/check-tiers-scope.md, a scope doc in the shape of docs/specs/continuous-loop-scope.md. It describes tier declaration, where each tier runs, and the learning loop as one mechanism; the defaults (absent tier = pre-merge, an empty file as today, no per-stack defaults, no GitHub Actions needed, git 2.38 enough); the bs-owned overlay for learned tiers, the declared tier winning, and how stale entries are reported (D8); the queue rule, the workspaces, the pinned integration branch, the post-merge trigger and digest-aware base, the not-run, env and reproduce rules before any bisect, the tested and recorded revert, resume, and the reopen with the revert's log in the brief (spec D1-D4); per-tier records and close (D5); the ledger's definitions (D6); the one-question proposal batch with the minutes-saved formula, the decisions.json shape, the guardrails the apply verb enforces, the 90-day decline and automatic promotion (D7-D9); and why this is a Blacksmith advantage (main stays merge-on-green, with the September 2026 evidence). It carries `<!-- PLANNED-NAMESPACE: checks -->` on its own line for the `bs checks post-merge|ledger|proposals|apply` verbs. Flags that existing verbs gain (the integration check's tier option, the queue's checks file, epic close's checks file, worktree create's reopen, the integration check's `remaining`) and error codes not yet in source are described in prose, never in a code span: the doc guards check flags and error codes, and a marker covers only a namespace. Add a row to the Scopes table in docs/specs/README.md and an entry in docs/README.md's index.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/checkTiersScopeDoc.test.ts (write first; fails today because the file does not exist): the doc exists, carries the `PLANNED-NAMESPACE: checks` marker on its own line, names the three tier values and the pre-merge default, contains the D7 decisions.json example as a fenced block, and is linked from docs/specs/README.md's Scopes table and from docs/README.md. It also asserts the operator's three asks: the doc says every proposal option shows runs covered, minutes spent and minutes saved; that the operator is asked once, as one batch; and that this is a predefined architecture that becomes a feature as it ships. Each of the three parts' headings is followed by a line `Status: planned.` (task-11 flips each to `Status: shipped.` and its test asserts that).",
+        "test/docCommands.test.ts and test/docErrorCodes.test.ts pass on the committed tree with the new doc present, unchanged; the coder pastes both runs' tails.",
+        "The doc names no backticked dotted token that is not already an error code in source, and no `bs <verb>` code span outside the `checks` namespace whose flags the shipped CLI does not declare.",
+        "The doc states every guardrail of spec D7-D9 and every threshold with its value, and says thresholds are named constants in v1.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "docs/specs/check-tiers-scope.md",
+        "docs/specs/README.md",
+        "docs/README.md",
+        "factory/orchestrator/test/checkTiersScopeDoc.test.ts"
+      ],
+      "budget": {
+        "tokens": 260000,
+        "diff_lines": 700
+      },
+      "contract": {
+        "functional_clauses": [
+          "One scope doc; the indexes only add a row or entry each.",
+          "Nothing is described as shipped that is not on the base; each part says it is planned."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The merge queue keeps today's command, or tests the pre-merge tier when the file declares tiers",
+      "summary": "Spec D2, AC3. `bs queue run --checks <file>`: an unlabelled or empty file keeps `--test-cmd`/`--select-test-cmd` exactly as today; a file declaring a later tier makes the pre-merge tier the pre-landing test; per-check results and `pre_landing` go on the queue's events.",
+      "objective": "In cli.ts `queue run`, add `--checks <file>` read through `readChecksFile`. Tiers are the effective tiers `readChecksFile` returns (declared only until task-10 adds the overlay, spec D8). When `declaresLaterTier(checks)` is false (every entry pre-merge, or an empty file), nothing changes: `--test-cmd` and `--select-test-cmd` run exactly as today and the file is only validated. When it is true: the pre-landing test is `selectTier(checks, 'pre-merge')` run through `testgate.run` (short-circuit, heavy lock as `run` does) in `step` and in the `--batch` candidate (`attemptCandidate`); neither `--test-cmd` nor `--select-test-cmd` is run, and the landing event records `test_cmd_not_run: true` and, when it was given, `select_test_cmd_not_run: true` (spec D2: the flags stay accepted, so the playbook never meets `cli.invalid-flag`); an empty pre-merge selection is refused with `queue.no-pre-merge-checks`. In factory/orchestrator/src/queue.ts let StepOptions carry the optional pre-merge list. A red pre-merge run is the same blocked outcome a red test command gives today, with the failing check's tail. On the events the queue already writes for a landing and for a red pre-landing test (read queue.ts and cli.ts to find where `wave-merged` and the blocked `error-logged` are written), add `pre_landing: 'test-cmd' | 'pre-merge-tier'`, and, for the tier, the per-check results (with `cmd_sha256`) and the tested `tree_sha`. Every `wave-merged` the queue writes (step, batch and adopt; queue.ts:367, :649, :942) also carries `merge_sha`: the merge commit that landed that task on the integration branch (the per-task fold commit in `--batch`). Add it through a new taskEvents.ts export `emitWaveMergedWith(taskId, ctx, opts, filesChanged, extra)`; `emitWaveMerged` keeps its declaration and behaviour. Document the flag and the rule in usage.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/queueTierChecks.test.ts (write first; fails today because `queue run` has no `--checks`): with an unlabelled file plus `--test-cmd` and `--select-test-cmd`, the queue runs the same commands as without `--checks` (fixture commands append their names to a file; the file and the landing event match a run without `--checks`, except the added `pre_landing: 'test-cmd'`). An empty file behaves the same way.",
+        "With a file of A (pre-merge), B (post-merge) plus `--test-cmd`, sequential `queue run --checks` runs A only, never the test command, lands the merge, and the landing event carries `pre_landing: 'pre-merge-tier'`, A's result with `cmd_sha256`, and a 40-hex `tree_sha`.",
+        "A red pre-merge check blocks the landing exactly as a red `--test-cmd` does today: nothing lands, and the blocked event carries the failing check's name and tail.",
+        "`--batch --checks` with a tiered file tests the candidate once with the pre-merge tier and lands or bisects as with `--test-cmd`.",
+        "A tiered file with `--select-test-cmd` lands as the same file without it does, running the pre-merge tier only, and the landing event says `select_test_cmd_not_run: true` (exit 0, no `cli.invalid-flag`); a tiered file with no pre-merge entry exits 1 with `queue.no-pre-merge-checks`, and nothing lands.",
+        "Every existing assertion in test/queue.test.ts and test/usage.test.ts still holds; runs without `--checks` produce the same events as on the base.",
+        "Every `wave-merged` written by step, `--batch` and adopt carries a 40-hex `merge_sha` equal to the integration-branch commit that merged that task (in `--batch`, each task's own fold commit, which `git log --first-parent` shows on the branch); `emitWaveMerged`'s existing callers and tests are unchanged.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/queue.ts",
+        "factory/orchestrator/src/taskEvents.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/queueTierChecks.test.ts",
+        "factory/orchestrator/test/queue.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 400000,
+        "diff_lines": 1150
+      },
+      "contract": {
+        "functional_clauses": [
+          "The queue reads its checks only through `readChecksFile`, `declaresLaterTier` and `selectTier`; no second parser.",
+          "With an unlabelled or empty file, behaviour is identical to today's.",
+          "Event payload changes are additive fields only."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "keeps_exports promise on taskEvents.ts: the only change is the new export `emitWaveMergedWith`; `emitWaveMerged` and every other export keep their declarations. Verified post-run by `bs claims impact`."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/taskEvents.ts"
+      ]
+    },
+    {
+      "task_id": "bs-check-tiers/task-5-integration-tier-runs",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Integration runs by tier: tiered records at the clone root, and a prepared scratch runner",
+      "summary": "Spec D3, D5, AC4. `runIntegrationCheck` runs a tier, `all` or `remaining` at the clone root under today's contract and records the tiers it ran, tiers present, the effective digest, the tree and not-run checks; `runChecksAt` runs checks at any commit in a prepared, always-removed scratch worktree; `latestTierChecks` folds records per tier.",
+      "objective": "In factory/orchestrator/src/integration.ts add optional `tier` (`CheckTier | 'all' | 'remaining'`), `commit`, `probeOf` and `workspace` (`'clone'` default, `'scratch'`) to IntegrationCheckInput. `runIntegrationCheck` keeps today's clone-root contract and refusals for `workspace: 'clone'`. With `tier`: a tier selects that tier (`selectTier`), `all` every check, `remaining` every current check the head is not certified for (no passing non-probe result at the head with its `check_sha256`, via `latestTierChecks`); an empty selection is refused with `integration.no-checks` naming the tier. Every record gains `tiers` (the tiers whose checks it ran, an array; an untiered run lists every tier present), `tiers_present`, `tree_sha`, `not_run` (names for which task-1's `isNotRun` holds), `probe_of` when set, and `error_class: 'execution.env-failure'` with the evidence when a failed check's own `environment` fires bs-gate-bounce's sleep classifier. Export `runChecksAt(projectDir, commit, checks, opts)`: creates a detached scratch worktree at `commit` under the same `.wt/<project>/` root queue.ts uses for batch candidates, named `scratch-<pid>-<uuid>` so no two runs collide; before adding it, removes (`git worktree remove --force`) every registered `scratch-<pid>-*` worktree under that root whose pid is not alive (heavyLock.ts `pidIsAlive`) and runs `git worktree prune`; runs `opts.setupCmd` first when given (its result returned as `setup`, never as a check), then gate.ts `checkWorktreeDeps`; a failed setup or a deps block returns `setupFailed` without running any check; otherwise runs the checks; removes the worktree in a `finally` whatever happens; never reads or changes the clone's branch, index or tree. `workspace: 'scratch'` routes through `runChecksAt` at `commit` (used by task-7 and task-12; the CLI never sets it). Export `latestTierChecks(events, epicId, opts?)` implementing spec D5: per commit and per `check_sha256`, the latest non-probe result (pass, fail or not-run) with its record id, so a caller can ask whether a commit is certified for a check; a record without `tiers_present` (written before this epic) is reported as `legacy`, and a post-epic record whose `tiers`, `tiers_present` or `results` is malformed is reported as `malformed`, never as empty.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/integrationTiers.test.ts (write first; fails today because `tier` is ignored): at the clone root with tier `post-merge`, only post-merge checks run and the record carries `tiers: ['post-merge']`, `tiers_present`, a 40-hex `tree_sha`, and per result `cmd_sha256` and `check_sha256`; with `all` every check runs. Without `tier`, the clone-root refusals (`integration.wrong-branch`, `integration.dirty-tree`) are unchanged.",
+        "`remaining`: with a passing post-merge record at the head, a file of pre-merge, post-merge and pre-release checks runs only the pre-merge and pre-release checks (fixture counter) and records `tiers: ['pre-merge', 'pre-release']`; after the post-merge check's command is edited, it runs that check too; after only its tier is moved, it does not.",
+        "Scratch names: two concurrent `runChecksAt` calls get distinct directories and both succeed; a registered `scratch-<pid>-*` worktree left by a dead pid (fixture: a pid known not to be alive) is removed before the next run, which then succeeds; one left by a live pid is untouched.",
+        "`runChecksAt` runs in a directory other than the clone (a fixture check writes its `pwd`), the scratch directory is gone afterwards, and the clone's `git status --porcelain` and current branch are byte-identical before and after; the worktree is removed when a check times out (1 ms `timeoutMs`).",
+        "`runChecksAt` with a failing `setupCmd`, and with a `package.json` declaring dependencies but no `node_modules/.bin`, returns `setupFailed` and runs no check (fixture counter file stays empty); with a passing `setupCmd` it runs the setup first, then the checks.",
+        "A heavy check whose lock wait times out (injected lock held, 1 ms wait) is listed in `not_run`. An empty selection throws `integration.no-checks` and writes no record. A failing check whose injected evidence has a clock gap of `SLEEP_GAP_MS` gets `error_class: 'execution.env-failure'`; one with gap 0 gets none.",
+        "`latestTierChecks`: a later post-merge record at the head does not replace a pre-release check's result; a probe record is never returned; a result under another `check_sha256` does not certify; a pre-epic record is reported as `legacy`; a post-epic record with no `tiers` is reported as `malformed`.",
+        "Every existing assertion in test/integration.test.ts and test/integrationPrFactPack.test.ts still holds.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/integration.ts",
+        "factory/orchestrator/test/integrationTiers.test.ts",
+        "factory/orchestrator/test/integration.test.ts"
+      ],
+      "budget": {
+        "tokens": 410000,
+        "diff_lines": 1200
+      },
+      "contract": {
+        "functional_clauses": [
+          "One record writer (`runIntegrationCheck`); probes and scratch runs go through it, never through a second writer.",
+          "The scratch worktree is always removed in a `finally`; the clone is never touched by a scratch run.",
+          "A failed setup or deps block is never recorded as a pass and runs no check.",
+          "Heavy checks take the heavy lock through `testgate.run`; nothing bypasses it.",
+          "Changes to exported declarations are additive optional fields and new exports."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-6-epic-close-per-tier",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Epic close and verdict need every tier green",
+      "summary": "Spec D5, AC5. integrationBlockers folds per tier from the effective checks or the latest record; a missing, stale, failed, digest-mismatched or incomplete record for any tier blocks, naming the tier; pre-epic records keep today's rule.",
+      "objective": "In factory/orchestrator/src/epic.ts, let the close and verdict inputs carry an optional checks declaration `[{name, tier, check_sha256}]` built from the effective checks (the CLI wiring is task-14). Replace the single last-wins integration record with task-5's `latestTierChecks`. With a declaration: every declared check must be certified at the current head (a passing non-probe result with its `check_sha256`); a missing, failed or not-run result, or one only under another `check_sha256` (the check changed), is a blocker naming the check and its tier. Without one: the required checks are those named by the latest post-epic record at the head. An unreadable head, and a record `latestTierChecks` reports `malformed`, each block with a message that says so. When the only records are pre-epic (`legacy`), apply today's single last-wins rule with today's blocker strings, byte-identical. Each failing tier is one blocker that names the tier. `closeEpic`'s override rule is unchanged.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/epicCloseTiers.test.ts (write first; fails today because one passing post-merge record at the head clears the blocker): with a declaration of pre-merge, post-merge and pre-release checks, a passing `all` record at an older head and a passing post-merge record at the current head give blockers naming the pre-merge and pre-release checks; adding a passing record at the head with `tiers: ['pre-merge', 'pre-release']` clears every blocker.",
+        "Separate cases each give one blocker naming the check: its command edited after the run (result only under another `check_sha256`, message says it changed); a failed result; a not-run result; a stale record; only a probe record at the head. Moving a check's tier after the run (same `check_sha256`) gives no blocker.",
+        "Fail closed: an unresolvable head (fixture deletes the integration ref) blocks with a message naming the head; a post-epic record with no `tiers`, and one whose `results` is not an array, each block with a message naming the record; neither is read as nothing to check.",
+        "Without a declaration, the checks named by the latest post-epic record at the head are required, and the same post-merge-shadowing case still blocks on the pre-release check.",
+        "An epic with only pre-epic records gets exactly today's blocker strings in every existing test of test/epic.test.ts, unchanged.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/epic.ts",
+        "factory/orchestrator/test/epicCloseTiers.test.ts",
+        "factory/orchestrator/test/epic.test.ts"
+      ],
+      "budget": {
+        "tokens": 340000,
+        "diff_lines": 900
+      },
+      "contract": {
+        "functional_clauses": [
+          "Close and verdict share one per-tier fold; no second copy.",
+          "Fail closed: an unreadable head, or a record that cannot be shown to cover a tier, blocks."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-7-post-merge-bisect",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Post-merge batch: the branch, the trigger, the base, a red that ran and reproduces, and the bisect",
+      "summary": "Spec D4, AC6. A library that pins the integration branch, decides whether a batch is due (dependency, batch, idle and final arms), finds a digest-aware base, runs the post-merge tier at the head in a prepared scratch worktree, refuses to blame never-run, env, flaky or pre-existing reds, and bisects a reproduced red over per-task merges to name a culprit.",
+      "objective": "New module factory/orchestrator/src/postMergeBisect.ts exporting `POST_MERGE_BATCH = 4` (commented with spec D4 as its source), `assertIntegrationBranch(projectDir, epicId)` (derives the branch only through worktree.ts `integrationBranchName(epic, epicBranchPrefix(project, epic))`, requires the `<prefix>/<epic>/integration` shape and refuses the default branch from `detectDefaultBranch`, with `postmerge.not-integration-branch`), `isBsRevertCommit(message)` (true when the message carries a `Bs-Revert-Of` trailer; task-16 validates all four), `landedBsReverts(projectDir, epicId)` (spec D4's one scan: every first-parent commit from the integration branch's fork point from the default branch to the head whose message carries a `Bs-Revert-Of` trailer, oldest first, never bounded by the base) and `findPostMergeCulprit(input, ctx, opts)`. Input: epic id, project dir, the effective checks (with `check_sha256`), the plan's tasks and dependency edges, the epic's event lineage, `final`, `setupCmd`, and an injectable runner (default task-5's `runIntegrationCheck` with `workspace: 'scratch'`). Steps: (0) `assertIntegrationBranch`. (1) No post-merge entry -> `no-checks-in-tier`, nothing created. (2) Base per spec D4: the latest ancestor of the head certified (task-5's `latestTierChecks`) for every current post-merge check by `check_sha256`; else the fork point from the default branch, flagged unobserved. The head itself certified for all of them -> `no-new-merges`. (3) Unless `final`, run only when a D4 arm holds: dependency (a `todo`/`ready` plan task depends on a task merged since the base), batch (at least `POST_MERGE_BATCH` task merges since the base), idle (`inFlightTasks` names no epic task other than ones whose folded status is in `HELD_OPEN_BY_AN_OPERATOR`); else `batch-not-ready`, nothing created. (4) Run the post-merge tier at the head; setup failed -> `setup-failed`; green -> `green`. (5) Any failed result for which `isNotRun` holds -> `lock-timeout`. (6) Every failed check env-classified -> `env-failure`. (7) Re-run the failed checks at the head as a probe; any passes -> `not-reproduced`; a not-run result here -> `lock-timeout`. (8) An unobserved base is probed with the failed checks; red -> `red-at-base`. (9) First-parent commits base..head that are neither per-task merges (`Merge <task-id> into <branch>`) nor in `landedBsReverts` -> `batch-has-foreign-commit`. (10) Bisect the task merges, re-running only the failed checks at each prefix as probes (a not-run probe -> `lock-timeout`); culprit = the first merge whose prefix is red after an observed-green prefix. (11) A later merge in the batch with a plan dependency edge on the culprit -> `revert-has-dependents`. Return `culprit-found` with the culprit task id, its merge sha, the failing checks, the merges in the batch, and every record and probe event id. This module never moves a ref and never writes `wave-reverted`; task-12 does. test/helpers/integrationRepo.ts exports its repo builder so task-12 and task-16 can import it without editing it: task merges, and a bs revert commit whose four trailers are parameters (`{revertOf, task, redRecord, failingChecks}`), each defaulting to the valid value the builder derives for the merge it reverts, each replaceable by any string and each omittable, so a caller can write a non-40-hex `Bs-Revert-Of`, an unknown `Bs-Task`, an unparseable `Bs-Red-Record` or an empty `Bs-Failing-Checks`.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/postMergeBisect.test.ts (write first; fails today because the module does not exist), on temp repos from test/helpers/integrationRepo.ts with three task merges where merge 2 breaks a post-merge check: outcome `culprit-found`, culprit task 2, and the probe records carry `probe_of` naming the head run.",
+        "Flaky head: the post-merge check fails once at the head and passes on the re-run (fixture alternates by a counter file) -> `not-reproduced` and no culprit. Under the null hypothesis (no re-run) the same fixture names merge 3; the test asserts no culprit, which differs.",
+        "Lock: the heavy post-merge check's lock is held by another process for the head run (injected lock, 1 ms wait) -> `lock-timeout`, no probe and no culprit; held only during the bisect -> `lock-timeout`, no culprit.",
+        "Trigger: 2 merges with an epic task in flight and no dependent waiting -> `batch-not-ready` and no worktree created; the same with a `todo` task depending on merge 1 -> it runs; the same with the in-flight task `escalated` -> it runs (idle arm); `final` always runs.",
+        "Base: after a passing post-merge record at the head, editing a post-merge command (new `check_sha256`) makes the next call run instead of `no-new-merges`, and moving a check's tier does not; a new check that already fails at the fork point -> `red-at-base`, no culprit.",
+        "`landedBsReverts` finds a bs revert commit that is itself the latest certified commit (the base), and one older than the base; it ignores a hand-written commit with no `Bs-Revert-Of` trailer, and returns one whose other trailers are malformed (task-16 records it as `invalid-trailers`). Those commits come from the builder's trailer parameters: a default call writes four valid trailers, and a call overriding one trailer or omitting it writes exactly that change (asserted on the commit message).",
+        "Each other outcome has its own fixture: `no-checks-in-tier` (no record, no worktree), `setup-failed`, `env-failure` (injected gap at `SLEEP_GAP_MS`), `batch-has-foreign-commit` (a hand commit; a bs revert commit in the range is not foreign), `revert-has-dependents`.",
+        "`assertIntegrationBranch` refuses when the derived branch would be the default branch (`main`) or lacks the `/integration` shape, before any worktree is created; with every fixture, the integration ref and the clone's branch, index and tree are byte-identical before and after.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/postMergeBisect.ts",
+        "factory/orchestrator/test/postMergeBisect.test.ts",
+        "factory/orchestrator/test/helpers/integrationRepo.ts"
+      ],
+      "budget": {
+        "tokens": 400000,
+        "diff_lines": 1170
+      },
+      "contract": {
+        "functional_clauses": [
+          "Read-and-probe only: no ref moves, no `wave-reverted`, no checkout of any branch.",
+          "A red must have run and must reproduce at the head before anything is blamed; never-run, env-classified, non-reproducing and pre-existing reds blame no task.",
+          "Head runs and probes are written through task-5's record writer; scratch runs through `runChecksAt`."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-8-check-ledger",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The check ledger: identity, duration, class and unique catches per check per run",
+      "summary": "Spec D6, AC8. A pure, read-only fold over gate, queue, integration and revert events that classifies each failure as real, flaky, env or not-run, marks unique catches, severity and sensitive-path guards (failing closed on unknown tasks), and computes runs, minutes, flake rate, importance and merges per post-merge run.",
+      "objective": "New module factory/orchestrator/src/checkLedger.ts exporting `checkLedger(inputs, opts)`, a pure fold plus an injected tree-diff reader, and named constants `LEDGER_WINDOW_DAYS = 30` and `SEVERITY_WEIGHTS` (S1 8, S2 4, S3 2, S4 1), each commented with spec D6 as its source. `inputs` is task-13's `{events, taskIdOf, taskClaims, sensitiveGlobs}` (this module reads no file). Every task join goes through `taskIdOf` (event id -> qualified task id or `unattributed`). Run rows come from `testgate-result`, the queue's landing and blocked events (task-4's `pre_landing` and per-check fields), `integration-check` records (task-5's fields; probes are runs) and `wave-reverted`. Each row: identity (name plus `cmd_sha256`, or `name-only`), qualified task or epic, tiers, tree, outcome, duration from bs-gate-bounce's `environment.monotonic_ms` (absent -> `null`, never 0), class, unique or shadowed, severity, event id. Classes, unique catch, severity and the sensitive-path guard follow spec D6 exactly: a not-run result (task-1's `isNotRun`, or a name in a record's `not_run`) is counted only as `not_run`; a task that is `unattributed` or has no claims entry counts as touching a sensitive path; severity and the guard otherwise use security.ts `claimTouchesGlob` over the task's claims and `sensitiveGlobs`. The tree-diff reader defaults to `git diff --name-only --no-renames <a> <b>`; an unreadable diff makes the failure `real`. `name-only` rows count toward catches and guards, never runs or minutes. `opts.window` (`{from, to}`) applies to the numbers only; the sensitive-path guard's catch arm reads every event in `inputs`, however old (spec D6). Per identity over the window: runs, measured minutes, unmeasured and not-run counts, median minutes, flake rate, importance, real catches, S1/S2 catches in the window, guards-sensitive, and the event ids behind each number; and the D7 inputs R and M split by source (gate, queue, close). Project-wide: post-merge head runs (`--final` included), task merges, epics with merges, and merges per post-merge run.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/checkLedger.test.ts (write first; fails today because the module does not exist), fixtures from test/helpers/ledgerEvents.ts: env (gap at `SLEEP_GAP_MS`), flaky (same identity, same tree, a fail and a pass, as the D4 head re-run writes), real (fail at tree A, pass at tree B, diff touching `src/x.ts`), not-real (fail at A, pass at B, diff touching only the checks file) and not-run (`reason: heavy.wait-timeout`). Each gets a different class, and the test asserts the class strings, so swapping any two definitions fails it.",
+        "Not-run: a check whose only failures are lock-wait timeouts has zero runs, zero minutes, zero catches and a `not_run` count equal to the timeouts; a bisect probe listing it in `not_run` adds nothing else.",
+        "Unique catch: C fails after faster F passed in the same run -> unique; C fails with faster F ordered after it (short-circuited) -> `shadowed`; F observed passing at the same tree in another record -> unique.",
+        "Severity and guard: a catch on a task claiming `src/auth/session.ts` is S1 and marks the check guarding; a check with 0 failures that ran on that task's gate inside the window is guarding too; outside the window with no catch it is not. A gate event whose `taskIdOf` entry is `unattributed`, or whose task has no claims entry, marks the check guarding (fail closed).",
+        "Identity: two rows with the same name and different `cmd_sha256` are two identities; a `name-only` real catch counts toward the guard but adds no run or minute.",
+        "A run with no `environment` has duration `null`; minutes sum measured runs only, with the unmeasured count beside them. An unreadable tree diff (injected reader throws) yields `real`.",
+        "Every number names its event ids; the fold writes nothing (inputs deep-equal before and after).",
+        "Window: a real catch on a task claiming `src/auth/session.ts` 40 days before `now`, with a 30-day window, still marks the check guarding (and task-9 then proposes nothing for it), while that catch adds nothing to the in-window runs, minutes, real catches or S1/S2 catches. A run on that task 40 days ago with no failure does not mark it guarding.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/checkLedger.ts",
+        "factory/orchestrator/test/checkLedger.test.ts",
+        "factory/orchestrator/test/helpers/ledgerEvents.ts"
+      ],
+      "budget": {
+        "tokens": 380000,
+        "diff_lines": 1100
+      },
+      "contract": {
+        "functional_clauses": [
+          "Pure and read-only: no event, file or table is read or written by the fold itself.",
+          "Flaky is observed (same identity, same tree, both outcomes), never inferred from load or timing; a check that never ran is no evidence of anything.",
+          "When a fact cannot be read, the default protects the check (a real catch, a guard), never exposes it."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-9-tier-proposals",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Tier-move proposals: the formula, decisions.json, an apply that writes only the overlay, promotion",
+      "summary": "Spec D7-D9, AC9, AC10. A read-only pending fold over undeclared entries with D7's minutes-saved formula per option, notices for declared entries, one validator shared by proposals and apply, an apply that writes the overlay and decision events only, a 90-day quiet decline, and automatic promotion of an overlay-demoted check.",
+      "objective": "New module factory/orchestrator/src/tierProposals.ts with module-level event-name constants `CHECK_TIER_DECIDED_EVENT`, `CHECK_TIER_PROMOTED_EVENT` and `CHECK_TIER_BATCH_ANSWERED_EVENT`, each written through an `event_type:` property in this file (apply's two appends; the `pending_event` `{event_type: CHECK_TIER_PROMOTED_EVENT, payload}` that promotion stores and then appends), so test/eventTypes.test.ts's scan sees all three written here; and named constants `MIN_RUNS = 20`, `MIN_MEASURED_MINUTES = 30`, `DECLINE_QUIET_DAYS = 90` (commented with spec D7 as their source). Export `pendingProposals(ledger, events, effectiveChecks, overlay, {epicId, writable, now})`, a pure fold that reads only its arguments (no `dir`, no git command, no file): `overlay` is task-15's `readOverlay` result, `writable` is task-15's `overlayWritable(dir)` result (`ok` or the reason) and `epicId` the epic whose lineage `answered_in_epic` reads, both computed by the caller (task-10's `bs checks proposals` from `--project` and `--epic`). It returns demote items exactly as spec D7 defines them (only entries with `tierSource` `default` or `overlay`), in the D7 proposal shape, with `options` computed by D7's formula from the ledger's R, M, d and project-wide B and E (`basis` names each input and whether it was measured or estimated; probes and not-run excluded; minutes rounded to 0.1); `notices` for declared entries (for example a declared post-merge check with a real catch); and task-15's overlay report. Stage-bound checks (gate.ts `stageBoundCheckNames`) are never proposed. Each item also carries task-8's `importance`; items are ordered by post-merge `minutes_saved`, largest first, then by `check`; and the result carries `answered_in_epic` (true when the lineage of `epicId` in `events` holds a `check-tier-batch-answered`). Export `validateDecisions(json, pending)` for the D7 decisions.json shape, and one `itemBlocker(item, ledger, effectiveChecks, now)` used by both `pendingProposals` (to exclude) and apply (to refuse). `pendingProposals` returns no items, only a notice naming the reason, when `writable` is not `ok` or the ledger is `degraded` (spec D6, D8), so the batch never asks what apply would refuse. Export `applyTierDecisions(decisions, {dir, checksFile, effectiveChecks, actor, ledger, events, now}, ctx, opts)`: with task-15's `overlayPath(dir)` null it refuses `checks.overlay-not-a-repo` without locking or creating anything; otherwise, inside task-15's `withOverlayLock`, first `reconcileOverlay`, then validate the whole array with `validateDecisions`, `itemBlocker` and `overlayWritable`, and write nothing on any refusal, naming the item and the reason (non-operator actor, a shape error, a check not in the file, a declared tier, a stage-bound check, a sensitive-path guard, an S1 or S2 catch in the window, an unwritable overlay). Then, in this order (spec D8's crash order), append one `check-tier-decided` per item (payload: `proposal_id`, `check`, `cmd_sha256`, `from_tier`, `to_tier` or none, `decision`, `note`) and write the approved tiers to the overlay with `writeOverlay` and the revision read under the lock (decline writes no overlay entry). Every call, an empty array included, finally appends one `check-tier-batch-answered` (`epic_id`, decided ids, pending ids) for the epic it is given, so a reply of `none` or an unparseable one is recorded and not asked again in that epic. The project's checks file is never opened for writing. Export `promoteAfterCatch(...)` for D7's automatic promotion: its evidence is a post-merge culprit result from task-7 (`{failing_checks, red_record_event_id, reproduced: true}`, spec D7), not the ledger; it acts only on a failing check whose effective tier has `tierSource: 'overlay'` from an approved `check-tier-decided` and whose own failure, read from the red record named by `red_record_event_id` in the events it is given, was neither env nor not-run; when that record is not in the events (a resumed culprit whose record was lost) it promotes nothing and returns `red-record-unreadable`; with `overlayPath(dir)` null it promotes nothing and returns `checks.overlay-not-a-repo` without locking; otherwise, inside `withOverlayLock`, after `reconcileOverlay`, it writes the overlay entry as `pre-merge` with `pending_event` holding the `check-tier-promoted` payload (`check`, `cmd_sha256`, `from_tier`, `to_tier: pre-merge`, `catch_event_id`, `decided_by_event_id`), then appends that event and clears `pending_event`; a declared tier returns `declared-tier-wins` and changes nothing. Vocabulary: this task is the first to write the three names, so it adds `check-tier-decided`, `check-tier-promoted` and `check-tier-batch-answered` to `gate_event` in factory/policies/taxonomy.yml with comments in the file's style, bumps `version` by one from the base's value, mirrors both in docs/specs/black-smith-architecture.md §8's yaml block, and updates the pinned version and history comment in test/taxonomy.test.ts, as task-2 did for `wave-reverted`; nothing else in those files changes.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/tierProposals.test.ts (write first; fails today because the module does not exist): the D7 example (R 26, M 124.8, d 4.8, B 5 measured, E 1) gives options keep 0.0, post-merge 100.8, pre-release 120.0, each with `runs_covered` 26 and `minutes_spent` 124.8; with no post-merge runs and 20 merges, post-merge saves 28.8 and `basis` marks B estimated.",
+        "No proposal for 19 runs, a real catch in the window, 29 minutes, a live decision, a sensitive-path guard, a check named `coverage`, or an entry that declares a tier; the declared post-merge check with a real catch appears under `notices`, not as an item.",
+        "`validateDecisions` accepts the D7 example and refuses each of: unknown key, unknown or decided `proposal_id`, `check` not matching the proposal, `approve` without `to_tier`, `to_tier` not among the item's options, `decline` with `to_tier`, a duplicate.",
+        "Every item `pendingProposals` returns passes `itemBlocker`, so applying an approve-all answer to an unchanged log never refuses. After a new S2 catch is appended between proposal and apply, `applyTierDecisions` refuses the whole array naming that item: no event appended, the overlay byte-identical.",
+        "A valid batch appends one `check-tier-decided` per item and then writes the approved tiers to the overlay; the checks file's bytes and mtime are unchanged, including when the file is tracked by git.",
+        "Crash order: an injected throw after the events and before `writeOverlay` leaves the checks in their earlier tier; the next `applyTierDecisions` call reconciles, the overlay then holds the approved tiers, and no `check-tier-decided` is duplicated (`pendingProposals` is a pure fold and writes nothing; task-10 tests the same convergence through `bs checks proposals`, which runs `reconcileOverlay` before it). An injected throw after the promotion's overlay write and before its event leaves the check at `pre-merge`; the next `applyTierDecisions` or `promoteAfterCatch` call appends exactly one `check-tier-promoted`.",
+        "`pendingProposals` called with `writable` `unreadable` (a corrupt overlay), `tracked` (its location tracked by git) or `not-a-repo`, each as task-15's `overlayWritable(dir)` returns it for that fixture, returns no items and a notice naming that reason; the fold is given no `dir` and runs no git command. For the same three locations `applyTierDecisions` refuses before appending anything.",
+        "A decided item does not resurface; a declined one is absent at day 89 and present at day 91.",
+        "`promoteAfterCatch` with a culprit result naming an overlay-demoted check sets the overlay entry to `pre-merge` and appends `check-tier-promoted`, for each of the outcomes `reverted`, `revert-has-dependents` and `revert-red` (the evidence is the same); on a declared post-merge check it returns `declared-tier-wins`; on a check whose own failure was env-classified or not-run it changes nothing; with the red record absent from the events it returns `red-record-unreadable` and changes nothing.",
+        "Ordering and importance: three eligible items with post-merge savings 10, 40 and 25 come back in the order 40, 25, 10, each with `importance` 0; a check with a unique catch shows its non-zero importance in the ledger and is not proposed.",
+        "Batch answered: `applyTierDecisions([])` for epic E appends exactly one `check-tier-batch-answered` and nothing else; `pendingProposals` with `epicId` E then reports `answered_in_epic: true`, and with another `epicId` `false`, over the same events.",
+        "Vocabulary: the three `check-tier-*` names are in taxonomy.yml `gate_event` and architecture §8, the version is one higher than task-2 left it in taxonomy.yml, §8 and test/taxonomy.test.ts, and test/eventTypes.test.ts and test/taxonomy.test.ts pass. Mutation, with the failing line in `notes`: with any one of the three taxonomy entries removed, eventTypes.test.ts fails naming tierProposals.ts's line as emitting an undeclared type.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/tierProposals.ts",
+        "factory/orchestrator/test/tierProposals.test.ts",
+        "factory/policies/taxonomy.yml",
+        "docs/specs/black-smith-architecture.md",
+        "factory/orchestrator/test/taxonomy.test.ts"
+      ],
+      "budget": {
+        "tokens": 420000,
+        "diff_lines": 1220
+      },
+      "contract": {
+        "functional_clauses": [
+          "Guardrails are enforced in `itemBlocker`, which both the proposal fold and apply call; never only in playbook prose.",
+          "Validate-all-then-write: any refusal leaves the event log and the overlay unchanged.",
+          "bs never writes the project's checks file; only the overlay and decision events change.",
+          "No decision is applied without an operator actor, except the automatic promotion back to pre-merge, which only moves a check earlier."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "The only policy file this task edits is factory/policies/taxonomy.yml, and only to add the three `check-tier-*` event names with their comments and bump `version`.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-10-checks-cli",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The `bs checks` namespace (ledger, proposals, apply) and the overlay in readChecksFile",
+      "summary": "Spec AC1, AC8-AC10, AC12, D8. `readChecksFile` resolves the overlay so every verb sees effective tiers; ships `bs checks ledger|proposals|apply` with the namespace-wide flags (proposals and apply also take the event envelope, because both can append); removes the scope doc's PLANNED-NAMESPACE marker in the same commit.",
+      "objective": "In cli.ts, make `readChecksFile(filePath, {dir})` resolve effective tiers with task-15's `resolveEffectiveTiers` against the overlay of `dir`'s project root (`dir` is the directory the verb runs in: `--worktree` for `gate run`, `--project` elsewhere), setting `tier` and `tierSource` on each entry; an unreadable overlay resolves every undeclared entry to `pre-merge` and the verb prints that it did. Add the `checks` namespace in cli.ts and usage.ts with flags that mean what they mean on every existing verb: `--project <dir>`, `--specs-dir <dir>` (the parent of `<epic>/plan*.json`), `--state-dir <dir>`, `--now <iso>`. `bs checks ledger --project <dir> --specs-dir <dir> [--checks <file>] [--state-dir <dir>] [--now <iso>]` gathers inputs with task-13's `gatherLedgerInputs` and prints task-8's `checkLedger` as JSON, plus task-13's warnings and `degraded` flag, and, with `--checks`, task-15's overlay report. `bs checks proposals` takes the same flags plus a required `--checks <file>` and `--epic <id>` and the required envelope flags `--session <id> --plan-version <n> --causal-parent <event-id>`, which mean what they mean on `bs checks apply` and `bs checks post-merge`; a missing one exits 1 naming it before anything is read or written. When task-15's `overlayPath(dir)` is null (outside a git repository) it takes no lock, runs no reconcile, creates nothing, and prints `pendingProposals` with `writable: 'not-a-repo'` (no items, the notice), exit 0. Otherwise it reads the overlay and the events without the lock and asks task-15's `overlayOwes`; when nothing is owed (always so in a project with no `.blacksmith/` directory, where nothing was ever applied) it takes no lock and creates no directory or file. Only when something is owed does it run task-15's `reconcileOverlay` under `withOverlayLock`, with `ctx` built from those three flags, so an owed `check-tier-promoted` is appended in the playbook's own session, at its plan version, chained to the given causal parent (its only possible writes are entries and events an earlier apply or promotion already owed), then prints task-9's `pendingProposals` (items, notices, overlay report, `answered_in_epic`), calling it with `epicId` from `--epic` and `writable` from task-15's `overlayWritable(dir)`, which this verb computes so the fold stays pure. `bs checks apply <decisions.json> --checks <file> --project <dir> --specs-dir <dir> --epic <id> --actor <actor> [--state-dir <dir>] [--now <iso>] --session <id> --plan-version <n> --causal-parent <event-id>` calls `applyTierDecisions` and exits 1 on any refusal, naming it. The CLI parses flags and calls the library functions only. Remove `<!-- PLANNED-NAMESPACE: checks -->` from docs/specs/check-tiers-scope.md in the same commit and turn its `bs checks post-merge` code spans into prose that says the verb ships with task-14, so the doc guards hold on this tree.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/checksCli.test.ts (write first; fails today because `checks` is not a namespace): `bs checks ledger` on a fixture state dir with two projects' epics under two specs dirs prints only the epics under `--specs-dir`; a specs dir whose plans name two projects exits 1 with `checks.mixed-projects`; `bs checks proposals` prints the D7 example's three options.",
+        "Overlay resolution: with an overlay entry moving undeclared check `e2e` to post-merge, `bs gate run` from a task worktree of the same repo defers `e2e` with `tier_source: 'overlay'`; with `e2e` declaring `tier: pre-merge` in the file, the gate runs it (the declaration wins) and `bs checks proposals` reports the overlay entry `shadowed`.",
+        "`bs checks apply` with a guardrail item exits 1 and leaves the log and the overlay unchanged; with a valid batch exits 0, writes one `check-tier-decided` per item and the overlay, and leaves a git-tracked checks file byte-identical; `--actor wave-runner` exits 1.",
+        "`bs checks ledger --checks` prints the overlay report with an `active`, a `shadowed` and an `orphaned` entry from a fixture overlay; without `--checks` it prints the ledger and no report. `bs checks ledger` never writes (log line count and overlay bytes unchanged); `bs checks proposals` writes nothing on a consistent overlay; on one owing a promotion event it appends exactly that event and nothing else, with the `--session`, `--plan-version` and `--causal-parent` it was given as the event's envelope; on one missing an approved `check-tier-decided` tier (an injected crash between apply's events and its overlay write) it writes that overlay entry, appends nothing, and prints the approved tier as effective; without `--session` it exits 1 naming the flag, and the log and the overlay are unchanged. In a git repo with no `.blacksmith/` directory it prints the items and leaves no `.blacksmith/`, lock file or overlay behind (the main clone's file listing and `.git/info/exclude` identical before and after); in a directory outside any git repository it exits 0 with no items and the `not-a-repo` notice and creates nothing.",
+        "test/docCommands.test.ts passes with the marker removed and fails by name if the marker is put back (mutation check pasted in `notes`); test/usage.test.ts still holds.",
+        "Queue with an overlay-only demotion: with an overlay entry moving undeclared `e2e` to post-merge and nothing declared, `bs queue run --checks --test-cmd --select-test-cmd` runs the pre-merge tier only, never the two commands, exits 0, and the landing event records `pre_landing: 'pre-merge-tier'` and both `*_not_run` flags.",
+        "`bs checks apply` with `[]` and `--epic E` exits 0 and appends one `check-tier-batch-answered`; `bs checks proposals --epic E` (with the envelope flags) then prints `answered_in_epic: true`.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "docs/specs/check-tiers-scope.md",
+        "factory/orchestrator/test/checksCli.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 425000,
+        "diff_lines": 1240
+      },
+      "contract": {
+        "functional_clauses": [
+          "The CLI only parses flags and calls the library functions; no classification, formula, overlay or guardrail logic in cli.ts beyond calling them.",
+          "`--project`, `--specs-dir`, `--state-dir` and `--now` mean what they mean on every existing verb.",
+          "`bs checks ledger` is read-only. `bs checks proposals` is read-only except for the writes `reconcileOverlay` owes (an approved tier missing from the overlay, a `pending_event` still owed), which carry the `--session`, `--plan-version` and `--causal-parent` envelope; on a consistent overlay it writes nothing, and it takes the overlay lock only when `overlayOwes` reports a write to make."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-11-playbooks-docs",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Playbooks and operator docs run the tiers, and the changelog",
+      "summary": "Spec AC3, AC5, AC7, AC9, AC11, AC12. wave.md and run.md pass the checks file to the queue, run the post-merge batch after each landing and before admission, reopen a reverted task with the revert's log in the brief, close with `--final` then `--tier remaining`, and ask the proposal batch once; operator guides and CHANGELOG follow.",
+      "objective": "Edit .claude/skills/bs/wave.md: step 7 gates the pre-merge tier and keeps the rule that the unit check is the project's full test command, in whatever tier the full suite sits. Step 10 adds `--checks <file>` beside today's `--test-cmd` (and `--select-test-cmd` where used) and says the queue keeps today's command for an unlabelled file and runs neither command, without refusing either flag, once a later tier exists (spec D2); after each `bs queue run` that landed a merge, and before admitting the next tasks, it runs `bs checks post-merge` with `--project`, `--specs-dir`, `--checks`, `--plan` and `--setup-cmd` (the install command the playbook runs in task worktrees) and handles each outcome: `green`, `no-checks-in-tier`, `no-new-merges`, `batch-not-ready` move on; `reverted` logs and lets rolling admission re-admit the task; `env-failure`, `not-reproduced` and `lock-timeout` are logged (`execution.env-failure`, `execution.flaky-test`, `execution.env-failure`) and the verb is called once more, a second at the same head goes to the operator (spec OQ6); `revert-recorded` (a revert that stands without a bounce), `promotion-skipped`, `declared-tier-wins` and every other outcome go to the operator with the JSON; for `revert-not-applicable` with reason `not-in-live-plan` the playbook names the three ways out spec D4 gives (an amendment that re-adds the task, an amendment adding a task that fixes the defect, an edit to the failing check) and offers no waiver, because no verb waives a red tier. Step 9 reopens a reverted task with `bs worktree create <project> <epic> <task> --reopen --revert <revert-sha>`, puts the latest `wave-reverted`'s `failing_checks`, `log_tail` and `red_record_event_id` into the coder's brief, and counts the round on the S2 ladder. Edit .claude/skills/bs/run.md in this order (spec D5): first the playbook runs `bs checks proposals --epic <id>` with the envelope flags `--session`, `--plan-version` and `--causal-parent`, as for `bs checks apply`; only when it has items and `answered_in_epic` is false (step 12's first pass) does it ask ONE question for the whole batch, numbering items 1..n and lettering each item's options (a = keep) with their runs covered, minutes spent and minutes saved, and stating D7's reply grammar (`<n><letter>` tokens, or `none`); it turns the reply into the D7 decisions.json (a parse failure, an unknown item or letter, or a repeated item decides nothing), and runs `bs checks apply --epic <id>` exactly once, with `[]` when nothing was decided; notices are reported, not asked; silence changes nothing. Then step 12 runs `bs checks post-merge --final` and then `bs integration check --tier remaining` at the clone root. Then verdict and close, both passing `--checks`. Update .claude/agents/bs-wave-runner.md only where it restates these steps. In docs/guide/operator-guide/queue-and-gate.md §5 document `tier` beside `heavy` and `timeout_ms`, the default, the empty-file rule, the overlay (location, declared-wins, shadowed and orphaned entries), and link docs/specs/check-tiers-scope.md; in closing-an-epic.md §7a document per-tier close and `--tier remaining`. Update the scope doc's status lines to shipped. Write the CHANGELOG.md Unreleased entry from the other tasks' notes.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/checkTiersPlaybook.test.ts (write first; fails today because the lines are absent): wave.md step 10 contains `bs queue run` with both `--checks` and `--test-cmd`, and `bs checks post-merge` with `--setup-cmd` and `--specs-dir`, placed before the admission line, and names every outcome task-7, task-12 and task-14 return; step 7 still states the full-test-command rule; step 9 contains `--reopen --revert`, names `failing_checks`, `log_tail` and `red_record_event_id` as brief content, and states the S2 ladder count; run.md step 12 contains `--final` and `bs integration check` with `--tier remaining`; run.md's `bs checks proposals` line carries `--session`, `--plan-version` and `--causal-parent`; run.md asks the proposal batch as one question and says no answer changes nothing. Order: in run.md, the line with `bs checks apply` comes before the line with `bs checks post-merge --final`, which comes before `--tier remaining`, which comes before `bs epic verdict` and `bs epic close` (the test compares line offsets).",
+        "docs/specs/check-tiers-scope.md: each part's `Status: planned.` line is now `Status: shipped.`.",
+        "The decisions.json example in run.md parses and passes task-9's `validateDecisions` against a matching pending fixture (the test imports the validator).",
+        "queue-and-gate.md §5 documents `tier`, its three values, the pre-merge default and the overlay (location, declared wins, shadowed, orphaned), and links the scope doc; closing-an-epic.md documents per-tier close.",
+        "test/docCommands.test.ts, test/docErrorCodes.test.ts and test/wavePlaybook.test.ts pass unchanged on the committed tree.",
+        "CHANGELOG.md has one Unreleased entry naming the tier field, the overlay, the queue rule, the post-merge batch, per-tier close, the ledger and the one-question batch.",
+        "No playbook line adds an approve button or any dashboard action; the dashboard stays display-only.",
+        "Reply grammar and first pass: run.md states the `<n><letter>` / `none` grammar, that `a` is keep, that an unparseable reply decides nothing, and that the question is asked only when `answered_in_epic` is false; a test parses the grammar example in run.md (`1b 3c`) into the decisions.json the playbook text says it becomes and checks it with task-9's `validateDecisions`.",
+        "wave.md names `revert-recorded` (operator, once) and does not tell the operator to drop `--select-test-cmd`; the post-merge step lists every outcome task-12 and task-16 return; the line naming `not-in-live-plan` names all three ways out (re-adding the task, a fixing task, an edit to the check).",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        ".claude/skills/bs/wave.md",
+        ".claude/skills/bs/run.md",
+        ".claude/agents/bs-wave-runner.md",
+        "docs/guide/operator-guide/queue-and-gate.md",
+        "docs/guide/operator-guide/closing-an-epic.md",
+        "docs/specs/check-tiers-scope.md",
+        "CHANGELOG.md",
+        "factory/orchestrator/test/checkTiersPlaybook.test.ts"
+      ],
+      "budget": {
+        "tokens": 400000,
+        "diff_lines": 1150
+      },
+      "contract": {
+        "functional_clauses": [
+          "Prose only states what the other tasks built; any gap is reported in `notes`, not papered over.",
+          "The proposal batch is asked once per batch, never one question per check, and only about items apply can apply."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "This task is the sole owner of CHANGELOG.md in this epic."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Post-merge revert: build it with git revert, test and record it, land it through the queue path, bounce the task, resume",
+      "summary": "Spec D1, D4, AC6. Orchestrates a post-merge batch: runs task-16's resume first, calls task-7's bisect, preflights the bounce, builds the culprit revert with `git revert -m 1` (git 2.38), tests it with the pre-merge and post-merge tiers and records those runs at the revert commit, lands it through queue.ts landCandidate on the pinned integration branch, then writes wave-reverted.",
+      "objective": "New module factory/orchestrator/src/postMerge.ts exporting `runPostMerge(input, ctx, opts)`. `liveTaskIds` are the ids of the input plan's records whose `task_status` is not `superseded` (the plan `bs checks post-merge --plan` read, the file `bs wave next` reads). (0) Call task-7's `assertIntegrationBranch`, then task-16's `resumeLandedReverts` with `liveTaskIds`; when it wrote anything, return its outcome and `resumed: true`. The result shape is `{outcome, resumed, reason?, culprits, revert_sha?, event_ids}`. `culprits` is a list of `{task, merge_sha, failing_checks, red_record_event_id, reproduced: true}`: on every outcome reached after task-7 returned `culprit-found` it holds that one culprit; on a resumed return (step 0) it holds the `culprit` of each resumed write that has one (task-16, rebuilt from the trailers); otherwise it is empty. task-14 promotes on every entry (spec D7), so a check whose catch was recorded by a resume after a crash is promoted like any other. (1) Call task-7's `findPostMergeCulprit`; return its outcome unchanged for anything but `culprit-found`. (2) Preflight: `waveRevertBlocker` for the culprit with `liveTaskIds`; a reason -> `revert-not-applicable` with that `reason` on the result, nothing built. For `not-in-live-plan` (a plan amendment dropped the finished culprit before this batch ran) nothing is reverted: the culprit's change stays on the integration branch, the head stays uncertified so close keeps refusing, and the outcome goes to the operator once with the culprit, the failing checks and the red record. The answer is one of three things, each of which re-certifies the head: a plan amendment that re-adds the task (plan.ts `draftNextVersion` accepts an added id the previous version does not hold live, so the next batch reverts and bounces it), a plan amendment adding a task that fixes the defect, or an edit to the failing check. No verb waives a red tier, so none is offered (spec D4). (3) Build: in a scratch worktree detached at the head (same `.wt/<project>/` root, removed in a `finally`), `git revert -m 1 --no-edit <culprit-merge>` then amend the message to carry the four trailers (`Bs-Revert-Of`, `Bs-Task`, `Bs-Red-Record`, `Bs-Failing-Checks`); a conflict is aborted (`git revert --abort`) -> `revert-conflict`. (4) Test the revert commit R with the pre-merge tier and then the whole post-merge tier through `runIntegrationCheck` with `workspace: 'scratch'`, `commit: R` and the current digest, writing both as certifying records at R; a not-run result -> `lock-timeout`; setup failure -> `setup-failed`; any other red -> `revert-red`. (5) Land R with queue.ts `landCandidate(projectDir, integrationBranch, head, R, message)`, where `integrationBranch` comes only from the branch `assertIntegrationBranch` returned; `landCandidate` is exported from queue.ts by this task without other change; `integration-dirty` and `integration-moved` are returned and nothing else is written. (6) After `landed`, `recordWaveReverted` (`disposition: bounce`) with the failing checks, the log tail, the red record id and every record and probe id -> `reverted`. A refusal or crash here is finished by task-16's resume on the next call. Only `reverted` writes `wave-reverted`; every other outcome moves no ref.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/postMergeRevert.test.ts (write first; fails today because the module does not exist), on task-7's fixture repos with three task merges where merge 2 breaks a post-merge check and no worktree holds the integration branch: outcome `reverted`; the ref points at a new commit whose parent is the old head, whose tree equals the old head without merge 2's change and whose message carries the four trailers; passing pre-merge and post-merge records exist at the new head and no further whole-tier run happened after the landing (fixture counter); one `wave-reverted` names task 2 with the probe ids.",
+        "With a clean worktree holding the integration branch (the clone or an epic worktree), `reverted` fast-forwards that worktree: its HEAD equals the new ref and `git status --porcelain` is empty. With tracked changes in the holder, the outcome is `integration-dirty`, the ref is unchanged and no `wave-reverted` exists.",
+        "Crash after landing: an injected throw right after `landCandidate` leaves the ref moved and no `wave-reverted`; the next `runPostMerge` call returns `{outcome: 'reverted', resumed: true}` (task-16's result passed through) with `culprits` holding task 2's culprit rebuilt from the trailers, exactly one `wave-reverted`, and a third call proceeds to the normal flow.",
+        "A revert that breaks a pre-merge check only (the culprit's export is imported by a later file; a pre-merge typecheck-like check fails after the revert) -> `revert-red`, ref unchanged. A revert conflict -> `revert-conflict`, ref unchanged, no revert in progress left in any worktree. A ref moved while R is tested -> `integration-moved`, ref left where the mover put it. A lock-wait timeout in R's test -> `lock-timeout`, ref unchanged.",
+        "Pinned branch: with the epic's prefix configured so the derived branch would be the default branch, `runPostMerge` throws `postmerge.not-integration-branch` before any worktree is created, and `main` is unchanged.",
+        "The mechanism runs on git 2.38: the module uses no `merge-tree --merge-base` (a grep criterion over the diff) and the test uses only `git revert`, `worktree`, `rev-parse`, `log` and `update-ref` via `landCandidate`.",
+        "`landCandidate` is exported from queue.ts with its declaration unchanged, and every existing assertion in test/queue.test.ts still holds.",
+        "`culprits` holds exactly one culprit, naming the task and failing checks, on `reverted`, `revert-has-dependents`, `revert-not-applicable`, `revert-conflict`, `revert-red`, `integration-dirty`, `integration-moved`, and on `setup-failed` and `lock-timeout` raised while R is tested (one fixture each: the setup command fails in R's scratch worktree; R's heavy check finds the lock held, 1 ms wait), and is empty on `green`, `not-reproduced`, `env-failure`, `red-at-base`, and on `setup-failed` and `lock-timeout` before a culprit (the head run's own setup failure or lock wait); the revert commit's message carries all four trailers.",
+        "Amended away (spec D4), fixture in this order: merge tasks 1-3 where merge 2 breaks a post-merge check; then a plan amendment drops the finished task 2 (the plan input is a v2 that omits it, as `draftNextVersion` does, with `plan-version-created` on the log); then `runPostMerge` -> `revert-not-applicable` with `reason: 'not-in-live-plan'` and task 2's culprit, no scratch worktree created, the integration ref unchanged and no `wave-reverted` on the log. Without the amendment (the v1 plan input with task 2 live, and no `plan-version-created` for v2) the same repo gives `reverted`, so the two runs differ only by the amendment. Re-adding task 2 by a v3 amendment (its id in `liveTaskIds` again) makes the next call `reverted`, so the first way out the operator is offered works.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/postMerge.ts",
+        "factory/orchestrator/src/queue.ts",
+        "factory/orchestrator/test/postMergeRevert.test.ts",
+        "factory/orchestrator/test/helpers/integrationRepo.ts"
+      ],
+      "budget": {
+        "tokens": 400000,
+        "diff_lines": 1170
+      },
+      "contract": {
+        "functional_clauses": [
+          "Nothing lands untested: the exact revert commit is tested with the pre-merge and post-merge tiers, and recorded, before the ref moves.",
+          "The ref moves only through `landCandidate` on the branch `assertIntegrationBranch` returned; no checkout, reset, rebase or force of any branch, and a dirty holder is never written into.",
+          "No state in which a revert landed and the log keeps no record of it after the next call: step 0 is task-16's resume.",
+          "One culprit per run; a red revert lands nothing.",
+          "`wave-reverted` only through task-2's `recordWaveReverted`."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "keeps_exports promise on queue.ts: the only change is adding `export` to `landCandidate` (and to its `LandOutcome` type if needed); no other declaration or body changes. Verified post-run by `bs claims impact`."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/queue.ts"
+      ]
+    },
+    {
+      "task_id": "bs-check-tiers/task-13-ledger-inputs",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Ledger inputs: one project's events across lineages, qualified task ids, and the claims map",
+      "summary": "Spec D6, AC8. A reader that gathers every session log for the epics under one specs dir across lineages, returns every kept event with the window bounds (no time filter; task-8 windows the numbers), keeps unattributed events, qualifies every task id, builds the task-to-claims map and sensitive globs, skips unreadable plans with a warning, and marks the result degraded on an unreadable session log.",
+      "objective": "New module factory/orchestrator/src/ledgerInputs.ts exporting `gatherLedgerInputs({stateDir, specsDir, sensitivePathsFile, now, windowDays})`. Layout: `specsDir` is the parent directory holding `<epic>/plan.json` and `<epic>/plan-v<n>.json`, as `--specs-dir` is on every existing verb. Epics: every `<epic>` directory there. Plans: the reader needs only `project`, `tasks`, and each task's `task_id` and `claims`; a plan file that does not parse or lacks those is skipped with a warning `{code: 'checks.plan-skipped', path, reason}` (no full plan validation). The project scope is the `project` of the readable plans; more than one distinct value throws `checks.mixed-projects`; no readable plan at all throws `checks.no-plans`. Events: every session in `stateDir` (events.ts `listSessionIds`, `readEvents`, `mergeSessionLogs`); a session `readEvents` cannot read adds `{code: 'checks.session-unreadable', path}` to the warnings and sets `degraded: true`. Keep an event when its epic (qualified `task_id`, `payload.epic_id`, or its session's single epic) is one of the epics, or when its session's lineage touches one of them. Do not filter by time: return `window: {from: now - windowDays, to: now}` beside the events, and task-8 applies it to the numbers only (spec D6). Qualify every kept event's task id with taskId.ts (`epicOfTaskId`, `qualifyTaskId`, `taskIdsMatch`): a qualified id as is; a bare id with its session's epic when the session or its lineage names exactly one epic; else `unattributed` (kept, never dropped). Claims: per qualified task id, the claims of its latest spec across the readable plan files, plus `task-added` records for follow-ups; a skipped plan's tasks get no entry, so task-8 counts them as sensitive. Sensitive globs: `loadSensitivePathsPolicy`. Returns `{events, window, taskIdOf, taskClaims, sensitiveGlobs, epics, project, sessionsRead, warnings, degraded}`. Read-only.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/ledgerInputs.test.ts (write first; fails today because the module does not exist): a fixture state dir with three sessions (two epics under the specs dir across two lineages, one epic elsewhere) yields every event of the two epics, in or out of the window, and none of the third, and `sessionsRead` is 3.",
+        "Task ids: a `testgate-result` with `task_id: \"task-3\"` in a session of epic E and one with `\"E/task-3\"` both map to `E/task-3` in `taskIdOf` and find the same claims; a bare id in a session whose lineage names two epics of the project is present in `events` and maps to `unattributed` (and, through task-8, marks the check guarding).",
+        "Events 31 and 400 days before `now` are both returned, and `window` is `[now - 30 days, now]` for a 30-day window. `taskClaims` takes a task's claims from its latest plan version, and a follow-up's from its `task-added` record.",
+        "A truncated plan file, and an old-schema plan missing a field the reader does not need, are handled differently: the truncated one is skipped with a `checks.plan-skipped` warning naming its path and its epic's events are still kept with no claims entries; the old-schema one is read. Plans naming two projects throw `checks.mixed-projects`; a specs dir with no readable plan throws `checks.no-plans`.",
+        "A session log with a non-JSON line yields `degraded: true` and a `checks.session-unreadable` warning naming the file; the other sessions' events are still returned.",
+        "Nothing in the state dir or specs dir changes (file mtimes and contents identical before and after).",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/ledgerInputs.ts",
+        "factory/orchestrator/test/ledgerInputs.test.ts"
+      ],
+      "budget": {
+        "tokens": 360000,
+        "diff_lines": 950
+      },
+      "contract": {
+        "functional_clauses": [
+          "Read-only: no event, file or table is written.",
+          "Every skip is fail-safe and named: a skipped plan only removes claims (so its tasks count as sensitive), and an unreadable session marks the result degraded.",
+          "Every task id is qualified before it leaves this module; an id that cannot be qualified is `unattributed`, never dropped."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-14-post-merge-cli",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The `bs checks post-merge` verb, tiered integration check, close with a checks file, and reopen",
+      "summary": "Spec AC4-AC7, AC10, AC12. Ships `bs checks post-merge` (with automatic promotion, using the namespace-wide flags), `integration check --tier <tier|all|remaining>`, `epic close|verdict --checks`, and `worktree create --reopen --revert`.",
+      "objective": "In cli.ts and usage.ts: (1) `bs checks post-merge --epic <id> --project <dir> --checks <file> --plan <plan.json> [--setup-cmd <cmd>] [--final] [--state-dir <dir>] [--now <iso>] --session <id> --plan-version <n> --causal-parent <event-id>` (flags mean what they mean in task-10) calls task-12's `runPostMerge` with the plan's tasks and edges and the effective checks, prints one JSON document with the outcome (and its `reason` when task-12 gives one), and exits 0 only for `green`, `reverted`, `no-checks-in-tier`, `no-new-merges` and `batch-not-ready`, else 1 (`revert-recorded` included, so the operator hears of it once). For every entry in task-12's `culprits` (every outcome reached after the culprit is found, and a resumed write's culprit rebuilt from its trailers, spec D7), it calls task-9's `promoteAfterCatch` with that culprit for each failing check, and adds the promotions, `declared-tier-wins`, or `promotion-skipped` with the reason (an overlay refusal such as `checks.overlay-tracked` or `checks.overlay-busy`) to the JSON; promotion needs no ledger, and a promotion failure never changes the post-merge outcome or its exit code. The JSON also carries task-15's overlay report. (2) `bs integration check --tier <pre-merge|post-merge|pre-release|all|remaining>` passes the tier. (3) `bs epic close` and `bs epic verdict` accept `--checks <file>` and pass task-6's declaration (`[{name, tier, check_sha256}]`) built from the effective checks. (4) In factory/orchestrator/src/worktree.ts add a reopen path, exposed as `bs worktree create <project-dir> <epic> <task-id> --reopen --revert <sha>` (spec D1): reuse a clean existing task worktree or attach one to the existing task branch without `-b`; refuse a dirty worktree, a branch tip that is not an ancestor of the integration head, and a `--revert` sha not on the integration branch; fast-forward the branch to the integration head; commit `git revert --no-edit <sha>`; with no task branch, cut it from the integration head and make the same commit. In docs/specs/check-tiers-scope.md restore the `bs checks post-merge` code spans and write the shipped flags as invocations.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/postMergeCli.test.ts (write first; fails today because `checks post-merge` is not a verb): on task-12's fixture, `bs checks post-merge` prints `reverted` and exits 0; on the revert-conflict fixture prints `revert-conflict` and exits 1; on two merges with a task in flight and no dependent waiting prints `batch-not-ready`, exits 0, and creates no worktree.",
+        "With a culprit in `culprits`, an overlay-demoted failing check is promoted (`check-tier-promoted` on the log, overlay entry back to `pre-merge`) on `reverted`, on `revert-has-dependents`, and on a resumed `reverted` (a bs revert commit landed with task-7's builder, its red record and probe on the log, no `wave-reverted`) alike; with that red record absent from the log, the resumed `reverted` stands, nothing is promoted, and the JSON says `promotion-skipped` with `red-record-unreadable`; and a declared post-merge one is reported `declared-tier-wins`; with the overlay's location tracked by git, the outcome and exit code are unchanged and the JSON says `promotion-skipped` with `checks.overlay-tracked`.",
+        "`bs integration check --tier pre-release` writes a record with `tiers: ['pre-release']` and runs only that tier; `--tier remaining` after a passing post-merge record at the head runs no post-merge check; without `--tier` the verb's behaviour and existing tests are unchanged except the added fields.",
+        "On a fixture where a bs revert landed and its task was superseded before `wave-reverted` was written, `bs checks post-merge` prints `revert-recorded` and exits 1 once; the next call proceeds to the normal flow.",
+        "`bs epic close --checks <file>` blocks with the tier named when only a post-merge record is current; without `--checks`, existing close tests are unchanged.",
+        "test/worktreeReopen.test.ts: after a revert landed, `--reopen --revert` leaves the task branch one commit ahead of the integration head with that commit's tree equal to the pre-revert head's; a dirty worktree, a non-ancestor tip and a sha off the integration branch are each refused with nothing changed; with the branch deleted, the branch is cut from the head and gets the same commit.",
+        "test/docCommands.test.ts passes on this tree with the restored spans; test/usage.test.ts still holds.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/src/worktree.ts",
+        "docs/specs/check-tiers-scope.md",
+        "factory/orchestrator/test/postMergeCli.test.ts",
+        "factory/orchestrator/test/worktreeReopen.test.ts",
+        "factory/orchestrator/test/usage.test.ts"
+      ],
+      "budget": {
+        "tokens": 410000,
+        "diff_lines": 1200
+      },
+      "contract": {
+        "functional_clauses": [
+          "The CLI only parses flags and calls library functions; bisect, revert, promotion and fold logic stay in their modules.",
+          "`--reopen` only fast-forwards and appends a commit; it never resets, rebases or forces a branch.",
+          "Exit 0 only for the five proceed outcomes; every other outcome exits 1 with the outcome named."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "keeps_exports promise on worktree.ts: the reopen path is new exports only; `createTaskWorktree`, `removeTaskWorktree`, `taskBranchName`, `integrationBranchName` and every other existing export keep their declarations. Verified post-run by `bs claims impact`."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/worktree.ts"
+      ]
+    },
+    {
+      "task_id": "bs-check-tiers/task-15-tier-overlay",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "The learned-tier overlay: location, validity, one writer at a time, crash order, reconcile, report",
+      "summary": "Spec D8, AC9, AC10. A bs-owned, git-excluded overlay at `<project-root>/.blacksmith/check-tiers.json` with named validity rules, a lock and revision check for every write, refusal of tracked, un-excludable and non-git locations, reconciliation with the log, and one report precedence; the project's checks file is never written.",
+      "objective": "New module factory/orchestrator/src/tierOverlay.ts exporting: `overlayPath(dir)` (the main worktree of the repository holding `dir`, from `git rev-parse --path-format=absolute --git-common-dir`, then `.blacksmith/check-tiers.json`; null outside a git repository); `readOverlay(dir)` (absent -> empty at revision 0; invalid per spec D8's rules -> `{unreadable: <first violation>}`, never a throw); `overlayWritable(dir)` (`ok`, or the reason: `not-a-repo`, `tracked` (`git ls-files --error-unmatch`), `unreadable`); `withOverlayLock(dir, fn, opts)` (never called when `overlayPath(dir)` is null: every caller, task-9's apply and promotion and task-10's proposals, checks first and answers `not-a-repo` without locking, and a call made anyway throws `checks.overlay-not-a-repo` before creating anything; it is called only by a caller about to write, so it creates `.blacksmith/` when absent, then creates `check-tiers.lock` beside the overlay with `O_EXCL` holding the pid, breaks a lock whose pid is dead (heavyLock.ts `pidIsAlive`), waits up to `opts.waitMs` then throws `checks.overlay-busy`, always releases); `writeOverlay(dir, {entries, expectedRevision}, opts)` (must run inside the lock; refuses `checks.overlay-not-a-repo`, `checks.overlay-tracked`, `checks.overlay-unreadable`, and `checks.overlay-moved` when the file's revision is not `expectedRevision`; writes revision + 1 atomically via a temp sibling and rename, with `opts.beforeRename` as the test seam for an injected crash; creates `.blacksmith/` when absent; calls workroot.ts `excludeFromGit`, which this task exports without other change, and proceeds only on `added` or `already-ignored`, else refuses `checks.overlay-exclude-failed` or `checks.overlay-tracked` and leaves no overlay written); `resolveEffectiveTiers(checks, overlay)` (per entry: declared `tier` -> `declared`; else an overlay entry with the same name and `commandDigest(cmd)` -> `overlay`; else `pre-merge`/`default`; an unreadable or absent overlay resolves every undeclared entry to `pre-merge`/`default`); `overlayReport(checks, overlay)` (spec D8's precedence: no entry with that name -> `orphaned`; that entry declares a tier -> `shadowed`, also when its command changed; digest differs -> `orphaned`; else `active`); `overlayOwes(overlay, events)` (pure: the approved `check-tier-decided` and `check-tier-promoted` tiers the overlay lacks and the `pending_event`s still owed; empty for an absent overlay when the log holds no approved decision); and `reconcileOverlay(dir, events, ctx, opts)` (inside the lock, re-reading the overlay there and writing exactly what `overlayOwes` reports: entries the approved `check-tier-decided` and `check-tier-promoted` events imply but the overlay lacks are written; a `pending_event` still owed is appended through `appendEvent` exactly as stored and cleared; nothing else changes). An entry's `pending_event`, when present, is an object with exactly `event_type` (the string `check-tier-promoted`) and an object `payload`; anything else makes the overlay unreadable. tierOverlay.ts writes no event type of its own: it recognises `check-tier-decided` and `check-tier-promoted` by comparing `event_type` strings and appends only the stored `pending_event`, so no `event_type:` property in it names a literal or constant, and it adds nothing to taxonomy.yml (task-9, which writes the three `check-tier-*` names, declares them).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/tierOverlay.test.ts (write first; fails today because the module does not exist): from a task worktree of a temp repo and from its main clone, `overlayPath` returns the same file under the main clone's `.blacksmith/`; in a plain directory outside any repository it returns null, `resolveEffectiveTiers` gives every undeclared entry `pre-merge`, and `writeOverlay` refuses `checks.overlay-not-a-repo`.",
+        "Validity: each of these makes `readOverlay` return `unreadable` naming the rule: a non-object; `version` 2; a negative `revision`; an empty `check`; a 63-hex `cmd_sha256`; `tier` `\"later\"`; an unknown key; a `pending_event` with a key other than `event_type` and `payload`; two entries with the same `check` and `cmd_sha256`. A valid file reads back deep-equal.",
+        "Report precedence: for one overlay entry `e2e`, the check absent from the file -> `orphaned`; present and declaring a tier -> `shadowed`, also with its command edited; present, undeclared, command edited -> `orphaned`; present, undeclared, same command -> `active`, and `resolveEffectiveTiers` gives it the overlay tier with source `overlay`.",
+        "Exclusion: `writeOverlay` in a fresh repo leaves `git status --porcelain` empty in the main clone and adds one line to `.git/info/exclude` (no tracked `.gitignore` changes); with `.blacksmith/check-tiers.json` committed to the repo it refuses `checks.overlay-tracked` and the file is unchanged; with `.git/info/exclude` made read-only (exclude returns `failed`) it refuses `checks.overlay-exclude-failed` and writes no overlay.",
+        "One writer: two writers started together under `withOverlayLock`, each adding a different entry after reading, both succeed in turn and the file holds both entries; a write with a stale `expectedRevision` refuses `checks.overlay-moved`; a lock left by a dead pid is broken; a lock held by a live pid makes the second writer throw `checks.overlay-busy` after `waitMs`.",
+        "Crash: `opts.beforeRename` throwing leaves the previous overlay byte-identical and no temp sibling behind after the next successful write. `reconcileOverlay` writes the tier of an approved `check-tier-decided` missing from the overlay, appends the `check-tier-promoted` held in a `pending_event` exactly once, and is a no-op on a consistent pair.",
+        "The project's checks file is never written: every exported function run against a temp repo whose checks file is mode 0444 leaves that file's bytes and mtime unchanged and raises no permission error.",
+        "No write, no lock: in a plain directory outside any repository `withOverlayLock` throws `checks.overlay-not-a-repo` and creates nothing (directory listing identical before and after); in a repo with no `.blacksmith/`, `overlayOwes` of the absent overlay and a log with no approved decision is empty, and the first `withOverlayLock` creates `.blacksmith/` for its lock and leaves no lock file after `fn` returns or throws. `overlayOwes` names a missing approved entry and an owed `pending_event`, and `reconcileOverlay` writes exactly those.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/tierOverlay.ts",
+        "factory/orchestrator/src/workroot.ts",
+        "factory/orchestrator/test/tierOverlay.test.ts"
+      ],
+      "budget": {
+        "tokens": 410000,
+        "diff_lines": 1170
+      },
+      "contract": {
+        "functional_clauses": [
+          "The overlay is the only file bs writes about tiers; the project's checks file is never written.",
+          "Every read-modify-write runs under `withOverlayLock` and checks the revision; no lost update.",
+          "Declared tiers always win; an overlay can only fill entries the operator left undeclared.",
+          "When the overlay cannot be read or does not exist, every undeclared entry runs pre-merge (the earliest tier), never later."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "keeps_exports promise on workroot.ts: the only change is adding `export` to `excludeFromGit` (and its report type if needed); no other declaration or body changes. Verified post-run by `bs claims impact`."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/workroot.ts"
+      ]
+    },
+    {
+      "task_id": "bs-check-tiers/task-16-post-merge-resume",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Post-merge resume: every landed bs revert ends with one record, bounce or record-only",
+      "summary": "Spec D4, AC6. Scans the integration branch from its fork point for bs revert commits with no `wave-reverted`, validates their trailers, and finishes each: a bounce when the task is still completed and not re-merged, a record-only event with a listed reason otherwise, always accepted; no outcome repeats.",
+      "objective": "New module factory/orchestrator/src/postMergeResume.ts exporting `resumeLandedReverts(input, ctx, opts)`. Input: project dir, epic id, the integration branch from task-7's `assertIntegrationBranch`, the epic's event lineage, and `liveTaskIds` (task-12 passes them: the live plan's records whose `task_status` is not `superseded`). For each commit task-7's `landedBsReverts` returns (fork point to head, oldest first) with no `wave-reverted` naming its sha: validate the trailers per spec D4 (`Bs-Revert-Of` 40-hex and a merge commit on the branch's first-parent history; `Bs-Task` a task id of this epic, qualified or bare, qualified with taskId.ts; `Bs-Red-Record` an event id `parseEventId` accepts; `Bs-Failing-Checks` a non-empty comma list). Invalid trailers -> `record-only` with reason `invalid-trailers`; a task id the lineage does not know -> `unknown-task`. Otherwise call task-2's `waveRevertBlocker` with `revertSha`, a git `isAncestor` (`git merge-base --is-ancestor`) and `liveTaskIds`: null -> `recordWaveReverted` with `disposition: bounce`, `resumed: true`, `failing_checks` from the trailer, the log tail and evidence ids from the red record when it can be read (`evidence: 'record'`), else the trailer's checks and the red record id only (`evidence: 'trailers-only'`); a reason -> `record-only` with that reason and whatever evidence can be read (`evidence: 'unreadable'` with empty lists when none). Each write whose trailers are valid and whose task is known and merged (every reason except `invalid-trailers`, `unknown-task` and `not-merged`) also yields `culprit`, rebuilt from the trailers in task-12's shape: `{task: <Bs-Task, qualified>, merge_sha: <Bs-Revert-Of>, failing_checks: <Bs-Failing-Checks>, red_record_event_id: <Bs-Red-Record>, reproduced: true}`. `reproduced: true` holds because task-12 builds a bs revert commit only after task-7 returned `culprit-found` (spec D4); whether each check's own failure was env or not-run is read later from the red record by task-9's promotion, never assumed here. Return `{outcome, resumed, wrote: [{task, revert_sha, disposition, reason?, culprit?}]}`: outcome `reverted` with `resumed: true` when every write was a bounce, `revert-recorded` when any was record-only, `nothing-to-resume` (`resumed: false`) when none was missing. It never moves a ref. Its fixtures are built inside test/postMergeResume.test.ts with the repo builder task-7 exports from test/helpers/integrationRepo.ts (imported, not edited).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/postMergeResume.test.ts (write first; fails today because the module does not exist), with a bs revert commit landed and no `wave-reverted`: the task still completed -> one `wave-reverted` with `disposition: bounce`, return `{outcome: 'reverted', resumed: true}`, and the task folds to `todo`.",
+        "One fixture per record-only exit, each writing exactly one `record-only` event with the named reason, returning `revert-recorded`, and leaving the task's folded status unchanged: superseded after the revert; waived; escalated (`held-by-operator`); merged again after the revert, by a `wave-merged` whose `merge_sha` has R as an ancestor (`re-merged`); a `Bs-Task` naming no known task (`unknown-task`); a `Bs-Task` naming a task the lineage knows (its `wave-admitted`) with no `wave-merged` (`not-merged`); a task merged and still completed that a later plan amendment dropped, so `liveTaskIds` lacks it (`not-in-live-plan`); a `Bs-Revert-Of` that is not 40-hex (`invalid-trailers`). Every bad trailer value is written through the trailer parameters of task-7's builder, never by a hand-made commit.",
+        "Mislabel guard: the task's original `wave-merged` carries the `merge_sha` R reverts; the resume writes a `bounce`, never `re-merged`.",
+        "Unreadable evidence: with the red record named by `Bs-Red-Record` absent from the log, a bounceable task gets a `bounce` with `evidence: 'trailers-only'` and `failing_checks` from the trailer; a superseded one gets a `record-only` with `evidence: 'unreadable'`; neither write is refused.",
+        "No repetition: after any exit, a second call returns `nothing-to-resume` and writes nothing. A bs revert commit that is itself the latest certified commit, and one older than the base, are both found.",
+        "The integration ref and the clone's branch, index and tree are byte-identical before and after every fixture.",
+        "Culprit: the bounce of AC1 and the `superseded` record-only write each carry `culprit` equal to their trailers' values (task qualified) with `reproduced: true`, the bounce also when its red record is absent (`evidence: 'trailers-only'`); the `invalid-trailers`, `unknown-task` and `not-merged` writes carry none.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/postMergeResume.ts",
+        "factory/orchestrator/test/postMergeResume.test.ts"
+      ],
+      "budget": {
+        "tokens": 370000,
+        "diff_lines": 1000
+      },
+      "contract": {
+        "functional_clauses": [
+          "Every landed bs revert without a record ends with exactly one `wave-reverted`; a record-only write uses only `RECORD_ONLY_REASONS` and cannot be refused; nothing is returned twice.",
+          "`record-only` never reopens a task; only `bounce` does, and only when `waveRevertBlocker` is null.",
+          "No ref moves; `wave-reverted` only through task-2's `recordWaveReverted`."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false
+    },
+    {
+      "task_id": "bs-check-tiers/task-17-reverted-task-reopens",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 1,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "A bounced revert reopens the task everywhere the lifecycle is read",
+      "summary": "Spec D1, AC7. The projector, finishedInLog and reinstatementBlocker treat a `bounce` wave-reverted as no merge, so goal-check, amend, readiness, wave next and admission all see the task as open; `record-only` changes nothing.",
+      "objective": "A task is reverted when its latest `wave-merged` is followed by a `wave-reverted` with `disposition: 'bounce'` naming it (match the event type and payload by their strings, as the projector's other arms do, so this task imports nothing from task-2's revert.ts); a `record-only` event never reopens anything. Apply that rule in: db/projector.ts `foldTasks` (`completed` -> `todo`, clearing whatever terminal bookkeeping a later `wave-merged` needs; read schema.ts's `terminalAt` comment and keep its rule; other statuses untouched); taskLifecycle.ts `finishedInLog` (a reverted task is not finished, so `creditableTaskIds`, `markFinishedFromLog`/`draftNextVersion`, specChange.ts and spec.ts all see it open without edits of their own) and `reinstatementBlocker` (a reverted merge is no merge). Change waveNext.ts or admission.ts only where a test shows the reverted row is not offered or admitted. A task the live plan no longer holds is never bounced: a plan amendment drops a finished task from v(n+1) (plan.ts `draftNextVersion`), so task-2's `waveRevertBlocker` returns `not-in-live-plan` for it, task-12 builds no revert, and task-16 records an already-landed one `record-only` (spec D4). Every `bounce` this task reads therefore names a task the live plan holds, and it needs no way back for a dropped one. The new arm makes `projectTasks` compare one more event type, so add `'wave-reverted'` to db/foldPredicates.ts `TASK_TYPES`: test/db/foldPredicates.test.ts walks `projectTasks` and every function it calls and fails any compared type the tasks predicate rejects on an empty payload. Compare against a string literal or a module-level `const` so that guard can resolve the operand, and change nothing else in foldPredicates.ts (its only importer is projector.ts, which this task also claims; no other task claims either file).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "test/waveReverted.test.ts (write first; fails today because the projector ignores `wave-reverted` and the row stays `completed`): after `wave-merged` then a `bounce` `wave-reverted` for task T (raw events in the fixture), `foldTasks` gives T `todo`; a second `wave-merged` gives `completed` again.",
+        "After the bounce: `finishedInLog` omits T; `creditableTaskIds` does not credit T; `markFinishedFromLog` then `draftNextVersion` keeps T live (not completed, not dropped) in the drafted next version; the epic readiness check lists T as not terminal-OK; `computeNextWave` with the log's status map offers T; `inFlightTasks` does not count T in flight. After a second `wave-merged` each of these reads T as finished again.",
+        "A `record-only` `wave-reverted` for a completed task and for a superseded task changes none of these readers. Nor does one with `reason: 'not-in-live-plan'`, in this order: `wave-merged` for T, a `plan-version-created` whose v2 omits T (as `draftNextVersion` drafts it), then the `record-only` event; `finishedInLog` still lists T, `creditableTaskIds` still credits it through its earlier-version rule, and `draftNextVersion` of v2 does not bring T back.",
+        "`reinstatementBlocker` for a superseded task whose only merge was bounced reports the missing merge, as for a task that never merged.",
+        "Every existing assertion in the projector, taskLifecycle, goal-check, spec-change, waveNext, admission and reinstate tests still holds.",
+        "test/db/foldPredicates.test.ts passes with `'wave-reverted'` in `TASK_TYPES`; with that one entry removed it fails by name (`wave-reverted (compared in projectTasks in db/projector.ts)` or the taskLifecycle.ts function it calls). The mutation run's failing line is in `notes`.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout (for example a `timeout_ms` line that only validates or passes through an existing value). An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/src/db/foldPredicates.ts",
+        "factory/orchestrator/src/taskLifecycle.ts",
+        "factory/orchestrator/src/waveNext.ts",
+        "factory/orchestrator/src/admission.ts",
+        "factory/orchestrator/test/waveReverted.test.ts"
+      ],
+      "budget": {
+        "tokens": 350000,
+        "diff_lines": 930
+      },
+      "contract": {
+        "functional_clauses": [
+          "One rule decides 'reverted' (latest `wave-merged` followed by a `bounce` `wave-reverted` naming the task), shared by the projector and taskLifecycle.ts, so the readers cannot disagree.",
+          "Only `completed` rows reopen; superseded, waived, failed and escalated tasks are never reopened, and `record-only` reopens nothing."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting, in full, including Decisions D1-D7. Do not edit it: it sits outside every task's claims. Put one Progress line for it in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: main after bs-optimize and bs-gate-bounce have both merged. If an upstream export this task names (for example `isHeavyCheck`, `CheckResult.environment`, the sleep classifier, `SLEEP_GAP_MS`, `bs heavy run`) is missing on the base, stop and report it in `notes`; never re-implement it.",
+          "TDD: write the named failing test first, run it and watch it fail for the stated reason, then implement until it passes. Record the failing run's assertion message in `notes`.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. An existing exact-payload assertion may gain this task's new fields and nothing else.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, fixtures included. No per-stack tier default anywhere; nothing may require GitHub Actions; `bs new` keeps scaffolding no `checks.json`.",
+          "Add no runtime or dev dependency.",
+          "For each new branch of logic, run a mutation check (disable it, run the new test file, see a named test fail, restore) and list the results in `notes`.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: task-11 is its sole owner in this epic. Put a one-paragraph, user-facing description of this change under `notes` in the result so task-11 can write the Unreleased entry.",
+          "keeps_exports promise on db/projector.ts, taskLifecycle.ts, waveNext.ts and admission.ts: no export removed and no exported declaration changed (a new `case` arm or a changed function body is not a declaration change; a new export is allowed). On db/foldPredicates.ts the only change is one entry added to the unexported `TASK_TYPES` set. Verified post-run by `bs claims impact <worktree> <spec.json>`; if the work needs a declaration change, stop and report it instead of breaking the promise."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "ui_affecting": false,
+      "keeps_exports": [
+        "factory/orchestrator/src/db/projector.ts",
+        "factory/orchestrator/src/db/foldPredicates.ts",
+        "factory/orchestrator/src/taskLifecycle.ts",
+        "factory/orchestrator/src/waveNext.ts",
+        "factory/orchestrator/src/admission.ts"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-5-integration-tier-runs",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-6-epic-close-per-tier",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-7-post-merge-bisect",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-7-post-merge-bisect",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-15-tier-overlay",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-8-check-ledger",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-8-check-ledger",
+      "dependsOn": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-8-check-ledger",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-8-check-ledger",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-8-check-ledger",
+      "dependsOn": "bs-check-tiers/task-13-ledger-inputs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-9-tier-proposals",
+      "dependsOn": "bs-check-tiers/task-8-check-ledger",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-9-tier-proposals",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-9-tier-proposals",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-9-tier-proposals",
+      "dependsOn": "bs-check-tiers/task-15-tier-overlay",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-16-post-merge-resume",
+      "dependsOn": "bs-check-tiers/task-7-post-merge-bisect",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-16-post-merge-resume",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-16-post-merge-resume",
+      "dependsOn": "bs-check-tiers/task-17-reverted-task-reopens",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-16-post-merge-resume",
+      "dependsOn": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "dependsOn": "bs-check-tiers/task-7-post-merge-bisect",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "dependsOn": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "dependsOn": "bs-check-tiers/task-16-post-merge-resume",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-3-check-tiers-scope-doc",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-8-check-ledger",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-9-tier-proposals",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-13-ledger-inputs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-10-checks-cli",
+      "dependsOn": "bs-check-tiers/task-15-tier-overlay",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-10-checks-cli",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-9-tier-proposals",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-6-epic-close-per-tier",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-15-tier-overlay",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-14-post-merge-cli",
+      "dependsOn": "bs-check-tiers/task-16-post-merge-resume",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-1-tier-field-gate-filter",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-3-check-tiers-scope-doc",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-4-queue-pre-merge-checks",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-5-integration-tier-runs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-6-epic-close-per-tier",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-7-post-merge-bisect",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-8-check-ledger",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-9-tier-proposals",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-10-checks-cli",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-12-post-merge-revert-landing",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-13-ledger-inputs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-14-post-merge-cli",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-15-tier-overlay",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-16-post-merge-resume",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-11-playbooks-docs",
+      "dependsOn": "bs-check-tiers/task-17-reverted-task-reopens",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-check-tiers/task-9-tier-proposals",
+      "dependsOn": "bs-check-tiers/task-2-wave-reverted-event",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    }
+  ],
+  "open_questions": [
+    "OQ1 Which checks promote automatically after a real post-merge catch? (a) only checks whose overlay tier came from an approved demotion (recommended: a declared tier is the operator's own statement, so a catch there becomes a notice); (b) every post-merge check with a real catch, overriding the declaration (would mean bs writes the project's checks file, against spec D8). The plan implements (a).",
+    "OQ2 Where a check catch's severity comes from. (a) fixed rule: S1 when the caught task touches a sensitive path (unknown claims count as sensitive), else S2 (recommended for v1: conservative, no new field); (b) an optional per-check `severity` in checks.json, absent = S2; (c) a join to the task's later findings. The plan implements (a).",
+    "OQ3 What 'a check guarding security-sensitive paths' means. (a) exposure: it ran on a sensitive task inside the window, or caught a real defect on one ever, with unattributed or claimless tasks counted as sensitive (recommended and implemented: a security check that never failed stays protected; the cost is fewer proposals while sensitive work is active); (b) real catches only (a scan that never failed becomes demotable); (c) a declared per-check flag.",
+    "OQ4 Thresholds (20 runs, 30-day window, 30 measured minutes, post-merge batch of 4 merges, 90-day decline, weights 8/4/2/1). (a) named constants in code for v1, moved to a policy file once a second project tunes them (recommended: no policy surface before there is data to tune it); (b) a policy file now (factory/policies/check-tiers.yml, pinned by docPolicyValues); (c) the same numbers as flags on the `checks` verbs, per run.",
+    "OQ5 When the one-question proposal batch is asked. (a) at epic close, beside the closing report (recommended: an existing operator touchpoint, once per epic); (b) a standalone verb the operator runs.",
+    "OQ6 After `env-failure`, `not-reproduced` or `lock-timeout` at the head. (a) the playbook calls `bs checks post-merge` once more, and a second such outcome at the same head goes to the operator (recommended: bounded, the same shape as bs-gate-bounce's re-gate rule); (b) go to the operator at once; (c) no extra call: wait for the next landing or `--final` to run it again."
+  ],
+  "planner_notes": [
+    "Round 7 (answers the 4-item round-6 spec review; see the epic spec's 'Review round 6 — changes'). No re-slice, and no claim or edge change: task-9's `pendingProposals` takes `{epicId, writable, now}` computed by its caller; task-15 adds the pure `overlayOwes` and states when `withOverlayLock` is called; task-10's `bs checks proposals` locks only when something is owed; task-12's culprit list and its `not-in-live-plan` ways out are corrected, and task-11's playbook names the same ways out. Budgets after this round, measured from this file: declared coder budgets sum to 6.455M; the largest token budget is 425,000 of 440,000 (task-10, 97%) and the largest diff budget 1,240 of 1,400 (task-10, 89%).",
+    "Round 6 (answers the 8-finding round-5 spec review; see the epic spec's 'Review round 5 — changes'). No re-slice: the seventeen tasks, their waves and their slicing are unchanged. Claims added: task-17 takes db/foldPredicates.ts (keeps_exports; one `TASK_TYPES` entry for its new `wave-reverted` arm; no other task claims it, and its only importer is projector.ts, also task-17's, so no edge); task-2 takes test/taxonomy.test.ts; task-9 takes factory/policies/taxonomy.yml, docs/specs/black-smith-architecture.md and test/taxonomy.test.ts, because each event name now enters the taxonomy with the task that first writes it (test/eventTypes.test.ts), and a new claim-order edge task-9 -> task-2 serialises the two taxonomy editors beside the existing artifact edge. Its budget figures described the round-6 file; round 7's are in the note above.",
+    "Round 5 (answers the 10-finding round-4 spec review; see the epic spec's 'Review round 4 — changes'). Slicing: seventeen coder tasks, all ui_affecting false (no task claims a UI-extension path or changes what a user sees; the dashboard is display-only and untouched). Part 1 (tier declaration) is task-1 with task-15's overlay (D8); part 2 (where tiers run) is tasks 4, 5, 6, 7, 16, 12 with task-2's revert event, task-17's reopen of the lifecycle readers and task-14's worktree reopen; part 3 (learning loop) is tasks 13, 8, 9; tasks 10 and 14 are the CLI surfaces; tasks 3 and 11 are the docs and playbooks. New this round: task-17, split from task-2. Its budget figures described the round-5 file; round 6's are in the note above.",
+    "Base for the read-back: bs-gate-bounce is not coded, so the closest end state is bs/bs-optimize/integration (1d35c16f in round 5, 430dc5b7 in round 6), exported with an archive of that commit into a scratch repo (no checkout of the clone). `bs claims impact --plan plan.json <all 17 ids> --repo <scratch>`, round 5 and again round 6 (same result; db/foldPredicates.ts is imported only by projector.ts inside task-17's claims): 7 symbol crossings across 6 task pairs that run in order, and 17 crossings on keeps_exports promises verified post-run: task-17 on db/projector.ts, taskLifecycle.ts, waveNext.ts, admission.ts (imported by cli.ts, which task-1 claims in the same wave; task-17 changes function bodies and adds a `case` arm), task-4 on taskEvents.ts (adds `emitWaveMergedWith` only), task-14 on worktree.ts (the reopen path adds exports only), task-15 on workroot.ts (adds `export` to `excludeFromGit` only). task-12 promises queue.ts (adds `export` to `landCandidate`); the tool cannot see that crossing because postMerge.ts is new. task-2's new revert.ts imports projector.ts `foldTasks`, which task-17 changes in the same wave under its promise.",
+    "Remaining crossings and their edges: (1) testgate.ts (task-1) -> queue.ts (task-4): task-4 dependsOn task-1, artifact (declaresLaterTier, selectTier) and claim-order (cli.ts, usage.ts). task-1 cannot promise keeps_exports on testgate.ts: it adds an optional field to the exported CheckCommand and CheckResult, which the post-run check counts as a changed declaration. (2) testgate.ts (task-1) -> integration.ts (task-5): task-5 dependsOn task-1. (3) queue.ts (task-4) -> cli.ts (task-1): task-4 runs after task-1 and claims cli.ts itself. (4) integration.ts (task-5) -> cli.ts (task-1): task-5 after task-1; the next cli.ts claimants (task-10, task-14) run later, task-14 with an artifact edge on task-5. (5) integration.ts (task-5) -> epic.ts and epic.test.ts (task-6): task-6 dependsOn task-5. (6) epic.ts (task-6) -> cli.ts dynamic: task-14, the cli.ts claimant that wires `--checks` into close, dependsOn task-6.",
+    "Crossings the tool cannot see (claimsWithoutFiles: the files are new): postMergeBisect.ts (task-7) imports integration.ts (task-5) and admission.ts (task-2's promise): edge 7->5. checkLedger.ts (task-8) imports testgate.ts types (task-1), integration.ts (task-5), revert.ts (task-2), security.ts (unclaimed) and reads task-4's queue fields: edges 8->1, 8->5, 8->2, 8->4. tierProposals.ts (task-9) imports checkLedger.ts and gate.ts `stageBoundCheckNames`, writes the three `check-tier-*` event names and declares them in taxonomy.yml after task-2 declared `wave-reverted`: edges 9->8, 9->1, 9->2 (artifact and claim-order). postMerge.ts (task-12) imports postMergeBisect.ts, integration.ts, revert.ts and queue.ts `landCandidate`, which task-12 exports on a keeps_exports promise after task-4: edges 12->7, 12->5, 12->2, 12->4. ledgerInputs.ts (task-13) imports only unclaimed modules (events.ts, taskId.ts, plan files, security.ts), so it runs in W1; task-8 takes its `taskIdOf` map by value, declared as edge 8->13. tierOverlay.ts (task-15) imports testgate.ts `commandDigest` (task-1) and workroot.ts: edge 15->1, so it runs in W2; task-9 (9->15), task-10 (10->15) and task-14 (14->15) consume it. cli.ts (task-10) imports ledgerInputs.ts, checkLedger.ts, tierProposals.ts: edges 10->13, 10->8, 10->9; task-14 imports postMerge.ts, tierProposals.ts, checkLedger.ts, ledgerInputs.ts, integration.ts, epic.ts: edges 14->12, 14->9, 14->8, 14->13, 14->5, 14->6, and 14->10 by claim-order on cli.ts, usage.ts and the scope doc. task-11 documents all of it: edges 11 -> every other task. The shared test helper test/helpers/integrationRepo.ts is claimed by task-7 and task-12, which are ordered (12->7). postMergeResume.ts (task-16) imports task-7's `landedBsReverts` and task-2's `recordWaveReverted`/`waveRevertBlocker`, reads task-4's `merge_sha` and relies on task-17's reopen in its test: edges 16->7, 16->2, 16->4, 16->17; task-12 calls it first (12->16) and task-14 reports its outcomes (14->16). task-14 no longer imports task-8 or task-13: promotion takes task-12's culprit, not the ledger.",
+    "`bs wave schedule plan.json --repo <scratch>`: depth 7, widest 5, no constraints. W1 task-1, task-2, task-3, task-13, task-17; W2 task-4, task-5, task-15; W3 task-6, task-7, task-8; W4 task-9, task-16; W5 task-10, task-12; W6 task-14; W7 task-11. The depth is the cli.ts/usage.ts chain (task-1 -> task-4 -> task-10 -> task-14) and the library chains task-5 -> task-7 -> task-16 -> task-12 and task-8 -> task-9. The `checks` namespace ships in task-10, which removes the scope doc's PLANNED-NAMESPACE marker in the same commit and turns `bs checks post-merge` spans into prose; task-14 restores them when that verb ships (docCommands.test.ts: a marker covers one namespace, expires when the CLI declares it, and flags of existing verbs are checked).",
+    "Hub files: cli.ts, usage.ts (tasks 1, 4, 10, 14, a chain), testgate.ts and gate.ts (task-1 only), queue.ts (task-4, then task-12 adding one export), integration.ts (task-5), epic.ts (task-6), taxonomy.yml, architecture §8 and test/taxonomy.test.ts (task-2, then task-9 by a claim-order edge; each adds the event names it is first to write and bumps the version), revert.ts (task-2), projector.ts, taskLifecycle.ts and db/foldPredicates.ts (task-17), taskEvents.ts (task-4, one export), worktree.ts (task-14), workroot.ts (task-15, one export), wave.md, run.md, queue-and-gate.md, closing-an-epic.md and CHANGELOG.md (task-11, sole CHANGELOG owner), docs/specs/check-tiers-scope.md (tasks 3, 10, 14, 11, ordered). Existing test files are claimed only by tasks that change the module they pin; usage.test.ts by the cli.ts chain. Not added to worktree.yml serialize_always_globs: that is a factory/policies change no task here makes.",
+    "Upstream overlap: bs-optimize task-11 (playbooks, CHANGELOG) and bs-gate-bounce tasks 1-4 (gate.ts, testgate.ts, cli.ts, usage.ts, wave.md, queue-and-gate.md, CHANGELOG) claim the same hot files. This epic's worktrees are cut from main after both merge; before ingest, re-run `bs claims impact` and `bs wave schedule` against main at that point, because gate-bounce's paperwork.ts and judges.ts exports were not in the read-back base.",
+    "Coverage: AC1 task-1, task-10; AC2 task-1; AC3 task-4, task-10, task-11; AC4 task-5, task-14; AC5 task-6, task-14, task-11; AC6 task-7, task-16, task-12, task-2, task-4, task-14; AC7 task-17, task-2, task-14, task-11; AC8 task-8, task-13, task-10; AC9 task-9, task-15, task-10, task-11; AC10 task-9, task-15, task-12, task-14; AC11 task-11; AC12 task-3, task-10, task-14, task-11; AC13 every task (diff-grep criterion and the shared nonfunctional clauses); AC14 task-2, task-9.",
+    "Budget (estimate, not a measurement): declared coder budgets sum to 6.455M tokens (round 7). With testers, two grader rounds, reviewer, security reviewer where triggered (task-2 and task-9 edit a policy file; task-8, task-9 and task-13 read sensitive-paths.yml), verifier, wave-runners and the epic session at about 3-4x the coder figure, the epic lands near 19-25M: inside the 32M huge cap, and at the high end above the 22.4M alarm (70%). This is a risk the operator should see at sign-off. The alarm, not this estimate, is the authority; when it fires the planner re-plans the remaining work to fit or asks, and never extends the budget.",
+    "Evidence handling: both research briefs cite code and repo docs only (no web findings). Checks against the code (rounds 2 and 3): taskLifecycle.ts:107 finishedInLog and its callers (goalCheck.ts:270, specChange.ts:291, spec.ts:658); queue.ts:465 landCandidate; gate.ts gatherCoverageEvidence keyed on the check name (gate.ts:1052) and checkWorktreeDeps; worktree.ts:252 `worktree add -b` and :273 `branch -d`; testgate.ts:55 `cmd` set only on integration records and run() returning pass for an empty list; admission.ts:32 inFlightTasks; events.ts listSessionIds/readEvents/mergeSessionLogs and the optional `project` envelope field. Decisions D1-D10 are in the epic spec; the operator's calls are the six open_questions, and the plan implements each recommendation until the operator says otherwise. Round 3 adds: installCheck.ts:217 (git 2.38 floor; `merge-tree --merge-base` needs 2.40, so the revert uses `git revert -m 1`); testgate.ts:70 and :349 (`heavy.wait-timeout` returned without running the command); taskStatus.ts:77 `HELD_OPEN_BY_AN_OPERATOR`; taskId.ts `epicOfTaskId`, `qualifyTaskId`, `taskIdsMatch`; workroot.ts `excludeFromGit` (`.git/info/exclude`); usage.ts uses `--project <dir>` 18 times and never `--project <name>`. Round 4 adds: workroot.ts:272-313 (`excludeFromGit` returns `tracked`, `not-a-repo` or `failed` without excluding); heavyLock.ts:135 (`open(mutex, 'wx')`, the lock pattern the overlay reuses) and `pidIsAlive`; queue.ts:541 (`batch-<uuid>` names, the pattern scratch worktrees follow). Round 5 adds: taskEvents.ts:681-688 (`emitWaveMerged` payload is `task_ids` plus `files_changed`, no sha) and its three queue call sites queue.ts:367, :649, :942. Round 6 adds (bs/bs-optimize/integration 430dc5b7): db/foldPredicates.ts:12 `TASK_TYPES` and test/db/foldPredicates.test.ts:395 (the guard walks `projectTasks` and its callees and rejects a compared type the predicate refuses on an empty payload); test/eventTypes.test.ts:274 and test/helpers/eventTypeScan.ts:262 `UNEMITTED_EVENT_TYPES` (a declared type nothing writes fails), with Rule A/C (an `event_type:` property naming a literal or a module-level const) as what counts as a write; events.ts:26 (`event_type: string`, so `appendEvent` never refused an unknown type); taxonomy.yml:9 (a taxonomy change bumps `version`), test/taxonomy.test.ts:205 (the pinned version) and :305-330 (§8 mirrors the YAML value for value, in order); plan.ts:956-964 (`draftNextVersion` drops a completed, unsuperseded task) and goalCheck.ts:246 (the earlier-version credit rule)."
+  ]
+}

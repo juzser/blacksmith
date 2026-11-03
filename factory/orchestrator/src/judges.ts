@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { isOperatorActor } from './actors.js';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { isAuditAxisTaskId } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
@@ -98,6 +99,33 @@ const DEFAULT_MODEL_TIER = 'frontier';
 
 /** `--no-findings`: an operator attesting that a judge ran clean, recorded as an attestation and never as an artifact. */
 const ATTESTED_BY = 'operator';
+
+/**
+ * An attestation says the operator read a review nobody else saw, so only an
+ * envelope that names an operator actor may write one. `actor` is the
+ * envelope's `--actor`, as given: an omitted one is refused too, because the
+ * event would carry `system` and the orchestrator shares the operator's CLI
+ * session, so only an explicit `--actor operator` is a deliberate statement.
+ * An agent with a clean result writes `[]` to its declared artifact and closes
+ * the turn with --artifact / --evidence instead.
+ */
+export function requireOperatorAttestation(
+  actor: unknown,
+  how: 'flag' | 'raw-event' = 'flag',
+): void {
+  if (isOperatorActor(actor as string | null | undefined)) return;
+  const who = actor;
+  const named = typeof who === 'string' && who !== '' ? `"${who}"` : null;
+  const fix =
+    how === 'flag'
+      ? 'The operator passes --actor operator.'
+      : 'The operator sets "actor":"operator" in the event JSON.';
+  throw new SmithError(
+    'cli.no-findings-needs-operator',
+    `--no-findings is the operator's attestation, and this command's actor is ${named ?? 'not set'}. An agent with a clean result writes \`[]\` to its declared artifact and closes the turn with --artifact / --evidence. ${fix}`,
+    { actor: named === null ? null : String(who) },
+  );
+}
 
 export interface EventContext {
   sessionId: string;
@@ -924,7 +952,9 @@ export interface JudgeReportCheck {
  * Everything `recordJudgeReport` checks before it appends: the kind, the turn
  * the report belongs to, the artifact's freshness and its shape. Throws the
  * same JudgeError codes and writes nothing, so a preflight can ask whether a
- * report would be accepted without making it.
+ * report would be accepted without making it. It does not check who is
+ * attesting: for `--no-findings` that is the caller's job
+ * (`requireOperatorAttestation`), before it asks for a close.
  */
 export function checkJudgeReport(
   input: JudgeReportInput,
@@ -987,6 +1017,7 @@ export async function recordJudgeReport(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<JudgeReport> {
+  if (input.noFindings) requireOperatorAttestation(ctx.actor);
   const turns = await readJudgeTurns(input.taskId, ctx, opts);
   const { turn, artifactPath, findingCount } = checkJudgeReport(input, turns, opts);
 

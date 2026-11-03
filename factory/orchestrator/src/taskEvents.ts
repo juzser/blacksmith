@@ -684,9 +684,24 @@ export async function emitWaveMerged(
   opts: EventOpts = {},
   filesChanged?: readonly string[],
 ): Promise<StoredEvent> {
+  return emitWaveMergedWith(taskId, ctx, opts, filesChanged, {});
+}
+
+/**
+ * `emitWaveMerged` plus extra payload fields: the queue's `merge_sha` and its
+ * pre-landing record. Additive only, so a reader of the base payload still
+ * finds every field it knew.
+ */
+export async function emitWaveMergedWith(
+  taskId: string,
+  ctx: TaskEventContext,
+  opts: EventOpts,
+  filesChanged: readonly string[] | undefined,
+  extra: Record<string, unknown>,
+): Promise<StoredEvent> {
   const payload: Record<string, unknown> = { task_ids: [taskId] };
   if (filesChanged !== undefined) payload.files_changed = [...filesChanged];
-  return appendEvent(envelope(ctx, 'wave-merged', payload, taskId), opts);
+  return appendEvent(envelope(ctx, 'wave-merged', { ...payload, ...extra }, taskId), opts);
 }
 
 /**
@@ -701,6 +716,17 @@ export async function emitTaskBlocked(
   ctx: TaskEventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent> {
+  return emitTaskBlockedWith(taskId, error, ctx, opts, {});
+}
+
+/** `emitTaskBlocked`'s payload plus `extra`: the queue's pre-landing record on a red run. */
+export async function emitTaskBlockedWith(
+  taskId: string,
+  error: TaskErrorInput,
+  ctx: TaskEventContext,
+  opts: EventOpts,
+  extra: Record<string, unknown>,
+): Promise<StoredEvent> {
   return appendEvent(
     envelope(
       ctx,
@@ -710,6 +736,7 @@ export async function emitTaskBlocked(
         severity: error.severity,
         task_ref: taskId,
         ...(error.detail === undefined ? {} : { detail: error.detail }),
+        ...extra,
       },
       taskId,
     ),

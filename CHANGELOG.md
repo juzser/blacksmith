@@ -31,6 +31,51 @@ than appearing in it.
 
 ### Added
 
+The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
+belongs. One entry.
+
+- **Check tiers** (`bs-check-tiers`). A check in `checks.json` may carry a
+  `tier`: `pre-merge`, `post-merge` or `pre-release`. Absent means `pre-merge`
+  unless an approved move in the tier overlay (below) applies to that check, so
+  a file that labels nothing behaves as before only while no approved overlay
+  move applies, and nothing is guessed from a stack or a command name. `bs gate run` runs only the pre-merge tier and
+  records what it deferred, `bs results check --as gate` applies the same
+  selection, and `bs brief compose` lists only the pre-merge checks in a
+  worker's brief and names the deferred ones. What `bs` learns lives in a
+  local overlay, `.blacksmith/check-tiers.json`, kept out of git: your file is
+  never rewritten, a tier it declares always wins, and an overlay that is
+  missing, tracked or outside a repository leaves every undeclared check in
+  `pre-merge`. `bs queue run --checks` makes the pre-merge tier the
+  pre-landing test; with no later-tier entry in the effective tiers (declared
+  plus overlay) `--test-cmd` and `--select-test-cmd` run as before, and with one they are accepted but not
+  run. Every `wave-merged` now carries `merge_sha`. The post-merge batch,
+  `bs checks post-merge`, runs on the integration branch when a batch is due,
+  bisects a red that reproduces to the one task that broke it, tests a
+  revert of that task's merge with both tiers, lands it through the queue's
+  landing path and records a `wave-reverted` that reopens the task
+  (`bs worktree create <project> <epic> <task> --reopen --revert <sha>` brings
+  its branch back); a revert that landed but was never recorded is finished on
+  the next run, and a failure that never ran, happened while the machine
+  slept, or did not reproduce blames nobody. `--held` lists the tasks waiting
+  on an uncertified merge, and `bs wave check --checks <file> --project <dir>`
+  refuses them. Per-tier close: `bs integration check --tier` runs one tier,
+  all of them, or `remaining`, and `bs epic close` and `bs epic verdict` with
+  `--checks` need every declared check of every tier certified at the head; a
+  close without `--checks` on an epic whose records use tiers is refused. The
+  ledger, `bs checks ledger`, folds the event log into runs, minutes, flake
+  rate and catches per check over 30 days, and `bs checks proposals` asks the
+  operator one question per epic, never one per check, listing for each check
+  that ran at least 20 times, cost 30 minutes and never caught a defect the
+  runs covered, minutes spent and minutes saved of moving it to a later tier;
+  the reply is `<n><letter>` tokens or `none`, `bs checks apply` re-checks
+  every guardrail and refuses the whole batch with the failing items, and a
+  demoted check that fails a reproduced post-merge run moves back to
+  `pre-merge` by itself. Projects made with `bs new` get the scaffolded CI:
+  `scripts/check.mjs` (`pnpm run check`), a `ci.yml` with one job per tier fed
+  by the same file, and, with `--ui`, a dormant sharded e2e workflow; nothing
+  requires GitHub Actions. The Activity feed shows readable names for the new
+  gate rows.
+
 The gate-bounce epic (`bs-gate-bounce`) moves the gate's paperwork checks to
 before hand-off. One entry per task.
 
@@ -116,6 +161,57 @@ before hand-off. One entry per task.
   and a test runs them, so the documented compose commands run as printed.
 
 ### Changed
+
+- **The README says more of what the factory already does.** The first
+  screen gains three rows in the comparison with plain Claude Code (long
+  work, course change, lessons) and a paragraph on what
+  `docs/claims-matrix.md` and its test enforce. The cells gain width you can
+  check (`bs wave schedule`, `bs wave audit`, `bs epic width`), loading only
+  the playbook a turn needs (`bs playbook slice`), opt-in merge lanes
+  (`bs queue run --batch`), a worker's plan diff you approve or reject
+  (`bs plan propose|proposals|approve|reject`), the fingerprint the playbook
+  takes around each judge, the checks an epic close runs against the roadmap
+  goal and the assembled branch, the two tiers of session that let an epic
+  outlive one context window, and what the causal links check at write time.
+  "How it works" gains a table of the fourteen roles and when each is
+  dispatched (#509). After the gate-bounce epic and the diff-cap fix, the
+  Safety cell says the coder diff cap is 700 changed lines, not counting
+  tests, fixtures, lockfiles or generated output, and the Gates cell says a
+  worker runs its role's `bs results check` before it hands back, that
+  `wave.md` step 9 names one answerer per blocked reason, and that a check
+  whose clock shows the machine slept is not bounced to the coder (#512).
+  Each new sentence has a row in `docs/claims-matrix.md`, and the
+  `Demo: NOT MEASURED` line is unchanged.
+
+- **The diff cap counts code, not tests.** `measureDiff` measures test and
+  fixture files apart (`testLines`, `testFiles`), and `diffLines`, the number
+  the cap compares, is now non-test, non-generated lines; the gate records
+  both in `budget-check-result`, so which paths were called tests is
+  auditable. The test-path rule is language-agnostic and narrow:
+  `test`/`tests`/`e2e` directories count only outside a production root
+  (`src`, `app`, `lib` and the like, with Maven's `src/test/` as the one
+  exception), `fixtures` only under a test directory, `.test.`/`.spec.` only
+  on code extensions, JVM, Swift and PHP test names never under `main`, and
+  `spec`/`specs` directories never. An overrun is still recorded, never a
+  block. The coder template no longer says a merged diff over cap fails the
+  gate: it says to finish, keep to YAGNI, never thin a test and report the
+  measured lines. The same rule is stated in `agent-constraints.md`, the
+  operator guide's budget page, the `budgets.yml` comments, the task-spec and
+  result schemas, `taxonomy.yml`, the brief's diff-cap line and the
+  timeline's overrun label ("non-test lines"). `cap_diff_lines` stays 700
+  (#511).
+
+- **The repository moves to Biome 2.6.3.** `@biomejs/biome`, a dev
+  dependency, goes from 2.5.15 to 2.6.3, superseding Dependabot's #494, and
+  `biome.json`'s `$schema` follows. The nine hits of 2.6's new
+  `usePlaywrightValidDescribeCallback` rule were file-local helpers named
+  `describe()` that build strings, not Playwright code; they are renamed
+  after what they describe (`describeBudgetAlarm`,
+  `describeFingerprintEntry`, `describeLessonAudit`,
+  `describeSameMistakeKpi`), and `MobileTopBar.vue` awaits `nextTick()` as a
+  promise. The same `biome.json` passes on 2.5.15 and on 2.6.3, so a worktree
+  that shares an older install still lints. The 14 warnings 2.6 adds are left
+  as they are, and the scaffold's `biome.json.tmpl` keeps its schema (#506).
 
 - **The CLI tests run as ten files, and CI runs e2e in two shards.**
   `factory/orchestrator/test/cli.test.ts` is split into ten
@@ -229,6 +325,78 @@ before hand-off. One entry per task.
   `GET` or `HEAD`, and `GET /api/inbox` is gone.
 
 ### Fixed
+
+- **`--no-findings` is an attestation only the operator can make.** It
+  records `attested_by: operator` and closes a judge turn or a closing spec
+  review with no findings file. Until now, any actor could write one, so a
+  wave-runner's `bs judge report --no-findings` was logged as the operator
+  attesting reviews the operator never saw. `bs judge report`, `bs gate run`
+  and `bs epic spec-review` now refuse `--no-findings` unless the command
+  names an operator actor (`--actor operator`; `operator-skill` and `user`
+  also count). A missing `--actor` is refused too. The refusal is
+  `cli.no-findings-needs-operator`, exit 1, and nothing is written: `gate
+  run` checks every `--no-findings` role and the actor before it closes any
+  turn. `bs results check --as gate` refuses the same lines with the same
+  code. `bs event append` refuses a `judge-reported` or
+  `spec-review-recorded` event that carries `attested_by` unless the event's
+  own actor is an operator actor. An agent with a clean result writes `[]` to
+  its declared artifact and closes the turn with `--artifact` or
+  `--evidence`, as before. An operator who uses `--no-findings` now adds
+  `--actor operator`.
+
+- **A CLI judge's echoed prompt no longer counts against its output cap.**
+  A CLI that echoes its whole stdin prompt onto stderr, as plain `codex exec`
+  does (D-195), had every byte counted by `spawnCapped`, so `bs plan quorum`
+  escalated with `provider.output-too-large` once the prompt grew past
+  roughly 256 KB minus the answer. The in-spawn limit is now
+  `max_output_bytes` plus the prompt's byte length, for every CLI transport;
+  `max_output_bytes` and the policies are unchanged, and the error still
+  names the configured cap. Pipe output is also decoded across chunk
+  boundaries: each stream gets its own `StringDecoder`, flushed on close, and
+  bytes are still counted from the raw buffer length. A multibyte character
+  split between two chunks used to decode as U+FFFD; it now arrives as the
+  child wrote it (#514).
+
+- **`bs cleanup --apply` deletes a merged branch by the sha its gate
+  approved.** It ran `git branch -d`, whose own "fully merged" check reads the
+  HEAD of the checkout it runs in, so a main checkout behind the target kept
+  every merged task branch, and the report said `keep` for an item whose
+  worktree it had removed. The delete is now
+  `git update-ref --no-deref -d refs/heads/<branch> <sha>` with the sha the
+  last gate approved, and a branch that moved after the gate is refused.
+  Cleanup makes the checks `branch -d` made itself, in the plan and again
+  right before the delete: a symbolic ref is never followed and is kept
+  (`symref:`), and a branch some worktree has checked out, is rebasing
+  (including one a `rebase --update-refs` will move) or is bisecting is kept
+  (`checked-out: <branch> at <path>`). After a delete, the branch's config
+  section is removed. A partial removal reports the worktree item as
+  `remove` and a separate branch item right after it as `keep` with its
+  reason; `CleanupItem` has no new field. A task branch merged into the
+  epic's integration branch is deleted, because its commits stay on that
+  branch. `bs worktree rm` still uses `git branch -d` (#508).
+
+- **The policy hook reads long operands and words in linear time.** Its
+  redirection pattern started a descriptor match at every digit of a digit
+  run, so a long numeric word took quadratic time: `timeout` with an
+  80,000-digit operand took about 19 s, and now takes 12–26 ms. A non-empty
+  descriptor now starts only at the head of a digit run. `readShellWords`,
+  `splitDequotedWords` and `splitTopLevelCommands` take a run of plain
+  characters in one step instead of one character at a time, so the
+  200,000-letter option word drops from about 160 ms to about 40 ms locally.
+  Old and new verdicts were compared over 36,926 inputs with no mismatch
+  (#507).
+
+- **The README and quickstart name every file `bs init` writes and every
+  window it leaves alone.** The README said that outside `.blacksmith/`,
+  `bs init` adds only Claude Code settings; it also writes
+  `.claude/bs-settings-record.json`, and the sentence now names both files
+  and says both are kept out of git through `.git/info/exclude`. The
+  quickstart named only a user's `autoCompactWindow` as the reason bs writes
+  no window keys; a per-model `autoCompactWindow`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, in
+  the environment or a settings `env` block, do the same, and a local file
+  whose `env` is not an object gets no caps. Both now say so, with rows in
+  `docs/claims-matrix.md` (#505).
 
 - **`bs lessons compile` keeps a lesson's error class.** It built its input
   from the approved store rows without the class, so a lesson raised with

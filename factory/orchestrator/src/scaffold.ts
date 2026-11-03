@@ -313,7 +313,11 @@ export type RunCommand = (command: string, args: readonly string[], cwd: string)
  * frozen install then checks against — the reason the first PR out of any epic
  * used to red-CI on step one.
  */
-const TOOLCHAIN_STEPS: readonly { name: string; command: string; args: readonly string[] }[] = [
+export const TOOLCHAIN_STEPS: readonly {
+  name: string;
+  command: string;
+  args: readonly string[];
+}[] = [
   { name: 'install', command: 'pnpm', args: ['install'] },
   { name: 'lint', command: 'pnpm', args: ['run', 'lint'] },
   { name: 'typecheck', command: 'pnpm', args: ['run', 'typecheck'] },

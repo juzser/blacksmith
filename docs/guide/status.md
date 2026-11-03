@@ -48,7 +48,7 @@ is the record. `bs doctor` checks both halves and the machine in one command.
 Installed, `bs`
 writes under `.blacksmith/` in the directory you run it from, or wherever
 `BS_HOME` points — true of every release since `0.1.1`; the registry
-carries `0.6.0`.
+carries `0.7.0`.
 `0.1.0`, the release before it, predates `bs init`, ships no roadmap for
 `bs new` to read, and keeps state inside its own install directory.
 
@@ -87,8 +87,11 @@ line the daemon is allowed to cross. See
 [`../runbooks/ops.md`](../runbooks/ops.md).
 
 **2. Some checks only run when you run them.** `bs integration check` is
-the only check that sees the *assembled* integration branch, and it is
-operator-invoked. Same for the closing spec review, with one carve-out: at
+the clone-root run of the *assembled* integration branch that close requires,
+and it is operator-invoked. When the effective checks hold a post-merge entry,
+`/bs run` starts `bs checks post-merge` after each landing, and a batch that
+is due runs that tier at the integration head in a detached scratch worktree.
+The closing spec review is operator-invoked too, with one carve-out: at
 effort tier `small` (§0a), a plan still at v1 — never amended — waives it
 outright, and the verdict records that as a skip rather than a hold (see
 [operator-guide §7c](operator-guide/closing-an-epic.md#7c-bs-epic-spec-review--reading-the-plan-against-the-code-that-exists)).
