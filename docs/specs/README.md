@@ -31,6 +31,7 @@ reads the finding.
 | [`continuous-loop-scope.md`](continuous-loop-scope.md) | 19 kB | the continuous loop — the factory running epic after epic without an operator turn between them |
 | [`check-tiers-scope.md`](check-tiers-scope.md) | 17 kB | check tiers — a check declares when it runs, each tier runs where it belongs, and the factory learns which checks to move later (status: shipped) |
 | [`plugin-port-scope.md`](plugin-port-scope.md) | 21 kB | the plugin port (status: partly shipped) |
+| [`lean-mode-scope.md`](lean-mode-scope.md) | 22 kB | lean mode — `/bs do`, a few agents and the same gates, the other verbs trimmed, the dashboard removed (status: decisions recorded, not built) |
 
 A scope is not a contract: once its work has shipped, the architecture and
 the guides say what exists, and the scope says only what was intended.
