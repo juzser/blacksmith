@@ -12,12 +12,23 @@ are pairwise disjoint, that none share a `serialize_always_globs` hotspot
 them after another:
 
 ```bash
-bs wave check factory/specs/active/epic-1/plan-v1.json epic-1/task-1 epic-1/task-2
+bs wave check factory/specs/active/epic-1/plan-v1.json epic-1/task-1 epic-1/task-2 \
+  --session <session-id> --plan-version <n> --causal-parent <event-id> \
+  --checks <checks.json> --project <project-dir>
 ```
 
 ```json
 {"valid":true}
 ```
+
+With `--checks`, which needs `--project` and `--session`, a task that waits on
+a merge no post-merge record certifies is refused `wave.held-by-post-merge`.
+With `--session` and no `--checks`, an epic whose log holds tiered integration
+records is refused `wave.checks-required`. A check without `--session` admits
+nothing and reads no log, so it checks neither refusal: it prints its verdict
+for a wave refused for claims, coupling or budget, and for an admissible wave
+it stops at `cli.missing-flag` before writing unless `--dry` is given, which
+writes nothing.
 
 On failure you get `overlapViolations` (claims genuinely overlap — cut a
 dependency edge and run serially instead) and/or `serializeAlwaysViolations`

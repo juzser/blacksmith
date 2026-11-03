@@ -1075,6 +1075,69 @@ describe('bs results check (built binary)', () => {
       expect(inputs(checkGate(line))).toEqual(['checks']);
     });
 
+    describe('checks: tier selection, the same refusals as gate run', () => {
+      const withChecks = async (checks: unknown[]) => {
+        const line = await gateLine(await clean(w));
+        line[line.indexOf('--checks') + 1] = await write('tiered.json', checks);
+        return line;
+      };
+      const counter = () => path.join(scratch, 'tier-counter');
+      const touching = (name: string, extra: Record<string, unknown> = {}) => ({
+        name,
+        cmd: `echo ${name} >> '${counter()}'`,
+        heavy: false,
+        ...extra,
+      });
+
+      it('names gate.no-pre-merge-checks with the message runGate throws, running nothing', async () => {
+        const checks = [
+          touching('b', { tier: 'post-merge' }),
+          touching('c', { tier: 'pre-release' }),
+        ];
+        const events = snapshot(w.stateDir);
+        const run = checkGate(await withChecks(checks));
+        expect(run.status).toBe(1);
+        expect(inputs(run)).toEqual(['checks']);
+        expect(run.json.problems[0].reason).toBe('gate.no-pre-merge-checks');
+        const { runGate } = await import('../src/gate.js');
+        const thrown = await runGate(
+          { ...(await clean(w)), checks: checks as never },
+          w.ctx(),
+          w.opts(),
+        ).catch((e) => e as Error);
+        expect(run.json.problems[0].detail.message).toBe((thrown as Error).message);
+        expect(existsSync(counter())).toBe(false);
+        expect(snapshot(w.stateDir)).toEqual(events);
+      });
+
+      it('names gate.stage-check-deferred for a deferred coverage check', async () => {
+        const run = checkGate(
+          await withChecks([touching('a'), touching('coverage', { tier: 'post-merge' })]),
+        );
+        expect(run.status).toBe(1);
+        expect(run.json.problems[0].reason).toBe('gate.stage-check-deferred');
+        expect(existsSync(counter())).toBe(false);
+      });
+
+      it('reports an invalid tier as a checks problem', async () => {
+        const run = checkGate(await withChecks([touching('a', { tier: 'post_merge' })]));
+        expect(run.json.problems[0].reason).toBe('gate.invalid-check-tier');
+      });
+
+      it('still refuses a string heavy beside a valid tier', async () => {
+        const run = checkGate(
+          await withChecks([touching('a', { tier: 'post-merge', heavy: 'false' })]),
+        );
+        expect(run.json.problems[0].reason).toBe('gate.invalid-check-heavy');
+      });
+
+      it('leaves an unlabelled file passing', async () => {
+        const run = checkGate(await withChecks([touching('a'), touching('b')]));
+        expect(run.json.outcome).toBe('pass');
+        expect(existsSync(counter())).toBe(false);
+      });
+    });
+
     it('evidence: an --evidence file that is not a list', async () => {
       const line = await gateLine(await clean(w), [
         '--evidence',

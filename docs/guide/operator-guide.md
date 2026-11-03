@@ -95,7 +95,7 @@ closing spec review, the second eye, the goal-check, the width report and
 the cleanup.
 
 - [7. `bs plan quorum` + `bs epic verdict`](operator-guide/closing-an-epic.md#7-bs-plan-quorum--bs-epic-verdict)
-- [7a. `bs integration check` — the only command that sees the branch](operator-guide/closing-an-epic.md#7a-bs-integration-check--the-only-command-that-sees-the-branch)
+- [7a. `bs integration check` — the clone-root run that close requires](operator-guide/closing-an-epic.md#7a-bs-integration-check--the-clone-root-run-that-close-requires)
 - [7b. `bs epic close` — the verdict, written down](operator-guide/closing-an-epic.md#7b-bs-epic-close--the-verdict-written-down)
 - [7c. `bs epic spec-review` — reading the plan against the code that exists](operator-guide/closing-an-epic.md#7c-bs-epic-spec-review--reading-the-plan-against-the-code-that-exists)
 - [7d. `bs crossfind` — a second eye, not a second vote](operator-guide/closing-an-epic.md#7d-bs-crossfind--a-second-eye-not-a-second-vote)

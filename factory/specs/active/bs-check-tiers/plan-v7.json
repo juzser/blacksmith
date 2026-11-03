@@ -1,0 +1,58 @@
+{
+  "epic_id": "bs-check-tiers",
+  "version": 7,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-check-tiers/task-23-step8-compose-worktree",
+      "epic_id": "bs-check-tiers",
+      "plan_version": 7,
+      "project": "blacksmith",
+      "agent_role": "coder",
+      "title": "Show the absolute worktree and artifact in wave.md step 8's compose command",
+      "summary": "Plan v7. Wording only: step 8's compose command gains `--worktree` and `--artifact`; step 8 and dispatch.md say which briefs compose refuses without each; one test regex follows.",
+      "objective": "Close f-bs-check-tiers/integration-09b69938 and f-bs-check-tiers/integration-7bbb7b01 by rewording in place. Add no section, CLI flag or code, and no test beyond one pinned regex. wave.md step 8's `bs brief compose` command has no `--worktree`, yet task-22's sentence says the brief reads the overlay of its `--worktree`, and compose refuses a coder, tester or judge brief without an absolute one (`brief.worktree-required`). It also refuses every judge turn without an absolute `--artifact` (`brief.artifact-required`), which the command and dispatch.md's requirement sentence leave out too. The command gains both flags; step 8's refusal clause and dispatch.md's 'Compose requires' sentence name them; and handbackPreflight.test.ts's pin on step 8's sentence follows the new words.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "09b69938, 7bbb7b01. wave.md step 8 shows the absolute worktree and artifact its briefs need, and step 8 and dispatch.md name them among what compose refuses without. Compose refuses a brief for a coder, a tester and every judge turn but the spec-reviewer's and the auditor's without an absolute `--worktree` (`brief.worktree-required`), and every judge turn's without an absolute `--artifact` (`brief.artifact-required`, checked right after; briefCompose.ts `WORKTREE_ROLES`, `JUDGE_TURN_ROLES`). Any other role's brief accepts either flag and ignores it. (a) In .claude/skills/bs/wave.md step 8, the compose command becomes `bs brief compose --role <role> --task <task-id> --session <id> --work-root <work-root> --worktree <absolute worktree path> --artifact <absolute path> --provider <name> --model-tier <tier> --base <ref> --checks <file> --out <file>`: the two flags go right after `--work-root <work-root>`, in that order, and nothing else in the command changes. So handbackPreflight.test.ts's pin on the prefix (`bs brief compose --role <role> --task <task-id> --session <id> --work-root <work-root>`) still matches unchanged, and briefComposeDocs.test.ts still finds every required worker flag in the command. (b) In step 8's sentence that begins '`bs brief compose` writes each coder's, tester's and grader's line', 'it refuses to compose such a brief without them, and' becomes 'it refuses to compose such a brief without them, without an absolute `--worktree` or, for a grader brief, without an absolute `--artifact`, and'. \"such a brief\" is a coder's, tester's or grader's, and the grader is the one judge turn among them. The list of flags the lines are written from stays as it is: `bs dispatch lint` checks those lines and never a worktree or an artifact, so neither flag is added to the flags 'a brief that lacks them' refers to. (c) In factory/orchestrator/test/handbackPreflight.test.ts, the second regex of the test 'wave.md step 8 says compose writes the lines and checks, refuses without them, and the lint fails' gains the same words at the same place and changes in nothing else, so it pins the new sentence and fails on the old one. Show that: with the step-8 sentence put back to its old words, `pnpm exec vitest run factory/orchestrator/test/handbackPreflight.test.ts` run from the worktree root (where package.json and vitest.config.ts are) fails that test by name; then restore the new words, before the full suite runs, and put the failing output in `notes`. (d) In .claude/skills/bs/dispatch.md, under '## Carry into the prompt', 'Compose requires `--work-root` for a coder, tester or grader;' becomes 'Compose requires an absolute `--worktree` for a coder, a tester and every judge turn but the spec-reviewer's and the auditor's; an absolute `--artifact` for every judge turn; `--work-root` for a coder, tester or grader;'. The command form before it already shows `[--worktree <dir>]` and `[--artifact <file>]`, and stays as it is. Check (each check reads the file with newlines and runs of spaces folded to one space, so a sentence wrapped across source lines is still found, and the folded file is one line, so `-c` prints 1 when the text is present and 0 when it is not; `-e` lets a pattern start with `--`): `tr '\\n' ' ' < .claude/skills/bs/wave.md | tr -s ' ' | /usr/bin/grep -cF -e '--work-root <work-root> --worktree <absolute worktree path> --artifact <absolute path> --provider <name>'` prints 1; `tr '\\n' ' ' < .claude/skills/bs/wave.md | tr -s ' ' | /usr/bin/grep -cF -e 'it refuses to compose such a brief without them, without an absolute `--worktree` or, for a grader brief, without an absolute `--artifact`, and'` prints 1; `tr '\\n' ' ' < .claude/skills/bs/wave.md | tr -s ' ' | /usr/bin/grep -cF -e 'it refuses to compose such a brief without them, and'` prints 0; `tr '\\n' ' ' < .claude/skills/bs/dispatch.md | tr -s ' ' | /usr/bin/grep -cF -e 'Compose requires an absolute `--worktree` for a coder, a tester and every judge turn but the'` prints 1; `tr '\\n' ' ' < .claude/skills/bs/dispatch.md | tr -s ' ' | /usr/bin/grep -cF -e 'an absolute `--artifact` for every judge turn; `--work-root` for a coder, tester or grader;'` prints 1; `tr '\\n' ' ' < .claude/skills/bs/dispatch.md | tr -s ' ' | /usr/bin/grep -cF -e 'Compose requires `--work-root`'` prints 0; `tr '\\n' ' ' < factory/orchestrator/test/handbackPreflight.test.ts | tr -s ' ' | /usr/bin/grep -cF -e 'it refuses to compose such a brief without them, without an absolute `--worktree` or, for a grader brief, without an absolute `--artifact`, and'` prints 1; and `tr '\\n' ' ' < factory/orchestrator/test/handbackPreflight.test.ts | tr -s ' ' | /usr/bin/grep -cF -e 'such a brief without them, and'` prints 0.",
+        "Diff check (AC13), run by the coder before hand-back and re-run by the grader: `git diff --no-renames <base>...HEAD -U0 | /usr/bin/grep -E '^\\+[^+].*(\\.(skip|only|todo|fails)\\(|retry|quarantin|testTimeout|hookTimeout|timeout_ms|DEFAULT_TIMEOUT_MS|waitForLines)'`. `notes` carries its full output and, for every hit, why it is not a skip, retry, quarantine or larger timeout. An unexplained hit fails this criterion."
+      ],
+      "claims": [
+        ".claude/skills/bs/wave.md",
+        ".claude/skills/bs/dispatch.md",
+        "factory/orchestrator/test/handbackPreflight.test.ts"
+      ],
+      "budget": {
+        "tokens": 80000,
+        "diff_lines": 20
+      },
+      "contract": {
+        "functional_clauses": [
+          "wave.md step 8's compose command carries `--worktree <absolute worktree path>` and `--artifact <absolute path>`, so a brief built from it is refused neither with `brief.worktree-required` nor, for a judge turn, with `brief.artifact-required`, and the step's sentence about the overlay of the brief's `--worktree` describes the command the step shows.",
+          "Step 8's refusal clause and dispatch.md's requirement sentence name the absolute `--worktree` and, for a judge turn, the absolute `--artifact` that compose refuses a brief without; neither says `bs dispatch lint` checks them."
+        ],
+        "nonfunctional_clauses": [
+          "Read factory/specs/active/bs-check-tiers/epic-spec.md before starting: AC2 (a brief that lists checks is a coder or tester brief, and both refuse without `--worktree`) and the section '### Plan v7 — third closing-review fix'. Do not edit it: it sits outside every task's claims. Put one Progress line for this task in the result `notes` (what changed, and anything a later task must know); the epic session copies it in at merge.",
+          "Base: the epic's integration branch `bs/bs-check-tiers/integration` at bf6f36f1 or later, where every task of plan v6 has merged. If a passage a criterion names is not on the base as quoted, stop and report it in `notes` instead of rewriting another passage.",
+          "Diff budget (#511): `diff_lines` caps the non-test lines of the diff only; the one test-file edit is counted apart. Re-wrap at most the source lines a changed sentence spans, not the rest of its paragraph. At plan time that measured 10 non-test lines (wave.md 7, dispatch.md 3).",
+          "No test is added. The only test edit is criterion 1 (c)'s, one regex, and it keeps that regex's strength. Each criterion names the grep that checks it: run each one and put the command and its output in `notes`. The existing doc guards that read these files run in the full suite and must pass. Among them are docCommands.test.ts (every documented `bs` command and flag must exist in usage.ts), docErrorCodes.test.ts (every backticked dotted token must be a code raised in source), briefComposeDocs.test.ts (a documented compose command names the flags compose requires), handbackPreflight.test.ts, checkTiersPlaybook.test.ts (its step-8 pin), wavePlaybook.test.ts and playbookCitations.test.ts.",
+          "Before hand-back run, in the foreground and in full: `pnpm run build`, root `pnpm run test` (the whole suite, never a scoped file), `pnpm run typecheck`, `pnpm run typecheck:test` and `pnpm exec biome check .` from the repo root (the whole repo, never a scoped path); report each exit code and the tail of each output. Run the full suite through `bs heavy run` so it takes the machine's heavy lock.",
+          "Also run `bash scripts/check.sh` and read the tail of its output, not only its exit code; name every step it printed as SKIP.",
+          "Weaken nothing: add no `.skip`, `.only`, `.todo`, `.fails`, `retry`, quarantine list or flaky marker; raise no `testTimeout`, `hookTimeout`, `timeout_ms`, `waitForLines` default, `DEFAULT_TIMEOUT_MS` or any other timeout; remove, loosen or reorder no existing assertion, check, gate stage, grader, judge, review round or verifier. Criterion 1 (c) replaces one regex with the same regex plus the new words; that is not a loosening.",
+          "Reword in place. Add no section, heading or test, add no flag to the CLI, and change no heading. Cite no line numbers in the docs.",
+          "Open source, any stack: no other project's name, no client code and no absolute home-directory path (`/Users/...`, `/home/...`) in any committed file, and no sentence that names a per-stack tier default or makes anything require GitHub Actions.",
+          "Add no runtime or dev dependency.",
+          "Do not edit anything under factory/policies/.",
+          "Do not edit CHANGELOG.md: it is outside this task's claims, and this task changes no behaviour."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "recheck",
+      "task_status": "todo",
+      "ui_affecting": false
+    }
+  ],
+  "edges": [],
+  "project": "blacksmith",
+  "effort": "huge"
+}

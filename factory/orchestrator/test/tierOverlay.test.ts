@@ -1,0 +1,933 @@
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
+import { type CheckCommand, commandDigest } from '../src/testgate.js';
+import {
+  OVERLAY_LOCK_WAIT_MS,
+  type OverlayEntry,
+  type OverlayState,
+  overlayOwes,
+  overlayPath,
+  overlayReport,
+  overlayWritable,
+  readOverlay,
+  reconcileOverlay,
+  resolveEffectiveTiers,
+  withOverlayLock,
+  writeOverlay,
+} from '../src/tierOverlay.js';
+
+// Seams for the lock-breaking interleavings: a hook that runs inside the module's
+// liveness probe, and one that runs before it reads a file.
+const seams = vi.hoisted(() => ({
+  afterProbe: null as null | ((pid: number) => void),
+  beforeRead: null as null | ((file: string) => void),
+  beforeLink: null as null | ((from: string, to: string) => void),
+}));
+vi.mock('../src/heavyLock.js', async (orig) => {
+  const real = await orig<typeof import('../src/heavyLock.js')>();
+  return {
+    ...real,
+    pidIsAlive: (pid: number): boolean => {
+      const alive = real.pidIsAlive(pid);
+      seams.afterProbe?.(pid);
+      return alive;
+    },
+  };
+});
+vi.mock('node:fs', async (orig) => {
+  const real = await orig<typeof import('node:fs')>();
+  return {
+    ...real,
+    readFileSync: (...args: Parameters<typeof real.readFileSync>) => {
+      seams.beforeRead?.(String(args[0]));
+      return real.readFileSync(...args);
+    },
+    linkSync: (from: string, to: string) => {
+      seams.beforeLink?.(from, to);
+      return real.linkSync(from, to);
+    },
+  };
+});
+
+const roots: string[] = [];
+const tmp = (): string => {
+  const d = realpathSync(mkdtempSync(path.join(tmpdir(), 'smith-overlay-')));
+  roots.push(d);
+  return d;
+};
+const git = (cwd: string, ...args: string[]): string =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+function makeRepo(): string {
+  const main = tmp();
+  git(main, 'init', '-q', '-b', 'main');
+  git(main, 'config', 'user.email', 't@example.com');
+  git(main, 'config', 'user.name', 't');
+  writeFileSync(path.join(main, 'README.md'), 'x\n');
+  writeFileSync(path.join(main, 'checks.json'), '[]\n');
+  git(main, 'add', '.');
+  git(main, 'commit', '-q', '-m', 'init');
+  return main;
+}
+
+const overlayFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.json');
+const lockFile = (main: string): string => path.join(main, '.blacksmith', 'check-tiers.lock');
+const CMD = 'pnpm run e2e';
+const entry = (
+  check: string,
+  cmd = CMD,
+  tier: OverlayEntry['tier'] = 'post-merge',
+): OverlayEntry => ({
+  check,
+  cmd_sha256: commandDigest(cmd),
+  tier,
+  decided_by_event_id: 's#1',
+  decided_at: '2026-10-31T00:00:00.000Z',
+});
+const state = (main: string): OverlayState => {
+  const o = readOverlay(main);
+  if (!('entries' in o)) throw new Error(`unreadable: ${o.unreadable}`);
+  return o;
+};
+const rawOverlay = (main: string, doc: unknown): void => {
+  mkdirSync(path.dirname(overlayFile(main)), { recursive: true });
+  writeFileSync(overlayFile(main), typeof doc === 'string' ? doc : JSON.stringify(doc));
+};
+const valid = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  version: 1,
+  revision: 3,
+  entries: [entry('e2e')],
+  ...over,
+});
+const check = (name: string, cmd = CMD, tier?: CheckCommand['tier']): CheckCommand => ({
+  name,
+  cmd,
+  ...(tier === undefined ? {} : { tier }),
+});
+const stored = (
+  event_id: string,
+  event_type: string,
+  payload: Record<string, unknown>,
+): StoredEvent => ({
+  event_id,
+  record: {
+    session_id: 's',
+    actor: 'operator',
+    event_type,
+    plan_version: 1,
+    causal_parent: null,
+    payload,
+    ts: '2026-10-31T01:02:03.000Z',
+  },
+});
+const decided = (id: string, name: string, to_tier: string, decision = 'approve'): StoredEvent =>
+  stored(id, 'check-tier-decided', {
+    check: name,
+    cmd_sha256: commandDigest(CMD),
+    to_tier,
+    decision,
+  });
+
+afterEach(() => {
+  vi.useRealTimers();
+  for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+describe('location', () => {
+  it('reads one overlay from a task worktree and from the main clone; none outside git', () => {
+    const main = makeRepo();
+    const wt = path.join(tmp(), 'wt');
+    git(main, 'worktree', 'add', '-q', '-b', 'task', wt);
+    expect(overlayPath(wt)).toBe(overlayFile(main));
+    expect(overlayPath(main)).toBe(overlayFile(main));
+
+    const plain = tmp();
+    expect(overlayPath(plain)).toBeNull();
+    const tiers = resolveEffectiveTiers([check('a'), check('b')], readOverlay(plain));
+    expect(tiers.map((t) => [t.tier, t.tierSource])).toEqual([
+      ['pre-merge', 'default'],
+      ['pre-merge', 'default'],
+    ]);
+    expect(overlayWritable(plain)).toBe('not-a-repo');
+    expect(() => writeOverlay(plain, { entries: [], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-not-a-repo' }),
+    );
+  });
+});
+
+describe('location in a bare or separate-git-dir repository', () => {
+  it('answers not-a-repo for a bare repository and creates nothing beside it', async () => {
+    const parent = tmp();
+    const bare = path.join(parent, 'x.git');
+    git(parent, 'init', '-q', '--bare', bare);
+    const before = readdirSync(parent);
+    expect(overlayPath(bare)).toBeNull();
+    expect(overlayWritable(bare)).toBe('not-a-repo');
+    expect(() => writeOverlay(bare, { entries: [], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-not-a-repo' }),
+    );
+    await expect(withOverlayLock(bare, () => 1)).rejects.toMatchObject({
+      code: 'checks.overlay-not-a-repo',
+    });
+    expect(readdirSync(parent)).toEqual(before);
+  });
+
+  const separate = (gitdir: (root: string) => string): { root: string; wc: string } => {
+    const root = tmp();
+    const wc = path.join(root, 'sg');
+    mkdirSync(path.dirname(gitdir(root)), { recursive: true });
+    git(root, 'init', '-q', '-b', 'main', '--separate-git-dir', gitdir(root), wc);
+    git(wc, 'config', 'user.email', 't@example.com');
+    git(wc, 'config', 'user.name', 't');
+    writeFileSync(path.join(wc, 'README.md'), 'x\n');
+    git(wc, 'add', '.');
+    git(wc, 'commit', '-q', '-m', 'init');
+    return { root, wc };
+  };
+
+  it.each([
+    ['sgdir/.git', (r: string) => path.join(r, 'sgdir', '.git')],
+    ['gitdir', (r: string) => path.join(r, 'gitdir')],
+  ])(
+    'fails closed for a --separate-git-dir layout (%s): null, never a wrong path',
+    (name, gitdir) => {
+      const { root, wc } = separate(gitdir);
+      const linked = path.join(root, 'linked');
+      git(wc, 'worktree', 'add', '-q', '-b', 'task', linked);
+      expect(overlayPath(wc)).toBeNull();
+      expect(overlayWritable(wc)).toBe('not-a-repo');
+      // From a linked worktree git itself cannot tell `sgdir/.git` from a clone's own.
+      if (name !== 'sgdir/.git') expect(overlayPath(linked)).toBeNull();
+    },
+  );
+});
+
+describe('location of a main worktree whatever its HEAD holds', () => {
+  it('resolves an empty-tree HEAD and an unborn HEAD to the main clone', () => {
+    for (const commit of [true, false]) {
+      const main = tmp();
+      git(main, 'init', '-q', '-b', 'main');
+      git(main, 'config', 'user.email', 't@example.com');
+      git(main, 'config', 'user.name', 't');
+      if (commit) git(main, 'commit', '-q', '--allow-empty', '-m', 'empty');
+      const linked = path.join(tmp(), 'wt');
+      if (commit) git(main, 'worktree', 'add', '-q', '-b', 'b', linked);
+      else git(main, 'worktree', 'add', '-q', '--orphan', '-b', 'b', linked);
+      expect(overlayPath(linked), `commit=${commit}`).toBe(overlayFile(main));
+      expect(overlayPath(main)).toBe(overlayFile(main));
+    }
+  });
+
+  it('answers null for a linked worktree of a bare repository, even one named .git', () => {
+    const parent = tmp();
+    const bare = path.join(parent, '.git');
+    git(parent, 'init', '-q', '--bare', '-b', 'main', bare);
+    git(bare, 'config', 'user.email', 't@example.com');
+    git(bare, 'config', 'user.name', 't');
+    const sha = git(
+      bare,
+      'commit-tree',
+      '-m',
+      'x',
+      '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+    ).trim();
+    git(bare, 'update-ref', 'refs/heads/main', sha);
+    const linked = path.join(tmp(), 'wt');
+    git(bare, 'worktree', 'add', '-q', '-b', 'b', linked);
+    expect(overlayPath(linked)).toBeNull();
+  });
+
+  it('fails closed for a submodule, whose git dir git lists first', () => {
+    const sub = makeRepo();
+    const sup = makeRepo();
+    git(sup, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'mod');
+    const mod = path.join(sup, 'mod');
+    git(mod, 'config', 'user.email', 't@example.com');
+    git(mod, 'config', 'user.name', 't');
+    const linked = path.join(tmp(), 'wt');
+    git(mod, 'worktree', 'add', '-q', '-b', 'b', linked);
+    expect(overlayPath(mod)).toBeNull();
+    expect(overlayPath(linked)).toBeNull();
+  });
+});
+
+describe('location with inherited repository-locating variables', () => {
+  const VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE'];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const v of VARS) saved[v] = process.env[v];
+  });
+  afterEach(() => {
+    for (const v of VARS) {
+      if (saved[v] === undefined) delete process.env[v];
+      else process.env[v] = saved[v];
+    }
+  });
+
+  it('ignores GIT_DIR: a plain directory stays null and a subdirectory finds its clone', () => {
+    const main = makeRepo();
+    mkdirSync(path.join(main, 'sub'));
+    const plain = tmp();
+    process.env.GIT_DIR = path.join(main, '.git');
+    expect(overlayPath(plain)).toBeNull();
+    expect(overlayPath(path.join(main, 'sub'))).toBe(overlayFile(main));
+  });
+
+  it('keeps GIT_DIR out of the exclude call and restores the environment after it', () => {
+    const main = makeRepo();
+    const other = makeRepo();
+    process.env.GIT_DIR = path.join(other, '.git');
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    expect(process.env.GIT_DIR).toBe(path.join(other, '.git'));
+    expect(readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8')).toContain(
+      'check-tiers',
+    );
+    expect(readFileSync(path.join(other, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      'check-tiers',
+    );
+  });
+});
+
+describe('validity', () => {
+  const cases: [string, unknown, string][] = [
+    ['a non-object', [], 'JSON object'],
+    ['invalid JSON', '{nope', 'not valid JSON'],
+    ['version 2', valid({ version: 2 }), 'version must be 1'],
+    ['a negative revision', valid({ revision: -1 }), 'revision'],
+    ['an empty check', valid({ entries: [{ ...entry('x'), check: '' }] }), 'check must be'],
+    [
+      'a 63-hex cmd_sha256',
+      valid({ entries: [{ ...entry('x'), cmd_sha256: 'a'.repeat(63) }] }),
+      'cmd_sha256',
+    ],
+    ['tier later', valid({ entries: [{ ...entry('x'), tier: 'later' }] }), 'tier must be'],
+    ['an unknown key', valid({ extra: 1 }), 'unknown key "extra"'],
+    [
+      'an unknown entry key',
+      valid({ entries: [{ ...entry('x'), extra: 1 }] }),
+      'unknown key "extra"',
+    ],
+    [
+      'a pending_event with another key',
+      valid({
+        entries: [
+          {
+            ...entry('x'),
+            pending_event: { event_type: 'check-tier-promoted', payload: {}, x: 1 },
+          },
+        ],
+      }),
+      'pending_event has unknown key "x"',
+    ],
+    [
+      'a pending_event of another type',
+      valid({ entries: [{ ...entry('x'), pending_event: { event_type: 'other', payload: {} } }] }),
+      'pending_event.event_type',
+    ],
+    [
+      'a bad decided_at',
+      valid({ entries: [{ ...entry('x'), decided_at: 'yesterday' }] }),
+      'decided_at',
+    ],
+    ['a duplicate entry', valid({ entries: [entry('x'), entry('x')] }), 'repeats check "x"'],
+  ];
+  it.each(cases)('%s makes the overlay unreadable', (_name, doc, rule) => {
+    const main = makeRepo();
+    rawOverlay(main, doc);
+    const read = readOverlay(main);
+    expect(read).toHaveProperty('unreadable');
+    expect((read as { unreadable: string }).unreadable).toContain(rule);
+    expect(overlayWritable(main)).toBe('unreadable');
+    const tiers = resolveEffectiveTiers([check('e2e')], read);
+    expect(tiers[0]).toMatchObject({ tier: 'pre-merge', tierSource: 'default' });
+  });
+
+  it('reads a valid file back deep-equal, and an absent one as empty at revision 0', () => {
+    const main = makeRepo();
+    expect(readOverlay(main)).toEqual({ revision: 0, entries: [] });
+    const full = {
+      ...entry('e2e'),
+      pending_event: { event_type: 'check-tier-promoted', payload: { check: 'e2e' } },
+    };
+    rawOverlay(main, valid({ entries: [full, entry('lint', 'pnpm lint', 'pre-release')] }));
+    expect(readOverlay(main)).toEqual({
+      revision: 3,
+      entries: [full, entry('lint', 'pnpm lint', 'pre-release')],
+    });
+    expect(overlayWritable(main)).toBe('ok');
+  });
+});
+
+describe('report precedence', () => {
+  const overlay: OverlayState = { revision: 1, entries: [entry('e2e')] };
+  const status = (checks: CheckCommand[]): string | undefined =>
+    overlayReport(checks, overlay)[0]?.status;
+  it('orders absent, shadowed, edited and active', () => {
+    expect(status([check('other')])).toBe('orphaned');
+    expect(status([check('e2e', CMD, 'post-merge')])).toBe('shadowed');
+    expect(status([check('e2e', 'edited', 'pre-release')])).toBe('shadowed');
+    expect(status([check('e2e', 'edited')])).toBe('orphaned');
+    expect(status([check('e2e')])).toBe('active');
+    expect(overlayReport([check('e2e')], { unreadable: 'x' })).toEqual([]);
+  });
+  it('gives an active entry its overlay tier, and a declared tier wins', () => {
+    const [a] = resolveEffectiveTiers([check('e2e')], overlay);
+    expect(a).toMatchObject({ tier: 'post-merge', tierSource: 'overlay' });
+    const [d] = resolveEffectiveTiers([check('e2e', CMD, 'pre-release')], overlay);
+    expect(d).toMatchObject({ tier: 'pre-release', tierSource: 'declared' });
+    const [o] = resolveEffectiveTiers([check('e2e', 'edited')], overlay);
+    expect(o).toMatchObject({ tier: 'pre-merge', tierSource: 'default' });
+  });
+});
+
+describe('exclusion', () => {
+  it('writes in a fresh repo without dirtying it or a tracked .gitignore', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    expect(git(main, 'status', '--porcelain')).toBe('');
+    const exclude = readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude.split('\n').filter((l) => l.includes('check-tiers'))).toHaveLength(1);
+    expect(existsSync(path.join(main, '.gitignore'))).toBe(false);
+    expect(state(main).revision).toBe(1);
+    writeOverlay(main, { entries: [], expectedRevision: 1 });
+    expect(readFileSync(path.join(main, '.git', 'info', 'exclude'), 'utf8')).toBe(exclude);
+  });
+
+  it('keeps the lock, its reclaim mutex and the temp bs leaves in .blacksmith out of git status', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    const dir = path.dirname(overlayFile(main));
+    for (const f of ['check-tiers.lock', 'check-tiers.lock.reclaim', 'check-tiers.json.tmp']) {
+      writeFileSync(path.join(dir, f), '1\n');
+    }
+    expect(git(main, 'status', '--porcelain')).toBe('');
+  });
+
+  it('leaves another file in .blacksmith visible to git', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [], expectedRevision: 0 });
+    writeFileSync(path.join(path.dirname(overlayFile(main)), 'notes.txt'), 'x\n');
+    expect(git(main, 'status', '--porcelain')).toContain('.blacksmith/');
+  });
+
+  it('refuses a tracked overlay and leaves the file unchanged', () => {
+    const main = makeRepo();
+    rawOverlay(main, valid());
+    git(main, 'add', '-f', '.blacksmith/check-tiers.json');
+    git(main, 'commit', '-q', '-m', 'track');
+    const before = readFileSync(overlayFile(main), 'utf8');
+    expect(overlayWritable(main)).toBe('tracked');
+    expect(() => writeOverlay(main, { entries: [], expectedRevision: 3 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-tracked' }),
+    );
+    expect(readFileSync(overlayFile(main), 'utf8')).toBe(before);
+  });
+
+  it('refuses when the exclude file cannot be written, and writes no overlay', () => {
+    const main = makeRepo();
+    const exclude = path.join(main, '.git', 'info', 'exclude');
+    mkdirSync(path.dirname(exclude), { recursive: true });
+    writeFileSync(exclude, '# none\n');
+    chmodSync(exclude, 0o444);
+    try {
+      expect(() => writeOverlay(main, { entries: [], expectedRevision: 0 })).toThrowError(
+        expect.objectContaining({ code: 'checks.overlay-exclude-failed' }),
+      );
+    } finally {
+      chmodSync(exclude, 0o644);
+    }
+    expect(existsSync(overlayFile(main))).toBe(false);
+  });
+});
+
+describe('one writer at a time', () => {
+  it('serialises two writers that read then add different entries', async () => {
+    const main = makeRepo();
+    const add = (name: string): Promise<void> =>
+      withOverlayLock(main, async () => {
+        const o = state(main);
+        await new Promise((r) => setTimeout(r, 30));
+        writeOverlay(main, { entries: [...o.entries, entry(name)], expectedRevision: o.revision });
+      });
+    await Promise.all([add('a'), add('b')]);
+    const final = state(main);
+    expect(final.entries.map((e) => e.check).sort()).toEqual(['a', 'b']);
+    expect(final.revision).toBe(2);
+    expect(existsSync(lockFile(main))).toBe(false);
+  });
+
+  it('refuses a stale revision as moved', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [], expectedRevision: 0 });
+    expect(() => writeOverlay(main, { entries: [], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-moved' }),
+    );
+  });
+
+  describe('the lock file', () => {
+    const dirOf = (main: string): string => path.dirname(lockFile(main));
+    const put = (main: string, content: string): void => {
+      mkdirSync(dirOf(main), { recursive: true });
+      writeFileSync(lockFile(main), content);
+    };
+
+    it('breaks a lock whose pid is dead, without waiting', async () => {
+      const main = makeRepo();
+      put(main, `${deadPid()}\n`);
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it.each(['', 'garbage\n', '0\n', '2147483648\n', '123', '123\n\n', '-5\n'])(
+      'refuses a lock holding %j, which is not a pid, and breaks nothing',
+      async (content) => {
+        const main = makeRepo();
+        put(main, content);
+        const fn = vi.fn();
+        await expect(withOverlayLock(main, fn, { waitMs: 0 })).rejects.toMatchObject({
+          code: 'checks.overlay-lock-unusable',
+          message: expect.stringContaining(lockFile(main)),
+        });
+        expect(fn).not.toHaveBeenCalled();
+        expect(readFileSync(lockFile(main), 'utf8')).toBe(content);
+        expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+      },
+    );
+
+    it('refuses, never breaks, a live holder lock it could not read (EMFILE)', async () => {
+      const main = makeRepo();
+      put(main, `${process.ppid}\n`);
+      seams.beforeRead = (file) => {
+        if (file === lockFile(main)) throw errno('EMFILE');
+      };
+      try {
+        await expect(withOverlayLock(main, () => 'ran', { waitMs: 0 })).rejects.toMatchObject({
+          code: 'checks.overlay-lock-unusable',
+        });
+      } finally {
+        seams.beforeRead = null;
+      }
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+    });
+
+    it('treats a lock released between its failed create and its read as absent', async () => {
+      const main = makeRepo();
+      put(main, `${process.ppid}\n`);
+      let reads = 0;
+      seams.beforeRead = (file) => {
+        if (file === lockFile(main) && reads++ === 0) rmSync(lockFile(main));
+      };
+      try {
+        expect(await withOverlayLock(main, () => 'ran', { waitMs: 0 })).toBe('ran');
+      } finally {
+        seams.beforeRead = null;
+      }
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('does not remove a live lock that replaced the dead one it was about to break', async () => {
+      const main = makeRepo();
+      const dead = deadPid();
+      put(main, `${dead}\n`);
+      // Between the verdict (the holder is dead) and the reclaim, another writer
+      // broke the dead lock and took a new, live one (this process).
+      seams.afterProbe = (pid) => {
+        if (pid !== dead) return;
+        seams.afterProbe = null;
+        rmSync(lockFile(main));
+        writeFileSync(lockFile(main), `${process.pid}\n`);
+      };
+      const fn = vi.fn();
+      try {
+        await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+          code: 'checks.overlay-busy',
+          message: expect.stringContaining(`pid ${process.pid}`),
+        });
+      } finally {
+        seams.afterProbe = null;
+      }
+      expect(fn).not.toHaveBeenCalled();
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
+      expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+    });
+
+    it('waits, then throws busy naming the dead holder, while another breaker holds the mutex', async () => {
+      const main = makeRepo();
+      const dead = deadPid();
+      put(main, `${dead}\n`);
+      writeFileSync(`${lockFile(main)}.reclaim`, '');
+      const fn = vi.fn();
+      await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+        message: expect.stringContaining(`pid ${dead}`),
+      });
+      expect(fn).not.toHaveBeenCalled();
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${dead}\n`);
+      expect(readFileSync(`${lockFile(main)}.reclaim`, 'utf8')).toBe('');
+    });
+
+    it('publishes the lock through a temp file and link, never visible empty', async () => {
+      const main = makeRepo();
+      const seen: { lockExisted: boolean; temp: string }[] = [];
+      seams.beforeLink = (from, to) => {
+        if (to !== lockFile(main)) return;
+        seen.push({ lockExisted: existsSync(to), temp: readFileSync(from, 'utf8') });
+      };
+      try {
+        await withOverlayLock(main, () => {
+          expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.pid}\n`);
+        });
+      } finally {
+        seams.beforeLink = null;
+      }
+      expect(seen).toEqual([{ lockExisted: false, temp: `${process.pid}\n` }]);
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('leaves no temp file behind when the lock is held', async () => {
+      const main = makeRepo();
+      put(main, `${process.ppid}\n`);
+      await expect(withOverlayLock(main, () => 1, { waitMs: 0 })).rejects.toMatchObject({
+        code: 'checks.overlay-busy',
+      });
+      expect(readdirSync(dirOf(main))).toEqual(['check-tiers.lock']);
+    });
+
+    it('breaks a leaked reclaim mutex and reclaims the dead lock without waiting out the wait', async () => {
+      const main = makeRepo();
+      put(main, `${deadPid()}\n`);
+      const mutex = `${lockFile(main)}.reclaim`;
+      writeFileSync(mutex, '');
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(mutex, old, old);
+      const started = Date.now();
+      expect(await withOverlayLock(main, () => 'ran', { waitMs: 5000 })).toBe('ran');
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+
+    it('releases only a lock that still holds its own pid, and tolerates one already gone', async () => {
+      const main = makeRepo();
+      await withOverlayLock(main, () => {
+        rmSync(lockFile(main));
+        writeFileSync(lockFile(main), `${process.ppid}\n`);
+      });
+      expect(readFileSync(lockFile(main), 'utf8')).toBe(`${process.ppid}\n`);
+      rmSync(lockFile(main));
+      await withOverlayLock(main, () => rmSync(lockFile(main)));
+      expect(readdirSync(dirOf(main))).toEqual([]);
+    });
+  });
+  it('makes a second call in the holder process wait, then throw busy with waitMs', async () => {
+    const main = makeRepo();
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const first = withOverlayLock(main, () => held);
+    const fn = vi.fn();
+    await expect(withOverlayLock(main, fn, { waitMs: 150 })).rejects.toMatchObject({
+      code: 'checks.overlay-busy',
+    });
+    expect(fn).not.toHaveBeenCalled();
+    release();
+    await first;
+    expect(existsSync(lockFile(main))).toBe(false);
+  });
+
+  it('keeps a default wait of OVERLAY_LOCK_WAIT_MS, no more and no less', async () => {
+    expect(OVERLAY_LOCK_WAIT_MS).toBe(30000);
+    const main = makeRepo();
+    writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+    const overlayBytes = readFileSync(overlayFile(main));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    const first = withOverlayLock(main, () => held);
+    const lockBytes = readFileSync(lockFile(main), 'utf8');
+    expect(lockBytes).toBe(`${process.pid}\n`);
+    const filesBefore = readdirSync(path.dirname(lockFile(main))).sort();
+
+    const fn = vi.fn();
+    let settled = false;
+    const second = withOverlayLock(main, fn).then(
+      () => 'resolved',
+      (e: unknown) => e,
+    );
+    void second.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(OVERLAY_LOCK_WAIT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(settled).toBe(true);
+    const err = (await second) as { code?: string; message?: string };
+    expect(err.code).toBe('checks.overlay-busy');
+    expect(err.message).toContain(String(process.pid));
+    expect(err.message).toContain(String(OVERLAY_LOCK_WAIT_MS));
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(readFileSync(overlayFile(main)).equals(overlayBytes)).toBe(true);
+    expect(readFileSync(lockFile(main), 'utf8')).toBe(lockBytes);
+    expect(readdirSync(path.dirname(lockFile(main))).sort()).toEqual(filesBefore);
+    release();
+    await first;
+    expect(existsSync(lockFile(main))).toBe(false);
+  });
+});
+
+describe('crash order and reconcile', () => {
+  it('leaves the previous overlay byte-identical when the rename never happens', () => {
+    const main = makeRepo();
+    writeOverlay(main, { entries: [entry('a')], expectedRevision: 0 });
+    const before = readFileSync(overlayFile(main));
+    expect(() =>
+      writeOverlay(
+        main,
+        { entries: [entry('a'), entry('b')], expectedRevision: 1 },
+        {
+          beforeRename: () => {
+            throw new Error('crash');
+          },
+        },
+      ),
+    ).toThrow('crash');
+    expect(readFileSync(overlayFile(main)).equals(before)).toBe(true);
+    writeOverlay(main, { entries: [entry('a'), entry('b')], expectedRevision: 1 });
+    expect(readdirSync(path.dirname(overlayFile(main)))).toEqual(['check-tiers.json']);
+  });
+
+  const pendingPayload = {
+    check: 'e2e',
+    cmd_sha256: commandDigest(CMD),
+    from_tier: 'post-merge',
+    to_tier: 'pre-merge',
+  };
+
+  it('owes the approved tier the overlay lacks and nothing for a consistent pair', () => {
+    expect(overlayOwes({ revision: 0, entries: [] }, [])).toEqual({
+      missing: [],
+      pending: [],
+      settled: [],
+    });
+    const log = [
+      decided('s#1', 'e2e', 'post-merge'),
+      decided('s#2', 'lint', 'pre-release', 'decline'),
+    ];
+    const owes = overlayOwes({ revision: 0, entries: [] }, log);
+    expect(owes.missing).toEqual([
+      {
+        check: 'e2e',
+        cmd_sha256: commandDigest(CMD),
+        tier: 'post-merge',
+        decided_by_event_id: 's#1',
+        decided_at: '2026-10-31T01:02:03.000Z',
+      },
+    ]);
+    expect(overlayOwes({ revision: 1, entries: owes.missing }, log)).toEqual({
+      missing: [],
+      pending: [],
+      settled: [],
+    });
+    expect(overlayOwes({ unreadable: 'x' }, log)).toEqual({
+      missing: [],
+      pending: [],
+      settled: [],
+    });
+  });
+
+  it('never overwrites an entry that is ahead of the log with its pending promotion', () => {
+    const ahead = {
+      ...entry('e2e', CMD, 'pre-merge'),
+      pending_event: { event_type: 'check-tier-promoted', payload: pendingPayload },
+    };
+    const owes = overlayOwes({ revision: 2, entries: [ahead] }, [
+      decided('s#1', 'e2e', 'post-merge'),
+    ]);
+    expect(owes.missing).toEqual([]);
+    expect(owes.pending).toEqual([ahead]);
+    const logged = stored('s#2', 'check-tier-promoted', pendingPayload);
+    const done = overlayOwes({ revision: 2, entries: [ahead] }, [
+      decided('s#1', 'e2e', 'post-merge'),
+      logged,
+    ]);
+    expect(done.pending).toEqual([]);
+    expect(done.settled).toEqual([ahead]);
+  });
+
+  it('writes a missing approved tier and appends a pending event exactly once', async () => {
+    const main = makeRepo();
+    const stateDir = tmp();
+    const start = await appendEvent(
+      {
+        session_id: 's',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const ctx = {
+      session_id: 's',
+      actor: 'orchestrator',
+      plan_version: 1,
+      causal_parent: start.event_id,
+    };
+    await withOverlayLock(main, () =>
+      reconcileOverlay(main, [decided('s#9', 'e2e', 'post-merge')], ctx, { events: { stateDir } }),
+    );
+    expect(state(main).entries.map((e) => [e.check, e.tier])).toEqual([['e2e', 'post-merge']]);
+
+    const o = state(main);
+    const pe = { event_type: 'check-tier-promoted', payload: pendingPayload };
+    writeOverlay(main, {
+      entries: [{ ...o.entries[0], tier: 'pre-merge', pending_event: pe }] as OverlayEntry[],
+      expectedRevision: o.revision,
+    });
+    const log = [decided('s#9', 'e2e', 'post-merge')];
+    await withOverlayLock(main, () => reconcileOverlay(main, log, ctx, { events: { stateDir } }));
+    const appended = (await readEvents('s', { stateDir })).filter(
+      (e) => e.record.event_type === 'check-tier-promoted',
+    );
+    expect(appended).toHaveLength(1);
+    expect(appended[0]?.record.payload).toEqual(pendingPayload);
+    expect(state(main).entries[0]).not.toHaveProperty('pending_event');
+    expect(state(main).entries[0]?.tier).toBe('pre-merge');
+
+    const revision = state(main).revision;
+    await withOverlayLock(main, () =>
+      reconcileOverlay(main, [...log, ...appended], ctx, { events: { stateDir } }),
+    );
+    expect(state(main).revision).toBe(revision);
+    expect(await readEvents('s', { stateDir })).toHaveLength(2);
+  });
+
+  it('only clears a pending event the log already holds, without appending it again', async () => {
+    const main = makeRepo();
+    const stateDir = tmp();
+    const pe = { event_type: 'check-tier-promoted', payload: pendingPayload };
+    writeOverlay(main, {
+      entries: [{ ...entry('e2e', CMD, 'pre-merge'), pending_event: pe }],
+      expectedRevision: 0,
+    });
+    const ctx = { session_id: 's', actor: 'orchestrator', plan_version: 1, causal_parent: null };
+    await withOverlayLock(main, () =>
+      reconcileOverlay(main, [stored('s#2', 'check-tier-promoted', pendingPayload)], ctx, {
+        events: { stateDir },
+      }),
+    );
+    expect(state(main).entries[0]).not.toHaveProperty('pending_event');
+    expect(existsSync(path.join(stateDir, 's.jsonl'))).toBe(false);
+  });
+});
+
+describe('the checks file is never written', () => {
+  it('leaves a read-only checks file untouched across every export', async () => {
+    const main = makeRepo();
+    const file = path.join(main, 'checks.json');
+    chmodSync(file, 0o444);
+    const bytes = readFileSync(file);
+    const mtime = statSync(file).mtimeMs;
+    const checks = [check('e2e')];
+    const ctx = { session_id: 's', actor: 'orchestrator', plan_version: 1, causal_parent: null };
+    overlayPath(main);
+    readOverlay(main);
+    overlayWritable(main);
+    await withOverlayLock(main, async () => {
+      writeOverlay(main, { entries: [entry('e2e')], expectedRevision: 0 });
+      await reconcileOverlay(main, [decided('s#1', 'e2e', 'post-merge')], ctx);
+    });
+    resolveEffectiveTiers(checks, readOverlay(main));
+    overlayReport(checks, readOverlay(main));
+    overlayOwes(readOverlay(main), []);
+    expect(readFileSync(file).equals(bytes)).toBe(true);
+    expect(statSync(file).mtimeMs).toBe(mtime);
+  });
+});
+
+describe('no write, no lock', () => {
+  it('throws not-a-repo outside git and creates nothing', async () => {
+    const plain = tmp();
+    const before = readdirSync(plain);
+    await expect(withOverlayLock(plain, () => 1)).rejects.toMatchObject({
+      code: 'checks.overlay-not-a-repo',
+    });
+    expect(readdirSync(plain)).toEqual(before);
+  });
+
+  it('creates .blacksmith for its lock and leaves no lock after fn returns or throws', async () => {
+    const main = makeRepo();
+    expect(overlayOwes(readOverlay(main), [])).toEqual({ missing: [], pending: [], settled: [] });
+    expect(existsSync(path.join(main, '.blacksmith'))).toBe(false);
+    await withOverlayLock(main, () => {
+      expect(existsSync(lockFile(main))).toBe(true);
+    });
+    expect(readdirSync(path.join(main, '.blacksmith'))).toEqual([]);
+    await expect(
+      withOverlayLock(main, () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    expect(readdirSync(path.join(main, '.blacksmith'))).toEqual([]);
+    expect(git(main, 'status', '--porcelain')).toBe('');
+  });
+});
+
+beforeEach(() => {
+  vi.useRealTimers();
+});
+
+const errno = (code: string): Error => Object.assign(new Error(code), { code });
+const blacksmithDir = (main: string): string => path.join(main, '.blacksmith');
+const deadPid = (): number => spawnSync(process.execPath, ['-e', '0']).pid as number;
+
+describe('what the overlay is written from is validated', () => {
+  const bad = [
+    ['an empty check', { check: '', cmd_sha256: commandDigest(CMD), to_tier: 'post-merge' }],
+    ['a non-hex cmd_sha256', { check: 'e2e', cmd_sha256: 'xyz', to_tier: 'post-merge' }],
+  ] as const;
+  for (const [name, payload] of bad) {
+    it(`skips an approved decision with ${name}; overlayOwes agrees and the file stays readable`, async () => {
+      const main = makeRepo();
+      const ev = stored('s#9', 'check-tier-decided', { ...payload, decision: 'approve' });
+      const good = decided('s#10', 'lint', 'post-merge');
+      expect(overlayOwes(readOverlay(main), [ev]).missing).toEqual([]);
+      expect(overlayOwes(readOverlay(main), [ev, good]).missing.map((e) => e.check)).toEqual([
+        'lint',
+      ]);
+      const ctx = { session_id: 's', actor: 'operator', plan_version: 1, causal_parent: null };
+      await withOverlayLock(main, () => reconcileOverlay(main, [ev, good], ctx));
+      expect(state(main).entries.map((e) => e.check)).toEqual(['lint']);
+    });
+  }
+
+  it('writeOverlay refuses an entry that would make the file unreadable, writing nothing', () => {
+    const main = makeRepo();
+    const broken = { ...entry('e2e'), cmd_sha256: 'xyz' };
+    expect(() => writeOverlay(main, { entries: [broken], expectedRevision: 0 })).toThrowError(
+      expect.objectContaining({ code: 'checks.overlay-invalid' }),
+    );
+    expect(existsSync(overlayFile(main))).toBe(false);
+    expect(existsSync(blacksmithDir(main))).toBe(false);
+  });
+});

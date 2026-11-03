@@ -100,7 +100,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
         "budget-check-result {"overruns":[],"status":"not-declared","tokensUsed":150}",
-        "testgate-result {"environment":"<1 entries>","pass":true,"results":[{"exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}]}",
+        "testgate-result {"deferred":[],"environment":"<1 entries>","pass":true,"results":[{"check_sha256":"b0ca82928a2e2df2ffad0ff0e2bd39631fceb98f204102cb8bc27eae057c64d6","cmd_sha256":"b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b","exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}],"tier":"pre-merge","tree_sha":"<sha>"}",
         "severity-decisions {"decisions":[],"lesson_ids_escalating":[],"lessons_escalating":0,"lessons_loaded":0}",
         "gate-outcome {"outcome":"pass","reason":null}",
       ]

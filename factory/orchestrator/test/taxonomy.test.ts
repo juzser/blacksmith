@@ -201,8 +201,12 @@ describe('loadTaxonomy (real repo file)', () => {
     // which added `auditor` to agent; to 10 by FD-21, which added `operator`
     // to agent so a person can be a finding's `found_by`; to 11 by
     // factory-error-log task-4, which added `issue-reported` to gate_event; to
-    // 12 by bs-optimize task-1, which added the `other.unclassified` error class.
-    expect(tx.version).toBe(12);
+    // 12 by bs-optimize task-1, which added the `other.unclassified` error class; to 13 by
+    // bs-check-tiers task-2, which added `wave-reverted` to graph_event; to 14 by
+    // bs-check-tiers task-4, which added `queue-tier-run` to gate_event; to 15 by
+    // bs-check-tiers task-9, which added `check-tier-decided`, `check-tier-promoted`
+    // and `check-tier-batch-answered` to gate_event.
+    expect(tx.version).toBe(15);
     for (const dim of [
       'case',
       'origin',

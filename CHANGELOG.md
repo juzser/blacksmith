@@ -31,6 +31,51 @@ than appearing in it.
 
 ### Added
 
+The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
+belongs. One entry.
+
+- **Check tiers** (`bs-check-tiers`). A check in `checks.json` may carry a
+  `tier`: `pre-merge`, `post-merge` or `pre-release`. Absent means `pre-merge`
+  unless an approved move in the tier overlay (below) applies to that check, so
+  a file that labels nothing behaves as before only while no approved overlay
+  move applies, and nothing is guessed from a stack or a command name. `bs gate run` runs only the pre-merge tier and
+  records what it deferred, `bs results check --as gate` applies the same
+  selection, and `bs brief compose` lists only the pre-merge checks in a
+  worker's brief and names the deferred ones. What `bs` learns lives in a
+  local overlay, `.blacksmith/check-tiers.json`, kept out of git: your file is
+  never rewritten, a tier it declares always wins, and an overlay that is
+  missing, tracked or outside a repository leaves every undeclared check in
+  `pre-merge`. `bs queue run --checks` makes the pre-merge tier the
+  pre-landing test; with no later-tier entry in the effective tiers (declared
+  plus overlay) `--test-cmd` and `--select-test-cmd` run as before, and with one they are accepted but not
+  run. Every `wave-merged` now carries `merge_sha`. The post-merge batch,
+  `bs checks post-merge`, runs on the integration branch when a batch is due,
+  bisects a red that reproduces to the one task that broke it, tests a
+  revert of that task's merge with both tiers, lands it through the queue's
+  landing path and records a `wave-reverted` that reopens the task
+  (`bs worktree create <project> <epic> <task> --reopen --revert <sha>` brings
+  its branch back); a revert that landed but was never recorded is finished on
+  the next run, and a failure that never ran, happened while the machine
+  slept, or did not reproduce blames nobody. `--held` lists the tasks waiting
+  on an uncertified merge, and `bs wave check --checks <file> --project <dir>`
+  refuses them. Per-tier close: `bs integration check --tier` runs one tier,
+  all of them, or `remaining`, and `bs epic close` and `bs epic verdict` with
+  `--checks` need every declared check of every tier certified at the head; a
+  close without `--checks` on an epic whose records use tiers is refused. The
+  ledger, `bs checks ledger`, folds the event log into runs, minutes, flake
+  rate and catches per check over 30 days, and `bs checks proposals` asks the
+  operator one question per epic, never one per check, listing for each check
+  that ran at least 20 times, cost 30 minutes and never caught a defect the
+  runs covered, minutes spent and minutes saved of moving it to a later tier;
+  the reply is `<n><letter>` tokens or `none`, `bs checks apply` re-checks
+  every guardrail and refuses the whole batch with the failing items, and a
+  demoted check that fails a reproduced post-merge run moves back to
+  `pre-merge` by itself. Projects made with `bs new` get the scaffolded CI:
+  `scripts/check.mjs` (`pnpm run check`), a `ci.yml` with one job per tier fed
+  by the same file, and, with `--ui`, a dormant sharded e2e workflow; nothing
+  requires GitHub Actions. The Activity feed shows readable names for the new
+  gate rows.
+
 The gate-bounce epic (`bs-gate-bounce`) moves the gate's paperwork checks to
 before hand-off. One entry per task.
 

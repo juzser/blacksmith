@@ -13,6 +13,7 @@ import { epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { namesTask } from './taskLifecycle.js';
 
 export class InFlightError extends SmithError {}
+export class HeldByPostMergeError extends SmithError {}
 
 /** The epic and the plan version the fold is asked about. */
 export interface AdmissionScope {
@@ -81,6 +82,23 @@ export function assertNotInFlight(taskId: string, inFlight: ReadonlySet<string>)
         'wave.in-flight',
         `wave.in-flight: "${taskId}" is admitted and not finished; it cannot join another wave.`,
         { taskId },
+      );
+    }
+  }
+}
+
+/**
+ * Refuse a task held by a post-merge check. `held` maps a task id to the
+ * merged task ids it waits on (computed by the caller); raises
+ * `wave.held-by-post-merge` naming the task and those merges.
+ */
+export function assertNotHeld(taskId: string, held: ReadonlyMap<string, readonly string[]>): void {
+  for (const [heldId, merges] of held) {
+    if (taskIdsMatch(heldId, taskId)) {
+      throw new HeldByPostMergeError(
+        'wave.held-by-post-merge',
+        `wave.held-by-post-merge: "${taskId}" waits on ${merges.map((m) => `"${m}"`).join(', ')}, whose post-merge checks have not cleared.`,
+        { taskId, merges: [...merges] },
       );
     }
   }

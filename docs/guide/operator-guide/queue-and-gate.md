@@ -13,6 +13,7 @@ merge queue for one epic:
 bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
+  --checks checks.json \
   --tasks tasks.json \
   --plan plans/epic-1.json \
   --session sess-7 --causal-parent sess-7#0
@@ -28,9 +29,13 @@ unwritten.
 admitted one at a time: certify there is a commit to merge → rebase onto
 the current integration-branch head → run the cumulative regression gate
 (`--test-cmd`, standing in for "every previously merged task's tests in
-this epic") → merge on green, bounce on red. The command stops at the
-first non-`merged` outcome and exits `1`; prints the full outcome array
-either way.
+this epic") → merge on green, bounce on red. With `--checks` and an entry
+whose effective tier is later than pre-merge (declared or from the overlay),
+the pre-merge tier is the pre-landing test and neither `--test-cmd` nor
+`--select-test-cmd` runs; the landing records `pre_landing: pre-merge-tier`
+and names its `queue-tier-run` record by `pre_landing_run_id` (§5). The
+command stops at the first non-`merged` outcome and exits `1`; prints the full
+outcome array either way.
 
 Each task's step holds the machine's heavy lock (§5e), under the label
 `queue-<task id>`, from the rebase through the merge and its `wave-merged`.
@@ -346,6 +351,47 @@ bs gate run epic-1/task-1 \
   `timeout_ms`; a lock wait that times out fails that check with
   `reason: "heavy.wait-timeout"` and the holder in its `tail`, so the gate
   reads `tests-failed`.
+- `"tier"` — an entry may also carry `tier`, beside `heavy`: `heavy` says a
+  check runs under the machine lock, `tier` says *when* it runs. One of
+  `pre-merge`, `post-merge` or `pre-release`; an unknown value is refused at
+  read time, naming the entry and the file. **Absent means `pre-merge`**
+  unless the tier overlay (the next bullet) has moved that check, so a file
+  that labels nothing behaves exactly as before while the overlay moves none
+  of its checks, and an empty file still passes. `bs gate run` runs the pre-merge tier only and names what it
+  deferred in the `testgate-result`; a non-empty file with no pre-merge entry
+  is refused before any stage (`gate.no-pre-merge-checks`), and so is a
+  deferred check a gate stage depends on (`gate.stage-check-deferred`). The
+  merge queue reads the same file (`bs queue run --checks`, §4): with no
+  later-tier entry, declared or from the overlay, it runs `--test-cmd` as it
+  always did, and with one the
+  pre-merge tier is the pre-landing test and neither `--test-cmd` nor
+  `--select-test-cmd` runs, though both flags are still accepted. The
+  post-merge tier runs on the integration branch after landings
+  (`bs checks post-merge`), and `bs integration check --tier` runs one tier,
+  every tier, or what the head is not yet certified for (§7a of
+  [closing an epic](closing-an-epic.md)).
+- **The tier overlay.** What `bs` learns about tiers does not touch your
+  file. It lives in `.blacksmith/check-tiers.json` in the project's main
+  worktree, shared by every linked worktree and kept out of git through
+  `.git/info/exclude`; the event log is the source of truth and the overlay is
+  its local copy. A tier your file *declares* always wins (`declared`); else
+  an overlay entry with the same check name and command; else `pre-merge`.
+  Each overlay entry is reported once: `shadowed` when your file declares a
+  tier for that name (the declaration wins), `orphaned` when no entry has that
+  name or the command changed since the decision (it matches nothing, so the
+  check falls back to `pre-merge`), otherwise `active`. An overlay that is
+  missing, unreadable or tracked by git leaves every undeclared check in
+  `pre-merge` and `bs` asks no question it could not apply. Four layouts have
+  no overlay: outside a git repository; a bare repository and its linked
+  worktrees; an absorbed submodule, whose git dir lives in the superproject's
+  `.git/modules/`, and its linked worktrees (a submodule whose `.git` is its
+  own directory is an ordinary repository and keeps its overlay at its own
+  root); and a `--separate-git-dir` layout's main work tree and its linked
+  worktrees, except the one known wrong case below. In each, writes are refused with `checks.overlay-not-a-repo` and proposals carry
+  no items, so no tier is learned there. The one known wrong case: every linked
+  worktree of a `--separate-git-dir` layout whose git dir is named `.git`
+  resolves the overlay to that git dir's parent, not to the work tree. The mechanism, its thresholds and its guardrails are specified in
+  [`docs/specs/check-tiers-scope.md`](../../specs/check-tiers-scope.md).
 - `--grader` — the grader's own result file for this task
   (`state/results/<task-id>.grader-r<round>.json`). Its `structured_output` is
   validated against `grader-verdict.schema.json`, and the rubric gates: any

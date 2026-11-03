@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { availableParallelism, loadavg, constants as osConstants } from 'node:os';
 import { BS_PREFIX, LEGACY_PREFIX } from './env.js';
 import { SmithError } from './errors.js';
@@ -29,6 +30,117 @@ export interface CheckCommand {
    * decides from the name.
    */
   heavy?: boolean;
+  /**
+   * When the check runs: `pre-merge` (the gate and the merge queue),
+   * `post-merge` or `pre-release`. Absent means `pre-merge`. Validated
+   * fail-closed where the file is read (`assertCheckTier`).
+   */
+  tier?: CheckTier;
+  /** Where the effective tier came from; set by the file reader, never declared. */
+  tierSource?: 'declared' | 'overlay' | 'default';
+}
+
+export type CheckTier = 'pre-merge' | 'post-merge' | 'pre-release';
+
+export const CHECK_TIERS: readonly CheckTier[] = ['pre-merge', 'post-merge', 'pre-release'];
+
+/** The tier a check runs in: its declared one, else `pre-merge`. */
+export function checkTier(check: Pick<CheckCommand, 'tier'>): CheckTier {
+  return check.tier ?? 'pre-merge';
+}
+
+/** The checks of one tier, in file order. */
+export function selectTier<T extends Pick<CheckCommand, 'tier'>>(
+  checks: readonly T[],
+  tier: CheckTier,
+): T[] {
+  return checks.filter((c) => checkTier(c) === tier);
+}
+
+/** Whether any check sits in post-merge or pre-release. */
+export function declaresLaterTier(checks: readonly Pick<CheckCommand, 'tier'>[]): boolean {
+  return checks.some((c) => checkTier(c) !== 'pre-merge');
+}
+
+/** Refuse a `tier` that is not one of the three exact strings (absent is fine). */
+export function assertCheckTier(check: CheckCommand, file: string): void {
+  const tier: unknown = check.tier;
+  if (tier === undefined || CHECK_TIERS.includes(tier as CheckTier)) return;
+  throw new SmithError(
+    'gate.invalid-check-tier',
+    `"${check.name}" in ${file} has tier ${JSON.stringify(tier)}; it must be one of ${CHECK_TIERS.map((t) => `"${t}"`).join(', ')}.`,
+    { name: check.name, tier, file },
+  );
+}
+
+const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/** sha256 hex of the raw command string: the ledger's identity for a check. */
+export function commandDigest(cmd: string): string {
+  return sha256(cmd);
+}
+
+/**
+ * sha256 hex of the canonical JSON of name, command, heavy and timeout: the
+ * certification identity. Never the tier, so moving a check keeps its results.
+ */
+export function checkDigest(check: CheckCommand): string {
+  return sha256(
+    JSON.stringify({
+      name: check.name,
+      cmd: check.cmd,
+      heavy: check.heavy ?? null,
+      timeout_ms: check.timeout_ms ?? null,
+    }),
+  );
+}
+
+/** Whether a result is a check whose command never ran: the heavy-lock wait timed out. */
+export function isNotRun(result: Pick<CheckResult, 'reason'>): boolean {
+  return result.reason === 'heavy.wait-timeout';
+}
+
+export interface DeferredCheck {
+  name: string;
+  tier: CheckTier;
+  tier_source: 'declared' | 'overlay' | 'default';
+}
+
+/**
+ * The checks the gate runs and the ones it defers, with both refusals: a
+ * non-empty file whose pre-merge selection is empty, and a stage-bound check
+ * (one a gate stage reads) whose tier is later. An empty file selects nothing
+ * and defers nothing, as before tiers existed.
+ */
+export function selectGateChecks(
+  checks: readonly CheckCommand[],
+  stageBound: readonly string[],
+): { selected: CheckCommand[]; deferred: DeferredCheck[] } {
+  const selected = selectTier(checks, 'pre-merge');
+  if (checks.length > 0 && selected.length === 0) {
+    throw new SmithError(
+      'gate.no-pre-merge-checks',
+      `The checks file has ${checks.length} check(s) and none is in the pre-merge tier (${checks.map((c) => `${c.name}: ${checkTier(c)}`).join(', ')}), so the gate would run nothing and pass. Put at least one check in pre-merge.`,
+      { checks: checks.map((c) => ({ name: c.name, tier: checkTier(c) })) },
+    );
+  }
+  const deferred = checks
+    .filter((c) => checkTier(c) !== 'pre-merge')
+    .map((c) => ({
+      name: c.name,
+      tier: checkTier(c),
+      tier_source:
+        c.tierSource ?? (c.tier === undefined ? ('default' as const) : ('declared' as const)),
+    }));
+  const bound = deferred.find((d) => stageBound.includes(d.name));
+  if (bound !== undefined) {
+    throw new SmithError(
+      'gate.stage-check-deferred',
+      `"${bound.name}" is in the ${bound.tier} tier, but a gate stage reads it, so it must stay pre-merge.`,
+      { name: bound.name, tier: bound.tier },
+    );
+  }
+  return { selected, deferred };
 }
 
 /**
@@ -69,6 +181,10 @@ export interface CheckResult {
   lock_wait_ms?: number;
   /** Set to `heavy.wait-timeout` when the check failed because the lock wait timed out. */
   reason?: string;
+  /** sha256 of the command alone (`commandDigest`); set by `run`. */
+  cmd_sha256?: string;
+  /** sha256 of name, command, heavy and timeout (`checkDigest`); set by `run`. */
+  check_sha256?: string;
 }
 
 /** `key` also covers API_KEY and APIKEY; `passw` covers PASSWORD and PASSWD. */
@@ -110,6 +226,19 @@ export interface RunOptions {
   heavyLock?: Pick<HeavyLockOptions, 'lockDir' | 'pollMs' | 'maxWaitMs' | 'isPidAlive' | 'env'>;
   /** Clock and load sources for the environment evidence; each defaults to the real one. */
   environmentSources?: EnvironmentSources;
+}
+
+/**
+ * The evidence of every failed check whose own window shows the machine slept.
+ * Each failed check is judged by its own entry, so a gap on a check that
+ * passed never classifies another check's failure. Empty when the run passed.
+ */
+export function sleptFailedChecks(testResult: RunResult): CheckEnvironment[] {
+  const environment = testResult.environment ?? [];
+  return testResult.results.flatMap((r, i) => {
+    const entry = environment[i];
+    return !r.pass && entry !== undefined && sleptDuringCheck(entry) ? [entry] : [];
+  });
 }
 
 export interface RunResult {
@@ -499,7 +628,11 @@ export async function run(checks: CheckCommand[], opts: RunOptions): Promise<Run
       );
       measured = { ...m, result: { ...m.result, lock_wait_ms: 0 } };
     }
-    results.push(measured.result);
+    results.push({
+      ...measured.result,
+      cmd_sha256: commandDigest(check.cmd),
+      check_sha256: checkDigest(check),
+    });
     environment.push(measured.environment);
     if (!measured.result.pass && !opts.runAll) break;
   }

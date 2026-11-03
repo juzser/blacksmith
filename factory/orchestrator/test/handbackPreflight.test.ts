@@ -1047,7 +1047,7 @@ describe('task-8 docs: composer, lint and the tester result file', () => {
       /bs brief compose --role <role> --task <task-id> --session <id> --work-root <work-root>/,
     );
     expect(step8).toMatch(
-      /`bs brief compose` writes each coder's, tester's and grader's line, and each coder's and tester's gate check commands, from the flags `--provider`, `--model-tier`, `--base` \(the coder\), `--checks` \(the file step 7's gate line takes\) and `--work-root <work-root>` \(the value of steps 5 and 7\); it refuses to compose such a brief without them, and `bs dispatch lint` exits 1 on a brief that lacks them/,
+      /`bs brief compose` writes each coder's, tester's and grader's line, and each coder's and tester's gate check commands, from the flags `--provider`, `--model-tier`, `--base` \(the coder\), `--checks` \(the file step 7's gate line takes\) and `--work-root <work-root>` \(the value of steps 5 and 7\); it refuses to compose such a brief without them, without an absolute `--worktree` or, for a grader brief, without an absolute `--artifact`, and `bs dispatch lint` exits 1 on a brief that lacks them/,
     );
   });
 
