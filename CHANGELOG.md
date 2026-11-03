@@ -326,6 +326,15 @@ before hand-off. One entry per task.
 
 ### Fixed
 
+- **`trial.mjs record` no longer fails when `.blacksmith` is git-ignored.**
+  `diffStats` marked new files with `git add -N -- . ':(exclude).blacksmith'`,
+  which exits 1 under git 2.55 when the excluded directory is ignored (for
+  example listed in `.git/info/exclude`), so `record` stopped at "diff
+  (marking new files) failed". It now lists the untracked, non-ignored files
+  itself and marks only those, so the install directory stays out of the
+  numbers and out of the index whether it is absent, untracked, ignored or
+  partly tracked.
+
 - **`--no-findings` is an attestation only the operator can make.** It
   records `attested_by: operator` and closes a judge turn or a closing spec
   review with no findings file. Until now, any actor could write one, so a
