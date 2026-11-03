@@ -380,6 +380,31 @@ describe('record', () => {
     },
   );
 
+  it('record counts new files whose names look like pathspecs exactly once (real git)', async () => {
+    writeTask('kind-a', {});
+    prepare({ task: 'kind-a', arm: 'plain', dir: work }, deps(nodeSpawner));
+    for (const n of ['-dash.txt', '[ab].txt', 'a.txt', 'with space.txt', ':!keep.txt']) {
+      put(path.join(work, n), 'x\n');
+    }
+    const rec = await record(base(), deps(nodeSpawner));
+    expect(rec.diff).toEqual({ files: 5, added: 5, removed: 0 });
+  });
+
+  it('record marks 201 new files in more than one add call (real git)', async () => {
+    writeTask('kind-a', {});
+    prepare({ task: 'kind-a', arm: 'plain', dir: work }, deps(nodeSpawner));
+    for (let i = 0; i < 201; i++) put(path.join(work, 'src', `f${i}.js`), 'x\n');
+    const adds: number[] = [];
+    const spy: Spawner = (cmd, args, o) => {
+      if (cmd === 'git' && args[0] === 'add' && args.includes('-N')) adds.push(args.length);
+      return nodeSpawner(cmd, args, o);
+    };
+    const rec = await record(base(), deps(spy));
+    expect(rec.diff).toEqual({ files: 201, added: 201, removed: 0 });
+    expect(adds).toHaveLength(2);
+    expect(Math.max(...adds)).toBeLessThanOrEqual(200 + 3);
+  });
+
   it('record with no transcript stores tokens null and wall_clock_ms null', async () => {
     writeTask('kind-a', {});
     const rec = await record(base(), deps(fakeSpawner().spawn));
