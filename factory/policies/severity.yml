@@ -32,6 +32,10 @@ levels:
       - new flaky test introduced by the task
       - behavioral-drift touching a core flow
       - >
+          unmet acceptance criterion, or one no test would fail without (the
+          `test-coverage` category): a criterion removed or inverted leaves
+          the suite green
+      - >
           serious visual defect against the uiux spec or the project's design
           system: a spec'd layout broken, or content clipped/overflowing, at
           a required viewport; an interactive target below the project's
