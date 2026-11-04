@@ -15,6 +15,8 @@ import {
 
 export class EventError extends SmithError {}
 
+export type EnvelopeDefault = 'session' | 'causal_parent';
+
 export interface EventEdge {
   edge_type: string;
   edge_provenance: string;
@@ -47,6 +49,14 @@ export interface EventInput {
    * and validated like any other field.
    */
   cli_session_id?: string;
+  /**
+   * Which envelope fields the writer filled in rather than being told: any of
+   * `session` (taken from `CLAUDE_CODE_SESSION_ID`) and `causal_parent` (the
+   * log's last event, read under the log lock). Absent on an event whose
+   * envelope was given in full, so a reader can tell a chosen parent from a
+   * defaulted one (architecture §18 rule 8; lean-mode-scope O-11).
+   */
+  envelope_defaulted?: EnvelopeDefault[];
   /**
    * Honoured only under `opts.keepTs` (a `prompts-` backfill); every other
    * write is stamped "now" and this field is overwritten.
@@ -786,6 +796,8 @@ export async function validateEventEnvelope(
   opts: EventOpts = {},
 ): Promise<void> {
   const causalParent = input.causal_parent ?? null;
+  // A parent the writer will default under the lock is not yet known to check.
+  if (causalParent === null && input.session_id === envelopeDefaults.parentFor) return;
   requireCausalParentPresence(input.event_type, causalParent);
   if (causalParent === null) return;
 
@@ -813,16 +825,67 @@ function keptTs(input: EventInput, existing: readonly StoredEvent[]): string {
   return new Date(ms).toISOString();
 }
 
+/**
+ * Envelope defaults chosen by the CLI for THIS process (O-11). `bs` is one
+ * command per process, so `eventContextFromFlags` records here what it could
+ * not take from a flag, and the writer acts on it at the one place that holds
+ * the log lock: a verb hands the writer `causal_parent: null`, and a `null`
+ * for a flagged session means "the last event of that log", resolved after the
+ * log is read under the lock, never computed beforehand. Library callers never
+ * set this, so for them a null parent is refused exactly as before.
+ */
+const envelopeDefaults: { session?: string; parentFor?: string } = {};
+
+export function setEnvelopeDefaults(defaults: { session?: string; parentFor?: string }): void {
+  delete envelopeDefaults.session;
+  delete envelopeDefaults.parentFor;
+  if (defaults.session !== undefined) envelopeDefaults.session = defaults.session;
+  if (defaults.parentFor !== undefined) envelopeDefaults.parentFor = defaults.parentFor;
+}
+
+/** The `session-start` record `bs session start` writes: one builder for both writers of a root. */
+function rootInput(sessionId: string, opts: StartSessionOptions = {}): EventInput {
+  return {
+    session_id: sessionId,
+    actor: opts.actor ?? 'operator',
+    event_type: ROOT_EVENT_TYPE,
+    plan_version: 1,
+    causal_parent: opts.continues ?? null,
+    payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
+  };
+}
+
 async function appendEventLocked(
   input: EventInput,
   opts: EventOpts,
   filePath: string,
 ): Promise<StoredEvent> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  let existing = await readEventsAtPath(filePath, input.session_id);
+
+  // O-11: a null parent on a non-root event, for the session the CLI flagged,
+  // is the last event of the log as read HERE, under the lock. An empty log
+  // gets the same root `bs session start` writes first.
+  const defaulted: EnvelopeDefault[] = [];
+  if (input.event_type !== ROOT_EVENT_TYPE && input.session_id === envelopeDefaults.session) {
+    defaulted.push('session');
+  }
+  if (
+    input.causal_parent == null &&
+    input.event_type !== ROOT_EVENT_TYPE &&
+    input.session_id === envelopeDefaults.parentFor
+  ) {
+    if (existing.length === 0) {
+      await appendEventLocked(rootInput(input.session_id), opts, filePath);
+      existing = await readEventsAtPath(filePath, input.session_id);
+    }
+    input = { ...input, causal_parent: (existing[existing.length - 1] as StoredEvent).event_id };
+    defaulted.push('causal_parent');
+  }
+  if (defaulted.length > 0) input = { ...input, envelope_defaulted: defaulted };
+
   const causalParent = input.causal_parent ?? null;
   requireCausalParentPresence(input.event_type, causalParent);
-
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const existing = await readEventsAtPath(filePath, input.session_id);
 
   if (causalParent !== null) {
     await validateCausalParent(input, opts, existing);
@@ -954,14 +1017,7 @@ export async function startSession(
   opts: StartSessionOptions = {},
 ): Promise<StoredEvent> {
   const filePath = logPath(sessionId, opts);
-  const input: EventInput = {
-    session_id: sessionId,
-    actor: opts.actor ?? 'operator',
-    event_type: ROOT_EVENT_TYPE,
-    plan_version: 1,
-    causal_parent: opts.continues ?? null,
-    payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
-  };
+  const input = rootInput(sessionId, opts);
   if (opts.promptId !== undefined) await requireUserPrompt(opts.promptId, opts);
 
   return enqueue(filePath, () =>
@@ -1059,6 +1115,8 @@ export async function readEvents(sessionId: string, opts: EventOpts = {}): Promi
  * about an existing-but-empty log; that one really is an empty session.
  */
 export function requireSession(sessionId: string, opts: EventOpts = {}): void {
+  // A session whose parent the CLI is defaulting gets its root at the first write.
+  if (envelopeDefaults.parentFor === sessionId) return;
   const filePath = logPath(sessionId, opts);
   if (!existsSync(filePath)) {
     throw new EventError(

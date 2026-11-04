@@ -93,6 +93,7 @@ import {
   type StoredEvent,
   sessionsOpenedByEdge,
   sessionTree,
+  setEnvelopeDefaults,
   startSession,
   tailEvents,
 } from './events.js';
@@ -794,10 +795,25 @@ function requirePositionals(positional: string[], doc: CommandDoc, required?: nu
  * a fence read back tomorrow is the first place anyone would notice.
  */
 function eventContextFromFlags(flags: Record<string, string>): EventContext {
+  // O-11: both are optional. The session falls back to the CLI session id the
+  // Bash tool exports; the parent stays null here and the writer fills it in
+  // from the log's last event under the log lock (events.ts, `envelopeDefaults`).
+  // An empty env var is no session: refuse as before rather than write to "".
+  const fromEnv = process.env.CLAUDE_CODE_SESSION_ID;
+  const sessionId =
+    flags.session === undefined && fromEnv !== undefined && fromEnv !== ''
+      ? fromEnv
+      : requireFlag(flags, 'session');
+  const explicitParent = flags['causal-parent'];
+  setEnvelopeDefaults({
+    ...(flags.session === undefined ? { session: sessionId } : {}),
+    ...(explicitParent === undefined ? { parentFor: sessionId } : {}),
+  });
   return {
-    sessionId: requireFlag(flags, 'session'),
+    sessionId,
     planVersion: boundedIntFlag(flags, 'plan-version', { min: 1 }) ?? 1,
-    causalParent: requireFlag(flags, 'causal-parent'),
+    // Null is the "defaulted" marker; an explicit flag, even an empty one, is passed through.
+    causalParent: explicitParent ?? null,
     actor: flags.actor,
   };
 }
@@ -3848,10 +3864,10 @@ async function main(): Promise<number> {
     // unwritten. `--session` is what turns the run into a fact, so a run
     // with no session to write it into is refused before any git write
     // below, rather than left to merge and tell nobody.
-    if (!flags.session) {
+    if (!flags.session && !process.env.CLAUDE_CODE_SESSION_ID) {
       throw new SmithError(
         'cli.queue-run-needs-session',
-        'queue run merges task branches into the integration branch, so every merge must be logged: pass --session <id> --causal-parent <event-id> --plan <plan.json> (add --plan-version if the plan is not version 1).',
+        'queue run merges task branches into the integration branch, so every merge must be logged: pass --session <id> (or run inside Claude Code, which sets CLAUDE_CODE_SESSION_ID) and --plan <plan.json>; --causal-parent defaults to the last event of the session, so pass it explicitly when several tasks write into the session at once (add --plan-version if the plan is not version 1).',
         { epic },
       );
     }
@@ -3897,9 +3913,10 @@ async function main(): Promise<number> {
       // …and the plan is not the only register: a follow-up minted by
       // `findings raise` is in the log alone, and refusing it here is what
       // left D-41's own follow-up unmergeable (D-48/P9-31).
-      const logged = flags.session
-        ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
-        : [];
+      const logged = await readAddedTasks(
+        { sessionId: events.ctx.sessionId },
+        eventOptsFromFlags(flags),
+      );
       const loggedIds = logged.map((t) => t.taskId);
       for (const task of tasks) task.taskId = resolveTaskId(plan, task.taskId, loggedIds);
       edges = plan.edges.map((e) => ({ task: e.task, dependsOn: e.dependsOn }));

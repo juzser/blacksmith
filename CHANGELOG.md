@@ -31,6 +31,15 @@ than appearing in it.
 
 ### Added
 
+- **Optional envelope flags** (lean mode, O-11). `--session` and `--causal-parent`
+  are optional on every verb that takes the event envelope. `--session`
+  defaults to `CLAUDE_CODE_SESSION_ID` and is refused when neither is set;
+  `--causal-parent` defaults to the session's last event, read under the log
+  lock, with the root `bs session start` writes added first on an empty log.
+  A defaulted event records `envelope_defaulted`. Explicit flags behave as
+  before. Fan-out writers, such as the wave-runner, must still pass
+  `--causal-parent`: the last event may be a sibling's.
+
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.
 

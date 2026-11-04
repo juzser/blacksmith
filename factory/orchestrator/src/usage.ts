@@ -46,7 +46,17 @@ export interface CommandDoc {
 }
 
 /** The event-writing flags shared by every command that appends to a session log. */
-const EVENTS = '--session <id> --causal-parent <event-id> [--plan-version <n>] [--actor <name>]';
+const EVENTS =
+  '[--session <id>] [--causal-parent <event-id>] [--plan-version <n>] [--actor <name>]';
+/**
+ * What the two optional envelope flags default to (O-11), printed by `--help`
+ * wherever a command takes them. The fan-out warning is architecture §18 rule 8:
+ * a "last event" read while siblings write is the sibling's event.
+ */
+export const ENVELOPE_NOTE =
+  'Envelope: --session and --causal-parent are optional. --session defaults to $CLAUDE_CODE_SESSION_ID (refused when neither is set); ' +
+  "--causal-parent defaults to the session's last event, read under the log lock, with the session's root written first when the log is empty. " +
+  "A defaulted event records envelope_defaulted. Several tasks writing into one session at once (fan-out, as the wave-runner does) must pass --causal-parent explicitly: the last event may be a sibling's.";
 /** …plus the state-dir override, on the commands whose module accepts EventOpts. */
 const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
 /**
@@ -127,7 +137,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'plan quorum',
     positionals: '',
     flags:
-      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--project <dir>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
+      '--plan-version <n> [--session <id>] [--causal-parent <event-id>] [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--project <dir>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
     summary:
       'Critique-only review of a drafted plan: --plan <draft.json> before it is filed, or --epic for the filed version. Exit 1 means the operator must look first.',
   },
@@ -351,11 +361,11 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--checks <checks.json>] [--batch] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--session <id>] [--causal-parent <event-id>] --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--checks <checks.json>] [--batch] [--state-dir <dir>]',
     summary:
       'Serially rebase, test, and merge task branches into the integration branch. ' +
-      'A merge is a fact the log must carry, so --session/--causal-parent/--plan are required — ' +
-      'refuses before any git write without them. ' +
+      'A merge is a fact the log must carry, so a session (--session, or $CLAUDE_CODE_SESSION_ID) and --plan are required — ' +
+      'refuses before any git write without them. --causal-parent defaults to the last event; pass it when tasks write into the session at once. ' +
       '--batch (roadmap merge-lanes) groups claim-disjoint tasks with groupForBatch and ' +
       'tests each group once instead of once per task — see queue.ts and the operator guide. ' +
       '--checks reads the project checks file: with no post-merge or pre-release entry (or an empty file) ' +
@@ -687,7 +697,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'checks proposals',
     positionals: '',
     flags:
-      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --session <id> --plan-version <n> --causal-parent <event-id> [--actor <name>] [--state-dir <dir>] [--now <iso>]',
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> [--session <id>] --plan-version <n> [--causal-parent <event-id>] [--actor <name>] [--state-dir <dir>] [--now <iso>]',
     summary:
       'Print the pending tier proposals, notices, overlay report and answered_in_epic. Writes only the repair the overlay and the log already owe each other, under the envelope flags.',
   },
@@ -695,7 +705,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'checks apply',
     positionals: '<decisions.json>',
     flags:
-      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --actor <name> --session <id> --plan-version <n> --causal-parent <event-id> [--hand-off <refusal-code>] [--state-dir <dir>] [--now <iso>]',
+      '--project <dir> --specs-dir <dir> --checks <checks.json> --epic <id> --actor <name> [--session <id>] --plan-version <n> [--causal-parent <event-id>] [--hand-off <refusal-code>] [--state-dir <dir>] [--now <iso>]',
     summary:
       'Apply the operator’s tier decisions, or refuse the whole batch with the failing items. Exit 1 on a refusal. With --hand-off <refusal-code> it records that the reply went to the operator instead (decides nothing, validates nothing, takes no lock).',
   },
@@ -1169,8 +1179,10 @@ export function usageFor(key: string): CommandDoc {
   return doc;
 }
 
-function renderCommands(docs: readonly CommandDoc[]): string {
-  return docs.map((doc) => `  ${usageLine(doc)}\n      ${doc.summary}\n`).join('');
+function renderCommands(docs: readonly CommandDoc[], withEnvelopeNote = false): string {
+  const out = docs.map((doc) => `  ${usageLine(doc)}\n      ${doc.summary}\n`).join('');
+  const takesEnvelope = docs.some((doc) => doc.flags.includes('--causal-parent'));
+  return withEnvelopeNote && takesEnvelope ? `${out}\n  ${ENVELOPE_NOTE}\n` : out;
 }
 
 /**
@@ -1196,6 +1208,8 @@ export function usageText(namespace?: string): string {
           '',
           '  bs <namespace> --help      list one namespace',
           '  bs <command> --help        show one command',
+          '',
+          `  ${ENVELOPE_NOTE}`,
           '',
         ].join('\n')
       : `Usage: bs ${namespace} <action> [args] [--flags]\n`;
@@ -1223,12 +1237,12 @@ export function helpText(namespace?: string, action?: string): string | undefine
 
   const key = action === undefined ? namespace : `${namespace} ${action}`;
   const exact = COMMANDS.filter((doc) => doc.command === key);
-  if (exact.length > 0) return renderCommands(exact);
+  if (exact.length > 0) return renderCommands(exact, true);
 
   // `bs new my-project --help`: the action slot holds a positional, so the
   // namespace alone is the command.
   const bare = COMMANDS.filter((doc) => doc.command === namespace);
-  if (bare.length > 0) return renderCommands(bare);
+  if (bare.length > 0) return renderCommands(bare, true);
 
   if (NAMESPACES.has(namespace)) return usageText(namespace);
   return undefined;

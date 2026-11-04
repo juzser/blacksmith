@@ -20,10 +20,12 @@ bs queue run epic-1 \
 ```
 
 A merge that lands is a fact the log must carry (#269): `--session`,
-`--causal-parent` and `--plan` are all required, and the queue refuses
-before any git write when one is missing (`cli.queue-run-needs-session` /
-`cli.missing-flag`) rather than merging silently and leaving `wave-merged`
-unwritten.
+`--causal-parent` and `--plan` are how it is logged. A session is required
+(`--session`, or `CLAUDE_CODE_SESSION_ID` inside Claude Code) and so is
+`--plan`; the queue refuses before any git write when one is missing
+(`cli.queue-run-needs-session` / `cli.missing-flag`) rather than merging
+silently and leaving `wave-merged` unwritten. `--causal-parent` is optional
+and defaults to the session's last event; see the envelope bullet in §5.
 
 `tasks.json` is `Array<{ taskId, branch, worktreeDir }>`. Each task is
 admitted one at a time: certify there is a commit to merge → rebase onto
@@ -135,7 +137,7 @@ emit the same `wave-merged` the queue would have, with the same
 The branch is derived from the plan-resolved task id, never passed: a
 `--branch` flag would let you hand it the *other* task's branch, which
 really is a parent of that merge, and adopt any task with it. `--plan` and
-`--session` are both required for the same reason `queue run --session`
+a session (`--session` or `CLAUDE_CODE_SESSION_ID`) are both required for the same reason `queue run --session`
 requires `--plan` — the merge is logged under the id the plan declares, or
 not at all. Every refusal exits `1` with a `queue.adopt-*` code and writes
 no event: a mistyped sha is an operator error, not a blocked task.
@@ -405,11 +407,21 @@ bs gate run epic-1/task-1 \
 - `--base` — the ref the merge queue will merge this branch into, normally
   `bs/<epic>/integration`. Optional, and the one flag whose absence
   costs you something: see §5a.
-- `--session`/`--plan-version`/`--causal-parent` are required on every
-  gate/findings/waivers command — they're the event-log envelope
-  (`session_id`, `plan_version`, `causal_parent`). `--causal-parent` must
-  reference a real prior event in that session's log, so a session from
-  scratch starts with `bs session start <session-id>`, which writes the
+- `--session`/`--plan-version`/`--causal-parent` are the event-log envelope
+  (`session_id`, `plan_version`, `causal_parent`) on every
+  gate/findings/waivers command. `--session` and `--causal-parent` are
+  optional: with no `--session` the writer uses `CLAUDE_CODE_SESSION_ID`
+  (refused when that is unset too), and with no `--causal-parent` it uses
+  the last event already in that session's log, read under the same lock as
+  the append. An empty log gets the same root `bs session start` writes
+  first. An event filled in this way records `envelope_defaulted`
+  (`["session"]`, `["causal_parent"]` or both), so a reader can tell a
+  chosen parent from a defaulted one. **Fan-out writers must pass
+  `--causal-parent` explicitly**: several tasks writing into one session at
+  once, as the wave-runner does, can find a sibling's event as the "last
+  event". A parent you pass must reference a real prior event in that
+  session's log, so a session from scratch can also start with
+  `bs session start <session-id>`, which writes the
   root and prints the event id the next command hangs off. `session-start`
   is the only event type allowed a `null` causal_parent, and the only one
   allowed to name a parent in a *different* session (see §5a and §5b).

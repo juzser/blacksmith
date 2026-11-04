@@ -213,18 +213,16 @@ const scope = (fx: Fx): string[] => [
 ];
 const ledgerCli = (fx: Fx, extra: string[] = []) =>
   runCli(['checks', 'ledger', ...scope(fx), ...extra]);
-const proposalsCli = (fx: Fx, extra: string[] = [], env: string[] = ENVELOPE) =>
-  runCli([
-    'checks',
-    'proposals',
-    ...scope(fx),
-    '--checks',
-    fx.checks,
-    '--epic',
-    'e',
-    ...env,
-    ...extra,
-  ]);
+const proposalsCli = (
+  fx: Fx,
+  extra: string[] = [],
+  env: string[] = ENVELOPE,
+  procEnv?: Record<string, string>,
+) =>
+  runCli(
+    ['checks', 'proposals', ...scope(fx), '--checks', fx.checks, '--epic', 'e', ...env, ...extra],
+    procEnv,
+  );
 const applyCli = (fx: Fx, decisions: string, extra: string[] = [], env: string[] = ENVELOPE) =>
   runCli([
     'checks',
@@ -374,14 +372,17 @@ describe('bs checks proposals', () => {
   it('names the first missing required flag before anything is read or written', () => {
     const fx = makeFx(['unit']);
     const before = logLines(fx);
+    // --causal-parent is optional (O-11) and --session falls back to
+    // CLAUDE_CODE_SESSION_ID, which this test blanks; --plan-version stays required here.
     const all: [string, string][] = [
       ['--session', 'ops'],
       ['--plan-version', '3'],
       ['--causal-parent', 'ops#0'],
     ];
     for (const [i, [flag]] of all.entries()) {
+      if (flag === '--causal-parent') continue;
       const env = all.filter((_, j) => j !== i).flat();
-      const run = proposalsCli(fx, [], env);
+      const run = proposalsCli(fx, [], env, { CLAUDE_CODE_SESSION_ID: '' });
       expect(run.status, flag).toBe(1);
       expect(json(run).error.code).toBe('cli.missing-flag');
       expect(json(run).error.message).toContain(flag);

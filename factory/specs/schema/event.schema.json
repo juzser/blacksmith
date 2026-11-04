@@ -3,7 +3,7 @@
   "$id": "https://black-smith.dev/schema/event.schema.json",
   "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
   "title": "Event",
-  "description": "One record in state/events/*.jsonl, the factory's durable execution substrate (architecture §7). Field names follow §7's record shape exactly: {ts, session_id, actor, event_type, task_id?, agent_id?, plan_version, causal_parent, payload, project?, cli_session_id?}.",
+  "description": "One record in state/events/*.jsonl, the factory's durable execution substrate (architecture §7). Field names follow §7's record shape exactly: {ts, session_id, actor, event_type, task_id?, agent_id?, plan_version, causal_parent, payload, project?, cli_session_id?, envelope_defaulted?}.",
   "type": "object",
   "required": [
     "ts",
@@ -67,6 +67,13 @@
       "maxLength": 64,
       "pattern": "^[0-9a-fA-F-]{8,64}$",
       "description": "Optional — the CLI session that wrote the event, stamped by the writer from CLAUDE_CODE_SESSION_ID and absent outside one (and on every event logged before the stamp existed). Not part of the envelope: it never stands in for session_id or causal_parent (architecture §18 rule 8), and it is never turn or delegation evidence, since an epic session and its subagents can share one CLI session (rule 4). It only links a live CLI session to the factory sessions it drives."
+    },
+    "envelope_defaulted": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["session", "causal_parent"] },
+      "description": "Optional — which envelope fields the writer filled in rather than being given: 'session' (from CLAUDE_CODE_SESSION_ID) and 'causal_parent' (the log's last event, read under the log lock). Absent when the envelope was given in full, so a reader can tell a chosen parent from a defaulted one; under fan-out a defaulted parent may be a sibling's event (architecture §18 rule 8)."
     },
     "edge": {
       "type": "object",

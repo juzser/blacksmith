@@ -51,9 +51,14 @@ operator who has the repo, never a file to assume you can open. Read, do not
 assume — and when a cited file is not there, say so instead of substituting a
 remembered number.
 
-Every write command needs an event-log envelope: `--session <id>
---plan-version <n> --causal-parent <event-id> [--actor operator]` (`wave-runner`
-inside a wave session — its agent template has the rule). Open a
+Every write command carries an event-log envelope: `[--session <id>]
+[--plan-version <n>] [--causal-parent <event-id>] [--actor operator]`. A
+sequential session may leave `--session` and `--causal-parent` out:
+`--session` defaults to `CLAUDE_CODE_SESSION_ID`, `--causal-parent` to the
+session's last event (an empty log gets its root first), and the event records
+`envelope_defaulted`. Fan-out writers (`wave-runner` inside a wave session — its
+agent template has the rule) must pass `--causal-parent` explicitly, since the
+last event may be a sibling's. Open a
 session with `bs session start <session-id>` if one isn't already
 running — it writes the root and prints the event id everything else hangs
 off as `--causal-parent`. Run it once: it refuses a session that already
