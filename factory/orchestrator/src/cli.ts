@@ -26,6 +26,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { reproduceAdvisoryFinding, runAdvisoryCrosscheck } from './advisoryCrosscheck.js';
 import { foldAgents, JUDGE_REPORT_EVENT_TYPE, liveAgents } from './agents-registry.js';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
@@ -1458,12 +1459,24 @@ function requireNoFindingsRole(close: JudgeReportInput): void {
   }
 }
 
+/** `--grader` hands the gate a verdict, `--no-grader` says there is none on purpose; both at once is a contradiction. */
+function requireGraderOrOptOut(flags: Record<string, string>): void {
+  if (flags['no-grader'] !== undefined && flags.grader !== undefined) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      '--grader and --no-grader are mutually exclusive: hand in the verdict or opt out of the grader, not both.',
+      { flag: 'no-grader' },
+    );
+  }
+}
+
 const RESULTS_CHECK_ROLES = ['coder', 'tester', 'grader', 'gate'] as const;
 const SESSION_FLAGS = ['session', 'causal-parent', 'plan-version', 'actor', 'state-dir'];
 const ENVELOPE_FLAGS = ['agent', 'provider', 'model-tier', 'input-tokens', 'output-tokens'];
 /** What only a full `gate run` line carries; a role mode names `--as gate` when handed one. */
 const GATE_ONLY_FLAGS = [
   'checks',
+  'no-grader',
   'run-all',
   'evidence',
   'found-by',
@@ -1531,6 +1544,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       accepted: allowed,
     });
   }
+  requireGraderOrOptOut(flags);
   if (as !== 'grader') requireFlag(flags, 'result');
   if (as === 'coder' || as === 'gate') requireFlag(flags, 'worktree');
   if (as === 'tester') requireFlag(flags, 'plan');
@@ -1619,7 +1633,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       '--artifacts-dir only sets the reported artifact_home: the grader stage reads no artifact.',
     );
   }
-  const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  const alsoReported: { role: string; kind: JudgeKind | null; artifactPath: string | null }[] = [];
   let selection: { selected: string[]; deferred: unknown[] } | undefined;
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
@@ -1665,7 +1679,11 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
           judgeInput,
         );
         if (checked === undefined) continue;
-        alsoReported.push({ role: close.role, kind: checked.turn.kind });
+        alsoReported.push({
+          role: close.role,
+          kind: checked.turn.kind,
+          artifactPath: checked.artifactPath,
+        });
         simulated = simulated.map((t) => (t === checked.turn ? { ...t, reported: true } : t));
       }
     }
@@ -1692,6 +1710,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
               ...(flags.base ? { baseRef: flags.base } : {}),
               ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
               ...(graderVerdict === undefined ? {} : { graderVerdict }),
+              ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
               ...(uiAffecting === undefined ? {} : { uiAffecting }),
               alsoReported,
             },
@@ -4966,6 +4985,7 @@ async function main(): Promise<number> {
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.
+    requireGraderOrOptOut(flags);
     const handedIn = handedInSources(args, flags);
     const turns =
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
@@ -5011,6 +5031,7 @@ async function main(): Promise<number> {
         // to the base the task-branch name implies.
         ...(flags.base ? { baseRef: flags.base } : {}),
         ...(graderVerdict !== undefined ? { graderVerdict } : {}),
+        ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
         ...(budget ? { budget } : {}),
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
         uiAffecting: uiAffectingFromFlags(flags, taskId),
@@ -6435,6 +6456,72 @@ async function main(): Promise<number> {
         native_considered: native.length,
       });
       return result.report.gates ? 1 : 0;
+    }
+  }
+
+  if (namespace === 'crosscheck') {
+    // The lean path's one-shot review (advisoryCrosscheck.ts). `run` never
+    // blocks: every outcome, including "nobody to ask", is exit 0 with a status
+    // in the JSON. Only `reproduce` gives a finding any power.
+    if (action === 'run') {
+      const eventOpts = eventOptsFromFlags(flags);
+      const sessionId = requireSessionFlag(flags);
+      requireSession(sessionId, eventOpts);
+      // The provider call is an external write before the append: pin first.
+      const runCtx = await pinnedEventContext(flags);
+      const projectDir = flags.project ?? projectDirFromFlags(flags) ?? process.cwd();
+      const policy = loadCrosscheckPolicy(flags.policy, { projectDir });
+      const criteria = [...(repeated.criterion ?? [])];
+      if (flags['criteria-file']) {
+        criteria.push(
+          ...readFileSync(flags['criteria-file'], 'utf8')
+            .split('\n')
+            .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])?\s*/, '').trim())
+            .filter((line) => line !== ''),
+        );
+      }
+      if (flags.plan) {
+        for (const task of readJsonFile<PlanFile>(flags.plan).tasks) {
+          criteria.push(...((task.acceptance_criteria as string[] | undefined) ?? []));
+        }
+      }
+      const result = await runAdvisoryCrosscheck(
+        {
+          taskId: requireFlag(flags, 'task'),
+          project: projectDir,
+          ...(flags.worktree ? { worktree: flags.worktree } : {}),
+          base: requireFlag(flags, 'base'),
+          head: requireFlag(flags, 'head'),
+          criteria,
+          ...(repeated['test-file'] ? { testFiles: repeated['test-file'] } : {}),
+          budget: judgeBudgetFromFlags(flags),
+          policy,
+        },
+        runCtx,
+        eventOpts,
+      );
+      printJson({ ...result, advisory: true });
+      return 0;
+    }
+
+    if (action === 'reproduce') {
+      const [findingId] = requirePositionals(positional, usageFor('crosscheck reproduce')) as [
+        string,
+      ];
+      const eventOpts = eventOptsFromFlags(flags);
+      requireSession(requireSessionFlag(flags), eventOpts);
+      const result = await reproduceAdvisoryFinding(
+        { findingId, evidence: requireFlag(flags, 'evidence') },
+        await pinnedEventContext(flags),
+        eventOpts,
+      );
+      printJson({
+        reproduced: true,
+        already_reproduced: result.already_reproduced,
+        finding: result.finding,
+        event_id: result.event_id,
+      });
+      return 0;
     }
   }
 

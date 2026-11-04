@@ -639,7 +639,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'gate run',
     positionals: '<task-id>',
-    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file> | --no-grader] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
     summary:
       'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked. It runs the pre-merge tier of --checks: an entry may carry "tier" (pre-merge, post-merge or pre-release; absent means pre-merge), and testgate-result names what it deferred. A non-empty file with no pre-merge entry, or a deferred coverage check, is refused before any stage. --no-findings <role> attests the clean case for the operator and needs --actor operator; any other actor is refused before any close is written.',
   },
@@ -653,9 +653,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'results check',
     positionals: '<task-id>',
-    flags: `--as <coder|tester|grader|gate> [--result <result.json>] [--worktree <dir>] [--base <ref>] [--plan <file>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--checks <checks.json>] [--project <dir>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--run-all] ${EVENTS_DIR}`,
+    flags: `--as <coder|tester|grader|gate> [--result <result.json>] [--worktree <dir>] [--base <ref>] [--plan <file>] [--grader <file> | --no-grader] [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--checks <checks.json>] [--project <dir>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--run-all] ${EVENTS_DIR}`,
     summary:
-      "The gate's paperwork before hand-back, read-only: the same stage checks, none of the tests, and nothing written. --as coder takes --result and --worktree [--base]; --as tester takes --result and --plan; --as grader takes --grader; --as coder and --as tester also take [--agent --provider --model-tier], --as grader refuses them; all three take [--artifacts-dir] (under --as grader it only sets the reported artifact_home, because the grader stage reads no artifact) and the session flags where they read them (--session defaults to $CLAUDE_CODE_SESSION_ID, as in gate run), and refuse the gate-only flags (--checks, --run-all, --evidence, --found-by, --found-by-provider, --findings, --no-findings, --uiux-visual, --lessons). --as gate takes the `gate run` line verbatim, reads every file on it, dry-runs the judge closes it would make, includes the uiux stage, and runs no check. Exit 1 when blocked.",
+      "The gate's paperwork before hand-back, read-only: the same stage checks, none of the tests, and nothing written. --as coder takes --result and --worktree [--base]; --as tester takes --result and --plan; --as grader takes --grader; --as coder and --as tester also take [--agent --provider --model-tier], --as grader refuses them; all three take [--artifacts-dir] (under --as grader it only sets the reported artifact_home, because the grader stage reads no artifact) and the session flags where they read them (--session defaults to $CLAUDE_CODE_SESSION_ID, as in gate run), and refuse the gate-only flags (--checks, --no-grader, --run-all, --evidence, --found-by, --found-by-provider, --findings, --no-findings, --uiux-visual, --lessons). --as gate takes the `gate run` line verbatim (--no-grader is gate-only too: it skips a missing grader verdict as skipped-by-option but still reads one a grader turn reported, so not-met blocks and met is recorded; it is refused with --grader), reads every file on it, dry-runs the judge closes it would make, includes the uiux stage, and runs no check. Exit 1 when blocked.",
   },
   {
     command: 'uiux check',
@@ -1005,6 +1005,20 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] [--project <dir>] [--worktree <dir>] ${EVENTS_DIR}`,
     summary:
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
+  },
+  {
+    command: 'crosscheck run',
+    positionals: '',
+    flags: `--task <id> --base <rev> --head <rev> [--project <dir>] [--worktree <dir>] [--criterion <text>...] [--criteria-file <file>] [--plan <file>] [--test-file <path>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
+    summary:
+      'One-shot advisory review of base..head by the first enabled external provider: real defects and untested criteria, no vote. Never blocks (exit 0); no provider, a moved worktree or malformed output is recorded as skipped/discarded/failed. Findings are advisory until "crosscheck reproduce".',
+  },
+  {
+    command: 'crosscheck reproduce',
+    positionals: '<finding-id>',
+    flags: `--evidence <text> ${EVENTS_DIR}`,
+    summary:
+      'Mark an advisory finding reproduced (a failing test or probe run): raises it as an ordinary finding and confirms it, so the normal fix-pending route takes it to the coder.',
   },
   {
     command: 'ui serve',

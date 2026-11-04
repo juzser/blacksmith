@@ -646,6 +646,25 @@ too.
   ceiling on a single call, and the finder runs on the whole diff, not on
   one finding's summary.
 
+### 5a. The advisory cross-check — one review, no vote
+
+The lean path (`docs/specs/lean-mode-scope.md` §5) does not use the finder's
+reconciliation or the quorum. `bs crosscheck run --task <id> --base <rev>
+--head <rev>` picks the first enabled external provider in this file, calls
+it once on the combined diff, and records one `advisory-crosscheck` event.
+
+- **It reads `independent_finder.send_diff` and `max_diff_bytes`.** With
+  `send_diff: false` (the shipped default) the run is `skipped` and no source
+  leaves the machine. Set it to `true` on a box that has decided to.
+- **It never blocks and never asks.** No provider, an unreachable one, a
+  moved worktree (result discarded) or malformed output all exit 0 with
+  `status` of `skipped`, `discarded` or `failed`.
+- **Its findings are not votes.** It writes no `judge-verdict`, so `bs stats
+  providers`, the quorum and the epic verdict do not see it.
+- **`bs crosscheck reproduce <finding-id> --evidence <text>`** is the only
+  way a finding gains power: it raises the finding as an ordinary one and
+  confirms it, and the usual fix route applies.
+
 ## 6. Rollback
 
 Two levers, same file, same "operator edit, never a runtime write" rule:

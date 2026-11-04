@@ -585,7 +585,8 @@ export interface Ladder {
   steps: { reason: string; fix: () => Promise<void> }[];
 }
 
-export async function buildLadder(w: World): Promise<Ladder> {
+export async function buildLadder(w: World, opts: { noGrader?: boolean } = {}): Promise<Ladder> {
+  const noGrader = opts.noGrader === true;
   const file = path.join(w.worktreeDir, 'src.ts');
   const declared = { type: 'log', path: 'ladder-evidence.txt' };
   let result: Record<string, unknown> = {
@@ -593,14 +594,20 @@ export async function buildLadder(w: World): Promise<Ladder> {
     structured_output: {},
     artifacts: [declared],
   };
-  let graderVerdict: unknown = { verdict: 'pass' };
+  let graderVerdict: unknown = noGrader ? undefined : { verdict: 'pass' };
   await writeFile(file, 'export const x = 3;\n');
   await rm(path.join(w.worktreeDir, 'node_modules'), { recursive: true, force: true });
   await dispatchJudge(w, 'reviewer');
   await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL]));
 
   return {
-    input: () => baseInput(w, { result, graderVerdict, uiAffecting: true }),
+    input: () =>
+      baseInput(w, {
+        result,
+        ...(graderVerdict === undefined ? {} : { graderVerdict }),
+        ...(noGrader ? { noGrader: true } : {}),
+        uiAffecting: true,
+      }),
     steps: [
       {
         reason: 'schema-invalid',
@@ -662,12 +669,17 @@ export async function buildLadder(w: World): Promise<Ladder> {
           await closeUiuxTurn(w, 'visual', 2);
         },
       },
-      {
-        reason: 'grader-invalid',
-        fix: async () => {
-          graderVerdict = graderFile(graderVerdictBody());
-        },
-      },
+      // The opt-out has no grader file to be invalid, so that step is the first's absence.
+      ...(noGrader
+        ? []
+        : [
+            {
+              reason: 'grader-invalid',
+              fix: async () => {
+                graderVerdict = graderFile(graderVerdictBody());
+              },
+            },
+          ]),
     ],
   };
 }

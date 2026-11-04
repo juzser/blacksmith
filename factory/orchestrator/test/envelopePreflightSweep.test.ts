@@ -25,12 +25,12 @@ import { describe, expect, it } from 'vitest';
 // entry points that run git, checks, tests or providers (openAudit, closeAudit,
 // step, batchStep, runGate, runIntegrationCheck, runPostMerge, runScheduler,
 // runPlanQuorum, runEpicVerdict, closeEpic, promoteAfterCatch, runJudge,
-// runCrossFinding). A new name belongs here the day a verb starts using it.
+// runCrossFinding, runAdvisoryCrosscheck). A new name belongs here the day a verb starts using it.
 // Comments are blanked first. It cannot see a write hidden behind a function
 // it does not name; the by-hand sweep covers the rest.
 
 const WRITE =
-  /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|mkdirSync|mkdir|renameSync|rename|rmSync|rm|copyFileSync|copyFile|execFileSync|execFile|spawnSync|spawn|execSync|runJudge|runCrossFinding|amendPlan|approveSpecChange|nextVersion|writePlanFile|writeOverlay|reconcileOverlay|runGate|step|batchStep|runIntegrationCheck|runPostMerge|openAudit|closeAudit|runScheduler|runPlanQuorum|runEpicVerdict|closeEpic|promoteAfterCatch)\(/g;
+  /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|mkdirSync|mkdir|renameSync|rename|rmSync|rm|copyFileSync|copyFile|execFileSync|execFile|spawnSync|spawn|execSync|runJudge|runCrossFinding|runAdvisoryCrosscheck|amendPlan|approveSpecChange|nextVersion|writePlanFile|writeOverlay|reconcileOverlay|runGate|step|batchStep|runIntegrationCheck|runPostMerge|openAudit|closeAudit|runScheduler|runPlanQuorum|runEpicVerdict|closeEpic|promoteAfterCatch)\(/g;
 // A mutating git call: runGit/git with a mutating subcommand among its arguments.
 // Reads (rev-parse, rev-list, show, ls-tree, status, diff, log, merge-base) stay out.
 const GIT_WRITE =
@@ -91,6 +91,7 @@ const PINNED = [
   "namespace === 'checks' && action === 'proposals'",
   "namespace === 'checks' && action === 'apply'",
   "namespace === 'crossfind'",
+  "namespace === 'crosscheck'",
 ];
 
 /** Library functions an append-only verb calls: nothing write-like before the first append. */
