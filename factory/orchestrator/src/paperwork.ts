@@ -7,7 +7,12 @@ import type { EventOpts, StoredEvent } from './events.js';
 import type { DepsCheck } from './gate.js';
 import { foldJudgeTurns, type JudgeTurn, outstandingJudges } from './judges.js';
 import { readLineage } from './lineageSnapshot.js';
-import { inspectMcpManifest, type McpGateViolation, mcpOverrideKeys } from './mcp.js';
+import {
+  inspectMcpManifest,
+  type McpGateViolation,
+  mcpLandedShas,
+  mcpOverrideKeys,
+} from './mcp.js';
 import {
   type CompiledSchemaSet,
   compileSchemas,
@@ -315,7 +320,7 @@ export function mcpStage(
   taskId: string,
   events: readonly StoredEvent[] = [],
 ): McpStage {
-  const r = inspectMcpManifest(worktreeDir, mcpOverrideKeys(events, taskId));
+  const r = inspectMcpManifest(worktreeDir, mcpOverrideKeys(events, taskId), mcpLandedShas(events));
   const violations = [...r.invalid, ...r.unsigned];
   const reason =
     r.invalid.length > 0

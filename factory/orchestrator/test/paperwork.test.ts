@@ -16,6 +16,7 @@ import {
   STAGES_FOR_ROLE,
   screenshotsFromArtifacts,
 } from '../src/paperwork.js';
+import { emitWaveMergedWith } from '../src/taskEvents.js';
 import { checkUiux } from '../src/uiuxGate.js';
 import {
   artifactMissing,
@@ -389,8 +390,23 @@ describe('mcp manifest at the gate', () => {
     );
     w.git(['add', MANIFEST]);
     w.git(['commit', '-q', '-m', 'upstream signed']);
+    const landed = w.git(['rev-parse', 'HEAD']);
     w.git(['checkout', '-q', task]);
     w.git(['merge', '-q', '--no-edit', integration]);
+    // Merged in, but no landing on record: nothing vouches for that commit, so it counts against the task.
+    const unrecorded = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(unrecorded.gate).toMatchObject({
+      outcome: 'blocked',
+      reason: 'mcp-approval-unsigned-by-operator',
+    });
+    // The queue's landing event records the integration head it produced.
+    await emitWaveMergedWith(
+      'epic-1/task-0',
+      { sessionId: w.sessionId, planVersion: 1, causalParent: `${w.sessionId}#0`, actor: 'system' },
+      w.opts(),
+      undefined,
+      { merge_sha: landed },
+    );
     const merged = await gateOf(baseInput(w, { baseRef: undefined }));
     expect(merged.gate.outcome).toBe('pass');
     expect(merged.pre.outcome).toBe('pass');
@@ -399,6 +415,20 @@ describe('mcp manifest at the gate', () => {
       w,
       mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }, forged]),
     );
+    const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['forged_widget']);
+  });
+
+  it('does not take a moved integration branch for a recorded landing', async () => {
+    const forged = { ...UNSIGNED_TOOL, name: 'forged_widget', approval: OPERATOR_APPROVAL };
+    await mcpSignedOnBase(w);
+    await commitMcpManifest(
+      w,
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }, forged]),
+    );
+    w.git(['branch', '-f', 'smith/epic-1/integration', 'HEAD']);
+    w.git(['commit', '-q', '--allow-empty', '-m', 'one more']);
     const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
     expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
     expect(violations.map((v) => v.tool)).toEqual(['forged_widget']);

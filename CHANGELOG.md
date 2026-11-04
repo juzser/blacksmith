@@ -56,8 +56,8 @@ than appearing in it.
   on every run. `bs mcp override` needs an explicit `--actor` and records it as
   given. The recorded base follows the task: `bs worktree create --reopen`
   records one for an older branch, the queue moves it on a rebase, removing the
-  worktree deletes it, and merging the integration branch into the task moves the
-  comparison point up. A project with no manifest is untouched, and `epic close`
+  worktree deletes it, and merging upstream into the task moves the comparison
+  point up to the newest landing the queue recorded. A project with no manifest is untouched, and `epic close`
   keeps its own check.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it

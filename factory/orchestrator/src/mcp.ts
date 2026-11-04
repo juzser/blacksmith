@@ -842,33 +842,34 @@ const problem = (message: string): McpGateViolation => ({
 
 /**
  * The commit the task is judged against. Start from the one `worktree create` (or a
- * rebase by the queue) recorded; undefined for a branch nobody recorded. When the
- * integration branch has since been merged into the task, the merge-base with its
- * tip is newer, and upstream changes are not the task's: use it, provided it
- * descends from the recorded base. A commit only the task authored is never on the
- * integration branch, so it stays the task's.
+ * rebase by the queue) recorded; undefined for a branch nobody recorded. When
+ * upstream has since been merged into the task, a later commit is the base, but
+ * only one the factory itself recorded: a `merge_sha` the queue wrote on a landing
+ * (`landed`), that is an ancestor of HEAD and descends from the recorded base. No
+ * branch name is consulted, so moving one changes nothing. An upstream merge with
+ * no landing on record keeps the recorded base, and the operator overrides.
  */
-function recordedBase(dir: string): string | undefined {
-  let recorded: string;
-  let branch: string;
+function recordedBase(dir: string, landed: ReadonlySet<string>): string | undefined {
+  let best: string;
   try {
-    branch = runGit(dir, ['branch', '--show-current']);
+    const branch = runGit(dir, ['branch', '--show-current']);
     if (branch === '') return undefined;
-    recorded = runGit(dir, ['rev-parse', '--verify', `${taskBaseRef(branch)}^{commit}`]);
+    best = runGit(dir, ['rev-parse', '--verify', `${taskBaseRef(branch)}^{commit}`]);
   } catch {
     return undefined;
   }
-  try {
-    const integration = branch.replace(/\/[^/]+$/, '/integration');
-    const common = runGit(dir, ['merge-base', 'HEAD', integration]);
-    if (common !== recorded) {
-      runGit(dir, ['merge-base', '--is-ancestor', recorded, common]);
-      return common;
+  const isAncestor = (a: string, b: string): boolean => {
+    try {
+      runGit(dir, ['merge-base', '--is-ancestor', a, b]);
+      return true;
+    } catch {
+      return false;
     }
-  } catch {
-    // No integration branch, or the common ancestor does not descend from the record.
+  };
+  for (const sha of landed) {
+    if (sha !== best && isAncestor(best, sha) && isAncestor(sha, 'HEAD')) best = sha;
   }
-  return recorded;
+  return best;
 }
 
 /**
@@ -897,9 +898,10 @@ function recordedBase(dir: string): string | undefined {
 export function inspectMcpManifest(
   dir: string,
   overrides: ReadonlySet<string> = new Set(),
+  landed: ReadonlySet<string> = new Set(),
 ): McpManifestInspection {
   const none = { invalid: [], unsigned: [], overridden: [] };
-  const baseRev = recordedBase(dir);
+  const baseRev = recordedBase(dir, landed);
   const head = readCommittedManifest(dir, 'HEAD');
   const base: Committed =
     baseRev === undefined ? { kind: 'absent' } : readCommittedManifest(dir, baseRev);
@@ -995,6 +997,17 @@ export function inspectMcpManifest(
   });
 
   return { present: true, invalid, unsigned: stillUnsigned, overridden };
+}
+
+/** The integration commits the queue recorded on landings (`wave-merged`'s `merge_sha`). */
+export function mcpLandedShas(events: readonly StoredEvent[]): Set<string> {
+  const shas = new Set<string>();
+  for (const e of events) {
+    if (e.record.event_type !== 'wave-merged') continue;
+    const sha = (e.record.payload as Record<string, unknown>).merge_sha;
+    if (typeof sha === 'string' && sha !== '') shas.add(sha);
+  }
+  return shas;
 }
 
 export const MCP_OVERRIDE_EVENT = 'mcp-approval-override';

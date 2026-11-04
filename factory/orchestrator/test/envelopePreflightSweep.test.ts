@@ -105,6 +105,7 @@ const APPEND_ONLY_FUNCTIONS: Array<[string, string]> = [
   ['feedback.ts', 'recordFeedback'],
   ['feedback.ts', 'resolveFeedback'],
   ['waivers.ts', 'approveTaskWaiver'],
+  ['mcp.ts', 'recordMcpOverride'],
   ['judges.ts', 'recordJudgeDispatch'],
   ['judges.ts', 'recordJudgeReport'],
   ['reinstate.ts', 'reinstateTask'],

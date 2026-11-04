@@ -787,8 +787,11 @@ belong to the close), and a task answers only for what it changed:
   --reopen` does that for a reopened task and says so in its output
   (`baseRecorded`).
 - The base follows the task: the queue moves it to the commit it rebased onto,
-  removing the worktree deletes it, and when the integration branch is merged into
-  the task the newer merge-base is used, so upstream changes are not the task's.
+  removing the worktree deletes it, and when upstream is merged into the task the
+  base moves up to the newest landing the queue recorded (a `wave-merged`
+  `merge_sha`) that is an ancestor of the task. No branch name is consulted. The
+  trade-off: upstream merged in by hand, with no landing on record, still counts
+  against the task, so the gate blocks and the operator overrides each tool.
 - An ignored or untracked manifest is not read. A project with no manifest
   passes untouched. The result is logged as `mcp-check-result` on every path.
 
