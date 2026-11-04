@@ -267,6 +267,37 @@ describe('bs results check (built binary)', () => {
       );
     }
 
+    it('refuses --grader with --no-grader before any judge close is written', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      const input = await graderMet(w);
+      await dispatchWithArtifact('grader', graderPath);
+      const line = await gateLine(input, ['--no-grader']);
+      await utimes(graderPath, futureStamp(), futureStamp());
+      const before = snapshot(w.stateDir);
+      const real = runCli(['gate', 'run', w.taskId, ...line], {}, undefined, w.worktreeDir);
+      expect(real.status).not.toBe(0);
+      expect(`${real.stdout}${real.stderr}`).toMatch(/mutually exclusive/);
+      expect(snapshot(w.stateDir)).toEqual(before);
+    });
+
+    it('names the same first defect when the line closes the grader turn itself under --no-grader', async () => {
+      const graderPath = path.join(scratch, 'grader.json');
+      await write('grader.json', '[]');
+      await dispatchWithArtifact('grader', graderPath);
+      await utimes(graderPath, futureStamp(), futureStamp());
+      const line = await gateLine(await clean(w), [
+        '--no-grader',
+        '--evidence',
+        graderPath,
+        '--found-by',
+        'grader',
+      ]);
+      const preflight = checkGate(line);
+      const real = gate(line);
+      expect(real.json.reason).toBe('grader-invalid');
+      expect(preflight.json.reason).toBe('grader-invalid');
+    });
+
     it('passes the judges stage for a grader turn the line hands in, writing nothing', async () => {
       const input = await graderMet(w);
       const graderPath = path.join(scratch, 'grader.json');

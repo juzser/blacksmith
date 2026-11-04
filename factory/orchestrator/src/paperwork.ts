@@ -351,6 +351,8 @@ export function mcpStage(
 export interface AlsoReported {
   role: string;
   kind?: string | null;
+  /** The file the pending close names, so a stage that reads it sees what the gate will. */
+  artifactPath?: string | null;
 }
 
 export interface JudgesStage {
@@ -390,13 +392,30 @@ export function judgesStage(
  * file; a file that cannot be read comes back as a string, which
  * `graderStage` refuses as an invalid shape.
  */
-export function reportedGraderFile(turns: readonly JudgeTurn[]): unknown {
-  const latest = turns
-    .filter((t) => t.role === 'grader' && t.reported && t.reportedArtifact !== null)
+export function reportedGraderFile(
+  turns: readonly JudgeTurn[],
+  alsoReported: readonly AlsoReported[] = [],
+): unknown {
+  const graders = turns.filter((t) => t.role === 'grader');
+  // A bare id two epics both hold a grader turn for names no task: the same
+  // guess `checkJudgeReport` refuses as `epicAmbiguous`, so it is not resolved
+  // by taking the later round.
+  if (new Set(graders.map((t) => t.taskId)).size > 1) {
+    return 'ambiguous grader turns: the task id names a task in more than one epic';
+  }
+  // A close the line itself is about to make reports the file it names.
+  const pending = alsoReported.find((r) => r.role === 'grader' && r.artifactPath);
+  if (pending?.artifactPath) return readGraderFile(pending.artifactPath);
+  const latest = graders
+    .filter((t) => t.reported && t.reportedArtifact !== null)
     .sort((a, b) => b.round - a.round)[0];
   if (latest === undefined || latest.reportedArtifact === null) return undefined;
+  return readGraderFile(latest.reportedArtifact);
+}
+
+function readGraderFile(file: string): unknown {
   try {
-    return JSON.parse(readFileSync(latest.reportedArtifact, 'utf8')) as unknown;
+    return JSON.parse(readFileSync(file, 'utf8')) as unknown;
   } catch {
     return 'unreadable grader file';
   }
@@ -703,7 +722,10 @@ export async function checkPaperwork(
           input.noGrader === true
             ? ctx.sessionId === undefined
               ? undefined
-              : reportedGraderFile(foldJudgeTurns(await lineage(), input.taskId))
+              : reportedGraderFile(
+                  foldJudgeTurns(await lineage(), input.taskId),
+                  input.alsoReported,
+                )
             : input.graderVerdict;
         if (verdictFile === undefined) {
           skip(stage, input.noGrader === true ? 'skipped-by-option' : 'no-input');

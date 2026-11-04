@@ -32,8 +32,10 @@ than appearing in it.
 ### Added
 
 - **`--no-grader` on `gate run` and `results check`** (lean mode, O-6). The
-  caller can say on purpose that a run has no grader; the stage is skipped and
-  the preflight reports it as `skipped-by-option`. Refused with `--grader`.
+  caller can say on purpose that a run has no grader; a missing verdict is
+  skipped and the preflight reports it as `skipped-by-option`. A verdict a
+  grader turn already reported for the task is still read: `not-met` blocks as
+  `grader-fail` and `met` is recorded as a verdict. Refused with `--grader`.
   Every gate outcome and its `gate-outcome` event now records the grader state
   as `verdict` (with its result), `skipped-by-option` or `not-run`, so a
   skipped grader is never read as a passed one. The default is unchanged: no

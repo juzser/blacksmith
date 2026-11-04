@@ -1543,6 +1543,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       accepted: allowed,
     });
   }
+  requireGraderOrOptOut(flags);
   if (as !== 'grader') requireFlag(flags, 'result');
   if (as === 'coder' || as === 'gate') requireFlag(flags, 'worktree');
   if (as === 'tester') requireFlag(flags, 'plan');
@@ -1631,7 +1632,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       '--artifacts-dir only sets the reported artifact_home: the grader stage reads no artifact.',
     );
   }
-  const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  const alsoReported: { role: string; kind: JudgeKind | null; artifactPath: string | null }[] = [];
   let selection: { selected: string[]; deferred: unknown[] } | undefined;
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
@@ -1677,14 +1678,17 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
           judgeInput,
         );
         if (checked === undefined) continue;
-        alsoReported.push({ role: close.role, kind: checked.turn.kind });
+        alsoReported.push({
+          role: close.role,
+          kind: checked.turn.kind,
+          artifactPath: checked.artifactPath,
+        });
         simulated = simulated.map((t) => (t === checked.turn ? { ...t, reported: true } : t));
       }
     }
   }
 
   // Read after the closes, as `gate run` does: a close that fails is the failure it exits on.
-  requireGraderOrOptOut(flags);
   const graderVerdict = flags.grader
     ? await attempt('grader', () => readJsonFile<unknown>(requireFlag(flags, 'grader')))
     : undefined;
@@ -4980,6 +4984,7 @@ async function main(): Promise<number> {
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.
+    requireGraderOrOptOut(flags);
     const handedIn = handedInSources(args, flags);
     const turns =
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
@@ -5004,7 +5009,6 @@ async function main(): Promise<number> {
     // .grader-r<round>.json). Optional for the same reason as --plan: an ad-hoc
     // gate run has no rubric result to hand over, and inventing one would be
     // worse than skipping the stage (D-34/P9-14).
-    requireGraderOrOptOut(flags);
     const graderVerdict = flags.grader ? readJsonFile<unknown>(flags.grader) : undefined;
 
     const outcome = await runGate(

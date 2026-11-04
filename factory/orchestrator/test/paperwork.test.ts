@@ -13,7 +13,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readEvents } from '../src/events.js';
 import { type GateInput, recordTaskResult, runGate } from '../src/gate.js';
-import { recordJudgeReport } from '../src/judges.js';
+import { recordJudgeDispatch, recordJudgeReport } from '../src/judges.js';
 import { recordMcpOverride } from '../src/mcp.js';
 import {
   checkPaperwork,
@@ -942,6 +942,41 @@ describe('stage order', () => {
     const input = { ...baseInput(w), noGrader: true };
     const gate = await runGate(input, w.ctx(), w.opts());
     expect(gate).toMatchObject({ outcome: 'pass', grader: { state: 'verdict', result: 'met' } });
+  });
+
+  it('a bare id that two epics hold grader turns for is ambiguous, not resolved to the later round', async () => {
+    for (const [taskId, round, overall] of [
+      ['epic-1/task-9', 1, 'fail'],
+      ['epic-2/task-9', 2, 'pass'],
+    ] as const) {
+      const file = path.join(w.stateDir, `grader-${taskId.replace('/', '-')}.json`);
+      await recordJudgeDispatch(
+        { taskId, role: 'grader', round, artifactPath: file, model: 'claude-opus-5' },
+        w.ctx(),
+        w.opts(),
+      );
+      await writeFile(
+        file,
+        JSON.stringify(
+          graderFile(
+            graderVerdictBody({
+              overall,
+              round,
+              criteria: [{ criterion: 'c', status: overall, evidence: 'e' }],
+              ...(overall === 'fail' ? { gaps: ['g'] } : {}),
+            }),
+          ),
+        ),
+      );
+      const later = new Date(Date.now() + 60_000);
+      await utimes(file, later, later);
+      await recordJudgeReport({ taskId, role: 'grader' }, w.ctx(), w.opts());
+    }
+    const input = { ...baseInput(w), taskId: 'task-9', noGrader: true };
+    const pre = await checkPaperwork(paperworkInput(input, 'gate'), w.ctx(), w.opts());
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'grader-invalid' });
+    expect(pre.reason).toBe('grader-invalid');
   });
 
   it('reports every problem in the gate order, not only the first', async () => {
