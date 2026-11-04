@@ -204,12 +204,24 @@ The dashboard and `bs stats` keep working off `state/events/*.jsonl`. What chang
 
 ## 8. Fixes the lean path needs first (phase 0)
 
-These were found in the trial and lie on the lean path. Each is a small separate PR.
+These were found in the trial and lie on the lean path. Each was a small separate PR. **Status: shipped, 2026-11-04.**
 
-1. `bs init` adds `/.blacksmith/` to `.git/info/exclude`. Without it, the integration check refuses a fresh project's untracked state.
-2. The trial harness `diffStats` exits 1 when `.blacksmith` is git-ignored, because the exclude pathspec names an ignored path.
-3. The uiux screenshot tool cannot go below about 500 px wide. Its "phone width" shots were cropped, which caused a false S2.
-4. `bs checks post-merge` takes the checked-out integration branch for the default branch when the repo has no remote.
+1. **The integration check refused a fresh project's untracked declarations** (#530).
+   - The draft of this scope proposed having `bs init` exclude `/.blacksmith/`. That would hide the declarations the work-root design wants tracked.
+   - The shipped fix is in the check instead: untracked files under the work root no longer count as a dirty tree. Tracked changes anywhere, and untracked files elsewhere, still refuse.
+2. **The trial harness `diffStats` exited 1 when `.blacksmith` was git-ignored** (#528). It now lists new files itself and marks them with literal pathspecs.
+3. **Cropped "phone width" screenshots caused a false S2** (#531).
+   - Shots now carry their measured `inner_width` and `client_width`, and the gate judges them by layout width.
+   - A page wider than its mobile viewport blocks as `mobile-overflow`.
+   - A page not scaled to the device width is refused with a hint about the meta viewport tag.
+4. **`bs checks post-merge` took the checked-out integration branch for the default branch when the repo had no remote** (#529). Without a remote, the default branch now resolves from `main`/`master` and never from a `bs/` branch.
+
+Follow-ups that the phase-0 reviews found, all fail-closed, not yet scheduled:
+- `WORK_ROOT` follows the cwd, not `--project`, so the #530 fix applies only when `bs` runs from the project.
+- `queue.ts`, `commit.ts`, `claims.ts` and `immutability.ts` read renames from the first porcelain column only.
+- `.blacksmith/.env`, though git-ignored, is loaded into the checks' environment.
+- A `bs new` project without a remote has only a `setup` branch (`scaffold.ts`), so its default branch now resolves to `worktree.default-branch-not-found`.
+- With both `main` and `master` and no remote, the default branch can depend on which branch is checked out. Recording the branch an integration branch was cut from would settle it.
 
 Two further trial findings are on the full path only and are deferred:
 - spec-review findings on a draft plan stay `raised` after the draft is fixed;
