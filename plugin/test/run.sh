@@ -78,7 +78,7 @@ for a in planner coder reviewer researcher scout; do
 done
 check "rules.md rule 4: the person runs /cross-check" grep -qi "the person runs it" "$P/rules.md"
 check "SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$P/skills/cross-check/SKILL.md"
-check "SKILL.md shows a quoted heredoc for criteria" grep -q "<<'EOF'" "$P/skills/cross-check/SKILL.md"
+check "SKILL.md shows a quoted heredoc for criteria" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
 check "SKILL.md asks for a 600000 Bash timeout" grep -q 600000 "$P/skills/cross-check/SKILL.md"
 for a in reviewer scout; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
 
@@ -100,7 +100,10 @@ cat > "$FAKE_DIR/stdin"
 cat "$FAKE_DIR/stdin" >&2
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "${FAKE_FAIL:-}" ] && { echo "boom: not logged in" >&2; exit 3; }
-[ -n "${FAKE_SLEEP:-}" ] && exec sleep "$FAKE_SLEEP"
+case "${FAKE_MODE:-}" in
+  child) sleep 31 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; wait ;;
+  stubborn) trap '' TERM; sleep 32 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; while :; do sleep 1; done ;;
+esac
 printf 'FAKE-FINDING: none\n' > "$out"
 echo 'STDOUT-NOISE []'
 FAKE
@@ -177,10 +180,28 @@ mkdir -p "$T/tmp"
 (cd "$R" && TMPDIR="$T/tmp" PATH="$T/bin:$PATH" sh "$X" main >/dev/null 2>&1)
 (cd "$R" && TMPDIR="$T/tmp" PATH="$T/bin:$PATH" FAKE_FAIL=1 sh "$X" main >/dev/null 2>&1)
 [ -z "$(ls -A "$T/tmp")" ] && ok "temp dir removed" || bad "temp dir left behind"
-# timeout
-r="$(cd "$R" && PATH="$T/bin:$PATH" FAKE_SLEEP=20 CROSSCHECK_TIMEOUT=2 sh "$X" main 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && ok "timeout exits 0" || bad "timeout exit $rc"
-case "$r" in *skipped*"timed out"*) ok "timeout skipped with reason";; *) bad "timeout: $r";; esac
+# timeout: the whole process group must die, also when codex ignores TERM
+for mode in child stubborn; do
+  rm -f "$T/child" "$T/parent"; mkdir -p "$T/tmp2"
+  r="$(cd "$R" && TMPDIR="$T/tmp2" PATH="$T/bin:$PATH" FAKE_MODE=$mode CROSSCHECK_TIMEOUT=2 CROSSCHECK_GRACE=1 sh "$X" main 2>&1)"; rc=$?
+  [ "$rc" -eq 0 ] && ok "timeout ($mode) exits 0" || bad "timeout ($mode) exit $rc"
+  case "$r" in skipped*|"cross-check: skipped"*"timed out"*) ok "timeout ($mode) output starts with skipped and a reason";; *) bad "timeout ($mode): $r";; esac
+  case "$r" in *Terminated*|*Killed*) bad "timeout ($mode) leaked a shell job notice: $r";; *) ok "timeout ($mode) no job notice";; esac
+  alive=0
+  for f in child parent; do [ -s "$T/$f" ] && kill -0 "$(cat "$T/$f")" 2>/dev/null && alive=1; done
+  [ -s "$T/child" ] && [ "$alive" -eq 0 ] && ok "timeout ($mode) leaves no surviving processes" || bad "timeout ($mode) survivors (alive=$alive)"
+  [ -z "$(ls -A "$T/tmp2")" ] && ok "timeout ($mode) temp dir removed" || bad "timeout ($mode) temp dir left"
+done
+# untracked files are not in the diff: warn, with the hint
+printf 'x\n' > "$R/new-untracked.txt"
+r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+case "$r" in *"1 untracked"*"git add -N"*) ok "untracked files warned about with the hint";; *) bad "no untracked warning: $r";; esac
+rm -f "$R/new-untracked.txt"
+r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+case "$r" in *untracked*) bad "untracked warning with no untracked files";; *) ok "no warning when nothing is untracked";; esac
+check "SKILL.md uses a rare heredoc delimiter" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
+check "SKILL.md mentions git add -N" grep -q "git add -N" "$P/skills/cross-check/SKILL.md"
+check "README mentions git add -N" grep -q "git add -N" "$P/README.md"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "== PASS =="; exit 0; else echo "== FAIL =="; exit 1; fi

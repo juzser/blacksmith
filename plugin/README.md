@@ -31,7 +31,7 @@ The marketplace entry named "blacksmith" still installs the old plugin. It switc
 
 ## Privacy: the cross-check sends your code out
 
-`/cross-check` runs only when you invoke it (Claude is not allowed to start it). It starts codex as a read-only agent with `-C <your repo>`. Codex can read any file in the repo that it chooses to, and it loads the repo's agent instructions. Everything it reads goes to the codex vendor, together with the diff (uncommitted changes included), the changed test files and your criteria. Nothing else in this plugin leaves your machine. It needs `codex` installed and logged in. With no `codex`, or on any failure or timeout, it reports "skipped" and never blocks. Settings: `CROSSCHECK_MODEL`, `CROSSCHECK_EFFORT`, `CROSSCHECK_TIMEOUT`, `CROSSCHECK_MAX_BYTES` (over the cap it skips rather than send half a diff).
+`/cross-check` runs only when you invoke it (Claude is not allowed to start it). It starts codex as a read-only agent with `-C <your repo>`. Codex can read any file in the repo that it chooses to, and it loads the repo's agent instructions. Everything it reads goes to the codex vendor, together with the diff (uncommitted changes included; untracked files are not, so run `git add -N <file>` to include a new one), the changed test files and your criteria. Nothing else in this plugin leaves your machine. It needs `codex` installed and logged in. With no `codex`, or on any failure or timeout, it reports "skipped" and never blocks. Settings: `CROSSCHECK_MODEL`, `CROSSCHECK_EFFORT`, `CROSSCHECK_TIMEOUT`, `CROSSCHECK_MAX_BYTES` (over the cap it skips rather than send half a diff).
 
 ## Optional: make compaction automatic at 60%
 
