@@ -1304,7 +1304,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
 
   it('has exactly one bullet per reason of the gate type and none for another', () => {
     const reasons = Object.keys(ANSWERER_OF).sort();
-    expect(reasons).toHaveLength(15);
+    expect(reasons).toHaveLength(16);
     expect(
       bullets
         .filter((b) => b.reason !== undefined)
@@ -1427,7 +1427,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
       }
       expect(
         queueText.split('\n').filter((l) => l.startsWith('| `blocked` (`reason:')),
-      ).toHaveLength(15);
+      ).toHaveLength(16);
     });
 
     it('ends the grader-invalid row with the capped clause and keeps its two pinned phrases', () => {

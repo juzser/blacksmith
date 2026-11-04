@@ -398,6 +398,29 @@ export async function recordTester(
   return result;
 }
 
+/** Tester recorded with the mobile-light page wider than its 390 px viewport. */
+export async function recordTesterWithOverflow(w: World): Promise<Record<string, unknown>> {
+  const result = await testerResult(w, SHOT_NAMES);
+  for (const art of result.artifacts as Record<string, unknown>[]) {
+    if (art.path === 'home-mobile-light.png') {
+      art.inner_width = 600;
+      art.client_width = 390;
+    }
+  }
+  await recordTaskResult(
+    { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
+    w.ctx(),
+    w.opts(),
+  );
+  return result;
+}
+
+export const mobileOverflow: FixtureBuilder = async (w) => {
+  await withSpecTurn(w);
+  await recordTesterWithOverflow(w);
+  return baseInput(w, { uiAffecting: true });
+};
+
 export const uiuxSpecMissing: FixtureBuilder = async (w) => baseInput(w, { uiAffecting: true });
 
 /** Tester recorded with a screenshot named without the viewport and theme suffix. */
@@ -490,6 +513,7 @@ export const PARITY_CASES: readonly {
   },
   { name: 'uiux spec missing', build: uiuxSpecMissing, reason: 'uiux-spec-missing' },
   { name: 'screenshots stale', build: screenshotsStale, reason: 'screenshots-stale' },
+  { name: 'mobile overflow', build: mobileOverflow, reason: 'mobile-overflow' },
   { name: 'uiux visual missing', build: uiuxVisualMissing, reason: 'uiux-visual-missing' },
   { name: 'ui-affecting, everything in place', build: uiuxClean, reason: null },
 ];
@@ -565,8 +589,15 @@ export async function buildLadder(w: World): Promise<Ladder> {
         reason: 'uiux-spec-missing',
         fix: async () => {
           await withSpecTurn(w);
-          await recordTester(w);
+          await recordTesterWithOverflow(w);
           await closeUiuxTurn(w, 'visual');
+        },
+      },
+      {
+        reason: 'mobile-overflow',
+        fix: async () => {
+          await recordTester(w);
+          await closeUiuxTurn(w, 'visual', 2);
         },
       },
       {
