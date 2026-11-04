@@ -1,9 +1,19 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readEvents } from '../src/events.js';
 import { type GateInput, recordTaskResult, runGate } from '../src/gate.js';
+import { recordJudgeReport } from '../src/judges.js';
 import { recordMcpOverride } from '../src/mcp.js';
 import {
   checkPaperwork,
@@ -33,8 +43,10 @@ import {
   type FixtureBuilder,
   graderDead,
   graderFailed,
+  graderFile,
   graderMet,
   graderOutsideStructured,
+  graderVerdictBody,
   judgesOutstanding,
   MISANNOTATED_TOOL,
   mcpManifest,
@@ -888,6 +900,48 @@ describe('stage order', () => {
     const gate = await runGate(input, w.ctx(), w.opts());
     expect(gate).toMatchObject({ outcome: 'blocked', reason: 'judges-outstanding' });
     expect(pre.reason).toBe('judges-outstanding');
+  });
+
+  async function reportGrader(overall: 'pass' | 'fail') {
+    await dispatchJudge(w, 'grader');
+    const file = path.join(w.stateDir, 'grader.json');
+    const status = overall === 'pass' ? 'pass' : 'fail';
+    await writeFile(
+      file,
+      JSON.stringify(
+        graderFile(
+          graderVerdictBody({
+            overall,
+            criteria: [{ criterion: 'a bare CR splits a line', status, evidence: 'test red' }],
+            ...(overall === 'fail' ? { gaps: ['still red'] } : {}),
+          }),
+        ),
+      ),
+    );
+    const later = new Date(Date.now() + 60_000);
+    await utimes(file, later, later);
+    await recordJudgeReport({ taskId: w.taskId, role: 'grader' }, w.ctx(), w.opts());
+  }
+
+  it('an opted-out run still blocks on a not-met verdict reported for this task, as --grader would', async () => {
+    await reportGrader('fail');
+    const input = { ...baseInput(w), noGrader: true };
+    const pre = await checkPaperwork(paperworkInput(input, 'gate'), w.ctx(), w.opts());
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({
+      outcome: 'blocked',
+      reason: 'grader-fail',
+      grader: { state: 'verdict', result: 'not-met' },
+    });
+    // The preflight reports a rubric verdict and never blocks on it, as with --grader.
+    expect(pre.verdicts).toEqual({ grader: 'fail' });
+  });
+
+  it('an opted-out run records a reported met verdict as a verdict, not as skipped', async () => {
+    await reportGrader('pass');
+    const input = { ...baseInput(w), noGrader: true };
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'pass', grader: { state: 'verdict', result: 'met' } });
   });
 
   it('reports every problem in the gate order, not only the first', async () => {

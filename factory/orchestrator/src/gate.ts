@@ -19,7 +19,7 @@ import {
   transition,
 } from './findings.js';
 import { runGit } from './git.js';
-import { type JudgeTurn, readJudgeTurns } from './judges.js';
+import { foldJudgeTurns, type JudgeTurn, readJudgeTurns } from './judges.js';
 import { appendTracked, beginLineageRun, endLineageRun, readLineage } from './lineageSnapshot.js';
 import type { McpGateViolation } from './mcp.js';
 import {
@@ -30,6 +30,7 @@ import {
   graderStage,
   judgesStage,
   mcpStage,
+  reportedGraderFile,
   resolveTaxonomyAndSchemas,
   schemaStage,
   screenshotsFromArtifacts,
@@ -1090,11 +1091,17 @@ async function runGateStages(
   if (input.noGrader === true && input.graderVerdict !== undefined) {
     throw new Error('gate: `noGrader` and a grader verdict are mutually exclusive.');
   }
-  let grader: GraderRecord =
+  // An opt-out skips a missing verdict, not one a grader turn already reported for this task.
+  const reportedVerdict =
     input.noGrader === true
-      ? { state: 'skipped-by-option' }
-      : input.graderVerdict !== undefined
-        ? { state: 'verdict' }
+      ? reportedGraderFile(foldJudgeTurns(await readLineage(ctx.sessionId, opts), input.taskId))
+      : undefined;
+  const graderVerdict = input.graderVerdict ?? reportedVerdict;
+  let grader: GraderRecord =
+    graderVerdict !== undefined
+      ? { state: 'verdict' }
+      : input.noGrader === true
+        ? { state: 'skipped-by-option' }
         : { state: 'not-run' };
   // Every outcome carries the grader state as it stood when the run ended.
   const finalize = (o: UnfinalizedGateOutcome, c: GateContext, p: EventOpts) =>
@@ -1303,9 +1310,9 @@ async function runGateStages(
   // so a full test run here is spent for nothing. It sits behind the commit
   // certificate for the same reason the tests do: a rubric scored against a
   // worktree the merge will never see is scored against nothing (D-30/D-34).
-  if (input.graderVerdict !== undefined) {
+  if (graderVerdict !== undefined) {
     const graderCheck = await checkGraderVerdict(
-      input.graderVerdict,
+      graderVerdict,
       input.taskId,
       ctx,
       opts,

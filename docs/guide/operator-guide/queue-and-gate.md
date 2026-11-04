@@ -300,8 +300,11 @@ states the run was in, so a skipped grader is never read as a passed one:
 | `{"state": "skipped-by-option"}` | `--no-grader`: the caller chose to run without a grader. |
 | `{"state": "not-run"}` | Neither flag. The default is unchanged (the stage is skipped), but the record shows nobody asked for the opt-out either. |
 
-`--no-grader` only skips the rubric stage. A grader turn dispatched with
-`bs judge dispatch` and not yet reported still blocks as `judges-outstanding`.
+`--no-grader` only skips a *missing* verdict. A grader turn dispatched with
+`bs judge dispatch` and not yet reported still blocks as `judges-outstanding`,
+and one reported with a result file is read as if `--grader` had handed it in:
+a `not-met` result blocks as `grader-fail`, a `met` one is recorded as a
+`verdict`, not as skipped.
 
 ```bash
 bs gate run epic-1/task-1 \

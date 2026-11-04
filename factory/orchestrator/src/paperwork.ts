@@ -383,6 +383,25 @@ export function judgesStage(
 
 // --- grader -----------------------------------------------------------------
 
+/**
+ * The grader file the task's latest reported grader turn handed in, for a run
+ * that opted out of `--grader`: an opt-out skips a missing verdict, it never
+ * ignores one on file. `undefined` when no grader turn was reported with a
+ * file; a file that cannot be read comes back as a string, which
+ * `graderStage` refuses as an invalid shape.
+ */
+export function reportedGraderFile(turns: readonly JudgeTurn[]): unknown {
+  const latest = turns
+    .filter((t) => t.role === 'grader' && t.reported && t.reportedArtifact !== null)
+    .sort((a, b) => b.round - a.round)[0];
+  if (latest === undefined || latest.reportedArtifact === null) return undefined;
+  try {
+    return JSON.parse(readFileSync(latest.reportedArtifact, 'utf8')) as unknown;
+  } catch {
+    return 'unreadable grader file';
+  }
+}
+
 /** One row of the grader's rubric, once it has validated. */
 interface GradedCriterion {
   criterion: string;
@@ -680,15 +699,17 @@ export async function checkPaperwork(
         break;
       }
       case 'grader': {
-        if (input.noGrader === true) {
-          skip(stage, 'skipped-by-option');
+        const verdictFile =
+          input.noGrader === true
+            ? ctx.sessionId === undefined
+              ? undefined
+              : reportedGraderFile(foldJudgeTurns(await lineage(), input.taskId))
+            : input.graderVerdict;
+        if (verdictFile === undefined) {
+          skip(stage, input.noGrader === true ? 'skipped-by-option' : 'no-input');
           break;
         }
-        if (input.graderVerdict === undefined) {
-          skip(stage, 'no-input');
-          break;
-        }
-        const r = graderStage(input.graderVerdict, taxonomy, schemas);
+        const r = graderStage(verdictFile, taxonomy, schemas);
         if (r.shape === 'invalid') {
           block(stage, 'grader-invalid', r.payload);
         } else if (r.rubric !== null) {
