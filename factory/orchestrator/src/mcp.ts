@@ -15,9 +15,13 @@
 // to render a verdict is a gate that behaves differently in CI than on a
 // laptop. Rule ids (MCP-P1, MCP-T4, ...) are the contract with the doc — when
 // one changes here, the doc's numbered list changes in the same commit.
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { isOperatorActor } from './actors.js';
 import { SmithError } from './errors.js';
+import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import type { EventContext } from './findings.js';
 import { runGit, runGitRaw } from './git.js';
 import { PROJECTS_DIR, roadmapReadPath, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
 import {
@@ -34,6 +38,7 @@ import {
   validateProjectName,
 } from './scaffold.js';
 import { ensureWritableRoadmap } from './workroot.js';
+import { taskBaseRef } from './worktree.js';
 
 export class McpError extends SmithError {}
 
@@ -750,8 +755,10 @@ export interface McpManifestInspection {
   present: boolean;
   /** What the task's author can fix: a new rule violation, or a manifest that cannot be read. */
   invalid: McpGateViolation[];
-  /** What only the operator can supply: an approval the task added or changed, or a new unsigned mutating tool. */
+  /** What only the operator can supply: an approval the task added or changed, a new unsigned mutating tool, or a base nobody recorded. */
   unsigned: McpGateViolation[];
+  /** Tools whose unsigned entry an operator override covers, `tool` plus entry hash. */
+  overridden: { tool: string; entryHash: string }[];
 }
 
 type Committed = { kind: 'absent' } | { kind: 'bad'; why: string } | { kind: 'ok'; text: string };
@@ -818,39 +825,61 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 
+/** A tool's entry without its `approval`: what a signature is bound to. */
+export function mcpEntryHash(tool: Record<string, unknown>): string {
+  const { approval: _approval, ...entry } = tool;
+  return createHash('sha256').update(canonical(entry)).digest('hex');
+}
+
+/** The key an operator override and a tool entry meet on. */
+export const mcpOverrideKey = (tool: string, entryHash: string): string => `${tool}|${entryHash}`;
+
 const problem = (message: string): McpGateViolation => ({
   rule: 'MCP-MANIFEST',
   path: `/${MANIFEST_NAME}`,
   message,
 });
 
+/** The commit the task branch was cut from, as `worktree create` recorded it; undefined for a branch nobody recorded. */
+function recordedBase(dir: string): string | undefined {
+  try {
+    const branch = runGit(dir, ['branch', '--show-current']);
+    if (branch === '') return undefined;
+    return runGit(dir, ['rev-parse', '--verify', `${taskBaseRef(branch)}^{commit}`]);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The per-task gate's read of the project's manifest. It reads the committed
- * manifest at HEAD, never the working tree, and compares it with the one at the
- * merge-base of HEAD and `baseRef`, so a task answers only for what it changed:
+ * manifest at HEAD, never the working tree, and compares it with the manifest at
+ * the commit the task branch was cut from, recorded as a SHA by `worktree create`
+ * (so neither a missing `--base` nor a moved branch changes it). A task answers
+ * only for what it changed:
  *
  * - a violation the base manifest already carries does not block (keyed by rule
  *   plus tool or path), so one red manifest does not stop every unrelated task;
- * - an `approval` the task added or changed, and a new unsigned mutating tool
- *   (MCP-T4), are `unsigned`: only the operator signs, so a task cannot satisfy
- *   the rule by writing the signature itself;
+ * - an `approval` the task added or changed, an approval whose tool entry changed
+ *   since it was signed, and a new unsigned mutating tool (MCP-T4) are `unsigned`:
+ *   only the operator signs. An operator override recorded for the tool and its
+ *   entry hash (`overridden`) clears one;
  * - a manifest the base carries and HEAD lacks, a symlink or directory at the
  *   path, and JSON that does not parse are `invalid`, and say why.
  *
- * Without a resolvable `baseRef` the base counts as empty, so nothing the
- * manifest holds is excused. The rules are `checkManifest`'s, deliberately not
- * the roadmap rules (see `resolveMcpSurface`). `/bs do` has no epic close; this
- * is why the MCP-T4 rule would otherwise never run there.
+ * When the manifest exists and no base was recorded the check fails closed as
+ * `unsigned`: a missing base is never read as an empty one.
+ *
+ * The rules are `checkManifest`'s, deliberately not the roadmap rules (see
+ * `resolveMcpSurface`). `/bs do` has no epic close; this is why the MCP-T4 rule
+ * would otherwise never run there.
  */
-export function inspectMcpManifest(dir: string, baseRef?: string): McpManifestInspection {
-  let baseRev: string | undefined;
-  if (baseRef !== undefined) {
-    try {
-      baseRev = runGit(dir, ['merge-base', 'HEAD', baseRef]);
-    } catch {
-      baseRev = undefined;
-    }
-  }
+export function inspectMcpManifest(
+  dir: string,
+  overrides: ReadonlySet<string> = new Set(),
+): McpManifestInspection {
+  const none = { invalid: [], unsigned: [], overridden: [] };
+  const baseRev = recordedBase(dir);
   const head = readCommittedManifest(dir, 'HEAD');
   const base: Committed =
     baseRev === undefined ? { kind: 'absent' } : readCommittedManifest(dir, baseRev);
@@ -858,22 +887,33 @@ export function inspectMcpManifest(dir: string, baseRef?: string): McpManifestIn
   if (head.kind === 'absent') {
     return base.kind === 'ok'
       ? {
+          ...none,
           present: true,
           invalid: [problem(`${MANIFEST_NAME} exists on the base but is gone at HEAD; restore it`)],
-          unsigned: [],
         }
-      : { present: false, invalid: [], unsigned: [] };
+      : { ...none, present: false };
   }
-  if (head.kind === 'bad') return { present: true, invalid: [problem(head.why)], unsigned: [] };
+  if (head.kind === 'bad') return { ...none, present: true, invalid: [problem(head.why)] };
 
   const manifest = parseManifest(head);
   if (manifest === undefined) {
     return {
+      ...none,
       present: true,
       invalid: [
         problem(`${MANIFEST_NAME} is not valid JSON; run \`bs mcp check\` for the parser message`),
       ],
-      unsigned: [],
+    };
+  }
+  if (baseRev === undefined) {
+    return {
+      ...none,
+      present: true,
+      unsigned: [
+        problem(
+          `No base commit is recorded for this branch, so the manifest cannot be compared with what the task was cut from. Record it with \`git update-ref ${taskBaseRef('<branch>')} <sha>\` (\`bs worktree create\` does it for new tasks).`,
+        ),
+      ],
     };
   }
 
@@ -888,26 +928,118 @@ export function inspectMcpManifest(dir: string, baseRef?: string): McpManifestIn
     (v.rule === 'MCP-T4' ? unsigned : invalid).push(v);
   }
 
-  const baseApprovals = new Map<string, string>();
+  const baseSigned = new Map<string, { approval: string; entryHash: string }>();
   for (const tool of toolsOf(baseManifest)) {
     const name = toolName(tool);
     if (name !== undefined && isRecord(tool) && tool.approval !== undefined) {
-      baseApprovals.set(name, canonical(tool.approval));
+      baseSigned.set(name, { approval: canonical(tool.approval), entryHash: mcpEntryHash(tool) });
     }
   }
   toolsOf(manifest).forEach((tool, index) => {
     const name = toolName(tool);
     if (name === undefined || !isRecord(tool) || tool.approval === undefined) return;
-    if (baseApprovals.get(name) === canonical(tool.approval)) return;
+    const signed = baseSigned.get(name);
+    if (signed?.approval === canonical(tool.approval) && signed.entryHash === mcpEntryHash(tool)) {
+      return;
+    }
     unsigned.push({
       rule: 'MCP-T4',
       path: `/tools/${index}/approval`,
       tool: name,
-      message: `The approval on "${name}" was added or changed by this task. Only the operator signs: the operator commits it to the base branch and the task moves onto it.`,
+      message:
+        signed === undefined
+          ? `The approval on "${name}" was added by this task. Only the operator signs.`
+          : `The approval on "${name}" was changed, or the tool entry changed since it was signed. Only the operator signs.`,
     });
   });
 
-  return { present: true, invalid, unsigned };
+  // An unsigned defect on a tool is cleared by an operator override for that tool's current entry.
+  const entryHashes = new Map<string, string>();
+  for (const tool of toolsOf(manifest)) {
+    const name = toolName(tool);
+    if (name !== undefined && isRecord(tool)) entryHashes.set(name, mcpEntryHash(tool));
+  }
+  const overridden: { tool: string; entryHash: string }[] = [];
+  const stillUnsigned = unsigned.filter((v) => {
+    const hash = v.tool === undefined ? undefined : entryHashes.get(v.tool);
+    if (
+      v.tool === undefined ||
+      hash === undefined ||
+      !overrides.has(mcpOverrideKey(v.tool, hash))
+    ) {
+      return true;
+    }
+    if (!overridden.some((o) => o.tool === v.tool))
+      overridden.push({ tool: v.tool, entryHash: hash });
+    return false;
+  });
+
+  return { present: true, invalid, unsigned: stillUnsigned, overridden };
+}
+
+export const MCP_OVERRIDE_EVENT = 'mcp-approval-override';
+
+/** The override keys one task's log carries: events an operator wrote for it. */
+export function mcpOverrideKeys(events: readonly StoredEvent[], taskId: string): Set<string> {
+  const keys = new Set<string>();
+  for (const e of events) {
+    if (e.record.event_type !== MCP_OVERRIDE_EVENT || e.record.task_id !== taskId) continue;
+    if (!isOperatorActor(e.record.actor)) continue;
+    const p = e.record.payload as Record<string, unknown>;
+    if (typeof p.tool === 'string' && typeof p.entry_hash === 'string') {
+      keys.add(mcpOverrideKey(p.tool, p.entry_hash));
+    }
+  }
+  return keys;
+}
+
+/**
+ * `bs mcp override`: record that the operator lets one tool stand unsigned for a
+ * task. The event names the tool and the hash of its committed entry, so it covers
+ * that entry only; change the entry and it no longer applies. Refused unless the
+ * actor is an operator actor and a note is given. As with `waivers approve-task`
+ * and `epic close --override-rationale`, "operator" is the `--actor` string the
+ * caller passes: nothing authenticates a person.
+ */
+export async function recordMcpOverride(
+  input: { taskId: string; worktreeDir: string; tool: string; note: string },
+  ctx: EventContext,
+  opts: EventOpts = {},
+): Promise<StoredEvent> {
+  const actor = ctx.actor ?? 'user';
+  if (!isOperatorActor(actor)) {
+    throw new McpError(
+      'mcp.not-operator',
+      `Actor "${actor}" cannot override an MCP approval: only the operator can. Pass --actor operator.`,
+      { actor },
+    );
+  }
+  if (input.note.trim() === '') {
+    throw new McpError('mcp.note-required', 'An MCP override needs a short rationale (--note).', {
+      taskId: input.taskId,
+    });
+  }
+  const manifest = parseManifest(readCommittedManifest(input.worktreeDir, 'HEAD'));
+  const entry = toolsOf(manifest).find((t) => toolName(t) === input.tool);
+  if (!isRecord(entry)) {
+    throw new McpError(
+      'mcp.unknown-tool',
+      `The committed ${MANIFEST_NAME} has no tool "${input.tool}".`,
+      { tool: input.tool },
+    );
+  }
+  return appendEvent(
+    {
+      session_id: ctx.sessionId,
+      actor,
+      event_type: MCP_OVERRIDE_EVENT,
+      task_id: input.taskId,
+      plan_version: ctx.planVersion,
+      causal_parent: ctx.causalParent,
+      payload: { tool: input.tool, entry_hash: mcpEntryHash(entry), operator_note: input.note },
+    },
+    opts,
+  );
 }
 
 /**

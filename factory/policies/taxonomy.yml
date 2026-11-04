@@ -77,6 +77,7 @@ graph_event:     [plan-version-created, plan-version-superseded,
 # ── Gates (event-log first-class, §11 — added Phase 4) ───────────────
 gate_event:      [schema-check-result, artifact-check-result,
                   commit-check-result, deps-check-result,
+                  mcp-check-result, mcp-approval-override,
                   judges-outstanding, grader-verdict, budget-check-result,
                   testgate-result, coverage-evidence, integration-check,
                   queue-tier-run,
@@ -104,6 +105,15 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       checks are about to run (P9-16d);
                   #                       always logged, including when the
                   #                       project declares nothing to install
+                  # mcp-check-result    — the committed mcp.manifest.json against the
+                  #                       commit the task was cut from: only what
+                  #                       the task changed is judged, and an
+                  #                       approval is the operator's to sign.
+                  #                       Always logged, including when the
+                  #                       project has no manifest
+                  # mcp-approval-override — the operator lets one tool stand
+                  #                       unsigned for a task, naming the tool and
+                  #                       the hash of its committed entry
                   # judges-outstanding  — a judge this task dispatched through
                   #                       `bs judge dispatch` never reported
                   #                       back, so the gate refuses to score an

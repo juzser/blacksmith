@@ -1166,9 +1166,11 @@ async function runGateStages(
   }
 
   // The same manifest rules `epic close` enforces (MCP-T4's signed approval among
-  // them), run here because `/bs do` has no epic close. A project with no
-  // `mcp.manifest.json` passes through untouched.
-  const mcp = mcpStage(input.worktreeDir, input.baseRef);
+  // them), run here because `/bs do` has no epic close. Emitted on every path, like
+  // the deps check: a project with no manifest is untouched, and the log can tell
+  // that apart from a check that never ran.
+  const mcp = mcpStage(input.worktreeDir, input.taskId, await readLineage(ctx.sessionId, opts));
+  await emit('mcp-check-result', mcp.payload, input.taskId, ctx, opts);
   if (mcp.reason !== null) {
     return finalize(
       {

@@ -514,7 +514,7 @@ one thing this playbook never asks you to.
    - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
    - `findings`: bounce to the coder.
    - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule, path and tool); the coder fixes the manifest in its own commit and never writes an `approval` (`.claude/skills/bs/mcp.md`).
-   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, or a new mutating tool with none: only the operator signs, by committing the approval to the base branch, and the task moves onto it; the coder is not bounced and writes none).
+   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, a changed tool entry under an old approval, a new mutating tool with none, or no recorded base: only the operator signs, by running `bs mcp override <task-id> --worktree <dir> --tool <name> --note <why> --actor operator` for each tool, after which the gate runs again; the coder is not bounced and writes none).
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
    - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.

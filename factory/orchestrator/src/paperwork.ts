@@ -2,12 +2,12 @@ import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { type ArtifactCheck, type ArtifactDecl, checkArtifacts } from './artifacts.js';
 import { type CommitCertificate, certifyCommit } from './commit.js';
-import type { EventOpts } from './events.js';
+import type { EventOpts, StoredEvent } from './events.js';
 // Type-only: gate.ts imports this module at runtime, so the reverse edge must not exist.
 import type { DepsCheck } from './gate.js';
 import { foldJudgeTurns, type JudgeTurn, outstandingJudges } from './judges.js';
 import { readLineage } from './lineageSnapshot.js';
-import { inspectMcpManifest, type McpGateViolation } from './mcp.js';
+import { inspectMcpManifest, type McpGateViolation, mcpOverrideKeys } from './mcp.js';
 import {
   type CompiledSchemaSet,
   compileSchemas,
@@ -293,33 +293,49 @@ export interface McpStage {
   reason: 'mcp-manifest-invalid' | 'mcp-approval-unsigned-by-operator' | null;
   /** Every defect, author-fixable first, each naming its tool where there is one. */
   violations: McpGateViolation[];
-  /** One line per defect. */
-  payload: { summary: string[] };
+  /** The `mcp-check-result` payload. */
+  payload: {
+    ok: boolean;
+    manifest_present: boolean;
+    reason: string | null;
+    summary: string[];
+    overridden: { tool: string; entry_hash: string }[];
+  };
 }
 
 /**
  * A project that exposes an MCP surface owes a valid `mcp.manifest.json`, with
  * MCP-T4's operator signature among the rules. The epic-close check owns the full
  * path; this is the same manifest rule at the task gate, for `/bs do`, which has no
- * epic close. See `inspectMcpManifest` for what a task answers for.
+ * epic close. See `inspectMcpManifest` for what a task answers for. `events` is the
+ * task's lineage, where an operator override is looked for.
  */
-export function mcpStage(worktreeDir: string, baseRef?: string): McpStage {
-  const r = inspectMcpManifest(worktreeDir, baseRef);
+export function mcpStage(
+  worktreeDir: string,
+  taskId: string,
+  events: readonly StoredEvent[] = [],
+): McpStage {
+  const r = inspectMcpManifest(worktreeDir, mcpOverrideKeys(events, taskId));
   const violations = [...r.invalid, ...r.unsigned];
+  const reason =
+    r.invalid.length > 0
+      ? 'mcp-manifest-invalid'
+      : r.unsigned.length > 0
+        ? 'mcp-approval-unsigned-by-operator'
+        : null;
   return {
     ok: violations.length === 0,
-    reason:
-      r.invalid.length > 0
-        ? 'mcp-manifest-invalid'
-        : r.unsigned.length > 0
-          ? 'mcp-approval-unsigned-by-operator'
-          : null,
+    reason,
     violations,
     payload: {
+      ok: violations.length === 0,
+      manifest_present: r.present,
+      reason,
       summary: violations.map(
         (v) =>
           `${v.rule}${v.tool === undefined ? '' : ` tool "${v.tool}"`} at ${v.path}: ${v.message}`,
       ),
+      overridden: r.overridden.map((o) => ({ tool: o.tool, entry_hash: o.entryHash })),
     },
   };
 }
@@ -594,7 +610,11 @@ export async function checkPaperwork(
           skip(stage, 'no-input');
           break;
         }
-        const r = mcpStage(input.worktreeDir, input.baseRef);
+        const r = mcpStage(
+          input.worktreeDir,
+          input.taskId,
+          ctx.sessionId === undefined ? [] : await lineage(),
+        );
         if (r.reason !== null) block(stage, r.reason, r.payload);
         break;
       }

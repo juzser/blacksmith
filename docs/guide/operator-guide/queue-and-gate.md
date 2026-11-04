@@ -530,7 +530,7 @@ block the merge queue, it queues an operator question (§8 below).
 | `blocked` (`reason: "not-committed"`) | There is no commit here to score — see §5a | Never reaches tests; bounce to the coder to commit |
 | `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; the wave-runner's own fix answers it: run `pnpm install` in the worktree, then the preflight again (no agent runs) |
 | `blocked` (`reason: "mcp-manifest-invalid"`) | The task introduced a violation of a rule `bs mcp check` enforces in the committed `mcp.manifest.json`, or removed the manifest, or committed one that is not a regular file or not valid JSON | Never reaches tests; `mcpViolations[]` names each rule, path and tool; bounce to the coder to fix the manifest. A project with no manifest is untouched; `epic close` keeps its own check |
-| `blocked` (`reason: "mcp-approval-unsigned-by-operator"`) | The task added or changed a tool's `approval`, or added a mutating tool with none (MCP-T4) | Never reaches tests; `mcpViolations[]` names each tool; the epic session answers it, because only the operator signs (see the MCP manifest check below) |
+| `blocked` (`reason: "mcp-approval-unsigned-by-operator"`) | The task added or changed a tool's `approval`, changed a signed tool's entry, added a mutating tool with none (MCP-T4), or the branch has no recorded base | Never reaches tests; `mcpViolations[]` names each tool; the epic session answers it, because only the operator signs: `bs mcp override` (see the MCP manifest check below) |
 | `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes. With a uiux turn among them, bounce to the uiux pass (any other judge it names is re-poked beside it); with no uiux turn among them, a judge turn answers it (each judge it names re-poked, then `bs judge report`, §3c) |
 | `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; a judge turn answers it: the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'); `wave.md` step 7 sends it to the grader before `gate run` |
 | `blocked` (`reason: "uiux-spec-missing"`) | A UI-affecting task has no uiux spec from the uiux spec pass | Never reaches tests; bounce to the uiux pass (the spec pass) |
@@ -764,9 +764,11 @@ the log has to be able to tell that apart from one that never ran.
 
 Behind the deps check. The gate reads `mcp.manifest.json` as the task's HEAD
 commit holds it, never from the working tree, and compares it with the manifest
-at the merge-base of HEAD and `--base`. It runs the same manifest rules `bs mcp
-check` and `epic close` run (not the roadmap rules, which belong to the close),
-and a task answers only for what it changed:
+at the commit the task branch was cut from. `bs worktree create` records that
+commit as a SHA under `refs/bs/base/<branch>`, so neither a missing `--base` nor
+a moved base branch changes what the task is judged against. It runs the same
+manifest rules `bs mcp check` and `epic close` run (not the roadmap rules, which
+belong to the close), and a task answers only for what it changed:
 
 - A violation the base manifest already carries does not block; a new one blocks
   with `mcp-manifest-invalid` and `mcpViolations[]`, each naming its rule, path
@@ -774,18 +776,27 @@ and a task answers only for what it changed:
 - A manifest the base carries and HEAD lacks, a symlink or directory at the
   path, and JSON that does not parse block with the same reason, and
   `mcpViolations[]` says which.
-- An `approval` the task added or changed, and a new mutating tool with none,
-  block with `mcp-approval-unsigned-by-operator`. Only the operator signs.
+- An `approval` the task added or changed, an approval whose tool entry has
+  changed since it was signed (an approval is bound to a hash of the entry
+  without its `approval`), and a new mutating tool with none block with
+  `mcp-approval-unsigned-by-operator`. Only the operator signs.
+- A branch with a manifest and no recorded base (a task cut before the record
+  existed) blocks with the same reason and says so; a missing base is never read
+  as an empty one. Record it by hand with `git update-ref`.
 - An ignored or untracked manifest is not read. A project with no manifest
-  passes untouched. Without `--base` nothing is excused against a base.
+  passes untouched. The result is logged as `mcp-check-result` on every path.
 
-**How an approval gets in.** Nothing records an operator's signature outside the
-manifest itself (`.claude/skills/bs/mcp.md` has the operator write the
-`approval` there, and `epic close` checks only its shape), so the gate has no
-record to verify one against. The rule is therefore positional: the operator
-commits the manifest entry with its `approval` to the base branch, and the task
-moves onto that commit. The gate then sees an approval the task did not touch.
-No new signing mechanism exists, and `epic close` keeps its own check.
+**How an unsigned tool gets through.** The operator runs
+`bs mcp override <task-id> --worktree <dir> --tool <name> --note <why> --actor operator`
+for each tool. It appends an `mcp-approval-override` event naming the tool and
+the hash of its committed entry, and the gate reads it on the next run. Change
+the entry and the override no longer applies. This is the same path
+`epic close --override-rationale` and `waivers approve-task` give: **"operator"
+is the `--actor` string the caller passes, and `epic close` checks not even that
+(it records the rationale text under actor `operator` by default).** Nothing
+authenticates a person, so an agent that writes `--actor operator` produces the
+same event. A stronger proof is a separate decision, and this check builds none.
+`epic close` keeps its own check.
 
 ## 5b. One epic across several sessions — `bs event lineage`
 

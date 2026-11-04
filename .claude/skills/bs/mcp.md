@@ -18,8 +18,8 @@ which is the rubber stamp the standard exists to prevent.
    with a mutation class and matching annotations; anything that is not
    `read-only` needs `approval: { operator, date, milestone }` — an operator
    signature, taken at this milestone. Never sign one yourself: the gate blocks
-   an approval a task added or changed, so the operator commits it to the base
-   branch and the task moves onto it.
+   an approval a task added or changed, and the operator clears a tool for a
+   task with `bs mcp override`.
 3. Tools that wrap a guardrail-gated action (deploy, outbound send, writes to
    `main`) are not allowed at all (mcp.md MCP-S3). A signed `destructive` tool
    is permission to act inside the project, never a way around an operator

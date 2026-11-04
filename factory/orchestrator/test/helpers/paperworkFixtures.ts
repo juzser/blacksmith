@@ -78,6 +78,8 @@ export async function createWorld(): Promise<World> {
   git(['add', '.']);
   git(['commit', '-q', '-m', 'task work']);
   await mkdir(path.join(worktreeDir, 'node_modules', '.bin'), { recursive: true });
+  // What `bs worktree create` records at the cut.
+  git(['update-ref', 'refs/bs/base/smith/epic-1/task-1', 'main']);
 
   await appendEvent(
     {
@@ -239,6 +241,8 @@ export async function commitMcpManifestOnBase(w: World, body: string): Promise<v
   w.git(['commit', '-q', '-m', 'operator manifest']);
   w.git(['checkout', '-q', task]);
   w.git(['rebase', '-q', 'main']);
+  // The task is cut afresh from the operator's commit.
+  w.git(['update-ref', `refs/bs/base/${task}`, 'main']);
 }
 
 export const mcpUnsignedTool: FixtureBuilder = async (w) => {

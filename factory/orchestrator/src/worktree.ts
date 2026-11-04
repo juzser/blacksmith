@@ -10,6 +10,15 @@ export class WorktreeError extends SmithError {}
  * runEpicVerdict(), both of which need to recognise `<epic>/integration` as non-task. */
 export const RESERVED_TASK_ID = 'integration';
 
+/**
+ * Where the commit a task branch was cut from is recorded: `refs/bs/base/<branch>`.
+ * A SHA, not a branch name, so moving the base branch afterwards does not move what
+ * the task is judged against. The MCP manifest check of the gate reads it.
+ */
+export function taskBaseRef(branch: string): string {
+  return `refs/bs/base/${branch}`;
+}
+
 function localBranchExists(projectDir: string, branch: string): boolean {
   try {
     git(projectDir, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
@@ -271,7 +280,9 @@ export function createTaskWorktree(
     sourceBranch = ensureIntegrationBranch(projectDir, epic);
   }
 
+  const baseSha = git(projectDir, ['rev-parse', '--verify', `${sourceBranch}^{commit}`]);
   git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, sourceBranch]);
+  git(projectDir, ['update-ref', taskBaseRef(branch), baseSha]);
 
   return { worktreeDir, branch, epic, taskId };
 }
