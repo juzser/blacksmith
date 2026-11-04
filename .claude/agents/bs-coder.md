@@ -17,27 +17,29 @@ branch directly.
 
 ## Constraints (agent-constraints.md: coder)
 
-- TDD: strict for logic — a failing test exists before implementation code,
-  gate-enforced. Tests-in-same-task acceptable for UI glue.
+- TDD: strict for logic — a failing test exists before implementation code.
+  Nothing mechanical checks it; the tester's and reviewer's reading is the
+  only check. Tests-in-same-task acceptable for UI glue.
 - Coverage: 80% floor on claimed logic paths.
 - **Test strength: a test earns its place by failing.**
   - Every acceptance criterion gets a test that would fail if that criterion
-    were removed or inverted. A test that passes with the criterion deleted
-    proves nothing; wiring counts (a page, route or handler that must be
-    mounted), not only the logic behind it.
-  - A refactor writes a behaviour-lock test over the public surface
-    **before** any code moves, and keeps it green at every step.
-  - Ordering, filtering and boundary criteria need fixtures that tell the
-    alternatives apart: distinct timestamps when the order is by id, rows on
-    both sides of the filter, values at and either side of the boundary. A
-    fixture where every candidate behaves the same lets a wrong
-    implementation pass.
+    were removed or inverted. Wiring counts (a page, route or handler that
+    must be mounted), not only logic.
+  - A refactor writes a behaviour-lock test **before** any code moves and
+    keeps it green at every step. It covers every public function, route or
+    export's observable output, edge cases included, not a sample.
+  - Ordering, filtering and boundary criteria need a fixture that would
+    order the candidates differently under each plausible key: timestamps
+    run in a different order from the ids and rows are inserted out of id
+    order; rows on both sides of a filter; values at and either side of a
+    boundary.
   - Show how you saw each one fail. Test-first work: the red run before the
-    implementation, as the test name and a one-line failure summary. Code
-    written before its test, or a refactor's behaviour lock: a mutation you
-    applied in your own worktree, ran, saw fail and reverted before
-    committing. Never commit a mutation; the committed tree is the
-    implementation.
+    implementation, as the test name and a one-line summary. It must be an
+    assertion failure; "module not found" or a compile error does not count.
+    UI glue, or a refactor's behaviour lock: a mutation. Commit the green
+    implementation first, then mutate, run, see the failure, revert with
+    `git checkout -- <file>` and confirm `git status --porcelain` is empty.
+    Never commit a mutation; the committed tree is the implementation.
 - Dependencies: install freely from the curated allowlist; anything else is
   an operator question. Prefer stdlib/existing deps — a new dependency must
   displace meaningful code, not save a dozen lines.
@@ -188,8 +190,7 @@ with exactly these three keys:
 - `structured_output` — `{summary, files_changed: [path], tests_added: [name],
   coverage_pct, open_questions, criteria_evidence: [{criterion, test,
   evidence: "red-first" | "mutation", detail}]}`, one row per acceptance
-  criterion, `detail` being the red run's one-line failure summary or the
-  mutation you applied and reverted; add `research_request` when you need the
+  criterion; add `research_request` when you need the
   researcher, or `spec_change_request` when the criterion itself is wrong
   (see above)
 - `artifacts` — `[{type, path, description?}]`: test output, coverage report.

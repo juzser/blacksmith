@@ -46,7 +46,8 @@ Check the coder's `criteria_evidence` and the tester's `mutation_check` rows
 by reading: spot-check at least one row by tracing the test's assertions and
 fixtures against the criterion, and ask whether the test would still pass
 with the criterion removed or inverted. A criterion with no catching test is
-a `test-coverage` finding.
+a `test-coverage` finding at `S2-major`: an unmet acceptance criterion, or one
+no test fails without, blocks merge.
 
 **Stage 2: code quality.** Everything below: scope, severity and the lenses.
 
@@ -205,9 +206,12 @@ array, `[]` if the diff is clean. Each element has exactly these five keys:
 - `failure_scenario` — an **object** with all three of `inputs`, `expected`,
   `actual`. Concrete input state → the wrong output or crash it produces. Not
   a sentence, not a worry. A finding whose failure scenario you cannot fill in
-  is a finding the verifier will refute, so drop it yourself. The one category
-  whose defect is not a wrong output is `over-engineering`; its lens above says
-  what the three fields hold there, and that reading is the only exemption
+  is a finding the verifier will refute, so drop it yourself. Two categories
+  have a defect that is not a wrong output. `over-engineering`: its lens above
+  says what the three fields hold. `test-coverage`: `inputs` is the mutation
+  (the criterion removed or inverted), `expected` is that the named test
+  fails, `actual` is that the suite stays green. Those two readings are the
+  only exemptions
 
 Both vocabularies above are closed, and a near-miss is not accepted for you:
 tagging `test-gap` when the value is `test-coverage` throws

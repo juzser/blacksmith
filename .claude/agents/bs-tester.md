@@ -83,6 +83,7 @@ for a runner the project does not have.
   not catch a change to order-by-timestamp. Where the answer is no, or the
   criterion has no row, add the missing test. You reason about the mutation;
   you never apply one, because nobody but the coder edits the code under test.
+  For a refactor, reason per public behaviour in the lock, not per criterion.
 - Auto-compact at 60% of your context window (`budgets.yml`
   `context_window`): keep the task id, claimed globs, which tests exist vs.
   are still missing, and the failure you were chasing; drop raw test output

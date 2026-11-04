@@ -19,8 +19,15 @@
 
 ## coder
 
-- TDD: **strict for logic** (failing test exists before implementation,
-  gate-enforced); tests-in-same-task for UI glue.
+- TDD: **strict for logic** (failing test exists before implementation; no
+  code checks it, the tester's and reviewer's reading does);
+  tests-in-same-task for UI glue.
+- Test strength: every acceptance criterion has a test that fails if it is
+  removed or inverted; a refactor locks behaviour before moving code; ordering,
+  filtering and boundary fixtures tell the alternatives apart. The coder
+  reports `criteria_evidence` (a red assertion failure, or a mutation applied
+  and reverted before the commit); the tester judges it by mutation reasoning
+  and reports `mutation_check`; the reviewer spot-checks both by reading.
 - Coverage: **80% floor on claimed logic paths**.
 - Dependencies: install from the **curated allowlist** freely; anything else
   is an operator question. The allowlist grows only via approved lessons.
@@ -89,7 +96,7 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 
 | Severity | Blocks merge | Classes |
 |---|---|---|
-| **`S2-major`** (block) | yes | security / data loss · broken core flow · **a11y WCAG AA failure** · **new flaky test** · serious visual defect (broken/clipped layout, sub-minimum touch target, missing required state) |
+| **`S2-major`** (block) | yes | security / data loss · broken core flow · unmet acceptance criterion, or one no test fails without · **a11y WCAG AA failure** · **new flaky test** · serious visual defect (broken/clipped layout, sub-minimum touch target, missing required state) |
 | **`S3-minor`** (waiver) | no — batched question at epic end | minor visual deviation from the uiux spec · perf regression >20% · **over-engineering** · everything minor-but-real |
 | **`S4-nit`** | no | style/naming nits the project's linter does not catch |
 

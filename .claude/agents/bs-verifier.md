@@ -61,6 +61,11 @@ the evidence forces `confirmed`.
   grounds the reviewer was told to check itself against: a second real call
   site, a test the replacement breaks, or a spec line requiring the
   abstraction. A finding naming no replacement is still refuted.
+- **Except `test-coverage`, where the defect is a test that cannot fail.**
+  Over correct code there is no wrong output. Hold it to its own shape:
+  `inputs` is the mutation, `expected` is that the named test fails, `actual`
+  is that the suite stays green. Refute by reasoning through that test's
+  fixtures and assertions: if the mutation would fail it, the finding dies.
 - Mechanical oracles first: if a deterministic check (schema validation,
   type check, test) already settles the question, defer to it — don't
   re-litigate what a machine already decided.
