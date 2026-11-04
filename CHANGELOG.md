@@ -39,7 +39,8 @@ than appearing in it.
   A defaulted event records `envelope_defaulted` (an added root is tagged
   `auto_root`). A defaulted parent is refused with
   `cli.envelope-parent-ambiguous` while more than one dispatch is live in the
-  session. Explicit flags behave as before. Fan-out writers, such as the wave-runner, must still pass
+  session (any, when the session came from the env), before any git write for
+  `queue run`. Explicit flags behave as before. Fan-out writers, such as the wave-runner, must still pass
   `--causal-parent`: the last event may be a sibling's.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it

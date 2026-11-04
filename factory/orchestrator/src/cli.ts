@@ -782,6 +782,47 @@ function requirePositionals(positional: string[], doc: CommandDoc, required?: nu
 }
 
 /**
+ * The session a verb works on: `--session`, else the CLI session id the Bash
+ * tool exports (O-11). An empty env var is no session. Every verb reads its
+ * session through here, so a session taken from the env gets exactly the
+ * checks an explicit one does.
+ */
+function effectiveSession(flags: Record<string, string>): string | undefined {
+  if (flags.session !== undefined) return flags.session;
+  const fromEnv = process.env.CLAUDE_CODE_SESSION_ID;
+  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : undefined;
+}
+
+/** `effectiveSession`, or the usual `cli.missing-flag` refusal when neither is set. */
+function requireSessionFlag(flags: Record<string, string>): string {
+  return effectiveSession(flags) ?? requireFlag(flags, 'session');
+}
+
+/**
+ * Under fan-out the log's last event can be a sibling's, so a defaulted parent
+ * is refused while dispatches are live in the session (architecture §18 rule
+ * 8): more than one for an explicit `--session`, and even one when the session
+ * itself came from the env, because subagents share their parent's CLI session
+ * and one of them may be the writer. "Live" is the registry's fold, the same
+ * one the daemon reuses; it has no staleness cutoff, so the refusal says how to
+ * close a dispatch that is really dead.
+ */
+function ambiguousParentGuard(threshold: number) {
+  return (existing: readonly StoredEvent[]): void => {
+    const live = liveAgents(foldAgents(existing));
+    if (live.length < threshold) return;
+    const names = live.map(
+      (a) => `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id})`,
+    );
+    throw new SmithError(
+      'cli.envelope-parent-ambiguous',
+      `${live.length} dispatch(es) are live in this session (${names.join('; ')}), so its last event may belong to another writer. Nothing was written. Pass --causal-parent <event-id> explicitly. If one of them is dead, close it with a terminal event: bs event append '{"event_type":"error-logged",...}' naming its task_id and agent_role (or task-result-recorded; an epic-closed event closes every dispatch of that epic).`,
+      { live: live.map((a) => a.id) },
+    );
+  };
+}
+
+/**
  * Every gate/findings/waivers command writes to the same session log, so they
  * share this shape.
  *
@@ -794,39 +835,17 @@ function requirePositionals(positional: string[], doc: CommandDoc, required?: nu
  * the shared envelope for twenty-odd verbs and the number outlives the typo, so
  * a fence read back tomorrow is the first place anyone would notice.
  */
-/**
- * Under fan-out the log's last event can be a sibling's, so a defaulted parent
- * is refused while more than one dispatch is live in the session (architecture
- * §18 rule 8). "Live" is the registry's fold, the same one the daemon reuses.
- */
-function refuseAmbiguousDefaultParent(existing: readonly StoredEvent[]): void {
-  const live = liveAgents(foldAgents(existing));
-  if (live.length <= 1) return;
-  const names = live.map(
-    (a) => `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id})`,
-  );
-  throw new SmithError(
-    'cli.envelope-parent-ambiguous',
-    `${live.length} dispatches are live in this session (${names.join('; ')}), so its last event may belong to a sibling. Nothing was written. Pass --causal-parent <event-id> explicitly.`,
-    { live: live.map((a) => a.id) },
-  );
-}
-
 function eventContextFromFlags(flags: Record<string, string>): EventContext {
-  // O-11: both are optional. The session falls back to the CLI session id the
-  // Bash tool exports; the parent stays null here and the writer fills it in
-  // from the log's last event under the log lock (events.ts, `envelopeDefaults`).
-  // An empty env var is no session: refuse as before rather than write to "".
-  const fromEnv = process.env.CLAUDE_CODE_SESSION_ID;
-  const sessionId =
-    flags.session === undefined && fromEnv !== undefined && fromEnv !== ''
-      ? fromEnv
-      : requireFlag(flags, 'session');
+  // O-11: both are optional. The parent stays null here and the writer fills it
+  // in from the log's last event under the log lock (events.ts,
+  // `envelopeDefaults`), or at pre-flight for verbs that write outside state.
+  const sessionId = requireSessionFlag(flags);
+  const sessionFromEnv = flags.session === undefined;
   const explicitParent = flags['causal-parent'];
   setEnvelopeDefaults({
-    ...(flags.session === undefined ? { session: sessionId } : {}),
+    ...(sessionFromEnv ? { session: sessionId } : {}),
     ...(explicitParent === undefined
-      ? { parentFor: sessionId, parentGuard: refuseAmbiguousDefaultParent }
+      ? { parentFor: sessionId, parentGuard: ambiguousParentGuard(sessionFromEnv ? 1 : 2) }
       : {}),
   });
   return {
@@ -926,7 +945,7 @@ function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, strin
  * resolved.
  */
 async function issueInputs(flags: Record<string, string>) {
-  const sessionId = requireFlag(flags, 'session');
+  const sessionId = requireSessionFlag(flags);
   const eventOpts = eventOptsFromFlags(flags);
   requireSession(sessionId, eventOpts);
   const lineageEvents = await readLineageEvents(sessionId, eventOpts);
@@ -1826,7 +1845,7 @@ async function refuseUnadmissibleTasks(
   taskIds: readonly string[],
   flags: Record<string, string>,
 ): Promise<void> {
-  const sessionId = flags.session as string;
+  const sessionId = requireSessionFlag(flags);
   const eventOpts = eventOptsFromFlags(flags);
   const gaps = await planIngestGaps(plan, { sessionId }, eventOpts);
   if (gaps.length > 0) {
@@ -1882,10 +1901,11 @@ async function nextWaveInputFrom(
   // read only the plan would never propose it — the task would exist, be
   // admissible by id, and be offered to nobody. The plan wins for an id both
   // registers know, since a re-cut plan is the newer statement of its claims.
-  const events = flags.session
+  const session = effectiveSession(flags);
+  const events = session
     ? // Lineage-wide (D-119) for the same reason the budget check is: an
       // epic's tasks are not confined to the session that happens to ask.
-      await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
+      await readLineageEvents(session, eventOptsFromFlags(flags))
     : [];
   // Imported here rather than at module scope: `db/projector.js` reaches
   // `db/schema.js` and drizzle behind it, and cliBoot.test.ts holds that out
@@ -1952,7 +1972,7 @@ async function nextWaveInputFrom(
     statusById,
     // Epic bs-optimize criterion 9: `plan ingest` resets a running task to
     // `todo` in the plan file, so the log, not the file, says who is running.
-    ...(flags.session
+    ...(session
       ? {
           inFlight: (await import('./admission.js')).inFlightTasks(events, {
             epicId: planOnDisk.epic_id,
@@ -2268,7 +2288,7 @@ async function runEffectivenessVerb(
     sessionId = (session ?? chain) as string;
     lineage = chain !== undefined;
   } else {
-    sessionId = requireFlag(flags, 'session');
+    sessionId = requireSessionFlag(flags);
     lineage = flags.lineage === 'true';
   }
   requireSession(sessionId, eventOpts);
@@ -2807,7 +2827,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'plan' && action === 'proposals') {
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     // Same P9-28 rule the findings verbs follow: an empty list is an answer
     // about the proposals, and it must not double as the answer about a
@@ -2887,7 +2907,7 @@ async function main(): Promise<number> {
     const [planFile] = requirePositionals(positional, usageFor('wave check'), 1) as [string];
     // The hold is decided by the records in the log, so its flags travel together with --session.
     if (flags.checks !== undefined || flags.project !== undefined) {
-      requireFlag(flags, 'session');
+      requireSessionFlag(flags);
       requireFlag(flags, 'checks');
       requireFlag(flags, 'project');
     }
@@ -2910,8 +2930,9 @@ async function main(): Promise<number> {
     // second register an id may be found in — and the place its claims come
     // from. Read only when there is a session to read; the plan wins for an
     // id both know, since a re-cut plan is the newer statement of its claims.
-    const logged = flags.session
-      ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
+    const session = effectiveSession(flags);
+    const logged = session
+      ? await readAddedTasks({ sessionId: session }, eventOptsFromFlags(flags))
       : [];
     const taskIds = typedIds.map((typed) =>
       resolveTaskId(
@@ -2920,12 +2941,12 @@ async function main(): Promise<number> {
         logged.map((t) => t.taskId),
       ),
     );
-    if (flags.session) {
+    if (session) {
       await refuseUnadmissibleTasks(plan, taskIds, flags);
       // Epic bs-optimize criterion 9: a task the log says is running cannot
       // join a second wave.
       const { assertNotHeld, assertNotInFlight, inFlightTasks } = await import('./admission.js');
-      const lineage = await readLineageEvents(flags.session as string, eventOptsFromFlags(flags));
+      const lineage = await readLineageEvents(session, eventOptsFromFlags(flags));
       const inFlight = inFlightTasks(lineage, { epicId: plan.epic_id, planVersion: plan.version });
       for (const id of taskIds) assertNotInFlight(id, inFlight);
       if (flags.checks !== undefined) {
@@ -3017,10 +3038,10 @@ async function main(): Promise<number> {
         { plan: plan.epic_id },
       );
     }
-    const budgetEvents = flags.session
+    const budgetEvents = session
       ? // D-119: lineage-wide, not this session's own log — an epic's spend is
         // the sum of every session that worked on it.
-        await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
+        await readLineageEvents(session, eventOptsFromFlags(flags))
       : [];
     // Sized for the tier this epic runs at: the plan's own `effort` after
     // effort.yml's security floor, else effort.yml's default_tier.
@@ -3029,7 +3050,7 @@ async function main(): Promise<number> {
       budgetEvents,
       budgetPolicy,
       declaredWaveBudgets(plan, taskIds, budgetPolicy),
-      { sessionId: flags.session ?? '', epicId: plan.epic_id },
+      { sessionId: session ?? '', epicId: plan.epic_id },
     );
     const overridden = rationale !== '' && blocksAdmission(budget.status);
     const blocked = blocksAdmission(budget.status) && !overridden;
@@ -3109,7 +3130,7 @@ async function main(): Promise<number> {
     // agents-registry.ts, and nothing that only `wave audit` needs should be
     // on the path every `smith --help` walks.
     const { auditWaveConcurrency, summariseWaveConcurrency } = await import('./waveConcurrency.js');
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     // Lineage-wide, for the reason `wave next` and the budget check already
@@ -3237,7 +3258,7 @@ async function main(): Promise<number> {
 
   if (namespace === 'scheduler' && action === 'run') {
     const { computeProposals, runScheduler } = await import('./scheduler.js');
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const dry = flags.dry === 'true';
     requireSession(sessionId, eventOptsFromFlags(flags));
     // The lineage (D-119). The scheduler's idempotency is positional — a
@@ -3310,7 +3331,7 @@ async function main(): Promise<number> {
     // failed (P9-2).
     const { foldTasks } = await import('./db/projector.js');
 
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     requireSession(sessionId, eventOptsFromFlags(flags));
     // Lineage, for the same reason `run` reads it: proposal idempotency is
     // positional, so a session-scoped read from a continuation would classify
@@ -3570,7 +3591,7 @@ async function main(): Promise<number> {
       // what supplies the log to check against; without it there is nothing
       // to refuse against, so demand it explicitly rather than silently
       // trusting an unauthenticated `--from`.
-      const sessionId = requireFlag(flags, 'session');
+      const sessionId = requireSessionFlag(flags);
       const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
       const successors = taskSuccessors(events, epic);
       const from = flags.from;
@@ -3792,7 +3813,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'feedback' && action === 'pending') {
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     const taskId = flags.task;
@@ -4060,7 +4081,7 @@ async function main(): Promise<number> {
     // under whatever id was typed — the D-46/P9-29 mislabelling, reintroduced
     // by the command that exists to repair its aftermath.
     const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const logged = await readAddedTasks({ sessionId }, eventOptsFromFlags(flags));
     const taskId = resolveTaskId(
       plan,
@@ -4380,7 +4401,7 @@ async function main(): Promise<number> {
       prompt,
       role: requireFlag(flags, 'role'),
       taskId: requireFlag(flags, 'task'),
-      sessionId: requireFlag(flags, 'session'),
+      sessionId: requireSessionFlag(flags),
       ...(flags['agents-dir'] ? { agentsDir: flags['agents-dir'] } : {}),
       eventOpts: eventOptsFromFlags(flags),
     });
@@ -4646,7 +4667,7 @@ async function main(): Promise<number> {
         worktreeDir,
         role: requireFlag(flags, 'role'),
         taskId: requireFlag(flags, 'task'),
-        sessionId: requireFlag(flags, 'session'),
+        sessionId: requireSessionFlag(flags),
         // The clock is read here rather than inside sandbox.ts so the module
         // stays pinnable by a test — the same reason `openedAt` is an input.
         openedAt: flags.at ?? new Date().toISOString(),
@@ -5338,7 +5359,7 @@ async function main(): Promise<number> {
     // back to the plan's live tasks, never widens it.
     let logEvents: StoredEvent[] = [];
     try {
-      logEvents = await readLineageEvents(requireFlag(flags, 'session'), eventOptsFromFlags(flags));
+      logEvents = await readLineageEvents(requireSessionFlag(flags), eventOptsFromFlags(flags));
     } catch {
       // the fallback above stands
     }
@@ -5552,7 +5573,7 @@ async function main(): Promise<number> {
   // answered about the real state/events/ log instead — an answer about a
   // different session, which is worse than an error (P9-15).
   if (namespace === 'findings' && action === 'list') {
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     // An empty list is an answer about the findings; it must not also be the
     // answer about the session (P9-28).
@@ -5617,7 +5638,7 @@ async function main(): Promise<number> {
   if (namespace === 'findings' && action === 'for-dispatch') {
     const usage = usageLine(usageFor('findings for-dispatch'));
     if (flags.task !== undefined) requireFlag(flags, 'plan');
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     if (positional.length > 0) {
@@ -5707,7 +5728,7 @@ async function main(): Promise<number> {
 
   if (namespace === 'waivers' && action === 'pending') {
     const [epic] = requirePositionals(positional, usageFor('waivers pending')) as [string];
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     const pending = await pendingBatch(epic, { sessionId }, eventOpts);
@@ -5745,7 +5766,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'checks' && action === 'post-merge') {
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
     const checksFile = requireFlag(flags, 'checks');
@@ -6136,7 +6157,7 @@ async function main(): Promise<number> {
 
   if (namespace === 'dream') {
     const { dream } = await import('./lessons.js');
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     // Before the lineage read, so a typo costs a message and not a full log walk.
     const since = isoDateFlag(flags, 'since')?.toISOString();
     const eventOpts = eventOptsFromFlags(flags);
@@ -6221,7 +6242,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'judge' && action === 'outstanding') {
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const taskId = requireFlag(flags, 'task');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
@@ -6247,7 +6268,7 @@ async function main(): Promise<number> {
     // imports nothing at runtime -- so that a later dependency added to it
     // cannot quietly cost `smith --help` a database (P9-2, test/cliBoot.test.ts).
     const { openQuorumEscalations, summariseEscalations } = await import('./quorumEscalations.js');
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     // The lineage and not the session: an escalation raised in one operator
@@ -6331,7 +6352,7 @@ async function main(): Promise<number> {
     }
 
     if (action === 'run') {
-      const sessionId = requireFlag(flags, 'session');
+      const sessionId = requireSessionFlag(flags);
       const taskId = requireFlag(flags, 'task');
       const eventOpts = eventOptsFromFlags(flags);
       requireSession(sessionId, eventOpts);
@@ -6483,7 +6504,7 @@ async function main(): Promise<number> {
   if (namespace === 'db' && action === 'apply') {
     const { apply: applyDb } = await import('./db/projector.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
-    const sessionId = requireFlag(flags, 'session');
+    const sessionId = requireSessionFlag(flags);
     // Applying a session that has no log would report 0 events applied and
     // exit 0 — a successful-looking no-op is the worst possible answer for a
     // command whose whole job is "make the DB match the log" (P9-28).
@@ -6525,7 +6546,7 @@ async function main(): Promise<number> {
         // chain it continues, resolved off the projection so `stats` still needs
         // nothing but a db. It has nothing to widen without --session, and
         // saying so beats silently reporting every session as "the lineage".
-        scope.sessionIds = projectedLineage(handle.db, requireFlag(flags, 'session'));
+        scope.sessionIds = projectedLineage(handle.db, requireSessionFlag(flags));
       }
       if (action === 'overview') {
         printJson(overview(handle.db, scope));
@@ -6600,7 +6621,7 @@ async function main(): Promise<number> {
     }
     const { text, manifest } = await composeBrief({
       role: requireFlag(flags, 'role'),
-      sessionId: requireFlag(flags, 'session'),
+      sessionId: requireSessionFlag(flags),
       ...(flags.task ? { taskId: flags.task } : {}),
       ...(flags.epic ? { epicId: flags.epic } : {}),
       ...(flags.plan ? { planFile: flags.plan } : {}),

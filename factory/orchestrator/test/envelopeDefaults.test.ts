@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { readEvents } from '../src/events.js';
+import { appendEvent, readEvents, setEnvelopeDefaults } from '../src/events.js';
 import { CLI_PATH, runCli } from './helpers/cliHarness.js';
 
 // O-11 (lean-mode-scope §6a item 1): `--session` and `--causal-parent` are
@@ -13,6 +14,31 @@ import { CLI_PATH, runCli } from './helpers/cliHarness.js';
 
 const SESSION = '0a1b2c3d-1111-4222-8333-444455556666';
 const execFileAsync = promisify(execFile);
+
+function wavePlan() {
+  return {
+    epic_id: 'epic-1',
+    version: 1,
+    status: 'active',
+    tasks: [
+      {
+        task_id: 'epic-1/task-1',
+        epic_id: 'epic-1',
+        plan_version: 1,
+        objective: 'Do the thing.',
+        output_schema_ref: 'result.schema.json',
+        acceptance_criteria: ['it works'],
+        claims: ['src/foo/*.ts'],
+        budget: { tokens: 1000, diff_lines: 100 },
+        contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+      },
+    ],
+    edges: [],
+  };
+}
 
 describe('envelope defaults (built binary)', () => {
   let scratch: string;
@@ -169,6 +195,51 @@ describe('envelope defaults (built binary)', () => {
       expect(await lineCount(stateDir)).toBe(3);
     });
 
+    it('refuses at ONE live dispatch when the session itself came from the env', async () => {
+      const stateDir = await seed(1);
+      const run = record(stateDir, [], { CLAUDE_CODE_SESSION_ID: 'fan' });
+      expect(run.status).toBe(1);
+      expect(JSON.parse(run.stdout).error.code).toBe('cli.envelope-parent-ambiguous');
+      expect(await lineCount(stateDir)).toBe(2);
+      // ...and with no live dispatch the env session is fine.
+      const quiet = await seed(0);
+      expect(record(quiet, [], { CLAUDE_CODE_SESSION_ID: 'fan' }).status).toBe(0);
+    });
+
+    it('names how to close an abandoned dispatch', async () => {
+      const stateDir = await seed(2);
+      const run = record(stateDir, ['--session', 'fan'], { CLAUDE_CODE_SESSION_ID: '' });
+      const message = JSON.parse(run.stdout).error.message;
+      expect(message).toContain('error-logged');
+      expect(message).toContain('bs event append');
+    });
+
+    it('decides the refusal under the log lock, atomically with the read', async () => {
+      const stateDir = await seed(1);
+      const logFile = path.join(stateDir, 'fan.jsonl');
+      const lock = `${logFile}.lock`;
+      await writeFile(lock, 'held by the test');
+      const textFile = path.join(scratch, 'refusal.txt');
+      await writeFile(textFile, 'x');
+      const child = execFileAsync(
+        'node',
+        [CLI_PATH, 'prompt', 'record', textFile, '--state-dir', stateDir, '--session', 'fan'],
+        { env: { ...process.env, CLAUDE_CODE_SESSION_ID: '', BS_NO_SETTINGS_HINT: '1' } },
+      ).then(
+        () => ({ code: 0, out: '' }),
+        (e: { code: number; stdout: string }) => ({ code: e.code, out: e.stdout }),
+      );
+      // The child is now queued on the lock having seen ONE live dispatch at most;
+      // a second goes live before the lock is released.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await appendFile(logFile, `${JSON.stringify(dispatch('e/t9', 3))}\n`);
+      await rm(lock);
+      const result = await child;
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.out).error.code).toBe('cli.envelope-parent-ambiguous');
+      expect(await lineCount(stateDir)).toBe(3);
+    });
+
     it('never refuses an explicit --causal-parent', async () => {
       const stateDir = await seed(2);
       const run = record(stateDir, ['--session', 'fan', '--causal-parent', 'fan#0'], {
@@ -177,6 +248,50 @@ describe('envelope defaults (built binary)', () => {
       expect(run.status).toBe(0);
       expect(await lineCount(stateDir)).toBe(4);
     });
+  });
+
+  it('leaves no root-only log behind when the defaulted event itself is rejected', async () => {
+    const stateDir = fresh();
+    setEnvelopeDefaults({ parentFor: 'never' });
+    try {
+      await expect(
+        appendEvent(
+          {
+            session_id: 'never',
+            actor: 'system',
+            event_type: 'dispatch_decision',
+            plan_version: 1,
+            causal_parent: null,
+            payload: {},
+          },
+          { stateDir },
+        ),
+      ).rejects.toThrow(/dispatch_decision/);
+    } finally {
+      setEnvelopeDefaults({});
+    }
+    expect(existsSync(path.join(stateDir, 'never.jsonl'))).toBe(false);
+  });
+
+  it('reads the session from the env in read verbs and the wave admission checks too', async () => {
+    const stateDir = fresh();
+    runCli(['session', 'start', SESSION, '--state-dir', stateDir]);
+    const list = runCli(['findings', 'list', '--state-dir', stateDir], {
+      CLAUDE_CODE_SESSION_ID: SESSION,
+    });
+    expect(list.status).toBe(0);
+
+    // `wave check` with an env session gets the refusals --session gets.
+    const plan = path.join(scratch, 'wave-plan.json');
+    await writeFile(plan, JSON.stringify(wavePlan()));
+    const args = ['wave', 'check', plan, 'epic-1/task-1', '--state-dir', stateDir, '--dry'];
+    const flagged = runCli([...args, '--session', SESSION], { CLAUDE_CODE_SESSION_ID: '' });
+    const viaEnv = runCli(args, { CLAUDE_CODE_SESSION_ID: SESSION });
+    const bare = runCli(args, { CLAUDE_CODE_SESSION_ID: '' });
+    expect(flagged.status).toBe(1);
+    expect(viaEnv.status).toBe(flagged.status);
+    expect(JSON.parse(viaEnv.stdout).error.code).toBe(JSON.parse(flagged.stdout).error.code);
+    expect(bare.status).toBe(0);
   });
 
   it('says in --help that the flags are optional, their defaults, and the fan-out rule', () => {
@@ -191,19 +306,28 @@ describe('envelope defaults (built binary)', () => {
     expect(runCli(['gate', 'run', '--help']).stdout).toContain('[--causal-parent <event-id>]');
   });
 
-  it('keeps the log valid when defaulted writers race in separate processes', async () => {
+  it.each([
+    ['an empty log (the auto-root is raced too)', false],
+    ['a log that already has its root', true],
+  ])('keeps the log valid when defaulted writers race on %s', async (_name, seeded) => {
     const stateDir = fresh();
+    if (seeded) runCli(['session', 'start', SESSION, '--state-dir', stateDir]);
     const textFile = path.join(scratch, 'prompt.txt');
     await writeFile(textFile, 'racing');
     const env = { ...process.env, CLAUDE_CODE_SESSION_ID: SESSION, BS_NO_SETTINGS_HINT: '1' };
-    // Both start on an EMPTY log, so the auto-root is raced as well.
-    await Promise.all(
-      Array.from({ length: 6 }, () =>
-        execFileAsync('node', [CLI_PATH, 'prompt', 'record', textFile, '--state-dir', stateDir], {
-          env,
-        }),
-      ),
+    // The lock is held while every writer starts, so all six are queued on it
+    // together rather than depending on process-start jitter.
+    await mkdir(stateDir, { recursive: true });
+    const lock = path.join(stateDir, `${SESSION}.jsonl.lock`);
+    await writeFile(lock, 'held by the test');
+    const writers = Array.from({ length: 6 }, () =>
+      execFileAsync('node', [CLI_PATH, 'prompt', 'record', textFile, '--state-dir', stateDir], {
+        env,
+      }),
     );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await rm(lock);
+    await Promise.all(writers);
     const events = await readEvents(SESSION, { stateDir });
     expect(events).toHaveLength(7);
     expect(events.filter((e) => e.record.event_type === 'session-start')).toHaveLength(1);

@@ -504,7 +504,10 @@ also what limits who may hold `Agent`: a node may dispatch only if it owns the
 event log for what it dispatches. `factory/policies/delegation.yml` names the
 exceptions — today one, `wave-runner` — and each of them earns it by opening a
 session of its own against your dispatch's event id before it dispatches
-anything.
+anything. A dispatched agent that writes events passes `--session` and
+`--causal-parent` explicitly: it shares the dispatcher's CLI session, so the
+optional defaults would write into the dispatcher's log under a parent it did
+not choose.
 
 Run `bs issues report --session <session-id> --state-dir <dir> [--epic
 <id>]` right after any of the three things this log can hold: the

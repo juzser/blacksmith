@@ -56,7 +56,7 @@ const EVENTS =
 export const ENVELOPE_NOTE =
   'Envelope: --session and --causal-parent are optional. --session defaults to $CLAUDE_CODE_SESSION_ID (refused when neither is set); ' +
   "--causal-parent defaults to the session's last event, read under the log lock, with the session's root written first when the log is empty. " +
-  "A defaulted event records envelope_defaulted (and the root it adds is tagged auto_root). A defaulted parent is refused (cli.envelope-parent-ambiguous, nothing written) while more than one dispatch is live in the session. Several tasks writing into one session at once (fan-out, as the wave-runner does) must pass --causal-parent explicitly: the last event may be a sibling's.";
+  "A defaulted event records envelope_defaulted (and the root it adds is tagged auto_root). A defaulted parent is refused (cli.envelope-parent-ambiguous, nothing written) while more than one dispatch is live in the session, or any dispatch when the session itself came from the env, since subagents share it. Verbs that write git state decide this before any git write, and pin the last event as the parent. Several tasks writing into one session at once (fan-out, as the wave-runner does) must pass --causal-parent explicitly: the last event may be a sibling's.";
 /** …plus the state-dir override, on the commands whose module accepts EventOpts. */
 const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
 /**

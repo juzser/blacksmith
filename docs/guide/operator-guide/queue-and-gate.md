@@ -418,9 +418,14 @@ bs gate run epic-1/task-1 \
   (`["session"]`, `["causal_parent"]` or both), so a reader can tell a
   chosen parent from a defaulted one; the root written for an empty log is
   tagged `["auto_root"]`. While more than one dispatch is live in the session
-  (the agents-registry fold), a defaulted parent is refused with
-  `cli.envelope-parent-ambiguous` and nothing is written; an explicit
-  `--causal-parent` is never refused. **Fan-out writers must pass
+  (the agents-registry fold), or even one when the session came from the env
+  (subagents share their parent's CLI session), a defaulted parent is refused
+  with `cli.envelope-parent-ambiguous` and nothing is written; an explicit
+  `--causal-parent` is never refused. The fold has no staleness cutoff: a dead
+  dispatch stays live until a terminal event closes it, and the refusal names
+  the `error-logged` event to write with `bs event append`. `queue run` and the
+  other verbs that write git state make this decision before any git write and
+  pin the last event as the parent. **Fan-out writers must pass
   `--causal-parent` explicitly**: several tasks writing into one session at
   once, as the wave-runner does, can find a sibling's event as the "last
   event". A parent you pass must reference a real prior event in that

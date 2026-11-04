@@ -796,8 +796,21 @@ export async function validateEventEnvelope(
   opts: EventOpts = {},
 ): Promise<void> {
   const causalParent = input.causal_parent ?? null;
-  // A parent the writer will default under the lock is not yet known to check.
-  if (causalParent === null && input.session_id === envelopeDefaults.parentFor) return;
+  if (causalParent === null && input.session_id === envelopeDefaults.parentFor) {
+    // A verb that writes git (or other outside state) before its append calls
+    // this first, so a refusal must come now, not after the merge landed (D-42).
+    // Run the refusal here and pin the last event as the parent: it is "the
+    // last event when the command started", read, never computed, and the
+    // append then has nothing left to refuse. An empty log pins nothing; its
+    // root is written by the append.
+    const existing = await readEventsAtPath(logPath(input.session_id, opts), input.session_id);
+    const last = existing[existing.length - 1];
+    if (last !== undefined) {
+      envelopeDefaults.parentGuard?.(existing);
+      envelopeDefaults.pinnedParent = last.event_id;
+    }
+    return;
+  }
   requireCausalParentPresence(input.event_type, causalParent);
   if (causalParent === null) return;
 
@@ -838,6 +851,8 @@ const envelopeDefaults: {
   session?: string;
   parentFor?: string;
   parentGuard?: (existing: readonly StoredEvent[]) => void;
+  /** The last event read at pre-flight (`validateEventEnvelope`); see there. */
+  pinnedParent?: string;
 } = {};
 
 /**
@@ -854,6 +869,7 @@ export function setEnvelopeDefaults(defaults: {
   delete envelopeDefaults.session;
   delete envelopeDefaults.parentFor;
   delete envelopeDefaults.parentGuard;
+  delete envelopeDefaults.pinnedParent;
   if (defaults.parentGuard !== undefined) envelopeDefaults.parentGuard = defaults.parentGuard;
   if (defaults.session !== undefined) envelopeDefaults.session = defaults.session;
   if (defaults.parentFor !== undefined) envelopeDefaults.parentFor = defaults.parentFor;
@@ -869,6 +885,20 @@ function rootInput(sessionId: string, opts: StartSessionOptions = {}): EventInpu
     causal_parent: opts.continues ?? null,
     payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
   };
+}
+
+/** Schema, taxonomy and typed-payload validation of one record; throws, writes nothing. */
+function checkRecordShape(input: EventInput, opts: EventOpts): void {
+  const record: EventRecord = { ...input, ts: input.ts ?? new Date().toISOString() };
+  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
+  const result = validateRecord(schemas, taxonomy, 'event', record);
+  if (!result.valid) {
+    throw new EventError('events.invalid-record', 'Event failed schema/taxonomy validation.', {
+      errors: result.errors,
+    });
+  }
+  validatePayloadDimensions(taxonomy, record);
+  validateTypedPayload(schemas, taxonomy, record);
 }
 
 async function appendEventLocked(
@@ -892,16 +922,32 @@ async function appendEventLocked(
     input.session_id === envelopeDefaults.parentFor
   ) {
     if (existing.length === 0) {
+      // Refuse a bad event BEFORE the root is written, so a rejection leaves no
+      // root-only log. The parent id here is a stand-in for the check alone; it
+      // is never stored (the stored parent is the root's own id, read back).
+      checkRecordShape(
+        {
+          ...input,
+          causal_parent: `${input.session_id}#0`,
+          envelope_defaulted: [...defaulted, 'causal_parent'],
+        },
+        opts,
+      );
       await appendEventLocked(
         { ...rootInput(input.session_id), envelope_defaulted: ['auto_root'] },
         opts,
         filePath,
       );
       existing = await readEventsAtPath(filePath, input.session_id);
+    } else if (envelopeDefaults.pinnedParent === undefined) {
+      // Same lock as the read of the last event: check and default are atomic.
+      envelopeDefaults.parentGuard?.(existing);
     }
-    // Same lock as the read of the last event: check and default are atomic.
-    envelopeDefaults.parentGuard?.(existing);
-    input = { ...input, causal_parent: (existing[existing.length - 1] as StoredEvent).event_id };
+    input = {
+      ...input,
+      causal_parent:
+        envelopeDefaults.pinnedParent ?? (existing[existing.length - 1] as StoredEvent).event_id,
+    };
     defaulted.push('causal_parent');
   }
   if (defaulted.length > 0) input = { ...input, envelope_defaulted: defaulted };
@@ -918,16 +964,7 @@ async function appendEventLocked(
   const ts = opts.keepTs ? keptTs(input, existing) : new Date().toISOString();
   const record: EventRecord = { ...input, ...cliStamp(input, opts), ts };
 
-  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
-  const result = validateRecord(schemas, taxonomy, 'event', record);
-  if (!result.valid) {
-    throw new EventError('events.invalid-record', 'Event failed schema/taxonomy validation.', {
-      errors: result.errors,
-    });
-  }
-
-  validatePayloadDimensions(taxonomy, record);
-  validateTypedPayload(schemas, taxonomy, record);
+  checkRecordShape(record, opts);
 
   const index = existing.length;
   await appendFile(filePath, `${JSON.stringify(record)}\n`, 'utf8');

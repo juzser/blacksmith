@@ -368,8 +368,8 @@ Two storage layers, one source of truth:
   well-formed, and leaves it absent otherwise (outside a CLI session, and on
   every event logged before the stamp existed); a malformed value is
   dropped, never thrown. It is **not envelope**: it never stands in for
-  `session_id` or `causal_parent`, which every write still carries
-  explicitly (§18 rule 8). And it is **never turn or delegation evidence**:
+  `session_id` or `causal_parent`, which every write still carries (§18
+  rule 8) — given, or defaulted and then marked `envelope_defaulted`. And it is **never turn or delegation evidence**:
   an epic session and the subagents it runs can share one CLI session, so
   two events with the same stamp say nothing about who wrote them (§18 rule
   4). It only links a live CLI session to the factory sessions it drove —
@@ -1333,7 +1333,13 @@ not in the diff — it is in every verdict the factory issued afterwards.
 
 8. **Every write carries the envelope, and an event id is read, never
    computed.** `--session`, `--causal-parent`, `--plan-version` on every
-   write command; the id comes back in that command's own output. *Breaks:*
+   write command; the id comes back in that command's own output. `--session`
+   and `--causal-parent` may be left out (lean-mode O-11): the session is then
+   `CLAUDE_CODE_SESSION_ID` and the parent is the session's last event, read
+   under the log lock, or at pre-flight for verbs that write outside state
+   (the id is still read, never computed). The event records
+   `envelope_defaulted`, a defaulted parent is refused while dispatches are
+   live (`cli.envelope-parent-ambiguous`), and fan-out writers stay explicit. *Breaks:*
    under fan-out the events between yours belong to sibling tasks, so a
    guessed parent names a real event that is not the parent — it validates,
    and the lineage is quietly wrong.
