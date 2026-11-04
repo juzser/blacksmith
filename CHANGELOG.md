@@ -45,8 +45,12 @@ than appearing in it.
 - **MCP manifest check at the gate.** `bs gate run` and `bs results check --as
   coder|gate` now validate `mcp.manifest.json` whenever the gated worktree has
   one, because the lean `/bs do` path has no epic close. An unsigned mutating
-  tool (MCP-T4) or any other manifest violation blocks with
-  `mcp-manifest-invalid`, and `mcpViolations` names the rule and the tool. A
+  The gate reads the committed manifest and blocks only on what the task
+  changed: a new violation, a removed or non-regular manifest, or invalid JSON
+  blocks with `mcp-manifest-invalid`, and an `approval` the task added or
+  changed, or a new unsigned mutating tool, blocks with
+  `mcp-approval-unsigned-by-operator`, which the epic session answers because
+  only the operator signs. `mcpViolations` names the rule and the tool. A
   project with no manifest is untouched, and `epic close` keeps its own check.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it

@@ -100,6 +100,10 @@ this repo entirely, and its worktrees follow it wherever it does.
 Write only inside your claimed globs; out-of-claim edits fail the gate
 (`contract.claim-violation`).
 
+Never write or change `approval` in `mcp.manifest.json`: it is the operator's
+signature. If the preflight reports `mcp-approval-unsigned-by-operator`, say so
+in `notes` and leave the manifest as it is.
+
 <!-- BEGIN SHARED:heavy-run -->
 **Heavy runs take the machine lock.** One full suite or e2e run at a time
 runs on the machine. A full-suite or e2e command — the project's `test_unit` or

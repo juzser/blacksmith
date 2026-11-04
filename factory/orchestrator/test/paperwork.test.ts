@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,8 @@ import {
   baseInput,
   buildLadder,
   clean,
+  commitMcpManifest,
+  commitMcpManifestOnBase,
   createWorld,
   depsMissing,
   earlyHandBack,
@@ -31,15 +33,23 @@ import {
   graderMet,
   graderOutsideStructured,
   judgesOutstanding,
+  MISANNOTATED_TOOL,
+  mcpManifest,
+  mcpMisannotatedTool,
+  mcpSelfSigned,
+  mcpSignedOnBase,
+  mcpUnreadable,
   mcpUnsignedTool,
   mcpValid,
   OPEN_JUDGE,
+  OPERATOR_APPROVAL,
   PARITY_CASES,
   SHOT_NAMES,
   screenshotMisnamed,
   shapeError,
   stampedResult,
   testerResult,
+  UNSIGNED_TOOL,
   uiuxVisualMissing,
   uiuxVisualOpen,
   uncommitted,
@@ -255,26 +265,109 @@ describe('mcp manifest at the gate', () => {
     await w.dispose();
   });
 
-  it('blocks on an unsigned mutating tool and names the tool, in the gate and the preflight', async () => {
-    const input = await mcpUnsignedTool(w);
+  const MANIFEST = 'mcp.manifest.json';
+  const gateOf = async (input: GateInput) => {
     const gate = await runGate(input, w.ctx(), w.opts());
-    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    const pre = await checkPaperwork(paperworkInput(input, 'coder'), w.ctx(), w.opts());
     const violations = gate.outcome === 'blocked' ? (gate.mcpViolations ?? []) : [];
+    return { gate, pre, violations };
+  };
+
+  it('sends an unsigned mutating tool to the operator and names the tool, in the gate and the preflight', async () => {
+    const { gate, pre, violations } = await gateOf(await mcpUnsignedTool(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
     expect(violations).toHaveLength(1);
     expect(violations[0]).toMatchObject({ rule: 'MCP-T4', tool: 'rotate_widget' });
-    const pre = await checkPaperwork(paperworkInput(input, 'coder'), w.ctx(), w.opts());
-    expect(pre.reason).toBe('mcp-manifest-invalid');
+    expect(pre.reason).toBe('mcp-approval-unsigned-by-operator');
     expect(JSON.stringify(pre.problems)).toContain('rotate_widget');
+  });
+
+  it('blocks an approval the task wrote, whatever its shape', async () => {
+    const { gate, violations } = await gateOf(await mcpSelfSigned(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['rotate_widget']);
+  });
+
+  it('blocks an approval the task changed against the base', async () => {
+    await mcpSignedOnBase(w);
+    const changed = { ...OPERATOR_APPROVAL, operator: 'someone-else' };
+    await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval: changed }]));
+    const { gate } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+  });
+
+  it('passes an approval the operator committed to the base and the task left alone', async () => {
+    const { gate, pre } = await gateOf(await mcpSignedOnBase(w));
+    expect(gate.outcome).toBe('pass');
+    expect(pre.outcome).toBe('pass');
   });
 
   it('passes a valid manifest and a project with no manifest', async () => {
     expect((await runGate(await mcpValid(w), w.ctx(), w.opts())).outcome).toBe('pass');
-    await rm(path.join(w.worktreeDir, 'mcp.manifest.json'));
+    await rm(path.join(w.worktreeDir, MANIFEST));
     w.git(['commit', '-q', '-am', 'drop manifest']);
-    const gate = await runGate(baseInput(w), w.ctx(), w.opts());
+    const { gate, pre } = await gateOf(baseInput(w));
     expect(gate.outcome).toBe('pass');
-    const pre = await checkPaperwork(paperworkInput(baseInput(w), 'coder'), w.ctx(), w.opts());
     expect(pre.outcome).toBe('pass');
+  });
+
+  it('does not block on a violation the base manifest already carries, and blocks a new one', async () => {
+    await commitMcpManifestOnBase(w, mcpManifest([MISANNOTATED_TOOL]));
+    w.git(['commit', '-q', '--allow-empty', '-m', 'unrelated work']);
+    expect((await gateOf(baseInput(w))).gate.outcome).toBe('pass');
+    const second = { ...MISANNOTATED_TOOL, name: 'second_widget' };
+    await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL, second]));
+    const { gate, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(violations.every((v) => v.tool === 'second_widget')).toBe(true);
+  });
+
+  it('blocks when the manifest the base carries is gone at HEAD', async () => {
+    await commitMcpManifestOnBase(w, mcpManifest());
+    w.git(['rm', '-q', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'drop manifest']);
+    const { gate, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(violations).toHaveLength(1);
+  });
+
+  it('blocks a committed dangling symlink and a symlink to a valid file outside the repo', async () => {
+    const outside = path.join(w.elsewhereDir, 'valid.json');
+    await writeFile(outside, mcpManifest());
+    for (const target of [path.join(w.elsewhereDir, 'missing.json'), outside]) {
+      await rm(path.join(w.worktreeDir, MANIFEST), { force: true });
+      await symlink(target, path.join(w.worktreeDir, MANIFEST));
+      w.git(['add', MANIFEST]);
+      w.git(['commit', '-q', '-m', 'link manifest']);
+      const { gate, violations } = await gateOf(baseInput(w));
+      expect(gate, target).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+      expect(violations).toHaveLength(1);
+      w.git(['rm', '-q', '--cached', MANIFEST]);
+      w.git(['commit', '-q', '-m', 'unlink manifest']);
+    }
+  });
+
+  it('ignores an ignored or untracked manifest the task never committed', async () => {
+    await writeFile(path.join(w.worktreeDir, '.git', 'info', 'exclude'), `${MANIFEST}\n`);
+    await writeFile(path.join(w.worktreeDir, MANIFEST), '{ not json');
+    const { gate, pre } = await gateOf(baseInput(w));
+    expect(gate.outcome).toBe('pass');
+    expect(pre.outcome).toBe('pass');
+  });
+
+  it('explains an unreadable manifest and a directory at the manifest path', async () => {
+    const bad = await gateOf(await mcpUnreadable(w));
+    expect(bad.gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(bad.violations).toHaveLength(1);
+    expect(bad.violations[0]?.message).toMatch(/JSON/);
+    w.git(['rm', '-q', MANIFEST]);
+    await mkdir(path.join(w.worktreeDir, MANIFEST));
+    await writeFile(path.join(w.worktreeDir, MANIFEST, 'x.json'), '{}');
+    w.git(['add', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'directory at manifest path']);
+    const dir = await gateOf(baseInput(w));
+    expect(dir.gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(dir.violations).toHaveLength(1);
   });
 });
 
@@ -294,7 +387,8 @@ describe('paperwork role parity', () => {
     ['artifact outside the home', artifactOutsideHome, 'artifacts-missing'],
     ['uncommitted work', uncommitted, 'not-committed'],
     ['deps missing', depsMissing, 'deps-missing'],
-    ['mcp unsigned mutating tool', mcpUnsignedTool, 'mcp-manifest-invalid'],
+    ['mcp unsigned mutating tool', mcpUnsignedTool, 'mcp-approval-unsigned-by-operator'],
+    ['mcp misannotated tool', mcpMisannotatedTool, 'mcp-manifest-invalid'],
   ] as [string, FixtureBuilder, string][])(
     'coder: %s returns the gate reason',
     async (_n, build, reason) => {

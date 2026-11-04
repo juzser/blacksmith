@@ -338,8 +338,9 @@ one thing this playbook never asks you to.
         which returns it no more without the operator's answer, from any
         worker.
      5. **The verb or the log failed.** An `intake` problem whose `input` is
-        `judge-internal` or `paperwork`, or one this list does not name. It goes
-        to the epic session and never to an agent, and it is not a round.
+        `judge-internal` or `paperwork`, or one this list does not name, and the
+        stage reason `mcp-approval-unsigned-by-operator` (only the operator signs).
+        It goes to the epic session and never to an agent, and it is not a round.
 
      One preflight result can hold problems from several branches: `problems`
      lists every `intake` problem first, then the stage problems, which are
@@ -512,7 +513,8 @@ one thing this playbook never asks you to.
    - `grader-fail`: bounce to the coder with the payload's `failed_criteria`; a round-2 `fail` re-scopes under step 6 instead.
    - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
    - `findings`: bounce to the coder.
-   - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule and tool); the coder fixes the manifest, and never signs an approval itself (`.claude/skills/bs/mcp.md`).
+   - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule, path and tool); the coder fixes the manifest in its own commit and never writes an `approval` (`.claude/skills/bs/mcp.md`).
+   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, or a new mutating tool with none: only the operator signs, by committing the approval to the base branch, and the task moves onto it; the coder is not bounced and writes none).
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
    - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.

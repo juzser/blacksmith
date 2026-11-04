@@ -267,6 +267,7 @@ export type GateOutcome =
         | 'not-committed'
         | 'deps-missing'
         | 'mcp-manifest-invalid'
+        | 'mcp-approval-unsigned-by-operator'
         | 'judges-outstanding'
         | UiuxBlockReason
         | 'grader-invalid'
@@ -292,7 +293,7 @@ export type GateOutcome =
        */
       schemaErrors: ValidationIssue[];
       blockingFindings: Finding[];
-      /** Set only on `mcp-manifest-invalid`: each manifest rule that failed, naming its tool. */
+      /** Set only on the two `mcp-` reasons: each manifest defect, naming its tool where it has one. */
       mcpViolations?: McpGateViolation[];
       /**
        * Required, and `[]` when the artifacts were fine — an absent field and
@@ -1167,13 +1168,13 @@ async function runGateStages(
   // The same manifest rules `epic close` enforces (MCP-T4's signed approval among
   // them), run here because `/bs do` has no epic close. A project with no
   // `mcp.manifest.json` passes through untouched.
-  const mcp = mcpStage(input.worktreeDir);
-  if (!mcp.ok) {
+  const mcp = mcpStage(input.worktreeDir, input.baseRef);
+  if (mcp.reason !== null) {
     return finalize(
       {
         outcome: 'blocked',
         taskId: input.taskId,
-        reason: 'mcp-manifest-invalid',
+        reason: mcp.reason,
         testResult: null,
         schemaErrors: [],
         blockingFindings: [],

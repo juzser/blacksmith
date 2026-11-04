@@ -47,6 +47,7 @@ export type PaperworkReason =
   | 'not-committed'
   | 'deps-missing'
   | 'mcp-manifest-invalid'
+  | 'mcp-approval-unsigned-by-operator'
   | 'judges-outstanding'
   | UiuxBlockReason
   | 'grader-invalid';
@@ -288,32 +289,38 @@ export function depsStage(worktreeDir: string): DepsStage {
 
 export interface McpStage {
   ok: boolean;
-  /** Present when the manifest parsed: its violations, each naming the tool it is about. */
+  /** `mcp-manifest-invalid` when the author can fix it, else `mcp-approval-unsigned-by-operator`. */
+  reason: 'mcp-manifest-invalid' | 'mcp-approval-unsigned-by-operator' | null;
+  /** Every defect, author-fixable first, each naming its tool where there is one. */
   violations: McpGateViolation[];
-  /** One line per defect, naming the tool where there is one. */
-  payload: { problem: 'unreadable' | null; summary: string[] };
+  /** One line per defect. */
+  payload: { summary: string[] };
 }
 
 /**
- * A project that exposes an MCP surface owes a valid `mcp.manifest.json` (MCP-T4's
- * signed approval among the rules). The epic-close check owns the full path; this is
- * the same manifest rule at the task gate, for `/bs do`, which has no epic close.
+ * A project that exposes an MCP surface owes a valid `mcp.manifest.json`, with
+ * MCP-T4's operator signature among the rules. The epic-close check owns the full
+ * path; this is the same manifest rule at the task gate, for `/bs do`, which has no
+ * epic close. See `inspectMcpManifest` for what a task answers for.
  */
-export function mcpStage(worktreeDir: string): McpStage {
-  const r = inspectMcpManifest(worktreeDir);
-  const summary =
-    r.problem === 'unreadable'
-      ? [
-          'mcp.manifest.json exists but is not valid JSON; run `bs mcp check` for the parser message',
-        ]
-      : r.violations.map(
-          (v) =>
-            `${v.rule}${v.tool === undefined ? '' : ` tool "${v.tool}"`} at ${v.path}: ${v.message}`,
-        );
+export function mcpStage(worktreeDir: string, baseRef?: string): McpStage {
+  const r = inspectMcpManifest(worktreeDir, baseRef);
+  const violations = [...r.invalid, ...r.unsigned];
   return {
-    ok: !r.present || (r.problem === null && r.violations.length === 0),
-    violations: r.violations,
-    payload: { problem: r.problem, summary },
+    ok: violations.length === 0,
+    reason:
+      r.invalid.length > 0
+        ? 'mcp-manifest-invalid'
+        : r.unsigned.length > 0
+          ? 'mcp-approval-unsigned-by-operator'
+          : null,
+    violations,
+    payload: {
+      summary: violations.map(
+        (v) =>
+          `${v.rule}${v.tool === undefined ? '' : ` tool "${v.tool}"`} at ${v.path}: ${v.message}`,
+      ),
+    },
   };
 }
 
@@ -587,8 +594,8 @@ export async function checkPaperwork(
           skip(stage, 'no-input');
           break;
         }
-        const r = mcpStage(input.worktreeDir);
-        if (!r.ok) block(stage, 'mcp-manifest-invalid', r.payload);
+        const r = mcpStage(input.worktreeDir, input.baseRef);
+        if (r.reason !== null) block(stage, r.reason, r.payload);
         break;
       }
       case 'judges': {

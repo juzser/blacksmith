@@ -213,14 +213,56 @@ export async function commitMcpManifest(w: World, body: string): Promise<void> {
   w.git(['commit', '-q', '-m', 'mcp manifest']);
 }
 
+/** The operator's signature on a tool, as `mcp.md` MCP-T4 spells it. */
+export const OPERATOR_APPROVAL = {
+  operator: 'sam',
+  date: '2026-11-04',
+  milestone: 'demo-mcp-surface',
+};
+
+/** A write tool whose annotation breaks MCP-T2 as well as lacking a signature. */
+export const MISANNOTATED_TOOL = {
+  ...UNSIGNED_TOOL,
+  annotations: { ...UNSIGNED_TOOL.annotations, readOnlyHint: true },
+};
+
+/**
+ * Commit `body` as `mcp.manifest.json` on the base branch, then move the task
+ * branch onto it: the way an operator-authored approval reaches a task. Call
+ * before the task commits a manifest of its own.
+ */
+export async function commitMcpManifestOnBase(w: World, body: string): Promise<void> {
+  const task = w.git(['branch', '--show-current']);
+  w.git(['checkout', '-q', 'main']);
+  await writeFile(path.join(w.worktreeDir, 'mcp.manifest.json'), body);
+  w.git(['add', 'mcp.manifest.json']);
+  w.git(['commit', '-q', '-m', 'operator manifest']);
+  w.git(['checkout', '-q', task]);
+  w.git(['rebase', '-q', 'main']);
+}
+
 export const mcpUnsignedTool: FixtureBuilder = async (w) => {
   await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
   return baseInput(w);
 };
 
-export const mcpSignedTool: FixtureBuilder = async (w) => {
-  const approval = { operator: 'sam', date: '2026-11-04', milestone: 'demo-mcp-surface' };
-  await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval }]));
+export const mcpMisannotatedTool: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL]));
+  return baseInput(w);
+};
+
+/** The task itself writes the approval. */
+export const mcpSelfSigned: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]));
+  return baseInput(w);
+};
+
+/** The operator signed on the base branch; the task leaves the manifest alone. */
+export const mcpSignedOnBase: FixtureBuilder = async (w) => {
+  await commitMcpManifestOnBase(
+    w,
+    mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]),
+  );
   return baseInput(w);
 };
 
@@ -489,10 +531,20 @@ export const PARITY_CASES: readonly {
   { name: 'artifact outside the home', build: artifactOutsideHome, reason: 'artifacts-missing' },
   { name: 'uncommitted work', build: uncommitted, reason: 'not-committed' },
   { name: 'deps missing', build: depsMissing, reason: 'deps-missing' },
-  { name: 'mcp unsigned mutating tool', build: mcpUnsignedTool, reason: 'mcp-manifest-invalid' },
+  {
+    name: 'mcp unsigned mutating tool',
+    build: mcpUnsignedTool,
+    reason: 'mcp-approval-unsigned-by-operator',
+  },
+  {
+    name: 'mcp approval written by the task',
+    build: mcpSelfSigned,
+    reason: 'mcp-approval-unsigned-by-operator',
+  },
+  { name: 'mcp misannotated tool', build: mcpMisannotatedTool, reason: 'mcp-manifest-invalid' },
   { name: 'mcp unreadable manifest', build: mcpUnreadable, reason: 'mcp-manifest-invalid' },
   { name: 'mcp valid manifest', build: mcpValid, reason: null },
-  { name: 'mcp signed mutating tool', build: mcpSignedTool, reason: null },
+  { name: 'mcp tool signed on the base', build: mcpSignedOnBase, reason: null },
   { name: 'judge turn outstanding', build: judgesOutstanding, reason: 'judges-outstanding' },
   {
     name: 'grader verdict outside structured_output',
@@ -541,7 +593,7 @@ export async function buildLadder(w: World): Promise<Ladder> {
   await writeFile(file, 'export const x = 3;\n');
   await rm(path.join(w.worktreeDir, 'node_modules'), { recursive: true, force: true });
   await dispatchJudge(w, 'reviewer');
-  await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
+  await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL]));
 
   return {
     input: () => baseInput(w, { result, graderVerdict, uiAffecting: true }),
@@ -574,6 +626,12 @@ export async function buildLadder(w: World): Promise<Ladder> {
       },
       {
         reason: 'mcp-manifest-invalid',
+        fix: async () => {
+          await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
+        },
+      },
+      {
+        reason: 'mcp-approval-unsigned-by-operator',
         fix: async () => {
           await commitMcpManifest(w, mcpManifest());
         },

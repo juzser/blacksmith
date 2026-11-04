@@ -18,6 +18,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { SmithError } from './errors.js';
+import { runGit, runGitRaw } from './git.js';
 import { PROJECTS_DIR, roadmapReadPath, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
 import {
   loadRoadmap,
@@ -745,38 +746,168 @@ export interface McpGateViolation extends McpViolation {
 }
 
 export interface McpManifestInspection {
-  /** False when the checkout has no `mcp.manifest.json`: nothing to check. */
+  /** False when neither HEAD nor the base carries `mcp.manifest.json`: nothing to check. */
   present: boolean;
-  /** Set when the file exists but is not valid JSON; no verdict could be rendered. */
-  problem: 'unreadable' | null;
-  violations: McpGateViolation[];
+  /** What the task's author can fix: a new rule violation, or a manifest that cannot be read. */
+  invalid: McpGateViolation[];
+  /** What only the operator can supply: an approval the task added or changed, or a new unsigned mutating tool. */
+  unsigned: McpGateViolation[];
 }
 
-/**
- * The per-task gate's read of the project's manifest: the same `checkManifest`
- * the epic-close check runs (and deliberately not the roadmap rules, for the
- * reason `resolveMcpSurface` gives), over `<dir>/mcp.manifest.json`. `/bs do`
- * has no epic close, so without this the MCP-T4 approval rule would never run
- * on that path. A project with no manifest is untouched; an unreadable one is
- * reported rather than skipped, as the close-time check does.
- */
-export function inspectMcpManifest(dir: string): McpManifestInspection {
-  const manifestPath = path.join(dir, MANIFEST_NAME);
-  if (!existsSync(manifestPath)) return { present: false, problem: null, violations: [] };
-  let manifest: unknown;
+type Committed = { kind: 'absent' } | { kind: 'bad'; why: string } | { kind: 'ok'; text: string };
+
+/** The manifest as `rev` holds it. A symlink, a directory or a submodule at the path is `bad`; the working tree is never read. */
+function readCommittedManifest(dir: string, rev: string): Committed {
+  let listing: string;
   try {
-    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    listing = runGit(dir, ['ls-tree', rev, '--', MANIFEST_NAME]);
   } catch {
-    return { present: true, problem: 'unreadable', violations: [] };
+    return { kind: 'absent' };
   }
-  const tools = isRecord(manifest) && Array.isArray(manifest.tools) ? manifest.tools : [];
-  const violations = checkManifest(manifest).violations.map((v): McpGateViolation => {
+  if (listing === '') return { kind: 'absent' };
+  const mode = listing.split(' ')[0];
+  if (mode !== '100644' && mode !== '100755') {
+    return {
+      kind: 'bad',
+      why: `${MANIFEST_NAME} is committed as ${mode === '120000' ? 'a symlink' : 'something other than a regular file'}; commit the manifest itself`,
+    };
+  }
+  try {
+    return { kind: 'ok', text: runGitRaw(dir, ['show', `${rev}:${MANIFEST_NAME}`]) };
+  } catch {
+    return { kind: 'absent' };
+  }
+}
+
+function parseManifest(c: Committed): unknown | undefined {
+  if (c.kind !== 'ok') return undefined;
+  try {
+    return JSON.parse(c.text);
+  } catch {
+    return undefined;
+  }
+}
+
+function toolsOf(manifest: unknown): unknown[] {
+  return isRecord(manifest) && Array.isArray(manifest.tools) ? manifest.tools : [];
+}
+
+function toolName(tool: unknown): string | undefined {
+  return isRecord(tool) && typeof tool.name === 'string' ? tool.name : undefined;
+}
+
+function violationsOf(manifest: unknown): McpGateViolation[] {
+  const tools = toolsOf(manifest);
+  return checkManifest(manifest).violations.map((v): McpGateViolation => {
     const index = /^\/tools\/(\d+)/.exec(v.path)?.[1];
-    const tool = index === undefined ? undefined : tools[Number(index)];
-    const name = isRecord(tool) && typeof tool.name === 'string' ? tool.name : undefined;
+    const name = index === undefined ? undefined : toolName(tools[Number(index)]);
     return name === undefined ? v : { ...v, tool: name };
   });
-  return { present: true, problem: null, violations };
+}
+
+const violationKey = (v: McpGateViolation): string => `${v.rule}|${v.tool ?? v.path}`;
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+const problem = (message: string): McpGateViolation => ({
+  rule: 'MCP-MANIFEST',
+  path: `/${MANIFEST_NAME}`,
+  message,
+});
+
+/**
+ * The per-task gate's read of the project's manifest. It reads the committed
+ * manifest at HEAD, never the working tree, and compares it with the one at the
+ * merge-base of HEAD and `baseRef`, so a task answers only for what it changed:
+ *
+ * - a violation the base manifest already carries does not block (keyed by rule
+ *   plus tool or path), so one red manifest does not stop every unrelated task;
+ * - an `approval` the task added or changed, and a new unsigned mutating tool
+ *   (MCP-T4), are `unsigned`: only the operator signs, so a task cannot satisfy
+ *   the rule by writing the signature itself;
+ * - a manifest the base carries and HEAD lacks, a symlink or directory at the
+ *   path, and JSON that does not parse are `invalid`, and say why.
+ *
+ * Without a resolvable `baseRef` the base counts as empty, so nothing the
+ * manifest holds is excused. The rules are `checkManifest`'s, deliberately not
+ * the roadmap rules (see `resolveMcpSurface`). `/bs do` has no epic close; this
+ * is why the MCP-T4 rule would otherwise never run there.
+ */
+export function inspectMcpManifest(dir: string, baseRef?: string): McpManifestInspection {
+  let baseRev: string | undefined;
+  if (baseRef !== undefined) {
+    try {
+      baseRev = runGit(dir, ['merge-base', 'HEAD', baseRef]);
+    } catch {
+      baseRev = undefined;
+    }
+  }
+  const head = readCommittedManifest(dir, 'HEAD');
+  const base: Committed =
+    baseRev === undefined ? { kind: 'absent' } : readCommittedManifest(dir, baseRev);
+
+  if (head.kind === 'absent') {
+    return base.kind === 'ok'
+      ? {
+          present: true,
+          invalid: [problem(`${MANIFEST_NAME} exists on the base but is gone at HEAD; restore it`)],
+          unsigned: [],
+        }
+      : { present: false, invalid: [], unsigned: [] };
+  }
+  if (head.kind === 'bad') return { present: true, invalid: [problem(head.why)], unsigned: [] };
+
+  const manifest = parseManifest(head);
+  if (manifest === undefined) {
+    return {
+      present: true,
+      invalid: [
+        problem(`${MANIFEST_NAME} is not valid JSON; run \`bs mcp check\` for the parser message`),
+      ],
+      unsigned: [],
+    };
+  }
+
+  const baseManifest = parseManifest(base);
+  const known = new Set(
+    baseManifest === undefined ? [] : violationsOf(baseManifest).map(violationKey),
+  );
+  const invalid: McpGateViolation[] = [];
+  const unsigned: McpGateViolation[] = [];
+  for (const v of violationsOf(manifest)) {
+    if (known.has(violationKey(v))) continue;
+    (v.rule === 'MCP-T4' ? unsigned : invalid).push(v);
+  }
+
+  const baseApprovals = new Map<string, string>();
+  for (const tool of toolsOf(baseManifest)) {
+    const name = toolName(tool);
+    if (name !== undefined && isRecord(tool) && tool.approval !== undefined) {
+      baseApprovals.set(name, canonical(tool.approval));
+    }
+  }
+  toolsOf(manifest).forEach((tool, index) => {
+    const name = toolName(tool);
+    if (name === undefined || !isRecord(tool) || tool.approval === undefined) return;
+    if (baseApprovals.get(name) === canonical(tool.approval)) return;
+    unsigned.push({
+      rule: 'MCP-T4',
+      path: `/tools/${index}/approval`,
+      tool: name,
+      message: `The approval on "${name}" was added or changed by this task. Only the operator signs: the operator commits it to the base branch and the task moves onto it.`,
+    });
+  });
+
+  return { present: true, invalid, unsigned };
 }
 
 /**

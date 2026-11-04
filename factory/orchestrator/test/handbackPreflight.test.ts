@@ -367,6 +367,7 @@ describe('queue-and-gate.md section 5 and the CHANGELOG', () => {
 const REASON_BRANCH = {
   'deps-missing': 1,
   'mcp-manifest-invalid': 3,
+  'mcp-approval-unsigned-by-operator': 5,
   'judges-outstanding': 2,
   'uiux-spec-missing': 2,
   'uiux-visual-missing': 2,
@@ -377,7 +378,7 @@ const REASON_BRANCH = {
   'screenshots-missing': 3,
   'screenshots-stale': 3,
   'mobile-overflow': 3,
-} satisfies Record<PaperworkReason, 1 | 2 | 3>;
+} satisfies Record<PaperworkReason, 1 | 2 | 3 | 5>;
 
 describe('wave.md step 7 routes every preflight problem to one of five branches', () => {
   const wave = read('.claude/skills/bs/wave.md');
@@ -1200,6 +1201,7 @@ const ANSWERER_OF = {
   'grader-invalid': 'judge-turn',
   'deps-missing': 'wave-runner',
   'mcp-manifest-invalid': 'coder',
+  'mcp-approval-unsigned-by-operator': 'epic-session',
   'judges-outstanding': {
     'uiux-named': 'uiux',
     'judges-only': 'judge-turn',
@@ -1304,7 +1306,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
 
   it('has exactly one bullet per reason of the gate type and none for another', () => {
     const reasons = Object.keys(ANSWERER_OF).sort();
-    expect(reasons).toHaveLength(16);
+    expect(reasons).toHaveLength(17);
     expect(
       bullets
         .filter((b) => b.reason !== undefined)
@@ -1345,6 +1347,8 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
         ['wave-runner'],
         ['uiux', 'judge-turn'],
         ['coder', 'tester', 'result-worker'],
+        [],
+        ['epic-session'],
       ];
       for (const kind of kinds) expect(allowed[branch], `${reason} ${kind}`).toContain(kind);
     }
@@ -1427,7 +1431,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
       }
       expect(
         queueText.split('\n').filter((l) => l.startsWith('| `blocked` (`reason:')),
-      ).toHaveLength(16);
+      ).toHaveLength(17);
     });
 
     it('ends the grader-invalid row with the capped clause and keeps its two pinned phrases', () => {
