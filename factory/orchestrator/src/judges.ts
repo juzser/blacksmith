@@ -914,6 +914,23 @@ export function readJudgeArtifact(
   );
 }
 
+/**
+ * The distinct task ids `role`'s turns carry for `taskId`, when there is more
+ * than one: a bare id that two epics both hold a turn for. Null otherwise.
+ * (More than one turn on the SAME task id is the uiux spec/visual pair, which
+ * `kind` disambiguates, not an epic clash.)
+ */
+export function turnsSpanEpics(
+  turns: readonly JudgeTurn[],
+  role: string,
+  taskId: string,
+): string[] | null {
+  const ids = new Set(
+    turns.filter((t) => t.role === role && taskIdsMatch(t.taskId, taskId)).map((t) => t.taskId),
+  );
+  return ids.size > 1 ? [...ids] : null;
+}
+
 function notDispatchedMessage(
   input: JudgeReportInput,
   turn: JudgeTurn | undefined,
@@ -927,9 +944,9 @@ function notDispatchedMessage(
     }
     return `Task id "${input.taskId}" has ${kindAmbiguous.length} open "${input.role}" turns (kinds: ${kinds}). Report with "--kind" naming the one to close — closing one here would be a guess.`;
   }
-  const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
-  if (distinctTaskIds.size > 1) {
-    return `Task id "${input.taskId}" names a "${input.role}" turn in ${distinctTaskIds.size} epics (${forRole.map((t) => t.taskId).join(', ')}). Report against the qualified id — closing one of them here would be a guess.`;
+  const spanned = turnsSpanEpics(forRole, input.role, input.taskId);
+  if (spanned !== null) {
+    return `Task id "${input.taskId}" names a "${input.role}" turn in ${spanned.length} epics (${forRole.map((t) => t.taskId).join(', ')}). Report against the qualified id — closing one of them here would be a guess.`;
   }
   if (turn === undefined && input.kind !== undefined && forRole.length > 0) {
     const kinds = forRole.map((t) => t.kind ?? 'null').join(', ');
@@ -970,8 +987,7 @@ export function checkJudgeReport(
   // two epics both claim a turn for. More than one turn on the SAME task id
   // (same role, same taskId) is the uiux spec/visual pair, disambiguated by
   // `kind` instead — both cases are a guess to resolve on our own.
-  const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
-  const epicAmbiguous = distinctTaskIds.size > 1;
+  const epicAmbiguous = turnsSpanEpics(forRole, input.role, input.taskId) !== null;
   // A kindless report picks among OPEN turns only, the same set
   // `outstandingJudges` exposes — a closed turn is not a candidate to guess
   // between, and the error must not count it as "open" either. With no turn

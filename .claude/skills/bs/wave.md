@@ -246,7 +246,8 @@ one thing this playbook never asks you to.
    runs; it never decides pass/fail itself. At one round the grader scores
    once and a failed criterion is the coder's bounce, not a re-grade. Its result file is an **input to
    step 7**, not a note to the operator: pass it as `--grader` or the rubric
-   gates nothing (D-34). A round-2 `fail` re-scopes via dispatch.md's "Round
+   gates nothing (D-34). `/bs run` keeps the grader and passes `--grader` as
+   above; `--no-grader` is not part of this loop. A round-2 `fail` re-scopes via dispatch.md's "Round
    counting and escalation", not a round 3 on this id (`bs playbook slice
    dispatch --section "Round counting and escalation"`).
    - **The judges go out in one message, after the tester.** When the tester
