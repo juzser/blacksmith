@@ -38,7 +38,7 @@ check "cross-check doc states code is sent only when invoked" grep -qi "only whe
 check "compact doc has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/../docs/compact.md"
 
 echo "-- agent frontmatter --"
-for a in planner coder reviewer researcher scout; do
+for a in planner coder reviewer auditor; do
   f="$P/agents/$a.md"
   fm="$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1{print}' "$f" 2>/dev/null)"
   get() { printf '%s\n' "$fm" | sed -n "s/^$1:[[:space:]]*//p" | head -1; }
@@ -48,8 +48,13 @@ for a in planner coder reviewer researcher scout; do
   case "$(get effort)" in low|medium|high|xhigh|max) ok "$a effort $(get effort)";; *) bad "$a effort";; esac
   l=$(wc -l < "$f" | tr -d ' ')
   [ "$l" -le 40 ] && ok "$a is $l lines" || bad "$a is $l lines"
+  b=$(awk 'c>=2{print} $0=="---"{c++}' "$f" | grep -c .)
+  [ "$b" -le 14 ] && ok "$a body is $b lines (<= 14)" || bad "$a body is $b lines (> 14)"
+  get description | grep -Eqi 'not for|never|do not' && ok "$a description says when not to use it" || bad "$a description lacks a when-not"
 done
-for a in reviewer scout; do
+n=$(ls "$P/agents" | tr '\n' ' ')
+[ "$n" = "auditor.md coder.md planner.md reviewer.md " ] && ok "only planner, coder, reviewer, auditor exist" || bad "agents dir has: $n"
+for a in reviewer auditor; do
   t="$(sed -n 's/^tools:[[:space:]]*//p' "$P/agents/$a.md" | head -1)"
   case "$t" in *Write*|*Edit*|"") bad "$a is read-only via tools ($t)";; *) ok "$a is read-only via tools";; esac
 done
@@ -71,7 +76,9 @@ rm "$T/fake/rules.md"
 CLAUDE_PLUGIN_ROOT="$T/fake" sh "$T/fake/hooks/session-rules.sh" >/dev/null 2>&1; [ $? -eq 0 ] && ok "exits 0 when rules.md is missing" || bad "missing rules.md exit"
 
 echo "-- rules.md routing table matches the agents --"
-for a in planner coder reviewer researcher scout; do
+rows=$(grep -c '^| .*`[a-z]*` |' "$P/rules.md")
+[ "$rows" -eq 4 ] && ok "routing table has 4 agent rows" || bad "routing table has $rows agent rows"
+for a in planner coder reviewer auditor; do
   row="$(grep -F "\`$a\`" "$P/rules.md" | grep '^|' | head -1)"
   rm_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$4); print $4}')"
   re_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$5); print $5}')"
@@ -83,7 +90,20 @@ check "rules.md rule 4: the person runs /cross-check" grep -qi "the person runs 
 check "SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$P/skills/cross-check/SKILL.md"
 check "SKILL.md shows a quoted heredoc for criteria" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
 check "SKILL.md asks for a 600000 Bash timeout" grep -q 600000 "$P/skills/cross-check/SKILL.md"
-for a in reviewer scout; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
+for a in reviewer auditor; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
+
+echo "-- audit skill and marketplace --"
+A="$P/skills/audit/SKILL.md"
+check "audit SKILL.md has name audit" grep -q '^name: audit' "$A"
+check "audit SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$A"
+for ax in performance code-quality security; do check "audit SKILL.md names axis $ax" grep -q "$ax" "$A"; done
+check "audit SKILL.md has no architecture axis" sh -c "! grep -qi architecture '$A'"
+t="$(sed -n 's/^tools:[[:space:]]*//p' "$P/agents/auditor.md" | head -1)"
+[ "$t" = "Read, Grep, Glob, Bash" ] && ok "auditor tools are Read, Grep, Glob, Bash" || bad "auditor tools ($t)"
+check "marketplace lists one plugin: blacksmith at ./plugin" node -e '
+const m=JSON.parse(require("fs").readFileSync(process.argv[1]));
+if(m.plugins.length!==1||m.plugins[0].name!=="blacksmith"||m.plugins[0].source!=="./plugin")process.exit(1)' "$P/../.claude-plugin/marketplace.json"
+check "no mods/ directory" test ! -e "$P/../mods"
 
 echo "-- cross-check.sh --"
 X="$P/skills/cross-check/cross-check.sh"

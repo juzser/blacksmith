@@ -1,7 +1,7 @@
 {
   "name": "blacksmith",
   "version": "1.0.0",
-  "description": "Five small things for Claude Code: plain explanations, a confidence % on every option, a cross-check by a different model, model and effort per kind of task, and a compact rule.",
+  "description": "Small things for Claude Code: plain explanations, a confidence % on every option, a cross-check by a different model, a read-only audit, agents with their own model and effort, and a compact rule.",
   "author": {
     "name": "juzser",
     "url": "https://github.com/juzser"
@@ -9,5 +9,10 @@
   "homepage": "https://github.com/juzser/blacksmith/tree/main/plugin",
   "repository": "https://github.com/juzser/blacksmith",
   "license": "MIT",
-  "keywords": ["rules", "cross-check", "agents"]
+  "keywords": [
+    "rules",
+    "cross-check",
+    "audit",
+    "agents"
+  ]
 }

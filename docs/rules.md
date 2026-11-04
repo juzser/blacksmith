@@ -8,7 +8,7 @@ The rules are one file, [`plugin/rules.md`](../plugin/rules.md). It covers how t
 
 ## Turn them off
 
-- For every session: `claude plugin disable blacksmith`, then start a new session. This also drops the agents and `/cross-check`.
+- For every session: `claude plugin disable blacksmith`, then start a new session. This also drops the agents, `/audit` and `/cross-check`.
 - Only the rules: there is no setting for that. Fork the plugin and delete the hook, or override the parts you dislike (below).
 
 ## Override them

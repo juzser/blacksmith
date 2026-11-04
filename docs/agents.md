@@ -1,16 +1,15 @@
 # Agents
 
-Five agents, each with its own model and effort in its frontmatter. The routing table lives in [`plugin/rules.md`](../plugin/rules.md#3-model-and-effort-routing); the agent files are in [`plugin/agents/`](../plugin/agents/).
+Four agents, each with its own model and effort in its frontmatter. The routing table lives in [`plugin/rules.md`](../plugin/rules.md#3-model-and-effort-routing); the agent files are in [`plugin/agents/`](../plugin/agents/).
 
 | Agent | Model | Effort |
 |---|---|---|
 | `planner` | opus | high |
 | `coder` | sonnet | medium |
 | `reviewer` | sonnet | medium |
-| `researcher` | sonnet | medium |
-| `scout` | haiku | low |
+| `auditor` | sonnet | high |
 
-Use subagents for independent work that can run in parallel, and to keep bulky output out of the main session.
+Each agent's `description` says what to send it and what not to. `auditor` is started by [`/audit`](audit.md), one per axis. Use subagents for independent work that can run in parallel, and to keep bulky output out of the main session.
 
 ## Change a model or effort
 

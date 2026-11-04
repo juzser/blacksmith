@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Blacksmith gate: plugin tests, JSON, marketplace paths, shell syntax, markdown
-# links, and (when `claude` is on PATH) the plugin validators. CI runs this file.
+# links, and (when `claude` is on PATH) the plugin validator. CI runs this file.
 # A step that cannot run prints SKIP, not OK: read the tail, not the exit code.
 
 set -u
@@ -24,7 +24,7 @@ echo
 echo "-- JSON parses --"
 while IFS= read -r f; do
   if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" 2>/dev/null; then ok "$f"; else bad "$f"; fi
-done < <(git ls-files '.claude-plugin/*.json' 'plugin/*.json' 'mods/pr-mod/*.json' '.claude/*.json')
+done < <(git ls-files '.claude-plugin/*.json' 'plugin/*.json' '.claude/*.json')
 
 echo
 echo "-- marketplace sources --"
@@ -54,13 +54,11 @@ bash scripts/test-md-links.sh || FAIL=1
 node scripts/check-md-links.mjs . || FAIL=1
 
 echo
-echo "-- claude plugin validate / test --"
+echo "-- claude plugin validate --"
 if command -v claude >/dev/null 2>&1; then
   claude plugin validate plugin >/dev/null 2>&1 && ok "validate plugin" || bad "validate plugin"
-  claude plugin validate mods/pr-mod >/dev/null 2>&1 && ok "validate mods/pr-mod" || bad "validate mods/pr-mod"
-  claude plugin test mods/pr-mod >/dev/null 2>&1 && ok "test mods/pr-mod" || bad "test mods/pr-mod"
 else
-  skip "claude not on PATH: plugin validate and pr-mod tests did not run"
+  skip "claude not on PATH: plugin validate did not run"
 fi
 
 echo

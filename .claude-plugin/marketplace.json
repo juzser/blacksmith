@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "blacksmith",
-  "description": "Blacksmith for Claude Code: plain explanations, a confidence % on options, a cross-check by a different model, model and effort per kind of task, and a compact rule. Plus an optional pull-request module, pr-mod.",
+  "description": "Blacksmith for Claude Code: plain explanations, a confidence % on options, a cross-check by a different model, an audit, model and effort per kind of task, and a compact rule.",
   "owner": {
     "name": "juzser",
     "url": "https://github.com/juzser"
@@ -9,23 +9,13 @@
   "plugins": [
     {
       "name": "blacksmith",
-      "description": "Five small things for Claude Code: plain explanations, a confidence % on every option, a cross-check by a different model, model and effort per kind of task, and a compact rule.",
+      "description": "Small things for Claude Code: plain explanations, a confidence % on every option, a cross-check by a different model, a read-only audit, agents with their own model and effort, and a compact rule.",
       "author": {
         "name": "juzser"
       },
       "category": "workflow",
       "source": "./plugin",
       "homepage": "https://github.com/juzser/blacksmith"
-    },
-    {
-      "name": "pr-mod",
-      "description": "Optional pull-request view: a pane lists the repo's open PRs with CI and merge state, and merges, updates a branch or sends a fix prompt; a band line above the prompt counts them. A plugin module; needs a Claude Code build with plugin modules and the gh CLI.",
-      "author": {
-        "name": "juzser"
-      },
-      "category": "workflow",
-      "source": "./mods/pr-mod",
-      "homepage": "https://github.com/juzser/blacksmith/tree/main/mods/pr-mod"
     }
   ]
 }

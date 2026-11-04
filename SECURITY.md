@@ -16,9 +16,9 @@ You should get an acknowledgement within a few days. This is a small project: th
 
 - **Cross-check.** `/cross-check` sends code to a third-party service. A path where it sends more than [documented](docs/cross-check.md), runs without the person invoking it, or lets codex write to the tree, is in scope.
 - **The SessionStart hook.** `plugin/hooks/session-rules.sh` runs on every session start. A way to make it run something other than printing `rules.md` is in scope.
-- **pr-mod.** Anything that merges, pushes or runs a command without the person's explicit action.
+- **The audit.** `/audit` agents are read-only by instruction. A path where an audit changes the tree, or runs without the person starting it, is in scope.
 - **Scripts.** Shell injection through a branch name, file name or criteria text passed to `cross-check.sh`.
 
 ## Out of scope
 
-Behaviour of Claude Code, codex or `gh` themselves; report those to their vendors. Prompt injection into a model that has no way to act beyond what the person already allowed.
+Behaviour of Claude Code or codex themselves; report those to their vendors. Prompt injection into a model that has no way to act beyond what the person already allowed.

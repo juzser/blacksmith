@@ -1,5 +1,5 @@
 name: Bug report
-description: The plugin, the cross-check skill, pr-mod or the gate behaves wrong.
+description: The plugin, the cross-check skill, the audit skill or the gate behaves wrong.
 labels: ['bug']
 body:
   - type: markdown

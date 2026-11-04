@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a change to the plugin, the cross-check skill or pr-mod.
+description: Propose a change to the plugin, the cross-check skill or the audit skill.
 labels: ['enhancement']
 body:
   - type: markdown
@@ -34,7 +34,7 @@ body:
         - Agents
         - Cross-check
         - Compact
-        - pr-mod
+        - Audit
         - Docs / install
         - Other
     validations:

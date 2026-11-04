@@ -7,8 +7,3 @@
 *.log
 # Per-project canvas state for a local editor, not a fact about the repo.
 .nodeterm/
-
-# pr-mod: Claude Code writes its engine API types and base tsconfig when it
-# loads the mod, for the build doing the loading. A committed copy would pin
-# one build's API.
-/mods/pr-mod/.claude-plugin/types/

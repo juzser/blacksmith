@@ -31,8 +31,7 @@ Send work to the agent that fits it. Each agent carries its own model and effort
 | Split work of 2+ independent parts into a plan | `planner` | opus | high |
 | Implement one part, test-first, in its own worktree | `coder` | sonnet | medium |
 | Fresh-context, read-only review of a diff | `reviewer` | sonnet | medium |
-| Docs, web research, reading unfamiliar code | `researcher` | sonnet | medium |
-| Searches, summaries, mechanical checks | `scout` | haiku | low |
+| Whole-project audit, one axis (performance, code-quality, security); started by `/audit` | `auditor` | sonnet | high |
 
 Use subagents for independent work that can run in parallel, and to keep bulky output out of the main session. Keep the main session for talking to the person and for decisions.
 

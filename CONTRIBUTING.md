@@ -22,7 +22,7 @@ The repo layout and what the gate checks are in [docs/development.md](docs/devel
 
 ## What fits
 
-Changes to the five pieces (rules, confidence %, cross-check, agents, compact), to pr-mod, and to the docs. A new feature has to give a reason that Claude Code's own defaults do not cover. [docs/history.md](docs/history.md) explains why the earlier, larger design was dropped.
+Changes to the plugin's pieces (rules, confidence %, cross-check, audit, agents, compact) and to the docs. A new feature has to give a reason that Claude Code's own defaults do not cover. [docs/history.md](docs/history.md) explains why the earlier, larger design was dropped.
 
 ## House rules
 
