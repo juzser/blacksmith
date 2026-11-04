@@ -416,7 +416,9 @@ two scripts, and only one of them can block:
   `PostToolUse` on `AskUserQuestion`. It only records.
 - **The plugin guard**, `plugin-policy.sh`, for `PreToolUse` on Bash, Write,
   Edit, MultiEdit, NotebookEdit, Agent and Task. It is off by default: unless
-  `BS_PLUGIN_GUARD=1` is set it exits at once and decides nothing. On, it can
+  `BS_PLUGIN_GUARD=1` is set it exits at once and decides nothing, except for a
+  call made inside a subagent, where it refuses the operator's own verbs (and is
+  silent if the hook is missing). On, it can
   deny a call, as [the plugin guard](#the-plugin-guard-opt-in) below says.
 
 The recorder writes each prompt and each option answer to the event log,

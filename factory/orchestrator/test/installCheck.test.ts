@@ -17,6 +17,15 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 
 const done = (stdout: string, status = 0): RunResult => ({ status, stdout });
 const FAKE_ROOT = '/path/to/install';
+/** What the policy hook prints in subagent-only mode for the probe verb. */
+const REFUSAL = JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason:
+      'BLOCKED: subagent-operator-verb: refused. The operator runs this from the main session.',
+  },
+});
 
 /** Everything healthy; each test overrides the one thing it probes. */
 function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
@@ -32,6 +41,7 @@ function deps(over: Partial<DoctorDeps> = {}): DoctorDeps {
     },
     exists: () => true,
     run: (cmd) => {
+      if (cmd === 'bs-policy-hook') return done(REFUSAL);
       if (cmd === 'claude') return done('Installed plugins:\n  blacksmith@blacksmith\n');
       return done('9.3.0\n');
     },
@@ -54,6 +64,7 @@ describe('installCheck probes', () => {
       'bs',
       'claude',
       'plugin',
+      'subagent-lane',
       'dashboard',
       'concurrency-caps',
     ]);
@@ -95,6 +106,64 @@ describe('installCheck probes', () => {
       check({ run: run({ status: null, stdout: '', error: 'ETIMEDOUT' }) }, 'claude').status,
     ).toBe('unknown');
     expect(check({ run: run(done('', 3)) }, 'claude').status).toBe('unknown');
+  });
+
+  describe('subagent-lane', () => {
+    it('is ok when the hook refuses the probe operator verb, asked in subagent-only mode', () => {
+      const seen: Array<{ cmd: string; env?: Record<string, string>; input?: string }> = [];
+      const found = check(
+        {
+          run: (cmd, _args, _t, opts) => {
+            seen.push({ cmd, ...(opts ?? {}) });
+            return cmd === 'bs-policy-hook' ? done(REFUSAL) : done('9.3.0\n');
+          },
+        },
+        'subagent-lane',
+      );
+      expect(found.status).toBe('ok');
+      const probe = seen.find((c) => c.cmd === 'bs-policy-hook');
+      expect(probe?.env?.BS_POLICY_SUBAGENT_ONLY).toBe('1');
+      expect(probe?.input).toContain('"agent_id"');
+      expect(probe?.input).toContain('bs waivers apply');
+    });
+
+    it('says the lane is inactive when no hook is found', () => {
+      const found = check(
+        {
+          run: (cmd) =>
+            cmd === 'bs-policy-hook' ? { status: null, stdout: '', error: 'ENOENT' } : done('1\n'),
+        },
+        'subagent-lane',
+      );
+      expect(found.status).toBe('unknown');
+      expect(found.detail).toMatch(/inactive/);
+      expect(found.fix).toMatch(/npm i -g/);
+    });
+
+    it('says the lane is inactive when an older hook does not refuse the probe', () => {
+      const found = check(
+        { run: (cmd) => (cmd === 'bs-policy-hook' ? done('') : done('1\n')) },
+        'subagent-lane',
+      );
+      expect(found.status).toBe('unknown');
+      expect(found.detail).toMatch(/older package has no subagent mode/);
+    });
+
+    it('uses the hook BS_POLICY_HOOK names, with node, as the shim does', () => {
+      const ran: string[] = [];
+      const found = check(
+        {
+          env: { ...CONCURRENCY_CAPS, BS_POLICY_HOOK: '/x/policyHook.js' },
+          run: (cmd, args) => {
+            ran.push([cmd, ...args].join(' '));
+            return cmd === 'node' ? done(REFUSAL) : done('1\n');
+          },
+        },
+        'subagent-lane',
+      );
+      expect(found.status).toBe('ok');
+      expect(ran).toContain('node /x/policyHook.js');
+    });
   });
 
   describe('plugin', () => {
@@ -172,7 +241,9 @@ describe('installCheck extra edges', () => {
     );
     expect(seen).toContain('claude plugin list');
     expect(seen).toContain('claude --version');
-    expect(seen.every((s) => /--version$|plugin list$/.test(s))).toBe(true);
+    // The subagent-lane probe hands the policy hook a made-up call and runs nothing else.
+    const rest = seen.filter((s) => !s.startsWith('bs-policy-hook'));
+    expect(rest.every((s) => /--version$|plugin list$/.test(s))).toBe(true);
   });
 
   it('node: accepts a full semver floor', () => {

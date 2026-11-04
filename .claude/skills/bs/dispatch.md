@@ -186,7 +186,7 @@ tool calls (`CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY`) by default, unless
 ## Splitting an epic across sessions (P9-7)
 
 A new session's `session-start` may name an event in the previous session as
-its `causal_parent` — `bs session start <new-id> --continues <old-id>#<n>` —
+its `causal_parent` — `bs session start <new-id> --continues <old-id>#<n> --actor <your-role>` —
 and that is the only place a cross-session edge is allowed: everything after
 the root chains locally, so each session has exactly one entry edge and the log
 stays a tree of sessions rather than a graph. `bs event lineage
@@ -464,9 +464,9 @@ back — the kanban chip, the dashboard's live-agent groups, the overview's
 recent dispatches, the dispatch audit. The tiers are taxonomy.yml's three —
 `frontier`, `mid`, `small` — and the flag is the only thing that puts the
 true one on the record. `--no-findings` records an operator
-*attestation* rather than a review — use it only for a judge that ran outside
-the factory, and only with `--actor operator`: any other actor is refused
-(`cli.no-findings-needs-operator`). A judge that genuinely found nothing writes
+*attestation* rather than a review — only the operator writes it, from the main
+session, for a judge that ran outside the factory (`.claude/skills/bs/run.md`
+says how): any other actor is refused (`cli.no-findings-needs-operator`). A judge that genuinely found nothing writes
 `[]` and reports with `--artifact` / `--evidence`.
 
 Tell the judge the exact path on its own line, verbatim —

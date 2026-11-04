@@ -314,7 +314,7 @@ deny rules and its guard hook resolve paths against a checkout. The plugin's
 `hooks/hooks.json` holds the non-blocking prompt-capture hook and the
 [plugin guard](docs/guide/plugin-guard.md), which does nothing until you set
 `BS_PLUGIN_GUARD=1` and then runs the package's `bs-policy-hook` in front of
-your tool calls for the same policy decisions. The rest of that port is scoped
+your tool calls for the same policy decisions; one check in it, the refusal of operator verbs from a subagent, is on by default. The rest of that port is scoped
 in [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
 `INSTALL.md` Part 2 is the long form of the clone above: per-platform

@@ -74,7 +74,7 @@ describe('plugin-policy.sh', () => {
     const stub = path.join(tmp, 'stub-hook.js');
     writeFileSync(
       stub,
-      "const s = require('node:fs').readFileSync(0, 'utf8'); process.stdout.write(`${JSON.stringify({ echoed: s })}\\n`);\n",
+      "const s = require('node:fs').readFileSync(0, 'utf8'); process.stdout.write(JSON.stringify({ echoed: s }) + '\\n');\n",
     );
     const input = bashInput('echo "quoted $HOME $(whoami)"');
     const run = runShim(input, {
@@ -121,6 +121,77 @@ describe('plugin-policy.sh', () => {
       hookSpecificOutput: { permissionDecision: string };
     };
     expect(out.hookSpecificOutput.permissionDecision).toBe('ask');
+  });
+
+  describe('the subagent check, on by default', () => {
+    const asSubagent = (command: string): string =>
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command },
+        cwd: REPO_ROOT,
+        agent_id: 'a1',
+        agent_type: 'bs-coder',
+      });
+    const env = { PATH: `${NODE_DIR}:${SYS_BIN}`, BS_POLICY_HOOK: BUILT_HOOK };
+
+    it('denies an operator verb from a subagent with the switch unset', () => {
+      const run = runShim(asSubagent('bs waivers apply --epic e'), env);
+      expect(run.status).toBe(0);
+      const out = JSON.parse(run.stdout) as {
+        hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+      };
+      expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(out.hookSpecificOutput.permissionDecisionReason).toContain('main session');
+    });
+
+    it('decides nothing else: a force push from a subagent is left to the opt-in guard', () => {
+      const run = runShim(asSubagent(['git', 'push', '--force', 'origin', 'main'].join(' ')), env);
+      expect(run.status).toBe(0);
+      expect(run.stdout).toBe('');
+    });
+
+    it('is silent for a subagent call it allows, and for the same verb from the main session', () => {
+      expect(runShim(asSubagent('bs gate run --task t'), env).stdout).toBe('');
+      expect(runShim(bashInput('bs waivers apply --epic e'), env).stdout).toBe('');
+    });
+
+    it('is silent, never asking, when no hook is found or the hook fails', () => {
+      const none = runShim(asSubagent('bs waivers apply'), { PATH: `${NODE_DIR}:${SYS_BIN}` });
+      expect(none.status).toBe(0);
+      expect(none.stdout).toBe('');
+      const broken = path.join(tmp, 'broken-hook.js');
+      writeFileSync(broken, 'process.exit(3);\n');
+      const run = runShim(asSubagent('bs waivers apply'), { ...env, BS_POLICY_HOOK: broken });
+      expect(run.status).toBe(0);
+      expect(run.stdout).toBe('');
+    });
+
+    it('relays only a refusal that names a subagent rule, so an older hook decides nothing', () => {
+      const older = path.join(tmp, 'older-hook.js');
+      // An older package ignores the mode and runs every rule: it refuses this call.
+      writeFileSync(
+        older,
+        'process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "BLOCKED: force-push is never allowed" } }) + "\\n");\n',
+      );
+      const run = runShim(asSubagent('ls'), { ...env, BS_POLICY_HOOK: older });
+      expect(run.status).toBe(0);
+      expect(run.stdout).toBe('');
+      // With the switch on the same hook's refusal is relayed, as before.
+      const on = runShim(asSubagent('ls'), { ...env, BS_POLICY_HOOK: older, BS_PLUGIN_GUARD: '1' });
+      expect(on.stdout).toContain('force-push');
+    });
+
+    it('runs the named hook in subagent-only mode', () => {
+      const stub = path.join(tmp, 'mode-hook.js');
+      writeFileSync(
+        stub,
+        "process.stdout.write(JSON.stringify({ mode: process.env.BS_POLICY_SUBAGENT_ONLY, via: 'subagent-lane' }) + '\\n');\n",
+      );
+      const run = runShim(asSubagent('ls'), { ...env, BS_POLICY_HOOK: stub });
+      expect((JSON.parse(run.stdout) as { mode: string }).mode).toBe('1');
+      const on = runShim(asSubagent('ls'), { ...env, BS_POLICY_HOOK: stub, BS_PLUGIN_GUARD: '1' });
+      expect((JSON.parse(on.stdout) as { mode: string }).mode).toBe('');
+    });
   });
 
   it('does not run the named hook at all while the switch is off', () => {

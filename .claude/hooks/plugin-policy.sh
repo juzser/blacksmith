@@ -1,11 +1,18 @@
 #!/bin/sh
-# Blacksmith -- opt-in policy guard for plugin installs.
+# Blacksmith -- policy guard for plugin installs.
 #
-# Registered by the plugin's hooks/hooks.json for PreToolUse. It does nothing
-# at all unless BS_PLUGIN_GUARD=1 is set in the environment, so a plugin
-# install behaves exactly as before until an operator turns it on.
+# Registered by the plugin's hooks/hooks.json for PreToolUse. The policy guard
+# as a whole is opt-in: it does nothing unless BS_PLUGIN_GUARD=1 is set in the
+# environment, so a plugin install behaves as before until an operator turns it
+# on. One check is on by default, because it is about who is calling and not
+# about the project: when the hook input carries "agent_id" (Claude Code adds it
+# only for a call made inside a subagent), the shim runs the policy hook in its
+# subagent-only mode (BS_POLICY_SUBAGENT_ONLY=1), which refuses the verbs that
+# stand for the operator's own decision and nothing else. That lane is silent
+# when anything is missing or slow: no hook found, node absent, no answer in
+# time, an error. It never asks and never allows on its own authority.
 #
-# When on, it hands the hook JSON on stdin, unchanged, to the policy hook the
+# When the guard is on, it hands the hook JSON on stdin, unchanged, to the policy hook the
 # operator names, first match wins:
 #   1. $BS_POLICY_HOOK, an existing file (run with node)
 #   2. `bs-policy-hook` on PATH (the bin of the global package)
@@ -20,9 +27,20 @@
 # BS_PLUGIN_GUARD_WATCHDOG (seconds, digits or digits.digits) shortens the limit
 # for tests; the default is 3.
 
-[ "${BS_PLUGIN_GUARD:-}" = "1" ] || exit 0
+SUBONLY=""
+IN=""
+if [ "${BS_PLUGIN_GUARD:-}" != "1" ]; then
+  # Off: only a subagent's call is looked at. Without cat there is nothing to read.
+  command -v cat >/dev/null 2>&1 || exit 0
+  IN="$(cat)"
+  case "$IN" in
+    *'"agent_id"'*) SUBONLY=1 ;;
+    *) exit 0 ;;
+  esac
+fi
 
 ask() {
+  [ -n "$SUBONLY" ] && exit 0
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$1"
   exit 0
 }
@@ -57,12 +75,18 @@ trap cleanup EXIT
 trap 'exit 0' HUP INT TERM
 
 # A background job gets /dev/null as stdin, so hold the input in a file.
-cat >"$WORK/in"
+if [ -n "$SUBONLY" ]; then
+  printf '%s\n' "$IN" >"$WORK/in"
+else
+  cat >"$WORK/in"
+fi
+HOOK_MODE=""
+[ -n "$SUBONLY" ] && HOOK_MODE=1
 
 if [ "$WHICH" = "BS_POLICY_HOOK" ]; then
-  node "$BS_POLICY_HOOK" <"$WORK/in" >"$WORK/out" 2>/dev/null &
+  BS_POLICY_SUBAGENT_ONLY="$HOOK_MODE" node "$BS_POLICY_HOOK" <"$WORK/in" >"$WORK/out" 2>/dev/null &
 else
-  bs-policy-hook <"$WORK/in" >"$WORK/out" 2>/dev/null &
+  BS_POLICY_SUBAGENT_ONLY="$HOOK_MODE" bs-policy-hook <"$WORK/in" >"$WORK/out" 2>/dev/null &
 fi
 HPID=$!
 
@@ -87,6 +111,16 @@ fi
 [ "$STATUS" -eq 0 ] || ask "Blacksmith's plugin guard could not get a decision from $WHICH (it exited with an error). Rebuild or reinstall the package; until then every command needs your approval."
 
 OUTPUT="$(cat "$WORK/out")"
+if [ -n "$SUBONLY" ]; then
+  # Off, a subagent's call relays only a refusal naming a subagent rule. A hook
+  # older than this mode ignores BS_POLICY_SUBAGENT_ONLY and decides every
+  # rule, which the operator has not turned on, so anything else is dropped.
+  # `bs doctor` probes the hook and says when it has no subagent mode.
+  case "$OUTPUT" in
+    *subagent-*) ;;
+    *) OUTPUT="" ;;
+  esac
+fi
 if [ -n "$OUTPUT" ]; then
   printf '%s\n' "$OUTPUT"
 fi

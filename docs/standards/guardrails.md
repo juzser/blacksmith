@@ -371,6 +371,95 @@ pipeline behind it: the sandbox refuses up front the writes a matcher can see,
 the fingerprint catches after the fact the ones it cannot. Neither half is
 sold as the other.
 
+## Operator verbs inside a subagent
+
+Some `bs` verbs and git operations stand for the operator's own decision, or
+for bookkeeping the dispatching session owns. The CLI attributes them by a
+free-text `--actor`, and some verbs default it to the operator, which a lease
+does not govern. So the policy hook also checks *who is calling*. Claude Code
+puts `agent_id` in the hook input only for a call made inside a subagent; when
+it is present, the hook applies the rules below. A call from the main session,
+where the operator types, has no `agent_id` and is decided exactly as before.
+Each refusal names its rule and says the operator runs the command from the
+main session.
+
+**What is on by default.** In a clone, this check is part of the guard hook.
+In a plugin install the rest of the policy hook stays opt-in
+(`BS_PLUGIN_GUARD=1`), but this check is on without it: the shim reads the hook
+input, and only when it carries `agent_id` runs the policy hook in its
+subagent-only mode, which decides these rules and nothing else. That lane is
+silent when the hook cannot be found, errors or is slow: it never asks and
+never allows on its own authority, and it relays only a refusal that names a
+`subagent-` rule, so a hook older than this mode (which ignores the mode and
+decides every rule) decides nothing for a subagent. That silence is why `bs
+doctor` has a `subagent-lane` check: it asks the hook, in subagent-only mode,
+to judge a probe operator verb from a subagent, and reports `inactive` when no
+hook is found or the hook does not refuse it. Every other rule in this file is
+unchanged: off in a plugin install until you turn the guard on.
+
+The `bs` verbs are an allowlist, not a denylist. From a subagent:
+
+- a read-only verb is allowed (`stack show`, `results check`, `event tail`,
+  `brief compose`, `playbook slice`, `heavy wait`, `stats *`, and the other
+  verbs listed as `SUBAGENT_BS_READ_ONLY` in `subagentGuard.ts`);
+- a write verb is allowed only if a template tells a subagent to run it, on a
+  line that instructs it and not one that only names the verb or hands it to
+  the operator or the epic session: `event append`, `findings transition`,
+  `gate run`, `heavy run`, `issues report`, `judge dispatch`, `judge report`,
+  `plan propose`, `queue run`, `results record`, `session start` (with an
+  explicit `--actor`, since without one the CLI records the operator),
+  `worktree create` (`SUBAGENT_BS_WRITE_ALLOW`; a test names the instructing
+  line of each);
+- any other verb is refused, including the ones that default `--actor` to the
+  operator and a verb added later, until someone lists it on purpose;
+- `event append` is an allowlist over event types too: `dispatch_decision`,
+  `error-logged`, `task-added` and `task-result-recorded`
+  (`SUBAGENT_EVENT_ALLOW`), each in the shape that does not set a task's status
+  or attribution: `task-added` only as `task_status: failed` with no claims, budget
+  or branch; `error-logged` never with a `coordination.*` class (which escalates);
+  `task-result-recorded` only with `run_status: dead`. Any other
+  type, JSON the guard cannot read (a leading blank is trimmed; stdin, a
+  pipe, a substitution) and an `actor` of the operator are refused.
+
+| Rule | What it refuses inside a subagent |
+| --- | --- |
+| `subagent-operator-actor` | A `bs` invocation (`bs`, `smith`, `node …/dist/cli`, package-runner forms) carrying `--actor` or `--decided-by` with `operator`, `user` or `operator-skill`, or with a value the guard cannot read; an `event append` whose JSON names one of them as `actor`. |
+| `subagent-operator-verb` | A `bs` verb that is not on the allowlists above; a verb or flag word computed on the line; a computed command word, except a bare variable (`"$PYTHON" -m …`) on a line that names no `bs`, `cli`, protected ref or protected path, and a computed directory in front of a literal program name; a `bs` command that `xargs` completes from input the guard cannot read; `script`, `watch`, `parallel`, `coproc` and `case` are read as wrappers of the command they hold. |
+| `subagent-owned-event` | An `event append` of a type outside the event allowlist, or with JSON or a type the guard cannot read. |
+| `subagent-git-ref` | Any ref-changing git form that targets `main`, `master`, an `*/integration` branch or `refs/bs/*`: `update-ref`, `branch` with force, delete, move or copy, `checkout -B`, `switch -C`, `worktree add -B`, `fetch` or `pull` into a local ref, `push` to `.` or to any path or URL; a target the guard cannot read; `commit`, `merge`, `reset`, `rebase`, `cherry-pick`, `revert` and `am` run inside a worktree whose branch is one of those (the queue does its own merges through the CLI); and a write to `.git/refs/bs/`, `.git/packed-refs` or the ref files of those branches. |
+| `subagent-state-write` | A write onto a session event log (`state/events/*.jsonl`) or a sandbox lease (`state/sandboxes/*.json`). |
+| `subagent-config-write` | The same writes onto the operator's configuration: `.blacksmith/*.yml`, `.blacksmith/*.json` (including `crosscheck.yml`, the per-project switch that lets source leave), `.blacksmith/factory/policies/` and `.blacksmith/factory/specs/roadmap.md` (the specs a planner writes under `.blacksmith/factory/specs/active/` stay allowed), `factory/policies/*.yml`, and the guard's own files: `.claude/hooks/`, `.claude/settings*.json`, `.claude/agents/*.md`, `.claude/skills/`, `hooks/hooks.json`, `hooks/*.sh`, the build the hook runs from (`factory/orchestrator/dist/` of the Blacksmith checkout and of the installed package, and anything under `node_modules/@juzser/blacksmith/`). The guard files and policy files are protected in the operator's checkout; a linked worktree of the subagent's own is not that checkout, so a build there still works. |
+| (all of the above) | "A write" means `Write`, `Edit`, `MultiEdit`, a redirect, and the write-capable commands the guard knows (`SUBAGENT_WRITE_COMMANDS`: `cp`, `mv`, `ln`, `install`, `rsync`, `tee`, `rm`, `touch`, `truncate`, `dd`, `tar -C`, `unzip -d`, `curl -o`, `wget -O`, `patch`, in-place `sed`/`perl`/`awk`, `git checkout <rev> -- <path>`, `git restore`). A relative path resolves against the working directory and any `cd` before it, a copy or move into a directory is judged as `<dir>/<name of the source>`, and every path is judged with its symlinks resolved. |
+
+Paths under a test or fixtures directory stay allowed when that directory is below the repository the path is in (a project kept under a directory called `tests` is not exempt), as do project files that
+only share a directory name with the state (`src/store/state/events/reducer.ts`).
+
+The command is read with the same shell reader the force-push rule uses, so
+`env X=1 bs …`, `sh -c "bs …"`, `eval`, `$( )`, `xargs`, `{ …; }`, `if …; then`,
+`find -exec`, `--actor=operator` and the `node …/dist/cli` forms are read
+through. A line the reader cannot understand that names `bs` or a ref command
+is refused, because it cannot say what the line runs.
+
+**What stays open.** The hook reads the command text and the tool arguments of
+one call, and acts on one agent's call at a time. It does not close:
+
+- a script written with `Write` and then run, `node -e` importing the factory's
+  modules, `python -c` writing to a log, or any other interpreter that opens the
+  file itself;
+- a path reached through a symlink created in the same command line before the
+  guard resolves it, or a bind or mount;
+- a command word or argument built at run time from data the guard cannot see
+  (a file, stdin, the environment);
+- a write command the guard does not list, and a git alias or hook that writes
+  a ref;
+- an older global package that has no subagent mode (`bs doctor` reports it as
+  `inactive`; it fails open rather than ask).
+
+Closing these needs authentication in the CLI itself, so that a verb checks who
+is calling and not what the command line says. This check does not provide that
+and is not a substitute for it. It removes the direct routes, which are the ones
+an agent reaches by following a template or by a plain mistake.
+
 ## CI
 
 - Install from the lockfile only — `--frozen-lockfile`, or whatever the

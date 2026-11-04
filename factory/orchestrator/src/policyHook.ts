@@ -20,7 +20,9 @@ import { decideHookPayload } from './hookDecision.js';
 // Reads fd 0 rather than accumulating 'data' events: the payload is one small
 // JSON object a shell pipes in and closes, and a throw on a broken read is the
 // outcome we want anyway.
-const output = decideHookPayload(readFileSync(0, 'utf8'), process.cwd());
+const output = decideHookPayload(readFileSync(0, 'utf8'), process.cwd(), undefined, undefined, {
+  subagentOnly: process.env.BS_POLICY_SUBAGENT_ONLY === '1',
+});
 if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
 // Any throw above is left to propagate: node exits non-zero with a stack on
 // stderr, and guard.sh reads that as "the policy layer could not answer" and

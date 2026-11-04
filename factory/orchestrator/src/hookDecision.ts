@@ -13,9 +13,11 @@
 // same function rather than a second copy of it.
 import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { agentNameFor, roleOfAgentType } from './agentNames.js';
 import { type BriefMarker, parseBriefMarker } from './briefMarker.js';
 import { parseDeclaredArtifactLine } from './declaredArtifactLine.js';
+import { runGit } from './git.js';
 import { JUDGE_ROLES } from './judgeRoles.js';
 import {
   detectCurrentBranch,
@@ -26,6 +28,7 @@ import {
   type PolicyContext,
 } from './policy.js';
 import { activeSandboxFor, type SandboxLease } from './sandbox.js';
+import { type SubagentContext, subagentRefusal } from './subagentGuard.js';
 
 /** The `hookSpecificOutput` envelope Claude Code reads back from a PreToolUse hook. */
 export interface HookDecisionOutput {
@@ -101,8 +104,15 @@ export function decideHookPayload(
   leaseDir?: string,
   /** Parsers for the diet rules; a test injects throwing ones. */
   dietDeps?: DietDeps,
+  /**
+   * Decide only what a subagent may not run, and nothing else. The plugin shim
+   * uses it when the opt-in guard is off: that is the one check a plugin
+   * install has on by default.
+   */
+  options: { subagentOnly?: boolean } = {},
 ): HookDecisionOutput | null {
   const parsed: unknown = JSON.parse(raw);
+  if (options.subagentOnly === true) return subagentOnlyDecision(parsed, fallbackCwd);
   // Diet rules (D4) run first and never throw: no match means the decision
   // path below runs exactly as before.
   const diet = dietDecision(parsed, dietDeps);
@@ -116,12 +126,32 @@ export function decideHookPayload(
       prompt?: unknown;
     };
     cwd?: unknown;
+    agent_id?: unknown;
   };
   if (payload.tool_name === 'Agent' || payload.tool_name === 'Task') {
     return decideAgentDispatch(payload.tool_input);
   }
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   const command = typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
+  // Claude Code puts `agent_id` in the hook input only for a call made inside
+  // a subagent. The operator's own verbs are refused there; the main session,
+  // with no `agent_id`, never reaches this and is decided exactly as before.
+  const filePathForSubagent =
+    typeof payload.tool_input?.file_path === 'string' ? payload.tool_input.file_path : null;
+  if (payload.agent_id !== undefined) {
+    const refused = subagentRefusal(toolName, command, filePathForSubagent, {
+      ...subagentContext(payloadCwd(payload.cwd, fallbackCwd)),
+    });
+    if (refused !== null) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: `BLOCKED: ${refused.reason}`,
+        },
+      };
+    }
+  }
   // A `Write`/`Edit`/`MultiEdit` payload carries no command; its target is
   // `tool_input.file_path`, absolute. Bash was the only tool worth inspecting
   // while every leased role was a judge, since judges hold no file tools and a
@@ -266,6 +296,77 @@ export function decideHookPayload(
       permissionDecisionReason: `BLOCKED: ${reason}`,
     },
   };
+}
+
+function payloadCwd(cwd: unknown, fallbackCwd: string): string {
+  return typeof cwd === 'string' && cwd !== '' ? cwd : fallbackCwd;
+}
+
+/** Whether `file` (already real) lies inside the linked git worktree `cwd` is in, not the main checkout. */
+function insideLinkedWorktree(file: string, cwd: string): boolean {
+  try {
+    const top = realpathSync(runGit(cwd, ['rev-parse', '--show-toplevel']));
+    const gitDir = realpathSync(runGit(cwd, ['rev-parse', '--path-format=absolute', '--git-dir']));
+    const common = realpathSync(
+      runGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+    );
+    return gitDir !== common && path.resolve(file).startsWith(`${top}${path.sep}`);
+  } catch {
+    return false;
+  }
+}
+
+/** What the subagent rules need to know about where the call runs. */
+function subagentContext(cwd: string): SubagentContext {
+  return {
+    cwd,
+    inOwnWorktree: (file) => insideLinkedWorktree(file, cwd),
+    branchAt: (dir) => detectCurrentBranch(dir),
+    protectedDirs: runningBuildDirs(cwd),
+  };
+}
+
+/**
+ * The directory this hook is running from when it is a build (`dist/`): the
+ * main checkout's, or the installed package's. A subagent's own worktree build
+ * is not protected, so a build there still works.
+ */
+function runningBuildDirs(cwd: string): string[] {
+  try {
+    const here = realpathSync(path.dirname(fileURLToPath(import.meta.url)));
+    if (path.basename(here) !== 'dist') return [];
+    return insideLinkedWorktree(path.join(here, 'x'), cwd) ? [] : [here];
+  } catch {
+    return [];
+  }
+}
+
+function denyOutput(reason: string): HookDecisionOutput {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `BLOCKED: ${reason}`,
+    },
+  };
+}
+
+/** The subagent check alone: no `agent_id` means no opinion, and so does an allowed call. */
+function subagentOnlyDecision(parsed: unknown, fallbackCwd: string): HookDecisionOutput | null {
+  const payload = parsed as {
+    tool_name?: unknown;
+    tool_input?: { command?: unknown; file_path?: unknown };
+    cwd?: unknown;
+    agent_id?: unknown;
+  };
+  if (payload.agent_id === undefined) return null;
+  const refused = subagentRefusal(
+    typeof payload.tool_name === 'string' ? payload.tool_name : '',
+    typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '',
+    typeof payload.tool_input?.file_path === 'string' ? payload.tool_input.file_path : null,
+    subagentContext(payloadCwd(payload.cwd, fallbackCwd)),
+  );
+  return refused === null ? null : denyOutput(refused.reason);
 }
 
 /**

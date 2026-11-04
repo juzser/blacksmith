@@ -1179,7 +1179,7 @@ function decodeAnsiCQuoting(segment: string): { text: string; unterminated: bool
  * backslash, so it cannot move where any quote ends. Joining fewer pairs than
  * bash does is the only direction that can split a word the shell reads whole.
  */
-function joinLineContinuations(command: string): string {
+export function joinLineContinuations(command: string): string {
   const joinEvery = (text: string): string => {
     let out = '';
     let k = 0;
@@ -1489,7 +1489,7 @@ function isShellWrappedForceCandidate(segment: string): boolean {
  * a subcommand spelled `rese""t`, `p\ush` or `"reset"` as `reset`, where
  * `isGitSubcommand`'s literal-substring read cannot.
  */
-interface DequotedWord {
+export interface DequotedWord {
   readonly raw: string;
   readonly text: string;
 }
@@ -1607,7 +1607,7 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
 ]);
 
 /** The subcommand word of a `git` invocation found at `words[gitIndex]`, walking past global options the way `git` itself does. */
-function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): number {
+export function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): number {
   let i = gitIndex + 1;
   while (i < words.length) {
     const word = words[i];
@@ -1954,7 +1954,7 @@ const PLAIN_RUN_RE = /[^ \t\n;|&()<>'"\\$`#]+/y;
  * quote, expansion or here-document, a refused body, a redirection without a
  * target) and the caller then asks about the whole command.
  */
-function readShellWords(
+export function readShellWords(
   segment: string,
   readBody: (body: string) => boolean,
 ): DequotedWord[] | null {
@@ -2091,7 +2091,7 @@ const GIT_CONFIG_UNREADABLE_REASON =
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-S', '--split-string']);
 
 /** The index where a segment's command starts: past leading `NAME=value` words and the `env` prefix. */
-function commandStart(words: readonly DequotedWord[], from = 0): number {
+export function commandStart(words: readonly DequotedWord[], from = 0): number {
   let start = from;
   while (start < words.length) {
     const text = words[start]?.text ?? '';
@@ -2276,10 +2276,10 @@ function segmentsWithGitPipe(
 }
 
 /** Where a line ends one command and starts the next, read without regard to quotes. */
-const ROUGH_SEPARATOR_RE = /\|\||&&|;|\n|(?<!>)\|/;
+export const ROUGH_SEPARATOR_RE = /\|\||&&|;|\n|(?<!>)\|/;
 
 /** `xargs` options that take the next word as their value. */
-const XARGS_VALUE_OPTIONS = new Set([
+export const XARGS_VALUE_OPTIONS = new Set([
   '-I',
   '-J',
   '-R',
@@ -2323,24 +2323,25 @@ const COMMAND_PREFIX_WORDS = new Set([
 
 const PREFIX_OPERAND_RE = /^\d+(?:\.\d+)?[smhd]?$/;
 // A short option word holding the letter c; two linear tests, no backtracking on a long word.
-const isShellCommandFlag = (word: string): boolean => /^-[a-z]+$/i.test(word) && /c/i.test(word);
+export const isShellCommandFlag = (word: string): boolean =>
+  /^-[a-z]+$/i.test(word) && /c/i.test(word);
 
-const baseName = (word: string | undefined): string => (word ?? '').split('/').pop() ?? '';
-const isShellWord = (word: string | undefined): boolean =>
+export const baseName = (word: string | undefined): string => (word ?? '').split('/').pop() ?? '';
+export const isShellWord = (word: string | undefined): boolean =>
   SHELL_INTERPRETER_RE.test(baseName(word));
 
 /** How many split-string options the guard reads in one segment; a segment past it is refused. */
 const ENV_SPLIT_LIMIT = 64;
 const ENV_SPLIT_LIMIT_REASON =
   'an env split-string here nests more options than the guard reads — write the command out plainly';
-type EnvSplitBudget = { left: number; exceeded: boolean };
+export type EnvSplitBudget = { left: number; exceeded: boolean };
 
 // A backslash-underscore outside quotes ends a word in an `env -S` value, as whitespace does.
 const splitOnSpace = (value: string): string[] => value.split(/(?:\s|\\_)+/).filter(Boolean);
 const VALUE_RUNS: Record<string, RegExp> = { '': /[^\s"'\\]+/y, "'": /[^']+/y, '"': /[^"\\]+/y };
 
 /** The words of a split-string value, reading single quotes, double quotes and backslashes. */
-function splitValueWords(value: string): string[] {
+export function splitValueWords(value: string): string[] {
   const pieces: string[] = [];
   let current: string | null = null;
   let quote = '';
@@ -2377,7 +2378,7 @@ function splitValueWords(value: string): string[] {
  * command line in one word; that word is replaced by the words it holds. An
  * `-S` anywhere else (an `xargs` option) is left alone.
  */
-function splitEnvCommand(
+export function splitEnvCommand(
   words: readonly DequotedWord[],
   from: number,
   budget: EnvSplitBudget,
@@ -2432,7 +2433,7 @@ function splitEnvCommand(
  * `xargs`, `eval` or a shell. A word the walk cannot classify is not trusted to
  * be the command: the first of those later in the segment is taken instead.
  */
-type SplitWords = (words: readonly DequotedWord[], from: number) => readonly DequotedWord[];
+export type SplitWords = (words: readonly DequotedWord[], from: number) => readonly DequotedWord[];
 const isInputRunner = (word: string | undefined): boolean =>
   baseName(word) === 'xargs' || word === 'eval';
 
@@ -2447,7 +2448,7 @@ const OPTION_READ_LIMIT_REASON =
   'more options follow prefix words here than the guard reads — write the command out plainly';
 type OptionBranch = { at: number; options: number[] };
 
-function walkPrefixWords(
+export function walkPrefixWords(
   start: readonly DequotedWord[],
   from: number,
   split: SplitWords,
@@ -2769,7 +2770,7 @@ function checkForcePush(
  * the pre-split reading, so a parse it gets wrong can only over-refuse, never
  * let a force flag through.
  */
-function topLevelCommands(command: string): string[] {
+export function topLevelCommands(command: string): string[] {
   return splitTopLevelCommands(command) ?? [command];
 }
 
@@ -2777,7 +2778,7 @@ function topLevelCommands(command: string): string[] {
 const INERT_RUN_RE = /[^'"\\`()&|;\n$]+/y;
 
 /** `topLevelCommands`' split, or `null` when the line holds something it cannot read with confidence. */
-function splitTopLevelCommands(command: string): string[] | null {
+export function splitTopLevelCommands(command: string): string[] | null {
   if (/\$\{|<<|(^|[^$])#/.test(command) || scanAnsiCQuoting(command).opened) return null;
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
@@ -3850,7 +3851,7 @@ function stripHeredocBodies(command: string): string {
  */
 const REDIRECT_TARGET_RE = />>?\s*(?!&)([^\s;&|<>]+)/g;
 
-function redirectTargets(command: string): string[] {
+export function redirectTargets(command: string): string[] {
   const targets: string[] = [];
   for (const match of stripHeredocBodies(command).matchAll(REDIRECT_TARGET_RE)) {
     const token = (match[1] ?? '').replace(/^["']/, '').replace(/["']$/, '');

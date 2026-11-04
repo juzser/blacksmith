@@ -44,6 +44,31 @@ than appearing in it.
   no quorum, epic verdict or provider-agreement stat counts its findings. A
   finding gains power only through `bs crosscheck reproduce <finding-id>
   --evidence <text>`, which raises it as an ordinary finding and confirms it.
+
+- **Operator-attributed verbs are refused inside subagents.** The policy hook
+  now checks who is calling: Claude Code sets `agent_id` in the hook input only
+  for a call made inside a subagent. From a subagent the `bs` verbs are an
+  allowlist (read-only verbs, plus the write verbs the agent templates, `wave.md`
+  and `dispatch.md` hand to a subagent); `--actor` and `--decided-by` naming the
+  operator are refused; `event append` is allowed for `dispatch_decision`,
+  `error-logged`, `task-added` and `task-result-recorded` only, each in a shape that does not set a task's status; ref-changing git forms aimed at
+  `main`, `master`, `*/integration` or `refs/bs/*` are refused, as are writes to
+  the session event logs, ref files, the operator's `.blacksmith/` and
+  `factory/policies/` configuration and the guard's own hook, settings, agent
+  and skill files and the build the hook runs from, through `Write`, redirects and the write-capable commands the
+  guard lists, with symlinks resolved. A computed command word is refused, and
+  `bs session start` from a subagent needs an explicit `--actor`. The shell is read with the force-push
+  rule's reader. The main session has no `agent_id` and behaves as before. **On
+  by default:** in a plugin install this check runs without `BS_PLUGIN_GUARD=1`
+  (the shim runs the policy hook in a subagent-only mode, relays only a
+  `subagent-` refusal, and stays silent if the hook is missing, fails or is too
+  old to have the mode; `bs doctor` has a `subagent-lane` check that says so);
+  every other rule stays opt-in there. The
+  playbooks no longer carry the two operator commands in the files a wave-runner
+  reads, and the wave-runner's `bs session start` names its actor. A hook cannot see a written-then-run script, `node -e`, `python -c` or
+  a symlink; closing those needs authentication in the CLI. See
+  `docs/standards/guardrails.md`.
+
 - **`--no-grader` on `gate run` and `results check`** (lean mode, O-6). The
   caller can say on purpose that a run has no grader; a missing verdict is
   skipped and the preflight reports it as `skipped-by-option`. A verdict a

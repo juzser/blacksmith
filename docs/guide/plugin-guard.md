@@ -2,7 +2,7 @@
 
 A clone of this repository enforces Blacksmith's policy on every tool call
 through a hook. A plugin install does not, by default: nothing runs in front of
-your tool calls and nothing changes for you. The plugin guard is an opt-in way
+your tool calls and nothing changes for you, with one exception described under "On by default: operator verbs in subagents". The plugin guard is an opt-in way
 to get the same policy decisions in a plugin install.
 
 ## What it enforces
@@ -26,6 +26,21 @@ marker is decided as before.
 If the guard is on but cannot reach the hook, it asks you instead of allowing
 the call. The message names the fix: put `bs-policy-hook` on your PATH, or set
 `BS_POLICY_HOOK` to the path of the built `policyHook.js`.
+
+## On by default: operator verbs in subagents
+
+One check does not wait for the switch. When Claude Code runs a tool call
+inside a subagent, it adds `agent_id` to the hook input, and the plugin's hook
+then runs Blacksmith's policy hook in a subagent-only mode. That mode refuses
+the `bs` verbs and git operations that stand for the operator's own decision
+(see "Operator verbs inside a subagent" in `docs/standards/guardrails.md`) and
+decides nothing else: a force push from a subagent is still left to the opt-in
+guard. A call from your own session has no `agent_id` and is untouched. If the
+hook cannot be found, errors, is slow or is an older package without this mode,
+this check stays silent; it never asks. `bs doctor` shows whether it is active:
+its `subagent-lane` line probes the hook with an operator verb from a subagent. The reason it can be on while the rest is off: it is about who is calling,
+needs nothing from your project, and cannot make a call that your own session
+makes fail.
 
 ## The one switch
 

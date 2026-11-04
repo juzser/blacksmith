@@ -46,7 +46,12 @@ export interface DoctorDeps {
   /** Reads a file as text; throws when it is absent. */
   readFile: (file: string) => string;
   exists: (file: string) => boolean;
-  run: (cmd: string, args: string[], timeoutMs: number) => RunResult;
+  run: (
+    cmd: string,
+    args: string[],
+    timeoutMs: number,
+    opts?: { input?: string; env?: Record<string, string> },
+  ) => RunResult;
 }
 
 /** Quoted from INSTALL.md (Step 6 and the top of the file); a test pins the doc to these. */
@@ -119,6 +124,49 @@ function pluginCheck(deps: DoctorDeps): Check {
     };
   }
   return unknown('claude plugin list printed output doctor does not recognise');
+}
+
+/**
+ * The subagent lane of the plugin guard: the one policy check that runs without
+ * `BS_PLUGIN_GUARD=1`, and that stays silent when the hook is missing or too
+ * old. Silent is the failure to make visible, so doctor does what the shim
+ * does (the hook `BS_POLICY_HOOK` names, else `bs-policy-hook` on PATH), asks it
+ * in subagent-only mode to judge a probe call from a subagent, and reports
+ * whether the refusal came back.
+ */
+function subagentLaneCheck(deps: DoctorDeps): Check {
+  const fix = 'Reinstall the global package: npm i -g @juzser/blacksmith';
+  const probe = JSON.stringify({
+    tool_name: 'Bash',
+    tool_input: { command: 'bs waivers apply --epic probe' },
+    cwd: deps.root,
+    agent_id: 'doctor-probe',
+  });
+  const env: Record<string, string> = {
+    ...Object.fromEntries(
+      Object.entries(deps.env).filter((e): e is [string, string] => e[1] !== undefined),
+    ),
+    BS_POLICY_SUBAGENT_ONLY: '1',
+  };
+  const named = deps.env.BS_POLICY_HOOK;
+  const useNamed = named !== undefined && named !== '' && deps.exists(named);
+  const res = useNamed
+    ? deps.run('node', [named], TIMEOUT_MS, { input: probe, env })
+    : deps.run('bs-policy-hook', [], TIMEOUT_MS, { input: probe, env });
+  const inactive = (why: string): Check => ({
+    id: 'subagent-lane',
+    status: 'unknown',
+    detail: `inactive: ${why}; operator verbs are not refused from subagents in a plugin install`,
+    fix,
+  });
+  if (res.error !== undefined) return inactive(`no policy hook found (${res.error})`);
+  if (res.status !== 0) return inactive(`the policy hook exited ${res.status}`);
+  if (/subagent-operator-verb/.test(res.stdout) && /"deny"/.test(res.stdout)) {
+    return ok('subagent-lane', 'a probe operator verb from a subagent is refused');
+  }
+  return inactive(
+    'the policy hook did not refuse the probe (an older package has no subagent mode)',
+  );
 }
 
 function claudeCheck(deps: DoctorDeps): Check {
@@ -225,6 +273,7 @@ export function runChecks(deps: DoctorDeps): Check[] {
       : ok('bs', deps.bsVersion),
     claudeCheck(deps),
     pluginCheck(deps),
+    subagentLaneCheck(deps),
     dashboardCheck(deps),
     capsCheck(deps),
   ];
@@ -260,8 +309,13 @@ export function realDeps(root: string): DoctorDeps {
     home: homedir(),
     readFile: (file) => readFileSync(file, 'utf8'),
     exists: existsSync,
-    run: (cmd, args, timeoutMs) => {
-      const res = spawnSync(cmd, args, { encoding: 'utf8', timeout: timeoutMs });
+    run: (cmd, args, timeoutMs, opts) => {
+      const res = spawnSync(cmd, args, {
+        encoding: 'utf8',
+        timeout: timeoutMs,
+        ...(opts?.input === undefined ? {} : { input: opts.input }),
+        ...(opts?.env === undefined ? {} : { env: opts.env }),
+      });
       const code = res.error ? (res.error as NodeJS.ErrnoException).code : undefined;
       return {
         status: res.status,

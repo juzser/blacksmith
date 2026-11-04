@@ -18,7 +18,7 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
 
 - **Open your own log before you dispatch anything.** Your first command is
   `bs session start <wave-id> --continues <the dispatch event id you were
-  handed>`. Every dispatch you write goes to that session. This is not
+  handed> --actor wave-runner`. Every dispatch you write goes to that session. This is not
   bookkeeping: the rule the whole factory reads the log by is *the dispatching
   node owns the event log for what it dispatches*, and a wave that writes into
   the epic's log is a second author of the epic's causal chain. `bs

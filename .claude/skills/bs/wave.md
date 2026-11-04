@@ -72,7 +72,7 @@ not cosmetic — it is the edge an audit walks:
   wave up are reported as violations, correctly, because from the log's side
   they cannot be told apart from an agent narrating its own work. Open your
   own instead:
-  `bs session start <wave-id>-takeover --continues <dead-session>#<n>`.
+  `bs session start <wave-id>-takeover --continues <dead-session>#<n> --actor wave-runner`.
   That keeps the chain whole — the epic's folded reads still see every
   dispatch on both sides of the handover — and it makes the takeover a fact
   in the log rather than something a reader has to infer from two agents and
@@ -515,7 +515,7 @@ one thing this playbook never asks you to.
    - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
    - `findings`: bounce to the coder.
    - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule, path and tool); the coder fixes the manifest in its own commit and never writes an `approval` (`.claude/skills/bs/mcp.md`).
-   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, a changed tool entry under an old approval, a new mutating tool with none, or no recorded base: only the operator signs, by running `bs mcp override <task-id> --worktree <dir> --tool <name> --note <why> --actor operator` for each tool, after which the gate runs again; the coder is not bounced and writes none).
+   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, a changed tool entry under an old approval, a new mutating tool with none, or no recorded base: only the operator signs, from the main session, with the command `.claude/skills/bs/mcp.md` gives, after which the gate runs again; the coder is not bounced and writes none).
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
    - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.
