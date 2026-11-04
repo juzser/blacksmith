@@ -1,7 +1,8 @@
 ---
 name: cross-check
-description: Get a second opinion on a change from a different model (codex, read-only). Use after a non-trivial change, when the person asks for a cross-check or a second opinion. Sends the diff to the codex vendor, so run it only when the person has invoked it.
+description: Get a second opinion on a change from a different model (codex, read-only). The person runs it after a non-trivial change. It sends the diff, and files codex chooses to read, to the codex vendor.
 argument-hint: "[base-revision] [criteria]"
+disable-model-invocation: true
 ---
 
 # Cross-check
@@ -10,15 +11,17 @@ One review by a different model, on the change as it stands. It is advisory.
 
 ## Steps
 
-1. Pick the base. Use the argument if given, otherwise leave it empty and the script uses the merge-base with the default branch.
+1. Pick the base. Use the argument if given, otherwise pass an empty string and the script uses the merge-base with the default branch.
 2. Gather the acceptance criteria from the arguments or the conversation: what the change must do, in a few lines.
-3. Run the script. Its path is in this skill's directory:
+3. Run the script with the criteria on stdin through a quoted heredoc, exactly in this form, so the shell never expands the text. Set the Bash tool timeout to 600000.
 
    ```sh
-   sh "${CLAUDE_SKILL_DIR}/cross-check.sh" "<base or empty>" "<criteria>"
+   sh "${CLAUDE_SKILL_DIR}/cross-check.sh" "" - <<'EOF'
+   <criteria, pasted as they are>
+   EOF
    ```
 
-   It sends `git diff <base>...HEAD`, the changed test files and the criteria to `codex exec -s read-only`, and prints the answer. Model and effort come from `CROSSCHECK_MODEL` (default `gpt-6-sol`) and `CROSSCHECK_EFFORT` (default `medium`). `CROSSCHECK_MAX_BYTES` (default 120000) caps the size.
+   Put the base revision between the empty quotes when there is one. The script sends the diff of the working tree against the base (uncommitted changes included) and the changed test files to `codex exec -s read-only`, and prints the answer. Model and effort come from `CROSSCHECK_MODEL` (default `gpt-6-sol`) and `CROSSCHECK_EFFORT` (default `medium`). `CROSSCHECK_MAX_BYTES` (default 120000) caps the size. `CROSSCHECK_TIMEOUT` (default 540 seconds) stops a slow call.
 4. If the output starts with `cross-check: skipped`, tell the person it was skipped and why, in plain words. Do not retry and do not block on it.
 5. Otherwise try to reproduce each finding: write a failing test or run a probe with the concrete input it gave. Then report each one as:
    - reproduced and fixed;

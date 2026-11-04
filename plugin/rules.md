@@ -15,6 +15,7 @@ Applies to chat replies and to documents a person will read. It does not apply t
 - Keep lists to about 5 items, most important first. Offer the rest on request.
 - Reply in the language the person writes in.
 - Ask one short question when the request is unclear. Ask before a destructive or irreversible step.
+- Example. Jargon: "Task checkout-3 is blocked: S3 finding on claim overlap." Plain: "One part is on hold because two changes touched the same file and I am not sure which should win. Please tell me which to keep. Technical details: task checkout-3, S3 finding."
 - Pre-send check: drop any announcing first sentence, recap of what you just did, or closing pleasantry. The first and last lines alone should say what happened and what comes next.
 
 ## 2. Confidence on options
@@ -37,7 +38,7 @@ Use subagents for independent work that can run in parallel, and to keep bulky o
 
 ## 4. Cross-check
 
-After a non-trivial change, offer `/cross-check` (a second opinion from a different model), or run it if the person has asked for it. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
+After a non-trivial change, offer `/cross-check` (a second opinion from a different model). The person runs it; you do not, because it sends code to another vendor. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
 
 ## 5. Compact
 
@@ -46,4 +47,4 @@ Compact at about 60% of the context window, not at 90%: the room left is what yo
 - Keep: the goal, the decisions made and why, the current step, what is still open, and the key paths and ids.
 - Drop: raw tool output and the raw returns of dispatched agents. Anything re-readable from files or git is not worth carrying.
 
-If the person has set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (for example to 60), the harness compacts there. Otherwise tell them when you are near 60% and compact with `/compact <what to keep>`.
+If the person has set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (for example to 60), the harness compacts there. Otherwise, when you are near 60%, ask the person to run `/compact <what to keep>`; you cannot run it yourself. Auto-compact handles the rest.

@@ -53,29 +53,34 @@ done
 t="$(sed -n 's/^tools:[[:space:]]*//p' "$P/agents/planner.md" | head -1)"
 case "$t" in *Write*) case "$t" in *Edit*) bad "planner tools ($t)";; *) ok "planner can write its plan, not edit";; esac;; *) bad "planner tools ($t)";; esac
 
-echo "-- session-rules.sh --"
-out="$(CLAUDE_PLUGIN_ROOT="$P" sh "$P/hooks/session-rules.sh")"; rc=$?
+echo "-- session-rules.sh (plain stdout) --"
+CLAUDE_PLUGIN_ROOT="$P" sh "$P/hooks/session-rules.sh" > "$T/hook.out"; rc=$?
 [ "$rc" -eq 0 ] && ok "exits 0" || bad "exit code $rc"
-printf '%s' "$out" > "$T/hook.json"
-check "prints valid JSON" jsonok "$T/hook.json"
-check "JSON carries rules.md verbatim" node -e '
-const fs=require("fs");const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-const h=j.hookSpecificOutput;
-if(h.hookEventName!=="SessionStart")process.exit(1);
-if(h.additionalContext.trim()!==fs.readFileSync(process.argv[2],"utf8").trim())process.exit(1)' "$T/hook.json" "$P/rules.md"
-# Escaping: quotes, backslashes, tabs, CR and a control byte must still give valid JSON.
+cmp -s "$T/hook.out" "$P/rules.md" && ok "stdout equals rules.md byte for byte" || bad "stdout differs from rules.md"
+# Hostile bytes pass through unchanged: quotes, backslashes, tab, CR, a control byte, UTF-8.
 mkdir -p "$T/fake/hooks"; cp "$P/hooks/session-rules.sh" "$T/fake/hooks/"
-printf 'say "hi" \\ back\\slash\ttab\r\nline2 \001 end\n' > "$T/fake/rules.md"
-out="$(CLAUDE_PLUGIN_ROOT="$T/fake" sh "$T/fake/hooks/session-rules.sh")"; rc=$?
-printf '%s' "$out" > "$T/esc.json"
-[ "$rc" -eq 0 ] && ok "escaping run exits 0" || bad "escaping run exit $rc"
-check "escaping gives valid JSON" jsonok "$T/esc.json"
-check "escaped text round-trips quotes and backslashes" node -e '
-const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-const c=j.hookSpecificOutput.additionalContext;
-if(!c.includes("say \"hi\" \\ back\\slash\ttab")||!c.includes("line2"))process.exit(1)' "$T/esc.json"
+printf 'say "hi" \\ back\\slash\\n\ttab\r\nline2 \001 end \303\251 \342\202\254 $(x) `y`\n' > "$T/fake/rules.md"
+for loc in C en_US.UTF-8; do
+  LC_ALL=$loc CLAUDE_PLUGIN_ROOT="$T/fake" sh "$T/fake/hooks/session-rules.sh" > "$T/esc.out"; rc=$?
+  [ "$rc" -eq 0 ] && cmp -s "$T/esc.out" "$T/fake/rules.md" && ok "hostile bytes unchanged under $loc" || bad "hostile bytes under $loc (rc $rc)"
+done
 rm "$T/fake/rules.md"
 CLAUDE_PLUGIN_ROOT="$T/fake" sh "$T/fake/hooks/session-rules.sh" >/dev/null 2>&1; [ $? -eq 0 ] && ok "exits 0 when rules.md is missing" || bad "missing rules.md exit"
+
+echo "-- rules.md routing table matches the agents --"
+for a in planner coder reviewer researcher scout; do
+  row="$(grep -F "\`$a\`" "$P/rules.md" | grep '^|' | head -1)"
+  rm_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$4); print $4}')"
+  re_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$5); print $5}')"
+  am="$(sed -n 's/^model:[[:space:]]*//p' "$P/agents/$a.md" | head -1)"
+  ae="$(sed -n 's/^effort:[[:space:]]*//p' "$P/agents/$a.md" | head -1)"
+  [ -n "$am" ] && [ "$rm_" = "$am" ] && [ "$re_" = "$ae" ] && ok "$a row matches ($am, $ae)" || bad "$a row ($rm_,$re_) vs frontmatter ($am,$ae)"
+done
+check "rules.md rule 4: the person runs /cross-check" grep -qi "the person runs it" "$P/rules.md"
+check "SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$P/skills/cross-check/SKILL.md"
+check "SKILL.md shows a quoted heredoc for criteria" grep -q "<<'EOF'" "$P/skills/cross-check/SKILL.md"
+check "SKILL.md asks for a 600000 Bash timeout" grep -q 600000 "$P/skills/cross-check/SKILL.md"
+for a in reviewer scout; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
 
 echo "-- cross-check.sh --"
 X="$P/skills/cross-check/cross-check.sh"
@@ -95,6 +100,7 @@ cat > "$FAKE_DIR/stdin"
 cat "$FAKE_DIR/stdin" >&2
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "${FAKE_FAIL:-}" ] && { echo "boom: not logged in" >&2; exit 3; }
+[ -n "${FAKE_SLEEP:-}" ] && exec sleep "$FAKE_SLEEP"
 printf 'FAKE-FINDING: none\n' > "$out"
 echo 'STDOUT-NOISE []'
 FAKE
@@ -136,6 +142,45 @@ case "$r" in *skipped*codex*) ok "missing codex skipped with reason";; *) bad "m
 r="$(cd "$T" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && ok "non-repo exits 0" || bad "non-repo exit $rc"
 case "$r" in *skipped*) ok "non-repo skipped";; *) bad "non-repo: $r";; esac
+
+echo "-- cross-check.sh: hardening --"
+# no bypass or widened sandbox flags next to -s read-only
+r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+a="$(cat "$T/args")"
+if printf '%s\n' "$a" | grep -Eq 'bypass|full-auto|yolo|danger|workspace-write|--add-dir|-s=|--sandbox'; then bad "codex got a bypass or sandbox flag"; else ok "no bypass or extra sandbox flags"; fi
+[ "$(printf '%s\n' "$a" | grep -cx -- '-s')" -eq 1 ] && ok "exactly one -s" || bad "-s count"
+# symlinked test file, non-ASCII and quoted names, uncommitted change
+printf 'SECRET-OUTSIDE-REPO\n' > "$T/outside.txt"
+ln -s "$T/outside.txt" "$R/test/link.test.js"
+printf 'NAIVE-MARKER\n' > "$R/test/naïve.test.js"
+printf 'QUOTE-MARKER\n' > "$R/test/q\"x.test.js"
+git -C "$R" add .; git -C "$R" commit -qm more
+printf 'a\nb\nc\nUNCOMMITTED-LINE\n' > "$R/f.txt"
+r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+grep -q SECRET-OUTSIDE-REPO "$T/stdin" && bad "symlinked test file leaked" || ok "symlinked test file skipped"
+grep -qxF "### test/naïve.test.js" "$T/stdin" && ok "non-ASCII test file name included" || bad "non-ASCII name dropped"
+grep -qxF "### test/q\"x.test.js" "$T/stdin" && ok "quoted test file name included" || bad "quoted name dropped"
+grep -q UNCOMMITTED-LINE "$T/stdin" && ok "uncommitted change included" || bad "uncommitted change missing"
+case "$r" in *"working tree"*) ok "output says it used the working tree";; *) bad "output does not say which diff";; esac
+# criteria from stdin, shell-unsafe text is not executed
+(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main - <<'EOF' >/dev/null 2>&1
+must $(touch "$FAKE_DIR/pwned") `touch "$FAKE_DIR/pwned2"` "quoted"
+EOF
+)
+grep -qF 'must $(touch' "$T/stdin" && [ ! -e "$T/pwned" ] && [ ! -e "$T/pwned2" ] && ok "criteria on stdin kept verbatim" || bad "criteria on stdin"
+# size cap applies before codex is called
+rm -f "$T/args"
+(cd "$R" && PATH="$T/bin:$PATH" CROSSCHECK_MAX_BYTES=10 sh "$X" main >/dev/null 2>&1)
+[ ! -e "$T/args" ] && ok "cap applied before the codex call" || bad "codex was called over the cap"
+# temp dir cleaned up (also after a failure)
+mkdir -p "$T/tmp"
+(cd "$R" && TMPDIR="$T/tmp" PATH="$T/bin:$PATH" sh "$X" main >/dev/null 2>&1)
+(cd "$R" && TMPDIR="$T/tmp" PATH="$T/bin:$PATH" FAKE_FAIL=1 sh "$X" main >/dev/null 2>&1)
+[ -z "$(ls -A "$T/tmp")" ] && ok "temp dir removed" || bad "temp dir left behind"
+# timeout
+r="$(cd "$R" && PATH="$T/bin:$PATH" FAKE_SLEEP=20 CROSSCHECK_TIMEOUT=2 sh "$X" main 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "timeout exits 0" || bad "timeout exit $rc"
+case "$r" in *skipped*"timed out"*) ok "timeout skipped with reason";; *) bad "timeout: $r";; esac
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "== PASS =="; exit 0; else echo "== FAIL =="; exit 1; fi

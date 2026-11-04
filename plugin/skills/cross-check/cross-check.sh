@@ -1,7 +1,12 @@
 #!/bin/sh
-# cross-check.sh [base] [criteria]
-# Sends the diff base...HEAD, the changed test files and the criteria to codex
-# for one read-only review, and prints what it answered. POSIX sh + git + codex.
+# cross-check.sh [base] [criteria|-]
+# Sends the diff of the working tree against base (so uncommitted changes count),
+# the changed test files and the criteria to codex for one read-only review, and
+# prints what it answered. POSIX sh + git + codex.
+#
+# Arguments: base defaults to the merge-base with the default branch. The second
+# argument is the criteria text, or "-" to read them from stdin (use a quoted
+# heredoc so the shell never expands them).
 #
 # Env (all optional):
 #   CROSSCHECK_MODEL      codex model          (default gpt-6-sol)
@@ -9,12 +14,14 @@
 #   CROSSCHECK_MAX_BYTES  size cap, diff + tests (default 120000). Over it the
 #                         check is skipped: half a diff yields confident
 #                         findings about code that is not there.
+#   CROSSCHECK_TIMEOUT    seconds before the codex call is stopped (default 540)
 #
 # Always exits 0. When it cannot run it prints "cross-check: skipped (<reason>)".
 
 model="${CROSSCHECK_MODEL:-gpt-6-sol}"
 effort="${CROSSCHECK_EFFORT:-medium}"
 max="${CROSSCHECK_MAX_BYTES:-120000}"
+tmo="${CROSSCHECK_TIMEOUT:-540}"
 base="$1"
 criteria="${2:-}"
 
@@ -22,6 +29,7 @@ skip() { printf 'cross-check: skipped (%s)\n' "$1"; exit 0; }
 
 command -v codex >/dev/null 2>&1 || skip "codex is not installed or not on PATH"
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || skip "not inside a git repository"
+real="$(cd "$repo" && pwd -P)"
 
 if [ -z "$base" ]; then
   for b in "$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)" origin/main origin/master main master; do
@@ -31,18 +39,25 @@ if [ -z "$base" ]; then
 fi
 git rev-parse -q --verify "$base" >/dev/null 2>&1 || skip "base '$base' is not a known revision"
 
+[ "$criteria" = "-" ] && criteria="$(cat)"
+
 work="$(mktemp -d 2>/dev/null)" || skip "cannot create a temp directory"
 trap 'rm -rf "$work"' EXIT
 
-git -C "$repo" diff "$base"...HEAD > "$work/diff" 2>/dev/null || skip "git diff failed"
-[ -s "$work/diff" ] || skip "no changes between $base and HEAD"
+git -C "$repo" diff "$base" > "$work/diff" 2>/dev/null || skip "git diff failed"
+[ -s "$work/diff" ] || skip "no changes between $base and the working tree"
 
-# Changed test files, whole, so the reviewer sees what is already covered.
+# Changed test files, whole, so the reviewer sees what is already covered. Symlinks
+# and anything whose real path is outside the repository are never read.
 : > "$work/tests"
-git -C "$repo" diff --name-only "$base"...HEAD 2>/dev/null |
+git -C "$repo" diff --name-only -z "$base" 2>/dev/null | tr '\0' '\n' |
   grep -E '(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.|_test\.' |
   while IFS= read -r f; do
-    [ -f "$repo/$f" ] && { printf '### %s\n' "$f"; cat "$repo/$f"; printf '\n'; }
+    p="$repo/$f"
+    [ -f "$p" ] && [ ! -L "$p" ] || continue
+    d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || continue
+    case "$d" in "$real"|"$real"/*) ;; *) continue ;; esac
+    printf '### %s\n' "$f"; cat "$p"; printf '\n'
   done >> "$work/tests"
 
 size=$(( $(wc -c < "$work/diff") + $(wc -c < "$work/tests") ))
@@ -60,12 +75,24 @@ size=$(( $(wc -c < "$work/diff") + $(wc -c < "$work/tests") ))
 } > "$work/prompt"
 
 # The answer comes from the -o file only: plain exec echoes the whole prompt to stderr.
-if ! codex exec -s read-only -C "$repo" --color never -o "$work/out" \
-     -m "$model" -c "model_reasoning_effort=\"$effort\"" - < "$work/prompt" > /dev/null 2> "$work/err"; then
-  skip "codex call failed: $(tail -n 3 "$work/err" | tr '\n' ' ' | cut -c1-300)"
-fi
+# Run it in the background with a watchdog, since macOS has no timeout(1).
+codex exec -s read-only -C "$repo" --color never -o "$work/out" \
+  -m "$model" -c "model_reasoning_effort=\"$effort\"" - < "$work/prompt" > /dev/null 2> "$work/err" &
+pid=$!
+(
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1; i=$((i + 1))
+    if [ "$i" -ge "$tmo" ]; then : > "$work/timedout"; kill "$pid" 2>/dev/null; break; fi
+  done
+) > /dev/null 2>&1 &
+wd=$!
+wait "$pid"; rc=$?
+wait "$wd" 2>/dev/null
+[ -e "$work/timedout" ] && skip "codex timed out after ${tmo}s (set CROSSCHECK_TIMEOUT to change)"
+[ "$rc" -eq 0 ] || skip "codex call failed: $(tail -n 3 "$work/err" | tr '\n' ' ' | cut -c1-300)"
 [ -s "$work/out" ] || skip "codex returned no answer"
 
-printf 'cross-check: findings from %s (effort %s), advisory until reproduced\n\n' "$model" "$effort"
+printf 'cross-check: findings from %s (effort %s) on %s vs the working tree, uncommitted changes included. Advisory until reproduced.\n\n' "$model" "$effort" "$base"
 cat "$work/out"
 exit 0

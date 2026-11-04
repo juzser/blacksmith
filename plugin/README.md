@@ -4,11 +4,13 @@ A small Claude Code plugin. It adds five things and leaves everything else to Cl
 
 ## Install
 
+From a checkout of this repository:
+
 ```sh
-claude plugin install blacksmith --marketplace juzser/blacksmith
+claude --plugin-dir ./plugin
 ```
 
-To try it from a checkout without installing: `claude --plugin-dir ./plugin`.
+The marketplace entry named "blacksmith" still installs the old plugin. It switches to `./plugin` in the next PR; after that, `claude plugin install blacksmith --marketplace juzser/blacksmith` installs this one.
 
 ## What it does
 
@@ -29,7 +31,7 @@ To try it from a checkout without installing: `claude --plugin-dir ./plugin`.
 
 ## Privacy: the cross-check sends your code out
 
-`/cross-check` sends the diff, the changed test files and your criteria to the codex vendor, **only when you invoke it**. Nothing else in this plugin leaves your machine. It needs `codex` installed and logged in. With no `codex`, or on any failure, it reports "skipped" and never blocks. Settings: `CROSSCHECK_MODEL`, `CROSSCHECK_EFFORT`, `CROSSCHECK_MAX_BYTES` (over the cap it skips rather than send half a diff).
+`/cross-check` runs only when you invoke it (Claude is not allowed to start it). It starts codex as a read-only agent with `-C <your repo>`. Codex can read any file in the repo that it chooses to, and it loads the repo's agent instructions. Everything it reads goes to the codex vendor, together with the diff (uncommitted changes included), the changed test files and your criteria. Nothing else in this plugin leaves your machine. It needs `codex` installed and logged in. With no `codex`, or on any failure or timeout, it reports "skipped" and never blocks. Settings: `CROSSCHECK_MODEL`, `CROSSCHECK_EFFORT`, `CROSSCHECK_TIMEOUT`, `CROSSCHECK_MAX_BYTES` (over the cap it skips rather than send half a diff).
 
 ## Optional: make compaction automatic at 60%
 
