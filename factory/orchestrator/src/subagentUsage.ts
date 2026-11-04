@@ -35,6 +35,7 @@ import {
   autoRootInput,
   type EventInput,
   listSessionIds,
+  readEvents,
   type StoredEvent,
 } from './events.js';
 import {
@@ -153,55 +154,70 @@ async function record(
     const m = /^agent-(.+)\.jsonl$/.exec(path.basename(transcriptPath));
     if (m?.[1] !== undefined) ids.add(m[1]);
   }
-  const target = await logHoldingStart(eventsDir, cli, ids);
-  if (target === null) return null;
   const usage = transcriptPath === undefined ? null : await readTranscriptUsage(transcriptPath);
+  // A stop always writes. The hooks are async, so it can run before its own
+  // start has landed: it goes where that start is, else where a start would,
+  // and the fold pairs the two by agent id and occurrence in either order.
+  const target =
+    (await logHoldingAgent(eventsDir, cli, ids)) ??
+    (await findMainLog(eventsDir, cli, Date.now() - FALLBACK_WINDOW_MS)) ??
+    cli;
 
   const stored = await appendWithin(
     target,
     (existing) => {
-      // The latest start of this agent that has no stop on it: a resumed agent
-      // starts again under the same id, and each run closes its own.
-      const stopped = new Set(
-        existing.filter((e) => e.record.event_type === STOP).map((e) => e.record.causal_parent),
-      );
-      const start = [...existing]
-        .reverse()
-        .find(
-          (e) =>
-            e.record.event_type === START &&
-            ids.has(e.record.agent_id ?? '') &&
-            !stopped.has(e.event_id),
-        );
-      if (start === undefined) return [];
-      return [
-        {
-          session_id: target,
-          actor: 'system',
-          event_type: STOP,
-          agent_id: start.record.agent_id as string,
-          plan_version: start.record.plan_version,
-          causal_parent: start.event_id,
-          payload: {
-            agent_role: role,
-            agent_type: agentType,
-            model: usage?.model ?? null,
-            input_tokens: usage?.inputTokens ?? 0,
-            output_tokens: usage?.outputTokens ?? 0,
-            cache_creation_tokens: usage?.cacheCreationTokens ?? 0,
-            cache_read_tokens: usage?.cacheReadTokens ?? 0,
-            total_tokens: usage?.used ?? 0,
-            last_turn_tokens: usage?.lastTurnTokens ?? 0,
-            complete: usage?.complete ?? false,
-            source: 'hook',
-          },
-          ...(start.record.project === undefined ? {} : { project: start.record.project }),
+      const out: EventInput[] = [];
+      if (existing.length === 0) out.push(autoRootInput(target));
+      const pending = pendingStart(existing, ids);
+      const aid = pending?.aid ?? normalizeAgentId(agentId);
+      const prior = existing
+        .filter((e) => e.record.event_type === STOP && e.record.agent_id === aid)
+        .at(-1);
+      const before = cumulativeOf(prior);
+      const now: Cumulative = {
+        input: usage?.inputTokens ?? 0,
+        output: usage?.outputTokens ?? 0,
+        cache_creation: usage?.cacheCreationTokens ?? 0,
+        cache_read: usage?.cacheReadTokens ?? 0,
+        total: usage?.used ?? 0,
+      };
+      // A second firing of the same stop: every start has its stop and the
+      // transcript has not moved since the previous one.
+      if (pending === null && prior !== undefined && before.total === now.total) return [];
+      const delta = (k: keyof Cumulative): number => Math.max(0, now[k] - before[k]);
+      const prompt = [...existing].reverse().find((e) => e.record.event_type === 'user_prompt');
+      const parent = pending?.start ?? prompt ?? existing[0];
+      out.push({
+        session_id: target,
+        actor: 'system',
+        event_type: STOP,
+        agent_id: aid,
+        plan_version: parent?.record.plan_version ?? 1,
+        causal_parent: parent?.event_id ?? `${target}#0`,
+        payload: {
+          agent_role: role,
+          agent_type: agentType,
+          model: usage?.model ?? null,
+          // This run only: one transcript spans every run of a resumed agent.
+          input_tokens: delta('input'),
+          output_tokens: delta('output'),
+          cache_creation_tokens: delta('cache_creation'),
+          cache_read_tokens: delta('cache_read'),
+          total_tokens: delta('total'),
+          // The transcript so far, kept apart so the next stop can subtract it.
+          cumulative_tokens: now.total,
+          cumulative: now,
+          last_turn_tokens: usage?.lastTurnTokens ?? 0,
+          complete: usage?.complete ?? false,
+          source: 'hook',
         },
-      ];
+        ...(parent?.record.project === undefined ? {} : { project: parent.record.project }),
+      });
+      return out;
     },
     opts,
   );
-  if (stored.length === 0 || usage === null) return null;
+  if (stored.every((e) => e.record.event_type !== STOP) || usage === null) return null;
 
   // budgets.yml's task caps are p90s of the Agent tool's reported total, which
   // is the final turn's size, so that is what they are compared with. The
@@ -213,44 +229,94 @@ async function record(
   });
 }
 
+type Cumulative = {
+  input: number;
+  output: number;
+  cache_creation: number;
+  cache_read: number;
+  total: number;
+};
+
+/** What the transcript held at a previous stop; zero for none. */
+function cumulativeOf(stop: StoredEvent | undefined): Cumulative {
+  const zero: Cumulative = { input: 0, output: 0, cache_creation: 0, cache_read: 0, total: 0 };
+  const c = stop?.record.payload.cumulative;
+  if (!isObj(c)) return zero;
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return {
+    input: n(c.input),
+    output: n(c.output),
+    cache_creation: n(c.cache_creation),
+    cache_read: n(c.cache_read),
+    total: n(c.total),
+  };
+}
+
+/**
+ * The start the next stop closes: the k-th stop of an agent id closes its k-th
+ * start, so that is `starts[stops.length]`; the latest such across the ids.
+ */
+function pendingStart(
+  existing: readonly StoredEvent[],
+  ids: ReadonlySet<string>,
+): { aid: string; start: StoredEvent } | null {
+  let best: { aid: string; start: StoredEvent; at: number } | null = null;
+  for (const aid of ids) {
+    const starts = existing.filter(
+      (e) => e.record.event_type === START && e.record.agent_id === aid,
+    );
+    const stops = existing.filter((e) => e.record.event_type === STOP && e.record.agent_id === aid);
+    const start = starts[stops.length];
+    if (start === undefined) continue;
+    const at = existing.indexOf(start);
+    if (best === null || at > best.at) best = { aid, start, at };
+  }
+  return best === null ? null : { aid: best.aid, start: best.start };
+}
+
 /** `agent-abc123` and `abc123` are one agent: the docs show both spellings. */
 export function normalizeAgentId(id: string): string {
   return id.startsWith('agent-') && id.length > 'agent-'.length ? id.slice('agent-'.length) : id;
 }
 
 /**
- * The log of this CLI session that holds a start for one of `ids`: the
- * session's own logs first (one cheap read each), then any other recent log,
- * so a start in an epic main log is found without re-deriving which log the
- * session was driving when it started.
+ * The log that holds this agent: the one with a start still waiting for its
+ * stop (the latest such, across every recent log), else any log that has the
+ * agent's events at all (so a repeated stop finds its previous one).
  */
-async function logHoldingStart(
+async function logHoldingAgent(
   eventsDir: string,
   cli: string,
   ids: ReadonlySet<string>,
 ): Promise<string | null> {
-  const holds = (id: string): boolean => {
+  const floor = Date.now() - FALLBACK_WINDOW_MS;
+  const mentions = (id: string): boolean => {
     try {
       const text = readFileSync(path.join(eventsDir, `${id}.jsonl`), 'utf8');
-      if (!text.includes(START)) return false;
       return [...ids].some((i) => text.includes(`"agent_id":${JSON.stringify(i)}`));
     } catch {
       return false;
     }
   };
-  const own = [cli, `prompts-${cli}`];
-  for (const id of own) if (holds(id)) return id;
-  const floor = Date.now() - FALLBACK_WINDOW_MS;
+  const logs = [cli, `prompts-${cli}`];
   for (const id of listSessionIds(eventsDir)) {
-    if (own.includes(id)) continue;
+    if (logs.includes(id)) continue;
     try {
-      if (statSync(path.join(eventsDir, `${id}.jsonl`)).mtimeMs < floor) continue;
+      if (statSync(path.join(eventsDir, `${id}.jsonl`)).mtimeMs >= floor) logs.push(id);
     } catch {
-      continue;
+      // Unreadable: not a candidate.
     }
-    if (holds(id)) return id;
   }
-  return null;
+  let waiting: { id: string; ts: string } | null = null;
+  let seen: string | null = null;
+  for (const id of logs.filter(mentions)) {
+    seen ??= id;
+    const pending = pendingStart(await readEvents(id, { stateDir: eventsDir }), ids);
+    if (pending !== null && (waiting === null || pending.start.record.ts >= waiting.ts)) {
+      waiting = { id, ts: pending.start.record.ts };
+    }
+  }
+  return waiting?.id ?? seen;
 }
 
 function capFor(role: string, env: CaptureContext['env']): number | null {

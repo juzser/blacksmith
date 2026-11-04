@@ -40,7 +40,12 @@ than appearing in it.
   and cache tokens, the last turn's size, whether the transcript read whole).
   A role whose last turn is over its `budgets.yml` `task:` cap (those caps are
   p90s of the Agent tool's reported total, which is the final turn) prints a
-  `systemMessage` warning. Both hooks are `async` and always exit 0. A resumed
+  `systemMessage` warning. Both hooks are `async` and always exit 0. A stop always
+  writes and pairs with its start by agent id and occurrence in either order; a
+  resumed run records only its own tokens (`total_tokens` is the delta,
+  `cumulative_tokens` the transcript so far); a hook start binds to the oldest
+  unclaimed hand-written dispatch of its role and that pair stays live until
+  its hook stop. A resumed
   agent's second start gets its own stop; ids match with or without an
   `agent-` prefix or by transcript file name; the start goes to `<cli id>.jsonl`
   with the same auto-root the envelope defaults write, so the guard sees it. `bs subagent spend --session <id>` prints spend by role. The registry

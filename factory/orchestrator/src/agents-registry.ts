@@ -210,16 +210,47 @@ function openKey(taskId: string, role: string): string {
   return `${taskId}\u0000${role}`;
 }
 
+/**
+ * Entries a hook start has bound to a hand-written dispatch. Their liveness is
+ * the hook's alone: which same-role dispatch a hook start belongs to cannot be
+ * known when starts arrive asynchronously, so a hand-written terminal event on
+ * one marks its task done (the terminal fields) but the entry stays `live`
+ * until its hook stop (or `epic-closed`). A mis-binding between same-role
+ * agents then cannot change the live count.
+ */
+const boundEntries = new WeakSet<AgentRecord>();
+
 function closeEntry(
   open: AgentRecord,
   eventId: string,
   ts: string,
   terminalType: TerminalType,
+  force = false,
 ): void {
   open.terminalEventId = eventId;
   open.terminalAt = ts;
   open.terminalType = terminalType;
+  if (boundEntries.has(open) && !force) return;
   open.status = STATUS_FOR_TERMINAL[terminalType];
+}
+
+/** A hook stop ends its entry for good: a deferred hand-written terminal, if any, names how. */
+function finishHookEntry(
+  entry: AgentRecord,
+  stopId: string,
+  ts: string,
+  open: Map<string, AgentRecord>,
+  openEpicLevel: AgentRecord[],
+): void {
+  if (entry.status !== 'live') return;
+  if (entry.terminalType !== null) {
+    entry.status = STATUS_FOR_TERMINAL[entry.terminalType];
+  } else {
+    closeEntry(entry, stopId, ts, 'result', true);
+  }
+  for (const [k, e] of open) if (e === entry) open.delete(k);
+  const i = openEpicLevel.indexOf(entry);
+  if (i >= 0) openEpicLevel.splice(i, 1);
 }
 
 /**
@@ -288,11 +319,10 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
   // closes the latest of them (F2), and `epic-closed` sweeps the rest.
   let openEpicLevel: AgentRecord[] = [];
   const records: AgentRecord[] = [];
-  // Hook-start event id -> the entry that start speaks for.
-  const startEntry = new Map<string, AgentRecord>();
+  // Per (session, agent id): the entries its starts made, and the stops seen,
+  // each in arrival order.
+  const pairs = new Map<string, { entries: AgentRecord[]; stops: { id: string; ts: string }[] }>();
   const hookOwned = new Set<AgentRecord>();
-  // Hand-written entries a hook start has already claimed.
-  const claimed = new Set<AgentRecord>();
 
   for (const { event_id, record } of events) {
     if (record.event_type === DISPATCH_EVENT_TYPE) {
@@ -342,72 +372,69 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
     if (record.event_type === SUBAGENT_START_EVENT_TYPE) {
       const payload = record.payload as { agent_role?: string };
       if (!payload.agent_role || !record.agent_id) continue;
-      // One real agent, one entry: a hand-written dispatch of this role that no
-      // hook start has claimed yet IS this agent (the playbook writes it just
-      // before launching). The newest such one, so concurrent agents of a role
-      // bind one to one in launch order.
-      let bound: AgentRecord | undefined;
-      for (let i = records.length - 1; i >= 0; i--) {
-        const r = records[i] as AgentRecord;
-        if (r.status !== 'live' || hookOwned.has(r) || claimed.has(r)) continue;
-        if (r.sessionId !== record.session_id || r.agentRole !== payload.agent_role) continue;
-        bound = r;
-        break;
+      const key = `${record.session_id}\u0000${record.agent_id}`;
+      const pair = pairs.get(key) ?? { entries: [], stops: [] };
+      pairs.set(key, pair);
+      const occurrence = pair.entries.length;
+      // One real agent, one entry: the oldest hand-written dispatch of this role
+      // that no hook start has claimed is this agent (the playbook writes it just
+      // before launching, so launch order is dispatch order). A resume (a later
+      // start of a known agent id) is never bound: its dispatch was the first run's.
+      let entry: AgentRecord | undefined;
+      if (occurrence === 0) {
+        entry = records.find(
+          (r) =>
+            r.status === 'live' &&
+            !hookOwned.has(r) &&
+            !boundEntries.has(r) &&
+            r.sessionId === record.session_id &&
+            r.agentRole === payload.agent_role &&
+            r.terminalType === null,
+        );
       }
-      if (bound !== undefined) {
-        claimed.add(bound);
-        bound.agentId = record.agent_id;
-        startEntry.set(event_id, bound);
-        continue;
+      if (entry !== undefined) {
+        boundEntries.add(entry);
+        entry.agentId = record.agent_id;
+      } else {
+        entry = {
+          id: event_id,
+          sessionId: record.session_id,
+          taskId: null,
+          epicId: null,
+          agentId: record.agent_id,
+          agentRole: payload.agent_role,
+          round: 1,
+          provider: 'claude',
+          modelTier: 'unknown',
+          dispatchedAt: record.ts,
+          terminalEventId: null,
+          terminalAt: null,
+          terminalType: null,
+          status: 'live',
+        };
+        records.push(entry);
+        // In no open map: a task-less role-based close must not take a hook-only
+        // entry, so only its own stop (or a hand-written one) closes it.
+        hookOwned.add(entry);
       }
-      const agent: AgentRecord = {
-        id: event_id,
-        sessionId: record.session_id,
-        taskId: null,
-        epicId: null,
-        agentId: record.agent_id,
-        agentRole: payload.agent_role,
-        round: 1,
-        provider: 'claude',
-        modelTier: 'unknown',
-        dispatchedAt: record.ts,
-        terminalEventId: null,
-        terminalAt: null,
-        terminalType: null,
-        status: 'live',
-      };
-      records.push(agent);
-      // Deliberately in no open map: a task-less role-based close must not take
-      // a hook-only entry, so only its own stop (or a hand-written one) closes it.
-      hookOwned.add(agent);
-      startEntry.set(event_id, agent);
+      pair.entries.push(entry);
+      // A stop of this occurrence that arrived first closes it now.
+      const early = pair.stops[occurrence];
+      if (early !== undefined) finishHookEntry(entry, early.id, early.ts, open, openEpicLevel);
       continue;
     }
 
     if (record.event_type === SUBAGENT_STOP_EVENT_TYPE) {
       if (!record.agent_id) continue;
-      // The stop names its own start as parent; fall back to the newest live
-      // entry of that agent id (a hand-written stop may not carry the parent).
-      let entry = record.causal_parent ? startEntry.get(record.causal_parent) : undefined;
-      if (entry === undefined) {
-        for (let i = records.length - 1; i >= 0; i--) {
-          const r = records[i] as AgentRecord;
-          if (
-            r.status === 'live' &&
-            r.sessionId === record.session_id &&
-            r.agentId === record.agent_id
-          ) {
-            entry = r;
-            break;
-          }
-        }
-      }
-      if (entry === undefined || entry.status !== 'live') continue;
-      closeEntry(entry, event_id, record.ts, 'result');
-      // A bound hand-written entry also sits in an open map.
-      for (const [key, e] of open) if (e === entry) open.delete(key);
-      const k = openEpicLevel.indexOf(entry);
-      if (k >= 0) openEpicLevel.splice(k, 1);
+      // Paired by occurrence, not by parent: the k-th stop of an agent id closes
+      // its k-th start, in whatever order the async hooks landed them.
+      const key = `${record.session_id}\u0000${record.agent_id}`;
+      const pair = pairs.get(key) ?? { entries: [], stops: [] };
+      pairs.set(key, pair);
+      const occurrence = pair.stops.length;
+      pair.stops.push({ id: event_id, ts: record.ts });
+      const entry = pair.entries[occurrence];
+      if (entry !== undefined) finishHookEntry(entry, event_id, record.ts, open, openEpicLevel);
       continue;
     }
 
@@ -526,7 +553,7 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
       for (const [key, entry] of open) {
         if (entry.sessionId !== record.session_id) continue;
         if (entry.epicId !== payload.epic_id) continue;
-        closeEntry(entry, event_id, record.ts, 'abandoned');
+        closeEntry(entry, event_id, record.ts, 'abandoned', true);
         open.delete(key);
       }
       // The epic-level half keeps D-187's reasoning for an entry whose Result
@@ -539,7 +566,7 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
       openEpicLevel = openEpicLevel.filter((entry) => {
         if (entry.sessionId !== record.session_id) return true;
         if (entry.epicId !== null && entry.epicId !== payload.epic_id) return true;
-        closeEntry(entry, event_id, record.ts, 'abandoned');
+        closeEntry(entry, event_id, record.ts, 'abandoned', true);
         return false;
       });
     }

@@ -79,4 +79,41 @@ describe('hook entries beside hand-written dispatches', () => {
     expect(liveAgents(foldAgents([s1, e1, s2]))).toHaveLength(1);
     expect(liveAgents(foldAgents([s1, e1, s2, e2]))).toEqual([]);
   });
+
+  it('a stop that arrives before its start closes that start when it lands', () => {
+    const s = start('a1', 'coder');
+    const e = stop('a1', s.event_id);
+    expect(liveAgents(foldAgents([e, s]))).toEqual([]);
+  });
+
+  it('pairs a resumed agent by occurrence in any arrival order', () => {
+    const s1 = start('a1', 'coder');
+    const s2 = start('a1', 'coder');
+    const e1 = stop('a1', s1.event_id);
+    const e2 = stop('a1', s2.event_id);
+    expect(liveAgents(foldAgents([s1, s2, e1, e2]))).toEqual([]);
+    expect(liveAgents(foldAgents([s1, s2, e1]))).toHaveLength(1);
+    expect(liveAgents(foldAgents([e1, s1, e2, s2]))).toEqual([]);
+    expect(liveAgents(foldAgents([e1, s1, s2]))).toHaveLength(1);
+  });
+
+  it('keeps a bound pair live until its hook stop, whatever the hand terminal says', () => {
+    const t1 = hand('coder', 'e/t1');
+    const t2 = hand('coder', 'e/t2');
+    const a1 = start('a1', 'coder');
+    const a2 = start('a2', 'coder');
+    const r1 = ev('task-result-recorded', { agent: 'coder' }, { task_id: 'e/t1' });
+    // a1's hook stop, then t1's hand result: a2 is still running.
+    expect(liveAgents(foldAgents([t1, t2, a1, a2, stop('a1', a1.event_id), r1]))).toHaveLength(1);
+    // The same with the pair reversed (t2 result first, a1 stops).
+    const r2 = ev('task-result-recorded', { agent: 'coder' }, { task_id: 'e/t2' });
+    expect(liveAgents(foldAgents([t1, t2, a1, a2, r2, stop('a1', a1.event_id)]))).toHaveLength(1);
+    // A hand result alone ends no bound pair.
+    expect(liveAgents(foldAgents([t1, t2, a1, a2, r1, r2]))).toHaveLength(2);
+    // Binding is oldest first.
+    expect(foldAgents([t1, t2, a1, a2]).map((a) => [a.taskId, a.agentId])).toEqual([
+      ['e/t1', 'a1'],
+      ['e/t2', 'a2'],
+    ]);
+  });
 });

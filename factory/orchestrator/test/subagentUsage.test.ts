@@ -247,6 +247,92 @@ describe('recordSubagent', () => {
     expect(stop?.record.payload).toMatchObject({ last_turn_tokens: 50_001, total_tokens: 200 });
   });
 
+  it('a stop that runs before its start still writes, and the start then closes', async () => {
+    const file = transcript('early.jsonl', [assistant('m1', 'x', { input_tokens: 5 })]);
+    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    let events = await read();
+    expect(events.map((e) => e.record.event_type)).toEqual(['session-start', 'subagent-stopped']);
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    events = await read();
+    expect(liveAgents(foldAgents(events))).toEqual([]);
+  });
+
+  it('pairs an interleaved start, start, stop, stop of a resumed agent', async () => {
+    await openCliLog();
+    const f1 = transcript('i1.jsonl', [assistant('m1', 'x', { input_tokens: 5 })]);
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    expect(liveAgents(foldAgents(await read()))).toHaveLength(2);
+    await recordSubagent(stopJson('a1', f1), 'stop', ctx());
+    await recordSubagent(
+      stopJson(
+        'a1',
+        transcript('i2.jsonl', [
+          assistant('m1', 'x', { input_tokens: 5 }),
+          assistant('m2', 'x', { input_tokens: 7 }),
+        ]),
+      ),
+      'stop',
+      ctx(),
+    );
+    expect(liveAgents(foldAgents(await read()))).toEqual([]);
+  });
+
+  it('records a resumed run as the delta since the previous stop, and the cumulative apart', async () => {
+    await openCliLog();
+    const a = assistant('m1', 'x', { input_tokens: 100, output_tokens: 20 });
+    const b = assistant('m2', 'x', { input_tokens: 30, output_tokens: 5 });
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', transcript('d.jsonl', [a])), 'stop', ctx());
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', transcript('d.jsonl', [a, b])), 'stop', ctx());
+    const stops = (await read()).filter((e) => e.record.event_type === 'subagent-stopped');
+    expect(stops.map((e) => e.record.payload.total_tokens)).toEqual([120, 35]);
+    expect(stops.map((e) => e.record.payload.input_tokens)).toEqual([100, 30]);
+    expect(stops[1]?.record.payload.cumulative_tokens).toBe(155);
+    expect(spendByRole(await read()).total_tokens).toBe(155);
+  });
+
+  it('finds a resume whose earlier run sits in another log', async () => {
+    await openCliLog();
+    const f = transcript('l.jsonl', [assistant('m1', 'x', { input_tokens: 1 })]);
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', f), 'stop', ctx());
+    const epicLog = 'epic-main';
+    await appendWithin(epicLog, () => [{ ...rootEvent, session_id: epicLog }], {
+      stateDir: eventsDir,
+    });
+    await appendWithin(
+      epicLog,
+      (e) => [
+        {
+          session_id: epicLog,
+          actor: 'system',
+          event_type: 'subagent-started',
+          agent_id: 'a1',
+          plan_version: 1,
+          causal_parent: e[0]?.event_id ?? null,
+          payload: { agent_role: 'coder', agent_type: 'bs-coder' },
+        },
+      ],
+      { stateDir: eventsDir, cliSessionId: CLI },
+    );
+    await recordSubagent(
+      stopJson(
+        'a1',
+        transcript('l.jsonl', [
+          assistant('m1', 'x', { input_tokens: 1 }),
+          assistant('m2', 'x', { input_tokens: 4 }),
+        ]),
+      ),
+      'stop',
+      ctx(),
+    );
+    const events = await read(epicLog);
+    expect(events[2]?.record.event_type).toBe('subagent-stopped');
+    expect(events[2]?.record.causal_parent).toBe(events[1]?.event_id);
+  });
+
   it('a stop with no readable transcript still closes the dispatch, incomplete', async () => {
     await openCliLog();
     await recordSubagent(startJson('a1'), 'start', ctx());
@@ -292,8 +378,6 @@ describe('recordSubagent', () => {
     ]) {
       expect(await recordSubagent(raw, 'start', ctx())).toBeNull();
     }
-    // A stop with no matching start has nowhere to go.
-    expect(await recordSubagent(stopJson('ghost', undefined), 'stop', ctx())).toBeNull();
     expect(files()).toEqual([]);
   });
 
