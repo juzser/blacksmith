@@ -27,6 +27,7 @@ import {
   type EventContext,
   type Finding,
   type FindingEvidence,
+  LEGAL_TRANSITIONS,
   listFindings,
   mintFindings,
   normalizeFilePath,
@@ -83,13 +84,15 @@ export interface DroppedTestFile {
  * failure after the send.
  */
 const NOT_REACHED_CODES: ReadonlySet<string> = new Set([
-  'provider.auth-failed',
-  'provider.cli-unavailable',
-  'provider.disabled',
-  'provider.misconfigured',
-  'provider.missing-api-key',
-  'provider.not-external',
-  'provider.unknown',
+  // Each is raised before any byte of the prompt is sent:
+  'provider.missing-api-key', // api-transport.ts resolveApiKey(), before fetch()
+  'provider.cli-unavailable', // cli-transport.ts processFailure(): the process never started
+  'provider.disabled', // providers/index.ts, before a transport is chosen
+  'provider.not-external', // providers/index.ts, before a transport is chosen
+  'provider.unknown', // providers/index.ts, before a transport is chosen
+  // Deliberately absent: provider.auth-failed is raised at api-transport.ts on an
+  // HTTP 401/403, which comes back AFTER the whole prompt was POSTed.
+  // provider.misconfigured is raised nowhere any more (providers/types.ts).
 ]);
 
 // ---------------------------------------------------------------------------
@@ -108,17 +111,19 @@ export function selectAdvisoryProvider(
   // independent_finder.providers is the operator's list of vendors that may
   // receive source (crossFinding.ts walks exactly it): a provider outside it
   // never gets the diff, however active it is.
-  const allowed = new Set(policy.independentFinder.providers);
-  if (allowed.size === 0) {
+  if (policy.independentFinder.providers.length === 0) {
     return {
       name: null,
       reason: 'crosscheck.yml independent_finder.providers names no vendor that may receive source',
     };
   }
   const missing: string[] = [];
-  for (const [name, config] of Object.entries(policy.providers)) {
-    if (config.kind === 'native' || !config.enabled || config.mode !== 'active') continue;
-    if (!allowed.has(name)) continue;
+  // The list's own order is the operator's ranking of who may receive source.
+  for (const name of policy.independentFinder.providers) {
+    const config = policy.providers[name];
+    if (!config || config.kind === 'native' || !config.enabled || config.mode !== 'active') {
+      continue;
+    }
     if (config.transport === 'cli' && !onPath(config.command)) {
       missing.push(`${name} (${config.command} is not on PATH)`);
       continue;
@@ -220,6 +225,7 @@ export interface AdvisoryRunInput {
   /** Test seams: a fake transport and a fake PATH probe. */
   runJudgeImpl?: (name: string, request: JudgeRequest) => Promise<JudgeResult>;
   commandOnPathImpl?: (command: string) => boolean;
+  fetchImpl?: typeof fetch;
 }
 
 /** A file at `head`, read under a byte cap; `dropped` says why it was not read. */
@@ -376,7 +382,9 @@ export async function runAdvisoryCrosscheck(
 
   const worktree = input.worktree ?? input.project;
   const before = fingerprintWorktree(worktree);
-  const call = input.runJudgeImpl ?? ((name, req) => runJudge(name, req, { policy }));
+  const call =
+    input.runJudgeImpl ??
+    ((name, req) => runJudge(name, req, { policy, fetchImpl: input.fetchImpl }));
   const model = providerModel(config);
 
   let judged: JudgeResult;
@@ -455,6 +463,13 @@ export async function runAdvisoryCrosscheck(
 // Reproduction: the only way an advisory finding gains power.
 // ---------------------------------------------------------------------------
 
+/** Statuses with no way forward (LEGAL_TRANSITIONS), so nothing can block on them. */
+const CLOSED_STATUSES: ReadonlySet<string> = new Set(
+  Object.entries(LEGAL_TRANSITIONS)
+    .filter(([, next]) => next.length === 0)
+    .map(([status]) => status),
+);
+
 export interface ReproduceInput {
   findingId: string;
   /** The failing test or probe run that reproduced it. Required: "I believe it" is not reproduction. */
@@ -520,6 +535,13 @@ export async function reproduceAdvisoryFinding(
     return { finding: existing, event_id: mark, already_reproduced: true };
   }
 
+  if (existing && CLOSED_STATUSES.has(existing.finding_status)) {
+    throw new AdvisoryCrosscheckError(
+      'crosscheck.finding-closed',
+      `Finding "${input.findingId}" is already ${existing.finding_status}; reproducing it would block nothing.`,
+      { findingId: input.findingId, status: existing.finding_status },
+    );
+  }
   let parent = ctx.causalParent;
   let current = existing;
   if (!current) {

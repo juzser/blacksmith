@@ -12,7 +12,7 @@ import {
   selectAdvisoryProvider,
   testFilesFromDiffNames,
 } from '../src/advisoryCrosscheck.js';
-import type { CliProviderConfig, CrosscheckPolicy } from '../src/crosscheck.js';
+import type { ApiProviderConfig, CliProviderConfig, CrosscheckPolicy } from '../src/crosscheck.js';
 import { appendEvent, readEvents } from '../src/events.js';
 import { foldFindings, listFindings, raiseFinding, transition } from '../src/findings.js';
 import type { JudgeRequest, JudgeResult } from '../src/providers/types.js';
@@ -97,6 +97,13 @@ describe('selectAdvisoryProvider', () => {
       name: null,
       reason: expect.stringContaining('independent_finder.providers'),
     });
+  });
+
+  it('follows the order of independent_finder.providers, not file order', () => {
+    const p = policy([cli('codex'), cli('deepseek')], true, {
+      providers: ['deepseek', 'codex'],
+    });
+    expect(selectAdvisoryProvider(p, () => true)).toEqual({ name: 'deepseek' });
   });
 
   it('says why when nobody is available', () => {
@@ -264,16 +271,16 @@ describe('runAdvisoryCrosscheck', () => {
     expect(events[0]?.record.payload).toMatchObject({ status: 'skipped' });
   });
 
-  it('skips when the transport cannot reach the provider (auth failing)', async () => {
+  it('skips when the transport cannot reach the provider (no key)', async () => {
     const out = await runAdvisoryCrosscheck(
       input(async () => {
-        throw new ProviderError('provider.auth-failed', 'not logged in');
+        throw new ProviderError('provider.missing-api-key', 'no key set');
       }),
       ctx(),
       { stateDir },
     );
     expect(out.status).toBe('skipped');
-    expect(out.reason).toContain('not logged in');
+    expect(out.reason).toContain('no key set');
   });
 
   it('records a failure after the send as failed, with sent: true and the code', async () => {
@@ -294,6 +301,43 @@ describe('runAdvisoryCrosscheck', () => {
         sent: true,
         error_code: code,
       });
+    }
+  });
+
+  it('records an HTTP 401 from the real API transport as failed, sent: true', async () => {
+    process.env.ADVISORY_TEST_KEY = 'k';
+    const api: ApiProviderConfig = {
+      name: 'deepseek',
+      kind: 'api',
+      transport: 'api',
+      enabled: true,
+      enabledSource: 'declared',
+      mode: 'active',
+      modelTier: 'mid',
+      baseUrl: 'https://example.invalid',
+      model: 'm',
+      apiKeyEnv: 'ADVISORY_TEST_KEY',
+      responseFormatJsonObject: false,
+    };
+    let postedBytes = 0;
+    const fetchImpl = (async (_url: unknown, init?: { body?: string }) => {
+      postedBytes = (init?.body ?? '').length;
+      return new Response('nope', { status: 401 });
+    }) as unknown as typeof fetch;
+    try {
+      const pol = policy([cli('codex', { enabled: false })]);
+      pol.providers.deepseek = api;
+      pol.independentFinder.providers = ['deepseek'];
+      const out = await runAdvisoryCrosscheck(
+        { ...input(undefined as never), runJudgeImpl: undefined, policy: pol, fetchImpl },
+        ctx(),
+        { stateDir },
+      );
+      expect(postedBytes).toBeGreaterThan(0);
+      expect(out.status).toBe('failed');
+      expect(out.sent).toBe(true);
+    } finally {
+      process.env.ADVISORY_TEST_KEY = undefined;
     }
   });
 
@@ -558,6 +602,45 @@ describe('runAdvisoryCrosscheck', () => {
     expect(
       events.filter((e) => e.record.event_type === ADVISORY_REPRODUCED_EVENT_TYPE),
     ).toHaveLength(1);
+  });
+
+  it('reproduce refuses a finding already closed, naming its state', async () => {
+    const run = await runAdvisoryCrosscheck(
+      input(async () => result([evidence()])),
+      ctx(),
+      { stateDir },
+    );
+    const f = run.findings[0] as (typeof run.findings)[number];
+    await raiseFinding(
+      {
+        filePath: f.file_path,
+        finding: {
+          finding_id: f.finding_id,
+          task_id: f.task_id,
+          finding_category: f.finding_category,
+          severity: f.severity,
+          finding_status: 'raised',
+          summary: f.summary,
+          failure_scenario: f.failure_scenario,
+          found_by: 'reviewer',
+        },
+      },
+      ctx(),
+      { stateDir },
+    );
+    await transition(f.finding_id, 'refuted', ctx(), { stateDir });
+    await expect(
+      reproduceAdvisoryFinding({ findingId: f.finding_id, evidence: 'probe' }, ctx(), {
+        stateDir,
+      }),
+    ).rejects.toMatchObject({
+      code: 'crosscheck.finding-closed',
+      message: expect.stringContaining('refuted'),
+    });
+    const marks = (await readEvents(sessionId, { stateDir })).filter(
+      (e) => e.record.event_type === ADVISORY_REPRODUCED_EVENT_TYPE,
+    );
+    expect(marks).toHaveLength(0);
   });
 
   it('a retry after a crash before the mark does not reset a finding that moved on', async () => {
