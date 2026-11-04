@@ -1094,7 +1094,10 @@ async function runGateStages(
   // An opt-out skips a missing verdict, not one a grader turn already reported for this task.
   const reportedVerdict =
     input.noGrader === true
-      ? reportedGraderFile(foldJudgeTurns(await readLineage(ctx.sessionId, opts), input.taskId))
+      ? reportedGraderFile(
+          foldJudgeTurns(await readLineage(ctx.sessionId, opts), input.taskId),
+          input.taskId,
+        )
       : undefined;
   const graderVerdict = input.graderVerdict ?? reportedVerdict;
   let grader: GraderRecord =

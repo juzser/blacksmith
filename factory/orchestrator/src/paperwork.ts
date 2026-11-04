@@ -5,7 +5,7 @@ import { type CommitCertificate, certifyCommit } from './commit.js';
 import type { EventOpts, StoredEvent } from './events.js';
 // Type-only: gate.ts imports this module at runtime, so the reverse edge must not exist.
 import type { DepsCheck } from './gate.js';
-import { foldJudgeTurns, type JudgeTurn, outstandingJudges } from './judges.js';
+import { foldJudgeTurns, type JudgeTurn, outstandingJudges, turnsSpanEpics } from './judges.js';
 import { readLineage } from './lineageSnapshot.js';
 import {
   inspectMcpManifest,
@@ -394,14 +394,16 @@ export function judgesStage(
  */
 export function reportedGraderFile(
   turns: readonly JudgeTurn[],
+  taskId: string,
   alsoReported: readonly AlsoReported[] = [],
 ): unknown {
   const graders = turns.filter((t) => t.role === 'grader');
   // A bare id two epics both hold a grader turn for names no task: the same
-  // guess `checkJudgeReport` refuses as `epicAmbiguous`, so it is not resolved
-  // by taking the later round.
-  if (new Set(graders.map((t) => t.taskId)).size > 1) {
-    return 'ambiguous grader turns: the task id names a task in more than one epic';
+  // guess `checkJudgeReport` refuses, so it is not resolved by taking the later round.
+  const spanned = turnsSpanEpics(turns, 'grader', taskId);
+  if (spanned !== null) {
+    const bare = taskId.slice(taskId.lastIndexOf('/') + 1);
+    return `grader turns for \`${taskId}\` span epics ${spanned.map((id) => `\`${id}\``).join(', ')}; pass the qualified id \`<epic>/${bare}\``;
   }
   // A close the line itself is about to make reports the file it names.
   const pending = alsoReported.find((r) => r.role === 'grader' && r.artifactPath);
@@ -461,7 +463,15 @@ export function graderStage(
       rubric: null,
       payload: payloadOf({
         verdict: 'invalid',
-        errors: [{ path: '/', message: 'grader verdict file is not a JSON object' }],
+        errors: [
+          {
+            path: '/',
+            message:
+              typeof verdictFile === 'string'
+                ? verdictFile
+                : 'grader verdict file is not a JSON object',
+          },
+        ],
       }),
     };
   }
@@ -724,6 +734,7 @@ export async function checkPaperwork(
               ? undefined
               : reportedGraderFile(
                   foldJudgeTurns(await lineage(), input.taskId),
+                  input.taskId,
                   input.alsoReported,
                 )
             : input.graderVerdict;

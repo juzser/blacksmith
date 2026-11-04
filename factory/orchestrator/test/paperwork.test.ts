@@ -977,6 +977,10 @@ describe('stage order', () => {
     const gate = await runGate(input, w.ctx(), w.opts());
     expect(gate).toMatchObject({ outcome: 'blocked', reason: 'grader-invalid' });
     expect(pre.reason).toBe('grader-invalid');
+    // The operator is told which ids collided and how to resolve it.
+    expect(JSON.stringify(pre.problems[0]?.detail)).toContain(
+      'grader turns for `task-9` span epics `epic-1/task-9`, `epic-2/task-9`; pass the qualified id `<epic>/task-9`',
+    );
   });
 
   it('reports every problem in the gate order, not only the first', async () => {
