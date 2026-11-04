@@ -583,6 +583,15 @@ else
 fi
 
 echo
+echo "-- minimal plugin: plugin/test/run.sh --"
+if bash plugin/test/run.sh; then
+  echo "OK   plugin/test/run.sh"
+else
+  echo "FAIL plugin/test/run.sh"
+  FAIL=1
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "== PASS =="
   exit 0
