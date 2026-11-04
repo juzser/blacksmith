@@ -546,6 +546,15 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
     if (record.event_type === EPIC_CLOSED_EVENT_TYPE) {
       const payload = record.payload as { epic_id?: string };
       if (!payload.epic_id) continue;
+      // A bound pair's liveness is the hook's, and a hand terminal removed it
+      // from both open maps below: only this sweep can end one whose hook stop
+      // never came (a restart, a `-p` teardown, a busy log).
+      for (const entry of records) {
+        if (!boundEntries.has(entry) || entry.status !== 'live') continue;
+        if (entry.sessionId !== record.session_id || entry.epicId !== payload.epic_id) continue;
+        if (entry.terminalType !== null) entry.status = STATUS_FOR_TERMINAL[entry.terminalType];
+        else closeEntry(entry, event_id, record.ts, 'abandoned', true);
+      }
       // Scoped to the session that closed the epic: another session's agents
       // are not this verdict's to speak for. Within it, the epic each entry
       // was dispatched for is now recorded (D-234), so the task-keyed half

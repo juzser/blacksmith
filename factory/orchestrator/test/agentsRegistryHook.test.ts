@@ -116,4 +116,15 @@ describe('hook entries beside hand-written dispatches', () => {
       ['e/t2', 'a2'],
     ]);
   });
+
+  it('epic-closed ends a bound pair whose hook stop never came', () => {
+    const t1 = hand('coder', 'e/t1');
+    const a1 = start('a1', 'coder');
+    const result = ev('task-result-recorded', { agent: 'coder' }, { task_id: 'e/t1' });
+    const err = ev('error-logged', { agent_role: 'coder', task_ref: 'e/t1' });
+    const closed = ev('epic-closed', { epic_id: 'e' });
+    expect(liveAgents(foldAgents([t1, a1, result, err]))).toHaveLength(1);
+    expect(liveAgents(foldAgents([t1, a1, result, err, closed]))).toEqual([]);
+    expect(liveAgents(foldAgents([t1, a1, closed]))).toEqual([]);
+  });
 });

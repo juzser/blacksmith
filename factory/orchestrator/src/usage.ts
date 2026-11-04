@@ -449,9 +449,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'subagent stop',
     positionals: '',
-    flags: '',
+    flags: '[--agent-id <id> [--reason <text>] [--session <id>] [--state-dir <dir>]]',
     summary:
-      "Read one SubagentStop hook payload on stdin and record the agent's role, model and tokens, parented on its own start. Prints a systemMessage JSON line only when the role crossed its budgets.yml task cap; always exit 0.",
+      "Read one SubagentStop hook payload on stdin and record the agent's role, model and tokens, parented on its own start. Prints a systemMessage JSON line only when the role crossed its budgets.yml task cap; always exit 0. With --agent-id it is the direct closer instead: it writes the stop of an agent whose hook stop was lost (no tokens, --reason defaulting to abandoned) and exits 1 when that agent has no open start.",
   },
   {
     command: 'subagent spend',

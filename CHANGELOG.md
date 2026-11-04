@@ -45,7 +45,9 @@ than appearing in it.
   resumed run records only its own tokens (`total_tokens` is the delta,
   `cumulative_tokens` the transcript so far); a hook start binds to the oldest
   unclaimed hand-written dispatch of its role and that pair stays live until
-  its hook stop. A resumed
+  its hook stop, or until `epic-closed`. `bs subagent stop --agent-id <id>
+  --reason abandoned` closes an agent whose hook stop was lost, and the
+  `cli.envelope-parent-ambiguous` refusal names it. A resumed
   agent's second start gets its own stop; ids match with or without an
   `agent-` prefix or by transcript file name; the start goes to `<cli id>.jsonl`
   with the same auto-root the envelope defaults write, so the guard sees it. `bs subagent spend --session <id>` prints spend by role. The registry

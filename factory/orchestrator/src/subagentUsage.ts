@@ -46,7 +46,7 @@ import {
   resolveCaptureStore,
   str,
 } from './promptCapture.js';
-import { readTranscriptUsage } from './transcriptTokens.js';
+import { readTranscriptUsage, type TranscriptUsage } from './transcriptTokens.js';
 
 const FALLBACK_WINDOW_MS = 72 * 3600 * 1000;
 
@@ -162,61 +162,18 @@ async function record(
     (await logHoldingAgent(eventsDir, cli, ids)) ??
     (await findMainLog(eventsDir, cli, Date.now() - FALLBACK_WINDOW_MS)) ??
     cli;
-
-  const stored = await appendWithin(
+  const stored = await appendStop({
+    eventsDir,
+    cli,
     target,
-    (existing) => {
-      const out: EventInput[] = [];
-      if (existing.length === 0) out.push(autoRootInput(target));
-      const pending = pendingStart(existing, ids);
-      const aid = pending?.aid ?? normalizeAgentId(agentId);
-      const prior = existing
-        .filter((e) => e.record.event_type === STOP && e.record.agent_id === aid)
-        .at(-1);
-      const before = cumulativeOf(prior);
-      const now: Cumulative = {
-        input: usage?.inputTokens ?? 0,
-        output: usage?.outputTokens ?? 0,
-        cache_creation: usage?.cacheCreationTokens ?? 0,
-        cache_read: usage?.cacheReadTokens ?? 0,
-        total: usage?.used ?? 0,
-      };
-      // A second firing of the same stop: every start has its stop and the
-      // transcript has not moved since the previous one.
-      if (pending === null && prior !== undefined && before.total === now.total) return [];
-      const delta = (k: keyof Cumulative): number => Math.max(0, now[k] - before[k]);
-      const prompt = [...existing].reverse().find((e) => e.record.event_type === 'user_prompt');
-      const parent = pending?.start ?? prompt ?? existing[0];
-      out.push({
-        session_id: target,
-        actor: 'system',
-        event_type: STOP,
-        agent_id: aid,
-        plan_version: parent?.record.plan_version ?? 1,
-        causal_parent: parent?.event_id ?? `${target}#0`,
-        payload: {
-          agent_role: role,
-          agent_type: agentType,
-          model: usage?.model ?? null,
-          // This run only: one transcript spans every run of a resumed agent.
-          input_tokens: delta('input'),
-          output_tokens: delta('output'),
-          cache_creation_tokens: delta('cache_creation'),
-          cache_read_tokens: delta('cache_read'),
-          total_tokens: delta('total'),
-          // The transcript so far, kept apart so the next stop can subtract it.
-          cumulative_tokens: now.total,
-          cumulative: now,
-          last_turn_tokens: usage?.lastTurnTokens ?? 0,
-          complete: usage?.complete ?? false,
-          source: 'hook',
-        },
-        ...(parent?.record.project === undefined ? {} : { project: parent.record.project }),
-      });
-      return out;
-    },
-    opts,
-  );
+    ids,
+    agentId: normalizeAgentId(agentId),
+    role,
+    agentType,
+    usage,
+    // `stop_hook_active` is the documented repeat firing; nothing else is dropped.
+    repeat: input.stop_hook_active === true,
+  });
   if (stored.every((e) => e.record.event_type !== STOP) || usage === null) return null;
 
   // budgets.yml's task caps are p90s of the Agent tool's reported total, which
@@ -227,6 +184,132 @@ async function record(
   return JSON.stringify({
     systemMessage: `Blacksmith: the ${role} subagent's last turn was ${fmt(usage.lastTurnTokens)} tokens (${fmt(usage.used)} summed over its run), over its task cap of ${fmt(cap)} (budgets.yml task.${role}). Recorded; nothing was stopped.`,
   });
+}
+
+interface StopArgs {
+  eventsDir: string;
+  cli: string;
+  target: string;
+  ids: ReadonlySet<string>;
+  agentId: string;
+  /** Null: take it from the start being closed. */
+  role: string | null;
+  agentType: string | null;
+  usage: TranscriptUsage | null;
+  /** A repeat firing writes nothing when no start is waiting. */
+  repeat?: boolean;
+  /** The direct closer: nothing to close means nothing written. */
+  requireStart?: boolean;
+  extra?: Record<string, unknown>;
+}
+
+/** The newest stop of this agent in any log of the session: what the transcript held then. */
+async function previousCumulative(
+  eventsDir: string,
+  cli: string,
+  ids: ReadonlySet<string>,
+): Promise<Cumulative> {
+  let latest: StoredEvent | undefined;
+  for (const id of candidateLogs(eventsDir, cli)) {
+    let events: StoredEvent[];
+    try {
+      events = await readEvents(id, { stateDir: eventsDir });
+    } catch {
+      continue;
+    }
+    for (const e of events) {
+      if (e.record.event_type !== STOP || !ids.has(e.record.agent_id ?? '')) continue;
+      if (latest === undefined || e.record.ts >= latest.record.ts) latest = e;
+    }
+  }
+  return cumulativeOf(latest);
+}
+
+async function appendStop(a: StopArgs): Promise<StoredEvent[]> {
+  const before = await previousCumulative(a.eventsDir, a.cli, a.ids);
+  // No usage read (no transcript, or none yet): nothing new, and the running
+  // total stays what the last stop recorded.
+  const now: Cumulative =
+    a.usage === null
+      ? before
+      : {
+          input: a.usage.inputTokens,
+          output: a.usage.outputTokens,
+          cache_creation: a.usage.cacheCreationTokens,
+          cache_read: a.usage.cacheReadTokens,
+          total: a.usage.used,
+        };
+  const delta = (k: keyof Cumulative): number => Math.max(0, now[k] - before[k]);
+  return appendWithin(
+    a.target,
+    (existing) => {
+      const out: EventInput[] = [];
+      const pending = pendingStart(existing, a.ids);
+      if (pending === null && (a.requireStart || a.repeat)) return [];
+      if (existing.length === 0) out.push(autoRootInput(a.target));
+      const prompt = [...existing].reverse().find((e) => e.record.event_type === 'user_prompt');
+      const parent = pending?.start ?? prompt ?? existing[0];
+      const startPayload = pending?.start.record.payload;
+      out.push({
+        session_id: a.target,
+        actor: 'system',
+        event_type: STOP,
+        agent_id: pending?.aid ?? a.agentId,
+        plan_version: parent?.record.plan_version ?? 1,
+        causal_parent: parent?.event_id ?? `${a.target}#0`,
+        payload: {
+          agent_role: a.role ?? str(startPayload?.agent_role) ?? 'unknown',
+          agent_type: a.agentType ?? str(startPayload?.agent_type) ?? 'unknown',
+          model: a.usage?.model ?? null,
+          // This run only: one transcript spans every run of a resumed agent.
+          input_tokens: delta('input'),
+          output_tokens: delta('output'),
+          cache_creation_tokens: delta('cache_creation'),
+          cache_read_tokens: delta('cache_read'),
+          total_tokens: delta('total'),
+          // The transcript so far, kept apart so the next stop can subtract it.
+          cumulative_tokens: now.total,
+          cumulative: now,
+          last_turn_tokens: a.usage?.lastTurnTokens ?? 0,
+          complete: a.usage?.complete ?? false,
+          source: a.requireStart ? 'cli' : 'hook',
+          ...a.extra,
+        },
+        ...(parent?.record.project === undefined ? {} : { project: parent.record.project }),
+      });
+      return out;
+    },
+    { stateDir: a.eventsDir, cliSessionId: a.cli },
+  );
+}
+
+/**
+ * The direct closer behind `bs subagent stop --agent-id`: the stop of an agent
+ * whose hook stop was lost, with no tokens, parented on its own start. Null
+ * when the agent has no open start in the session's logs.
+ */
+export async function closeSubagent(
+  eventsDir: string,
+  cli: string,
+  agentId: string,
+  reason: string,
+): Promise<StoredEvent | null> {
+  const ids = new Set([normalizeAgentId(agentId)]);
+  const target = await logHoldingAgent(eventsDir, cli, ids);
+  if (target === null) return null;
+  const stored = await appendStop({
+    eventsDir,
+    cli,
+    target,
+    ids,
+    agentId: normalizeAgentId(agentId),
+    role: null,
+    agentType: null,
+    usage: null,
+    requireStart: true,
+    extra: { reason },
+  });
+  return stored.find((e) => e.record.event_type === STOP) ?? null;
 }
 
 type Cumulative = {
@@ -284,20 +367,8 @@ export function normalizeAgentId(id: string): string {
  * stop (the latest such, across every recent log), else any log that has the
  * agent's events at all (so a repeated stop finds its previous one).
  */
-async function logHoldingAgent(
-  eventsDir: string,
-  cli: string,
-  ids: ReadonlySet<string>,
-): Promise<string | null> {
+function candidateLogs(eventsDir: string, cli: string): string[] {
   const floor = Date.now() - FALLBACK_WINDOW_MS;
-  const mentions = (id: string): boolean => {
-    try {
-      const text = readFileSync(path.join(eventsDir, `${id}.jsonl`), 'utf8');
-      return [...ids].some((i) => text.includes(`"agent_id":${JSON.stringify(i)}`));
-    } catch {
-      return false;
-    }
-  };
   const logs = [cli, `prompts-${cli}`];
   for (const id of listSessionIds(eventsDir)) {
     if (logs.includes(id)) continue;
@@ -307,9 +378,25 @@ async function logHoldingAgent(
       // Unreadable: not a candidate.
     }
   }
+  return logs;
+}
+
+async function logHoldingAgent(
+  eventsDir: string,
+  cli: string,
+  ids: ReadonlySet<string>,
+): Promise<string | null> {
+  const mentions = (id: string): boolean => {
+    try {
+      const text = readFileSync(path.join(eventsDir, `${id}.jsonl`), 'utf8');
+      return [...ids].some((i) => text.includes(`"agent_id":${JSON.stringify(i)}`));
+    } catch {
+      return false;
+    }
+  };
   let waiting: { id: string; ts: string } | null = null;
   let seen: string | null = null;
-  for (const id of logs.filter(mentions)) {
+  for (const id of candidateLogs(eventsDir, cli).filter(mentions)) {
     seen ??= id;
     const pending = pendingStart(await readEvents(id, { stateDir: eventsDir }), ids);
     if (pending !== null && (waiting === null || pending.start.record.ts >= waiting.ts)) {

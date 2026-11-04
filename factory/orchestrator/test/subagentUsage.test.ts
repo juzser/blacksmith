@@ -50,8 +50,9 @@ const startJson = (id: string, type = 'bs-coder', extra: object = {}) =>
     agent_type: type,
     ...extra,
   });
-const stopJson = (id: string, file: string | undefined, type = 'bs-coder') =>
+const stopJson = (id: string, file: string | undefined, type = 'bs-coder', extra: object = {}) =>
   JSON.stringify({
+    ...extra,
     session_id: CLI,
     cwd: dir,
     hook_event_name: 'SubagentStop',
@@ -333,6 +334,115 @@ describe('recordSubagent', () => {
     expect(events[2]?.record.causal_parent).toBe(events[1]?.event_id);
   });
 
+  it('a resume that wrote no usage and whose stop beats its start is not dropped', async () => {
+    await openCliLog();
+    const file = transcript('z.jsonl', [assistant('m1', 'x', { input_tokens: 9 })]);
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    // The resumed run added nothing to the transcript, and its stop lands first.
+    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    const events = await read();
+    expect(liveAgents(foldAgents(events))).toEqual([]);
+    const stops = events.filter((e) => e.record.event_type === 'subagent-stopped');
+    expect(stops.map((e) => e.record.payload.total_tokens)).toEqual([9, 0]);
+    expect(stops[1]?.record.payload.cumulative_tokens).toBe(9);
+  });
+
+  it('subtracts the previous stop wherever it was recorded', async () => {
+    await openCliLog();
+    const a = assistant('m1', 'x', { input_tokens: 25 });
+    const b = assistant('m2', 'x', { input_tokens: 15 });
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', transcript('x.jsonl', [a])), 'stop', ctx());
+    const epicLog = 'epic-main';
+    await appendWithin(epicLog, () => [{ ...rootEvent, session_id: epicLog }], {
+      stateDir: eventsDir,
+    });
+    await appendWithin(
+      epicLog,
+      (e) => [
+        {
+          session_id: epicLog,
+          actor: 'system',
+          event_type: 'subagent-started',
+          agent_id: 'a1',
+          plan_version: 1,
+          causal_parent: e[0]?.event_id ?? null,
+          payload: { agent_role: 'coder', agent_type: 'bs-coder' },
+        },
+      ],
+      { stateDir: eventsDir, cliSessionId: CLI },
+    );
+    await recordSubagent(stopJson('a1', transcript('x.jsonl', [a, b])), 'stop', ctx());
+    const second = (await read(epicLog))[2];
+    expect(second?.record.payload).toMatchObject({ total_tokens: 15, cumulative_tokens: 40 });
+  });
+
+  it('closes a lost-stop agent with `bs subagent stop --agent-id`, and fails when none is open', async () => {
+    await openCliLog();
+    await recordSubagent(startJson('agent-a1'), 'start', ctx());
+    expect(liveAgents(foldAgents(await read()))).toHaveLength(1);
+    const args = [
+      'subagent',
+      'stop',
+      '--agent-id',
+      'a1',
+      '--reason',
+      'abandoned',
+      '--state-dir',
+      eventsDir,
+    ];
+    const closed = runCli(args, { CLAUDE_CODE_SESSION_ID: CLI });
+    expect(closed.status, closed.stdout + closed.stderr).toBe(0);
+    const events = await read();
+    expect(liveAgents(foldAgents(events))).toEqual([]);
+    const stop = events.at(-1);
+    expect(stop?.record.causal_parent).toBe(events[1]?.event_id);
+    expect(stop?.record.payload).toMatchObject({
+      reason: 'abandoned',
+      total_tokens: 0,
+      agent_role: 'coder',
+    });
+    const again = runCli(args, { CLAUDE_CODE_SESSION_ID: CLI });
+    expect(again.status).not.toBe(0);
+  });
+
+  it('the refusal names the agent id and the closer, for hook and bound entries', async () => {
+    await openCliLog();
+    await appendWithin(
+      CLI,
+      (e) => [
+        {
+          session_id: CLI,
+          actor: 'orchestrator',
+          event_type: 'dispatch_decision',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: e[0]?.event_id ?? null,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5-5',
+          },
+        },
+      ],
+      { stateDir: eventsDir },
+    );
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(startJson('a2', 'Explore'), 'start', ctx());
+    const refused = runCli(
+      ['prompt', 'record', '-', '--state-dir', eventsDir],
+      { CLAUDE_CODE_SESSION_ID: CLI },
+      'x',
+    );
+    const text = refused.stdout + refused.stderr;
+    expect(text).toContain('agent_id a1');
+    expect(text).toContain('agent_id a2');
+    expect(text).toContain('bs subagent stop --agent-id');
+  });
+
   it('a stop with no readable transcript still closes the dispatch, incomplete', async () => {
     await openCliLog();
     await recordSubagent(startJson('a1'), 'start', ctx());
@@ -342,12 +452,16 @@ describe('recordSubagent', () => {
     expect(liveAgents(foldAgents(events))).toEqual([]);
   });
 
-  it('writes the stop once even if the hook fires twice', async () => {
+  it('skips a repeat firing only when stop_hook_active says it is one', async () => {
     await openCliLog();
     await recordSubagent(startJson('a1'), 'start', ctx());
     const file = transcript('a1.jsonl', [assistant('m1', 'x', { input_tokens: 1 })]);
     await recordSubagent(stopJson('a1', file), 'stop', ctx());
-    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    await recordSubagent(
+      stopJson('a1', file, 'bs-coder', { stop_hook_active: true }),
+      'stop',
+      ctx(),
+    );
     const events = await read();
     expect(events.filter((e) => e.record.event_type === 'subagent-stopped')).toHaveLength(1);
   });
@@ -403,7 +517,7 @@ describe('the #533 refusal and a dead agent', () => {
     const refused = note();
     expect(refused.status).not.toBe(0);
     expect(refused.stdout + refused.stderr).toContain('cli.envelope-parent-ambiguous');
-    expect(refused.stdout + refused.stderr).toContain('subagent-stopped');
+    expect(refused.stdout + refused.stderr).toContain('bs subagent stop --agent-id');
     await recordSubagent(stopJson('a1', undefined), 'stop', ctx());
     expect(note().status).toBe(0);
   });

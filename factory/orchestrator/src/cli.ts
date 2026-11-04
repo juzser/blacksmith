@@ -254,7 +254,7 @@ import {
   type SpecChangeStatus,
 } from './specChange.js';
 import { checkStack, loadStackAnswers } from './stack.js';
-import { recordSubagent, spendByRole } from './subagentUsage.js';
+import { closeSubagent, recordSubagent, spendByRole } from './subagentUsage.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
@@ -815,11 +815,11 @@ function ambiguousParentGuard(threshold: number) {
     if (live.length < threshold) return;
     const names = live.map(
       (a) =>
-        `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id}${a.taskId === null && a.agentId !== null ? `, agent_id ${a.agentId}` : ''})`,
+        `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id}${a.agentId === null ? '' : `, agent_id ${a.agentId}`})`,
     );
     throw new SmithError(
       'cli.envelope-parent-ambiguous',
-      `${live.length} dispatch(es) are live in this session (${names.join('; ')}), so its last event may belong to another writer. Nothing was written. Pass --causal-parent <event-id> explicitly. If one of them is dead, close it with a terminal event: bs event append '{"event_type":"error-logged",...}' naming its task_id and agent_role (or task-result-recorded; an epic-closed event closes every dispatch of that epic). A hook-recorded agent names no task: close it with {"event_type":"subagent-stopped","agent_id":"<its agent id>",...} appended with the session's causal_parent set to its start event.`,
+      `${live.length} dispatch(es) are live in this session (${names.join('; ')}), so its last event may belong to another writer. Nothing was written. Pass --causal-parent <event-id> explicitly. If one of them is dead, close it with a terminal event: bs event append '{"event_type":"error-logged",...}' naming its task_id and agent_role (or task-result-recorded; an epic-closed event closes every dispatch of that epic). An entry that shows an agent_id was recorded by the subagent hooks and only its stop ends it: bs subagent stop --agent-id <agent_id> --reason abandoned.`,
       { live: live.map((a) => a.id) },
     );
   };
@@ -3793,10 +3793,39 @@ async function main(): Promise<number> {
   // The SubagentStart / SubagentStop hooks' verbs (subagentUsage.ts). The
   // plugin reaches the same function through the lean `bs-subagent-hook` bin.
   // Recorders, so every outcome is exit 0 and a failure is a stderr line.
-  if (namespace === 'subagent' && (action === 'start' || action === 'stop')) {
+  if (namespace === 'subagent' && action === 'start') {
     const out = await recordSubagent(
       readFileSync(0, 'utf8'),
-      action,
+      'start',
+      captureContext(process.cwd(), process.env),
+    );
+    if (out !== null) console.log(out);
+    return 0;
+  }
+
+  if (namespace === 'subagent' && action === 'stop') {
+    if (flags['agent-id'] !== undefined) {
+      // The direct closer for an agent whose hook stop was lost: the same
+      // `subagent-stopped`, parented on its own start, with no tokens.
+      const stored = await closeSubagent(
+        flags['state-dir'] ?? STATE_EVENTS_DIR,
+        requireSessionFlag(flags),
+        flags['agent-id'],
+        flags.reason ?? 'abandoned',
+      );
+      if (stored === null) {
+        throw new SmithError(
+          'cli.subagent-not-open',
+          `No subagent "${flags['agent-id']}" has a start without a stop in this session's logs. Nothing was written.`,
+          { agent_id: flags['agent-id'] },
+        );
+      }
+      printJson({ event_id: stored.event_id });
+      return 0;
+    }
+    const out = await recordSubagent(
+      readFileSync(0, 'utf8'),
+      'stop',
       captureContext(process.cwd(), process.env),
     );
     if (out !== null) console.log(out);

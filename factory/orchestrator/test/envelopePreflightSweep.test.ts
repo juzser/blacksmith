@@ -50,6 +50,8 @@ const APPEND_ONLY = [
   "namespace === 'plan' && action === 'reject'",
   "namespace === 'wave' && action === 'check'",
   "namespace === 'prompt' && action === 'record'",
+  "namespace === 'subagent' && action === 'start'",
+  "namespace === 'subagent' && action === 'stop'",
   "namespace === 'feedback' && action === 'record'",
   "namespace === 'feedback' && action === 'resolve'",
   "namespace === 'queue' && action === 'adopt'",
