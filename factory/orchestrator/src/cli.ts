@@ -26,6 +26,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { reproduceAdvisoryFinding, runAdvisoryCrosscheck } from './advisoryCrosscheck.js';
 import { foldAgents, JUDGE_REPORT_EVENT_TYPE, liveAgents } from './agents-registry.js';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
@@ -6435,6 +6436,65 @@ async function main(): Promise<number> {
         native_considered: native.length,
       });
       return result.report.gates ? 1 : 0;
+    }
+  }
+
+  if (namespace === 'crosscheck') {
+    // The lean path's one-shot review (advisoryCrosscheck.ts). `run` never
+    // blocks: every outcome, including "nobody to ask", is exit 0 with a status
+    // in the JSON. Only `reproduce` gives a finding any power.
+    if (action === 'run') {
+      const eventOpts = eventOptsFromFlags(flags);
+      const sessionId = requireSessionFlag(flags);
+      requireSession(sessionId, eventOpts);
+      const projectDir = flags.project ?? projectDirFromFlags(flags) ?? process.cwd();
+      const policy = loadCrosscheckPolicy(flags.policy, { projectDir });
+      const criteria = [...(repeated.criterion ?? [])];
+      if (flags['criteria-file']) {
+        criteria.push(
+          ...readFileSync(flags['criteria-file'], 'utf8')
+            .split('\n')
+            .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])?\s*/, '').trim())
+            .filter((line) => line !== ''),
+        );
+      }
+      if (flags.plan) {
+        for (const task of readJsonFile<PlanFile>(flags.plan).tasks) {
+          criteria.push(...((task.acceptance_criteria as string[] | undefined) ?? []));
+        }
+      }
+      const result = await runAdvisoryCrosscheck(
+        {
+          taskId: requireFlag(flags, 'task'),
+          project: projectDir,
+          ...(flags.worktree ? { worktree: flags.worktree } : {}),
+          base: requireFlag(flags, 'base'),
+          head: requireFlag(flags, 'head'),
+          criteria,
+          ...(repeated['test-file'] ? { testFiles: repeated['test-file'] } : {}),
+          budget: judgeBudgetFromFlags(flags),
+          policy,
+        },
+        await pinnedEventContext(flags),
+        eventOpts,
+      );
+      printJson({ ...result, advisory: true });
+      return 0;
+    }
+
+    if (action === 'reproduce') {
+      const [findingId] = requirePositionals(positional, usageFor('crosscheck reproduce')) as [
+        string,
+      ];
+      const eventOpts = eventOptsFromFlags(flags);
+      requireSession(requireSessionFlag(flags), eventOpts);
+      const result = await reproduceAdvisoryFinding(
+        { findingId, evidence: requireFlag(flags, 'evidence') },
+        await pinnedEventContext(flags),
+        eventOpts,
+      );
+      printJson({ reproduced: true, finding: result.finding, event_id: result.event_id });
+      return 0;
     }
   }
 

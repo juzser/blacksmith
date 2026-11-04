@@ -1007,6 +1007,20 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },
   {
+    command: 'crosscheck run',
+    positionals: '',
+    flags: `--task <id> --base <rev> --head <rev> [--project <dir>] [--worktree <dir>] [--criterion <text>...] [--criteria-file <file>] [--plan <file>] [--test-file <path>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
+    summary:
+      'One-shot advisory review of base..head by the first enabled external provider: real defects and untested criteria, no vote. Never blocks (exit 0); no provider, a moved worktree or malformed output is recorded as skipped/discarded/failed. Findings are advisory until "crosscheck reproduce".',
+  },
+  {
+    command: 'crosscheck reproduce',
+    positionals: '<finding-id>',
+    flags: `--evidence <text> ${EVENTS_DIR}`,
+    summary:
+      'Mark an advisory finding reproduced (a failing test or probe run): raises it as an ordinary finding and confirms it, so the normal fix-pending route takes it to the coder.',
+  },
+  {
     command: 'ui serve',
     positionals: '',
     flags:
