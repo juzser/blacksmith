@@ -2,7 +2,9 @@
 
 Small things for Claude Code: plain explanations, a confidence % on options, `/cross-check`, `/audit`, four agents with their own model and effort, and a compact rule.
 
-- Overview and install: the [root README](../README.md).
+Install: `/plugin marketplace add juzser/blacksmith`, then `/plugin install blacksmith@blacksmith`.
+
+- Overview and details: the [root README](../README.md).
 - Rules text: [rules.md](rules.md), loaded by a SessionStart hook ([how](../docs/rules.md)).
 - Agents: [agents/](agents/) ([routing and overrides](../docs/agents.md)).
 - Audit: [docs/audit.md](../docs/audit.md).
