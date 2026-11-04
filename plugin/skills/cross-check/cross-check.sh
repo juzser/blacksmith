@@ -70,6 +70,8 @@ git rev-parse -q --verify "$base" >/dev/null 2>&1 || skip "base '$base' is not a
 # An explicit template: macOS mktemp ignores TMPDIR when it has none.
 work="$(mktemp -d "${TMPDIR:-/tmp}/crosscheck.XXXXXX" 2>/dev/null)" || skip "cannot create a temp directory"
 trap 'rm -rf "$work"' EXIT
+# From here a signal must clean up too (dash skips the EXIT trap on a signal).
+trap 'printf "cross-check: skipped (cancelled)\n"; exit 0' INT TERM HUP
 
 git -C "$repo" diff "$base" > "$work/diff" 2>/dev/null || skip "git diff failed"
 [ -s "$work/diff" ] || skip "no changes between $base and the working tree"
@@ -245,6 +247,9 @@ done
   fi
   wait
 } 2>/dev/null
+# The jobs are over: a late signal must not kill pids that may have been reused, nor
+# add a cancel line after the findings. Only the EXIT cleanup is left.
+trap 'exit 0' INT TERM HUP
 
 for p in $pids; do
   if [ -e "$work/$p.timedout" ] && [ ! -s "$work/$p.out" ]; then
@@ -274,5 +279,6 @@ for p in $provs; do
   esac
   if [ -s "$work/$p.skip" ]; then printf 'skipped: %s\n\n' "$(cat "$work/$p.skip")"
   else cat "$work/$p.out"; printf '\n\n'; fi
-done | LC_ALL=C tr -d '\000-\010\013-\037\177'
+done | LC_ALL=C tr -d '\000-\010\013-\037\177' |
+  LC_ALL=C sed "s/$(printf '\302')[$(printf '\200')-$(printf '\237')]//g"   # UTF-8 C1 controls U+0080-U+009F
 exit 0

@@ -106,6 +106,7 @@ while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "${FAKE_FAIL:-}" ] && { echo "boom: not logged in" >&2; exit 3; }
 case "${FAKE_MODE:-}" in
   ctl) printf 'A\033]52;c;ZXZpbA==\007B\033[2JC\033]8;;http://x\033\\D\ttab\n' > "$out"; exit 0 ;;
+  c1) printf 'Vi\341\273\207t Nam \360\237\230\200 A\302\233[2JB \302\235C \302\240D end\n' > "$out"; exit 0 ;;
   child) sleep 31 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; wait ;;
   stubborn) trap '' TERM; sleep 32 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; while :; do sleep 1; done ;;
 esac
@@ -408,6 +409,42 @@ if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "
 [ -z "$(ls -A "$T/tmp6")" ] && ok "temp dir removed after a KILL" || bad "temp dir left after a KILL"
 pkill -f "$URL/stall" 2>/dev/null
 rm -rf "$T/tmp6"
+echo "-- cross-check.sh: round 2 --"
+# C1 controls (UTF-8 U+0080..U+009F) are stripped; ordinary UTF-8 stays
+r="$(cd "$R" && env PATH="$T/bin:$PATH" FAKE_MODE=c1 CROSSCHECK_PROVIDERS=codex sh "$X" main 2>&1)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\302\233\|\302\235')"; then bad "C1 controls reached the output"; else ok "C1 controls U+009B and U+009D are stripped"; fi
+printf '%s' "$r" | LC_ALL=C grep -qF "$(printf 'Vi\341\273\207t Nam \360\237\230\200')" && ok "Vietnamese text and an emoji stay intact" || bad "UTF-8 text was damaged: $r"
+printf '%s' "$r" | LC_ALL=C grep -qF "$(printf '\302\240D')" && ok "U+00A0 (not a control) stays" || bad "U+00A0 was stripped"
+# a fake tool that stalls one step, to land a TERM in a given window
+mkdir -p "$T/slow"
+REALGIT="$(command -v git)"; REALTR="$(command -v tr)"
+printf '#!/bin/sh\ncase "$*" in *" diff "*) sleep 3 ;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$T/slow/git"
+printf '#!/bin/sh\ncase "$*" in *000*) "%s" "$@"; sleep 3 ;; *) exec "%s" "$@" ;; esac\n' "$REALTR" "$REALTR" > "$T/slowtr.sh"
+mkdir -p "$T/slowtr"; mv "$T/slowtr.sh" "$T/slowtr/tr"
+chmod +x "$T/slow/git" "$T/slowtr/tr"
+# round-2 item 1: a TERM while the diff is being collected removes the temp dir
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp7"; rm -f "$T/t7.out"
+  (cd "$R" && exec env TMPDIR="$T/tmp7" PATH="$T/slow:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t7.out" 2>&1) &
+  TP=$!
+  i=0; while [ -z "$(ls -A "$T/tmp7" 2>/dev/null)" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  sleep 0.5; kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] && ok "TERM during diff collection ($sh_) exits 0" || bad "TERM during diff collection ($sh_) exit $rc"
+  [ -z "$(ls -A "$T/tmp7")" ] && ok "TERM during diff collection ($sh_) leaves no temp file" || bad "TERM during diff collection ($sh_) left $(ls -A "$T/tmp7")"
+done
+# round-2 item 2: a TERM after the findings printed adds no cancel line
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp8"; rm -f "$T/t8.out" "$T/stdin"
+  (cd "$R" && exec env TMPDIR="$T/tmp8" PATH="$T/slowtr:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t8.out" 2>&1) &
+  TP=$!
+  i=0; while [ ! -s "$T/stdin" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+  sleep 1
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null
+  case "$(cat "$T/t8.out")" in *"cancelled"*) bad "late TERM ($sh_) appended a cancel line";; *FAKE-FINDING*) ok "late TERM ($sh_) adds no cancel line";; *) bad "late TERM ($sh_): $(cat "$T/t8.out")";; esac
+  [ -z "$(ls -A "$T/tmp8")" ] && ok "late TERM ($sh_) leaves no temp file" || bad "late TERM ($sh_) left temp files"
+done
 check "cross-check doc names DEEPSEEK_API_KEY and CROSSCHECK_PROVIDERS" sh -c "grep -q DEEPSEEK_API_KEY '$P/../docs/cross-check.md' && grep -q CROSSCHECK_PROVIDERS '$P/../docs/cross-check.md'"
 
 echo
