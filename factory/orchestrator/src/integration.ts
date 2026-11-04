@@ -92,11 +92,14 @@ function realOrResolved(p: string): string {
 }
 
 /**
- * The work-root prefix (`.blacksmith/`) relative to `projectDir`, or null when
- * the work root is the project itself or lies outside it (a clone, `BS_HOME`).
+ * The work-root prefix (`.blacksmith/`) relative to the repo root, which is
+ * what porcelain paths are relative to even when `projectDir` is a
+ * subdirectory of its repo. Null when the work root is the repo root itself or
+ * lies outside it (a clone, `BS_HOME`).
  */
 function workRootPrefix(projectDir: string, workRoot: string): string | null {
-  const rel = path.relative(realOrResolved(projectDir), realOrResolved(workRoot));
+  const top = git(projectDir, ['rev-parse', '--show-toplevel']);
+  const rel = path.relative(realOrResolved(top), realOrResolved(workRoot));
   if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
   return `${rel.split(path.sep).join('/')}/`;
 }
@@ -120,8 +123,9 @@ function dirtyEntries(projectDir: string, workRoot: string): string[] {
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i] as string;
     if (field.length < 4) continue;
-    // A rename or copy carries its source path as the next NUL field.
-    if (field[0] === 'R' || field[0] === 'C') i++;
+    // A rename or copy, in either status column, carries its source path as
+    // the next NUL field.
+    if ('RC'.includes(field[0] as string) || 'RC'.includes(field[1] as string)) i++;
     if (prefix !== null && field.startsWith('?? ') && field.slice(3).startsWith(prefix)) continue;
     entries.push(field);
   }
