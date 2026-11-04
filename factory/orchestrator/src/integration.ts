@@ -11,8 +11,9 @@ import {
 } from './events.js';
 import type { EventContext } from './findings.js';
 import type { DepsCheck } from './gate.js';
-import { runGit as git } from './git.js';
+import { runGit as git, runGitRaw } from './git.js';
 import { pidIsAlive } from './heavyLock.js';
+import { WORK_ROOT } from './paths.js';
 import {
   CHECK_TIERS,
   type CheckCommand,
@@ -81,6 +82,56 @@ export interface IntegrationCheckRecord {
   environmentEvidence?: CheckEnvironment[];
 }
 
+/** Resolve symlinks where the path exists (macOS tmp is `/var` -> `/private/var`). */
+function realOrResolved(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * The work-root prefix (`.blacksmith/`) relative to the repo root, which is
+ * what porcelain paths are relative to even when `projectDir` is a
+ * subdirectory of its repo. Null when the work root is the repo root itself or
+ * lies outside it (a clone, `BS_HOME`).
+ */
+function workRootPrefix(projectDir: string, workRoot: string): string | null {
+  const top = git(projectDir, ['rev-parse', '--show-toplevel']);
+  const rel = path.relative(realOrResolved(top), realOrResolved(workRoot));
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return `${rel.split(path.sep).join('/')}/`;
+}
+
+/**
+ * Status entries that make the tree dirty for a check run. Untracked files
+ * under the work root are declarations the operator has yet to commit (`bs
+ * init` ignores only state/, workspaces/ and .env there); they cannot change
+ * what a check runs. Tracked changes anywhere, and untracked files elsewhere,
+ * still count. `--untracked-files=all` explicitly: see D-178 at the call site.
+ */
+function dirtyEntries(projectDir: string, workRoot: string): string[] {
+  const prefix = workRootPrefix(projectDir, workRoot);
+  const fields = runGitRaw(projectDir, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+  ]).split('\0');
+  const entries: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i] as string;
+    if (field.length < 4) continue;
+    // A rename or copy, in either status column, carries its source path as
+    // the next NUL field.
+    if ('RC'.includes(field[0] as string) || 'RC'.includes(field[1] as string)) i++;
+    if (prefix !== null && field.startsWith('?? ') && field.slice(3).startsWith(prefix)) continue;
+    entries.push(field);
+  }
+  return entries;
+}
+
 export interface IntegrationCheckInput {
   epicId: string;
   projectDir: string;
@@ -95,6 +146,11 @@ export interface IntegrationCheckInput {
   timeoutMs?: number;
   /** A tier, `all`, or `remaining` (the checks `certifyChecks` does not certify at the target commit). */
   tier?: CheckTier | 'all' | 'remaining';
+  /**
+   * The work root whose untracked files do not count as a dirty tree. Default
+   * `WORK_ROOT`; ignored unless it is a strict subdirectory of `projectDir`.
+   */
+  workRoot?: string;
   /** Default `clone`: the project root, on the integration branch, clean. `scratch` needs `commit`. */
   workspace?: 'clone' | 'scratch';
   /** The commit a scratch run checks; resolved in the clone. */
@@ -508,12 +564,12 @@ export async function runIntegrationCheck(
     // `status.showUntrackedFiles = no` anywhere in git's config chain made an
     // untracked-only tree read back as clean — which is exactly the tree someone
     // forgot to commit, certified under a head it does not match (D-178).
-    const dirty = git(projectDir, ['status', '--porcelain', '--untracked-files=all']);
-    if (dirty) {
+    const dirty = dirtyEntries(projectDir, input.workRoot ?? WORK_ROOT);
+    if (dirty.length > 0) {
       throw new IntegrationCheckError(
         'integration.dirty-tree',
         `${projectDir} has uncommitted changes; a check run against a dirty tree certifies something that is not ${branch} at ${headSha.slice(0, 8)}.`,
-        { epicId, branch, projectDir, dirtyEntries: dirty.split('\n').length },
+        { epicId, branch, projectDir, dirtyEntries: dirty.length },
       );
     }
   }
