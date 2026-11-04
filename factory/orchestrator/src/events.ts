@@ -15,6 +15,8 @@ import {
 
 export class EventError extends SmithError {}
 
+export type EnvelopeDefault = 'session' | 'causal_parent' | 'auto_root';
+
 export interface EventEdge {
   edge_type: string;
   edge_provenance: string;
@@ -47,6 +49,14 @@ export interface EventInput {
    * and validated like any other field.
    */
   cli_session_id?: string;
+  /**
+   * Which envelope fields the writer filled in rather than being told: any of
+   * `session` (taken from `CLAUDE_CODE_SESSION_ID`) and `causal_parent` (the
+   * log's last event, read under the log lock). Absent on an event whose
+   * envelope was given in full, so a reader can tell a chosen parent from a
+   * defaulted one (architecture §18 rule 8; lean-mode-scope O-11).
+   */
+  envelope_defaulted?: EnvelopeDefault[];
   /**
    * Honoured only under `opts.keepTs` (a `prompts-` backfill); every other
    * write is stamped "now" and this field is overwritten.
@@ -786,6 +796,24 @@ export async function validateEventEnvelope(
   opts: EventOpts = {},
 ): Promise<void> {
   const causalParent = input.causal_parent ?? null;
+  if (causalParent === null && input.session_id === envelopeDefaults.parentFor) {
+    // A verb that writes git (or other outside state) before its append calls
+    // this first, so a refusal must come now, not after the merge landed (D-42).
+    // Run the refusal here and pin the last event as the parent: it is "the
+    // last event when the command started", read, never computed, and the
+    // append then has nothing left to refuse. An empty log pins the session
+    // root: the append writes it if it is still absent, else uses the log's
+    // first event, so what another process wrote meanwhile is never the parent.
+    const existing = await readEventsAtPath(logPath(input.session_id, opts), input.session_id);
+    const last = existing[existing.length - 1];
+    if (last !== undefined) {
+      envelopeDefaults.parentGuard?.(existing);
+      envelopeDefaults.pinnedParent = last.event_id;
+    } else {
+      envelopeDefaults.pinnedRoot = true;
+    }
+    return;
+  }
   requireCausalParentPresence(input.event_type, causalParent);
   if (causalParent === null) return;
 
@@ -813,16 +841,129 @@ function keptTs(input: EventInput, existing: readonly StoredEvent[]): string {
   return new Date(ms).toISOString();
 }
 
+/**
+ * Envelope defaults chosen by the CLI for THIS process (O-11). `bs` is one
+ * command per process, so `eventContextFromFlags` records here what it could
+ * not take from a flag, and the writer acts on it at the one place that holds
+ * the log lock: a verb hands the writer `causal_parent: null`, and a `null`
+ * for a flagged session means "the last event of that log", resolved after the
+ * log is read under the lock, never computed beforehand. Library callers never
+ * set this, so for them a null parent is refused exactly as before.
+ */
+const envelopeDefaults: {
+  session?: string;
+  parentFor?: string;
+  parentGuard?: (existing: readonly StoredEvent[]) => void;
+  /** The last event read at pre-flight (`validateEventEnvelope`); see there. */
+  pinnedParent?: string;
+  /** Pre-flight saw an empty log: the parent is the session root, wherever it ends up. */
+  pinnedRoot?: boolean;
+} = {};
+
+/**
+ * `parentGuard` runs under the log lock, on the events the default would pick
+ * its parent from, and may throw to refuse the default. It is a parameter and
+ * not an import because the live-dispatch fold (agents-registry.ts) imports
+ * this module.
+ */
+export function setEnvelopeDefaults(defaults: {
+  session?: string;
+  parentFor?: string;
+  parentGuard?: (existing: readonly StoredEvent[]) => void;
+}): void {
+  delete envelopeDefaults.session;
+  delete envelopeDefaults.parentFor;
+  delete envelopeDefaults.parentGuard;
+  delete envelopeDefaults.pinnedParent;
+  delete envelopeDefaults.pinnedRoot;
+  if (defaults.parentGuard !== undefined) envelopeDefaults.parentGuard = defaults.parentGuard;
+  if (defaults.session !== undefined) envelopeDefaults.session = defaults.session;
+  if (defaults.parentFor !== undefined) envelopeDefaults.parentFor = defaults.parentFor;
+}
+
+/** The `session-start` record `bs session start` writes: one builder for both writers of a root. */
+function rootInput(sessionId: string, opts: StartSessionOptions = {}): EventInput {
+  return {
+    session_id: sessionId,
+    actor: opts.actor ?? 'operator',
+    event_type: ROOT_EVENT_TYPE,
+    plan_version: 1,
+    causal_parent: opts.continues ?? null,
+    payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
+  };
+}
+
+/** Schema, taxonomy and typed-payload validation of one record; throws, writes nothing. */
+function checkRecordShape(input: EventInput, opts: EventOpts): void {
+  const record: EventRecord = { ...input, ts: input.ts ?? new Date().toISOString() };
+  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
+  const result = validateRecord(schemas, taxonomy, 'event', record);
+  if (!result.valid) {
+    throw new EventError('events.invalid-record', 'Event failed schema/taxonomy validation.', {
+      errors: result.errors,
+    });
+  }
+  validatePayloadDimensions(taxonomy, record);
+  validateTypedPayload(schemas, taxonomy, record);
+}
+
 async function appendEventLocked(
   input: EventInput,
   opts: EventOpts,
   filePath: string,
 ): Promise<StoredEvent> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  let existing = await readEventsAtPath(filePath, input.session_id);
+
+  // O-11: a null parent on a non-root event, for the session the CLI flagged,
+  // is the last event of the log as read HERE, under the lock. An empty log
+  // gets the same root `bs session start` writes first.
+  const defaulted: EnvelopeDefault[] = [];
+  if (input.event_type !== ROOT_EVENT_TYPE && input.session_id === envelopeDefaults.session) {
+    defaulted.push('session');
+  }
+  if (
+    input.causal_parent == null &&
+    input.event_type !== ROOT_EVENT_TYPE &&
+    input.session_id === envelopeDefaults.parentFor
+  ) {
+    if (existing.length === 0) {
+      // Refuse a bad event BEFORE the root is written, so a rejection leaves no
+      // root-only log. The parent id here is a stand-in for the check alone; it
+      // is never stored (the stored parent is the root's own id, read back).
+      checkRecordShape(
+        {
+          ...input,
+          causal_parent: `${input.session_id}#0`,
+          envelope_defaulted: [...defaulted, 'causal_parent'],
+        },
+        opts,
+      );
+      await appendEventLocked(
+        { ...rootInput(input.session_id), envelope_defaulted: ['auto_root'] },
+        opts,
+        filePath,
+      );
+      existing = await readEventsAtPath(filePath, input.session_id);
+    } else if (envelopeDefaults.pinnedParent === undefined && !envelopeDefaults.pinnedRoot) {
+      // Same lock as the read of the last event: check and default are atomic.
+      envelopeDefaults.parentGuard?.(existing);
+    }
+    input = {
+      ...input,
+      causal_parent:
+        envelopeDefaults.pinnedParent ??
+        (envelopeDefaults.pinnedRoot
+          ? (existing[0] as StoredEvent)
+          : (existing[existing.length - 1] as StoredEvent)
+        ).event_id,
+    };
+    defaulted.push('causal_parent');
+  }
+  if (defaulted.length > 0) input = { ...input, envelope_defaulted: defaulted };
+
   const causalParent = input.causal_parent ?? null;
   requireCausalParentPresence(input.event_type, causalParent);
-
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const existing = await readEventsAtPath(filePath, input.session_id);
 
   if (causalParent !== null) {
     await validateCausalParent(input, opts, existing);
@@ -833,16 +974,7 @@ async function appendEventLocked(
   const ts = opts.keepTs ? keptTs(input, existing) : new Date().toISOString();
   const record: EventRecord = { ...input, ...cliStamp(input, opts), ts };
 
-  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
-  const result = validateRecord(schemas, taxonomy, 'event', record);
-  if (!result.valid) {
-    throw new EventError('events.invalid-record', 'Event failed schema/taxonomy validation.', {
-      errors: result.errors,
-    });
-  }
-
-  validatePayloadDimensions(taxonomy, record);
-  validateTypedPayload(schemas, taxonomy, record);
+  checkRecordShape(record, opts);
 
   const index = existing.length;
   await appendFile(filePath, `${JSON.stringify(record)}\n`, 'utf8');
@@ -954,14 +1086,7 @@ export async function startSession(
   opts: StartSessionOptions = {},
 ): Promise<StoredEvent> {
   const filePath = logPath(sessionId, opts);
-  const input: EventInput = {
-    session_id: sessionId,
-    actor: opts.actor ?? 'operator',
-    event_type: ROOT_EVENT_TYPE,
-    plan_version: 1,
-    causal_parent: opts.continues ?? null,
-    payload: opts.promptId === undefined ? {} : { parent_prompt_id: opts.promptId },
-  };
+  const input = rootInput(sessionId, opts);
   if (opts.promptId !== undefined) await requireUserPrompt(opts.promptId, opts);
 
   return enqueue(filePath, () =>
@@ -1059,6 +1184,8 @@ export async function readEvents(sessionId: string, opts: EventOpts = {}): Promi
  * about an existing-but-empty log; that one really is an empty session.
  */
 export function requireSession(sessionId: string, opts: EventOpts = {}): void {
+  // A session whose parent the CLI is defaulting gets its root at the first write.
+  if (envelopeDefaults.parentFor === sessionId) return;
   const filePath = logPath(sessionId, opts);
   if (!existsSync(filePath)) {
     throw new EventError(

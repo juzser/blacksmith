@@ -61,17 +61,21 @@ describe('cli.ts (built binary)', () => {
       const tasksPath = path.join(scratchDir, `p269-tasks-${Date.now()}.json`);
       await writeFile(tasksPath, JSON.stringify([{ taskId: 'task-1', branch, worktreeDir }]));
 
-      const result = runCli([
-        'queue',
-        'run',
-        'epic-1',
-        '--project',
-        projectDir,
-        '--test-cmd',
-        'true',
-        '--tasks',
-        tasksPath,
-      ]);
+      const result = runCli(
+        [
+          'queue',
+          'run',
+          'epic-1',
+          '--project',
+          projectDir,
+          '--test-cmd',
+          'true',
+          '--tasks',
+          tasksPath,
+        ],
+        // No flag and no CLI session id: the one case that still refuses (O-11).
+        { CLAUDE_CODE_SESSION_ID: '' },
+      );
       expect(result.status).toBe(1);
       expect(JSON.parse(result.stdout).error.code).toBe('cli.queue-run-needs-session');
 

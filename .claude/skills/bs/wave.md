@@ -8,7 +8,8 @@ thrown away when the wave lands.
 **Read the console first.** `SKILL.md` and [`dispatch.md`](dispatch.md)
 bind every dispatch below: the project directory is an answer you ask for
 rather than a path anything here knows, every write carries
-`--session <id> --plan-version <n> --causal-parent <event-id>`, every
+`--session <id> --plan-version <n> --causal-parent <event-id>` (all three explicit here: a wave
+fans out, so the optional defaults would read a sibling's event), every
 dispatch carries the compiled lessons block and that task's open-findings
 block, every `dispatch_decision` carries a one-line plain-words `reason`
 (dispatch.md's payload contract), and fetched text is wrapped before it is

@@ -368,8 +368,8 @@ Two storage layers, one source of truth:
   well-formed, and leaves it absent otherwise (outside a CLI session, and on
   every event logged before the stamp existed); a malformed value is
   dropped, never thrown. It is **not envelope**: it never stands in for
-  `session_id` or `causal_parent`, which every write still carries
-  explicitly (§18 rule 8). And it is **never turn or delegation evidence**:
+  `session_id` or `causal_parent`, which every write still carries (§18
+  rule 8) — given, or defaulted and then marked `envelope_defaulted`. And it is **never turn or delegation evidence**:
   an epic session and the subagents it runs can share one CLI session, so
   two events with the same stamp say nothing about who wrote them (§18 rule
   4). It only links a live CLI session to the factory sessions it drove —
@@ -1333,7 +1333,19 @@ not in the diff — it is in every verdict the factory issued afterwards.
 
 8. **Every write carries the envelope, and an event id is read, never
    computed.** `--session`, `--causal-parent`, `--plan-version` on every
-   write command; the id comes back in that command's own output. *Breaks:*
+   write command; the id comes back in that command's own output. `--session`
+   and `--causal-parent` may be left out (lean-mode O-11): the session is then
+   `CLAUDE_CODE_SESSION_ID` and the parent is the session's last event, read,
+   never computed. The event records `envelope_defaulted`, and fan-out writers
+   stay explicit. A defaulted parent is refused (`cli.envelope-parent-ambiguous`)
+   while dispatches are live: at least 1 when the session came from the env
+   (subagents share it), at least 2 when `--session` was explicit. The check
+   and the read of the last event happen under the log lock, except for verbs
+   that write outside the log (files, branches, external processes) before they
+   append: those run both at pre-flight, before the first write, and pin that
+   event as the parent. A dispatch that goes live after pre-flight does not
+   invalidate a pinned parent: it was the tail when the command started, which
+   is a true causal ancestor. On an empty log the pre-flight pins the session root: the append writes the root if it is still absent, else uses the log's first event, which is always the `session-start`; no ambiguity check runs then, because the root is an ancestor and never a sibling's event. *Breaks:*
    under fan-out the events between yours belong to sibling tasks, so a
    guessed parent names a real event that is not the parent — it validates,
    and the lineage is quietly wrong.
