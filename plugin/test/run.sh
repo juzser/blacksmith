@@ -101,9 +101,11 @@ cat > "$T/bin/codex" <<'FAKE'
 printf '%s\n' "$@" > "$FAKE_DIR/args"
 cat > "$FAKE_DIR/stdin"
 cat "$FAKE_DIR/stdin" >&2
+env > "$FAKE_DIR/codexenv"
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "${FAKE_FAIL:-}" ] && { echo "boom: not logged in" >&2; exit 3; }
 case "${FAKE_MODE:-}" in
+  ctl) printf 'A\033]52;c;ZXZpbA==\007B\033[2JC\033]8;;http://x\033\\D\ttab\n' > "$out"; exit 0 ;;
   child) sleep 31 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; wait ;;
   stubborn) trap '' TERM; sleep 32 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; while :; do sleep 1; done ;;
 esac
@@ -208,6 +210,7 @@ check "cross-check doc mentions git add -N" grep -q "git add -N" "$P/../docs/cro
 
 echo "-- cross-check.sh: deepseek --"
 KEY="sk-TESTKEY-9f3a1c77"
+export CROSSCHECK_PROVIDERS="codex deepseek"
 cat > "$T/server.js" <<'SRVJS'
 const http = require("http"), fs = require("fs");
 const d = process.env.FAKE_DIR;
@@ -224,6 +227,7 @@ const srv = http.createServer((q, s) => {
     if (m === "stall") return;
     if (m === "401" || m === "500") { s.statusCode = +m; return s.end("SECRET-BODY-TEXT"); }
     if (m === "malformed") return s.end("{not json SECRET-BODY-TEXT");
+    if (m === "ctl") return s.end(JSON.stringify({ choices: [{ message: { content: "A\u001b]52;c;ZXZpbA==\u0007B\u001b[2JC\u001b]8;;http://x\u001b\\D\ttab" } }] }));
     if (m === "empty") return s.end(JSON.stringify({ choices: [] }));
     s.setHeader("content-type", "application/json");
     s.end(JSON.stringify({ choices: [{ message: { content: "DS-FINDING: none é \"q\"" } }] }));
@@ -292,8 +296,8 @@ SP=$!
 i=0; while [ ! -e "$T/ds.hit" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
 [ -e "$T/ds.hit" ] && ok "the call is in flight (server stalled)" || bad "the call never reached the server"
 if ps -ax -o args= | grep -F -- "$KEY" | grep -qv "grep -F"; then bad "the key is visible in ps"; else ok "the key is not on any command line during the call"; fi
-hf="$(ls "$T"/tmp3/*/ds.hdr 2>/dev/null | head -1)"
-[ -n "$hf" ] && [ "$(ls -l "$hf" | cut -c1-10)" = "-rw-------" ] && ok "header file is mode 0600" || bad "header file missing or not 0600 ($hf)"
+[ -n "$(ls -A "$T"/tmp3/*/ 2>/dev/null)" ] && ok "the run's temp dir exists mid-call" || bad "no temp dir mid-call"
+if grep -rlF "$KEY" "$T/tmp3" 2>/dev/null | grep -q .; then bad "the key is on disk mid-call"; else ok "no file holds the key mid-call"; fi
 wait "$SP"
 case "$(cat "$T/stall.out")" in *"skipped: "*"timed out"*) ok "timeout stops a stalled deepseek call";; *) bad "stall: $(cat "$T/stall.out")";; esac
 if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "curl survived the timeout"; else ok "no curl left after the timeout"; fi
@@ -333,6 +337,77 @@ if command -v dash >/dev/null 2>&1; then
   case "$r" in *"## codex"*FAKE-FINDING*"## deepseek"*DS-FINDING*) ok "dash: both groups appear";; *) bad "dash: $r";; esac
   cmp -s "$T/stdin" "$T/ds.prompt" && ok "dash: prompt intact on the server" || bad "dash: prompt differs"
 fi
+echo "-- cross-check.sh: review fixes --"
+# opt-in: deepseek does not run unless named, whatever the environment holds
+rm -f "$T/ds.hit"
+r="$(cd "$R" && env -u CROSSCHECK_PROVIDERS PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" sh "$X" main 2>&1)"
+[ ! -e "$T/ds.hit" ] && ok "default providers: deepseek is not called" || bad "deepseek ran without being listed"
+case "$r" in *"## deepseek"*) bad "default output has a deepseek group";; *) ok "default output has no deepseek group";; esac
+case "$r" in *"## codex"*FAKE-FINDING*) ok "default still runs codex";; *) bad "default codex: $r";; esac
+case "$r" in *"DEEPSEEK_API_KEY is set"*CROSSCHECK_PROVIDERS*) ok "hint says how to enable deepseek";; *) bad "no hint: $r";; esac
+r="$(cd "$R" && env -u CROSSCHECK_PROVIDERS -u DEEPSEEK_API_KEY PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+case "$r" in *"DEEPSEEK_API_KEY is set"*) bad "hint shown with no key";; *) ok "no hint when no key is set";; esac
+r="$(dsrun ok CROSSCHECK_PROVIDERS=codex)"
+case "$r" in *"DEEPSEEK_API_KEY is set"*) ok "hint also when only codex is listed";; *) bad "no hint for codex-only: $r";; esac
+# codex never sees the key
+dsrun ok >/dev/null
+grep -qF "$KEY" "$T/codexenv" && bad "codex's environment holds the key" || ok "codex's environment does not hold the key"
+grep -q '^DEEPSEEK_API_KEY=' "$T/codexenv" && bad "codex inherits DEEPSEEK_API_KEY" || ok "codex does not inherit DEEPSEEK_API_KEY"
+# control bytes in model output are stripped, newline and tab kept
+r="$(dsrun ok FAKE_MODE=ctl)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\033\|\007')"; then bad "ESC or BEL reached the output"; else ok "ESC and BEL are stripped from both providers' output"; fi
+r="$(dsrun ctl FAKE_MODE=ctl)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\033\|\007')"; then bad "ESC or BEL reached the output (deepseek ctl)"; else ok "control bytes stripped (deepseek ctl payload)"; fi
+case "$r" in *"A]52"*"tab"*) ok "the text around the control bytes is kept";; *) bad "stripping removed text: $r";; esac
+printf '%s' "$r" | LC_ALL=C grep -q "$(printf 'D\ttab')" && ok "tab survives" || bad "tab lost"
+# the curl command line: -q first, -g, https-only proto, no -L, no key
+mkdir -p "$T/fakecurl"; REALCURL="$(command -v curl)"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "$FAKE_DIR/curlargs"\nexec "%s" "$@"\n' "$REALCURL" > "$T/fakecurl/curl"; chmod +x "$T/fakecurl/curl"
+rm -f "$T/curlargs"
+(cd "$R" && env PATH="$T/fakecurl:$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" CROSSCHECK_PROVIDERS=deepseek sh "$X" main >/dev/null 2>&1)
+[ "$(head -1 "$T/curlargs")" = "-q" ] && ok "curl gets -q first" || bad "curl does not start with -q"
+grep -qxF -- '-g' "$T/curlargs" && ok "curl gets -g" || bad "curl lacks -g"
+grep -qxF -- '--proto' "$T/curlargs" && grep -qxF -- '=http' "$T/curlargs" && ok "curl gets --proto (=http for localhost)" || bad "curl lacks --proto"
+grep -qxF -- '--url' "$T/curlargs" && ok "curl gets the URL through --url" || bad "curl lacks --url"
+if grep -Eqx -- '-L|--location|--location-trusted|-[a-zA-Z]*L[a-zA-Z]*' "$T/curlargs"; then bad "curl follows redirects"; else ok "curl never follows redirects"; fi
+grep -qF "$KEY" "$T/curlargs" && bad "the key is on curl's command line" || ok "the key is not on curl's command line"
+grep -qxF -- '@-' "$T/curlargs" && ok "the header is read from stdin (-H @-)" || bad "header not from stdin"
+# URL validation
+for u in 'https://a.example/{x,y}/chat' 'https://a.example/[1-3]/chat' '-o/tmp/pwn' '--url=https://evil.example' 'http://example.com/chat' 'ftp://a.example/x' 'http://127.0.0.1@evil.example/x' 'http://127.0.0.1:80@evil.example/x' 'https://a.example/a b'; do
+  rm -f "$T/ds.hit"
+  r="$(cd "$R" && env PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$u" CROSSCHECK_PROVIDERS=deepseek sh "$X" main 2>&1)"
+  case "$r" in *"skipped: bad deepseek URL"*) ok "refused URL: $u";; *) bad "accepted URL: $u -> $r";; esac
+done
+case "$(cd "$R" && env PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="http://localhost:1/x" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=5 sh "$X" main 2>&1)" in *"bad deepseek URL"*) bad "localhost URL refused";; *) ok "http://localhost is allowed";; esac
+# a TERM mid-call: no temp files, no live children, no watchdog, under sh and dash
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp5"; rm -f "$T/ds.hit" "$T/child" "$T/parent" "$T/term.out"
+  (cd "$R" && exec env TMPDIR="$T/tmp5" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" FAKE_MODE=child CROSSCHECK_GRACE=1 "$sh_" "$X" main > "$T/term.out" 2>&1) &
+  TP=$!
+  i=0; while { [ ! -e "$T/ds.hit" ] || [ ! -s "$T/child" ]; } && [ "$i" -lt 80 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] && ok "TERM ($sh_) exits 0" || bad "TERM ($sh_) exit $rc"
+  case "$(cat "$T/term.out")" in *"skipped (cancelled)"*) ok "TERM ($sh_) says cancelled";; *) bad "TERM ($sh_): $(cat "$T/term.out")";; esac
+  [ -z "$(ls -A "$T/tmp5")" ] && ok "TERM ($sh_) leaves no temp file" || bad "TERM ($sh_) left $(ls -A "$T/tmp5")"
+  c="$(cat "$T/child" 2>/dev/null)"
+  if [ -n "$c" ] && kill -0 "$c" 2>/dev/null; then bad "TERM ($sh_) left codex's child running"; else ok "TERM ($sh_) stops codex's child"; fi
+  if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "TERM ($sh_) left curl running"; else ok "TERM ($sh_) stops curl"; fi
+  i=0; while ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+  ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "TERM ($sh_) left the watchdog running" || ok "TERM ($sh_) stops the watchdog"
+done
+# KILL cannot be trapped: the watchdog still ends with its parent
+mkdir -p "$T/tmp6"; rm -f "$T/ds.hit"
+(cd "$R" && exec env TMPDIR="$T/tmp6" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=300 sh "$X" main >/dev/null 2>&1) &
+KP=$!
+i=0; while [ ! -e "$T/ds.hit" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+kill -KILL "$KP" 2>/dev/null; wait "$KP" 2>/dev/null
+i=0; while ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "the watchdog or a job outlived a killed script" || ok "the watchdog and the jobs end when the script is killed"
+if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "curl outlived a killed script"; else ok "curl ends when the script is killed"; fi
+[ -z "$(ls -A "$T/tmp6")" ] && ok "temp dir removed after a KILL" || bad "temp dir left after a KILL"
+pkill -f "$URL/stall" 2>/dev/null
+rm -rf "$T/tmp6"
 check "cross-check doc names DEEPSEEK_API_KEY and CROSSCHECK_PROVIDERS" sh -c "grep -q DEEPSEEK_API_KEY '$P/../docs/cross-check.md' && grep -q CROSSCHECK_PROVIDERS '$P/../docs/cross-check.md'"
 
 echo

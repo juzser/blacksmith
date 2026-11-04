@@ -10,15 +10,17 @@
 # heredoc so the shell never expands them).
 #
 # Env (all optional):
-#   CROSSCHECK_PROVIDERS  providers to run, space or comma separated
-#                         (default "codex deepseek"). One that is not available
-#                         (codex not on PATH, DEEPSEEK_API_KEY unset) is skipped.
+#   CROSSCHECK_PROVIDERS  providers to run, space or comma separated (default
+#                         "codex"). DeepSeek is opt-in: it runs only when named,
+#                         e.g. "codex deepseek". A listed provider that is not
+#                         available (no codex, no DEEPSEEK_API_KEY) is skipped.
 #   CROSSCHECK_MODEL      codex model          (default gpt-6-sol)
 #   CROSSCHECK_EFFORT     codex reasoning effort (default medium)
 #   CROSSCHECK_DEEPSEEK_MODEL  deepseek model  (default deepseek-v4-pro; pinned,
 #                         because a retired id is silently answered by another model)
-#   CROSSCHECK_DEEPSEEK_URL    chat completions endpoint
-#                         (default https://api.deepseek.com/chat/completions)
+#   CROSSCHECK_DEEPSEEK_URL    chat completions endpoint (default
+#                         https://api.deepseek.com/chat/completions). https only;
+#                         http is accepted for 127.0.0.1 and localhost (tests).
 #   CROSSCHECK_MAX_BYTES  size cap, diff + tests (default 120000). Over it the
 #                         check is skipped: half a diff yields confident
 #                         findings about code that is not there.
@@ -26,12 +28,14 @@
 #                         each call and its child processes get TERM, then KILL after
 #   CROSSCHECK_GRACE      seconds between the two (default 5)
 #
-# DEEPSEEK_API_KEY is read from the environment only. It goes to curl in a 0600 header
-# file in the run's temp dir, never on a command line, and is never printed.
+# DEEPSEEK_API_KEY is read from the environment only, then removed from it, so codex
+# and every other child never see it. It reaches curl on stdin (-H @-): no file, no
+# command line, and it is never printed.
 #
 # Always exits 0. When it cannot run it prints "cross-check: skipped (<reason>)".
 
 set -f
+key="${DEEPSEEK_API_KEY:-}"; unset DEEPSEEK_API_KEY
 model="${CROSSCHECK_MODEL:-gpt-6-sol}"
 effort="${CROSSCHECK_EFFORT:-medium}"
 dsmodel="${CROSSCHECK_DEEPSEEK_MODEL:-deepseek-v4-pro}"
@@ -45,7 +49,7 @@ criteria="${2:-}"
 skip() { printf 'cross-check: skipped (%s)\n' "$1"; exit 0; }
 
 provs=""
-for p in $(printf '%s' "${CROSSCHECK_PROVIDERS:-codex deepseek}" | tr ',' ' '); do
+for p in $(printf '%s' "${CROSSCHECK_PROVIDERS:-codex}" | tr ',' ' '); do
   case "$p" in codex|deepseek) ;; *) skip "unknown provider '$p' in CROSSCHECK_PROVIDERS (use codex, deepseek)" ;; esac
   case " $provs " in *" $p "*) ;; *) provs="$provs $p" ;; esac
 done
@@ -150,11 +154,12 @@ sys.stdout.buffer.write(c.encode("utf-8"))' "$1"
 }
 
 run_deepseek() {
-  # The key is written by the printf builtin, so it never appears in an argv.
-  ( umask 077; printf 'Authorization: Bearer %s\n' "$DEEPSEEK_API_KEY" > "$work/ds.hdr" ) 2>/dev/null
   json_body "$work/prompt" "$dsmodel" > "$work/ds.body" 2>/dev/null || { echo "could not build the request" > "$work/deepseek.skip"; return; }
-  code="$(curl -q -sS -o "$work/ds.resp" -w '%{http_code}' --max-time "$tmo" \
-    -H "@$work/ds.hdr" -H 'Content-Type: application/json' --data-binary "@$work/ds.body" "$dsurl" 2>/dev/null)"
+  # The header comes on stdin from the printf builtin: no file, no argv. -q skips any
+  # .curlrc, -g stops {a,b} and [1-3] expanding into several requests, and there is no
+  # -L, so a redirect is never followed with the key.
+  code="$(printf 'Authorization: Bearer %s\n' "$key" | curl -q -sS -g --proto "$dsproto" -o "$work/ds.resp" -w '%{http_code}' \
+    --max-time "$tmo" -H @- -H 'Content-Type: application/json' --data-binary "@$work/ds.body" --url "$dsurl" 2>/dev/null)"
   crc=$?
   [ "$crc" -eq 28 ] && { : > "$work/deepseek.timedout"; return; }
   [ "$crc" -eq 0 ] || { echo "deepseek call failed (curl exit $crc)" > "$work/deepseek.skip"; return; }
@@ -163,13 +168,31 @@ run_deepseek() {
 }
 
 pids=""
+wd=""
+cancel() {
+  trap '' INT TERM HUP
+  procs=""
+  for p in $pids; do eval "r=\${pid_$p:-}"; [ -n "$r" ] && procs="$procs $(tree "$r")"; done
+  [ -n "$wd" ] && procs="$procs $(tree "$wd")"
+  kill -KILL $procs 2>/dev/null
+  rm -rf "$work"
+  printf 'cross-check: skipped (cancelled)\n'
+  exit 0
+}
+trap cancel INT TERM HUP
 for p in $provs; do
   case "$p" in
     codex)
       command -v codex >/dev/null 2>&1 || { echo "codex is not installed or not on PATH" > "$work/codex.skip"; continue; } ;;
     deepseek)
-      [ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "DEEPSEEK_API_KEY is not set" > "$work/deepseek.skip"; continue; }
-      case "$DEEPSEEK_API_KEY" in *[![:graph:]]*) echo "DEEPSEEK_API_KEY contains spaces or control characters" > "$work/deepseek.skip"; continue ;; esac
+      [ -n "$key" ] || { echo "DEEPSEEK_API_KEY is not set" > "$work/deepseek.skip"; continue; }
+      case "$dsurl" in
+        *[[:space:]]*|*"{"*|*"}"*|*"["*|*"]"*|*"@"*|*'\'*) echo "bad deepseek URL" > "$work/deepseek.skip"; continue ;;
+        https://*) dsproto="=https" ;;
+        http://127.0.0.1|http://127.0.0.1[:/]*|http://localhost|http://localhost[:/]*) dsproto="=http" ;;
+        *) echo "bad deepseek URL" > "$work/deepseek.skip"; continue ;;
+      esac
+      case "$key" in *[![:graph:]]*) echo "DEEPSEEK_API_KEY contains spaces or control characters" > "$work/deepseek.skip"; continue ;; esac
       command -v curl >/dev/null 2>&1 || { echo "curl is not installed" > "$work/deepseek.skip"; continue; }
       command -v node >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || { echo "needs node or python3" > "$work/deepseek.skip"; continue; } ;;
   esac
@@ -186,6 +209,17 @@ done
       i=0
       while :; do
         sleep 1; i=$((i + 1))
+        if ! kill -0 "$$" 2>/dev/null; then   # the script was killed: take its jobs down, then stop
+          procs=""
+          for p in $pids; do
+            [ -e "$work/$p.done" ] && continue
+            eval "r=\$pid_$p"
+            procs="$procs $(tree "$r")"
+          done
+          kill -KILL $procs 2>/dev/null
+          rm -rf "$work"
+          exit 0
+        fi
         live=""
         for p in $pids; do [ -e "$work/$p.done" ] || live="$live $p"; done
         [ -n "$live" ] || break
@@ -207,6 +241,7 @@ done
         fi
       done
     ) > /dev/null 2>&1 &
+    wd=$!
   fi
   wait
 } 2>/dev/null
@@ -228,7 +263,10 @@ if [ "$any" -eq 1 ]; then
 else
   printf 'cross-check: skipped (no provider returned findings)\n\n'
 fi
+if [ -n "$key" ]; then case " $provs " in *" deepseek "*) ;; *) printf 'Note: DEEPSEEK_API_KEY is set but deepseek is not enabled, so nothing was sent to it. To include it: CROSSCHECK_PROVIDERS="codex deepseek".\n\n' ;; esac; fi
 [ "${untracked:-0}" -gt 0 ] && printf 'Warning: %s untracked file(s) are not in the diff and were not reviewed. Run `git add -N <file>` to include them.\n\n' "$untracked"
+# Model output is data: control bytes (ESC, BEL, CR...) are dropped, newline and tab kept,
+# so it cannot drive the terminal (clear screen, OSC 52 clipboard, OSC 8 links).
 for p in $provs; do
   case "$p" in
     codex) printf '## codex (%s, effort %s)\n\n' "$model" "$effort" ;;
@@ -236,5 +274,5 @@ for p in $provs; do
   esac
   if [ -s "$work/$p.skip" ]; then printf 'skipped: %s\n\n' "$(cat "$work/$p.skip")"
   else cat "$work/$p.out"; printf '\n\n'; fi
-done
+done | LC_ALL=C tr -d '\000-\010\013-\037\177'
 exit 0

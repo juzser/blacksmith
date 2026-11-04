@@ -21,7 +21,7 @@ Inside a session the same is `/plugin marketplace add juzser/blacksmith` then `/
 
 ## Step 2: codex, for cross-check (optional)
 
-Only if the person wants `/cross-check`. Read [docs/cross-check.md](docs/cross-check.md) first: it sends code to the codex vendor. Check `codex --version`. If it is missing, this is a global install, so propose the command and ask first. Then the person logs in with `codex login` (they do this; it opens a browser). Without codex, `/cross-check` reports "skipped" and nothing breaks.
+Only if the person wants `/cross-check`. Read [docs/cross-check.md](docs/cross-check.md) first: it sends code to the codex vendor (and to DeepSeek only if the person opts in with `CROSSCHECK_PROVIDERS="codex deepseek"` and a `DEEPSEEK_API_KEY`). Check `codex --version`. If it is missing, this is a global install, so propose the command and ask first. Then the person logs in with `codex login` (they do this; it opens a browser). Without codex, `/cross-check` reports "skipped" and nothing breaks.
 
 ## Step 3: compact at 60% (optional)
 

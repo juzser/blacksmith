@@ -4,7 +4,7 @@ A small Claude Code plugin. It adds five things and leaves everything else to Cl
 
 1. **Plain explanations.** Rules for explaining things to a person: lead with the result, short sentences, jargon explained ([rules](docs/rules.md)).
 2. **Confidence on options.** Every option carries a confidence %, and the recommended one says what its figure rests on.
-3. **Cross-check.** `/cross-check` asks codex (read-only) and DeepSeek to review your change ([details and privacy](docs/cross-check.md)).
+3. **Cross-check.** `/cross-check` asks codex (read-only) to review your change, and DeepSeek too if you opt in ([details and privacy](docs/cross-check.md)).
 4. **Model and effort per task.** Five agents, `planner`, `coder`, `reviewer`, `researcher` and `scout`, each with its own model and effort ([agents](docs/agents.md)).
 5. **Compact rule.** Compact at about 60% of the context window, keeping what matters ([compact](docs/compact.md)).
 
