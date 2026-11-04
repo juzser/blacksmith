@@ -25,19 +25,20 @@ import { appendEvent, type EventOpts } from './events.js';
 import {
   computeFingerprint,
   type EventContext,
+  type Finding,
   type FindingEvidence,
+  listFindings,
   mintFindings,
   normalizeFilePath,
   raiseFinding,
   transition,
 } from './findings.js';
-import { runGit, runGitRaw } from './git.js';
+import { GIT_OUTPUT_OVER_CAP, GitCommandError, runGit, runGitRaw } from './git.js';
 import { checkWorktreeImmutable, fingerprintWorktree, type WorktreeDrift } from './immutability.js';
 import { readLineage } from './lineageSnapshot.js';
 import { commandOnPath } from './preconditions.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest, JudgeResult } from './providers/types.js';
-import { JUDGE_SCHEMA_FAILURE_CODES } from './providers/types.js';
 import { loadTaxonomy } from './taxonomy.js';
 
 export class AdvisoryCrosscheckError extends SmithError {}
@@ -63,8 +64,33 @@ export interface AdvisoryResult {
   reason?: string;
   provider?: string;
   findings: AdvisoryFinding[];
+  /** Whether the diff left the machine. False for every skip before the call. */
+  sent: boolean;
+  criteria_count: number;
+  test_files: string[];
+  test_files_dropped: DroppedTestFile[];
   event_id: string;
 }
+
+export interface DroppedTestFile {
+  path: string;
+  reason: string;
+}
+
+/**
+ * Transport codes that mean the call never got as far as reading the diff:
+ * nothing was available to ask. Everything else raised by the call itself is a
+ * failure after the send.
+ */
+const NOT_REACHED_CODES: ReadonlySet<string> = new Set([
+  'provider.auth-failed',
+  'provider.cli-unavailable',
+  'provider.disabled',
+  'provider.misconfigured',
+  'provider.missing-api-key',
+  'provider.not-external',
+  'provider.unknown',
+]);
 
 // ---------------------------------------------------------------------------
 // Pure pieces.
@@ -79,9 +105,20 @@ export function selectAdvisoryProvider(
   policy: CrosscheckPolicy,
   onPath: (command: string) => boolean = commandOnPath,
 ): { name: string } | { name: null; reason: string } {
+  // independent_finder.providers is the operator's list of vendors that may
+  // receive source (crossFinding.ts walks exactly it): a provider outside it
+  // never gets the diff, however active it is.
+  const allowed = new Set(policy.independentFinder.providers);
+  if (allowed.size === 0) {
+    return {
+      name: null,
+      reason: 'crosscheck.yml independent_finder.providers names no vendor that may receive source',
+    };
+  }
   const missing: string[] = [];
   for (const [name, config] of Object.entries(policy.providers)) {
-    if (config.kind === 'native' || !config.enabled) continue;
+    if (config.kind === 'native' || !config.enabled || config.mode !== 'active') continue;
+    if (!allowed.has(name)) continue;
     if (config.transport === 'cli' && !onPath(config.command)) {
       missing.push(`${name} (${config.command} is not on PATH)`);
       continue;
@@ -93,7 +130,7 @@ export function selectAdvisoryProvider(
     reason:
       missing.length > 0
         ? `no external provider is available: ${missing.join(', ')}`
-        : 'no external provider is enabled in crosscheck.yml',
+        : 'no enabled, active external provider is named in independent_finder.providers',
   };
 }
 
@@ -185,11 +222,20 @@ export interface AdvisoryRunInput {
   commandOnPathImpl?: (command: string) => boolean;
 }
 
-function readAtHead(project: string, head: string, file: string): string | null {
+/** A file at `head`, read under a byte cap; `dropped` says why it was not read. */
+function readAtHead(
+  project: string,
+  head: string,
+  file: string,
+  cap: number,
+): { content: string } | { dropped: string } {
   try {
-    return runGitRaw(project, ['show', `${head}:${file}`]);
-  } catch {
-    return null;
+    return { content: runGitRaw(project, ['show', `${head}:${file}`], { maxBuffer: cap + 1 }) };
+  } catch (err) {
+    if (err instanceof GitCommandError && err.stderr === GIT_OUTPUT_OVER_CAP) {
+      return { dropped: `over the remaining ${cap}-byte budget` };
+    }
+    return { dropped: 'not readable at the head revision' };
   }
 }
 
@@ -204,12 +250,9 @@ export async function runAdvisoryCrosscheck(
 ): Promise<AdvisoryResult> {
   const policy = input.policy ?? loadCrosscheckPolicy();
   const range = `${input.base}..${input.head}`;
-  const base = {
-    task_id: input.taskId,
-    base: input.base,
-    head: input.head,
-    criteria_count: input.criteria.length,
-  };
+  let testNames: string[] = [];
+  const dropped: DroppedTestFile[] = [];
+  let sent = false;
 
   const record = async (
     status: AdvisoryStatus,
@@ -220,7 +263,6 @@ export async function runAdvisoryCrosscheck(
       error_code?: string;
       drift?: WorktreeDrift[];
       findings?: AdvisoryFinding[];
-      test_files?: string[];
       usage?: unknown;
     } = {},
   ): Promise<AdvisoryResult> => {
@@ -233,7 +275,18 @@ export async function runAdvisoryCrosscheck(
         task_id: input.taskId,
         plan_version: ctx.planVersion,
         causal_parent: ctx.causalParent,
-        payload: { ...base, status, ...extra, findings },
+        payload: {
+          task_id: input.taskId,
+          base: input.base,
+          head: input.head,
+          criteria_count: input.criteria.length,
+          status,
+          sent,
+          test_files: testNames,
+          test_files_dropped: dropped,
+          ...extra,
+          findings,
+        },
       },
       opts,
     );
@@ -242,6 +295,10 @@ export async function runAdvisoryCrosscheck(
       ...(extra.reason === undefined ? {} : { reason: extra.reason }),
       ...(extra.provider === undefined ? {} : { provider: extra.provider }),
       findings,
+      sent,
+      criteria_count: input.criteria.length,
+      test_files: testNames,
+      test_files_dropped: dropped,
       event_id: stored.event_id,
     };
   };
@@ -261,24 +318,52 @@ export async function runAdvisoryCrosscheck(
     });
   }
 
-  const diff = runGitRaw(input.project, ['diff', range]);
+  // Read under a cap of max_diff_bytes + 1: the platform's 1 MiB default would
+  // crash the verb before it could say anything, and a cap lets an overflow be a
+  // recorded skip. Refused rather than truncated.
+  const budget = policy.independentFinder.maxDiffBytes;
+  let diff: string;
+  try {
+    diff = runGitRaw(input.project, ['diff', range], { maxBuffer: budget + 1 });
+  } catch (err) {
+    if (err instanceof GitCommandError && err.stderr === GIT_OUTPUT_OVER_CAP) {
+      return record('skipped', {
+        provider: providerName,
+        reason: `diff-too-large: ${range} is over independent_finder.max_diff_bytes (${budget}); refused rather than truncated`,
+      });
+    }
+    return record('failed', {
+      provider: providerName,
+      error_code: errorCode(err),
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
   if (diff.trim().length === 0) {
     return record('skipped', { provider: providerName, reason: `${range} has an empty diff` });
   }
-  const bytes = Buffer.byteLength(diff, 'utf8');
-  if (bytes > policy.independentFinder.maxDiffBytes) {
+  const diffBytes = Buffer.byteLength(diff, 'utf8');
+  if (diffBytes > budget) {
     return record('skipped', {
       provider: providerName,
-      reason: `${range} is ${bytes} bytes, over independent_finder.max_diff_bytes (${policy.independentFinder.maxDiffBytes}); refused rather than truncated`,
+      reason: `diff-too-large: ${range} is ${diffBytes} bytes, over independent_finder.max_diff_bytes (${budget}); refused rather than truncated`,
     });
   }
 
+  // Test files draw on what the diff left of the same budget, in diff order.
   const names = runGit(input.project, ['diff', '--name-only', range]).split('\n').filter(Boolean);
   const testPaths = input.testFiles ? [...input.testFiles] : testFilesFromDiffNames(names);
-  const testFiles = testPaths.flatMap((p) => {
-    const content = readAtHead(input.project, input.head, p);
-    return content === null ? [] : [{ path: p, content }];
-  });
+  let remaining = budget - diffBytes;
+  const testFiles: { path: string; content: string }[] = [];
+  for (const p of testPaths) {
+    const read = readAtHead(input.project, input.head, p, remaining);
+    if ('dropped' in read) {
+      dropped.push({ path: p, reason: read.dropped });
+      continue;
+    }
+    remaining -= Buffer.byteLength(read.content, 'utf8');
+    testFiles.push({ path: p, content: read.content });
+  }
+  testNames = testFiles.map((f) => f.path);
 
   const request = advisoryRequest({
     taskId: input.taskId,
@@ -293,18 +378,22 @@ export async function runAdvisoryCrosscheck(
   const before = fingerprintWorktree(worktree);
   const call = input.runJudgeImpl ?? ((name, req) => runJudge(name, req, { policy }));
   const model = providerModel(config);
-  const testNames = testFiles.map((f) => f.path);
 
   let judged: JudgeResult;
   try {
+    sent = true;
     judged = await call(providerName, request);
   } catch (err) {
     const code = errorCode(err);
     const message = err instanceof Error ? err.message : String(err);
     const common = { provider: providerName, model, error_code: code, reason: message };
-    // The provider answered and the answer was unusable: a recorded failure.
-    // Anything else means no usable answer ever arrived: nobody was available.
-    return record(JUDGE_SCHEMA_FAILURE_CODES.has(code) ? 'failed' : 'skipped', common);
+    // The call never reached a reader (no login, no binary, no key): nobody was
+    // available, and nothing was sent. Every other error came after the send.
+    if (NOT_REACHED_CODES.has(code)) {
+      sent = false;
+      return record('skipped', common);
+    }
+    return record('failed', common);
   }
 
   const after = checkWorktreeImmutable(worktree, before);
@@ -312,7 +401,6 @@ export async function runAdvisoryCrosscheck(
     return record('discarded', {
       provider: providerName,
       model,
-      test_files: testNames,
       reason: 'the worktree moved while the provider was reading it; its result was discarded',
       drift: after.drift,
     });
@@ -333,7 +421,11 @@ export async function runAdvisoryCrosscheck(
     ).map(({ finding, filePath }) => ({
       finding_id: finding.finding_id,
       task_id: input.taskId,
-      fingerprint: fingerprintOf(filePath, finding.finding_category, finding.summary),
+      fingerprint: computeFingerprint({
+        filePath,
+        category: finding.finding_category,
+        summary: finding.summary,
+      }),
       file_path: normalizeFilePath(filePath),
       finding_category: finding.finding_category,
       severity: finding.severity,
@@ -346,7 +438,6 @@ export async function runAdvisoryCrosscheck(
     return record('failed', {
       provider: providerName,
       model,
-      test_files: testNames,
       error_code: errorCode(err),
       reason: err instanceof Error ? err.message : String(err),
     });
@@ -355,17 +446,9 @@ export async function runAdvisoryCrosscheck(
   return record('ok', {
     provider: providerName,
     model,
-    test_files: testNames,
     findings,
     ...(judged.raw_usage ? { usage: judged.raw_usage } : {}),
   });
-}
-
-// mintFindings() does not hand back the fingerprint, only the draft it was
-// derived from; recompute it with the same function raiseFinding() uses so the
-// two always agree.
-function fingerprintOf(filePath: string, category: string, summary: string): string {
-  return computeFingerprint({ filePath, category, summary });
 }
 
 // ---------------------------------------------------------------------------
@@ -378,11 +461,24 @@ export interface ReproduceInput {
   evidence: string;
 }
 
+export interface ReproduceResult {
+  finding: Finding;
+  event_id: string;
+  /** True when the reproduction was already on record; nothing was written. */
+  already_reproduced: boolean;
+}
+
+/**
+ * Idempotent, and safe to retry after a crash at any point: the mark is the
+ * record that the reproduction finished, and every step before it is skipped
+ * when the log already shows it done. A finding that has moved on (fix-pending,
+ * fix-landed, ...) is never put back to `raised`.
+ */
 export async function reproduceAdvisoryFinding(
   input: ReproduceInput,
   ctx: EventContext,
   opts: EventOpts = {},
-): Promise<{ finding: Awaited<ReturnType<typeof transition>>; event_id: string }> {
+): Promise<ReproduceResult> {
   if (input.evidence.trim().length === 0) {
     throw new AdvisoryCrosscheckError(
       'crosscheck.reproduce-needs-evidence',
@@ -393,17 +489,12 @@ export async function reproduceAdvisoryFinding(
   const events = await readLineage(ctx.sessionId, opts);
   let advisory: AdvisoryFinding | undefined;
   let advisoryEventId: string | undefined;
+  let mark: string | undefined;
   for (const stored of events) {
     const { record } = stored;
     if (record.event_type === ADVISORY_REPRODUCED_EVENT_TYPE) {
       const payload = record.payload as { finding_id?: string };
-      if (payload.finding_id === input.findingId) {
-        throw new AdvisoryCrosscheckError(
-          'crosscheck.already-reproduced',
-          `Advisory finding "${input.findingId}" was already reproduced.`,
-          { findingId: input.findingId },
-        );
-      }
+      if (payload.finding_id === input.findingId) mark = stored.event_id;
     }
     if (record.event_type !== ADVISORY_EVENT_TYPE) continue;
     const found = ((record.payload as { findings?: AdvisoryFinding[] }).findings ?? []).find(
@@ -422,37 +513,55 @@ export async function reproduceAdvisoryFinding(
     );
   }
 
-  const raised = await raiseFinding(
-    {
-      filePath: advisory.file_path,
-      finding: {
-        finding_id: advisory.finding_id,
-        task_id: advisory.task_id,
-        finding_category: advisory.finding_category,
-        severity: advisory.severity,
-        finding_status: 'raised',
-        summary: advisory.summary,
-        failure_scenario: advisory.failure_scenario,
-        found_by: REVIEWER_ROLE,
-        found_by_provider: advisory.found_by_provider,
-      },
-    },
-    ctx,
-    opts,
+  const existing = (await listFindings(ctx.sessionId, { taskId: advisory.task_id }, opts)).find(
+    (f) => f.finding_id === advisory.finding_id,
   );
-  if (raised.suppressed) {
-    throw new AdvisoryCrosscheckError(
-      'crosscheck.reproduce-suppressed',
-      `Finding "${input.findingId}" is waived (fingerprint ${raised.fingerprint}); a waiver already answers it.`,
-      { findingId: input.findingId },
-    );
+  if (mark !== undefined && existing) {
+    return { finding: existing, event_id: mark, already_reproduced: true };
   }
-  const confirmed = await transition(
-    advisory.finding_id,
-    'confirmed',
-    { ...ctx, causalParent: raised.event_id },
-    opts,
-  );
+
+  let parent = ctx.causalParent;
+  let current = existing;
+  if (!current) {
+    const raised = await raiseFinding(
+      {
+        filePath: advisory.file_path,
+        finding: {
+          finding_id: advisory.finding_id,
+          task_id: advisory.task_id,
+          finding_category: advisory.finding_category,
+          severity: advisory.severity,
+          finding_status: 'raised',
+          summary: advisory.summary,
+          failure_scenario: advisory.failure_scenario,
+          found_by: REVIEWER_ROLE,
+          found_by_provider: advisory.found_by_provider,
+        },
+      },
+      ctx,
+      opts,
+    );
+    if (raised.suppressed) {
+      throw new AdvisoryCrosscheckError(
+        'crosscheck.reproduce-suppressed',
+        `Finding "${input.findingId}" is waived (fingerprint ${raised.fingerprint}); a waiver already answers it.`,
+        { findingId: input.findingId },
+      );
+    }
+    current = raised.finding;
+    parent = raised.event_id;
+  }
+  // Only a finding still at `raised` is confirmed; one further along keeps its place.
+  if (current.finding_status === 'raised') {
+    const confirmed = await transition(
+      advisory.finding_id,
+      'confirmed',
+      { ...ctx, causalParent: parent },
+      opts,
+    );
+    current = confirmed;
+    parent = confirmed.event_id;
+  }
   const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
@@ -460,7 +569,7 @@ export async function reproduceAdvisoryFinding(
       event_type: ADVISORY_REPRODUCED_EVENT_TYPE,
       task_id: advisory.task_id,
       plan_version: ctx.planVersion,
-      causal_parent: confirmed.event_id,
+      causal_parent: parent,
       payload: {
         finding_id: advisory.finding_id,
         task_id: advisory.task_id,
@@ -471,5 +580,5 @@ export async function reproduceAdvisoryFinding(
     },
     opts,
   );
-  return { finding: confirmed, event_id: stored.event_id };
+  return { finding: current, event_id: stored.event_id, already_reproduced: false };
 }

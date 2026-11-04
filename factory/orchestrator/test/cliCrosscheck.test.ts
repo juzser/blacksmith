@@ -139,6 +139,65 @@ describe('cli.ts crosscheck run / reproduce (built binary)', () => {
     expect(JSON.parse(after.stdout)).toHaveLength(1);
   });
 
+  it('collects criteria from --criterion, --criteria-file and --plan, and honours --test-file', () => {
+    const eventsDir = path.join(scratch, 'events-criteria');
+    const sessionId = `cli-crosscheck-crit-${Date.now()}`;
+    startSession(eventsDir, sessionId);
+    const answer = path.join(scratch, 'answer-empty.json');
+    writeFileSync(answer, '[]');
+    const criteriaFile = path.join(scratch, 'criteria.md');
+    writeFileSync(criteriaFile, '- first from file\n2. second from file\n\n');
+    const planFile = path.join(scratch, 'plan.json');
+    writeFileSync(
+      planFile,
+      JSON.stringify({
+        epic_id: 'lean-1',
+        version: 1,
+        status: 'approved',
+        tasks: [
+          { task_id: 'a', acceptance_criteria: ['plan one', 'plan two'] },
+          { task_id: 'b', acceptance_criteria: ['plan three'] },
+        ],
+        edges: [],
+      }),
+    );
+    const run = runCli(
+      [
+        'crosscheck',
+        'run',
+        '--task',
+        'lean-1/part-1',
+        '--base',
+        base,
+        '--head',
+        head,
+        '--project',
+        repo,
+        '--criterion',
+        'inline one',
+        '--criteria-file',
+        criteriaFile,
+        '--plan',
+        planFile,
+        '--test-file',
+        'src/a.ts',
+        '--policy',
+        policyFile(answer),
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ],
+      { SMITH_CROSSCHECK_OFFLINE: '' },
+    );
+    expect(run.status).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe('ok');
+    expect(parsed.criteria_count).toBe(1 + 2 + 3);
+    expect(parsed.test_files).toEqual(['src/a.ts']);
+    expect(parsed.test_files_dropped).toEqual([]);
+  });
+
   it('exits 0 with status skipped under the offline switch', () => {
     const eventsDir = path.join(scratch, 'events-offline');
     const sessionId = `cli-crosscheck-off-${Date.now()}`;

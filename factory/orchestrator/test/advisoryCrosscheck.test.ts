@@ -14,7 +14,7 @@ import {
 } from '../src/advisoryCrosscheck.js';
 import type { CliProviderConfig, CrosscheckPolicy } from '../src/crosscheck.js';
 import { appendEvent, readEvents } from '../src/events.js';
-import { foldFindings, listFindings } from '../src/findings.js';
+import { foldFindings, listFindings, raiseFinding, transition } from '../src/findings.js';
 import type { JudgeRequest, JudgeResult } from '../src/providers/types.js';
 import { ProviderError } from '../src/providers/types.js';
 import { crosscheckDefaults } from './helpers/crosscheckPolicy.js';
@@ -36,7 +36,11 @@ function cli(name: string, overrides: Partial<CliProviderConfig> = {}): CliProvi
   };
 }
 
-function policy(providers: CliProviderConfig[], sendDiff = true): CrosscheckPolicy {
+function policy(
+  providers: CliProviderConfig[],
+  sendDiff = true,
+  finder: { providers?: string[]; maxDiffBytes?: number } = {},
+): CrosscheckPolicy {
   const defaults = crosscheckDefaults();
   return {
     ...defaults,
@@ -45,7 +49,12 @@ function policy(providers: CliProviderConfig[], sendDiff = true): CrosscheckPoli
       ...Object.fromEntries(providers.map((p) => [p.name, p])),
     },
     quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
-    independentFinder: { ...defaults.independentFinder, sendDiff },
+    independentFinder: {
+      ...defaults.independentFinder,
+      sendDiff,
+      providers: finder.providers ?? providers.map((p) => p.name),
+      ...(finder.maxDiffBytes === undefined ? {} : { maxDiffBytes: finder.maxDiffBytes }),
+    },
   };
 }
 
@@ -73,6 +82,21 @@ describe('selectAdvisoryProvider', () => {
   it('skips a disabled provider and one whose binary is missing', () => {
     const p = policy([cli('codex', { enabled: false }), cli('other'), cli('third')]);
     expect(selectAdvisoryProvider(p, (cmd) => cmd === 'third')).toEqual({ name: 'third' });
+  });
+
+  it('skips a shadow provider: only active ones are asked', () => {
+    const p = policy([cli('codex', { mode: 'shadow' }), cli('deepseek')]);
+    expect(selectAdvisoryProvider(p, () => true)).toEqual({ name: 'deepseek' });
+  });
+
+  it('never picks a provider outside independent_finder.providers', () => {
+    const p = policy([cli('codex'), cli('deepseek')], true, { providers: ['deepseek'] });
+    expect(selectAdvisoryProvider(p, () => true)).toEqual({ name: 'deepseek' });
+    const none = policy([cli('codex')], true, { providers: [] });
+    expect(selectAdvisoryProvider(none, () => true)).toMatchObject({
+      name: null,
+      reason: expect.stringContaining('independent_finder.providers'),
+    });
   });
 
   it('says why when nobody is available', () => {
@@ -252,6 +276,162 @@ describe('runAdvisoryCrosscheck', () => {
     expect(out.reason).toContain('not logged in');
   });
 
+  it('records a failure after the send as failed, with sent: true and the code', async () => {
+    for (const code of ['provider.timeout', 'provider.cli-failed']) {
+      const out = await runAdvisoryCrosscheck(
+        input(async () => {
+          throw new ProviderError(code, 'boom');
+        }),
+        ctx(),
+        { stateDir },
+      );
+      expect(out.status).toBe('failed');
+      const events = (await readEvents(sessionId, { stateDir })).filter(
+        (e) => e.record.event_type === ADVISORY_EVENT_TYPE,
+      );
+      expect(events.at(-1)?.record.payload).toMatchObject({
+        status: 'failed',
+        sent: true,
+        error_code: code,
+      });
+    }
+  });
+
+  it('marks sent: false on a skip before the call', async () => {
+    await runAdvisoryCrosscheck(
+      { ...input(async () => result([])), policy: policy([cli('codex', { enabled: false })]) },
+      ctx(),
+      { stateDir },
+    );
+    const events = (await readEvents(sessionId, { stateDir })).filter(
+      (e) => e.record.event_type === ADVISORY_EVENT_TYPE,
+    );
+    expect(events[0]?.record.payload).toMatchObject({ status: 'skipped', sent: false });
+  });
+
+  it('skips with diff-too-large instead of crashing on a diff over the git buffer', async () => {
+    writeFileSync(
+      path.join(repo, 'src/big.ts'),
+      `${'x'.repeat(79)}
+`.repeat(20_000),
+    );
+    git('add', 'src/big.ts');
+    git('commit', '-q', '-m', 'big');
+    const bigHead = git('rev-parse', 'HEAD');
+    let called = false;
+    const run = (maxDiffBytes: number) =>
+      runAdvisoryCrosscheck(
+        {
+          ...input(async () => {
+            called = true;
+            return result([]);
+          }),
+          head: bigHead,
+          policy: policy([cli('codex')], true, { maxDiffBytes }),
+        },
+        ctx(),
+        { stateDir },
+      );
+    const small = await run(100_000);
+    expect(small.status).toBe('skipped');
+    expect(small.reason).toContain('diff-too-large');
+    expect(called).toBe(false);
+    // Over git's default 1 MiB buffer but inside the policy cap: it must be sent.
+    writeFileSync(
+      path.join(repo, 'src/big2.ts'),
+      `${'y'.repeat(79)}
+`.repeat(20_000),
+    );
+    git('add', 'src/big2.ts');
+    git('commit', '-q', '-m', 'big2');
+    const out = await runAdvisoryCrosscheck(
+      {
+        ...input(async () => {
+          called = true;
+          return result([]);
+        }),
+        head: git('rev-parse', 'HEAD'),
+        policy: policy([cli('codex')], true, { maxDiffBytes: 5_000_000 }),
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(out.status).toBe('ok');
+    expect(called).toBe(true);
+  });
+
+  it('skips an empty diff', async () => {
+    const out = await runAdvisoryCrosscheck(
+      { ...input(async () => result([])), head: base },
+      ctx(),
+      {
+        stateDir,
+      },
+    );
+    expect(out.status).toBe('skipped');
+    expect(out.reason).toContain('empty diff');
+  });
+
+  it('counts test files against the same byte budget and reports what it dropped', async () => {
+    writeFileSync(
+      path.join(repo, 'test/huge.test.ts'),
+      `${'z'.repeat(79)}
+`.repeat(5_000),
+    );
+    git('add', 'test/huge.test.ts');
+    git('commit', '-q', '-m', 'huge test');
+    // The huge file predates the range, so only the test budget can exclude it.
+    const rangeBase = git('rev-parse', 'HEAD');
+    writeFileSync(path.join(repo, 'src/a.ts'), 'export const x = 2;\n');
+    git('add', 'src/a.ts');
+    git('commit', '-q', '-m', 'small change');
+    let seen: JudgeRequest | undefined;
+    const out = await runAdvisoryCrosscheck(
+      {
+        ...input(async (_n, req) => {
+          seen = req;
+          return result([]);
+        }),
+        base: rangeBase,
+        head: git('rev-parse', 'HEAD'),
+        testFiles: ['test/huge.test.ts', 'test/a.test.ts'],
+        policy: policy([cli('codex')], true, { maxDiffBytes: 100_000 }),
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(out.status).toBe('ok');
+    expect(seen?.prompt).not.toContain('zzzzzzzzzz');
+    expect(out.test_files_dropped).toEqual([
+      { path: 'test/huge.test.ts', reason: expect.stringContaining('budget') },
+    ]);
+    expect(out.test_files).toContain('test/a.test.ts');
+    const events = (await readEvents(sessionId, { stateDir })).filter(
+      (e) => e.record.event_type === ADVISORY_EVENT_TYPE,
+    );
+    expect(events[0]?.record.payload).toMatchObject({
+      test_files_dropped: [{ path: 'test/huge.test.ts' }],
+    });
+  });
+
+  it('honours an explicit test-file list over the derived one', async () => {
+    let seen: JudgeRequest | undefined;
+    const out = await runAdvisoryCrosscheck(
+      {
+        ...input(async (_n, req) => {
+          seen = req;
+          return result([]);
+        }),
+        testFiles: ['src/a.ts'],
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(out.test_files).toEqual(['src/a.ts']);
+    expect(seen?.prompt).toContain('--- src/a.ts');
+    expect(seen?.prompt).not.toContain('--- test/a.test.ts');
+  });
+
   it('skips rather than sending source when the policy does not authorize the diff', async () => {
     let called = false;
     const out = await runAdvisoryCrosscheck(
@@ -346,7 +526,7 @@ describe('runAdvisoryCrosscheck', () => {
     });
   });
 
-  it('reproduce refuses an unknown id, empty evidence, and a second reproduction', async () => {
+  it('reproduce refuses an unknown id and empty evidence', async () => {
     const run = await runAdvisoryCrosscheck(
       input(async () => result([evidence()])),
       ctx(),
@@ -359,9 +539,59 @@ describe('runAdvisoryCrosscheck', () => {
     await expect(
       reproduceAdvisoryFinding({ findingId: id, evidence: '  ' }, ctx(), { stateDir }),
     ).rejects.toMatchObject({ code: 'crosscheck.reproduce-needs-evidence' });
+  });
+
+  it('reproduce is idempotent: a second call changes nothing', async () => {
+    const run = await runAdvisoryCrosscheck(
+      input(async () => result([evidence()])),
+      ctx(),
+      { stateDir },
+    );
+    const id = run.findings[0]?.finding_id as string;
     await reproduceAdvisoryFinding({ findingId: id, evidence: 'probe' }, ctx(), { stateDir });
-    await expect(
-      reproduceAdvisoryFinding({ findingId: id, evidence: 'probe' }, ctx(), { stateDir }),
-    ).rejects.toMatchObject({ code: 'crosscheck.already-reproduced' });
+    const again = await reproduceAdvisoryFinding({ findingId: id, evidence: 'probe' }, ctx(), {
+      stateDir,
+    });
+    expect(again.already_reproduced).toBe(true);
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.filter((e) => e.record.event_type === 'finding-raised')).toHaveLength(1);
+    expect(
+      events.filter((e) => e.record.event_type === ADVISORY_REPRODUCED_EVENT_TYPE),
+    ).toHaveLength(1);
+  });
+
+  it('a retry after a crash before the mark does not reset a finding that moved on', async () => {
+    const run = await runAdvisoryCrosscheck(
+      input(async () => result([evidence()])),
+      ctx(),
+      { stateDir },
+    );
+    const f = run.findings[0] as (typeof run.findings)[number];
+    // The crashed first attempt got as far as raise + confirm + fix-pending, but wrote no mark.
+    await raiseFinding(
+      {
+        filePath: f.file_path,
+        finding: {
+          finding_id: f.finding_id,
+          task_id: f.task_id,
+          finding_category: f.finding_category,
+          severity: f.severity,
+          finding_status: 'raised',
+          summary: f.summary,
+          failure_scenario: f.failure_scenario,
+          found_by: 'reviewer',
+        },
+      },
+      ctx(),
+      { stateDir },
+    );
+    await transition(f.finding_id, 'confirmed', ctx(), { stateDir });
+    await transition(f.finding_id, 'fix-pending', ctx(), { stateDir });
+    await reproduceAdvisoryFinding({ findingId: f.finding_id, evidence: 'probe' }, ctx(), {
+      stateDir,
+    });
+    const stored = await listFindings(sessionId, { taskId: 't-1' }, { stateDir });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.finding_status).toBe('fix-pending');
   });
 });

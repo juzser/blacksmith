@@ -6447,6 +6447,8 @@ async function main(): Promise<number> {
       const eventOpts = eventOptsFromFlags(flags);
       const sessionId = requireSessionFlag(flags);
       requireSession(sessionId, eventOpts);
+      // The provider call is an external write before the append: pin first.
+      const runCtx = await pinnedEventContext(flags);
       const projectDir = flags.project ?? projectDirFromFlags(flags) ?? process.cwd();
       const policy = loadCrosscheckPolicy(flags.policy, { projectDir });
       const criteria = [...(repeated.criterion ?? [])];
@@ -6475,7 +6477,7 @@ async function main(): Promise<number> {
           budget: judgeBudgetFromFlags(flags),
           policy,
         },
-        await pinnedEventContext(flags),
+        runCtx,
         eventOpts,
       );
       printJson({ ...result, advisory: true });
@@ -6493,7 +6495,12 @@ async function main(): Promise<number> {
         await pinnedEventContext(flags),
         eventOpts,
       );
-      printJson({ reproduced: true, finding: result.finding, event_id: result.event_id });
+      printJson({
+        reproduced: true,
+        already_reproduced: result.already_reproduced,
+        finding: result.finding,
+        event_id: result.event_id,
+      });
       return 0;
     }
   }

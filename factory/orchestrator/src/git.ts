@@ -24,6 +24,9 @@ import { SmithError } from './errors.js';
  * for a credential, for an editor — would otherwise wait forever on input
  * that no unattended agent is going to type.
  */
+/** The `stderr` a GitCommandError carries when git's output passed the caller's `maxBuffer`. */
+export const GIT_OUTPUT_OVER_CAP = 'git output exceeded the byte cap the caller set';
+
 export class GitCommandError extends SmithError {
   /** git's own stderr, credential-redacted. Empty when it said nothing. */
   readonly stderr: string;
@@ -59,11 +62,17 @@ export function redactCredentials(text: string): string {
  * `onConflict`, when given, reads what git said from stdout on exit 1 — for
  * the commands (merge-tree) that report a conflict there, not on stderr.
  */
-function exec(cwd: string, args: string[], onConflict?: (stdout: string) => string): string {
+function exec(
+  cwd: string,
+  args: string[],
+  onConflict?: (stdout: string) => string,
+  maxBuffer?: number,
+): string {
   try {
     return execFileSync('git', args, {
       cwd,
       encoding: 'utf8',
+      ...(maxBuffer === undefined ? {} : { maxBuffer }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
@@ -72,9 +81,11 @@ function exec(cwd: string, args: string[], onConflict?: (stdout: string) => stri
     // string instead, and that is the only thing worth reporting.
     const status = typeof e.status === 'number' ? e.status : null;
     const said =
-      onConflict !== undefined && status === 1
-        ? onConflict(e.stdout ?? '')
-        : (e.stderr ?? (typeof e.code === 'string' ? `git could not be run (${e.code})` : ''));
+      e.code === 'ENOBUFS'
+        ? GIT_OUTPUT_OVER_CAP
+        : onConflict !== undefined && status === 1
+          ? onConflict(e.stdout ?? '')
+          : (e.stderr ?? (typeof e.code === 'string' ? `git could not be run (${e.code})` : ''));
     throw new GitCommandError(cwd, args, status, redactCredentials(said));
   }
 }
@@ -88,8 +99,8 @@ export function runGit(cwd: string, args: string[]): string {
  * Same, byte-for-byte. For `-z` output, where the record separator is a NUL
  * and the trailing one is part of the format rather than noise to trim.
  */
-export function runGitRaw(cwd: string, args: string[]): string {
-  return exec(cwd, args);
+export function runGitRaw(cwd: string, args: string[], opts: { maxBuffer?: number } = {}): string {
+  return exec(cwd, args, undefined, opts.maxBuffer);
 }
 
 /**
