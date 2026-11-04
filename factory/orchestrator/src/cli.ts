@@ -1714,7 +1714,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
               ...(uiAffecting === undefined ? {} : { uiAffecting }),
               alsoReported,
             },
-            { sessionId: flags.session },
+            { sessionId: effectiveSession(flags) },
             opts,
           ),
         )

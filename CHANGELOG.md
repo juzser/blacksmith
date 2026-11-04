@@ -378,6 +378,12 @@ before hand-off. One entry per task.
 
 ### Fixed
 
+- **`results check` reads the session from `CLAUDE_CODE_SESSION_ID` as `gate run` does.**
+  It passed the raw `--session` flag to the paperwork stages, so with the session
+  taken from the env they skipped the judges, uiux and mcp-override reads and the
+  preflight passed where `gate run` blocked. It now resolves the session the same
+  way; with neither flag nor env nothing changes.
+
 - **`trial.mjs record` no longer fails when `.blacksmith` is git-ignored.**
   `diffStats` marked new files with `git add -N -- . ':(exclude).blacksmith'`,
   which exits 1 under git 2.55 when the excluded directory is ignored (for
