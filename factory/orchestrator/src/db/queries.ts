@@ -2674,6 +2674,10 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // shadow verdict nobody can see is a shadow deployment nobody can evaluate,
   // which is the whole reason the mode exists.
   'cross-finding-reconciled',
+  // The lean path's advisory cross-check and its reproductions: the only trace
+  // that a second model read the combined diff, including when it was skipped.
+  'advisory-crosscheck',
+  'advisory-finding-reproduced',
   // The scheduler's four proposals. Architecture §12 has the scheduler
   // propose and the operator dispose, so the timeline is the only place the
   // offer is ever made -- drop the row and the proposal is never put to
@@ -2851,6 +2855,8 @@ export function eventKind(eventType: string, _payload: Record<string, unknown>):
     case 'waiver-denied':
     case 'judge-verdict':
     case 'cross-finding-reconciled':
+    case 'advisory-crosscheck':
+    case 'advisory-finding-reproduced':
     case 'spec-change-proposed':
     case 'spec-change-decided':
       return 'Feedback';

@@ -31,6 +31,19 @@ than appearing in it.
 
 ### Added
 
+- **Advisory cross-check** (lean mode, O-2). `bs crosscheck run --task <id>
+  --base <rev> --head <rev>` sends the combined diff, the acceptance criteria
+  (`--criterion`, `--criteria-file` or `--plan`) and the test files (derived
+  from the diff, or `--test-file`) to the first provider in `crosscheck.yml`'s
+  `independent_finder.providers` order that is `mode: active`, once,
+  read-only and with the worktree fingerprinted around the call. It asks two questions: real defects with a concrete input and
+  output, and criteria no test would catch if removed. It never blocks and
+  never prompts: no provider, `send_diff: false`, a moved worktree or
+  malformed output exits 0 with `status` `skipped`, `discarded` or `failed`,
+  and writes one `advisory-crosscheck` event. It writes no `judge-verdict`, so
+  no quorum, epic verdict or provider-agreement stat counts its findings. A
+  finding gains power only through `bs crosscheck reproduce <finding-id>
+  --evidence <text>`, which raises it as an ordinary finding and confirms it.
 - **`--no-grader` on `gate run` and `results check`** (lean mode, O-6). The
   caller can say on purpose that a run has no grader; a missing verdict is
   skipped and the preflight reports it as `skipped-by-option`. A verdict a

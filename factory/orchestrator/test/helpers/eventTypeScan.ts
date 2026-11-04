@@ -152,6 +152,18 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       "One independent-finder run reconciled against the native reviewer's findings (crossFinding.ts). Outside the taxonomy for the same reason as judge-verdict -- promoting it into gate_event is an operator call with a version bump, not a change this lint makes on its own -- and unlike a gate result it decides nothing: it records what the second eye saw, which findings the two agreed on, and which the operator could raise. The mintable ids in the payload are drafts, not findings.",
   },
   {
+    eventType: 'advisory-crosscheck',
+    writtenBy: 'src',
+    reason:
+      "One advisory cross-check (advisoryCrosscheck.ts): the lean path's one-shot review by a different model. Outside the taxonomy for the same reason as cross-finding-reconciled. It is deliberately NOT a judge-verdict or a finding-raised: its findings are advisory, so no quorum, gate, epic close or provider-agreement stat may count them. Status is ok, skipped, failed or discarded.",
+  },
+  {
+    eventType: 'advisory-finding-reproduced',
+    writtenBy: 'src',
+    reason:
+      'The session reproduced an advisory finding with a failing test or probe (advisoryCrosscheck.ts). The finding itself is raised and confirmed through the ordinary finding-raised / finding-transitioned events; this one records the reproduction evidence.',
+  },
+  {
     eventType: 'judge-reported',
     writtenBy: 'src',
     reason:
