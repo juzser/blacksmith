@@ -12,6 +12,7 @@ export type UiuxBlockReason =
   | 'uiux-spec-missing'
   | 'screenshots-missing'
   | 'screenshots-stale'
+  | 'mobile-overflow'
   | 'uiux-visual-missing';
 
 /** A shot whose recorded in-page width does not prove its declared viewport: the file name says one thing, the page measured another (or nothing). */
@@ -20,10 +21,12 @@ export interface InvalidShot {
   viewport: string;
   inner_width?: number;
   client_width?: number;
-  why: 'width-mismatch' | 'no-width-record';
+  why: 'width-mismatch' | 'no-width-record' | 'page-not-mobile-scaled';
+  /** What to look at first; absent when `why` already says it. */
+  hint?: string;
 }
 
-/** A genuine mobile shot of a page that is wider than the viewport: a real horizontal-overflow fact, not a crop. */
+/** A genuine mobile shot of a page that is wider than the viewport: a real horizontal-overflow defect of the page, not a crop. */
 export interface OverflowShot {
   path: string;
   viewport: string;
@@ -32,8 +35,14 @@ export interface OverflowShot {
 }
 
 export type UiuxCheckResult =
-  | { outcome: 'pass'; overflow?: OverflowShot[] }
-  | { outcome: 'blocked'; reason: UiuxBlockReason; invalidShots?: InvalidShot[] };
+  | { outcome: 'pass' }
+  | {
+      outcome: 'blocked';
+      reason: UiuxBlockReason;
+      invalidShots?: InvalidShot[];
+      /** Set only on `mobile-overflow`: each mobile shot whose page is wider than its viewport. */
+      overflow?: OverflowShot[];
+    };
 
 export interface UiuxCheckInput {
   taskId: string;
@@ -129,6 +138,8 @@ const MOBILE_WIDTH = 390;
 const SCROLLBAR_ALLOWANCE = 20;
 /** Narrowest `window.innerWidth` a `desktop` shot may report. */
 const DESKTOP_MIN_WIDTH = 768;
+/** Where equal inner and client widths stop looking like a scrollbar quirk and start looking like an unscaled page (980 with no meta viewport, 780 at initial-scale=0.5). */
+const NOT_SCALED_MIN_WIDTH = 600;
 
 /**
  * Why a shot's recorded widths do not prove its declared viewport, or null when
@@ -141,11 +152,21 @@ function shotWidthIssue(s: ScreenshotEntry): InvalidShot['why'] | null {
   const { inner_width: inner, client_width: client } = s;
   if (typeof inner !== 'number' || typeof client !== 'number') return 'no-width-record';
   if (s.viewport === 'mobile') {
-    const ok = client <= MOBILE_WIDTH && client >= MOBILE_WIDTH - SCROLLBAR_ALLOWANCE;
-    return ok ? null : 'width-mismatch';
+    if (client <= MOBILE_WIDTH && client >= MOBILE_WIDTH - SCROLLBAR_ALLOWANCE) return null;
+    // Both widths agree and sit far above 390: the emulated device did not scale the page.
+    return inner === client && client >= NOT_SCALED_MIN_WIDTH
+      ? 'page-not-mobile-scaled'
+      : 'width-mismatch';
   }
   return inner >= DESKTOP_MIN_WIDTH ? null : 'width-mismatch';
 }
+
+const HINTS: Partial<Record<InvalidShot['why'], string>> = {
+  'width-mismatch':
+    'a headless --window-size crop, or a custom wide ::-webkit-scrollbar, can cause this; shoot with viewport emulation',
+  'page-not-mobile-scaled':
+    'the page has no mobile viewport: add <meta name="viewport" content="width=device-width, initial-scale=1">; shoot with isMobile device emulation and do not drop isMobile to make this pass, the page is the defect',
+};
 
 /** Every shot whose recorded widths do not match its viewport, with the widths it recorded. */
 export function shotWidthIssues(shots: readonly ScreenshotEntry[]): InvalidShot[] {
@@ -159,12 +180,13 @@ export function shotWidthIssues(shots: readonly ScreenshotEntry[]): InvalidShot[
       ...(s.inner_width === undefined ? {} : { inner_width: s.inner_width }),
       ...(s.client_width === undefined ? {} : { client_width: s.client_width }),
       why,
+      ...(HINTS[why] === undefined ? {} : { hint: HINTS[why] }),
     });
   }
   return out;
 }
 
-/** Valid mobile shots whose page is wider than the viewport (`inner_width` above `client_width`): reported, never refused. */
+/** Valid mobile shots whose page is wider than the viewport (`inner_width` above `client_width`): the gate blocks on them as `mobile-overflow`. */
 export function shotOverflows(shots: readonly ScreenshotEntry[]): OverflowShot[] {
   const out: OverflowShot[] = [];
   for (const s of shots) {
@@ -237,6 +259,11 @@ export function evaluateUiux(
     return { outcome: 'blocked', reason: 'screenshots-stale' };
   }
 
+  const overflow = shotOverflows(tester.screenshots);
+  if (overflow.length > 0) {
+    return { outcome: 'blocked', reason: 'mobile-overflow', overflow };
+  }
+
   const visualTurn = turns.find((t) => t.role === UIUX_ROLE && t.kind === 'visual');
   const visualDispatchIndex =
     visualTurn === undefined
@@ -250,8 +277,7 @@ export function evaluateUiux(
     return { outcome: 'blocked', reason: 'uiux-visual-missing' };
   }
 
-  const overflow = shotOverflows(tester.screenshots);
-  return overflow.length === 0 ? { outcome: 'pass' } : { outcome: 'pass', overflow };
+  return { outcome: 'pass' };
 }
 
 /**

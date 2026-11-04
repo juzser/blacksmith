@@ -17,6 +17,7 @@ import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 import {
   evaluateUiux,
   screenshotSetComplete,
+  shotOverflows,
   shotWidthIssues,
   type UiuxBlockReason,
 } from './uiuxGate.js';
@@ -569,11 +570,10 @@ export async function checkPaperwork(
           input.alsoReported,
         );
         if (r.outcome === 'blocked')
-          block(
-            stage,
-            r.reason,
-            r.invalidShots === undefined ? {} : { invalidShots: r.invalidShots },
-          );
+          block(stage, r.reason, {
+            ...(r.invalidShots === undefined ? {} : { invalidShots: r.invalidShots }),
+            ...(r.overflow === undefined ? {} : { overflow: r.overflow }),
+          });
         break;
       }
       case 'screenshots': {
@@ -593,6 +593,9 @@ export async function checkPaperwork(
             screenshots: r.shots,
             ...(invalidShots.length === 0 ? {} : { invalidShots }),
           });
+        } else {
+          const overflow = shotOverflows(r.shots);
+          if (overflow.length > 0) block(stage, 'mobile-overflow', { overflow });
         }
         break;
       }

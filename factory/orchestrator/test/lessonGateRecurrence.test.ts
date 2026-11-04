@@ -86,6 +86,7 @@ describe('GATE_BLOCK_ERROR_CLASSES', () => {
       'uiux-spec-missing': null,
       'uiux-visual-missing': null,
       'screenshots-stale': null,
+      'mobile-overflow': null,
       'grader-fail': null,
       'coverage-evidence': null,
       findings: null,

@@ -512,8 +512,9 @@ block the merge queue, it queues an operator question (§8 below).
 | `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; a judge turn answers it: the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'); `wave.md` step 7 sends it to the grader before `gate run` |
 | `blocked` (`reason: "uiux-spec-missing"`) | A UI-affecting task has no uiux spec from the uiux spec pass | Never reaches tests; bounce to the uiux pass (the spec pass) |
 | `blocked` (`reason: "uiux-visual-missing"`) | A UI-affecting task has no uiux visual pass over its screenshots | Never reaches tests; bounce to the uiux pass (the visual pass) |
-| `blocked` (`reason: "screenshots-missing"`) | A UI-affecting task has no complete screenshot set from the tester: a combination is missing, a file is not on disk, or a shot's recorded `inner_width`/`client_width` does not match its viewport (a cropped render); `invalidShots[]` names each such shot with its path, viewport and widths | Never reaches tests; bounce to the tester |
+| `blocked` (`reason: "screenshots-missing"`) | A UI-affecting task has no complete screenshot set from the tester: a combination is missing, a file is not on disk, or a shot's recorded `inner_width`/`client_width` does not match its viewport (a cropped render); `invalidShots[]` names each such shot with its path, viewport, widths and a hint (`page-not-mobile-scaled` points at the page's `<meta name="viewport">`) | Never reaches tests; bounce to the tester |
 | `blocked` (`reason: "screenshots-stale"`) | The tester's screenshots were taken at another HEAD than the gate's | Never reaches tests; bounce to the tester to re-shoot at the gate's HEAD |
+| `blocked` (`reason: "mobile-overflow"`) | A mobile shot was taken at the right width but its page is wider than the viewport (`inner_width` above `client_width`); `overflow[]` names each shot with both widths | Never reaches tests; bounce to the coder to fix the page, then the tester re-shoots |
 | `blocked` (`reason: "grader-fail"`) | A criterion came back `fail`/`partial`, or the grading run was `dead` | Never reaches tests; bounce to the coder with the named gaps; a round-2 `fail` re-scopes under wave.md step 6 instead |
 | `blocked` (`reason: "tests-failed"`) | A check command exited non-zero | On the same branch, bounce to the coder; an env-classified block follows the env-failure paragraph below instead |
 | `blocked` (`reason: "coverage-evidence"`) | A coverage check ran, and the evidence it left does not cover the task's claims: no summary, a claimed file with no row, or no claims read for the task id | The tests ran; three cases, see §5c: `present` false, the epic session answers it; `present` true with an `unmeasured` subject, bounce to the coder; `present` true with no `unmeasured` subject, the wave-runner's own fix answers it |
@@ -597,8 +598,8 @@ problem falls in exactly one of five branches:
    leaves one; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'), never to
    `gate run` and never to a builder.
 3. **A worker's file the gate blocks on.** `schema-invalid`,
-   `artifacts-missing`, `not-committed`, `screenshots-missing` and
-   `screenshots-stale`. The wave-runner runs `gate run`
+   `artifacts-missing`, `not-committed`, `screenshots-missing`,
+   `screenshots-stale` and `mobile-overflow`. The wave-runner runs `gate run`
    with the same flags. It blocks on the same reason before any check command
    runs and writes the blocked `gate-outcome` that `readFailedRounds` counts,
    so the bounce that follows is a failed round on the escalation ladder.

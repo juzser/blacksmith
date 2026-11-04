@@ -138,12 +138,13 @@ describe('uiuxGate.ts checkUiux', () => {
           inner_width: 500,
           client_width: 485,
           why: 'width-mismatch',
+          hint: expect.stringContaining('scrollbar'),
         },
       ],
     });
   });
 
-  it('passes a mobile page that really overflows (inner 600, client 390) and flags the overflow', async () => {
+  it('blocks mobile-overflow when a mobile page is wider than its viewport (inner 600, client 390)', async () => {
     await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
     await reportUiux('spec');
     const wide = SCREENSHOTS.map((s) =>
@@ -155,9 +156,40 @@ describe('uiuxGate.ts checkUiux', () => {
     await reportUiux('visual');
     const result = await checkUiux({ taskId, head: 'sha-1', artifactsDir }, ctx(), opts());
     expect(result).toEqual({
-      outcome: 'pass',
+      outcome: 'blocked',
+      reason: 'mobile-overflow',
       overflow: [
         { path: 'home-mobile-light.png', viewport: 'mobile', inner_width: 600, client_width: 390 },
+      ],
+    });
+  });
+
+  it.each([
+    ['980/980 (no meta viewport under isMobile)', 980],
+    ['780/780 (initial-scale=0.5)', 780],
+  ])('names the meta viewport when a narrow shot measures %s', async (_n, width) => {
+    await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
+    await reportUiux('spec');
+    const unscaled = SCREENSHOTS.map((s) =>
+      s.path === 'home-mobile-dark.png' ? { ...s, inner_width: width, client_width: width } : s,
+    );
+    await writeScreenshotsToDisk(unscaled);
+    await recordTester('sha-1', unscaled);
+    const result = await checkUiux({ taskId, head: 'sha-1', artifactsDir }, ctx(), opts());
+    expect(result).toEqual({
+      outcome: 'blocked',
+      reason: 'screenshots-missing',
+      invalidShots: [
+        {
+          path: 'home-mobile-dark.png',
+          viewport: 'mobile',
+          inner_width: width,
+          client_width: width,
+          why: 'page-not-mobile-scaled',
+          hint: expect.stringContaining(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+          ),
+        },
       ],
     });
   });

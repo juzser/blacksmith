@@ -48,7 +48,10 @@ for a runner the project does not have.
   its viewport (mobile: `client_width` 370 to 390; desktop: `inner_width` at
   least 768), and a shot with no record counts for nothing. A mobile page
   wider than its viewport (`inner_width` above `client_width`) is a real
-  overflow: shoot it as is and say so.
+  overflow: shoot it as is, and the gate bounces the page to the coder.
+  Shoot mobile with `isMobile` device emulation and never drop `isMobile` to
+  make a refused shot pass: a refusal such as `page-not-mobile-scaled` is a
+  page defect to report.
 - Touch-target measurement for every UI-affecting task: at the mobile
   viewport, measure the bounding box of every interactive element (`button`,
   `a[href]`, `input`, `select`, `[role=button]`, and the project's own

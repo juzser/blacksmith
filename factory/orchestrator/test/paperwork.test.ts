@@ -322,6 +322,7 @@ describe('paperwork role parity', () => {
       inner_width: 500,
       client_width: 485,
       why: 'width-mismatch',
+      hint: expect.stringContaining('scrollbar'),
     };
     await recordTaskResult(
       { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
@@ -359,6 +360,34 @@ describe('paperwork role parity', () => {
       reason: 'screenshots-missing',
       invalidShots: [crop],
     });
+  });
+
+  it('tester: a mobile page wider than its viewport is mobile-overflow in the gate and the preflight', async () => {
+    await withSpecTurn(w);
+    const result = await testerResult(w, SHOT_NAMES);
+    for (const a of result.artifacts as Record<string, unknown>[]) {
+      if (a.path === 'home-mobile-light.png') {
+        a.inner_width = 600;
+        a.client_width = 390;
+      }
+    }
+    await recordTaskResult(
+      { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
+      w.ctx(),
+      w.opts(),
+    );
+    const overflow = [
+      { path: 'home-mobile-light.png', viewport: 'mobile', inner_width: 600, client_width: 390 },
+    ];
+    const pre = await checkPaperwork(
+      { as: 'tester', taskId: w.taskId, result, artifactsDir: w.artifactsDir, uiAffecting: true },
+      w.ctx(),
+      w.opts(),
+    );
+    expect(pre).toMatchObject({ outcome: 'blocked', reason: 'mobile-overflow' });
+    expect(JSON.stringify(pre)).toContain('home-mobile-light.png');
+    const gate = await runGate(baseInput(w, { uiAffecting: true }), w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mobile-overflow', overflow });
   });
 
   it('tester: a missing combo is screenshots-missing in both', async () => {

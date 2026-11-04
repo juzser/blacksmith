@@ -314,8 +314,8 @@ one thing this playbook never asks you to.
         round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'). It is never sent to `gate run`
         and never to a builder.
      3. **A worker's file the gate blocks on.** `schema-invalid`,
-        `artifacts-missing`, `not-committed`, `screenshots-missing` and
-        `screenshots-stale`. Run `gate run` with the same
+        `artifacts-missing`, `not-committed`, `screenshots-missing`,
+        `screenshots-stale` and `mobile-overflow`. Run `gate run` with the same
         flags. It blocks on the same reason before any check command runs and
         writes the blocked `gate-outcome` that `readFailedRounds` counts; the
         bounce that follows is step 9's, a failed round on the ladder that
@@ -513,6 +513,7 @@ one thing this playbook never asks you to.
    - `findings`: bounce to the coder.
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
+   - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.
    - `schema-invalid`: bounce to the worker whose result it is (the worker the gate line's `--result` and `--agent` name).
    - `artifacts-missing`: bounce to the worker whose result it is (the worker the gate line's `--result` and `--agent` name).
    - `uiux-spec-missing`: bounce to the uiux pass (the uiux spec pass).
