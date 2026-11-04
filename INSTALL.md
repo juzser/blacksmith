@@ -410,10 +410,17 @@ enforcement: the twelve `permissions.deny` rules in `.claude/settings.json`
 and the guard hook in `.claude/hooks/`. A plugin's component set — skills,
 agents, commands, hooks, MCP and LSP servers — has no permissions in it, and
 it loads hooks only from a `hooks/hooks.json`. This plugin's file registers
-two scripts, and only one of them can block:
+three scripts, and only one of them can block:
 
 - **The recorder**, `prompt-capture.sh`, for `UserPromptSubmit` and for
   `PostToolUse` on `AskUserQuestion`. It only records.
+- **The subagent recorder**, `subagent-hook.sh`, for `SubagentStart` and
+  `SubagentStop`. It only records, and it is registered `async`: Claude Code
+  runs it in the background and does not enforce its timeout, so a stop that
+  waits on the event log is not cancelled. A cap warning it prints as a
+  `systemMessage` reaches the model on its next turn and is not shown to you.
+  It runs `$BS_SUBAGENT_HOOK` or `bs-subagent-hook` the way the prompt recorder
+  runs its entry.
 - **The plugin guard**, `plugin-policy.sh`, for `PreToolUse` on Bash, Write,
   Edit, MultiEdit, NotebookEdit, Agent and Task. It is off by default: unless
   `BS_PLUGIN_GUARD=1` is set it exits at once and decides nothing. On, it can

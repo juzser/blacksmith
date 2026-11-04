@@ -22,7 +22,7 @@
  * closes its start, with zero tokens and `complete: false`, because a start
  * left live refuses every later defaulted write in the session.
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { roleOfAgentType } from './agentNames.js';
 import {
@@ -30,7 +30,13 @@ import {
   SUBAGENT_STOP_EVENT_TYPE as STOP,
 } from './agents-registry.js';
 import { loadBudgetPolicy, roleCapTokens } from './budgets.js';
-import { appendWithin, type EventInput, ROOT_EVENT_TYPE, type StoredEvent } from './events.js';
+import {
+  appendWithin,
+  autoRootInput,
+  type EventInput,
+  listSessionIds,
+  type StoredEvent,
+} from './events.js';
 import {
   type CaptureContext,
   CLI_ID,
@@ -99,7 +105,6 @@ async function record(
   if (store === null) return null;
   const eventsDir = store.eventsDir;
   const opts = { stateDir: eventsDir, cliSessionId: cli };
-  const home = `prompts-${cli}`;
   const role = roleOf(agentType);
 
   if (mode === 'start') {
@@ -111,30 +116,23 @@ async function record(
         // Keep the 72 h fallback.
       }
     }
-    const main = await findMainLog(eventsDir, cli, floorMs);
-    const target = main ?? (existsSync(path.join(eventsDir, `${cli}.jsonl`)) ? cli : home);
+    // The epic main log the session drives, else the session's own log, which
+    // this creates with the auto-root #533 writes: the #533 guard reads
+    // `<cli id>.jsonl`, so an agent recorded anywhere else would never refuse
+    // a defaulted write while it is live.
+    const target = (await findMainLog(eventsDir, cli, floorMs)) ?? cli;
     await appendWithin(
       target,
       (existing) => {
         const out: EventInput[] = [];
-        if (existing.length === 0) {
-          out.push({
-            session_id: target,
-            actor: 'system',
-            event_type: ROOT_EVENT_TYPE,
-            plan_version: 1,
-            causal_parent: null,
-            payload: { kind: 'prompt-log' },
-            ...(store?.project === undefined ? {} : { project: store.project }),
-          });
-        }
+        if (existing.length === 0) out.push(autoRootInput(target));
         const prompt = [...existing].reverse().find((e) => e.record.event_type === 'user_prompt');
         const parent = prompt ?? existing[0];
         out.push({
           session_id: target,
           actor: 'system',
           event_type: START,
-          agent_id: agentId,
+          agent_id: normalizeAgentId(agentId),
           plan_version: parent?.record.plan_version ?? 1,
           causal_parent: parent?.event_id ?? `${target}#0`,
           payload: { agent_role: role, agent_type: agentType, source: 'hook' },
@@ -147,65 +145,112 @@ async function record(
     return null;
   }
 
-  // stop: the log that holds this agent's start.
-  const candidates = [...new Set([cli, home])];
-  const main = await findMainLog(eventsDir, cli, Date.now() - FALLBACK_WINDOW_MS);
-  if (main !== null) candidates.unshift(main);
+  // stop. The ids this agent can go by: the hook's own, and the one its
+  // transcript file name carries (`agent-<id>.jsonl`).
   const transcriptPath = str(input.agent_transcript_path);
+  const ids = new Set([normalizeAgentId(agentId)]);
+  if (transcriptPath !== undefined) {
+    const m = /^agent-(.+)\.jsonl$/.exec(path.basename(transcriptPath));
+    if (m?.[1] !== undefined) ids.add(m[1]);
+  }
+  const target = await logHoldingStart(eventsDir, cli, ids);
+  if (target === null) return null;
   const usage = transcriptPath === undefined ? null : await readTranscriptUsage(transcriptPath);
 
-  let written: StoredEvent | undefined;
-  for (const target of candidates) {
-    if (!existsSync(path.join(eventsDir, `${target}.jsonl`))) continue;
-    const stored = await appendWithin(
-      target,
-      (existing) => {
-        const start = existing.find(
-          (e) => e.record.event_type === START && e.record.agent_id === agentId,
+  const stored = await appendWithin(
+    target,
+    (existing) => {
+      // The latest start of this agent that has no stop on it: a resumed agent
+      // starts again under the same id, and each run closes its own.
+      const stopped = new Set(
+        existing.filter((e) => e.record.event_type === STOP).map((e) => e.record.causal_parent),
+      );
+      const start = [...existing]
+        .reverse()
+        .find(
+          (e) =>
+            e.record.event_type === START &&
+            ids.has(e.record.agent_id ?? '') &&
+            !stopped.has(e.event_id),
         );
-        if (start === undefined) return [];
-        const done = existing.some(
-          (e) => e.record.event_type === STOP && e.record.agent_id === agentId,
-        );
-        if (done) return [];
-        return [
-          {
-            session_id: target,
-            actor: 'system',
-            event_type: STOP,
-            agent_id: agentId,
-            plan_version: start.record.plan_version,
-            causal_parent: start.event_id,
-            payload: {
-              agent_role: role,
-              agent_type: agentType,
-              model: usage?.model ?? null,
-              input_tokens: usage?.inputTokens ?? 0,
-              output_tokens: usage?.outputTokens ?? 0,
-              cache_creation_tokens: usage?.cacheCreationTokens ?? 0,
-              cache_read_tokens: usage?.cacheReadTokens ?? 0,
-              total_tokens: usage?.used ?? 0,
-              complete: usage?.complete ?? false,
-              source: 'hook',
-            },
-            ...(start.record.project === undefined ? {} : { project: start.record.project }),
+      if (start === undefined) return [];
+      return [
+        {
+          session_id: target,
+          actor: 'system',
+          event_type: STOP,
+          agent_id: start.record.agent_id as string,
+          plan_version: start.record.plan_version,
+          causal_parent: start.event_id,
+          payload: {
+            agent_role: role,
+            agent_type: agentType,
+            model: usage?.model ?? null,
+            input_tokens: usage?.inputTokens ?? 0,
+            output_tokens: usage?.outputTokens ?? 0,
+            cache_creation_tokens: usage?.cacheCreationTokens ?? 0,
+            cache_read_tokens: usage?.cacheReadTokens ?? 0,
+            total_tokens: usage?.used ?? 0,
+            last_turn_tokens: usage?.lastTurnTokens ?? 0,
+            complete: usage?.complete ?? false,
+            source: 'hook',
           },
-        ];
-      },
-      opts,
-    );
-    if (stored.length > 0) {
-      written = stored[0];
-      break;
-    }
-  }
-  if (written === undefined || usage === null) return null;
+          ...(start.record.project === undefined ? {} : { project: start.record.project }),
+        },
+      ];
+    },
+    opts,
+  );
+  if (stored.length === 0 || usage === null) return null;
 
+  // budgets.yml's task caps are p90s of the Agent tool's reported total, which
+  // is the final turn's size, so that is what they are compared with. The
+  // summed spend is recorded too and is what spend by role adds up.
   const cap = capFor(role, ctx.env);
-  if (cap === null || usage.used <= cap) return null;
+  if (cap === null || usage.lastTurnTokens <= cap) return null;
   return JSON.stringify({
-    systemMessage: `Blacksmith: the ${role} subagent used ${fmt(usage.used)} tokens, over its task cap of ${fmt(cap)} (budgets.yml task.${role}). Recorded; nothing was stopped.`,
+    systemMessage: `Blacksmith: the ${role} subagent's last turn was ${fmt(usage.lastTurnTokens)} tokens (${fmt(usage.used)} summed over its run), over its task cap of ${fmt(cap)} (budgets.yml task.${role}). Recorded; nothing was stopped.`,
   });
+}
+
+/** `agent-abc123` and `abc123` are one agent: the docs show both spellings. */
+export function normalizeAgentId(id: string): string {
+  return id.startsWith('agent-') && id.length > 'agent-'.length ? id.slice('agent-'.length) : id;
+}
+
+/**
+ * The log of this CLI session that holds a start for one of `ids`: the
+ * session's own logs first (one cheap read each), then any other recent log,
+ * so a start in an epic main log is found without re-deriving which log the
+ * session was driving when it started.
+ */
+async function logHoldingStart(
+  eventsDir: string,
+  cli: string,
+  ids: ReadonlySet<string>,
+): Promise<string | null> {
+  const holds = (id: string): boolean => {
+    try {
+      const text = readFileSync(path.join(eventsDir, `${id}.jsonl`), 'utf8');
+      if (!text.includes(START)) return false;
+      return [...ids].some((i) => text.includes(`"agent_id":${JSON.stringify(i)}`));
+    } catch {
+      return false;
+    }
+  };
+  const own = [cli, `prompts-${cli}`];
+  for (const id of own) if (holds(id)) return id;
+  const floor = Date.now() - FALLBACK_WINDOW_MS;
+  for (const id of listSessionIds(eventsDir)) {
+    if (own.includes(id)) continue;
+    try {
+      if (statSync(path.join(eventsDir, `${id}.jsonl`)).mtimeMs < floor) continue;
+    } catch {
+      continue;
+    }
+    if (holds(id)) return id;
+  }
+  return null;
 }
 
 function capFor(role: string, env: CaptureContext['env']): number | null {

@@ -250,6 +250,14 @@ export interface TranscriptUsage {
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  /**
+   * input + cache creation + cache read + output of the LAST assistant record:
+   * the size of the final turn. This, not `used`, is what the Agent tool
+   * reports as a subagent's total (budgets.yml's task caps are p90s of that
+   * number): it matched the reported total exactly for 82 of 275 pairs and
+   * within 2 % for 225 in a real session; the summed `used` for none and 49.
+   */
+  lastTurnTokens: number;
   /** The last assistant record's `message.model`, or null when none names one. */
   model: string | null;
   /** False when a line did not parse; `used` is then a floor. */
@@ -271,6 +279,7 @@ export async function readTranscriptUsage(file: string): Promise<TranscriptUsage
     outputTokens: 0,
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
+    lastTurnTokens: 0,
     model: null,
     complete: true,
   };
@@ -293,6 +302,11 @@ export async function readTranscriptUsage(file: string): Promise<TranscriptUsage
       if (p === null) continue;
       const model = (rec as { message?: { model?: unknown } }).message?.model;
       if (typeof model === 'string' && model !== '' && model !== '<synthetic>') out.model = model;
+      out.lastTurnTokens =
+        num(p.usage.input_tokens) +
+        num(p.usage.cache_creation_input_tokens) +
+        num(p.usage.cache_read_input_tokens) +
+        num(p.usage.output_tokens);
       const key = dedupeKey(rec);
       if (key !== null) {
         if (seen.has(key)) continue;

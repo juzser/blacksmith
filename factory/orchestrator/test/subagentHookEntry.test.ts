@@ -62,7 +62,7 @@ describe('dist/subagentHook.js', () => {
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
-    expect(readdirSync(events)).toEqual([`prompts-${CLI}.jsonl`]);
+    expect(readdirSync(events)).toEqual([`${CLI}.jsonl`]);
   });
 });
 

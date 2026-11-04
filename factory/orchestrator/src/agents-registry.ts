@@ -98,13 +98,15 @@ export const ERROR_EVENT_TYPE = 'error-logged';
  * closes exactly that one: the hook knows the id, so it needs neither the
  * `(task_id, agent_role)` key nor a guess at "the latest of that role".
  *
- * Why new types rather than `dispatch_decision`: the playbooks of `/bs run`
- * still write one by hand, and every reader of `dispatch_decision`
- * (dispatchAudit, budgetAlarm) would count each agent twice, and would treat a
- * hook entry, which names no task, epic or model, as an unattributed hole.
- * An entry opened here is task-less, so a task-less `error-logged` naming its
- * role, or `epic-closed`, closes it too: a dead agent that never reached its
- * stop is closed the way the `cli.envelope-parent-ambiguous` message describes.
+ * Why new types rather than `dispatch_decision`: every reader of it
+ * (dispatchAudit, budgetAlarm) would count a hook-recorded agent as a hole with
+ * no task, epic or model. Where a hand-written dispatch of the same role is
+ * still open and no hook start has claimed it, the hook start is that agent and
+ * binds to it (one entry); otherwise it is an entry of its own, which no
+ * task-less role-based close and no `epic-closed` takes. A dead agent that
+ * never reached its stop is closed with a hand-written `subagent-stopped`
+ * naming its agent_id and its start as the causal parent (the
+ * `cli.envelope-parent-ambiguous` message says so).
  */
 export const SUBAGENT_START_EVENT_TYPE = 'subagent-started';
 export const SUBAGENT_STOP_EVENT_TYPE = 'subagent-stopped';
@@ -286,6 +288,11 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
   // closes the latest of them (F2), and `epic-closed` sweeps the rest.
   let openEpicLevel: AgentRecord[] = [];
   const records: AgentRecord[] = [];
+  // Hook-start event id -> the entry that start speaks for.
+  const startEntry = new Map<string, AgentRecord>();
+  const hookOwned = new Set<AgentRecord>();
+  // Hand-written entries a hook start has already claimed.
+  const claimed = new Set<AgentRecord>();
 
   for (const { event_id, record } of events) {
     if (record.event_type === DISPATCH_EVENT_TYPE) {
@@ -335,6 +342,24 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
     if (record.event_type === SUBAGENT_START_EVENT_TYPE) {
       const payload = record.payload as { agent_role?: string };
       if (!payload.agent_role || !record.agent_id) continue;
+      // One real agent, one entry: a hand-written dispatch of this role that no
+      // hook start has claimed yet IS this agent (the playbook writes it just
+      // before launching). The newest such one, so concurrent agents of a role
+      // bind one to one in launch order.
+      let bound: AgentRecord | undefined;
+      for (let i = records.length - 1; i >= 0; i--) {
+        const r = records[i] as AgentRecord;
+        if (r.status !== 'live' || hookOwned.has(r) || claimed.has(r)) continue;
+        if (r.sessionId !== record.session_id || r.agentRole !== payload.agent_role) continue;
+        bound = r;
+        break;
+      }
+      if (bound !== undefined) {
+        claimed.add(bound);
+        bound.agentId = record.agent_id;
+        startEntry.set(event_id, bound);
+        continue;
+      }
       const agent: AgentRecord = {
         id: event_id,
         sessionId: record.session_id,
@@ -352,19 +377,37 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
         status: 'live',
       };
       records.push(agent);
-      openEpicLevel.push(agent);
+      // Deliberately in no open map: a task-less role-based close must not take
+      // a hook-only entry, so only its own stop (or a hand-written one) closes it.
+      hookOwned.add(agent);
+      startEntry.set(event_id, agent);
       continue;
     }
 
     if (record.event_type === SUBAGENT_STOP_EVENT_TYPE) {
       if (!record.agent_id) continue;
-      const i = openEpicLevel.findIndex(
-        (a) => a.sessionId === record.session_id && a.agentId === record.agent_id,
-      );
-      const entry = openEpicLevel[i];
-      if (entry === undefined) continue;
+      // The stop names its own start as parent; fall back to the newest live
+      // entry of that agent id (a hand-written stop may not carry the parent).
+      let entry = record.causal_parent ? startEntry.get(record.causal_parent) : undefined;
+      if (entry === undefined) {
+        for (let i = records.length - 1; i >= 0; i--) {
+          const r = records[i] as AgentRecord;
+          if (
+            r.status === 'live' &&
+            r.sessionId === record.session_id &&
+            r.agentId === record.agent_id
+          ) {
+            entry = r;
+            break;
+          }
+        }
+      }
+      if (entry === undefined || entry.status !== 'live') continue;
       closeEntry(entry, event_id, record.ts, 'result');
-      openEpicLevel.splice(i, 1);
+      // A bound hand-written entry also sits in an open map.
+      for (const [key, e] of open) if (e === entry) open.delete(key);
+      const k = openEpicLevel.indexOf(entry);
+      if (k >= 0) openEpicLevel.splice(k, 1);
       continue;
     }
 

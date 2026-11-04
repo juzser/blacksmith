@@ -37,9 +37,13 @@ than appearing in it.
   subagent a session runs, `bs-*` or not, leaves a `subagent-started` event
   (explicit parent: the log's latest operator prompt, else its root) and a
   `subagent-stopped` event (parent: its own start; role, model, input, output
-  and cache tokens, whether the transcript read whole). A role over its
-  `budgets.yml` `task:` cap prints a `systemMessage` warning. Both hooks always
-  exit 0. `bs subagent spend --session <id>` prints spend by role. The registry
+  and cache tokens, the last turn's size, whether the transcript read whole).
+  A role whose last turn is over its `budgets.yml` `task:` cap (those caps are
+  p90s of the Agent tool's reported total, which is the final turn) prints a
+  `systemMessage` warning. Both hooks are `async` and always exit 0. A resumed
+  agent's second start gets its own stop; ids match with or without an
+  `agent-` prefix or by transcript file name; the start goes to `<cli id>.jsonl`
+  with the same auto-root the envelope defaults write, so the guard sees it. `bs subagent spend --session <id>` prints spend by role. The registry
   fold reads the pair, so a hook-recorded agent counts as live until its stop
   and the `cli.envelope-parent-ambiguous` refusal names how to close a dead one.
 - **Optional envelope flags** (lean mode, O-11). `--session` and `--causal-parent`

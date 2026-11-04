@@ -241,14 +241,17 @@ describe('plugin payload', () => {
       expect(post[0]?.hooks[0]?.command).toMatch(/prompt-capture\.sh" answer$/);
     });
 
-    it('is synchronous with a timeout of at most 5 s, and names neither guard.sh nor judge-stop.sh', () => {
+    it('runs only the subagent recorders in the background, each with a timeout of at most 5 s, and names neither guard.sh nor judge-stop.sh', () => {
       const text = readFileSync(path.join(root, 'hooks/hooks.json'), 'utf8');
       expect(text).not.toMatch(/guard\.sh|judge-stop\.sh/);
-      for (const group of Object.values(registered()).flat()) {
-        for (const h of group.hooks) {
+      for (const [event, groups] of Object.entries(registered())) {
+        for (const h of groups.flatMap((g) => g.hooks)) {
           expect(h.type).toBe('command');
           expect(h.timeout).toBeLessThanOrEqual(5);
-          expect(h).not.toHaveProperty('async');
+          // Only the SubagentStart/Stop recorders are async: a stop that waits on
+          // the log lock must not be cancelled, and they never gate anything.
+          if (event === 'SubagentStart' || event === 'SubagentStop') expect(h.async).toBe(true);
+          else expect(h).not.toHaveProperty('async');
         }
       }
     });

@@ -893,6 +893,15 @@ function rootInput(sessionId: string, opts: StartSessionOptions = {}): EventInpu
   };
 }
 
+/**
+ * The root an empty log gets when the CLI defaults the parent (O-11). Exported
+ * so the subagent hook, which also opens `<cli id>.jsonl` before any `bs` verb
+ * has, writes the same root rather than a second spelling of it.
+ */
+export function autoRootInput(sessionId: string): EventInput {
+  return { ...rootInput(sessionId), envelope_defaulted: ['auto_root'] };
+}
+
 /** Schema, taxonomy and typed-payload validation of one record; throws, writes nothing. */
 function checkRecordShape(input: EventInput, opts: EventOpts): void {
   const record: EventRecord = { ...input, ts: input.ts ?? new Date().toISOString() };
@@ -939,11 +948,7 @@ async function appendEventLocked(
         },
         opts,
       );
-      await appendEventLocked(
-        { ...rootInput(input.session_id), envelope_defaulted: ['auto_root'] },
-        opts,
-        filePath,
-      );
+      await appendEventLocked(autoRootInput(input.session_id), opts, filePath);
       existing = await readEventsAtPath(filePath, input.session_id);
     } else if (envelopeDefaults.pinnedParent === undefined && !envelopeDefaults.pinnedRoot) {
       // Same lock as the read of the last event: check and default are atomic.

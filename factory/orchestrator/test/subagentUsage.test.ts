@@ -139,11 +139,12 @@ describe('recordSubagent', () => {
     expect(events[2]?.record.causal_parent).toBe(events[1]?.event_id);
   });
 
-  it('lands in prompts-<cli> when the session has no log of its own', async () => {
+  it('creates <cli>.jsonl with the auto-root of #533 when the session has no log', async () => {
     await recordSubagent(startJson('a1', 'Explore'), 'start', ctx());
-    expect(files()).toEqual([`prompts-${CLI}.jsonl`]);
-    const events = await read(`prompts-${CLI}`);
+    expect(files()).toEqual([`${CLI}.jsonl`]);
+    const events = await read();
     expect(events.map((e) => e.record.event_type)).toEqual(['session-start', 'subagent-started']);
+    expect(events[0]?.record.envelope_defaulted).toEqual(['auto_root']);
     // A non-bs agent is recorded with its own type as the role.
     expect(events[1]?.record.payload).toMatchObject({
       agent_role: 'Explore',
@@ -153,9 +154,97 @@ describe('recordSubagent', () => {
       assistant('m1', 'claude-haiku-4-5', { input_tokens: 1, output_tokens: 1 }),
     ]);
     await recordSubagent(stopJson('a1', file, 'Explore'), 'stop', ctx());
-    const after = await read(`prompts-${CLI}`);
+    const after = await read();
     expect(after[2]?.record.event_type).toBe('subagent-stopped');
     expect(after[2]?.record.causal_parent).toBe(after[1]?.event_id);
+  });
+
+  it('the #533 guard sees an agent started before the session log existed', async () => {
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    const refused = runCli(
+      ['prompt', 'record', '-', '--state-dir', eventsDir],
+      { CLAUDE_CODE_SESSION_ID: CLI },
+      'x',
+    );
+    expect(refused.stdout + refused.stderr).toContain('cli.envelope-parent-ambiguous');
+  });
+
+  it('closes a resumed agent: start, stop, start, stop leaves nothing live', async () => {
+    await openCliLog();
+    const file = transcript('r.jsonl', [assistant('m1', 'x', { input_tokens: 1 })]);
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    await recordSubagent(startJson('a1'), 'start', ctx());
+    expect(liveAgents(foldAgents(await read()))).toHaveLength(1);
+    await recordSubagent(stopJson('a1', file), 'stop', ctx());
+    const events = await read();
+    expect(liveAgents(foldAgents(events))).toEqual([]);
+    const types = events.map((e) => e.record.event_type);
+    expect(types.filter((t) => t === 'subagent-stopped')).toHaveLength(2);
+    // Each stop hangs off its own start.
+    const starts = events.filter((e) => e.record.event_type === 'subagent-started');
+    const stops = events.filter((e) => e.record.event_type === 'subagent-stopped');
+    expect(stops.map((e) => e.record.causal_parent)).toEqual(starts.map((e) => e.event_id));
+  });
+
+  it('finds the start by agent_id in any log of the session, not only the default ones', async () => {
+    const epicLog = 'epic-main';
+    await appendWithin(epicLog, () => [{ ...rootEvent, session_id: epicLog }], {
+      stateDir: eventsDir,
+    });
+    await appendWithin(
+      epicLog,
+      (e) => [
+        {
+          session_id: epicLog,
+          actor: 'system',
+          event_type: 'subagent-started',
+          agent_id: 'a1',
+          plan_version: 1,
+          causal_parent: e[0]?.event_id ?? null,
+          payload: { agent_role: 'coder', agent_type: 'bs-coder' },
+        },
+      ],
+      { stateDir: eventsDir, cliSessionId: CLI },
+    );
+    await recordSubagent(stopJson('a1', undefined), 'stop', ctx());
+    const events = await read(epicLog);
+    expect(events[2]?.record.event_type).toBe('subagent-stopped');
+    expect(events[2]?.record.causal_parent).toBe(events[1]?.event_id);
+  });
+
+  it('matches ids whether or not either side carries the agent- prefix, or by transcript name', async () => {
+    await openCliLog();
+    const file = (name: string) => transcript(name, [assistant('m1', 'x', { input_tokens: 1 })]);
+    // start "agent-abc123", stop "abc123"
+    await recordSubagent(startJson('agent-abc123'), 'start', ctx());
+    await recordSubagent(stopJson('abc123', file('t1.jsonl')), 'stop', ctx());
+    // start "def456", stop "agent-def456"
+    await recordSubagent(startJson('def456'), 'start', ctx());
+    await recordSubagent(stopJson('agent-def456', file('t2.jsonl')), 'stop', ctx());
+    // start "ghi789", stop names another id but its transcript is agent-ghi789.jsonl
+    await recordSubagent(startJson('ghi789'), 'start', ctx());
+    await recordSubagent(stopJson('zzz', file('agent-ghi789.jsonl')), 'stop', ctx());
+    const events = await read();
+    expect(liveAgents(foldAgents(events))).toEqual([]);
+    expect(events.filter((e) => e.record.event_type === 'subagent-stopped')).toHaveLength(3);
+  });
+
+  it('records the last turn and compares that with the cap, not the summed transcript', async () => {
+    await openCliLog();
+    await recordSubagent(startJson('a1', 'bs-scribe'), 'start', ctx());
+    // Many turns, each small: the sum is huge, the last turn is not.
+    const lines = Array.from({ length: 200 }, (_, i) =>
+      assistant(`m${i}`, 'x', { input_tokens: 1, cache_read_input_tokens: 50_000 }),
+    );
+    const out = await recordSubagent(
+      stopJson('a1', transcript('many.jsonl', lines), 'bs-scribe'),
+      'stop',
+      ctx(),
+    );
+    expect(out).toBeNull();
+    const stop = (await read())[2];
+    expect(stop?.record.payload).toMatchObject({ last_turn_tokens: 50_001, total_tokens: 200 });
   });
 
   it('a stop with no readable transcript still closes the dispatch, incomplete', async () => {
