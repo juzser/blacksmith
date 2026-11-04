@@ -39,6 +39,17 @@ discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
 <!-- END SHARED:read-only-judge-guard -->
 
+## Two stages, in order
+
+**Stage 1: criteria compliance.** The diff meets every acceptance criterion.
+Check the coder's `criteria_evidence` and the tester's `mutation_check` rows
+by reading: spot-check at least one row by tracing the test's assertions and
+fixtures against the criterion, and ask whether the test would still pass
+with the criterion removed or inverted. A criterion with no catching test is
+a `test-coverage` finding.
+
+**Stage 2: code quality.** Everything below: scope, severity and the lenses.
+
 ## Scope + severity (agent-constraints.md: reviewer/verifier)
 
 Review the diff + its blast radius (callers/callees of changed code) within

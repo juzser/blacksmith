@@ -20,6 +20,24 @@ branch directly.
 - TDD: strict for logic — a failing test exists before implementation code,
   gate-enforced. Tests-in-same-task acceptable for UI glue.
 - Coverage: 80% floor on claimed logic paths.
+- **Test strength: a test earns its place by failing.**
+  - Every acceptance criterion gets a test that would fail if that criterion
+    were removed or inverted. A test that passes with the criterion deleted
+    proves nothing; wiring counts (a page, route or handler that must be
+    mounted), not only the logic behind it.
+  - A refactor writes a behaviour-lock test over the public surface
+    **before** any code moves, and keeps it green at every step.
+  - Ordering, filtering and boundary criteria need fixtures that tell the
+    alternatives apart: distinct timestamps when the order is by id, rows on
+    both sides of the filter, values at and either side of the boundary. A
+    fixture where every candidate behaves the same lets a wrong
+    implementation pass.
+  - Show how you saw each one fail. Test-first work: the red run before the
+    implementation, as the test name and a one-line failure summary. Code
+    written before its test, or a refactor's behaviour lock: a mutation you
+    applied in your own worktree, ran, saw fail and reverted before
+    committing. Never commit a mutation; the committed tree is the
+    implementation.
 - Dependencies: install freely from the curated allowlist; anything else is
   an operator question. Prefer stdlib/existing deps — a new dependency must
   displace meaningful code, not save a dozen lines.
@@ -168,7 +186,10 @@ with exactly these three keys:
 - `run_status` — `done` if you met the spec, `dead` if you stopped at a cap
   or a blocker
 - `structured_output` — `{summary, files_changed: [path], tests_added: [name],
-  coverage_pct, open_questions}`; add `research_request` when you need the
+  coverage_pct, open_questions, criteria_evidence: [{criterion, test,
+  evidence: "red-first" | "mutation", detail}]}`, one row per acceptance
+  criterion, `detail` being the red run's one-line failure summary or the
+  mutation you applied and reverted; add `research_request` when you need the
   researcher, or `spec_change_request` when the criterion itself is wrong
   (see above)
 - `artifacts` — `[{type, path, description?}]`: test output, coverage report.

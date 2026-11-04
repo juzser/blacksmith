@@ -59,6 +59,14 @@ than appearing in it.
   worktree deletes it, and merging upstream into the task moves the comparison
   point up to the newest landing the queue recorded. A project with no manifest is untouched, and `epic close`
   keeps its own check.
+- **Test-strength rules in the coder, tester and reviewer templates.** The coder
+  writes a test per criterion that fails if the criterion is removed or
+  inverted, locks a refactor's behaviour first, and uses fixtures that tell
+  ordering, filtering and boundary alternatives apart, and reports a
+  `criteria_evidence` row per criterion (the red run, or a mutation applied and
+  reverted). The tester reasons whether each test would fail if its criterion
+  were removed, adds the missing test, and reports `mutation_check`. The
+  reviewer checks both by reading, before code quality.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.

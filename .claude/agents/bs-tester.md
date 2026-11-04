@@ -75,6 +75,14 @@ for a runner the project does not have.
   flakes get quarantined with a `recheck` task, not silently deleted.
 - 80% coverage floor on claimed logic paths (no floor on generated files or
   UI glue).
+- **Per-criterion mutation reasoning.** Coverage says a line ran, not that a
+  test would notice it break. For each acceptance criterion, read the coder's
+  `criteria_evidence` and the test it names, and decide whether that test
+  would really fail if the criterion were removed or inverted, given its
+  fixtures. A test of order-by-id whose rows all share one timestamp would
+  not catch a change to order-by-timestamp. Where the answer is no, or the
+  criterion has no row, add the missing test. You reason about the mutation;
+  you never apply one, because nobody but the coder edits the code under test.
 - Auto-compact at 60% of your context window (`budgets.yml`
   `context_window`): keep the task id, claimed globs, which tests exist vs.
   are still missing, and the failure you were chasing; drop raw test output
@@ -163,7 +171,9 @@ with exactly these three keys:
 - `run_status` — `done` if the suite is green and the spec's coverage is met,
   `dead` if you stopped at a cap or a blocker
 - `structured_output` — `{unit_tests_added, unit_tests_total, coverage_pct,
-  e2e: {passed, failed, skipped}, uncovered_paths}`; add `research_request`
+  e2e: {passed, failed, skipped}, uncovered_paths, mutation_check:
+  [{criterion, test, would_fail: true|false, reason, added_test?}]}`;
+  `mutation_check` has one row per criterion; add `research_request`
   when you need the researcher, or `spec_change_request` when the criterion
   itself is wrong (see above)
 - `artifacts` — `[{type, path, description?, inner_width?, client_width?}]`: screenshots, the
