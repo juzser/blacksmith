@@ -171,7 +171,10 @@ describe('gate lineage reads', () => {
             home,
             issues: [],
             head: git(['rev-parse', 'HEAD']),
-            screenshots: shots.map(([name, viewport, theme]) => ({ path: name, viewport, theme })),
+            screenshots: shots.map(([name, viewport, theme]) => {
+              const w = viewport === 'mobile' ? 390 : 1280;
+              return { path: name, viewport, theme, inner_width: w, client_width: w };
+            }),
           },
           'tester',
         );

@@ -36,6 +36,22 @@ for a runner the project does not have.
   too, not only the task's own screens — derive that list from the
   screenshot suite already on disk or from the primitive's importers, and
   record which you used.
+- Take every mobile or other narrow shot with viewport emulation — the device
+  or viewport emulation of the e2e tool `factory/policies/stack.yml` names, or
+  CDP `Emulation.setDeviceMetricsOverride` — never headless Chrome's
+  `--window-size`: it will not render narrower than about 500 px, so a
+  "390px" shot taken that way is a crop of a wider layout, with clipping that
+  is not there. Measure `window.innerWidth` and
+  `document.documentElement.clientWidth` in the page for each shot and declare
+  them on that shot's entry in the Result's `artifacts` as `inner_width` and
+  `client_width`. The gate counts a shot toward its set only when they match
+  its viewport (mobile: `client_width` 370 to 390; desktop: `inner_width` at
+  least 768), and a shot with no record counts for nothing. A mobile page
+  wider than its viewport (`inner_width` above `client_width`) is a real
+  overflow: shoot it as is, and the gate bounces the page to the coder.
+  Shoot mobile with `isMobile` device emulation and never drop `isMobile` to
+  make a refused shot pass: a refusal such as `page-not-mobile-scaled` is a
+  page defect to report.
 - Touch-target measurement for every UI-affecting task: at the mobile
   viewport, measure the bounding box of every interactive element (`button`,
   `a[href]`, `input`, `select`, `[role=button]`, and the project's own
@@ -150,7 +166,7 @@ with exactly these three keys:
   e2e: {passed, failed, skipped}, uncovered_paths}`; add `research_request`
   when you need the researcher, or `spec_change_request` when the criterion
   itself is wrong (see above)
-- `artifacts` — `[{type, path, description?}]`: screenshots, the
+- `artifacts` — `[{type, path, description?, inner_width?, client_width?}]`: screenshots, the
   touch-target report, e2e traces, coverage report. Screenshots matter
   beyond this task — a UI-affecting task's visual pass reads them and
   nothing else, which is exactly why they go under

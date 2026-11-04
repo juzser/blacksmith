@@ -270,7 +270,10 @@ export async function testerResult(
   await writeShots(w, onDisk);
   return stampedResult({
     agent: 'tester',
-    artifacts: names.map((name) => ({ type: 'screenshot', path: name })),
+    artifacts: names.map((name) => {
+      const w = name.includes('-mobile-') ? 390 : 1280;
+      return { type: 'screenshot', path: name, inner_width: w, client_width: w };
+    }),
   });
 }
 

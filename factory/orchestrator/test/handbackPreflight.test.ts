@@ -173,7 +173,9 @@ describe('bs-tester.md screenshot rule', () => {
     ] as const) {
       expect(passage.length, name).toBeGreaterThan(100);
       expect(passage.replace(/\s+/g, ' '), name).toContain(RULE);
-      const prose = passage.replace('[{type, path, description?}]', '').replace(/\s+/g, ' ');
+      const prose = passage
+        .replace('[{type, path, description?, inner_width?, client_width?}]', '')
+        .replace(/\s+/g, ' ');
       expect(prose, name).not.toMatch(/description|describe|failing that/i);
     }
   });
@@ -372,6 +374,7 @@ const REASON_BRANCH = {
   'not-committed': 3,
   'screenshots-missing': 3,
   'screenshots-stale': 3,
+  'mobile-overflow': 3,
 } satisfies Record<PaperworkReason, 1 | 2 | 3>;
 
 describe('wave.md step 7 routes every preflight problem to one of five branches', () => {
@@ -1187,6 +1190,7 @@ const ANSWERER_OF = {
   findings: 'coder',
   'screenshots-missing': 'tester',
   'screenshots-stale': 'tester',
+  'mobile-overflow': 'coder',
   'schema-invalid': 'result-worker',
   'artifacts-missing': 'result-worker',
   'uiux-spec-missing': 'uiux',
@@ -1297,7 +1301,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
 
   it('has exactly one bullet per reason of the gate type and none for another', () => {
     const reasons = Object.keys(ANSWERER_OF).sort();
-    expect(reasons).toHaveLength(14);
+    expect(reasons).toHaveLength(15);
     expect(
       bullets
         .filter((b) => b.reason !== undefined)
@@ -1420,7 +1424,7 @@ describe('f-bs-gate-bounce/integration-38ddc74d, -2d92075f, -b3e3083c, -105d3733
       }
       expect(
         queueText.split('\n').filter((l) => l.startsWith('| `blocked` (`reason:')),
-      ).toHaveLength(14);
+      ).toHaveLength(15);
     });
 
     it('ends the grader-invalid row with the capped clause and keeps its two pinned phrases', () => {

@@ -12,9 +12,37 @@ export type UiuxBlockReason =
   | 'uiux-spec-missing'
   | 'screenshots-missing'
   | 'screenshots-stale'
+  | 'mobile-overflow'
   | 'uiux-visual-missing';
 
-export type UiuxCheckResult = { outcome: 'pass' } | { outcome: 'blocked'; reason: UiuxBlockReason };
+/** A shot whose recorded in-page width does not prove its declared viewport: the file name says one thing, the page measured another (or nothing). */
+export interface InvalidShot {
+  path: string;
+  viewport: string;
+  inner_width?: number;
+  client_width?: number;
+  why: 'width-mismatch' | 'no-width-record' | 'page-not-mobile-scaled';
+  /** What to look at first; absent when `why` already says it. */
+  hint?: string;
+}
+
+/** A genuine mobile shot of a page that is wider than the viewport: a real horizontal-overflow defect of the page, not a crop. */
+export interface OverflowShot {
+  path: string;
+  viewport: string;
+  inner_width: number;
+  client_width: number;
+}
+
+export type UiuxCheckResult =
+  | { outcome: 'pass' }
+  | {
+      outcome: 'blocked';
+      reason: UiuxBlockReason;
+      invalidShots?: InvalidShot[];
+      /** Set only on `mobile-overflow`: each mobile shot whose page is wider than its viewport. */
+      overflow?: OverflowShot[];
+    };
 
 export interface UiuxCheckInput {
   taskId: string;
@@ -34,6 +62,8 @@ interface RecordedScreenshot {
   path: string;
   viewport: string;
   theme: string;
+  inner_width?: number;
+  client_width?: number;
 }
 
 /** The latest `results record --worktree` call for this task — the gate's freshness evidence (U2 D2). */
@@ -92,19 +122,95 @@ interface ScreenshotEntry {
   path: string;
   viewport: string;
   theme: string;
+  /** `window.innerWidth` the tester measured in the page when it took the shot. */
+  inner_width?: number;
+  /** `document.documentElement.clientWidth`, measured the same way. */
+  client_width?: number;
+}
+
+/** The CSS width a `mobile` shot is declared at. */
+const MOBILE_WIDTH = 390;
+/**
+ * How far below 390 a mobile `client_width` may sit: a classic scrollbar takes
+ * 15-17 px off the layout viewport. A headless `--window-size=390` crop renders
+ * at 485+, so it falls well outside the band on the other side.
+ */
+const SCROLLBAR_ALLOWANCE = 20;
+/** Narrowest `window.innerWidth` a `desktop` shot may report. */
+const DESKTOP_MIN_WIDTH = 768;
+/** Where a layout viewport stops looking like a scrollbar quirk and starts looking like an unscaled page (980 with no meta viewport, 780 at initial-scale=0.5). */
+const NOT_SCALED_MIN_WIDTH = 600;
+
+/**
+ * Why a shot's recorded widths do not prove its declared viewport, or null when
+ * they do. No record is no proof: a crop of a wider layout looks like clipping
+ * and must not reach the visual judge as evidence. Mobile is keyed on
+ * `client_width` (the layout viewport): a page that overflows measures a large
+ * `inner_width` under correct emulation, so `inner_width` alone cannot refuse it.
+ */
+function shotWidthIssue(s: ScreenshotEntry): InvalidShot['why'] | null {
+  const { inner_width: inner, client_width: client } = s;
+  if (typeof inner !== 'number' || typeof client !== 'number') return 'no-width-record';
+  if (s.viewport === 'mobile') {
+    if (client <= MOBILE_WIDTH && client >= MOBILE_WIDTH - SCROLLBAR_ALLOWANCE) return null;
+    // The layout viewport sits far above 390, whatever the page overflows to: the emulated device did not scale the page.
+    return client >= NOT_SCALED_MIN_WIDTH ? 'page-not-mobile-scaled' : 'width-mismatch';
+  }
+  return inner >= DESKTOP_MIN_WIDTH ? null : 'width-mismatch';
+}
+
+const HINTS: Partial<Record<InvalidShot['why'], string>> = {
+  'width-mismatch':
+    'a headless --window-size crop, or a custom wide ::-webkit-scrollbar, can cause this; shoot with viewport emulation',
+  'page-not-mobile-scaled':
+    'the page is not scaled to the device width: its meta viewport is missing or wrong, for example initial-scale below 1; it should be <meta name="viewport" content="width=device-width, initial-scale=1">; shoot with isMobile device emulation and do not drop isMobile to make this pass, the page is the defect',
+};
+
+/** Every shot whose recorded widths do not match its viewport, with the widths it recorded. */
+export function shotWidthIssues(shots: readonly ScreenshotEntry[]): InvalidShot[] {
+  const out: InvalidShot[] = [];
+  for (const s of shots) {
+    const why = shotWidthIssue(s);
+    if (why === null) continue;
+    out.push({
+      path: s.path,
+      viewport: s.viewport,
+      ...(s.inner_width === undefined ? {} : { inner_width: s.inner_width }),
+      ...(s.client_width === undefined ? {} : { client_width: s.client_width }),
+      why,
+      ...(HINTS[why] === undefined ? {} : { hint: HINTS[why] }),
+    });
+  }
+  return out;
+}
+
+/** Valid mobile shots whose page is wider than the viewport (`inner_width` above `client_width`): the gate blocks on them as `mobile-overflow`. */
+export function shotOverflows(shots: readonly ScreenshotEntry[]): OverflowShot[] {
+  const out: OverflowShot[] = [];
+  for (const s of shots) {
+    if (s.viewport !== 'mobile' || shotWidthIssue(s) !== null) continue;
+    const { inner_width: inner, client_width: client } = s;
+    if (typeof inner === 'number' && typeof client === 'number' && inner > client)
+      out.push({ path: s.path, viewport: s.viewport, inner_width: inner, client_width: client });
+  }
+  return out;
 }
 
 /**
  * The screenshot-set test, shared by the gate's uiux stage and the tester's own
  * pre-hand-back check: all four REQUIRED_COMBOS are present, and every shot
- * resolves to a file inside the task's artifact home.
+ * resolves to a file inside the task's artifact home. A shot whose recorded
+ * in-page width does not match its declared viewport does not count toward
+ * its combo.
  */
 export function screenshotSetComplete(
   taskId: string,
   shots: readonly ScreenshotEntry[],
   artifactsDir?: string,
 ): boolean {
-  const haveCombos = new Set(shots.map((s) => `${s.viewport}:${s.theme}`));
+  const haveCombos = new Set(
+    shots.filter((s) => shotWidthIssue(s) === null).map((s) => `${s.viewport}:${s.theme}`),
+  );
   const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
     haveCombos.has(`${viewport}:${theme}`),
   );
@@ -139,11 +245,21 @@ export function evaluateUiux(
   }
 
   if (!screenshotSetComplete(input.taskId, tester.screenshots, input.artifactsDir)) {
-    return { outcome: 'blocked', reason: 'screenshots-missing' };
+    const invalidShots = shotWidthIssues(tester.screenshots);
+    return {
+      outcome: 'blocked',
+      reason: 'screenshots-missing',
+      ...(invalidShots.length === 0 ? {} : { invalidShots }),
+    };
   }
 
   if (input.head !== undefined && tester.head !== input.head) {
     return { outcome: 'blocked', reason: 'screenshots-stale' };
+  }
+
+  const overflow = shotOverflows(tester.screenshots);
+  if (overflow.length > 0) {
+    return { outcome: 'blocked', reason: 'mobile-overflow', overflow };
   }
 
   const visualTurn = turns.find((t) => t.role === UIUX_ROLE && t.kind === 'visual');

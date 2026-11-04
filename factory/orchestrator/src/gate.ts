@@ -56,7 +56,12 @@ import {
   selectGateChecks,
   sleptFailedChecks,
 } from './testgate.js';
-import { checkUiux, type UiuxBlockReason } from './uiuxGate.js';
+import {
+  checkUiux,
+  type InvalidShot,
+  type OverflowShot,
+  type UiuxBlockReason,
+} from './uiuxGate.js';
 
 // No GateError: a gate failing is the gate working. Every outcome here comes
 // back as a verdict the caller records, never as an exception the caller
@@ -296,6 +301,10 @@ export type GateOutcome =
       specFindings?: Finding[];
       /** Set only on `judges-outstanding`: the judges this task is still waiting on, and the file each one owes. */
       outstandingJudges?: JudgeTurn[];
+      /** Set only on a `screenshots-missing` block that refused shots for their recorded width: each one's path, viewport and widths. */
+      invalidShots?: InvalidShot[];
+      /** Set only on a `mobile-overflow` block: each mobile shot whose page is wider than its viewport, with both widths. */
+      overflow?: OverflowShot[];
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
@@ -1210,6 +1219,8 @@ async function runGateStages(
           artifactIssues: [],
           commitCheck,
           uiuxCheck,
+          ...(uiux.invalidShots === undefined ? {} : { invalidShots: uiux.invalidShots }),
+          ...(uiux.overflow === undefined ? {} : { overflow: uiux.overflow }),
         },
         ctx,
         opts,

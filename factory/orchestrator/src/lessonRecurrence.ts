@@ -31,7 +31,7 @@ export interface RecurrenceWindow {
  * `Record` over every reason, so a new gate reason fails to compile until it
  * is mapped. null counts toward no class: the wave-runner's own sequencing
  * (`judges-outstanding`, `uiux-spec-missing`, `uiux-visual-missing`,
- * `screenshots-stale`), a rubric verdict whose failed criteria can be of any
+ * `screenshots-stale`), a page defect only the page's own fix answers (`mobile-overflow`), a rubric verdict whose failed criteria can be of any
  * class (`grader-fail`), a reporter or include-glob gap (`coverage-evidence`),
  * and `findings`, each of which carries its own category.
  */
@@ -47,6 +47,7 @@ export const GATE_BLOCK_ERROR_CLASSES: Readonly<Record<GateBlockedReason, string
   'uiux-spec-missing': null,
   'uiux-visual-missing': null,
   'screenshots-stale': null,
+  'mobile-overflow': null,
   'grader-fail': null,
   'coverage-evidence': null,
   findings: null,

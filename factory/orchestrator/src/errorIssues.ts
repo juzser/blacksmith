@@ -27,6 +27,7 @@ export type GateBlockedReason =
   | 'uiux-spec-missing'
   | 'screenshots-missing'
   | 'screenshots-stale'
+  | 'mobile-overflow'
   | 'uiux-visual-missing'
   | 'grader-invalid'
   | 'grader-fail'
@@ -44,6 +45,7 @@ const GATE_BLOCKED_ERROR_CLASSES: Record<GateBlockedReason, string> = {
   'uiux-spec-missing': 'gate.blocked.uiux-spec-missing',
   'screenshots-missing': 'gate.blocked.screenshots-missing',
   'screenshots-stale': 'gate.blocked.screenshots-stale',
+  'mobile-overflow': 'gate.blocked.mobile-overflow',
   'uiux-visual-missing': 'gate.blocked.uiux-visual-missing',
   'grader-invalid': 'gate.blocked.grader-invalid',
   'grader-fail': 'gate.blocked.grader-fail',

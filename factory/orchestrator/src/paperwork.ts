@@ -14,7 +14,13 @@ import {
   validateRecord,
 } from './schemas.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
-import { evaluateUiux, screenshotSetComplete, type UiuxBlockReason } from './uiuxGate.js';
+import {
+  evaluateUiux,
+  screenshotSetComplete,
+  shotOverflows,
+  shotWidthIssues,
+  type UiuxBlockReason,
+} from './uiuxGate.js';
 
 // The gate's read-only pre-test checks, one pure function per stage. `runGate` calls them
 // and emits its events around them; `checkPaperwork` calls the same functions for a
@@ -137,16 +143,28 @@ export function artifactsStage(
 /** `name-desktop-light.png` and the three siblings a visual pass has to cover. */
 export const SCREENSHOT_RE = /-(desktop|mobile)-(light|dark)\.png$/;
 
-export function screenshotsFromArtifacts(
-  artifacts: readonly ArtifactDecl[],
-): { path: string; viewport: string; theme: string }[] {
-  const shots: { path: string; viewport: string; theme: string }[] = [];
+type ScreenshotRecord = {
+  path: string;
+  viewport: string;
+  theme: string;
+  inner_width?: number;
+  client_width?: number;
+};
+
+export function screenshotsFromArtifacts(artifacts: readonly ArtifactDecl[]): ScreenshotRecord[] {
+  const shots: ScreenshotRecord[] = [];
   for (const a of artifacts) {
     const match = SCREENSHOT_RE.exec(a.path);
     const viewport = match?.[1];
     const theme = match?.[2];
     if (viewport !== undefined && theme !== undefined)
-      shots.push({ path: a.path, viewport, theme });
+      shots.push({
+        path: a.path,
+        viewport,
+        theme,
+        ...(a.inner_width === undefined ? {} : { inner_width: a.inner_width }),
+        ...(a.client_width === undefined ? {} : { client_width: a.client_width }),
+      });
   }
   return shots;
 }
@@ -156,7 +174,7 @@ export function screenshotsStage(
   taskId: string,
   artifacts: readonly ArtifactDecl[],
   artifactsDir?: string,
-): { ok: boolean; shots: { path: string; viewport: string; theme: string }[] } {
+): { ok: boolean; shots: ScreenshotRecord[] } {
   const shots = screenshotsFromArtifacts(artifacts);
   return { ok: screenshotSetComplete(taskId, shots, artifactsDir), shots };
 }
@@ -551,7 +569,11 @@ export async function checkPaperwork(
           },
           input.alsoReported,
         );
-        if (r.outcome === 'blocked') block(stage, r.reason, {});
+        if (r.outcome === 'blocked')
+          block(stage, r.reason, {
+            ...(r.invalidShots === undefined ? {} : { invalidShots: r.invalidShots }),
+            ...(r.overflow === undefined ? {} : { overflow: r.overflow }),
+          });
         break;
       }
       case 'screenshots': {
@@ -565,7 +587,16 @@ export async function checkPaperwork(
           break;
         }
         const r = screenshotsStage(input.taskId, artifacts, input.artifactsDir);
-        if (!r.ok) block(stage, 'screenshots-missing', { screenshots: r.shots });
+        if (!r.ok) {
+          const invalidShots = shotWidthIssues(r.shots);
+          block(stage, 'screenshots-missing', {
+            screenshots: r.shots,
+            ...(invalidShots.length === 0 ? {} : { invalidShots }),
+          });
+        } else {
+          const overflow = shotOverflows(r.shots);
+          if (overflow.length > 0) block(stage, 'mobile-overflow', { overflow });
+        }
         break;
       }
       case 'grader': {

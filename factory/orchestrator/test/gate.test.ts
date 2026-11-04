@@ -1201,10 +1201,34 @@ describe('gate.ts (integration)', () => {
             issues: [],
             head,
             screenshots: [
-              { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
-              { path: 'home-desktop-dark.png', viewport: 'desktop', theme: 'dark' },
-              { path: 'home-mobile-light.png', viewport: 'mobile', theme: 'light' },
-              { path: 'home-mobile-dark.png', viewport: 'mobile', theme: 'dark' },
+              {
+                path: 'home-desktop-light.png',
+                viewport: 'desktop',
+                theme: 'light',
+                inner_width: 1280,
+                client_width: 1280,
+              },
+              {
+                path: 'home-desktop-dark.png',
+                viewport: 'desktop',
+                theme: 'dark',
+                inner_width: 1280,
+                client_width: 1280,
+              },
+              {
+                path: 'home-mobile-light.png',
+                viewport: 'mobile',
+                theme: 'light',
+                inner_width: 390,
+                client_width: 390,
+              },
+              {
+                path: 'home-mobile-dark.png',
+                viewport: 'mobile',
+                theme: 'dark',
+                inner_width: 390,
+                client_width: 390,
+              },
             ],
           },
         },
@@ -2761,7 +2785,14 @@ describe('recordTaskResult', () => {
           taskId: 'epic-1/task-2',
           result: resultFixture({
             task_id: 'epic-1/task-2',
-            artifacts: [{ type: 'screenshot', path: 'home-desktop-light.png' }],
+            artifacts: [
+              {
+                type: 'screenshot',
+                path: 'home-desktop-light.png',
+                inner_width: 1280,
+                client_width: 1280,
+              },
+            ],
           }),
           artifactsDir,
           worktreeDir,
@@ -2774,7 +2805,13 @@ describe('recordTaskResult', () => {
       const check = events.find((e) => e.record.event_type === 'artifact-check-result');
       expect(check?.record.payload.head).toBe(head);
       expect(check?.record.payload.screenshots).toEqual([
-        { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
+        {
+          path: 'home-desktop-light.png',
+          viewport: 'desktop',
+          theme: 'light',
+          inner_width: 1280,
+          client_width: 1280,
+        },
       ]);
     } finally {
       await rm(worktreeDir, { recursive: true, force: true });

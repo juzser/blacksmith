@@ -12,6 +12,10 @@ export interface ArtifactDecl {
   type: string;
   path: string;
   description?: string;
+  /** Screenshots only: `window.innerWidth` measured in the page at capture. */
+  inner_width?: number;
+  /** Screenshots only: `document.documentElement.clientWidth` measured in the page at capture. */
+  client_width?: number;
 }
 
 /**

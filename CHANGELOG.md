@@ -355,6 +355,20 @@ before hand-off. One entry per task.
   `worktree.default-branch-ambiguous`. With neither, it takes the checked-out
   branch unless that is a `bs/…` or `smith/…` branch. A project with a remote
   is unchanged.
+
+- **A cropped mobile screenshot no longer reaches the visual judge.** Headless
+  Chrome's `--window-size=390` renders at about 500 px or wider, so a "mobile"
+  shot was a crop with clipping that was not there, and `bs-uiux` raised a false
+  S2 on it. The tester now shoots with viewport emulation and declares each
+  shot's `inner_width` and `client_width`; the screenshot-set check counts a
+  shot only when they match its viewport (mobile: `client_width` 370 to 390;
+  desktop: `inner_width` at least 768), so a mismatched or unrecorded shot
+  leaves the set `screenshots-missing`, and the gate and preflight name each
+  refused shot (a page with no mobile viewport meta is named
+  `page-not-mobile-scaled`, with the tag to add). A mobile page that really
+  overflows (`inner_width` above `client_width`) blocks at the gate as
+  `mobile-overflow`, naming the shot and both widths, and goes to the coder.
+
 - **`--no-findings` is an attestation only the operator can make.** It
   records `attested_by: operator` and closes a judge turn or a closing spec
   review with no findings file. Until now, any actor could write one, so a
