@@ -670,9 +670,47 @@ describe('post-merge batch', () => {
       expect(repo.worktreeCount()).toBe(before);
     });
 
+    it('resolves master as the default with the integration branch checked out, no remote', () => {
+      const lone = path.join(repo.root, 'no-remote');
+      runGit(repo.root, ['init', '-q', '-b', 'master', lone]);
+      runGit(lone, [
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init',
+      ]);
+      runGit(lone, ['checkout', '-q', '-b', repo.branch]);
+      expect(assertIntegrationBranch(lone, repo.epicId)).toEqual({
+        branch: repo.branch,
+        defaultBranch: 'master',
+      });
+    });
+
     it('refuses when the derived branch is the default branch', async () => {
       const lone = path.join(repo.root, 'lone');
       runGit(repo.root, ['init', '-q', '-b', repo.branch, lone]);
+      runGit(lone, [
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init',
+      ]);
+      // A project whose origin/HEAD names the factory branch is the only way it is the default.
+      runGit(lone, [
+        'symbolic-ref',
+        'refs/remotes/origin/HEAD',
+        `refs/remotes/origin/${repo.branch}`,
+      ]);
       expect(() => assertIntegrationBranch(lone, repo.epicId)).toThrow(
         expect.objectContaining({ code: 'postmerge.not-integration-branch' }),
       );

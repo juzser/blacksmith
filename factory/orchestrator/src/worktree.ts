@@ -37,10 +37,12 @@ export function taskBranchExists(projectDir: string, epic: string, taskId: strin
 }
 
 /**
- * Best-effort default-branch detection: origin/HEAD symbolic ref first (the
- * normal case after a clone), then whatever branch is currently checked out,
- * then the conventional main/master names. Exported for cleanup.ts (epic
- * bs-optimize criterion 14).
+ * Default-branch detection: origin/HEAD symbolic ref first (the normal case
+ * after a clone). Without a remote: the checked-out branch if it is main or
+ * master; else the one of main/master that exists; if both exist,
+ * `init.defaultBranch` (any config scope) breaks the tie, otherwise refused as
+ * ambiguous; if neither exists, the checked-out branch — never a factory
+ * branch (`bs/…`, legacy `smith/…`), where a session usually stands.
  */
 export function detectDefaultBranch(projectDir: string): string {
   try {
@@ -51,22 +53,41 @@ export function detectDefaultBranch(projectDir: string): string {
     // no origin/HEAD — fall through
   }
 
+  let current = '';
   try {
-    const current = git(projectDir, ['branch', '--show-current']);
-    if (current) return current;
+    current = git(projectDir, ['branch', '--show-current']);
   } catch {
-    // detached or no commits yet — fall through
+    // detached or no commits yet — no checked-out branch to consult
   }
 
-  for (const candidate of ['main', 'master']) {
-    if (localBranchExists(projectDir, candidate)) return candidate;
+  const conventional = ['main', 'master'].filter((c) => localBranchExists(projectDir, c));
+  if (conventional.includes(current)) return current;
+  if (conventional.length === 1) return conventional[0] as string;
+  if (conventional.length > 1) {
+    try {
+      const configured = git(projectDir, ['config', '--get', 'init.defaultBranch']);
+      if (conventional.includes(configured)) return configured;
+    } catch {
+      // init.defaultBranch unset — ambiguous
+    }
+    throw new WorktreeError(
+      'worktree.default-branch-ambiguous',
+      `Both ${conventional.join(' and ')} exist in ${projectDir}; no remote, checked-out main/master or init.defaultBranch says which is the default branch.`,
+      { projectDir, candidates: conventional },
+    );
   }
+
+  if (current && !isFactoryBranch(current)) return current;
 
   throw new WorktreeError(
     'worktree.default-branch-not-found',
     `Could not detect a default branch in ${projectDir}.`,
     { projectDir },
   );
+}
+
+function isFactoryBranch(branch: string): boolean {
+  return [BRANCH_PREFIX, LEGACY_BRANCH_PREFIX].some((p) => branch.startsWith(`${p}/`));
 }
 
 /**

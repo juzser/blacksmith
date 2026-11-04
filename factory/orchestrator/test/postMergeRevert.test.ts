@@ -656,6 +656,12 @@ describe('post-merge revert landing', () => {
         'init',
       ]);
       runGit(lone, ['branch', 'main']);
+      // A project whose origin/HEAD names the factory branch is the only way it is the default.
+      runGit(lone, [
+        'symbolic-ref',
+        'refs/remotes/origin/HEAD',
+        `refs/remotes/origin/${repo.branch}`,
+      ]);
       const main = repo.git(['rev-parse', 'main'], lone);
       const tip = repo.git(['rev-parse', repo.branch], lone);
       const worktrees = () => repo.git(['worktree', 'list', '--porcelain'], lone);
