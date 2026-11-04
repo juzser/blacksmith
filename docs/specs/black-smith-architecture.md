@@ -1345,7 +1345,7 @@ not in the diff — it is in every verdict the factory issued afterwards.
    append: those run both at pre-flight, before the first write, and pin that
    event as the parent. A dispatch that goes live after pre-flight does not
    invalidate a pinned parent: it was the tail when the command started, which
-   is a true causal ancestor. *Breaks:*
+   is a true causal ancestor. On an empty log the pre-flight pins the session root: the append writes the root if it is still absent, else uses the log's first event, which is always the `session-start`; no ambiguity check runs then, because the root is an ancestor and never a sibling's event. *Breaks:*
    under fan-out the events between yours belong to sibling tasks, so a
    guessed parent names a real event that is not the parent — it validates,
    and the lineage is quietly wrong.

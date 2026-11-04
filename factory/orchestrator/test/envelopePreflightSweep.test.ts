@@ -18,7 +18,10 @@ import { describe, expect, it } from 'vitest';
 // outside the log: the fs writers (writeFile*, appendFileSync, mkdirSync,
 // renameSync, rmSync, copyFileSync), process spawners (execFileSync, spawnSync,
 // execSync), the plan-file writers (amendPlan, approveSpecChange, nextVersion,
-// writePlanFile), the overlay writers (writeOverlay, reconcileOverlay), and the
+// writePlanFile), the async and fs/promises forms (mkdir, rm, rename, appendFile,
+// copyFile, execFile, spawn), mutating git calls (worktree add|remove|prune,
+// commit, merge, branch, update-ref, reset, checkout, push, tag, rebase,
+// cherry-pick, revert, stash through runGit/git), the overlay writers (writeOverlay, reconcileOverlay), and the
 // entry points that run git, checks, tests or providers (openAudit, closeAudit,
 // step, batchStep, runGate, runIntegrationCheck, runPostMerge, runScheduler,
 // runPlanQuorum, runEpicVerdict, closeEpic, promoteAfterCatch, runJudge,
@@ -27,7 +30,11 @@ import { describe, expect, it } from 'vitest';
 // it does not name; the by-hand sweep covers the rest.
 
 const WRITE =
-  /\b(?:writeFileSync|writeFile|appendFileSync|mkdirSync|renameSync|rmSync|copyFileSync|execFileSync|spawnSync|execSync|runJudge|runCrossFinding|amendPlan|approveSpecChange|nextVersion|writePlanFile|writeOverlay|reconcileOverlay|runGate|step|batchStep|runIntegrationCheck|runPostMerge|openAudit|closeAudit|runScheduler|runPlanQuorum|runEpicVerdict|closeEpic|promoteAfterCatch)\(/g;
+  /\b(?:writeFileSync|writeFile|appendFileSync|appendFile|mkdirSync|mkdir|renameSync|rename|rmSync|rm|copyFileSync|copyFile|execFileSync|execFile|spawnSync|spawn|execSync|runJudge|runCrossFinding|amendPlan|approveSpecChange|nextVersion|writePlanFile|writeOverlay|reconcileOverlay|runGate|step|batchStep|runIntegrationCheck|runPostMerge|openAudit|closeAudit|runScheduler|runPlanQuorum|runEpicVerdict|closeEpic|promoteAfterCatch)\(/g;
+// A mutating git call: runGit/git with a mutating subcommand among its arguments.
+// Reads (rev-parse, rev-list, show, ls-tree, status, diff, log, merge-base) stay out.
+const GIT_WRITE =
+  /\b(?:runGit|git)\([^;]*?['"](?:worktree['"]\s*,\s*['"](?:add|remove|prune)|commit|merge|branch|update-ref|reset|checkout|push|tag|rebase|cherry-pick|revert|stash)['"]/g;
 const APPEND =
   /\b(?:appendEvent|appendWithin|appendEdge|startSession|emit\w*|raiseFinding|transition\w*|recordJudge\w*)\(/;
 const PIN = /pinnedEventContext\(|checksEnvelope\(/;
@@ -131,9 +138,11 @@ function callEnd(text: string, start: number): number {
 
 /** The first write-like call that runs before `limit` (a pin or an append), or undefined. */
 function writeBefore(text: string, limit: number): string | undefined {
-  for (const m of text.matchAll(WRITE)) {
-    const at = m.index ?? 0;
-    if (at < limit && !(limit < callEnd(text, at))) return m[0];
+  for (const re of [WRITE, GIT_WRITE]) {
+    for (const m of text.matchAll(re)) {
+      const at = m.index ?? 0;
+      if (at < limit && !(limit < callEnd(text, at))) return m[0];
+    }
   }
   return undefined;
 }
