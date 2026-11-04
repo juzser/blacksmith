@@ -165,13 +165,14 @@ describe('uiuxGate.ts checkUiux', () => {
   });
 
   it.each([
-    ['980/980 (no meta viewport under isMobile)', 980],
-    ['780/780 (initial-scale=0.5)', 780],
-  ])('names the meta viewport when a narrow shot measures %s', async (_n, width) => {
+    ['980/980 (no meta viewport under isMobile)', 980, 980],
+    ['780/780 (initial-scale=0.5)', 780, 780],
+    ['1200/980 (no meta viewport and the page overflows)', 1200, 980],
+  ])('names the meta viewport when a narrow shot measures %s', async (_n, inner, width) => {
     await dispatchUiux('spec', path.join(artifactsDir, 'spec.json'));
     await reportUiux('spec');
     const unscaled = SCREENSHOTS.map((s) =>
-      s.path === 'home-mobile-dark.png' ? { ...s, inner_width: width, client_width: width } : s,
+      s.path === 'home-mobile-dark.png' ? { ...s, inner_width: inner, client_width: width } : s,
     );
     await writeScreenshotsToDisk(unscaled);
     await recordTester('sha-1', unscaled);
@@ -183,7 +184,7 @@ describe('uiuxGate.ts checkUiux', () => {
         {
           path: 'home-mobile-dark.png',
           viewport: 'mobile',
-          inner_width: width,
+          inner_width: inner,
           client_width: width,
           why: 'page-not-mobile-scaled',
           hint: expect.stringContaining(

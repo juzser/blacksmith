@@ -138,7 +138,7 @@ const MOBILE_WIDTH = 390;
 const SCROLLBAR_ALLOWANCE = 20;
 /** Narrowest `window.innerWidth` a `desktop` shot may report. */
 const DESKTOP_MIN_WIDTH = 768;
-/** Where equal inner and client widths stop looking like a scrollbar quirk and start looking like an unscaled page (980 with no meta viewport, 780 at initial-scale=0.5). */
+/** Where a layout viewport stops looking like a scrollbar quirk and starts looking like an unscaled page (980 with no meta viewport, 780 at initial-scale=0.5). */
 const NOT_SCALED_MIN_WIDTH = 600;
 
 /**
@@ -153,10 +153,8 @@ function shotWidthIssue(s: ScreenshotEntry): InvalidShot['why'] | null {
   if (typeof inner !== 'number' || typeof client !== 'number') return 'no-width-record';
   if (s.viewport === 'mobile') {
     if (client <= MOBILE_WIDTH && client >= MOBILE_WIDTH - SCROLLBAR_ALLOWANCE) return null;
-    // Both widths agree and sit far above 390: the emulated device did not scale the page.
-    return inner === client && client >= NOT_SCALED_MIN_WIDTH
-      ? 'page-not-mobile-scaled'
-      : 'width-mismatch';
+    // The layout viewport sits far above 390, whatever the page overflows to: the emulated device did not scale the page.
+    return client >= NOT_SCALED_MIN_WIDTH ? 'page-not-mobile-scaled' : 'width-mismatch';
   }
   return inner >= DESKTOP_MIN_WIDTH ? null : 'width-mismatch';
 }
@@ -165,7 +163,7 @@ const HINTS: Partial<Record<InvalidShot['why'], string>> = {
   'width-mismatch':
     'a headless --window-size crop, or a custom wide ::-webkit-scrollbar, can cause this; shoot with viewport emulation',
   'page-not-mobile-scaled':
-    'the page has no mobile viewport: add <meta name="viewport" content="width=device-width, initial-scale=1">; shoot with isMobile device emulation and do not drop isMobile to make this pass, the page is the defect',
+    'the page is not scaled to the device width: its meta viewport is missing or wrong, for example initial-scale below 1; it should be <meta name="viewport" content="width=device-width, initial-scale=1">; shoot with isMobile device emulation and do not drop isMobile to make this pass, the page is the defect',
 };
 
 /** Every shot whose recorded widths do not match its viewport, with the widths it recorded. */
