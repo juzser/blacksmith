@@ -36,9 +36,9 @@ for a runner the project does not have.
   too, not only the task's own screens — derive that list from the
   screenshot suite already on disk or from the primitive's importers, and
   record which you used.
-- Take every mobile or other narrow shot with viewport emulation — Playwright's
-  `viewport` / `page.setViewportSize`, or CDP
-  `Emulation.setDeviceMetricsOverride` — never headless Chrome's
+- Take every mobile or other narrow shot with viewport emulation — the device
+  or viewport emulation of the e2e tool `factory/policies/stack.yml` names, or
+  CDP `Emulation.setDeviceMetricsOverride` — never headless Chrome's
   `--window-size`: it will not render narrower than about 500 px, so a
   "390px" shot taken that way is a crop of a wider layout, with clipping that
   is not there. Measure `window.innerWidth` and
