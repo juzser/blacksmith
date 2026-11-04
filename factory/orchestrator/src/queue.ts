@@ -18,7 +18,12 @@ import {
   selectTier,
 } from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
-import { epicBranchPrefix, integrationBranchName, RESERVED_TASK_ID } from './worktree.js';
+import {
+  epicBranchPrefix,
+  integrationBranchName,
+  moveTaskBase,
+  RESERVED_TASK_ID,
+} from './worktree.js';
 
 export class QueueError extends SmithError {}
 
@@ -304,8 +309,10 @@ async function certifyAndRebase(
     return { outcome: 'nothing-to-merge', taskId: task.taskId, reason, dirty: commit.dirty };
   }
 
+  const onto = hold?.onto ?? integrationBranch;
+  const ontoSha = runGit(task.worktreeDir, ['rev-parse', '--verify', `${onto}^{commit}`]);
   try {
-    execFileSync('git', ['rebase', hold?.onto ?? integrationBranch], {
+    execFileSync('git', ['rebase', onto], {
       cwd: task.worktreeDir,
       stdio: 'pipe',
       ...(hold ? { env: hold.env } : {}),
@@ -325,6 +332,8 @@ async function certifyAndRebase(
     return { outcome: 'rebase-conflict', taskId: task.taskId, conflictingFiles: files };
   }
 
+  // The branch now sits on `ontoSha`; a later gate compares against that, not the old cut.
+  moveTaskBase(task.worktreeDir, task.branch, ontoSha);
   return null;
 }
 

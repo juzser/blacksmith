@@ -782,7 +782,13 @@ belong to the close), and a task answers only for what it changed:
   `mcp-approval-unsigned-by-operator`. Only the operator signs.
 - A branch with a manifest and no recorded base (a task cut before the record
   existed) blocks with the same reason and says so; a missing base is never read
-  as an empty one. Record it by hand with `git update-ref`.
+  as an empty one. Record it with `git update-ref refs/bs/base/<branch>` set to
+  the merge-base of the branch and its integration branch; `bs worktree create
+  --reopen` does that for a reopened task and says so in its output
+  (`baseRecorded`).
+- The base follows the task: the queue moves it to the commit it rebased onto,
+  removing the worktree deletes it, and when the integration branch is merged into
+  the task the newer merge-base is used, so upstream changes are not the task's.
 - An ignored or untracked manifest is not read. A project with no manifest
   passes untouched. The result is logged as `mcp-check-result` on every path.
 
@@ -790,13 +796,15 @@ belong to the close), and a task answers only for what it changed:
 `bs mcp override <task-id> --worktree <dir> --tool <name> --note <why> --actor operator`
 for each tool. It appends an `mcp-approval-override` event naming the tool and
 the hash of its committed entry, and the gate reads it on the next run. Change
-the entry and the override no longer applies. This is the same path
-`epic close --override-rationale` and `waivers approve-task` give: **"operator"
-is the `--actor` string the caller passes, and `epic close` checks not even that
-(it records the rationale text under actor `operator` by default).** Nothing
-authenticates a person, so an agent that writes `--actor operator` produces the
-same event. A stronger proof is a separate decision, and this check builds none.
-`epic close` keeps its own check.
+the entry and the override no longer applies. `--actor` is required and is
+recorded exactly as given. This is the same path `epic close --override-rationale`
+and `waivers approve-task` give: **an override is attributed to the actor string
+the caller passes and is not authenticated.** The verb refuses an actor that is
+not an operator actor, and `epic close` checks not even that (it records the
+rationale text under actor `operator` by default). Nothing authenticates a person,
+so an agent that writes `--actor operator` produces the same event. A stronger
+proof is a separate decision, and this check builds none. `epic close` keeps its
+own check.
 
 ## 5b. One epic across several sessions — `bs event lineage`
 

@@ -271,7 +271,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<task-id>',
     flags: `--worktree <dir> --tool <name> --note <why> ${EVENTS_DIR}`,
     summary:
-      'Record that the operator lets one tool stand unsigned for a task, bound to the hash of its committed manifest entry. Requires --actor operator.',
+      'Record that the operator lets one tool stand unsigned for a task, bound to the hash of its committed manifest entry. Requires --actor, an operator actor such as operator; it is recorded as given and not authenticated.',
   },
   {
     command: 'research check',

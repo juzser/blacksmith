@@ -840,15 +840,35 @@ const problem = (message: string): McpGateViolation => ({
   message,
 });
 
-/** The commit the task branch was cut from, as `worktree create` recorded it; undefined for a branch nobody recorded. */
+/**
+ * The commit the task is judged against. Start from the one `worktree create` (or a
+ * rebase by the queue) recorded; undefined for a branch nobody recorded. When the
+ * integration branch has since been merged into the task, the merge-base with its
+ * tip is newer, and upstream changes are not the task's: use it, provided it
+ * descends from the recorded base. A commit only the task authored is never on the
+ * integration branch, so it stays the task's.
+ */
 function recordedBase(dir: string): string | undefined {
+  let recorded: string;
+  let branch: string;
   try {
-    const branch = runGit(dir, ['branch', '--show-current']);
+    branch = runGit(dir, ['branch', '--show-current']);
     if (branch === '') return undefined;
-    return runGit(dir, ['rev-parse', '--verify', `${taskBaseRef(branch)}^{commit}`]);
+    recorded = runGit(dir, ['rev-parse', '--verify', `${taskBaseRef(branch)}^{commit}`]);
   } catch {
     return undefined;
   }
+  try {
+    const integration = branch.replace(/\/[^/]+$/, '/integration');
+    const common = runGit(dir, ['merge-base', 'HEAD', integration]);
+    if (common !== recorded) {
+      runGit(dir, ['merge-base', '--is-ancestor', recorded, common]);
+      return common;
+    }
+  } catch {
+    // No integration branch, or the common ancestor does not descend from the record.
+  }
+  return recorded;
 }
 
 /**
@@ -911,7 +931,7 @@ export function inspectMcpManifest(
       present: true,
       unsigned: [
         problem(
-          `No base commit is recorded for this branch, so the manifest cannot be compared with what the task was cut from. Record it with \`git update-ref ${taskBaseRef('<branch>')} <sha>\` (\`bs worktree create\` does it for new tasks).`,
+          `No base commit is recorded for this branch, so the manifest cannot be compared with what the task was cut from. For a task cut before bases were recorded, record the commit it was cut from: \`git update-ref ${taskBaseRef('<branch>')} $(git merge-base <branch> <integration-branch>)\` (\`bs worktree create\` does it for new tasks, and \`--reopen\` for a reopened one).`,
         ),
       ],
     };
@@ -1006,11 +1026,18 @@ export async function recordMcpOverride(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent> {
-  const actor = ctx.actor ?? 'user';
+  const actor = ctx.actor;
+  if (actor === undefined || actor.trim() === '') {
+    throw new McpError(
+      'mcp.actor-required',
+      'An MCP override is attributed to the actor you give and nothing checks who that is: pass --actor explicitly (an operator actor, such as operator).',
+      {},
+    );
+  }
   if (!isOperatorActor(actor)) {
     throw new McpError(
       'mcp.not-operator',
-      `Actor "${actor}" cannot override an MCP approval: only the operator can. Pass --actor operator.`,
+      `Actor "${actor}" cannot override an MCP approval: only an operator actor can. Pass --actor operator.`,
       { actor },
     );
   }

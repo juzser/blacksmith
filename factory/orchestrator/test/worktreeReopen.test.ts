@@ -65,7 +65,11 @@ describe('reopenTaskWorktree', () => {
       branch: TASK_BRANCH,
       epic: EPIC,
       taskId: TASK,
+      baseRecorded: { sha: repo.git(['rev-parse', 'main']), from: 'merge-base' },
     });
+    expect(repo.git(['rev-parse', `refs/bs/base/${TASK_BRANCH}`])).toBe(
+      repo.git(['rev-parse', 'main']),
+    );
     expect(repo.git(['rev-list', '--count', `${before}..${TASK_BRANCH}`])).toBe('1');
     expect(repo.git(['rev-parse', `${TASK_BRANCH}^`])).toBe(before);
     expect(repo.git(['rev-parse', `${TASK_BRANCH}^{tree}`])).toBe(
@@ -79,6 +83,21 @@ describe('reopenTaskWorktree', () => {
       new RegExp(`^scratch-${process.pid}-[0-9a-f-]{36}$`),
     );
     expect(existsSync(scratch[0] as string)).toBe(false);
+  });
+
+  it('keeps the base an existing branch already has and says nothing about it', () => {
+    const cut = repo.git(['rev-parse', 'main']);
+    repo.git(['update-ref', `refs/bs/base/${TASK_BRANCH}`, cut]);
+    const result = reopen();
+    expect(result).not.toHaveProperty('baseRecorded');
+    expect(repo.git(['rev-parse', `refs/bs/base/${TASK_BRANCH}`])).toBe(cut);
+  });
+
+  it('records the head a deleted branch is cut from', () => {
+    repo.git(['branch', '-D', TASK_BRANCH]);
+    const head = repo.head();
+    reopen();
+    expect(repo.git(['rev-parse', `refs/bs/base/${TASK_BRANCH}`])).toBe(head);
   });
 
   it('reuses a clean existing task worktree', () => {
@@ -191,7 +210,7 @@ describe('reopenTaskWorktree', () => {
     });
   });
 
-  it('prints the same keys as a plain worktree create through the CLI', () => {
+  it('prints the keys of a plain worktree create, plus the base it recorded, through the CLI', () => {
     const run = runCli([
       'worktree',
       'create',
@@ -208,6 +227,7 @@ describe('reopenTaskWorktree', () => {
       branch: TASK_BRANCH,
       epic: EPIC,
       taskId: TASK,
+      baseRecorded: { sha: repo.git(['rev-parse', 'main']), from: 'merge-base' },
     });
     expect(repo.git(['rev-list', '--count', `${repo.head()}..${TASK_BRANCH}`])).toBe('1');
   });

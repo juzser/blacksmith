@@ -53,8 +53,12 @@ than appearing in it.
   `mcp-approval-unsigned-by-operator`, which the epic session answers because
   only the operator signs, and `bs mcp override` records that for one tool.
   `mcpViolations` names the rule and the tool, and `mcp-check-result` is logged
-  on every run. A
-  project with no manifest is untouched, and `epic close` keeps its own check.
+  on every run. `bs mcp override` needs an explicit `--actor` and records it as
+  given. The recorded base follows the task: `bs worktree create --reopen`
+  records one for an older branch, the queue moves it on a rebase, removing the
+  worktree deletes it, and merging the integration branch into the task moves the
+  comparison point up. A project with no manifest is untouched, and `epic close`
+  keeps its own check.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.

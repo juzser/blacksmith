@@ -378,6 +378,32 @@ describe('mcp manifest at the gate', () => {
     expect(violations.map((v) => v.tool)).toContain('forged_widget');
   });
 
+  it('counts only what the task changed when the integration branch is merged into it', async () => {
+    const task = w.git(['branch', '--show-current']);
+    const integration = 'smith/epic-1/integration';
+    w.git(['branch', integration, 'main']);
+    w.git(['checkout', '-q', integration]);
+    await writeFile(
+      path.join(w.worktreeDir, MANIFEST),
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]),
+    );
+    w.git(['add', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'upstream signed']);
+    w.git(['checkout', '-q', task]);
+    w.git(['merge', '-q', '--no-edit', integration]);
+    const merged = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(merged.gate.outcome).toBe('pass');
+    expect(merged.pre.outcome).toBe('pass');
+    const forged = { ...UNSIGNED_TOOL, name: 'forged_widget', approval: OPERATOR_APPROVAL };
+    await commitMcpManifest(
+      w,
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }, forged]),
+    );
+    const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['forged_widget']);
+  });
+
   it('fails closed when a manifest exists and no base was recorded', async () => {
     await mcpValid(w);
     w.git(['update-ref', '-d', `refs/bs/base/${w.git(['branch', '--show-current'])}`]);
@@ -385,6 +411,7 @@ describe('mcp manifest at the gate', () => {
     expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
     expect(pre.reason).toBe('mcp-approval-unsigned-by-operator');
     expect(violations[0]?.message).toMatch(/No base commit is recorded/);
+    expect(violations[0]?.message).toMatch(/merge-base/);
   });
 
   it('does not carry an approval over to a changed tool entry', async () => {
@@ -411,7 +438,14 @@ describe('mcp manifest at the gate', () => {
         { ...ctx, actor },
         w.opts(),
       );
-    await expect(override('coder')).rejects.toThrow(/only the operator/);
+    await expect(
+      recordMcpOverride(
+        { taskId: w.taskId, worktreeDir: w.worktreeDir, tool: 'rotate_widget', note: 'reviewed' },
+        { sessionId: w.sessionId, planVersion: 1, causalParent: `${w.sessionId}#0` },
+        w.opts(),
+      ),
+    ).rejects.toThrow(/--actor/);
+    await expect(override('coder')).rejects.toThrow(/operator actor/);
     await expect(override('operator', 'no_such_tool')).rejects.toThrow(/no tool/);
     await override('operator');
     const cleared = await gateOf(input);
