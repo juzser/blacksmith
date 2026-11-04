@@ -10,6 +10,7 @@ mention no longer exist in this tree.
 
 Blacksmith is now a small Claude Code plugin with five pieces: plain-explanation rules, a confidence % on options, `/cross-check` through codex (read-only), five agents with their own model and effort, and a compact rule. See [README.md](README.md) and [docs/history.md](docs/history.md) for why.
 
+- **Changed:** `/cross-check` also asks DeepSeek (`deepseek-v4-pro`, key from `DEEPSEEK_API_KEY`), in parallel with codex and with one output group per provider; `CROSSCHECK_PROVIDERS` picks which. DeepSeek sees only the prompt. A provider that is not set up is skipped. The temp dir now honors `TMPDIR` on macOS. See [docs/cross-check.md](docs/cross-check.md).
 - **Added:** the plugin in `plugin/` (PR #542); a markdown link check in `scripts/check.sh`; a docs set, `INSTALL.md` and `README.md` rewritten for the plugin.
 - **Kept:** `mods/pr-mod` (its own version), `LICENSE`, `CODE_OF_CONDUCT.md`, this changelog.
 - **Removed:** the orchestrator (`factory/`), the dashboard (`ui/`), the `bs-mod` module, the fourteen `bs-*` agents and the `/bs` skill, the guard hook, the trial harness (`trial/`), the old docs, the npm packaging (`package.json`, lockfile, TypeScript, lint and test configs), the e2e CI jobs and `.gitleaks.toml`. The `bs` command and the `@juzser/blacksmith` npm package are not part of 1.0.0; the last published version is 0.7.0.

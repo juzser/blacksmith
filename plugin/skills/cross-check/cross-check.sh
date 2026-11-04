@@ -1,27 +1,41 @@
 #!/bin/sh
 # cross-check.sh [base] [criteria|-]
 # Sends the diff of the working tree against base (so uncommitted changes count),
-# the changed test files and the criteria to codex for one read-only review, and
-# prints what it answered. POSIX sh + git + codex.
+# the changed test files and the criteria to each available provider for one review,
+# and prints what each answered, one group per provider. POSIX sh + git, plus codex
+# for the codex provider, curl and node (or python3) for the deepseek provider.
 #
 # Arguments: base defaults to the merge-base with the default branch. The second
 # argument is the criteria text, or "-" to read them from stdin (use a quoted
 # heredoc so the shell never expands them).
 #
 # Env (all optional):
+#   CROSSCHECK_PROVIDERS  providers to run, space or comma separated
+#                         (default "codex deepseek"). One that is not available
+#                         (codex not on PATH, DEEPSEEK_API_KEY unset) is skipped.
 #   CROSSCHECK_MODEL      codex model          (default gpt-6-sol)
-#   CROSSCHECK_EFFORT     reasoning effort     (default medium)
+#   CROSSCHECK_EFFORT     codex reasoning effort (default medium)
+#   CROSSCHECK_DEEPSEEK_MODEL  deepseek model  (default deepseek-v4-pro; pinned,
+#                         because a retired id is silently answered by another model)
+#   CROSSCHECK_DEEPSEEK_URL    chat completions endpoint
+#                         (default https://api.deepseek.com/chat/completions)
 #   CROSSCHECK_MAX_BYTES  size cap, diff + tests (default 120000). Over it the
 #                         check is skipped: half a diff yields confident
 #                         findings about code that is not there.
-#   CROSSCHECK_TIMEOUT    seconds before the codex call is stopped (default 540);
-#                         codex and its child processes get TERM, then KILL after
+#   CROSSCHECK_TIMEOUT    seconds before the calls are stopped (default 540);
+#                         each call and its child processes get TERM, then KILL after
 #   CROSSCHECK_GRACE      seconds between the two (default 5)
+#
+# DEEPSEEK_API_KEY is read from the environment only. It goes to curl in a 0600 header
+# file in the run's temp dir, never on a command line, and is never printed.
 #
 # Always exits 0. When it cannot run it prints "cross-check: skipped (<reason>)".
 
+set -f
 model="${CROSSCHECK_MODEL:-gpt-6-sol}"
 effort="${CROSSCHECK_EFFORT:-medium}"
+dsmodel="${CROSSCHECK_DEEPSEEK_MODEL:-deepseek-v4-pro}"
+dsurl="${CROSSCHECK_DEEPSEEK_URL:-https://api.deepseek.com/chat/completions}"
 max="${CROSSCHECK_MAX_BYTES:-120000}"
 tmo="${CROSSCHECK_TIMEOUT:-540}"
 grace="${CROSSCHECK_GRACE:-5}"
@@ -30,7 +44,12 @@ criteria="${2:-}"
 
 skip() { printf 'cross-check: skipped (%s)\n' "$1"; exit 0; }
 
-command -v codex >/dev/null 2>&1 || skip "codex is not installed or not on PATH"
+provs=""
+for p in $(printf '%s' "${CROSSCHECK_PROVIDERS:-codex deepseek}" | tr ',' ' '); do
+  case "$p" in codex|deepseek) ;; *) skip "unknown provider '$p' in CROSSCHECK_PROVIDERS (use codex, deepseek)" ;; esac
+  case " $provs " in *" $p "*) ;; *) provs="$provs $p" ;; esac
+done
+[ -n "$provs" ] || skip "CROSSCHECK_PROVIDERS names no provider"
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || skip "not inside a git repository"
 real="$(cd "$repo" && pwd -P)"
 
@@ -44,7 +63,8 @@ git rev-parse -q --verify "$base" >/dev/null 2>&1 || skip "base '$base' is not a
 
 [ "$criteria" = "-" ] && criteria="$(cat)"
 
-work="$(mktemp -d 2>/dev/null)" || skip "cannot create a temp directory"
+# An explicit template: macOS mktemp ignores TMPDIR when it has none.
+work="$(mktemp -d "${TMPDIR:-/tmp}/crosscheck.XXXXXX" 2>/dev/null)" || skip "cannot create a temp directory"
 trap 'rm -rf "$work"' EXIT
 
 git -C "$repo" diff "$base" > "$work/diff" 2>/dev/null || skip "git diff failed"
@@ -77,12 +97,13 @@ size=$(( $(wc -c < "$work/diff") + $(wc -c < "$work/tests") ))
   if [ -s "$work/tests" ]; then cat "$work/tests"; else printf '(none changed)\n'; fi
 } > "$work/prompt"
 
-# The answer comes from the -o file only: plain exec echoes the whole prompt to stderr.
-# Run it in the background with a watchdog, since macOS has no timeout(1). Shell job
-# control and process groups are not reliable without a terminal (dash refuses `set -m`),
-# so on timeout the watchdog walks codex's process tree with ps, sends TERM to every
-# member, and after the grace period KILL to every member, children included. The braces
-# keep the shell's job notices off the output.
+# Each provider runs as a background job that leaves its answer in $work/<p>.out, or a
+# reason in $work/<p>.skip, and $work/<p>.done when it ends by itself. One watchdog
+# covers all of them, since macOS has no timeout(1). Shell job control and process
+# groups are not reliable without a terminal (dash refuses `set -m`), so on timeout the
+# watchdog walks each running job's process tree with ps, sends TERM to every member,
+# and after the grace period KILL to every member, children included. The braces keep
+# the shell's job notices off the output.
 tree() { # tree <pid>: the pid and all its descendants, one per line
   echo "$1"
   ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '
@@ -92,36 +113,128 @@ tree() { # tree <pid>: the pid and all its descendants, one per line
           } while (ch) }'
 }
 alive() { for q in $1; do kill -0 "$q" 2>/dev/null && return 0; done; return 1; }
+
+# The answer comes from the -o file only: plain exec echoes the whole prompt to stderr.
+run_codex() {
+  codex exec -s read-only -C "$repo" --color never -o "$work/codex.out" \
+    -m "$model" -c "model_reasoning_effort=\"$effort\"" - < "$work/prompt" > /dev/null 2> "$work/codex.err"
+  rc=$?
+  [ "$rc" -eq 0 ] || { printf 'codex call failed: %s\n' "$(tail -n 3 "$work/codex.err" | tr '\n' ' ' | cut -c1-300)" > "$work/codex.skip"; return; }
+  [ -s "$work/codex.out" ] || printf 'codex returned no answer\n' > "$work/codex.skip"
+}
+
+# The request body is built and the answer parsed by node or python3, never by hand in sh.
+# json_body <prompt file> <model>: the request body on stdout.
+json_body() {
+  if command -v node >/dev/null 2>&1; then
+    node -e 'const fs=require("fs");process.stdout.write(JSON.stringify({model:process.argv[2],messages:[{role:"user",content:fs.readFileSync(process.argv[1],"utf8")}],stream:false}))' "$1" "$2"
+  else
+    python3 -c 'import sys,json
+p=open(sys.argv[1],encoding="utf-8",errors="replace").read()
+sys.stdout.write(json.dumps({"model":sys.argv[2],"messages":[{"role":"user","content":p}],"stream":False}))' "$1" "$2"
+  fi
+}
+# json_answer <response file>: choices[0].message.content on stdout; exit 1 if absent.
+json_answer() {
+  if command -v node >/dev/null 2>&1; then
+    node -e 'try{const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).choices[0].message.content;if(typeof c!=="string"||!c.trim())process.exit(1);process.stdout.write(c)}catch(e){process.exit(1)}' "$1"
+  else
+    python3 -c 'import sys,json
+try:
+    c=json.load(open(sys.argv[1],encoding="utf-8",errors="replace"))["choices"][0]["message"]["content"]
+    assert isinstance(c,str) and c.strip()
+except Exception:
+    sys.exit(1)
+sys.stdout.buffer.write(c.encode("utf-8"))' "$1"
+  fi
+}
+
+run_deepseek() {
+  # The key is written by the printf builtin, so it never appears in an argv.
+  ( umask 077; printf 'Authorization: Bearer %s\n' "$DEEPSEEK_API_KEY" > "$work/ds.hdr" ) 2>/dev/null
+  json_body "$work/prompt" "$dsmodel" > "$work/ds.body" 2>/dev/null || { echo "could not build the request" > "$work/deepseek.skip"; return; }
+  code="$(curl -q -sS -o "$work/ds.resp" -w '%{http_code}' --max-time "$tmo" \
+    -H "@$work/ds.hdr" -H 'Content-Type: application/json' --data-binary "@$work/ds.body" "$dsurl" 2>/dev/null)"
+  crc=$?
+  [ "$crc" -eq 28 ] && { : > "$work/deepseek.timedout"; return; }
+  [ "$crc" -eq 0 ] || { echo "deepseek call failed (curl exit $crc)" > "$work/deepseek.skip"; return; }
+  case "$code" in 2??) ;; *) echo "deepseek HTTP $code" > "$work/deepseek.skip"; return ;; esac
+  json_answer "$work/ds.resp" > "$work/deepseek.out" 2>/dev/null || echo "deepseek returned a malformed response" > "$work/deepseek.skip"
+}
+
+pids=""
+for p in $provs; do
+  case "$p" in
+    codex)
+      command -v codex >/dev/null 2>&1 || { echo "codex is not installed or not on PATH" > "$work/codex.skip"; continue; } ;;
+    deepseek)
+      [ -n "${DEEPSEEK_API_KEY:-}" ] || { echo "DEEPSEEK_API_KEY is not set" > "$work/deepseek.skip"; continue; }
+      case "$DEEPSEEK_API_KEY" in *[![:graph:]]*) echo "DEEPSEEK_API_KEY contains spaces or control characters" > "$work/deepseek.skip"; continue ;; esac
+      command -v curl >/dev/null 2>&1 || { echo "curl is not installed" > "$work/deepseek.skip"; continue; }
+      command -v node >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || { echo "needs node or python3" > "$work/deepseek.skip"; continue; } ;;
+  esac
+  pids="$pids $p"
+done
+
 {
-  codex exec -s read-only -C "$repo" --color never -o "$work/out" \
-    -m "$model" -c "model_reasoning_effort=\"$effort\"" - < "$work/prompt" > /dev/null 2> "$work/err" &
-  pid=$!
-  (
-    i=0
-    while kill -0 "$pid" 2>/dev/null; do
-      sleep 1; i=$((i + 1))
-      if [ "$i" -ge "$tmo" ]; then
-        : > "$work/timedout"
-        procs="$(tree "$pid")"
-        kill -TERM $procs 2>/dev/null
-        g=0
-        while alive "$procs" && [ "$g" -lt "$grace" ]; do sleep 1; g=$((g + 1)); done
-        # a process the group spawned meanwhile is still under a live parent: add it
-        kill -KILL $procs $(tree "$pid") 2>/dev/null
-        break
-      fi
-    done
-  ) > /dev/null 2>&1 &
-  wd=$!
-  wait "$pid"; rc=$?
-  wait "$wd"
+  for p in $pids; do
+    ( "run_$p"; : > "$work/$p.done" ) > /dev/null 2>&1 &
+    eval "pid_$p=$!"
+  done
+  if [ -n "$pids" ]; then
+    (
+      i=0
+      while :; do
+        sleep 1; i=$((i + 1))
+        live=""
+        for p in $pids; do [ -e "$work/$p.done" ] || live="$live $p"; done
+        [ -n "$live" ] || break
+        if [ "$i" -ge "$tmo" ]; then
+          procs=""
+          for p in $live; do
+            : > "$work/$p.timedout"
+            eval "r=\$pid_$p"
+            procs="$procs $(tree "$r")"
+          done
+          kill -TERM $procs 2>/dev/null
+          g=0
+          while alive "$procs" && [ "$g" -lt "$grace" ]; do sleep 1; g=$((g + 1)); done
+          # a process a job spawned meanwhile is still under a live parent: add it
+          again=""
+          for p in $live; do eval "r=\$pid_$p"; again="$again $(tree "$r")"; done
+          kill -KILL $procs $again 2>/dev/null
+          break
+        fi
+      done
+    ) > /dev/null 2>&1 &
+  fi
+  wait
 } 2>/dev/null
-[ -e "$work/timedout" ] && skip "codex timed out after ${tmo}s (set CROSSCHECK_TIMEOUT to change)"
-[ "$rc" -eq 0 ] || skip "codex call failed: $(tail -n 3 "$work/err" | tr '\n' ' ' | cut -c1-300)"
-[ -s "$work/out" ] || skip "codex returned no answer"
+
+for p in $pids; do
+  if [ -e "$work/$p.timedout" ] && [ ! -s "$work/$p.out" ]; then
+    echo "$p timed out after ${tmo}s (set CROSSCHECK_TIMEOUT to change)" > "$work/$p.skip"
+  elif [ ! -s "$work/$p.out" ] && [ ! -s "$work/$p.skip" ]; then
+    echo "$p returned no answer" > "$work/$p.skip"
+  fi
+done
+
+any=0
+for p in $provs; do [ -s "$work/$p.out" ] && [ ! -s "$work/$p.skip" ] && any=1; done
 
 untracked="$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')"
-printf 'cross-check: findings from %s (effort %s) on %s vs the working tree, uncommitted changes included. Advisory until reproduced.\n\n' "$model" "$effort" "$base"
+if [ "$any" -eq 1 ]; then
+  printf 'cross-check: findings on %s vs the working tree, uncommitted changes included. Advisory until reproduced; a point both providers name counts once.\n\n' "$base"
+else
+  printf 'cross-check: skipped (no provider returned findings)\n\n'
+fi
 [ "${untracked:-0}" -gt 0 ] && printf 'Warning: %s untracked file(s) are not in the diff and were not reviewed. Run `git add -N <file>` to include them.\n\n' "$untracked"
-cat "$work/out"
+for p in $provs; do
+  case "$p" in
+    codex) printf '## codex (%s, effort %s)\n\n' "$model" "$effort" ;;
+    deepseek) printf '## deepseek (%s; sees only the diff, changed tests and criteria in the prompt, and cannot read the repo)\n\n' "$dsmodel" ;;
+  esac
+  if [ -s "$work/$p.skip" ]; then printf 'skipped: %s\n\n' "$(cat "$work/$p.skip")"
+  else cat "$work/$p.out"; printf '\n\n'; fi
+done
 exit 0

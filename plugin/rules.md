@@ -38,7 +38,7 @@ Use subagents for independent work that can run in parallel, and to keep bulky o
 
 ## 4. Cross-check
 
-After a non-trivial change, offer `/cross-check` (a second opinion from a different model). The person runs it; you do not, because it sends code to another vendor. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
+After a non-trivial change, offer `/cross-check` (a second opinion from a different model). The person runs it; you do not, because it sends code to other vendors. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
 
 ## 5. Compact
 

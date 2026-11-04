@@ -7,4 +7,4 @@ Five small things for Claude Code: plain explanations, a confidence % on options
 - Agents: [agents/](agents/) ([routing and overrides](../docs/agents.md)).
 - Cross-check, including what leaves your machine: [docs/cross-check.md](../docs/cross-check.md).
 - Compact: [docs/compact.md](../docs/compact.md).
-- Tests: `bash plugin/test/run.sh` (bash, git, node; uses a fake `codex`).
+- Tests: `bash plugin/test/run.sh` (bash, git, node; uses a fake `codex` and a fake DeepSeek server on 127.0.0.1; needs curl and ps).
