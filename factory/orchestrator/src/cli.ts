@@ -871,10 +871,14 @@ async function pinnedEventContext(
   eventType = 'pre-flight',
 ): Promise<EventContext> {
   const ctx = eventContextFromFlags(flags);
-  await validateEventEnvelope(
-    { session_id: ctx.sessionId, event_type: eventType, causal_parent: ctx.causalParent },
-    eventOptsFromFlags(flags),
-  );
+  // An explicit parent is left exactly as it was: its own refusals come where
+  // they always did. Only a defaulted one needs deciding here.
+  if (ctx.causalParent === null) {
+    await validateEventEnvelope(
+      { session_id: ctx.sessionId, event_type: eventType, causal_parent: null },
+      eventOptsFromFlags(flags),
+    );
+  }
   return ctx;
 }
 
