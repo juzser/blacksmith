@@ -48,3 +48,7 @@ Compact at about 60% of the context window, not at 90%: the room left is what yo
 - Drop: raw tool output and the raw returns of dispatched agents. Anything re-readable from files or git is not worth carrying.
 
 If the person has set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (for example to 60), the harness compacts there. Otherwise, when you are near 60%, ask the person to run `/compact <what to keep>`; you cannot run it yourself. Auto-compact handles the rest.
+
+## 6. Verify before you call it done
+
+Never say done, fixed or passing without running the command that shows it (the tests, the build, or the real flow) in this session and reading its output. If something was not verified, say so plainly.
