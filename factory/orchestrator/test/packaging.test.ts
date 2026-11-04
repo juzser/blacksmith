@@ -167,6 +167,12 @@ describe('the published package', () => {
     expect(manifest.bin['bs-prompt-hook']).toBe('factory/orchestrator/dist/promptHook.js');
   });
 
+  it('declares the lean subagent-usage hook bin, shipped, and its shim in the plugin source', () => {
+    expect(manifest.bin['bs-subagent-hook']).toBe('factory/orchestrator/dist/subagentHook.js');
+    expect(isShipped(manifest.bin['bs-subagent-hook'] as string)).toBe(true);
+    expect(existsSync(path.join(REPO_ROOT, '.claude/hooks/subagent-hook.sh'))).toBe(true);
+  });
+
   it('declares the opt-in policy hook bin, shipped, and its shim in the plugin source', () => {
     expect(manifest.bin['bs-policy-hook']).toBe('factory/orchestrator/dist/policyHook.js');
     expect(isShipped(manifest.bin['bs-policy-hook'] as string)).toBe(true);

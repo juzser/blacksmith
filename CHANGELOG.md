@@ -31,6 +31,17 @@ than appearing in it.
 
 ### Added
 
+- **Subagent usage hooks** (lean mode, scope §4/§7). The plugin registers
+  `SubagentStart` and `SubagentStop` hooks (`hooks/subagent-hook.sh`, the
+  package bin `bs-subagent-hook`, verbs `bs subagent start|stop`). Every
+  subagent a session runs, `bs-*` or not, leaves a `subagent-started` event
+  (explicit parent: the log's latest operator prompt, else its root) and a
+  `subagent-stopped` event (parent: its own start; role, model, input, output
+  and cache tokens, whether the transcript read whole). A role over its
+  `budgets.yml` `task:` cap prints a `systemMessage` warning. Both hooks always
+  exit 0. `bs subagent spend --session <id>` prints spend by role. The registry
+  fold reads the pair, so a hook-recorded agent counts as live until its stop
+  and the `cli.envelope-parent-ambiguous` refusal names how to close a dead one.
 - **Optional envelope flags** (lean mode, O-11). `--session` and `--causal-parent`
   are optional on every verb that takes the event envelope. `--session`
   defaults to `CLAUDE_CODE_SESSION_ID` and is refused when neither is set;

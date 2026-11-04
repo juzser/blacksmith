@@ -8,8 +8,10 @@
 // never reaches any output. Every total is `{used, complete}`: `complete` is
 // false whenever an expected file was missing, unreadable or held an
 // unparseable line, so `used` is a floor, never a guess.
+import { createReadStream } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { roleOfAgentType } from './agentNames.js';
 import { loadTaxonomy } from './taxonomy.js';
 
@@ -239,4 +241,73 @@ export async function readSessionTokens(opts: {
     }
   }
   return { used, complete, subagents };
+}
+
+export interface TranscriptUsage {
+  /** Spend by the definition above: input + cache creation + output, cache reads left out. */
+  used: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  /** The last assistant record's `message.model`, or null when none names one. */
+  model: string | null;
+  /** False when a line did not parse; `used` is then a floor. */
+  complete: boolean;
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+/**
+ * One transcript file, streamed line by line so a large one is never held
+ * whole. Same counting rules as `readSessionTokens` (it reuses their record
+ * readers), with the per-field split and the model the hooks record. Null when
+ * the file cannot be opened.
+ */
+export async function readTranscriptUsage(file: string): Promise<TranscriptUsage | null> {
+  const out: TranscriptUsage = {
+    used: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    model: null,
+    complete: true,
+  };
+  const seen = new Set<string>();
+  const stream = createReadStream(file, { encoding: 'utf8' });
+  try {
+    for await (const line of createInterface({
+      input: stream,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    })) {
+      if (line.trim() === '') continue;
+      let rec: unknown;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        out.complete = false;
+        continue;
+      }
+      const p = assistantParts(rec);
+      if (p === null) continue;
+      const model = (rec as { message?: { model?: unknown } }).message?.model;
+      if (typeof model === 'string' && model !== '' && model !== '<synthetic>') out.model = model;
+      const key = dedupeKey(rec);
+      if (key !== null) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      out.inputTokens += num(p.usage.input_tokens);
+      out.outputTokens += num(p.usage.output_tokens);
+      out.cacheCreationTokens += num(p.usage.cache_creation_input_tokens);
+      out.cacheReadTokens += num(p.usage.cache_read_input_tokens);
+      out.used += countRecordTokens(rec);
+    }
+  } catch {
+    return null;
+  } finally {
+    stream.destroy();
+  }
+  return out;
 }

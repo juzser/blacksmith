@@ -183,7 +183,7 @@ export const newestMain = (events: readonly StoredEvent[], cli: string): StoredE
     .find((e) => e.record.cli_session_id === cli && MAIN_THREAD.has(e.record.actor));
 
 /** The epic main log this CLI session is driving, or null (design §2.1, target log). */
-async function findMainLog(
+export async function findMainLog(
   eventsDir: string,
   cli: string,
   floorMs: number,

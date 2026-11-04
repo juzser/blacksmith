@@ -208,7 +208,23 @@ describe('plugin payload', () => {
       // hook (guard.sh) is never registered here; the PreToolUse entry runs
       // plugin-policy.sh, which is inert unless BS_PLUGIN_GUARD=1.
       const hooks = registered();
-      expect(Object.keys(hooks).sort()).toEqual(['PostToolUse', 'PreToolUse', 'UserPromptSubmit']);
+      expect(Object.keys(hooks).sort()).toEqual([
+        'PostToolUse',
+        'PreToolUse',
+        'SubagentStart',
+        'SubagentStop',
+        'UserPromptSubmit',
+      ]);
+      // Lean mode: the subagent recorders, one entry each, never a gate.
+      for (const [event, mode] of [
+        ['SubagentStart', 'start'],
+        ['SubagentStop', 'stop'],
+      ] as const) {
+        const groups = hooks[event] as Group[];
+        expect(groups).toHaveLength(1);
+        expect(groups[0]?.hooks).toHaveLength(1);
+        expect(groups[0]?.hooks[0]?.command).toMatch(new RegExp(`subagent-hook\\.sh" ${mode}$`));
+      }
       const pre = hooks.PreToolUse as Group[];
       expect(pre).toHaveLength(1);
       expect(pre[0]?.matcher).toBe('Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task');

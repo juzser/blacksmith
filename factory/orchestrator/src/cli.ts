@@ -254,6 +254,7 @@ import {
   type SpecChangeStatus,
 } from './specChange.js';
 import { checkStack, loadStackAnswers } from './stack.js';
+import { recordSubagent, spendByRole } from './subagentUsage.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
@@ -813,11 +814,12 @@ function ambiguousParentGuard(threshold: number) {
     const live = liveAgents(foldAgents(existing));
     if (live.length < threshold) return;
     const names = live.map(
-      (a) => `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id})`,
+      (a) =>
+        `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id}${a.taskId === null && a.agentId !== null ? `, agent_id ${a.agentId}` : ''})`,
     );
     throw new SmithError(
       'cli.envelope-parent-ambiguous',
-      `${live.length} dispatch(es) are live in this session (${names.join('; ')}), so its last event may belong to another writer. Nothing was written. Pass --causal-parent <event-id> explicitly. If one of them is dead, close it with a terminal event: bs event append '{"event_type":"error-logged",...}' naming its task_id and agent_role (or task-result-recorded; an epic-closed event closes every dispatch of that epic).`,
+      `${live.length} dispatch(es) are live in this session (${names.join('; ')}), so its last event may belong to another writer. Nothing was written. Pass --causal-parent <event-id> explicitly. If one of them is dead, close it with a terminal event: bs event append '{"event_type":"error-logged",...}' naming its task_id and agent_role (or task-result-recorded; an epic-closed event closes every dispatch of that epic). A hook-recorded agent names no task: close it with {"event_type":"subagent-stopped","agent_id":"<its agent id>",...} appended with the session's causal_parent set to its start event.`,
       { live: live.map((a) => a.id) },
     );
   };
@@ -3785,6 +3787,27 @@ async function main(): Promise<number> {
     } catch {
       // A capture that fails loses one record; the prompt itself goes through.
     }
+    return 0;
+  }
+
+  // The SubagentStart / SubagentStop hooks' verbs (subagentUsage.ts). The
+  // plugin reaches the same function through the lean `bs-subagent-hook` bin.
+  // Recorders, so every outcome is exit 0 and a failure is a stderr line.
+  if (namespace === 'subagent' && (action === 'start' || action === 'stop')) {
+    const out = await recordSubagent(
+      readFileSync(0, 'utf8'),
+      action,
+      captureContext(process.cwd(), process.env),
+    );
+    if (out !== null) console.log(out);
+    return 0;
+  }
+
+  if (namespace === 'subagent' && action === 'spend') {
+    const sessionId = requireSessionFlag(flags);
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    printJson(spendByRole(await readEvents(sessionId, eventOpts)));
     return 0;
   }
 

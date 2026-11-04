@@ -440,6 +440,27 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Read one UserPromptSubmit hook payload on stdin and record it where the cwd is managed. Print one line, or nothing; always exit 0.',
   },
   {
+    command: 'subagent start',
+    positionals: '',
+    flags: '',
+    summary:
+      'Read one SubagentStart hook payload on stdin and record the dispatch where the cwd is managed, parented on the latest operator prompt or the log root. Prints nothing; always exit 0.',
+  },
+  {
+    command: 'subagent stop',
+    positionals: '',
+    flags: '',
+    summary:
+      "Read one SubagentStop hook payload on stdin and record the agent's role, model and tokens, parented on its own start. Prints a systemMessage JSON line only when the role crossed its budgets.yml task cap; always exit 0.",
+  },
+  {
+    command: 'subagent spend',
+    positionals: '',
+    flags: '[--session <id>] [--state-dir <dir>]',
+    summary:
+      'Print spend by role for a session from its subagent-stopped events: agents, tokens, models and the role cap, plus the total and how many agents have not stopped.',
+  },
+  {
     command: 'prompt import',
     positionals: '',
     flags: '--transcript <file> [--dry-run]',

@@ -93,6 +93,22 @@ export const JUDGE_REPORT_EVENT_TYPE = 'judge-reported';
 export const JUDGE_VERDICT_EVENT_TYPE = 'judge-verdict';
 export const ERROR_EVENT_TYPE = 'error-logged';
 /**
+ * The SubagentStart/SubagentStop hooks' pair (lean mode, scope §4/§7). The
+ * start opens an entry keyed by the subagent's own `agent_id`, and the stop
+ * closes exactly that one: the hook knows the id, so it needs neither the
+ * `(task_id, agent_role)` key nor a guess at "the latest of that role".
+ *
+ * Why new types rather than `dispatch_decision`: the playbooks of `/bs run`
+ * still write one by hand, and every reader of `dispatch_decision`
+ * (dispatchAudit, budgetAlarm) would count each agent twice, and would treat a
+ * hook entry, which names no task, epic or model, as an unattributed hole.
+ * An entry opened here is task-less, so a task-less `error-logged` naming its
+ * role, or `epic-closed`, closes it too: a dead agent that never reached its
+ * stop is closed the way the `cli.envelope-parent-ambiguous` message describes.
+ */
+export const SUBAGENT_START_EVENT_TYPE = 'subagent-started';
+export const SUBAGENT_STOP_EVENT_TYPE = 'subagent-stopped';
+/**
  * The epic's own terminal fact (D-187). Every close above speaks for a single
  * task, so an agent whose task never reported — and an epic-level dispatch,
  * whose `task_id` is absent by design (event.schema.json: "absent for
@@ -118,6 +134,8 @@ export const REGISTRY_EVENT_TYPES = [
   JUDGE_VERDICT_EVENT_TYPE,
   ERROR_EVENT_TYPE,
   EPIC_CLOSED_EVENT_TYPE,
+  SUBAGENT_START_EVENT_TYPE,
+  SUBAGENT_STOP_EVENT_TYPE,
 ] as const;
 
 export type AgentStatus = 'live' | 'done' | 'error' | 'superseded' | 'abandoned';
@@ -311,6 +329,42 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
       records.push(agent);
       if (taskId) open.set(openKey(taskId, payload.agent_role), agent);
       else openEpicLevel.push(agent);
+      continue;
+    }
+
+    if (record.event_type === SUBAGENT_START_EVENT_TYPE) {
+      const payload = record.payload as { agent_role?: string };
+      if (!payload.agent_role || !record.agent_id) continue;
+      const agent: AgentRecord = {
+        id: event_id,
+        sessionId: record.session_id,
+        taskId: null,
+        epicId: null,
+        agentId: record.agent_id,
+        agentRole: payload.agent_role,
+        round: 1,
+        provider: 'claude',
+        modelTier: 'unknown',
+        dispatchedAt: record.ts,
+        terminalEventId: null,
+        terminalAt: null,
+        terminalType: null,
+        status: 'live',
+      };
+      records.push(agent);
+      openEpicLevel.push(agent);
+      continue;
+    }
+
+    if (record.event_type === SUBAGENT_STOP_EVENT_TYPE) {
+      if (!record.agent_id) continue;
+      const i = openEpicLevel.findIndex(
+        (a) => a.sessionId === record.session_id && a.agentId === record.agent_id,
+      );
+      const entry = openEpicLevel[i];
+      if (entry === undefined) continue;
+      closeEntry(entry, event_id, record.ts, 'result');
+      openEpicLevel.splice(i, 1);
       continue;
     }
 
