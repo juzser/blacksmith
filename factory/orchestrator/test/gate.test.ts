@@ -1462,6 +1462,54 @@ describe('gate.ts (integration)', () => {
       });
     });
 
+    async function gateOutcomeGrader(): Promise<unknown> {
+      const events = await readEvents(sessionId, { stateDir });
+      const event = events.find((e) => e.record.event_type === 'gate-outcome');
+      return (event?.record.payload as Record<string, unknown> | undefined)?.grader;
+    }
+
+    describe('the grader state every gate outcome records', () => {
+      it('records the verdict and its result when one was handed in', async () => {
+        const outcome = await runGate(baseInput({ graderVerdict: graderFile(verdict()) }), ctx(), {
+          stateDir,
+        });
+        expect(outcome).toMatchObject({ grader: { state: 'verdict', result: 'met' } });
+        expect(await gateOutcomeGrader()).toEqual({ state: 'verdict', result: 'met' });
+      });
+
+      it('records a not-met verdict as the result of a blocked outcome', async () => {
+        const outcome = await runGate(
+          baseInput({ graderVerdict: graderFile(verdict({ overall: 'fail' })) }),
+          ctx(),
+          { stateDir },
+        );
+        expect(outcome).toMatchObject({
+          outcome: 'blocked',
+          grader: { state: 'verdict', result: 'not-met' },
+        });
+      });
+
+      it('records skipped-by-option under noGrader, and passes without a verdict', async () => {
+        const outcome = await runGate(baseInput({ noGrader: true }), ctx(), { stateDir });
+        expect(outcome).toMatchObject({ outcome: 'pass', grader: { state: 'skipped-by-option' } });
+        expect(await gateOutcomeGrader()).toEqual({ state: 'skipped-by-option' });
+      });
+
+      it('records not-run when there was neither a verdict nor the option', async () => {
+        const outcome = await runGate(baseInput(), ctx(), { stateDir });
+        expect(outcome).toMatchObject({ outcome: 'pass', grader: { state: 'not-run' } });
+        expect(await gateOutcomeGrader()).toEqual({ state: 'not-run' });
+      });
+
+      it('refuses noGrader together with a verdict', async () => {
+        await expect(
+          runGate(baseInput({ noGrader: true, graderVerdict: graderFile(verdict()) }), ctx(), {
+            stateDir,
+          }),
+        ).rejects.toThrow(/mutually exclusive/);
+      });
+    });
+
     // A gate run with no grader verdict is the pre-P9-14 pipeline, unchanged:
     // an ad-hoc gate run is not forced to invent a rubric result.
     it('runs the pipeline exactly as before when no verdict is handed over', async () => {

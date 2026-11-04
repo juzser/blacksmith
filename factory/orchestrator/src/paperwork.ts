@@ -5,7 +5,7 @@ import { type CommitCertificate, certifyCommit } from './commit.js';
 import type { EventOpts, StoredEvent } from './events.js';
 // Type-only: gate.ts imports this module at runtime, so the reverse edge must not exist.
 import type { DepsCheck } from './gate.js';
-import { foldJudgeTurns, type JudgeTurn, outstandingJudges } from './judges.js';
+import { foldJudgeTurns, type JudgeTurn, outstandingJudges, turnsSpanEpics } from './judges.js';
 import { readLineage } from './lineageSnapshot.js';
 import {
   inspectMcpManifest,
@@ -351,6 +351,8 @@ export function mcpStage(
 export interface AlsoReported {
   role: string;
   kind?: string | null;
+  /** The file the pending close names, so a stage that reads it sees what the gate will. */
+  artifactPath?: string | null;
 }
 
 export interface JudgesStage {
@@ -382,6 +384,44 @@ export function judgesStage(
 }
 
 // --- grader -----------------------------------------------------------------
+
+/**
+ * The grader file the task's latest reported grader turn handed in, for a run
+ * that opted out of `--grader`: an opt-out skips a missing verdict, it never
+ * ignores one on file. `undefined` when no grader turn was reported with a
+ * file; a file that cannot be read comes back as a string, which
+ * `graderStage` refuses as an invalid shape.
+ */
+export function reportedGraderFile(
+  turns: readonly JudgeTurn[],
+  taskId: string,
+  alsoReported: readonly AlsoReported[] = [],
+): unknown {
+  const graders = turns.filter((t) => t.role === 'grader');
+  // A bare id two epics both hold a grader turn for names no task: the same
+  // guess `checkJudgeReport` refuses, so it is not resolved by taking the later round.
+  const spanned = turnsSpanEpics(turns, 'grader', taskId);
+  if (spanned !== null) {
+    const bare = taskId.slice(taskId.lastIndexOf('/') + 1);
+    return `grader turns for \`${taskId}\` span epics ${spanned.map((id) => `\`${id}\``).join(', ')}; pass the qualified id \`<epic>/${bare}\``;
+  }
+  // A close the line itself is about to make reports the file it names.
+  const pending = alsoReported.find((r) => r.role === 'grader' && r.artifactPath);
+  if (pending?.artifactPath) return readGraderFile(pending.artifactPath);
+  const latest = graders
+    .filter((t) => t.reported && t.reportedArtifact !== null)
+    .sort((a, b) => b.round - a.round)[0];
+  if (latest === undefined || latest.reportedArtifact === null) return undefined;
+  return readGraderFile(latest.reportedArtifact);
+}
+
+function readGraderFile(file: string): unknown {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as unknown;
+  } catch {
+    return 'unreadable grader file';
+  }
+}
 
 /** One row of the grader's rubric, once it has validated. */
 interface GradedCriterion {
@@ -423,7 +463,15 @@ export function graderStage(
       rubric: null,
       payload: payloadOf({
         verdict: 'invalid',
-        errors: [{ path: '/', message: 'grader verdict file is not a JSON object' }],
+        errors: [
+          {
+            path: '/',
+            message:
+              typeof verdictFile === 'string'
+                ? verdictFile
+                : 'grader verdict file is not a JSON object',
+          },
+        ],
       }),
     };
   }
@@ -502,6 +550,8 @@ export interface PaperworkInput {
   artifactsDir?: string;
   /** The whole grader file, as read off disk. */
   graderVerdict?: unknown;
+  /** `--no-grader`: the grader stage is skipped as `skipped-by-option`, as the gate records it. */
+  noGrader?: boolean;
   /** The plan's `ui_affecting` flag; absent means the plan could not resolve it. */
   uiAffecting?: boolean;
   /** Judge turns the caller is about to close: the judges and uiux stages count them as reported. */
@@ -678,11 +728,21 @@ export async function checkPaperwork(
         break;
       }
       case 'grader': {
-        if (input.graderVerdict === undefined) {
-          skip(stage, 'no-input');
+        const verdictFile =
+          input.noGrader === true
+            ? ctx.sessionId === undefined
+              ? undefined
+              : reportedGraderFile(
+                  foldJudgeTurns(await lineage(), input.taskId),
+                  input.taskId,
+                  input.alsoReported,
+                )
+            : input.graderVerdict;
+        if (verdictFile === undefined) {
+          skip(stage, input.noGrader === true ? 'skipped-by-option' : 'no-input');
           break;
         }
-        const r = graderStage(input.graderVerdict, taxonomy, schemas);
+        const r = graderStage(verdictFile, taxonomy, schemas);
         if (r.shape === 'invalid') {
           block(stage, 'grader-invalid', r.payload);
         } else if (r.rubric !== null) {

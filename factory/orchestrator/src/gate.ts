@@ -19,7 +19,7 @@ import {
   transition,
 } from './findings.js';
 import { runGit } from './git.js';
-import { type JudgeTurn, readJudgeTurns } from './judges.js';
+import { foldJudgeTurns, type JudgeTurn, readJudgeTurns } from './judges.js';
 import { appendTracked, beginLineageRun, endLineageRun, readLineage } from './lineageSnapshot.js';
 import type { McpGateViolation } from './mcp.js';
 import {
@@ -30,6 +30,7 @@ import {
   graderStage,
   judgesStage,
   mcpStage,
+  reportedGraderFile,
   resolveTaxonomyAndSchemas,
   schemaStage,
   screenshotsFromArtifacts,
@@ -115,6 +116,12 @@ export interface GateInput {
    * ad-hoc gate run is not forced to invent a rubric result.
    */
   graderVerdict?: unknown;
+  /**
+   * The explicit opt-out: this run deliberately has no grader (`--no-grader`).
+   * It is recorded on the outcome as `skipped-by-option`, so a skipped grader
+   * is never read as a passed one. Refused together with `graderVerdict`.
+   */
+  noGrader?: boolean;
   lessons: readonly LessonRule[];
   /**
    * Severities an independent finder corroborated, keyed by fingerprint
@@ -255,6 +262,8 @@ export type GateOutcome =
       coverageEvidence?: CoverageEvidence;
       /** Present exactly when a `--plan` let the stage resolve `ui_affecting` (U2 S3). */
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** Which of the three grader states this run was in; see `GraderRecord`. */
+      grader: GraderRecord;
       /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
       event_id: string;
     }
@@ -314,6 +323,8 @@ export type GateOutcome =
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** Which of the three grader states this run was in; see `GraderRecord`. */
+      grader: GraderRecord;
       /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
       event_id: string;
     }
@@ -330,9 +341,21 @@ export type GateOutcome =
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** Which of the three grader states this run was in; see `GraderRecord`. */
+      grader: GraderRecord;
       /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
       event_id: string;
     };
+
+/**
+ * What the gate recorded about the grader, on every outcome and its
+ * `gate-outcome` event: a verdict was handed in (`result` once read), the
+ * caller opted out (`skipped-by-option`), or there was neither (`not-run`).
+ */
+export type GraderRecord =
+  | { state: 'verdict'; result?: 'met' | 'not-met' | 'not-graded' | 'invalid' }
+  | { state: 'skipped-by-option' }
+  | { state: 'not-run' };
 
 async function emit(
   eventType: string,
@@ -721,7 +744,9 @@ async function crossCheckFinding(
   return overturned;
 }
 
-type GraderCheck = { ok: true } | { ok: false; reason: 'grader-invalid' | 'grader-fail' };
+type GraderCheck = ({ ok: true } | { ok: false; reason: 'grader-invalid' | 'grader-fail' }) & {
+  result: 'met' | 'not-met' | 'not-graded' | 'invalid';
+};
 
 /**
  * Read the grader's rubric result and let it gate (D-34/P9-14). The grader
@@ -748,8 +773,11 @@ async function checkGraderVerdict(
 ): Promise<GraderCheck> {
   const grader = graderStage(verdictFile, taxonomy, schemas);
   await emit('grader-verdict', grader.payload, taskId, ctx, opts);
-  if (grader.shape === 'invalid') return { ok: false, reason: 'grader-invalid' };
-  return grader.rubric === 'met' ? { ok: true } : { ok: false, reason: 'grader-fail' };
+  if (grader.shape === 'invalid') return { ok: false, reason: 'grader-invalid', result: 'invalid' };
+  const result = grader.rubric ?? 'invalid';
+  return grader.rubric === 'met'
+    ? { ok: true, result }
+    : { ok: false, reason: 'grader-fail', result };
 }
 
 async function intakeAndDecide(
@@ -1060,6 +1088,27 @@ async function runGateStages(
   opts: EventOpts,
 ): Promise<GateOutcome> {
   // Before any stage or event: a refusal is a throw, never an outcome.
+  if (input.noGrader === true && input.graderVerdict !== undefined) {
+    throw new Error('gate: `noGrader` and a grader verdict are mutually exclusive.');
+  }
+  // An opt-out skips a missing verdict, not one a grader turn already reported for this task.
+  const reportedVerdict =
+    input.noGrader === true
+      ? reportedGraderFile(
+          foldJudgeTurns(await readLineage(ctx.sessionId, opts), input.taskId),
+          input.taskId,
+        )
+      : undefined;
+  const graderVerdict = input.graderVerdict ?? reportedVerdict;
+  let grader: GraderRecord =
+    graderVerdict !== undefined
+      ? { state: 'verdict' }
+      : input.noGrader === true
+        ? { state: 'skipped-by-option' }
+        : { state: 'not-run' };
+  // Every outcome carries the grader state as it stood when the run ended.
+  const finalize = (o: UnfinalizedGateOutcome, c: GateContext, p: EventOpts) =>
+    finalizeWith({ ...o, grader }, c, p);
   const { selected, deferred } = selectGateChecks(
     input.checks,
     stageBoundCheckNames(input.coverage),
@@ -1264,21 +1313,22 @@ async function runGateStages(
   // so a full test run here is spent for nothing. It sits behind the commit
   // certificate for the same reason the tests do: a rubric scored against a
   // worktree the merge will never see is scored against nothing (D-30/D-34).
-  if (input.graderVerdict !== undefined) {
-    const grader = await checkGraderVerdict(
-      input.graderVerdict,
+  if (graderVerdict !== undefined) {
+    const graderCheck = await checkGraderVerdict(
+      graderVerdict,
       input.taskId,
       ctx,
       opts,
       taxonomy,
       schemas,
     );
-    if (!grader.ok) {
+    grader = { state: 'verdict', result: graderCheck.result };
+    if (!graderCheck.ok) {
       return finalize(
         {
           outcome: 'blocked',
           taskId: input.taskId,
-          reason: grader.reason,
+          reason: graderCheck.reason,
           testResult: null,
           schemaErrors: [],
           blockingFindings: [],
@@ -1536,14 +1586,14 @@ function runBudgetCheck(input: GateInput): BudgetCheck {
 // them). Distributing over each branch first keeps the union shape.
 type UnfinalizedGateOutcome = GateOutcome extends infer T
   ? T extends { event_id: string }
-    ? Omit<T, 'event_id'>
+    ? Omit<T, 'event_id' | 'grader'>
     : T
   : never;
 
 const ENV_FAILURE_CLASS = 'execution.env-failure' as const;
 
-async function finalize(
-  outcome: UnfinalizedGateOutcome,
+async function finalizeWith(
+  outcome: UnfinalizedGateOutcome & { grader: GraderRecord },
   ctx: GateContext,
   opts: EventOpts,
 ): Promise<GateOutcome> {
@@ -1552,6 +1602,7 @@ async function finalize(
     {
       outcome: outcome.outcome,
       reason: 'reason' in outcome ? outcome.reason : null,
+      grader: outcome.grader,
       ...('error_class' in outcome && outcome.error_class !== undefined
         ? { error_class: outcome.error_class, environment_evidence: outcome.environmentEvidence }
         : {}),

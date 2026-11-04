@@ -1459,12 +1459,24 @@ function requireNoFindingsRole(close: JudgeReportInput): void {
   }
 }
 
+/** `--grader` hands the gate a verdict, `--no-grader` says there is none on purpose; both at once is a contradiction. */
+function requireGraderOrOptOut(flags: Record<string, string>): void {
+  if (flags['no-grader'] !== undefined && flags.grader !== undefined) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      '--grader and --no-grader are mutually exclusive: hand in the verdict or opt out of the grader, not both.',
+      { flag: 'no-grader' },
+    );
+  }
+}
+
 const RESULTS_CHECK_ROLES = ['coder', 'tester', 'grader', 'gate'] as const;
 const SESSION_FLAGS = ['session', 'causal-parent', 'plan-version', 'actor', 'state-dir'];
 const ENVELOPE_FLAGS = ['agent', 'provider', 'model-tier', 'input-tokens', 'output-tokens'];
 /** What only a full `gate run` line carries; a role mode names `--as gate` when handed one. */
 const GATE_ONLY_FLAGS = [
   'checks',
+  'no-grader',
   'run-all',
   'evidence',
   'found-by',
@@ -1532,6 +1544,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       accepted: allowed,
     });
   }
+  requireGraderOrOptOut(flags);
   if (as !== 'grader') requireFlag(flags, 'result');
   if (as === 'coder' || as === 'gate') requireFlag(flags, 'worktree');
   if (as === 'tester') requireFlag(flags, 'plan');
@@ -1620,7 +1633,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
       '--artifacts-dir only sets the reported artifact_home: the grader stage reads no artifact.',
     );
   }
-  const alsoReported: { role: string; kind: JudgeKind | null }[] = [];
+  const alsoReported: { role: string; kind: JudgeKind | null; artifactPath: string | null }[] = [];
   let selection: { selected: string[]; deferred: unknown[] } | undefined;
   if (as === 'gate' && ctx) {
     // The files `gate run` reads before it closes anything; a failure there is the failure it exits on.
@@ -1666,7 +1679,11 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
           judgeInput,
         );
         if (checked === undefined) continue;
-        alsoReported.push({ role: close.role, kind: checked.turn.kind });
+        alsoReported.push({
+          role: close.role,
+          kind: checked.turn.kind,
+          artifactPath: checked.artifactPath,
+        });
         simulated = simulated.map((t) => (t === checked.turn ? { ...t, reported: true } : t));
       }
     }
@@ -1693,6 +1710,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
               ...(flags.base ? { baseRef: flags.base } : {}),
               ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
               ...(graderVerdict === undefined ? {} : { graderVerdict }),
+              ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
               ...(uiAffecting === undefined ? {} : { uiAffecting }),
               alsoReported,
             },
@@ -4967,6 +4985,7 @@ async function main(): Promise<number> {
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.
+    requireGraderOrOptOut(flags);
     const handedIn = handedInSources(args, flags);
     const turns =
       handedIn.length > 0 ? await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags)) : [];
@@ -5012,6 +5031,7 @@ async function main(): Promise<number> {
         // to the base the task-branch name implies.
         ...(flags.base ? { baseRef: flags.base } : {}),
         ...(graderVerdict !== undefined ? { graderVerdict } : {}),
+        ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
         ...(budget ? { budget } : {}),
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
         uiAffecting: uiAffectingFromFlags(flags, taskId),
