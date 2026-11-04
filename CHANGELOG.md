@@ -31,6 +31,16 @@ than appearing in it.
 
 ### Added
 
+- **Minimal Blacksmith plugin** (`plugin/`, PR-1 of the rebuild). Five pieces
+  and nothing else: always-on rules (plain explanations, a confidence % on
+  options, model and effort routing, the compact rule) printed by a
+  SessionStart hook; five agents (`planner`, `coder`, `reviewer`,
+  `researcher`, `scout`) with model and effort in their frontmatter; and a
+  `/cross-check` skill that asks codex for one read-only review of the working
+  tree against a base. The skill runs only when the person invokes it, skips
+  with a reason when codex is missing, slow, oversize or failing, and never
+  blocks. `plugin/test/run.sh` runs from `scripts/check.sh`. The old
+  `.claude/` surface is untouched until PR-2.
 - **Advisory cross-check** (lean mode, O-2). `bs crosscheck run --task <id>
   --base <rev> --head <rev>` sends the combined diff, the acceptance criteria
   (`--criterion`, `--criteria-file` or `--plan`) and the test files (derived
