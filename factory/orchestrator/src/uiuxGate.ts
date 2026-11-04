@@ -14,7 +14,26 @@ export type UiuxBlockReason =
   | 'screenshots-stale'
   | 'uiux-visual-missing';
 
-export type UiuxCheckResult = { outcome: 'pass' } | { outcome: 'blocked'; reason: UiuxBlockReason };
+/** A shot whose recorded in-page width does not prove its declared viewport: the file name says one thing, the page measured another (or nothing). */
+export interface InvalidShot {
+  path: string;
+  viewport: string;
+  inner_width?: number;
+  client_width?: number;
+  why: 'width-mismatch' | 'no-width-record';
+}
+
+/** A genuine mobile shot of a page that is wider than the viewport: a real horizontal-overflow fact, not a crop. */
+export interface OverflowShot {
+  path: string;
+  viewport: string;
+  inner_width: number;
+  client_width: number;
+}
+
+export type UiuxCheckResult =
+  | { outcome: 'pass'; overflow?: OverflowShot[] }
+  | { outcome: 'blocked'; reason: UiuxBlockReason; invalidShots?: InvalidShot[] };
 
 export interface UiuxCheckInput {
   taskId: string;
@@ -100,21 +119,61 @@ interface ScreenshotEntry {
   client_width?: number;
 }
 
-/** The CSS width a `mobile` shot is declared at; headless `--window-size` cannot go below ~500 and crops instead. */
+/** The CSS width a `mobile` shot is declared at. */
 const MOBILE_WIDTH = 390;
-/** Narrowest width a `desktop` shot may report. */
+/**
+ * How far below 390 a mobile `client_width` may sit: a classic scrollbar takes
+ * 15-17 px off the layout viewport. A headless `--window-size=390` crop renders
+ * at 485+, so it falls well outside the band on the other side.
+ */
+const SCROLLBAR_ALLOWANCE = 20;
+/** Narrowest `window.innerWidth` a `desktop` shot may report. */
 const DESKTOP_MIN_WIDTH = 768;
 
 /**
- * A shot is genuine only when the widths measured in the page match the
- * viewport its name declares. No record is no proof: a crop of a wider layout
- * looks like clipping and must not reach the visual judge as evidence.
+ * Why a shot's recorded widths do not prove its declared viewport, or null when
+ * they do. No record is no proof: a crop of a wider layout looks like clipping
+ * and must not reach the visual judge as evidence. Mobile is keyed on
+ * `client_width` (the layout viewport): a page that overflows measures a large
+ * `inner_width` under correct emulation, so `inner_width` alone cannot refuse it.
  */
-function shotWidthMatches(s: ScreenshotEntry): boolean {
+function shotWidthIssue(s: ScreenshotEntry): InvalidShot['why'] | null {
   const { inner_width: inner, client_width: client } = s;
-  if (typeof inner !== 'number' || typeof client !== 'number') return false;
-  if (s.viewport === 'mobile') return inner === MOBILE_WIDTH && client <= MOBILE_WIDTH;
-  return inner >= DESKTOP_MIN_WIDTH && client >= DESKTOP_MIN_WIDTH;
+  if (typeof inner !== 'number' || typeof client !== 'number') return 'no-width-record';
+  if (s.viewport === 'mobile') {
+    const ok = client <= MOBILE_WIDTH && client >= MOBILE_WIDTH - SCROLLBAR_ALLOWANCE;
+    return ok ? null : 'width-mismatch';
+  }
+  return inner >= DESKTOP_MIN_WIDTH ? null : 'width-mismatch';
+}
+
+/** Every shot whose recorded widths do not match its viewport, with the widths it recorded. */
+export function shotWidthIssues(shots: readonly ScreenshotEntry[]): InvalidShot[] {
+  const out: InvalidShot[] = [];
+  for (const s of shots) {
+    const why = shotWidthIssue(s);
+    if (why === null) continue;
+    out.push({
+      path: s.path,
+      viewport: s.viewport,
+      ...(s.inner_width === undefined ? {} : { inner_width: s.inner_width }),
+      ...(s.client_width === undefined ? {} : { client_width: s.client_width }),
+      why,
+    });
+  }
+  return out;
+}
+
+/** Valid mobile shots whose page is wider than the viewport (`inner_width` above `client_width`): reported, never refused. */
+export function shotOverflows(shots: readonly ScreenshotEntry[]): OverflowShot[] {
+  const out: OverflowShot[] = [];
+  for (const s of shots) {
+    if (s.viewport !== 'mobile' || shotWidthIssue(s) !== null) continue;
+    const { inner_width: inner, client_width: client } = s;
+    if (typeof inner === 'number' && typeof client === 'number' && inner > client)
+      out.push({ path: s.path, viewport: s.viewport, inner_width: inner, client_width: client });
+  }
+  return out;
 }
 
 /**
@@ -129,7 +188,9 @@ export function screenshotSetComplete(
   shots: readonly ScreenshotEntry[],
   artifactsDir?: string,
 ): boolean {
-  const haveCombos = new Set(shots.filter(shotWidthMatches).map((s) => `${s.viewport}:${s.theme}`));
+  const haveCombos = new Set(
+    shots.filter((s) => shotWidthIssue(s) === null).map((s) => `${s.viewport}:${s.theme}`),
+  );
   const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
     haveCombos.has(`${viewport}:${theme}`),
   );
@@ -164,7 +225,12 @@ export function evaluateUiux(
   }
 
   if (!screenshotSetComplete(input.taskId, tester.screenshots, input.artifactsDir)) {
-    return { outcome: 'blocked', reason: 'screenshots-missing' };
+    const invalidShots = shotWidthIssues(tester.screenshots);
+    return {
+      outcome: 'blocked',
+      reason: 'screenshots-missing',
+      ...(invalidShots.length === 0 ? {} : { invalidShots }),
+    };
   }
 
   if (input.head !== undefined && tester.head !== input.head) {
@@ -184,7 +250,8 @@ export function evaluateUiux(
     return { outcome: 'blocked', reason: 'uiux-visual-missing' };
   }
 
-  return { outcome: 'pass' };
+  const overflow = shotOverflows(tester.screenshots);
+  return overflow.length === 0 ? { outcome: 'pass' } : { outcome: 'pass', overflow };
 }
 
 /**

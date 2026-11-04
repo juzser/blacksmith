@@ -14,7 +14,12 @@ import {
   validateRecord,
 } from './schemas.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
-import { evaluateUiux, screenshotSetComplete, type UiuxBlockReason } from './uiuxGate.js';
+import {
+  evaluateUiux,
+  screenshotSetComplete,
+  shotWidthIssues,
+  type UiuxBlockReason,
+} from './uiuxGate.js';
 
 // The gate's read-only pre-test checks, one pure function per stage. `runGate` calls them
 // and emits its events around them; `checkPaperwork` calls the same functions for a
@@ -563,7 +568,12 @@ export async function checkPaperwork(
           },
           input.alsoReported,
         );
-        if (r.outcome === 'blocked') block(stage, r.reason, {});
+        if (r.outcome === 'blocked')
+          block(
+            stage,
+            r.reason,
+            r.invalidShots === undefined ? {} : { invalidShots: r.invalidShots },
+          );
         break;
       }
       case 'screenshots': {
@@ -577,7 +587,13 @@ export async function checkPaperwork(
           break;
         }
         const r = screenshotsStage(input.taskId, artifacts, input.artifactsDir);
-        if (!r.ok) block(stage, 'screenshots-missing', { screenshots: r.shots });
+        if (!r.ok) {
+          const invalidShots = shotWidthIssues(r.shots);
+          block(stage, 'screenshots-missing', {
+            screenshots: r.shots,
+            ...(invalidShots.length === 0 ? {} : { invalidShots }),
+          });
+        }
         break;
       }
       case 'grader': {

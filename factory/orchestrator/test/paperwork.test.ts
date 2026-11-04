@@ -19,6 +19,7 @@ import { checkUiux } from '../src/uiuxGate.js';
 import {
   artifactMissing,
   artifactOutsideHome,
+  baseInput,
   buildLadder,
   clean,
   createWorld,
@@ -303,6 +304,61 @@ describe('paperwork role parity', () => {
     const { uiux, pre } = await testerCase(['home.png']);
     expect(uiux).toEqual({ outcome: 'blocked', reason: 'screenshots-missing' });
     expect(pre).toMatchObject({ outcome: 'blocked', reason: 'screenshots-missing', as: 'tester' });
+  });
+
+  it('tester: a cropped mobile shot is screenshots-missing in both, and both name the shot', async () => {
+    await withSpecTurn(w);
+    const result = await testerResult(w, SHOT_NAMES);
+    const artifacts = result.artifacts as Record<string, unknown>[];
+    for (const a of artifacts) {
+      if (a.path === 'home-mobile-dark.png') {
+        a.inner_width = 500;
+        a.client_width = 485;
+      }
+    }
+    const crop = {
+      path: 'home-mobile-dark.png',
+      viewport: 'mobile',
+      inner_width: 500,
+      client_width: 485,
+      why: 'width-mismatch',
+    };
+    await recordTaskResult(
+      { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
+      w.ctx(),
+      w.opts(),
+    );
+    const head = w.git(['rev-parse', 'HEAD']);
+    const uiux = await checkUiux(
+      { taskId: w.taskId, head, artifactsDir: w.artifactsDir },
+      w.ctx(),
+      w.opts(),
+    );
+    expect(uiux).toEqual({
+      outcome: 'blocked',
+      reason: 'screenshots-missing',
+      invalidShots: [crop],
+    });
+    const pre = await checkPaperwork(
+      {
+        as: 'tester',
+        taskId: w.taskId,
+        result,
+        artifactsDir: w.artifactsDir,
+        uiAffecting: true,
+      },
+      w.ctx(),
+      w.opts(),
+    );
+    expect(pre).toMatchObject({ outcome: 'blocked', reason: 'screenshots-missing' });
+    expect(JSON.stringify(pre)).toContain('"invalidShots"');
+    expect(JSON.stringify(pre)).toContain('home-mobile-dark.png');
+    const gate = await runGate(baseInput(w, { uiAffecting: true }), w.ctx(), w.opts());
+    expect(gate).toMatchObject({
+      outcome: 'blocked',
+      reason: 'screenshots-missing',
+      invalidShots: [crop],
+    });
   });
 
   it('tester: a missing combo is screenshots-missing in both', async () => {

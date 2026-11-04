@@ -124,12 +124,6 @@ an incomplete set (a missing theme or viewport) is itself a finding
 ("dark/mobile screenshots missing, pass incomplete"), never a silent pass on
 whatever happened to be there.
 
-Before raising a layout finding on a narrow-viewport shot, confirm the
-`inner_width` and `client_width` recorded for it match its viewport (390 for
-mobile). If they do not, or none is recorded, the shot is invalid evidence — a
-crop of a wider window, not a layout defect: report it as invalid in `notes`
-and ask for a re-shoot, never as a clipping deviation.
-
 Judge four sub-dimensions separately, and report each — one strong
 screenshot must not mask a failure in another dimension:
 

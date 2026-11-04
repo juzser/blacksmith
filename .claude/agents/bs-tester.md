@@ -45,8 +45,10 @@ for a runner the project does not have.
   `document.documentElement.clientWidth` in the page for each shot and declare
   them on that shot's entry in the Result's `artifacts` as `inner_width` and
   `client_width`. The gate counts a shot toward its set only when they match
-  its viewport (mobile: `inner_width` 390; desktop: at least 768), and a shot
-  with no record counts for nothing.
+  its viewport (mobile: `client_width` 370 to 390; desktop: `inner_width` at
+  least 768), and a shot with no record counts for nothing. A mobile page
+  wider than its viewport (`inner_width` above `client_width`) is a real
+  overflow: shoot it as is and say so.
 - Touch-target measurement for every UI-affecting task: at the mobile
   viewport, measure the bounding box of every interactive element (`button`,
   `a[href]`, `input`, `select`, `[role=button]`, and the project's own
@@ -161,7 +163,7 @@ with exactly these three keys:
   e2e: {passed, failed, skipped}, uncovered_paths}`; add `research_request`
   when you need the researcher, or `spec_change_request` when the criterion
   itself is wrong (see above)
-- `artifacts` — `[{type, path, description?}]`: screenshots, the
+- `artifacts` — `[{type, path, description?, inner_width?, client_width?}]`: screenshots, the
   touch-target report, e2e traces, coverage report. Screenshots matter
   beyond this task — a UI-affecting task's visual pass reads them and
   nothing else, which is exactly why they go under
