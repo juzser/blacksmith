@@ -63,6 +63,7 @@ const APPEND_ONLY = [
   "namespace === 'findings' && action === 'repair-obligation'",
   "namespace === 'task' && action === 'reinstate'",
   "namespace === 'waivers' && action === 'approve-task'",
+  "namespace === 'mcp' && action === 'override'",
   "namespace === 'waivers' && action === 'apply'",
   "namespace === 'lessons' && action === 'raise'",
   "namespace === 'lessons' && (action === 'approve' || action === 'reject')",
