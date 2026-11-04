@@ -69,7 +69,7 @@ looked at on every screen it reaches is unverified, not passed.
 
 | Severity | Blocks merge | Classes |
 |---|---|---|
-| `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test |
+| `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test, unmet acceptance criterion or one no test fails without |
 | `S3-minor` (waiver) | no — batched at epic end | minor visual deviation from the uiux spec, perf regression >20%, everything minor-but-real |
 | `S4-nit` | no | style/naming nits the project's linter does not catch |
 

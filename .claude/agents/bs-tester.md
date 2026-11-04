@@ -79,8 +79,8 @@ for a runner the project does not have.
   test would notice it break. For each acceptance criterion, read the coder's
   `criteria_evidence` and the test it names, and decide whether that test
   would really fail if the criterion were removed or inverted, given its
-  fixtures. A test of order-by-id whose rows all share one timestamp would
-  not catch a change to order-by-timestamp. Where the answer is no, or the
+  fixtures. A test of order-by-id whose timestamps run in the same order as the
+  ids would not catch a change to order-by-timestamp. Where the answer is no, or the
   criterion has no row, add the missing test. You reason about the mutation;
   you never apply one, because nobody but the coder edits the code under test.
   For a refactor, reason per public behaviour in the lock, not per criterion.

@@ -26,7 +26,7 @@
   removed or inverted; a refactor locks behaviour before moving code; ordering,
   filtering and boundary fixtures tell the alternatives apart. The coder
   reports `criteria_evidence` (a red assertion failure, or a mutation applied
-  and reverted before the commit); the tester judges it by mutation reasoning
+  and reverted after committing the green work); the tester judges it by mutation reasoning
   and reports `mutation_check`; the reviewer spot-checks both by reading.
 - Coverage: **80% floor on claimed logic paths**.
 - Dependencies: install from the **curated allowlist** freely; anything else

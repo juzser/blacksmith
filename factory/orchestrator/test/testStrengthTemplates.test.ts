@@ -38,6 +38,8 @@ describe('test-strength templates', () => {
     expect(t).toContain('would_fail');
     expect(t).toContain('added_test');
     expect(t).toContain('per public behaviour in the lock');
+    expect(t).toContain('timestamps run in the same order as the ids');
+    expect(t).not.toContain('share one timestamp');
     expect(t).not.toContain('tree_state');
     expect(t).not.toContain('scratch copy');
   });
