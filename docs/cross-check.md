@@ -40,8 +40,8 @@ Nothing else in the plugin sends anything out.
 - **Cap.** Over `CROSSCHECK_MAX_BYTES` the skill skips before any call, because half a diff yields confident findings about code that is not there.
 - **Timeout.** After `CROSSCHECK_TIMEOUT` seconds a running call and its child processes are stopped, and that provider reports "skipped".
 - **Context.** Because DeepSeek sees only the prompt, its findings about code outside the diff and the changed tests are guesses; each still has to be reproduced.
-- **Cancel.** If the run is interrupted (INT, TERM, HUP), the provider processes and the temp directory are cleaned up and the output says `skipped (cancelled)`. A hard KILL cannot be trapped; a watchdog then stops the calls and removes the temp directory.
-- **Output.** Control bytes (escape, bell and so on) in a model's answer are dropped before printing; newlines and tabs stay.
+- **Cancel.** If the run is interrupted (INT, TERM, HUP), the provider processes and the temp directory are cleaned up and the output says `skipped (cancelled)`. A hard KILL cannot be trapped. If it hits the script alone, the watchdog notices, stops the calls and removes the temp directory. If it hits the whole process group at once, the watchdog dies too and the temp directory (diff, test files and prompt; never the key) stays behind.
+- **Output.** Control characters (escape, bell, and the UTF-8 C1 range U+0080 to U+009F) in a model's answer are dropped before printing; newlines and tabs stay.
 - **Symlinks.** A changed test file that is a symlink is not sent, so a link cannot pull in a file from outside the repo.
 - **Untracked files.** They are not in the diff and are not reviewed; the output warns with a count. Run `git add -N <file>` to include one.
 
