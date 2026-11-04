@@ -7,6 +7,7 @@ import { readFailedRounds } from '../src/escalation.js';
 import { readEvents } from '../src/events.js';
 import type { GateInput } from '../src/gate.js';
 import { recordJudgeDispatch, recordJudgeReport } from '../src/judges.js';
+import { recordMcpOverride } from '../src/mcp.js';
 import { runCli } from './helpers/cliHarness.js';
 import {
   buildLadder,
@@ -18,6 +19,8 @@ import {
   graderMet,
   graderMissingCriteriaFields,
   graderVerdictBody,
+  judgesOutstanding,
+  mcpSelfSigned,
   PARITY_CASES,
   recordTester,
   screenshotComboMissing,
@@ -190,6 +193,80 @@ describe('bs results check (built binary)', () => {
         await step.fix();
       }
       expect(checkGate(await gateLine(ladder.input())).json.outcome).toBe('pass');
+    });
+  });
+
+  describe('a session taken from CLAUDE_CODE_SESSION_ID', () => {
+    const envOf = () => ({ CLAUDE_CODE_SESSION_ID: w.sessionId });
+    const dropSession = (line: string[]) => {
+      const at = line.indexOf('--session');
+      return [...line.slice(0, at), ...line.slice(at + 2)];
+    };
+    const checkEnv = (as: string, line: string[]) =>
+      parse(
+        runCli(
+          ['results', 'check', w.taskId, '--as', as, ...line],
+          envOf(),
+          undefined,
+          w.worktreeDir,
+        ),
+      );
+    const gateEnv = (line: string[]) =>
+      parse(runCli(['gate', 'run', w.taskId, ...line], envOf(), undefined, w.worktreeDir));
+
+    it.each([
+      ['an open judge turn', judgesOutstanding, 'judges-outstanding'],
+      ['a missing uiux visual', uiuxVisualMissing, 'uiux-visual-missing'],
+    ] as [string, FixtureBuilder, string][])(
+      '--as gate names %s like gate run does',
+      async (_name, build, reason) => {
+        const line = dropSession(await gateLine(await build(w)));
+        const real = gateEnv(line);
+        expect(real.json.reason).toBe(reason);
+        const preflight = checkEnv('gate', line);
+        expect(preflight.json.reason).toBe(reason);
+        expect(preflight.status).toBe(1);
+      },
+    );
+
+    const coderLine = async () => [
+      '--worktree',
+      w.worktreeDir,
+      '--result',
+      await write('result.json', (await mcpSelfSigned(w)).result),
+      '--base',
+      'main',
+      '--artifacts-dir',
+      w.artifactsDir,
+      '--state-dir',
+      w.stateDir,
+    ];
+    const override = () =>
+      recordMcpOverride(
+        { taskId: w.taskId, worktreeDir: w.worktreeDir, tool: 'rotate_widget', note: 'reviewed' },
+        w.ctx(),
+        w.opts(),
+      );
+
+    it('--as coder reads the operator mcp override off the env session', async () => {
+      const line = await coderLine();
+      await override();
+      expect(checkEnv('coder', line).json.outcome).toBe('pass');
+    });
+
+    it('--as coder with neither flag nor env reads no session: the override is not seen', async () => {
+      const line = await coderLine();
+      await override();
+      const preflight = check('coder', line);
+      expect(preflight.json.reason).toBe('mcp-approval-unsigned-by-operator');
+    });
+
+    it('--as gate with neither flag nor env is refused as gate run is', async () => {
+      const line = dropSession(await gateLine(await judgesOutstanding(w)));
+      const real = gate(line);
+      const preflight = checkGate(line);
+      expect(real.status).toBe(1);
+      expect(preflight.json.error.code).toBe(real.json.error.code);
     });
   });
 
