@@ -24,6 +24,7 @@ which is the rubber stamp the standard exists to prevent.
    gate.
 4. Run `bs mcp check <project>` before closing anything under that
    milestone. Exit 0 means green; exit 1 prints one `{ rule, path, message }`
-   per violation. `bs epic close` runs the same check and refuses while it
-   is red — the only way past it is `--override-rationale`, which is the
+   per violation. The per-task gate (`bs gate run`) runs the manifest rules
+   whenever the project has an `mcp.manifest.json`, and `bs epic close` runs
+   the same check and refuses while it is red — the only way past it is `--override-rationale`, which is the
    operator's call and their name in the event log, never yours.

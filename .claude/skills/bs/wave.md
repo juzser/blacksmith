@@ -289,7 +289,7 @@ one thing this playbook never asks you to.
    ```
 
    The gate runs schema check → artifact check → commit check → deps check →
-   outstanding-judge check → uiux check → grader verdict → tests → coverage
+   MCP manifest check → outstanding-judge check → uiux check → grader verdict → tests → coverage
    evidence → findings intake → severity decision
    (`docs/guide/operator-guide/queue-and-gate.md` §5).
    - **The preflight comes first.** Before it reads the problems, the
@@ -315,8 +315,8 @@ one thing this playbook never asks you to.
         round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'). It is never sent to `gate run`
         and never to a builder.
      3. **A worker's file the gate blocks on.** `schema-invalid`,
-        `artifacts-missing`, `not-committed`, `screenshots-missing`,
-        `screenshots-stale` and `mobile-overflow`. Run `gate run` with the same
+        `artifacts-missing`, `not-committed`, `mcp-manifest-invalid`,
+        `screenshots-missing`, `screenshots-stale` and `mobile-overflow`. Run `gate run` with the same
         flags. It blocks on the same reason before any check command runs and
         writes the blocked `gate-outcome` that `readFailedRounds` counts; the
         bounce that follows is step 9's, a failed round on the ladder that
@@ -512,6 +512,7 @@ one thing this playbook never asks you to.
    - `grader-fail`: bounce to the coder with the payload's `failed_criteria`; a round-2 `fail` re-scopes under step 6 instead.
    - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
    - `findings`: bounce to the coder.
+   - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule and tool); the coder fixes the manifest, and never signs an approval itself (`.claude/skills/bs/mcp.md`).
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
    - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.

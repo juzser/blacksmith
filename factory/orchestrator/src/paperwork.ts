@@ -7,6 +7,7 @@ import type { EventOpts } from './events.js';
 import type { DepsCheck } from './gate.js';
 import { foldJudgeTurns, type JudgeTurn, outstandingJudges } from './judges.js';
 import { readLineage } from './lineageSnapshot.js';
+import { inspectMcpManifest, type McpGateViolation } from './mcp.js';
 import {
   type CompiledSchemaSet,
   compileSchemas,
@@ -34,6 +35,7 @@ export type PaperworkStage =
   | 'artifacts'
   | 'commit'
   | 'deps'
+  | 'mcp'
   | 'judges'
   | 'uiux'
   | 'screenshots'
@@ -44,6 +46,7 @@ export type PaperworkReason =
   | 'artifacts-missing'
   | 'not-committed'
   | 'deps-missing'
+  | 'mcp-manifest-invalid'
   | 'judges-outstanding'
   | UiuxBlockReason
   | 'grader-invalid';
@@ -54,6 +57,7 @@ const STAGE_ORDER: readonly PaperworkStage[] = [
   'artifacts',
   'commit',
   'deps',
+  'mcp',
   'judges',
   'uiux',
   'screenshots',
@@ -62,10 +66,10 @@ const STAGE_ORDER: readonly PaperworkStage[] = [
 
 /** What each hand-off can already satisfy; judge turns and the tester record exist only once the wave-runner has recorded them. */
 export const STAGES_FOR_ROLE: Readonly<Record<PaperworkRole, readonly PaperworkStage[]>> = {
-  coder: ['schema', 'artifacts', 'commit', 'deps'],
+  coder: ['schema', 'artifacts', 'commit', 'deps', 'mcp'],
   tester: ['schema', 'artifacts', 'screenshots'],
   grader: ['grader'],
-  gate: ['schema', 'artifacts', 'commit', 'deps', 'judges', 'uiux', 'grader'],
+  gate: ['schema', 'artifacts', 'commit', 'deps', 'mcp', 'judges', 'uiux', 'grader'],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -277,6 +281,39 @@ export function depsStage(worktreeDir: string): DepsStage {
     ok: deps.ok,
     deps,
     payload: { ok: deps.ok, declares_dependencies: deps.declaresDependencies, detail: deps.detail },
+  };
+}
+
+// --- mcp --------------------------------------------------------------------
+
+export interface McpStage {
+  ok: boolean;
+  /** Present when the manifest parsed: its violations, each naming the tool it is about. */
+  violations: McpGateViolation[];
+  /** One line per defect, naming the tool where there is one. */
+  payload: { problem: 'unreadable' | null; summary: string[] };
+}
+
+/**
+ * A project that exposes an MCP surface owes a valid `mcp.manifest.json` (MCP-T4's
+ * signed approval among the rules). The epic-close check owns the full path; this is
+ * the same manifest rule at the task gate, for `/bs do`, which has no epic close.
+ */
+export function mcpStage(worktreeDir: string): McpStage {
+  const r = inspectMcpManifest(worktreeDir);
+  const summary =
+    r.problem === 'unreadable'
+      ? [
+          'mcp.manifest.json exists but is not valid JSON; run `bs mcp check` for the parser message',
+        ]
+      : r.violations.map(
+          (v) =>
+            `${v.rule}${v.tool === undefined ? '' : ` tool "${v.tool}"`} at ${v.path}: ${v.message}`,
+        );
+  return {
+    ok: !r.present || (r.problem === null && r.violations.length === 0),
+    violations: r.violations,
+    payload: { problem: r.problem, summary },
   };
 }
 
@@ -543,6 +580,15 @@ export async function checkPaperwork(
         }
         const r = depsStage(input.worktreeDir);
         if (!r.ok) block(stage, 'deps-missing', r.payload);
+        break;
+      }
+      case 'mcp': {
+        if (input.worktreeDir === undefined) {
+          skip(stage, 'no-input');
+          break;
+        }
+        const r = mcpStage(input.worktreeDir);
+        if (!r.ok) block(stage, 'mcp-manifest-invalid', r.payload);
         break;
       }
       case 'judges': {

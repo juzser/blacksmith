@@ -42,6 +42,7 @@ export const GATE_BLOCK_ERROR_CLASSES: Readonly<Record<GateBlockedReason, string
   'grader-invalid': 'contract.schema-violation',
   'not-committed': 'contract.uncommitted-work',
   'deps-missing': 'execution.env-failure',
+  'mcp-manifest-invalid': 'contract.schema-violation',
   'tests-failed': 'execution.test-failure',
   'judges-outstanding': null,
   'uiux-spec-missing': null,

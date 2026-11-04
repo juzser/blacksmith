@@ -168,6 +168,72 @@ export const depsMissing: FixtureBuilder = async (w) => {
   return baseInput(w);
 };
 
+/** A manifest `checkManifest` accepts; `tools` replaces the one read-only tool. */
+export function mcpManifest(tools?: Record<string, unknown>[]): string {
+  return `${JSON.stringify({
+    name: 'demo',
+    version: '0.1.0',
+    protocolRevision: '2025-11-25',
+    transport: { kind: 'stdio' },
+    tools: tools ?? [
+      {
+        name: 'project_health',
+        title: 'Project health',
+        description: 'Reports the surface revision.',
+        mutation: 'read-only',
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+    ],
+  })}\n`;
+}
+
+/** A write tool that nobody signed off (MCP-T4). */
+export const UNSIGNED_TOOL = {
+  name: 'rotate_widget',
+  title: 'Rotate widget',
+  description: 'Rotates a widget.',
+  mutation: 'write',
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+};
+
+/** Commit `mcp.manifest.json` with `body` on the task branch, so the commit stage stays green. */
+export async function commitMcpManifest(w: World, body: string): Promise<void> {
+  await writeFile(path.join(w.worktreeDir, 'mcp.manifest.json'), body);
+  w.git(['add', 'mcp.manifest.json']);
+  w.git(['commit', '-q', '-m', 'mcp manifest']);
+}
+
+export const mcpUnsignedTool: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
+  return baseInput(w);
+};
+
+export const mcpSignedTool: FixtureBuilder = async (w) => {
+  const approval = { operator: 'sam', date: '2026-11-04', milestone: 'demo-mcp-surface' };
+  await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval }]));
+  return baseInput(w);
+};
+
+export const mcpValid: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest());
+  return baseInput(w);
+};
+
+export const mcpUnreadable: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, '{ not json');
+  return baseInput(w);
+};
+
 /** The reviewer judge turn the outstanding fixtures leave open. */
 export const OPEN_JUDGE = { role: 'reviewer', kind: null } as const;
 
@@ -400,6 +466,10 @@ export const PARITY_CASES: readonly {
   { name: 'artifact outside the home', build: artifactOutsideHome, reason: 'artifacts-missing' },
   { name: 'uncommitted work', build: uncommitted, reason: 'not-committed' },
   { name: 'deps missing', build: depsMissing, reason: 'deps-missing' },
+  { name: 'mcp unsigned mutating tool', build: mcpUnsignedTool, reason: 'mcp-manifest-invalid' },
+  { name: 'mcp unreadable manifest', build: mcpUnreadable, reason: 'mcp-manifest-invalid' },
+  { name: 'mcp valid manifest', build: mcpValid, reason: null },
+  { name: 'mcp signed mutating tool', build: mcpSignedTool, reason: null },
   { name: 'judge turn outstanding', build: judgesOutstanding, reason: 'judges-outstanding' },
   {
     name: 'grader verdict outside structured_output',
@@ -447,6 +517,7 @@ export async function buildLadder(w: World): Promise<Ladder> {
   await writeFile(file, 'export const x = 3;\n');
   await rm(path.join(w.worktreeDir, 'node_modules'), { recursive: true, force: true });
   await dispatchJudge(w, 'reviewer');
+  await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
 
   return {
     input: () => baseInput(w, { result, graderVerdict, uiAffecting: true }),
@@ -475,6 +546,12 @@ export async function buildLadder(w: World): Promise<Ladder> {
         reason: 'deps-missing',
         fix: async () => {
           await mkdir(path.join(w.worktreeDir, 'node_modules', '.bin'), { recursive: true });
+        },
+      },
+      {
+        reason: 'mcp-manifest-invalid',
+        fix: async () => {
+          await commitMcpManifest(w, mcpManifest());
         },
       },
       {

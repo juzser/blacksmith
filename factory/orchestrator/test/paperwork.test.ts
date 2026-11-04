@@ -31,6 +31,8 @@ import {
   graderMet,
   graderOutsideStructured,
   judgesOutstanding,
+  mcpUnsignedTool,
+  mcpValid,
   OPEN_JUDGE,
   PARITY_CASES,
   SHOT_NAMES,
@@ -244,6 +246,38 @@ describe('paperwork parity with the gate', () => {
   });
 });
 
+describe('mcp manifest at the gate', () => {
+  let w: World;
+  beforeEach(async () => {
+    w = await createWorld();
+  });
+  afterEach(async () => {
+    await w.dispose();
+  });
+
+  it('blocks on an unsigned mutating tool and names the tool, in the gate and the preflight', async () => {
+    const input = await mcpUnsignedTool(w);
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    const violations = gate.outcome === 'blocked' ? (gate.mcpViolations ?? []) : [];
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ rule: 'MCP-T4', tool: 'rotate_widget' });
+    const pre = await checkPaperwork(paperworkInput(input, 'coder'), w.ctx(), w.opts());
+    expect(pre.reason).toBe('mcp-manifest-invalid');
+    expect(JSON.stringify(pre.problems)).toContain('rotate_widget');
+  });
+
+  it('passes a valid manifest and a project with no manifest', async () => {
+    expect((await runGate(await mcpValid(w), w.ctx(), w.opts())).outcome).toBe('pass');
+    await rm(path.join(w.worktreeDir, 'mcp.manifest.json'));
+    w.git(['commit', '-q', '-am', 'drop manifest']);
+    const gate = await runGate(baseInput(w), w.ctx(), w.opts());
+    expect(gate.outcome).toBe('pass');
+    const pre = await checkPaperwork(paperworkInput(baseInput(w), 'coder'), w.ctx(), w.opts());
+    expect(pre.outcome).toBe('pass');
+  });
+});
+
 describe('paperwork role parity', () => {
   let w: World;
   beforeEach(async () => {
@@ -260,6 +294,7 @@ describe('paperwork role parity', () => {
     ['artifact outside the home', artifactOutsideHome, 'artifacts-missing'],
     ['uncommitted work', uncommitted, 'not-committed'],
     ['deps missing', depsMissing, 'deps-missing'],
+    ['mcp unsigned mutating tool', mcpUnsignedTool, 'mcp-manifest-invalid'],
   ] as [string, FixtureBuilder, string][])(
     'coder: %s returns the gate reason',
     async (_n, build, reason) => {
@@ -476,15 +511,15 @@ describe('paperwork role parity', () => {
     expect(checked).toEqual(['grader']);
     expect(
       grader.skipped.filter((s) => s.why === 'not-checked-for-grader').map((s) => s.stage),
-    ).toEqual(['schema', 'artifacts', 'commit', 'deps', 'judges', 'uiux', 'screenshots']);
+    ).toEqual(['schema', 'artifacts', 'commit', 'deps', 'mcp', 'judges', 'uiux', 'screenshots']);
   });
 
   it('the stage sets are the contract', () => {
     expect(STAGES_FOR_ROLE).toEqual({
-      coder: ['schema', 'artifacts', 'commit', 'deps'],
+      coder: ['schema', 'artifacts', 'commit', 'deps', 'mcp'],
       tester: ['schema', 'artifacts', 'screenshots'],
       grader: ['grader'],
-      gate: ['schema', 'artifacts', 'commit', 'deps', 'judges', 'uiux', 'grader'],
+      gate: ['schema', 'artifacts', 'commit', 'deps', 'mcp', 'judges', 'uiux', 'grader'],
     });
   });
 });
@@ -586,6 +621,7 @@ describe('stage order', () => {
       'artifacts',
       'commit',
       'deps',
+      'mcp',
       'judges',
       'uiux',
       'grader',
@@ -664,6 +700,7 @@ describe('what checkPaperwork writes and what it skips', () => {
     expect(res.skipped).toEqual([
       { stage: 'commit', why: 'no-input' },
       { stage: 'deps', why: 'no-input' },
+      { stage: 'mcp', why: 'no-input' },
       { stage: 'judges', why: 'no-input' },
       { stage: 'uiux', why: 'no-input' },
       { stage: 'screenshots', why: 'not-checked-for-gate' },

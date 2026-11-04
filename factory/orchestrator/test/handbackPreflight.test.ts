@@ -276,6 +276,7 @@ describe('wave.md', () => {
       artifacts: 'artifact check',
       commit: 'commit check',
       deps: 'deps check',
+      mcp: 'MCP manifest check',
       judges: 'outstanding-judge check',
       uiux: 'uiux check',
       grader: 'grader verdict',
@@ -365,6 +366,7 @@ describe('queue-and-gate.md section 5 and the CHANGELOG', () => {
 /** The branch of wave.md step 7 each reason goes to. The compiler ties it to the type: a new reason without a branch fails to build. */
 const REASON_BRANCH = {
   'deps-missing': 1,
+  'mcp-manifest-invalid': 3,
   'judges-outstanding': 2,
   'uiux-spec-missing': 2,
   'uiux-visual-missing': 2,
@@ -1197,6 +1199,7 @@ const ANSWERER_OF = {
   'uiux-visual-missing': 'uiux',
   'grader-invalid': 'judge-turn',
   'deps-missing': 'wave-runner',
+  'mcp-manifest-invalid': 'coder',
   'judges-outstanding': {
     'uiux-named': 'uiux',
     'judges-only': 'judge-turn',

@@ -23,6 +23,7 @@ export type GateBlockedReason =
   | 'artifacts-missing'
   | 'not-committed'
   | 'deps-missing'
+  | 'mcp-manifest-invalid'
   | 'judges-outstanding'
   | 'uiux-spec-missing'
   | 'screenshots-missing'
@@ -41,6 +42,7 @@ const GATE_BLOCKED_ERROR_CLASSES: Record<GateBlockedReason, string> = {
   'artifacts-missing': 'gate.blocked.artifacts-missing',
   'not-committed': 'gate.blocked.not-committed',
   'deps-missing': 'gate.blocked.deps-missing',
+  'mcp-manifest-invalid': 'gate.blocked.mcp-manifest-invalid',
   'judges-outstanding': 'gate.blocked.judges-outstanding',
   'uiux-spec-missing': 'gate.blocked.uiux-spec-missing',
   'screenshots-missing': 'gate.blocked.screenshots-missing',

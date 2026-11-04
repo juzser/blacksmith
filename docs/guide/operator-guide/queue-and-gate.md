@@ -266,7 +266,7 @@ bisection narrows a red group down to the task that is actually guilty of it.
 ## 5. `bs gate run`
 
 The composed gate pipeline for one task: **schema check → artifact check →
-commit check → deps check → outstanding-judge check → grader verdict → tests →
+commit check → deps check → MCP manifest check → outstanding-judge check → grader verdict → tests →
 coverage evidence → findings intake → severity decision**. Every stage emits
 its own event to the session's log before the next stage runs.
 
@@ -529,6 +529,7 @@ block the merge queue, it queues an operator question (§8 below).
 | `blocked` (`reason: "artifacts-missing"`) | A declared artifact is outside `state/artifacts/<task-id>/` or absent | Never reaches tests; `artifactIssues` names each path and which of the two it is; bounce to the worker whose result it is |
 | `blocked` (`reason: "not-committed"`) | There is no commit here to score — see §5a | Never reaches tests; bounce to the coder to commit |
 | `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; the wave-runner's own fix answers it: run `pnpm install` in the worktree, then the preflight again (no agent runs) |
+| `blocked` (`reason: "mcp-manifest-invalid"`) | The project has an `mcp.manifest.json` that breaks a rule `bs mcp check` enforces, such as MCP-T4 (a mutating tool with no signed approval) | Never reaches tests; `mcpViolations[]` names each rule, path and tool; bounce to the coder to fix the manifest (an approval is the operator's to sign, never the coder's). A project with no manifest is untouched; `epic close` keeps its own check |
 | `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes. With a uiux turn among them, bounce to the uiux pass (any other judge it names is re-poked beside it); with no uiux turn among them, a judge turn answers it (each judge it names re-poked, then `bs judge report`, §3c) |
 | `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; a judge turn answers it: the grader's turn answers it (re-poked in the same round, or re-run within its round cap), never a builder; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'); `wave.md` step 7 sends it to the grader before `gate run` |
 | `blocked` (`reason: "uiux-spec-missing"`) | A UI-affecting task has no uiux spec from the uiux spec pass | Never reaches tests; bounce to the uiux pass (the spec pass) |
@@ -551,10 +552,10 @@ takes no lock.
 
 | `--as` | Reads | Stages |
 |---|---|---|
-| `--as coder` | `--result`, `--worktree` [`--base`] | `schema, artifacts, commit, deps` |
+| `--as coder` | `--result`, `--worktree` [`--base`] | `schema, artifacts, commit, deps, mcp` |
 | `--as tester` | `--result`, `--plan` | `schema, artifacts, screenshots` |
 | `--as grader` | `--grader` | `grader` |
-| `--as gate` | the `gate run` line, verbatim | `schema, artifacts, commit, deps, judges, uiux, grader` |
+| `--as gate` | the `gate run` line, verbatim | `schema, artifacts, commit, deps, mcp, judges, uiux, grader` |
 
 `--as coder` and `--as tester` also take `--agent --provider --model-tier`;
 `--as grader` refuses them. All three worker modes take `--artifacts-dir` and
@@ -619,8 +620,8 @@ problem falls in exactly one of five branches:
    leaves one; with no grader round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'), never to
    `gate run` and never to a builder.
 3. **A worker's file the gate blocks on.** `schema-invalid`,
-   `artifacts-missing`, `not-committed`, `screenshots-missing`,
-   `screenshots-stale` and `mobile-overflow`. The wave-runner runs `gate run`
+   `artifacts-missing`, `not-committed`, `mcp-manifest-invalid`,
+   `screenshots-missing`, `screenshots-stale` and `mobile-overflow`. The wave-runner runs `gate run`
    with the same flags. It blocks on the same reason before any check command
    runs and writes the blocked `gate-outcome` that `readFailedRounds` counts,
    so the bounce that follows is a failed round on the escalation ladder.
@@ -756,6 +757,16 @@ the project's `package.json` declares dependencies at all:
 `deps-check-result` is emitted on **every** path, including the no-op ones: a
 check that decided there was nothing to check is a check that happened, and
 the log has to be able to tell that apart from one that never ran.
+
+### The MCP manifest check — `/bs do` has no epic close
+
+Behind the deps check. When the gated worktree holds an `mcp.manifest.json`, the
+gate runs the same manifest rules `bs mcp check` and `epic close` run (not the
+roadmap rules, which belong to the close). A violation blocks with
+`mcp-manifest-invalid` and `mcpViolations[]`, each naming its rule, path and,
+where the path points at one, the tool. An unreadable manifest blocks too. A
+project with no manifest passes untouched, and `epic close` still checks the
+full path.
 
 ## 5b. One epic across several sessions — `bs event lineage`
 

@@ -42,6 +42,12 @@ than appearing in it.
   session (any, when the session came from the env), before any git write for
   `queue run`. Explicit flags behave as before. Fan-out writers, such as the wave-runner, must still pass
   `--causal-parent`: the last event may be a sibling's.
+- **MCP manifest check at the gate.** `bs gate run` and `bs results check --as
+  coder|gate` now validate `mcp.manifest.json` whenever the gated worktree has
+  one, because the lean `/bs do` path has no epic close. An unsigned mutating
+  tool (MCP-T4) or any other manifest violation blocks with
+  `mcp-manifest-invalid`, and `mcpViolations` names the rule and the tool. A
+  project with no manifest is untouched, and `epic close` keeps its own check.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.

@@ -739,6 +739,46 @@ export function resolveMcpSurface(opts: ResolveMcpSurfaceOptions): McpSurfaceSta
   return { required: true, milestoneId: milestone.milestoneId, manifestPath, check, problem };
 }
 
+/** A violation at the per-task gate: the manifest's own, plus the tool it is about when the path points at one. */
+export interface McpGateViolation extends McpViolation {
+  tool?: string;
+}
+
+export interface McpManifestInspection {
+  /** False when the checkout has no `mcp.manifest.json`: nothing to check. */
+  present: boolean;
+  /** Set when the file exists but is not valid JSON; no verdict could be rendered. */
+  problem: 'unreadable' | null;
+  violations: McpGateViolation[];
+}
+
+/**
+ * The per-task gate's read of the project's manifest: the same `checkManifest`
+ * the epic-close check runs (and deliberately not the roadmap rules, for the
+ * reason `resolveMcpSurface` gives), over `<dir>/mcp.manifest.json`. `/bs do`
+ * has no epic close, so without this the MCP-T4 approval rule would never run
+ * on that path. A project with no manifest is untouched; an unreadable one is
+ * reported rather than skipped, as the close-time check does.
+ */
+export function inspectMcpManifest(dir: string): McpManifestInspection {
+  const manifestPath = path.join(dir, MANIFEST_NAME);
+  if (!existsSync(manifestPath)) return { present: false, problem: null, violations: [] };
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return { present: true, problem: 'unreadable', violations: [] };
+  }
+  const tools = isRecord(manifest) && Array.isArray(manifest.tools) ? manifest.tools : [];
+  const violations = checkManifest(manifest).violations.map((v): McpGateViolation => {
+    const index = /^\/tools\/(\d+)/.exec(v.path)?.[1];
+    const tool = index === undefined ? undefined : tools[Number(index)];
+    const name = isRecord(tool) && typeof tool.name === 'string' ? tool.name : undefined;
+    return name === undefined ? v : { ...v, tool: name };
+  });
+  return { present: true, problem: null, violations };
+}
+
 /**
  * The hard gate, expressed as blockers rather than its own refusal path
  * (operator decision of 2026-08-07). summarizeEpic folds these into

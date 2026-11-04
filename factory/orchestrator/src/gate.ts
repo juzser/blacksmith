@@ -21,6 +21,7 @@ import {
 import { runGit } from './git.js';
 import { type JudgeTurn, readJudgeTurns } from './judges.js';
 import { appendTracked, beginLineageRun, endLineageRun, readLineage } from './lineageSnapshot.js';
+import type { McpGateViolation } from './mcp.js';
 import {
   artifactsStage,
   commitStage,
@@ -28,6 +29,7 @@ import {
   depsStage,
   graderStage,
   judgesStage,
+  mcpStage,
   resolveTaxonomyAndSchemas,
   schemaStage,
   screenshotsFromArtifacts,
@@ -264,6 +266,7 @@ export type GateOutcome =
         | 'artifacts-missing'
         | 'not-committed'
         | 'deps-missing'
+        | 'mcp-manifest-invalid'
         | 'judges-outstanding'
         | UiuxBlockReason
         | 'grader-invalid'
@@ -289,6 +292,8 @@ export type GateOutcome =
        */
       schemaErrors: ValidationIssue[];
       blockingFindings: Finding[];
+      /** Set only on `mcp-manifest-invalid`: each manifest rule that failed, naming its tool. */
+      mcpViolations?: McpGateViolation[];
       /**
        * Required, and `[]` when the artifacts were fine — an absent field and
        * an empty one must not both have to mean "nothing wrong here".
@@ -1159,6 +1164,28 @@ async function runGateStages(
     );
   }
 
+  // The same manifest rules `epic close` enforces (MCP-T4's signed approval among
+  // them), run here because `/bs do` has no epic close. A project with no
+  // `mcp.manifest.json` passes through untouched.
+  const mcp = mcpStage(input.worktreeDir);
+  if (!mcp.ok) {
+    return finalize(
+      {
+        outcome: 'blocked',
+        taskId: input.taskId,
+        reason: 'mcp-manifest-invalid',
+        testResult: null,
+        schemaErrors: [],
+        blockingFindings: [],
+        artifactIssues: [],
+        commitCheck,
+        mcpViolations: mcp.violations,
+      },
+      ctx,
+      opts,
+    );
+  }
+
   // D-31, D-20 / P9-11. Scoring a task while one of its judges is still owed
   // is scoring an unknown: `--evidence` absent reads identically whether the
   // security reviewer found nothing or died mid-turn without writing its file,
@@ -1524,6 +1551,9 @@ async function finalize(
       reason: 'reason' in outcome ? outcome.reason : null,
       ...('error_class' in outcome && outcome.error_class !== undefined
         ? { error_class: outcome.error_class, environment_evidence: outcome.environmentEvidence }
+        : {}),
+      ...('mcpViolations' in outcome && outcome.mcpViolations !== undefined
+        ? { mcp_violations: outcome.mcpViolations }
         : {}),
     },
     outcome.taskId,
