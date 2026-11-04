@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Blacksmith is deliberately small: five pieces, and Claude Code's
+        Blacksmith is deliberately small: a few pieces, and Claude Code's
         defaults for the rest. See the
-        [docs](https://github.com/juzser/blacksmith/blob/main/docs/README.md)
+        [docs](https://github.com/juzser/blacksmith/blob/main/docs/usage.md)
         and [what it no longer does](https://github.com/juzser/blacksmith/blob/main/docs/history.md).
 
   - type: textarea

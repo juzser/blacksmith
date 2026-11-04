@@ -2,12 +2,12 @@
 
 A small Claude Code plugin. It adds a few things and leaves the rest to Claude Code's defaults.
 
-1. **Plain explanations.** Lead with the result, short sentences, jargon explained ([rules](docs/rules.md)).
+1. **Plain explanations.** Lead with the result, short sentences, jargon explained ([rules](docs/usage.md#rules)).
 2. **Confidence on options.** Every option carries a confidence %, and the recommended one says what it rests on.
 3. **`/cross-check`.** A read-only review of your change by codex, and DeepSeek if you opt in ([details and privacy](docs/cross-check.md)).
 4. **`/audit`.** A read-only audit by axis (performance, code-quality, security), one agent per axis in parallel ([audit](docs/audit.md)).
-5. **Four agents.** `planner`, `coder`, `reviewer` and `auditor`, each with its own model and effort ([agents](docs/agents.md)).
-6. **Compact rule.** Compact at about 60% of the context window ([compact](docs/compact.md)).
+5. **Four agents.** `planner`, `coder`, `reviewer` and `auditor`, each with its own model and effort ([agents](docs/usage.md#agents)).
+6. **Compact rule.** Compact at about 60% of the context window ([compact](docs/usage.md#compact)).
 
 ## Install
 
@@ -28,4 +28,4 @@ Earlier versions were a factory (spec contracts, worktree orchestration, review 
 
 ## More
 
-[docs/README.md](docs/README.md) is the index. See also [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md). Phrasing ideas drawn from ayghri/i-have-adhd (MIT). License: [MIT](LICENSE).
+Usage: [docs/usage.md](docs/usage.md). See also [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md). Phrasing ideas drawn from ayghri/i-have-adhd (MIT). License: [MIT](LICENSE).

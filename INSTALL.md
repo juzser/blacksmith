@@ -31,7 +31,7 @@ Ask first. Merge into `~/.claude/settings.json` without replacing anything: read
 { "env": { "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "60" } }
 ```
 
-If the key is already set lower, leave it. Why: [docs/compact.md](docs/compact.md).
+If the key is already set lower, leave it. Why: [docs/usage.md](docs/usage.md#compact).
 
 ## Step 4: verify
 

@@ -35,7 +35,7 @@ for h in "Talking to a person" "Confidence" "Model and effort" "Cross-check" "Co
 done
 check "README <= 60 lines" test "$(wc -l < "$P/README.md" | tr -d ' ')" -le 60
 check "cross-check doc states code is sent only when invoked" grep -qi "only when" "$P/../docs/cross-check.md"
-check "compact doc has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/../docs/compact.md"
+check "usage doc has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/../docs/usage.md"
 
 echo "-- agent frontmatter --"
 for a in planner coder reviewer auditor; do

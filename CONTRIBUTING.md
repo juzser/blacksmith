@@ -18,7 +18,17 @@ You need bash, git and node. Without the `claude` CLI the plugin validators prin
 3. Run `bash scripts/check.sh` and paste its tail into the PR. It is the same file CI runs, as the job `gate (scripts/check.sh)`. A red gate is not merged.
 4. Add a line to [CHANGELOG.md](CHANGELOG.md) under Unreleased if users will notice.
 
-The repo layout and what the gate checks are in [docs/development.md](docs/development.md).
+## Layout and the gate
+
+```
+plugin/               the plugin: rules.md, hooks/, agents/, skills/, test/
+.claude-plugin/       marketplace.json: lists the plugin
+scripts/check.sh      the gate
+scripts/check-md-links.mjs, test-md-links.sh   the markdown link check and its test
+docs/                 usage, cross-check, audit, history
+```
+
+`bash scripts/check.sh` runs `plugin/test/run.sh`, checks that the JSON parses and that every marketplace `source` exists (the main entry must be `./plugin`), runs `sh -n` on the plugin's scripts, checks that every relative link in a tracked `.md` file resolves to a tracked path, and, when `claude` is on PATH, runs `claude plugin validate plugin`. Without `claude` that prints `SKIP`: read the tail, not the exit code. It must end in `== PASS ==`. CI runs the same file as the job `gate (scripts/check.sh)`. Try the plugin from a checkout with `claude --plugin-dir ./plugin`.
 
 ## What fits
 

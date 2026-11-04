@@ -12,5 +12,5 @@ contact_links:
     about: >-
       Use the same private channel. See CODE_OF_CONDUCT.md.
   - name: Read the docs first
-    url: https://github.com/juzser/blacksmith/blob/main/docs/README.md
-    about: One line per doc.
+    url: https://github.com/juzser/blacksmith/blob/main/docs/usage.md
+    about: Rules, agents and compact.

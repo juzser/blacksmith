@@ -1,10 +1,10 @@
 # AGENTS.md: operating rules for this repo
 
-For any agent or person changing Blacksmith. Overview: [README.md](README.md). Docs: [docs/README.md](docs/README.md).
+For any agent or person changing Blacksmith. Overview: [README.md](README.md). Usage: [docs/usage.md](docs/usage.md).
 
 ## What this repo is
 
-A small Claude Code plugin in `plugin/`, a marketplace in `.claude-plugin/`, and the gate `scripts/check.sh`. Layout: [docs/development.md](docs/development.md). The old factory lives at the `factory-final` tag ([history](docs/history.md)).
+A small Claude Code plugin in `plugin/`, a marketplace in `.claude-plugin/`, and the gate `scripts/check.sh`. Layout: [CONTRIBUTING.md](CONTRIBUTING.md). The old factory lives at the `factory-final` tag ([history](docs/history.md)).
 
 ## Branches
 
