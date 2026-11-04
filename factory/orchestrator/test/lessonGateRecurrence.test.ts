@@ -81,6 +81,8 @@ describe('GATE_BLOCK_ERROR_CLASSES', () => {
       'grader-invalid': 'contract.schema-violation',
       'not-committed': 'contract.uncommitted-work',
       'deps-missing': 'execution.env-failure',
+      'mcp-manifest-invalid': 'contract.schema-violation',
+      'mcp-approval-unsigned-by-operator': null,
       'tests-failed': 'execution.test-failure',
       'judges-outstanding': null,
       'uiux-spec-missing': null,

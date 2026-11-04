@@ -39,6 +39,20 @@ describe('worktree.ts', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('deletes the recorded base with the worktree', () => {
+    const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    git(projectDir, ['merge', '-q', '--no-edit', result.branch]);
+    removeTaskWorktree(projectDir, 'epic-1', 'task-1');
+    expect(git(projectDir, ['for-each-ref', 'refs/bs/base'])).toBe('');
+  });
+
+  it('records the commit a task branch was cut from, as a SHA', () => {
+    const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    const cutFrom = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
+    expect(git(projectDir, ['rev-parse', 'refs/bs/base/bs/epic-1/task-1'])).toBe(cutFrom);
+    expect(git(result.worktreeDir, ['rev-parse', `refs/bs/base/${result.branch}`])).toBe(cutFrom);
+  });
+
   it('creates the integration branch from the default branch on first use', () => {
     const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
 

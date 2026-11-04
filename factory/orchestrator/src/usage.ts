@@ -267,6 +267,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Render the MCP verdict the epic gate reads for the checkout you are in. Exit 1 on red.',
   },
   {
+    command: 'mcp override',
+    positionals: '<task-id>',
+    flags: `--worktree <dir> --tool <name> --note <why> ${EVENTS_DIR}`,
+    summary:
+      'Record that the operator lets one tool stand unsigned for a task, bound to the hash of its committed manifest entry. Requires --actor, an operator actor such as operator; it is recorded as given and not authenticated.',
+  },
+  {
     command: 'research check',
     positionals: '',
     flags: '--brief <brief.json>',

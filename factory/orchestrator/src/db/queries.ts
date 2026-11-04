@@ -2824,6 +2824,8 @@ export function eventKind(eventType: string, _payload: Record<string, unknown>):
     case 'artifact-check-result':
     case 'commit-check-result':
     case 'deps-check-result':
+    case 'mcp-check-result':
+    case 'mcp-approval-override':
     case 'judges-outstanding':
     case 'grader-verdict':
     case 'budget-check-result':

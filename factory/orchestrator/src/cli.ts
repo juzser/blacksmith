@@ -164,7 +164,7 @@ import {
   type UiuxDeviation,
   uiuxDeviationsToEvidence,
 } from './judges.js';
-import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
+import { addMcpSurface, recordMcpOverride, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
   DOTENV_PATH,
   IS_CLONE,
@@ -3281,6 +3281,22 @@ async function main(): Promise<number> {
     });
     printJson(report);
     return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'mcp' && action === 'override') {
+    const [taskId] = requirePositionals(positional, usageFor('mcp override')) as [string];
+    const event = await recordMcpOverride(
+      {
+        taskId,
+        worktreeDir: requireFlag(flags, 'worktree'),
+        tool: requireFlag(flags, 'tool'),
+        note: requireFlag(flags, 'note'),
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(event);
+    return 0;
   }
 
   if (namespace === 'scheduler' && action === 'run') {

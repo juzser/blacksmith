@@ -1,9 +1,10 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readEvents } from '../src/events.js';
 import { type GateInput, recordTaskResult, runGate } from '../src/gate.js';
+import { recordMcpOverride } from '../src/mcp.js';
 import {
   checkPaperwork,
   graderStage,
@@ -15,6 +16,7 @@ import {
   STAGES_FOR_ROLE,
   screenshotsFromArtifacts,
 } from '../src/paperwork.js';
+import { emitWaveMergedWith } from '../src/taskEvents.js';
 import { checkUiux } from '../src/uiuxGate.js';
 import {
   artifactMissing,
@@ -22,6 +24,8 @@ import {
   baseInput,
   buildLadder,
   clean,
+  commitMcpManifest,
+  commitMcpManifestOnBase,
   createWorld,
   depsMissing,
   earlyHandBack,
@@ -31,13 +35,23 @@ import {
   graderMet,
   graderOutsideStructured,
   judgesOutstanding,
+  MISANNOTATED_TOOL,
+  mcpManifest,
+  mcpMisannotatedTool,
+  mcpSelfSigned,
+  mcpSignedOnBase,
+  mcpUnreadable,
+  mcpUnsignedTool,
+  mcpValid,
   OPEN_JUDGE,
+  OPERATOR_APPROVAL,
   PARITY_CASES,
   SHOT_NAMES,
   screenshotMisnamed,
   shapeError,
   stampedResult,
   testerResult,
+  UNSIGNED_TOOL,
   uiuxVisualMissing,
   uiuxVisualOpen,
   uncommitted,
@@ -100,6 +114,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "artifact-check-result {"checked":0,"home":"<art>/epic-1/task-1","issues":[],"ok":true}",
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
+        "mcp-check-result {"manifest_present":false,"ok":true,"overridden":[],"reason":null,"summary":[]}",
         "budget-check-result {"overruns":[],"status":"not-declared","tokensUsed":150}",
         "testgate-result {"deferred":[],"environment":"<1 entries>","pass":true,"results":[{"check_sha256":"b0ca82928a2e2df2ffad0ff0e2bd39631fceb98f204102cb8bc27eae057c64d6","cmd_sha256":"b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b","exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}],"tier":"pre-merge","tree_sha":"<sha>"}",
         "severity-decisions {"decisions":[],"lesson_ids_escalating":[],"lessons_escalating":0,"lessons_loaded":0}",
@@ -152,6 +167,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "artifact-check-result {"checked":0,"home":"<art>/epic-1/task-1","issues":[],"ok":true}",
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
+        "mcp-check-result {"manifest_present":false,"ok":true,"overridden":[],"reason":null,"summary":[]}",
         "grader-verdict {"errors":[{"message":"grader verdict must be at .structured_output (round, criteria, overall), per the grader Output contract","path":"/structured_output"}],"failed_criteria":[],"overall":null,"round":null,"run_status":null,"verdict":"invalid"}",
         "gate-outcome {"outcome":"blocked","reason":"grader-invalid"}",
       ]
@@ -167,6 +183,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "artifact-check-result {"checked":0,"home":"<art>/epic-1/task-1","issues":[],"ok":true}",
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
+        "mcp-check-result {"manifest_present":false,"ok":true,"overridden":[],"reason":null,"summary":[]}",
         "gate-outcome {"outcome":"blocked","reason":"screenshots-missing"}",
       ]
     `);
@@ -244,6 +261,269 @@ describe('paperwork parity with the gate', () => {
   });
 });
 
+describe('mcp manifest at the gate', () => {
+  let w: World;
+  beforeEach(async () => {
+    w = await createWorld();
+  });
+  afterEach(async () => {
+    await w.dispose();
+  });
+
+  const MANIFEST = 'mcp.manifest.json';
+  const gateOf = async (input: GateInput) => {
+    const gate = await runGate(input, w.ctx(), w.opts());
+    const pre = await checkPaperwork(paperworkInput(input, 'coder'), w.ctx(), w.opts());
+    const violations = gate.outcome === 'blocked' ? (gate.mcpViolations ?? []) : [];
+    return { gate, pre, violations };
+  };
+
+  it('sends an unsigned mutating tool to the operator and names the tool, in the gate and the preflight', async () => {
+    const { gate, pre, violations } = await gateOf(await mcpUnsignedTool(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ rule: 'MCP-T4', tool: 'rotate_widget' });
+    expect(pre.reason).toBe('mcp-approval-unsigned-by-operator');
+    expect(JSON.stringify(pre.problems)).toContain('rotate_widget');
+  });
+
+  it('blocks an approval the task wrote, whatever its shape', async () => {
+    const { gate, violations } = await gateOf(await mcpSelfSigned(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['rotate_widget']);
+  });
+
+  it('blocks an approval the task changed against the base', async () => {
+    await mcpSignedOnBase(w);
+    const changed = { ...OPERATOR_APPROVAL, operator: 'someone-else' };
+    await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval: changed }]));
+    const { gate } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+  });
+
+  it('passes an approval the operator committed to the base and the task left alone', async () => {
+    const { gate, pre } = await gateOf(await mcpSignedOnBase(w));
+    expect(gate.outcome).toBe('pass');
+    expect(pre.outcome).toBe('pass');
+  });
+
+  it('passes a valid manifest and a project with no manifest', async () => {
+    expect((await runGate(await mcpValid(w), w.ctx(), w.opts())).outcome).toBe('pass');
+    await rm(path.join(w.worktreeDir, MANIFEST));
+    w.git(['commit', '-q', '-am', 'drop manifest']);
+    const { gate, pre } = await gateOf(baseInput(w));
+    expect(gate.outcome).toBe('pass');
+    expect(pre.outcome).toBe('pass');
+  });
+
+  it('does not block on a violation the base manifest already carries, and blocks a new one', async () => {
+    await commitMcpManifestOnBase(w, mcpManifest([MISANNOTATED_TOOL]));
+    w.git(['commit', '-q', '--allow-empty', '-m', 'unrelated work']);
+    expect((await gateOf(baseInput(w))).gate.outcome).toBe('pass');
+    const second = { ...MISANNOTATED_TOOL, name: 'second_widget' };
+    await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL, second]));
+    const { gate, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(violations.every((v) => v.tool === 'second_widget')).toBe(true);
+  });
+
+  it('blocks when the manifest the base carries is gone at HEAD', async () => {
+    await commitMcpManifestOnBase(w, mcpManifest());
+    w.git(['rm', '-q', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'drop manifest']);
+    const { gate, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(violations).toHaveLength(1);
+  });
+
+  it('blocks a committed dangling symlink and a symlink to a valid file outside the repo', async () => {
+    const outside = path.join(w.elsewhereDir, 'valid.json');
+    await writeFile(outside, mcpManifest());
+    for (const target of [path.join(w.elsewhereDir, 'missing.json'), outside]) {
+      await rm(path.join(w.worktreeDir, MANIFEST), { force: true });
+      await symlink(target, path.join(w.worktreeDir, MANIFEST));
+      w.git(['add', MANIFEST]);
+      w.git(['commit', '-q', '-m', 'link manifest']);
+      const { gate, violations } = await gateOf(baseInput(w));
+      expect(gate, target).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+      expect(violations).toHaveLength(1);
+      w.git(['rm', '-q', '--cached', MANIFEST]);
+      w.git(['commit', '-q', '-m', 'unlink manifest']);
+    }
+  });
+
+  it('ignores an ignored or untracked manifest the task never committed', async () => {
+    await writeFile(path.join(w.worktreeDir, '.git', 'info', 'exclude'), `${MANIFEST}\n`);
+    await writeFile(path.join(w.worktreeDir, MANIFEST), '{ not json');
+    const { gate, pre } = await gateOf(baseInput(w));
+    expect(gate.outcome).toBe('pass');
+    expect(pre.outcome).toBe('pass');
+  });
+
+  it('judges against the recorded base, with or without --base, and not against a moved branch', async () => {
+    await mcpSignedOnBase(w);
+    // No --base at all: the operator's approval is still the base's, so the task is untouched.
+    const noFlag = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(noFlag.gate.outcome).toBe('pass');
+    expect(noFlag.pre.outcome).toBe('pass');
+    // A forged approval on a moved `main` does not become the base.
+    const task = w.git(['branch', '--show-current']);
+    await commitMcpManifest(
+      w,
+      mcpManifest([{ ...UNSIGNED_TOOL, name: 'forged_widget', approval: OPERATOR_APPROVAL }]),
+    );
+    w.git(['branch', '-f', 'main', 'HEAD']);
+    expect(w.git(['branch', '--show-current'])).toBe(task);
+    const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toContain('forged_widget');
+  });
+
+  it('counts only what the task changed when the integration branch is merged into it', async () => {
+    const task = w.git(['branch', '--show-current']);
+    const integration = 'smith/epic-1/integration';
+    w.git(['branch', integration, 'main']);
+    w.git(['checkout', '-q', integration]);
+    await writeFile(
+      path.join(w.worktreeDir, MANIFEST),
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]),
+    );
+    w.git(['add', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'upstream signed']);
+    const landed = w.git(['rev-parse', 'HEAD']);
+    w.git(['checkout', '-q', task]);
+    w.git(['merge', '-q', '--no-edit', integration]);
+    // Merged in, but no landing on record: nothing vouches for that commit, so it counts against the task.
+    const unrecorded = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(unrecorded.gate).toMatchObject({
+      outcome: 'blocked',
+      reason: 'mcp-approval-unsigned-by-operator',
+    });
+    // The queue's landing event records the integration head it produced.
+    await emitWaveMergedWith(
+      'epic-1/task-0',
+      { sessionId: w.sessionId, planVersion: 1, causalParent: `${w.sessionId}#0`, actor: 'system' },
+      w.opts(),
+      undefined,
+      { merge_sha: landed },
+    );
+    const merged = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(merged.gate.outcome).toBe('pass');
+    expect(merged.pre.outcome).toBe('pass');
+    const forged = { ...UNSIGNED_TOOL, name: 'forged_widget', approval: OPERATOR_APPROVAL };
+    await commitMcpManifest(
+      w,
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }, forged]),
+    );
+    const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['forged_widget']);
+  });
+
+  it('does not take a moved integration branch for a recorded landing', async () => {
+    const forged = { ...UNSIGNED_TOOL, name: 'forged_widget', approval: OPERATOR_APPROVAL };
+    await mcpSignedOnBase(w);
+    await commitMcpManifest(
+      w,
+      mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }, forged]),
+    );
+    w.git(['branch', '-f', 'smith/epic-1/integration', 'HEAD']);
+    w.git(['commit', '-q', '--allow-empty', '-m', 'one more']);
+    const { gate, violations } = await gateOf(baseInput(w, { baseRef: undefined }));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['forged_widget']);
+  });
+
+  it('fails closed when a manifest exists and no base was recorded', async () => {
+    await mcpValid(w);
+    w.git(['update-ref', '-d', `refs/bs/base/${w.git(['branch', '--show-current'])}`]);
+    const { gate, pre, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(pre.reason).toBe('mcp-approval-unsigned-by-operator');
+    expect(violations[0]?.message).toMatch(/No base commit is recorded/);
+    expect(violations[0]?.message).toMatch(/merge-base/);
+  });
+
+  it('does not carry an approval over to a changed tool entry', async () => {
+    await mcpSignedOnBase(w);
+    const raised = {
+      ...UNSIGNED_TOOL,
+      mutation: 'destructive',
+      annotations: { ...UNSIGNED_TOOL.annotations, destructiveHint: true },
+      approval: OPERATOR_APPROVAL,
+    };
+    await commitMcpManifest(w, mcpManifest([raised]));
+    const { gate, violations } = await gateOf(baseInput(w));
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-approval-unsigned-by-operator' });
+    expect(violations.map((v) => v.tool)).toEqual(['rotate_widget']);
+  });
+
+  it('lets an operator override clear a tool, for that entry only', async () => {
+    const input = await mcpSelfSigned(w);
+    expect((await gateOf(input)).gate).toMatchObject({ outcome: 'blocked' });
+    const ctx = { ...w.ctx(), causalParent: `${w.sessionId}#0` };
+    const override = (actor: string, tool = 'rotate_widget') =>
+      recordMcpOverride(
+        { taskId: w.taskId, worktreeDir: w.worktreeDir, tool, note: 'reviewed' },
+        { ...ctx, actor },
+        w.opts(),
+      );
+    await expect(
+      recordMcpOverride(
+        { taskId: w.taskId, worktreeDir: w.worktreeDir, tool: 'rotate_widget', note: 'reviewed' },
+        { sessionId: w.sessionId, planVersion: 1, causalParent: `${w.sessionId}#0` },
+        w.opts(),
+      ),
+    ).rejects.toThrow(/--actor/);
+    await expect(override('coder')).rejects.toThrow(/operator actor/);
+    await expect(override('operator', 'no_such_tool')).rejects.toThrow(/no tool/);
+    await override('operator');
+    const cleared = await gateOf(input);
+    expect(cleared.gate.outcome).toBe('pass');
+    expect(cleared.pre.outcome).toBe('pass');
+    // Changing the entry afterwards voids the override.
+    const changed = {
+      ...UNSIGNED_TOOL,
+      description: 'Rotates something else.',
+      approval: OPERATOR_APPROVAL,
+    };
+    await commitMcpManifest(w, mcpManifest([changed]));
+    expect((await gateOf(baseInput(w))).gate).toMatchObject({
+      outcome: 'blocked',
+      reason: 'mcp-approval-unsigned-by-operator',
+    });
+  });
+
+  it('logs mcp-check-result on every path, including a project with no manifest', async () => {
+    await runGate(baseInput(w), w.ctx(), w.opts());
+    await runGate(await mcpUnsignedTool(w), w.ctx(), w.opts());
+    const results = (await readEvents(w.sessionId, w.opts())).filter(
+      (e) => e.record.event_type === 'mcp-check-result',
+    );
+    expect(results.map((e) => (e.record.payload as Record<string, unknown>).ok)).toEqual([
+      true,
+      false,
+    ]);
+    expect(results[0]?.record.payload).toMatchObject({ manifest_present: false });
+    expect(JSON.stringify(results[1]?.record.payload)).toContain('rotate_widget');
+  });
+
+  it('explains an unreadable manifest and a directory at the manifest path', async () => {
+    const bad = await gateOf(await mcpUnreadable(w));
+    expect(bad.gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(bad.violations).toHaveLength(1);
+    expect(bad.violations[0]?.message).toMatch(/JSON/);
+    w.git(['rm', '-q', MANIFEST]);
+    await mkdir(path.join(w.worktreeDir, MANIFEST));
+    await writeFile(path.join(w.worktreeDir, MANIFEST, 'x.json'), '{}');
+    w.git(['add', MANIFEST]);
+    w.git(['commit', '-q', '-m', 'directory at manifest path']);
+    const dir = await gateOf(baseInput(w));
+    expect(dir.gate).toMatchObject({ outcome: 'blocked', reason: 'mcp-manifest-invalid' });
+    expect(dir.violations).toHaveLength(1);
+  });
+});
+
 describe('paperwork role parity', () => {
   let w: World;
   beforeEach(async () => {
@@ -260,6 +540,8 @@ describe('paperwork role parity', () => {
     ['artifact outside the home', artifactOutsideHome, 'artifacts-missing'],
     ['uncommitted work', uncommitted, 'not-committed'],
     ['deps missing', depsMissing, 'deps-missing'],
+    ['mcp unsigned mutating tool', mcpUnsignedTool, 'mcp-approval-unsigned-by-operator'],
+    ['mcp misannotated tool', mcpMisannotatedTool, 'mcp-manifest-invalid'],
   ] as [string, FixtureBuilder, string][])(
     'coder: %s returns the gate reason',
     async (_n, build, reason) => {
@@ -476,15 +758,15 @@ describe('paperwork role parity', () => {
     expect(checked).toEqual(['grader']);
     expect(
       grader.skipped.filter((s) => s.why === 'not-checked-for-grader').map((s) => s.stage),
-    ).toEqual(['schema', 'artifacts', 'commit', 'deps', 'judges', 'uiux', 'screenshots']);
+    ).toEqual(['schema', 'artifacts', 'commit', 'deps', 'mcp', 'judges', 'uiux', 'screenshots']);
   });
 
   it('the stage sets are the contract', () => {
     expect(STAGES_FOR_ROLE).toEqual({
-      coder: ['schema', 'artifacts', 'commit', 'deps'],
+      coder: ['schema', 'artifacts', 'commit', 'deps', 'mcp'],
       tester: ['schema', 'artifacts', 'screenshots'],
       grader: ['grader'],
-      gate: ['schema', 'artifacts', 'commit', 'deps', 'judges', 'uiux', 'grader'],
+      gate: ['schema', 'artifacts', 'commit', 'deps', 'mcp', 'judges', 'uiux', 'grader'],
     });
   });
 });
@@ -586,6 +868,7 @@ describe('stage order', () => {
       'artifacts',
       'commit',
       'deps',
+      'mcp',
       'judges',
       'uiux',
       'grader',
@@ -664,6 +947,7 @@ describe('what checkPaperwork writes and what it skips', () => {
     expect(res.skipped).toEqual([
       { stage: 'commit', why: 'no-input' },
       { stage: 'deps', why: 'no-input' },
+      { stage: 'mcp', why: 'no-input' },
       { stage: 'judges', why: 'no-input' },
       { stage: 'uiux', why: 'no-input' },
       { stage: 'screenshots', why: 'not-checked-for-gate' },

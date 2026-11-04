@@ -148,6 +148,26 @@ describe('step', () => {
     expect(log).toContain('edit a');
   });
 
+  it('moves the recorded base to the head it rebased onto', async () => {
+    const first = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    const second = createTaskWorktree(projectDir, 'epic-1', 'task-2');
+    await writeFile(path.join(first.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(first.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    await writeFile(path.join(second.worktreeDir, 'b.txt'), 'b-edited\n');
+    git(second.worktreeDir, ['commit', '-q', '-am', 'edit b']);
+    const opts = { projectDir, epic: 'epic-1', testCmd: 'true' };
+    await step({ taskId: 'task-1', branch: first.branch, worktreeDir: first.worktreeDir }, opts);
+    const tip = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
+    expect(git(projectDir, ['rev-parse', `refs/bs/base/${second.branch}`])).not.toBe(tip);
+
+    const result = await step(
+      { taskId: 'task-2', branch: second.branch, worktreeDir: second.worktreeDir },
+      opts,
+    );
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-2' });
+    expect(git(projectDir, ['rev-parse', `refs/bs/base/${second.branch}`])).toBe(tip);
+  });
+
   // The queue used to `git checkout` the integration branch in the project
   // directory to merge, which moved the operator's own clone off the branch
   // they were working on. The merge now happens in a worktree of its own.

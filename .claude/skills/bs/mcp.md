@@ -17,13 +17,16 @@ which is the rubber stamp the standard exists to prevent.
    example. Every tool added after it is **declared in the manifest first**,
    with a mutation class and matching annotations; anything that is not
    `read-only` needs `approval: { operator, date, milestone }` — an operator
-   signature, taken at this milestone. Never sign one yourself.
+   signature, taken at this milestone. Never sign one yourself: the gate blocks
+   an approval a task added or changed, and the operator clears a tool for a
+   task with `bs mcp override`.
 3. Tools that wrap a guardrail-gated action (deploy, outbound send, writes to
    `main`) are not allowed at all (mcp.md MCP-S3). A signed `destructive` tool
    is permission to act inside the project, never a way around an operator
    gate.
 4. Run `bs mcp check <project>` before closing anything under that
    milestone. Exit 0 means green; exit 1 prints one `{ rule, path, message }`
-   per violation. `bs epic close` runs the same check and refuses while it
-   is red — the only way past it is `--override-rationale`, which is the
+   per violation. The per-task gate (`bs gate run`) runs the manifest rules
+   whenever the project has an `mcp.manifest.json`, and `bs epic close` runs
+   the same check and refuses while it is red — the only way past it is `--override-rationale`, which is the
    operator's call and their name in the event log, never yours.

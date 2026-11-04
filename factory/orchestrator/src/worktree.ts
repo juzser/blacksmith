@@ -10,6 +10,15 @@ export class WorktreeError extends SmithError {}
  * runEpicVerdict(), both of which need to recognise `<epic>/integration` as non-task. */
 export const RESERVED_TASK_ID = 'integration';
 
+/**
+ * Where the commit a task branch was cut from is recorded: `refs/bs/base/<branch>`.
+ * A SHA, not a branch name, so moving the base branch afterwards does not move what
+ * the task is judged against. The MCP manifest check of the gate reads it.
+ */
+export function taskBaseRef(branch: string): string {
+  return `refs/bs/base/${branch}`;
+}
+
 function localBranchExists(projectDir: string, branch: string): boolean {
   try {
     git(projectDir, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
@@ -210,6 +219,22 @@ export interface TaskWorktree {
   branch: string;
   epic: string;
   taskId: string;
+  /** Set only when a reopen had to record the base itself: a branch cut before bases were recorded. */
+  baseRecorded?: { sha: string; from: 'merge-base' | 'integration-head' };
+}
+
+/** Point a task branch's recorded base at `sha`: after a rebase, the commit it now sits on. */
+export function moveTaskBase(cwd: string, branch: string, sha: string): void {
+  git(cwd, ['update-ref', taskBaseRef(branch), sha]);
+}
+
+function hasRecordedBase(projectDir: string, branch: string): boolean {
+  try {
+    git(projectDir, ['rev-parse', '--verify', '--quiet', `${taskBaseRef(branch)}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface CreateTaskWorktreeOpts {
@@ -271,7 +296,9 @@ export function createTaskWorktree(
     sourceBranch = ensureIntegrationBranch(projectDir, epic);
   }
 
+  const baseSha = git(projectDir, ['rev-parse', '--verify', `${sourceBranch}^{commit}`]);
   git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, sourceBranch]);
+  git(projectDir, ['update-ref', taskBaseRef(branch), baseSha]);
 
   return { worktreeDir, branch, epic, taskId };
 }
@@ -299,6 +326,12 @@ export function removeTaskWorktree(projectDir: string, epic: string, taskId: str
       `Failed to delete branch ${branch} (not fully merged?): ${err instanceof Error ? err.message : String(err)}`,
       { branch },
     );
+  }
+
+  try {
+    git(projectDir, ['update-ref', '-d', taskBaseRef(branch)]);
+  } catch {
+    // No recorded base (a task cut before they were recorded): nothing to delete.
   }
 }
 
@@ -469,19 +502,42 @@ export function reopenTaskWorktree(
     );
   }
 
+  // A reattached branch keeps the base it was cut with. One cut before bases were
+  // recorded gets the merge-base with the integration branch, taken before the
+  // branch moves, and the output says so. A deleted branch is cut afresh from the
+  // integration head, which is its base.
+  let baseRecorded: TaskWorktree['baseRecorded'];
+  let legacyBase: string | undefined;
+  if (branchExists && !hasRecordedBase(projectDir, branch)) {
+    legacyBase = git(projectDir, ['merge-base', branch, integration]);
+  }
+  // Built before anything is written, so a refused reopen leaves no ref behind.
   const commit = buildReopenCommit(projectDir, integration, revert, opts.onScratch);
+  if (legacyBase !== undefined) {
+    moveTaskBase(projectDir, branch, legacyBase);
+    baseRecorded = { sha: legacyBase, from: 'merge-base' };
+  }
   if (existing !== undefined) {
     git(existing.worktree, ['merge', '--ff-only', commit]);
-    return { worktreeDir: existing.worktree, branch, epic: epicId, taskId };
+    return {
+      worktreeDir: existing.worktree,
+      branch,
+      epic: epicId,
+      taskId,
+      ...(baseRecorded ? { baseRecorded } : {}),
+    };
   }
   const worktreeDir = taskWorktreeDir(projectDir, epicId, taskId);
   if (branchExists) {
     git(projectDir, ['worktree', 'add', worktreeDir, branch]);
     git(worktreeDir, ['merge', '--ff-only', commit]);
   } else {
+    const head = git(projectDir, ['rev-parse', '--verify', `${integration}^{commit}`]);
     git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, commit]);
+    moveTaskBase(projectDir, branch, head);
+    baseRecorded = { sha: head, from: 'integration-head' };
   }
-  return { worktreeDir, branch, epic: epicId, taskId };
+  return { worktreeDir, branch, epic: epicId, taskId, ...(baseRecorded ? { baseRecorded } : {}) };
 }
 
 /** `git revert --no-edit <revert>` on the integration head in a throwaway worktree; returns the commit. */

@@ -42,6 +42,23 @@ than appearing in it.
   session (any, when the session came from the env), before any git write for
   `queue run`. Explicit flags behave as before. Fan-out writers, such as the wave-runner, must still pass
   `--causal-parent`: the last event may be a sibling's.
+- **MCP manifest check at the gate.** `bs gate run` and `bs results check --as
+  coder|gate` now validate `mcp.manifest.json` whenever the gated worktree has
+  one, because the lean `/bs do` path has no epic close. An unsigned mutating
+  The gate reads the committed manifest, compares it with the commit the task
+  was cut from (recorded by `bs worktree create`), and blocks only on what the
+  task changed: a new violation, a removed or non-regular manifest, or invalid JSON
+  blocks with `mcp-manifest-invalid`, and an `approval` the task added or
+  changed, or a new unsigned mutating tool, blocks with
+  `mcp-approval-unsigned-by-operator`, which the epic session answers because
+  only the operator signs, and `bs mcp override` records that for one tool.
+  `mcpViolations` names the rule and the tool, and `mcp-check-result` is logged
+  on every run. `bs mcp override` needs an explicit `--actor` and records it as
+  given. The recorded base follows the task: `bs worktree create --reopen`
+  records one for an older branch, the queue moves it on a rebase, removing the
+  worktree deletes it, and merging upstream into the task moves the comparison
+  point up to the newest landing the queue recorded. A project with no manifest is untouched, and `epic close`
+  keeps its own check.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
 belongs. One entry.

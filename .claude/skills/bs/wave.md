@@ -289,7 +289,7 @@ one thing this playbook never asks you to.
    ```
 
    The gate runs schema check → artifact check → commit check → deps check →
-   outstanding-judge check → uiux check → grader verdict → tests → coverage
+   MCP manifest check → outstanding-judge check → uiux check → grader verdict → tests → coverage
    evidence → findings intake → severity decision
    (`docs/guide/operator-guide/queue-and-gate.md` §5).
    - **The preflight comes first.** Before it reads the problems, the
@@ -315,8 +315,8 @@ one thing this playbook never asks you to.
         round left, the grader cap's re-scope applies (dispatch.md 'Round counting and escalation'). It is never sent to `gate run`
         and never to a builder.
      3. **A worker's file the gate blocks on.** `schema-invalid`,
-        `artifacts-missing`, `not-committed`, `screenshots-missing`,
-        `screenshots-stale` and `mobile-overflow`. Run `gate run` with the same
+        `artifacts-missing`, `not-committed`, `mcp-manifest-invalid`,
+        `screenshots-missing`, `screenshots-stale` and `mobile-overflow`. Run `gate run` with the same
         flags. It blocks on the same reason before any check command runs and
         writes the blocked `gate-outcome` that `readFailedRounds` counts; the
         bounce that follows is step 9's, a failed round on the ladder that
@@ -338,8 +338,9 @@ one thing this playbook never asks you to.
         which returns it no more without the operator's answer, from any
         worker.
      5. **The verb or the log failed.** An `intake` problem whose `input` is
-        `judge-internal` or `paperwork`, or one this list does not name. It goes
-        to the epic session and never to an agent, and it is not a round.
+        `judge-internal` or `paperwork`, or one this list does not name, and the
+        stage reason `mcp-approval-unsigned-by-operator` (only the operator signs).
+        It goes to the epic session and never to an agent, and it is not a round.
 
      One preflight result can hold problems from several branches: `problems`
      lists every `intake` problem first, then the stage problems, which are
@@ -512,6 +513,8 @@ one thing this playbook never asks you to.
    - `grader-fail`: bounce to the coder with the payload's `failed_criteria`; a round-2 `fail` re-scopes under step 6 instead.
    - `tests-failed`: bounce to the coder; a block carrying `error_class: execution.env-failure` follows the env-failure bullet instead.
    - `findings`: bounce to the coder.
+   - `mcp-manifest-invalid`: bounce to the coder with the payload's `mcpViolations` (each names its rule, path and tool); the coder fixes the manifest in its own commit and never writes an `approval` (`.claude/skills/bs/mcp.md`).
+   - `mcp-approval-unsigned-by-operator`: the epic session answers it (an `approval` the task added or changed, a changed tool entry under an old approval, a new mutating tool with none, or no recorded base: only the operator signs, by running `bs mcp override <task-id> --worktree <dir> --tool <name> --note <why> --actor operator` for each tool, after which the gate runs again; the coder is not bounced and writes none).
    - `screenshots-missing`: bounce to the tester.
    - `screenshots-stale`: bounce to the tester.
    - `mobile-overflow`: bounce to the coder; a mobile shot whose page is wider than its viewport is a defect of the page, so the tester re-shoots only after the fix.

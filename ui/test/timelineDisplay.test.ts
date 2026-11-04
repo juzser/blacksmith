@@ -1172,6 +1172,8 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       'artifact-check-result': ['Artifact check result', ''],
       'commit-check-result': ['Commit check result', ''],
       'deps-check-result': ['Dependency check (no verdict recorded)', ''],
+      'mcp-check-result': ['Mcp check result', ''],
+      'mcp-approval-override': ['Mcp approval override', ''],
       'judges-outstanding': ['Judges outstanding', ''],
       'grader-verdict': ['Grader verdict', ''],
       'budget-check-result': ['Budget check result', ''],

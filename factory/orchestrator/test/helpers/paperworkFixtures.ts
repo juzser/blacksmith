@@ -78,6 +78,8 @@ export async function createWorld(): Promise<World> {
   git(['add', '.']);
   git(['commit', '-q', '-m', 'task work']);
   await mkdir(path.join(worktreeDir, 'node_modules', '.bin'), { recursive: true });
+  // What `bs worktree create` records at the cut.
+  git(['update-ref', 'refs/bs/base/smith/epic-1/task-1', 'main']);
 
   await appendEvent(
     {
@@ -165,6 +167,116 @@ export const uncommitted: FixtureBuilder = async (w) => {
 
 export const depsMissing: FixtureBuilder = async (w) => {
   await rm(path.join(w.worktreeDir, 'node_modules'), { recursive: true, force: true });
+  return baseInput(w);
+};
+
+/** A manifest `checkManifest` accepts; `tools` replaces the one read-only tool. */
+export function mcpManifest(tools?: Record<string, unknown>[]): string {
+  return `${JSON.stringify({
+    name: 'demo',
+    version: '0.1.0',
+    protocolRevision: '2025-11-25',
+    transport: { kind: 'stdio' },
+    tools: tools ?? [
+      {
+        name: 'project_health',
+        title: 'Project health',
+        description: 'Reports the surface revision.',
+        mutation: 'read-only',
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+    ],
+  })}\n`;
+}
+
+/** A write tool that nobody signed off (MCP-T4). */
+export const UNSIGNED_TOOL = {
+  name: 'rotate_widget',
+  title: 'Rotate widget',
+  description: 'Rotates a widget.',
+  mutation: 'write',
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+};
+
+/** Commit `mcp.manifest.json` with `body` on the task branch, so the commit stage stays green. */
+export async function commitMcpManifest(w: World, body: string): Promise<void> {
+  await writeFile(path.join(w.worktreeDir, 'mcp.manifest.json'), body);
+  w.git(['add', 'mcp.manifest.json']);
+  w.git(['commit', '-q', '-m', 'mcp manifest']);
+}
+
+/** The operator's signature on a tool, as `mcp.md` MCP-T4 spells it. */
+export const OPERATOR_APPROVAL = {
+  operator: 'sam',
+  date: '2026-11-04',
+  milestone: 'demo-mcp-surface',
+};
+
+/** A write tool whose annotation breaks MCP-T2 as well as lacking a signature. */
+export const MISANNOTATED_TOOL = {
+  ...UNSIGNED_TOOL,
+  annotations: { ...UNSIGNED_TOOL.annotations, readOnlyHint: true },
+};
+
+/**
+ * Commit `body` as `mcp.manifest.json` on the base branch, then move the task
+ * branch onto it: the way an operator-authored approval reaches a task. Call
+ * before the task commits a manifest of its own.
+ */
+export async function commitMcpManifestOnBase(w: World, body: string): Promise<void> {
+  const task = w.git(['branch', '--show-current']);
+  w.git(['checkout', '-q', 'main']);
+  await writeFile(path.join(w.worktreeDir, 'mcp.manifest.json'), body);
+  w.git(['add', 'mcp.manifest.json']);
+  w.git(['commit', '-q', '-m', 'operator manifest']);
+  w.git(['checkout', '-q', task]);
+  w.git(['rebase', '-q', 'main']);
+  // The task is cut afresh from the operator's commit.
+  w.git(['update-ref', `refs/bs/base/${task}`, 'main']);
+}
+
+export const mcpUnsignedTool: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
+  return baseInput(w);
+};
+
+export const mcpMisannotatedTool: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL]));
+  return baseInput(w);
+};
+
+/** The task itself writes the approval. */
+export const mcpSelfSigned: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]));
+  return baseInput(w);
+};
+
+/** The operator signed on the base branch; the task leaves the manifest alone. */
+export const mcpSignedOnBase: FixtureBuilder = async (w) => {
+  await commitMcpManifestOnBase(
+    w,
+    mcpManifest([{ ...UNSIGNED_TOOL, approval: OPERATOR_APPROVAL }]),
+  );
+  return baseInput(w);
+};
+
+export const mcpValid: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, mcpManifest());
+  return baseInput(w);
+};
+
+export const mcpUnreadable: FixtureBuilder = async (w) => {
+  await commitMcpManifest(w, '{ not json');
   return baseInput(w);
 };
 
@@ -332,6 +444,29 @@ export async function recordTester(
   return result;
 }
 
+/** Tester recorded with the mobile-light page wider than its 390 px viewport. */
+export async function recordTesterWithOverflow(w: World): Promise<Record<string, unknown>> {
+  const result = await testerResult(w, SHOT_NAMES);
+  for (const art of result.artifacts as Record<string, unknown>[]) {
+    if (art.path === 'home-mobile-light.png') {
+      art.inner_width = 600;
+      art.client_width = 390;
+    }
+  }
+  await recordTaskResult(
+    { taskId: w.taskId, result, artifactsDir: w.artifactsDir, worktreeDir: w.worktreeDir },
+    w.ctx(),
+    w.opts(),
+  );
+  return result;
+}
+
+export const mobileOverflow: FixtureBuilder = async (w) => {
+  await withSpecTurn(w);
+  await recordTesterWithOverflow(w);
+  return baseInput(w, { uiAffecting: true });
+};
+
 export const uiuxSpecMissing: FixtureBuilder = async (w) => baseInput(w, { uiAffecting: true });
 
 /** Tester recorded with a screenshot named without the viewport and theme suffix. */
@@ -400,6 +535,20 @@ export const PARITY_CASES: readonly {
   { name: 'artifact outside the home', build: artifactOutsideHome, reason: 'artifacts-missing' },
   { name: 'uncommitted work', build: uncommitted, reason: 'not-committed' },
   { name: 'deps missing', build: depsMissing, reason: 'deps-missing' },
+  {
+    name: 'mcp unsigned mutating tool',
+    build: mcpUnsignedTool,
+    reason: 'mcp-approval-unsigned-by-operator',
+  },
+  {
+    name: 'mcp approval written by the task',
+    build: mcpSelfSigned,
+    reason: 'mcp-approval-unsigned-by-operator',
+  },
+  { name: 'mcp misannotated tool', build: mcpMisannotatedTool, reason: 'mcp-manifest-invalid' },
+  { name: 'mcp unreadable manifest', build: mcpUnreadable, reason: 'mcp-manifest-invalid' },
+  { name: 'mcp valid manifest', build: mcpValid, reason: null },
+  { name: 'mcp tool signed on the base', build: mcpSignedOnBase, reason: null },
   { name: 'judge turn outstanding', build: judgesOutstanding, reason: 'judges-outstanding' },
   {
     name: 'grader verdict outside structured_output',
@@ -420,6 +569,7 @@ export const PARITY_CASES: readonly {
   },
   { name: 'uiux spec missing', build: uiuxSpecMissing, reason: 'uiux-spec-missing' },
   { name: 'screenshots stale', build: screenshotsStale, reason: 'screenshots-stale' },
+  { name: 'mobile overflow', build: mobileOverflow, reason: 'mobile-overflow' },
   { name: 'uiux visual missing', build: uiuxVisualMissing, reason: 'uiux-visual-missing' },
   { name: 'ui-affecting, everything in place', build: uiuxClean, reason: null },
 ];
@@ -447,6 +597,7 @@ export async function buildLadder(w: World): Promise<Ladder> {
   await writeFile(file, 'export const x = 3;\n');
   await rm(path.join(w.worktreeDir, 'node_modules'), { recursive: true, force: true });
   await dispatchJudge(w, 'reviewer');
+  await commitMcpManifest(w, mcpManifest([MISANNOTATED_TOOL]));
 
   return {
     input: () => baseInput(w, { result, graderVerdict, uiAffecting: true }),
@@ -478,6 +629,18 @@ export async function buildLadder(w: World): Promise<Ladder> {
         },
       },
       {
+        reason: 'mcp-manifest-invalid',
+        fix: async () => {
+          await commitMcpManifest(w, mcpManifest([UNSIGNED_TOOL]));
+        },
+      },
+      {
+        reason: 'mcp-approval-unsigned-by-operator',
+        fix: async () => {
+          await commitMcpManifest(w, mcpManifest());
+        },
+      },
+      {
         reason: 'judges-outstanding',
         fix: async () => {
           await writeFile(path.join(w.stateDir, 'reviewer.json'), '[]', 'utf8');
@@ -488,8 +651,15 @@ export async function buildLadder(w: World): Promise<Ladder> {
         reason: 'uiux-spec-missing',
         fix: async () => {
           await withSpecTurn(w);
-          await recordTester(w);
+          await recordTesterWithOverflow(w);
           await closeUiuxTurn(w, 'visual');
+        },
+      },
+      {
+        reason: 'mobile-overflow',
+        fix: async () => {
+          await recordTester(w);
+          await closeUiuxTurn(w, 'visual', 2);
         },
       },
       {

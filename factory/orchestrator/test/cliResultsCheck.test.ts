@@ -390,7 +390,14 @@ describe('bs results check (built binary)', () => {
     const coderCases = PARITY_CASES.filter(
       (c) =>
         c.reason === null ||
-        ['schema-invalid', 'artifacts-missing', 'not-committed', 'deps-missing'].includes(c.reason),
+        [
+          'schema-invalid',
+          'artifacts-missing',
+          'not-committed',
+          'deps-missing',
+          'mcp-manifest-invalid',
+          'mcp-approval-unsigned-by-operator',
+        ].includes(c.reason),
     ).filter((c) => !c.name.startsWith('ui'));
 
     it.each(coderCases)(
