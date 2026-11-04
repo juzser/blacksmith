@@ -291,6 +291,18 @@ Two of these are opt-in by construction. A task that never used
 no-op for it; a gate run with no `--grader` file skips the rubric stage the same
 way, which is the pre-D-34 pipeline.
 
+Every outcome, and the `gate-outcome` event, records which of three grader
+states the run was in, so a skipped grader is never read as a passed one:
+
+| `grader` | Meaning |
+|---|---|
+| `{"state": "verdict", "result": "met" \| "not-met" \| "not-graded" \| "invalid"}` | `--grader` handed in a verdict. `result` is absent when the run was refused before the rubric stage read the file. |
+| `{"state": "skipped-by-option"}` | `--no-grader`: the caller chose to run without a grader. |
+| `{"state": "not-run"}` | Neither flag. The default is unchanged (the stage is skipped), but the record shows nobody asked for the opt-out either. |
+
+`--no-grader` only skips the rubric stage. A grader turn dispatched with
+`bs judge dispatch` and not yet reported still blocks as `judges-outstanding`.
+
 ```bash
 bs gate run epic-1/task-1 \
   --worktree ../.wt/my-project/task-1 \
@@ -401,6 +413,11 @@ bs gate run epic-1/task-1 \
   runs. **Optional** — omit it and the pipeline is schema check → tests →
   findings, which is what an ad-hoc gate run with no grading pass wants. The
   factory always passes it (`.claude/skills/bs/wave.md` step 7).
+- `--no-grader` — says on purpose that this run has no grader. The gate skips the
+  rubric stage and records `grader: {"state": "skipped-by-option"}` on the
+  outcome. Refused together with `--grader` (`cli.invalid-flag`); `results check`
+  takes it only with `--as gate` and reports the stage under `skipped` as
+  `skipped-by-option`.
 - `findings.json` — `Array<{ filePath, finding: {...} }>` from
   reviewer/verifier, matching `finding.schema.json` minus the computed
   `fingerprint`.

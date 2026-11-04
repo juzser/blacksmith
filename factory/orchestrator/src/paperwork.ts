@@ -502,6 +502,8 @@ export interface PaperworkInput {
   artifactsDir?: string;
   /** The whole grader file, as read off disk. */
   graderVerdict?: unknown;
+  /** `--no-grader`: the grader stage is skipped as `skipped-by-option`, as the gate records it. */
+  noGrader?: boolean;
   /** The plan's `ui_affecting` flag; absent means the plan could not resolve it. */
   uiAffecting?: boolean;
   /** Judge turns the caller is about to close: the judges and uiux stages count them as reported. */
@@ -678,6 +680,10 @@ export async function checkPaperwork(
         break;
       }
       case 'grader': {
+        if (input.noGrader === true) {
+          skip(stage, 'skipped-by-option');
+          break;
+        }
         if (input.graderVerdict === undefined) {
           skip(stage, 'no-input');
           break;

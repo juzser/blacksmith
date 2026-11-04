@@ -1458,12 +1458,24 @@ function requireNoFindingsRole(close: JudgeReportInput): void {
   }
 }
 
+/** `--grader` hands the gate a verdict, `--no-grader` says there is none on purpose; both at once is a contradiction. */
+function requireGraderOrOptOut(flags: Record<string, string>): void {
+  if (flags['no-grader'] !== undefined && flags.grader !== undefined) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      '--grader and --no-grader are mutually exclusive: hand in the verdict or opt out of the grader, not both.',
+      { flag: 'no-grader' },
+    );
+  }
+}
+
 const RESULTS_CHECK_ROLES = ['coder', 'tester', 'grader', 'gate'] as const;
 const SESSION_FLAGS = ['session', 'causal-parent', 'plan-version', 'actor', 'state-dir'];
 const ENVELOPE_FLAGS = ['agent', 'provider', 'model-tier', 'input-tokens', 'output-tokens'];
 /** What only a full `gate run` line carries; a role mode names `--as gate` when handed one. */
 const GATE_ONLY_FLAGS = [
   'checks',
+  'no-grader',
   'run-all',
   'evidence',
   'found-by',
@@ -1672,6 +1684,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
   }
 
   // Read after the closes, as `gate run` does: a close that fails is the failure it exits on.
+  requireGraderOrOptOut(flags);
   const graderVerdict = flags.grader
     ? await attempt('grader', () => readJsonFile<unknown>(requireFlag(flags, 'grader')))
     : undefined;
@@ -1692,6 +1705,7 @@ async function runResultsCheck(args: ParsedArgs): Promise<number> {
               ...(flags.base ? { baseRef: flags.base } : {}),
               ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
               ...(graderVerdict === undefined ? {} : { graderVerdict }),
+              ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
               ...(uiAffecting === undefined ? {} : { uiAffecting }),
               alsoReported,
             },
@@ -4990,6 +5004,7 @@ async function main(): Promise<number> {
     // .grader-r<round>.json). Optional for the same reason as --plan: an ad-hoc
     // gate run has no rubric result to hand over, and inventing one would be
     // worse than skipping the stage (D-34/P9-14).
+    requireGraderOrOptOut(flags);
     const graderVerdict = flags.grader ? readJsonFile<unknown>(flags.grader) : undefined;
 
     const outcome = await runGate(
@@ -5011,6 +5026,7 @@ async function main(): Promise<number> {
         // to the base the task-branch name implies.
         ...(flags.base ? { baseRef: flags.base } : {}),
         ...(graderVerdict !== undefined ? { graderVerdict } : {}),
+        ...(flags['no-grader'] === 'true' ? { noGrader: true } : {}),
         ...(budget ? { budget } : {}),
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
         uiAffecting: uiAffectingFromFlags(flags, taskId),

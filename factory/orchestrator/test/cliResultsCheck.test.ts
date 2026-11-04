@@ -182,6 +182,62 @@ describe('bs results check (built binary)', () => {
       expect(preflight.json.verdicts).toEqual({ grader: 'met' });
     });
 
+    describe('--no-grader', () => {
+      it('passes both verbs without a verdict, and the gate outcome says skipped', async () => {
+        const line = await gateLine(await clean(w), ['--no-grader']);
+        const preflight = checkGate(line);
+        const real = gate(line);
+        expect(preflight.json.outcome).toBe('pass');
+        expect(preflight.json.skipped).toContainEqual({
+          stage: 'grader',
+          why: 'skipped-by-option',
+        });
+        expect(real.json.outcome).toBe('pass');
+        expect(real.json.grader).toEqual({ state: 'skipped-by-option' });
+      });
+
+      it('records not-run when neither flag was given', async () => {
+        expect(gate(await gateLine(await clean(w))).json.grader).toEqual({ state: 'not-run' });
+      });
+
+      it('refuses --grader together with --no-grader on both verbs', async () => {
+        const line = await gateLine(await graderMet(w), ['--no-grader']);
+        const real = runCli(['gate', 'run', w.taskId, ...line], {}, undefined, w.worktreeDir);
+        const pre = runCli(
+          ['results', 'check', w.taskId, '--as', 'gate', ...line],
+          {},
+          undefined,
+          w.worktreeDir,
+        );
+        for (const run of [real, pre]) {
+          expect(run.status).not.toBe(0);
+          expect(`${run.stdout}${run.stderr}`).toMatch(/mutually exclusive/);
+        }
+      });
+
+      it('is refused by the worker modes', async () => {
+        const run = runCli(
+          ['results', 'check', w.taskId, '--as', 'grader', '--no-grader'],
+          {},
+          undefined,
+          w.worktreeDir,
+        );
+        expect(run.status).not.toBe(0);
+      });
+
+      it('names the same first defect as the gate down the ladder', async () => {
+        const ladder = await buildLadder(w, { noGrader: true });
+        for (const step of ladder.steps) {
+          const line = await gateLine(ladder.input(), ['--no-grader']);
+          expect(checkGate(line).json.reason).toBe(step.reason);
+          await step.fix();
+        }
+        expect(checkGate(await gateLine(ladder.input(), ['--no-grader'])).json.outcome).toBe(
+          'pass',
+        );
+      });
+    });
+
     it('follows the gate stage ladder one defect at a time', async () => {
       const ladder = await buildLadder(w);
       for (const step of ladder.steps) {

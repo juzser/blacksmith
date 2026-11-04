@@ -28,6 +28,7 @@ import {
   commitMcpManifestOnBase,
   createWorld,
   depsMissing,
+  dispatchJudge,
   earlyHandBack,
   type FixtureBuilder,
   graderDead,
@@ -118,7 +119,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "budget-check-result {"overruns":[],"status":"not-declared","tokensUsed":150}",
         "testgate-result {"deferred":[],"environment":"<1 entries>","pass":true,"results":[{"check_sha256":"b0ca82928a2e2df2ffad0ff0e2bd39631fceb98f204102cb8bc27eae057c64d6","cmd_sha256":"b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b","exitCode":0,"lock_wait_ms":0,"name":"noop","pass":true,"tail":""}],"tier":"pre-merge","tree_sha":"<sha>"}",
         "severity-decisions {"decisions":[],"lesson_ids_escalating":[],"lessons_escalating":0,"lessons_loaded":0}",
-        "gate-outcome {"outcome":"pass","reason":null}",
+        "gate-outcome {"grader":{"state":"not-run"},"outcome":"pass","reason":null}",
       ]
     `);
   });
@@ -128,7 +129,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
       [
         "blocked schema-invalid",
         "schema-check-result {"errors":[{"message":"must have required property 'task_id'","path":"/"},{"message":"must have required property 'token_usage'","path":"/"},{"message":"must have required property 'agent'","path":"/"},{"message":"must have required property 'provider'","path":"/"},{"message":"must have required property 'model_tier'","path":"/"}],"valid":false}",
-        "gate-outcome {"outcome":"blocked","reason":"schema-invalid"}",
+        "gate-outcome {"grader":{"state":"not-run"},"outcome":"blocked","reason":"schema-invalid"}",
       ]
     `);
   });
@@ -140,7 +141,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "schema-check-result {"errors":[],"valid":true}",
         "task-result-recorded <the result>",
         "artifact-check-result {"checked":1,"home":"<art>/epic-1/task-1","issues":[{"declared":"never-written.txt","problem":"missing","resolved":"<art>/epic-1/task-1/never-written.txt"}],"ok":false}",
-        "gate-outcome {"outcome":"blocked","reason":"artifacts-missing"}",
+        "gate-outcome {"grader":{"state":"not-run"},"outcome":"blocked","reason":"artifacts-missing"}",
       ]
     `);
   });
@@ -153,7 +154,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "task-result-recorded <the result>",
         "artifact-check-result {"checked":0,"home":"<art>/epic-1/task-1","issues":[],"ok":true}",
         "commit-check-result {"base_ref":"main","base_sha":null,"branch":"smith/epic-1/task-1","certified":false,"commits_ahead":null,"dirty":["src.ts"],"head":"<sha>","reason":"uncommitted-work"}",
-        "gate-outcome {"outcome":"blocked","reason":"not-committed"}",
+        "gate-outcome {"grader":{"state":"not-run"},"outcome":"blocked","reason":"not-committed"}",
       ]
     `);
   });
@@ -169,7 +170,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
         "mcp-check-result {"manifest_present":false,"ok":true,"overridden":[],"reason":null,"summary":[]}",
         "grader-verdict {"errors":[{"message":"grader verdict must be at .structured_output (round, criteria, overall), per the grader Output contract","path":"/structured_output"}],"failed_criteria":[],"overall":null,"round":null,"run_status":null,"verdict":"invalid"}",
-        "gate-outcome {"outcome":"blocked","reason":"grader-invalid"}",
+        "gate-outcome {"grader":{"result":"invalid","state":"verdict"},"outcome":"blocked","reason":"grader-invalid"}",
       ]
     `);
   });
@@ -184,7 +185,7 @@ describe('gate characterization: the lineage runGate writes (pinned before the r
         "commit-check-result {"base_ref":"main","base_sha":"<sha>","branch":"smith/epic-1/task-1","certified":true,"commits_ahead":1,"dirty":[],"head":"<sha>","reason":null}",
         "deps-check-result {"declares_dependencies":true,"detail":"1 dependencies declared and node_modules/.bin is present.","ok":true}",
         "mcp-check-result {"manifest_present":false,"ok":true,"overridden":[],"reason":null,"summary":[]}",
-        "gate-outcome {"outcome":"blocked","reason":"screenshots-missing"}",
+        "gate-outcome {"grader":{"state":"not-run"},"outcome":"blocked","reason":"screenshots-missing"}",
       ]
     `);
   });
@@ -200,6 +201,7 @@ function paperworkInput(g: GateInput, as: PaperworkRole): PaperworkInput {
     ...(g.baseRef === undefined ? {} : { baseRef: g.baseRef }),
     ...(g.artifactsDir === undefined ? {} : { artifactsDir: g.artifactsDir }),
     ...(g.graderVerdict === undefined ? {} : { graderVerdict: g.graderVerdict }),
+    ...(g.noGrader === true ? { noGrader: true } : {}),
     ...(g.uiAffecting === undefined ? {} : { uiAffecting: g.uiAffecting }),
   };
 }
@@ -857,6 +859,35 @@ describe('stage order', () => {
     const gate = await runGate(input, w.ctx(), w.opts());
     expect(gate.outcome).toBe('pass');
     expect(pre.outcome).toBe('pass');
+  });
+
+  it('the same ladder holds with the grader opted out, ending in a pass that says skipped', async () => {
+    const ladder = await buildLadder(w, { noGrader: true });
+    for (const step of ladder.steps) {
+      const input = ladder.input();
+      const pre = await checkPaperwork(paperworkInput(input, 'gate'), w.ctx(), w.opts());
+      const gate = await runGate(input, w.ctx(), w.opts());
+      const gateReason = gate.outcome === 'blocked' ? gate.reason : null;
+      if (step.reason === 'uiux-spec-missing') expect(gateReason).toMatch(/uiux|screenshots/);
+      else expect(gateReason).toBe(step.reason);
+      expect(pre.reason).toBe(gateReason);
+      await step.fix();
+    }
+    const input = ladder.input();
+    const pre = await checkPaperwork(paperworkInput(input, 'gate'), w.ctx(), w.opts());
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'pass', grader: { state: 'skipped-by-option' } });
+    expect(pre.outcome).toBe('pass');
+    expect(pre.skipped).toContainEqual({ stage: 'grader', why: 'skipped-by-option' });
+  });
+
+  it('an opted-out grader whose turn was dispatched still blocks as judges-outstanding', async () => {
+    await dispatchJudge(w, 'grader');
+    const input = { ...baseInput(w), noGrader: true };
+    const pre = await checkPaperwork(paperworkInput(input, 'gate'), w.ctx(), w.opts());
+    const gate = await runGate(input, w.ctx(), w.opts());
+    expect(gate).toMatchObject({ outcome: 'blocked', reason: 'judges-outstanding' });
+    expect(pre.reason).toBe('judges-outstanding');
   });
 
   it('reports every problem in the gate order, not only the first', async () => {
