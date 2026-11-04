@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "rootDir": ".",
-    "noEmit": true,
-    "declaration": false
-  },
-  "include": ["factory/orchestrator/src/**/*.ts", "factory/orchestrator/test/**/*.ts"]
-}

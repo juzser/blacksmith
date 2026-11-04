@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Blacksmith — Phase-2 sanity gate.
-# Validates: every policy YAML parses; every schema JSON parses and its
-# x-taxonomy annotations reference real taxonomy.yml dimensions; every
-# agent template has valid frontmatter; every hook passes `bash -n`.
+# Blacksmith gate: plugin tests, JSON, marketplace paths, shell syntax, markdown
+# links, and (when `claude` is on PATH) the plugin validators. CI runs this file.
+# A step that cannot run prints SKIP, not OK: read the tail, not the exit code.
 
 set -u
 set -o pipefail
@@ -11,584 +10,57 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 FAIL=0
+ok()   { echo "OK   $1"; }
+bad()  { echo "FAIL $1"; FAIL=1; }
+skip() { echo "SKIP $1"; }
 
-echo "== Blacksmith Phase-2 check =="
-
-# Three of the checks below are python + PyYAML. Without it they each die on
-# the same ModuleNotFoundError traceback and the run ends in a FAIL whose
-# cause is four sections further up — a policy/schema/template regression and
-# a missing dependency look identical from the summary. Name it once, up
-# front, with the fix. ci.yml pins the same version.
-if ! python3 -c 'import yaml' >/dev/null 2>&1; then
-  echo "FAIL PyYAML not importable by $(command -v python3 || echo python3) — the policy,"
-  echo "     x-taxonomy and agent-template checks below cannot run. Install it with"
-  echo "     'pip3 install --user pyyaml==6.0.2' (add --break-system-packages on a"
-  echo "     Homebrew/PEP-668 python), matching .github/workflows/ci.yml."
-  FAIL=1
-fi
+echo "== Blacksmith check =="
 
 echo
-echo "-- YAML: factory/policies/*.yml --"
-python3 - "$REPO_ROOT" <<'PY'
-import sys, glob, os
-import yaml
-
-root = sys.argv[1]
-fail = False
-files = sorted(glob.glob(os.path.join(root, "factory", "policies", "*.yml")))
-if not files:
-    print("FAIL: no YAML files found under factory/policies/")
-    sys.exit(1)
-for f in files:
-    try:
-        with open(f) as fh:
-            yaml.safe_load(fh)
-        print(f"OK   {os.path.relpath(f, root)}")
-    except Exception as e:
-        print(f"FAIL {os.path.relpath(f, root)}: {e}")
-        fail = True
-sys.exit(1 if fail else 0)
-PY
-[ $? -eq 0 ] || FAIL=1
+echo "-- plugin tests --"
+bash plugin/test/run.sh || FAIL=1
 
 echo
-echo "-- JSON Schema: factory/specs/schema/*.json --"
-python3 - "$REPO_ROOT" <<'PY'
-import sys, glob, os, json
-
-root = sys.argv[1]
-fail = False
-files = sorted(glob.glob(os.path.join(root, "factory", "specs", "schema", "*.json")))
-if not files:
-    print("FAIL: no JSON schema files found under factory/specs/schema/")
-    sys.exit(1)
-for f in files:
-    try:
-        with open(f) as fh:
-            json.load(fh)
-        print(f"OK   {os.path.relpath(f, root)}")
-    except Exception as e:
-        print(f"FAIL {os.path.relpath(f, root)}: {e}")
-        fail = True
-sys.exit(1 if fail else 0)
-PY
-[ $? -eq 0 ] || FAIL=1
+echo "-- JSON parses --"
+while IFS= read -r f; do
+  if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" 2>/dev/null; then ok "$f"; else bad "$f"; fi
+done < <(git ls-files '.claude-plugin/*.json' 'plugin/*.json' 'mods/pr-mod/*.json' '.claude/*.json')
 
 echo
-echo "-- x-taxonomy dimensions referenced in schemas exist in taxonomy.yml --"
-python3 - "$REPO_ROOT" <<'PY'
-import sys, glob, os, json
-import yaml
-
-root = sys.argv[1]
-fail = False
-
-taxonomy_path = os.path.join(root, "factory", "policies", "taxonomy.yml")
-with open(taxonomy_path) as fh:
-    taxonomy = yaml.safe_load(fh)
-
-dimensions = {k for k in taxonomy.keys() if k not in ("version", "rules")}
-
-def walk(node, found):
-    if isinstance(node, dict):
-        if "x-taxonomy" in node:
-            found.add(node["x-taxonomy"])
-        for v in node.values():
-            walk(v, found)
-    elif isinstance(node, list):
-        for v in node:
-            walk(v, found)
-
-schema_files = sorted(glob.glob(os.path.join(root, "factory", "specs", "schema", "*.json")))
-for f in schema_files:
-    with open(f) as fh:
-        schema = json.load(fh)
-    found = set()
-    walk(schema, found)
-    unknown = found - dimensions
-    if unknown:
-        print(f"FAIL {os.path.relpath(f, root)}: unknown taxonomy dimension(s) {sorted(unknown)}")
-        fail = True
-    else:
-        print(f"OK   {os.path.relpath(f, root)}: {sorted(found) if found else '(no x-taxonomy fields)'}")
-
-sys.exit(1 if fail else 0)
-PY
-[ $? -eq 0 ] || FAIL=1
-
-echo
-echo "-- Agent templates: frontmatter --"
-python3 - "$REPO_ROOT" <<'PY'
-import sys, glob, os
-import yaml
-
-root = sys.argv[1]
-fail = False
-required = ["name", "description", "model", "tools"]
-# `maxTurns` is enforced by Claude Code as the subagent's turn ceiling
-# (measured on two dogfood runs, 2026-09-07 and 2026-09-11), so
-# a template without it ships an uncapped role and a non-integer value is
-# a cap of unknown effect. Checked apart from `required` because `0` is
-# falsy and must be refused by name, not read as missing.
-turn_key = "maxTurns"
-
-files = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md")))
-with open(os.path.join(root, "factory", "policies", "taxonomy.yml")) as fh:
-    tax_agents = set(yaml.safe_load(fh)["agent"])
-# `operator` is the human as a `found_by` value — never dispatched, so no
-# template by design (taxonomy v10). A template
-# with `model`/`tools` frontmatter for a role nobody dispatches would be a
-# false declaration, so the equality below is over dispatched roles only.
-never_dispatched = {"operator"}
-tax_agents -= never_dispatched
-# The subagent is `bs-<role>` (agentNames.ts); the role stays bare in taxonomy.
-unprefixed = [os.path.basename(f) for f in files if not os.path.basename(f).startswith("bs-")]
-if unprefixed:
-    print(f"FAIL: template file without the bs- prefix: {', '.join(unprefixed)}")
-    fail = True
-template_names = {os.path.splitext(os.path.basename(f))[0].removeprefix("bs-") for f in files}
-if template_names & never_dispatched:
-    print(f"FAIL: template for a never-dispatched role: {', '.join(sorted(template_names & never_dispatched))}")
-    fail = True
-if template_names != tax_agents:
-    missing = tax_agents - template_names
-    extra = template_names - tax_agents
-    print(f"FAIL: templates != taxonomy agent dimension"
-          f"{' — missing template for: ' + ', '.join(sorted(missing)) if missing else ''}"
-          f"{' — template without taxonomy value: ' + ', '.join(sorted(extra)) if extra else ''}")
-    fail = True
-
-for f in files:
-    rel = os.path.relpath(f, root)
-    with open(f) as fh:
-        text = fh.read()
-    if not text.startswith("---"):
-        print(f"FAIL {rel}: missing frontmatter delimiter")
-        fail = True
-        continue
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        print(f"FAIL {rel}: malformed frontmatter block")
-        fail = True
-        continue
-    try:
-        fm = yaml.safe_load(parts[1])
-    except Exception as e:
-        print(f"FAIL {rel}: frontmatter is not valid YAML: {e}")
-        fail = True
-        continue
-    if not isinstance(fm, dict):
-        print(f"FAIL {rel}: frontmatter did not parse to a mapping")
-        fail = True
-        continue
-    missing = [k for k in required if not fm.get(k)]
-    turns = fm.get(turn_key)
-    if missing:
-        print(f"FAIL {rel}: missing frontmatter field(s) {missing}")
-        fail = True
-    elif not (isinstance(turns, int) and not isinstance(turns, bool) and turns > 0):
-        print(f"FAIL {rel}: {turn_key} must be a positive integer (the harness enforces it as the turn ceiling), got {turns!r}")
-        fail = True
-    elif fm["name"] != os.path.splitext(os.path.basename(f))[0]:
-        print(f"FAIL {rel}: name {fm['name']!r} must equal the file name (bs-<role>)")
-        fail = True
-    else:
-        print(f"OK   {rel}: name={fm['name']} model={fm['model']} {turn_key}={turns}")
-
-sys.exit(1 if fail else 0)
-PY
-[ $? -eq 0 ] || FAIL=1
-
-echo
-echo "-- Agent templates: stack neutrality --"
-# An agent prompt is dispatched against the operator's project, not against
-# this clone. So a prompt that says "Biome already owns style" or "run the
-# Playwright e2e" has answered the install interview on the operator's behalf,
-# and answered it wrong for anyone whose stack.yml says eslint-prettier,
-# cypress, or none. It is the defect docs/standards/stack.md had before the
-# answers became data: one operator's setup shipped as if it were the product.
-#
-# The rule: a prompt may name a tool the operator gets to choose only where it
-# also points at the policy that does the choosing. That keeps "whatever
-# `factory/policies/stack.yml` answers for `lint`" legal and "Biome's job" not.
-#
-# It covers docs/standards/ as well as the prompts, because the prompts cite it
-# -- fixing only the prompt leaves the standard it quotes still saying the old
-# thing, which is the drift, just moved. Same reason for severity.yml and
-# taxonomy.yml: a judge reads those class descriptions as its own definition of
-# the severity, so "nits not caught by Biome" is the reviewer prompt's Biome
-# again, one file down. The rest of factory/policies/ is deliberately out --
-# guardrails.yml has to name npm, pnpm, yarn and bun to match them, and a rule
-# that fires on a matcher naming what it matches is a rule about nothing. So is
-# stack.md/stack.yml, where enumerating the options is the whole job.
-#
-# The vocabulary is tethered rather than free-standing -- every term below must
-# still appear in stack.yml -- so an option renamed there fails this check
-# instead of quietly disarming it.
-python3 - "$REPO_ROOT" <<'PY'
-import sys, glob, os, re
-
-root = sys.argv[1]
-fail = False
-
-# term -> the token that must still be in stack.yml for the term to be an
-# answer the operator gets to give at all.
-TERMS = {
-    "biome": "biome",
-    "eslint": "eslint-prettier",
-    "prettier": "eslint-prettier",
-    "vitest": "vitest",
-    "jest": "jest",
-    "playwright": "playwright",
-    "cypress": "cypress",
-    "pnpm": "pnpm",
-    "npm": "npm",
-    "yarn": "yarn",
-    "bun": "bun",
+echo "-- marketplace sources --"
+node - <<'JS' || FAIL=1
+const fs = require('fs');
+const m = JSON.parse(fs.readFileSync('.claude-plugin/marketplace.json', 'utf8'));
+let bad = false;
+for (const p of m.plugins) {
+  const ok = fs.existsSync(p.source);
+  console.log(`${ok ? 'OK  ' : 'FAIL'} ${p.name} -> ${p.source}`);
+  if (!ok) bad = true;
 }
-# Naming a tool is fine when the same breath names the policy -- that is a
-# pointer to the answer rather than an assumption about it.
-POINTERS = ("stack.yml", "stack show")
-
-with open(os.path.join(root, "factory", "policies", "stack.yml")) as fh:
-    policy = fh.read()
-stale = sorted({t for t, token in TERMS.items() if token not in policy})
-if stale:
-    print(f"FAIL factory/policies/stack.yml: no longer offers {stale} - this "
-          f"check's vocabulary has drifted from the policy it guards")
-    fail = True
-
-
-def blocks(lines):
-    """(first line number, lines) per block, a block being the unit a pointer
-    licenses. A blank line ends one; so does the start of a bullet, a table
-    row or a heading, because a whole ten-bullet list is far too much to
-    exempt on the strength of one bullet citing the policy. Continuation
-    lines stay with the bullet they belong to, so the pointer may wrap."""
-    cur, start = [], 0
-    for i, line in enumerate(lines + [""]):
-        opens = re.match(r"\s*([-*|#]|\d+\.)", line) is not None
-        if (not line.strip() or opens) and cur:
-            yield start, cur
-            cur = []
-        if line.strip():
-            if not cur:
-                start = i
-            cur.append(line)
-    if cur:
-        yield start, cur
-
-
-scanned = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md"))
-                 + glob.glob(os.path.join(root, "docs", "standards", "*.md"))
-                 + [os.path.join(root, "factory", "policies", n)
-                    for n in ("severity.yml", "taxonomy.yml")])
-for f in scanned:
-    rel = os.path.relpath(f, root)
-    if os.path.basename(f) == "stack.md":
-        continue
-    bad = []
-    for start, block in blocks(open(f).read().split("\n")):
-        if any(p in "\n".join(block) for p in POINTERS):
-            continue
-        for j, line in enumerate(block):
-            for term in TERMS:
-                if re.search(rf"\b{re.escape(term)}\b", line, re.I):
-                    bad.append(f"{start + j + 1}: {term} - {line.strip()[:64]}")
-    if bad:
-        for b in bad:
-            print(f"FAIL {rel}:{b}")
-        fail = True
-    else:
-        print(f"OK   {rel}")
-
-sys.exit(1 if fail else 0)
-PY
-[ $? -eq 0 ] || FAIL=1
+const main = m.plugins.find((p) => p.name === 'blacksmith');
+if (!main || main.source !== './plugin') { console.log('FAIL blacksmith entry must have source ./plugin'); bad = true; }
+process.exit(bad ? 1 : 0);
+JS
 
 echo
-echo "-- bash -n on hooks --"
-shopt -s nullglob
-hook_files=(.claude/hooks/*.sh)
-if [ "${#hook_files[@]}" -eq 0 ]; then
-  echo "FAIL: no hook scripts found under .claude/hooks/"
-  FAIL=1
-else
-  for h in "${hook_files[@]}"; do
-    if bash -n "$h"; then
-      echo "OK   $h"
-    else
-      echo "FAIL $h: bash -n reported a syntax error"
-      FAIL=1
-    fi
-  done
-fi
+echo "-- sh -n on plugin scripts --"
+while IFS= read -r f; do
+  if sh -n "$f" 2>/dev/null; then ok "$f"; else bad "$f"; fi
+done < <(git ls-files 'plugin/*.sh')
 
 echo
-echo "-- Secret scan: gitleaks --"
-# The rule set is .gitleaks.toml, and it is deliberately narrow: exactly one
-# allowlisted literal (the fake credential the envkit-mcp acceptance criteria
-# quote by name) rather than a path-allowlist over factory/specs, so the
-# generic-api-key rule stays armed everywhere else. .env.example is NOT
-# allowlisted — it holds secrets by name only (its SMITH_* values are plain
-# numbers), and a credential appearing there is precisely the mistake worth
-# catching.
-if command -v gitleaks >/dev/null 2>&1; then
-  if gitleaks dir . --no-banner --redact --exit-code 1; then
-    echo "OK   gitleaks dir ."
-  else
-    echo "FAIL gitleaks dir . — a credential-shaped string reached the tree."
-    echo "     If it is a fixture, allowlist the literal in .gitleaks.toml; do not"
-    echo "     allowlist the path."
-    FAIL=1
-  fi
-elif [ -n "${CI:-}" ]; then
-  # Same reasoning as the pnpm branch below: locally, no gitleaks means you
-  # have not installed it. In CI it means the install step failed, and a run
-  # that never scanned must not be able to report PASS.
-  echo "FAIL gitleaks not found on PATH — in CI a missing scanner is a failure, not a skip."
-  FAIL=1
-else
-  echo "SKIP gitleaks not found on PATH — secret scan not run (brew install gitleaks)."
-fi
+echo "-- markdown links --"
+bash scripts/test-md-links.sh || FAIL=1
+node scripts/check-md-links.mjs . || FAIL=1
 
 echo
-echo "-- Phase-3 orchestrator package (only if pnpm is on PATH) --"
-if command -v pnpm >/dev/null 2>&1; then
-  if pnpm exec biome check .; then
-    echo "OK   pnpm biome check"
-  else
-    echo "FAIL pnpm biome check"
-    FAIL=1
-  fi
-
-  if pnpm tsc --noEmit; then
-    echo "OK   pnpm tsc --noEmit"
-  else
-    echo "FAIL pnpm tsc --noEmit"
-    FAIL=1
-  fi
-
-  if pnpm run typecheck:test; then
-    echo "OK   pnpm typecheck:test"
-  else
-    echo "FAIL pnpm typecheck:test"
-    FAIL=1
-  fi
-
-  # --coverage, not a bare run: the thresholds in each vitest config are
-  # only a gate if the gate is what runs them. Each config's floors sit under
-  # today's numbers on purpose — they catch a regression, not a refactor.
-  if pnpm run test:coverage; then
-    echo "OK   pnpm test:coverage"
-  else
-    echo "FAIL pnpm test:coverage"
-    FAIL=1
-  fi
-
-  echo
-  echo "-- Phase-6a dashboard (ui/, ui/server/) --"
-
-  if pnpm run typecheck:server; then
-    echo "OK   pnpm typecheck:server"
-  else
-    echo "FAIL pnpm typecheck:server"
-    FAIL=1
-  fi
-
-  if pnpm run typecheck:ui; then
-    echo "OK   pnpm typecheck:ui"
-  else
-    echo "FAIL pnpm typecheck:ui"
-    FAIL=1
-  fi
-
-  if pnpm run typecheck:ui:test; then
-    echo "OK   pnpm typecheck:ui:test"
-  else
-    echo "FAIL pnpm typecheck:ui:test"
-    FAIL=1
-  fi
-
-  if pnpm run test:server:coverage; then
-    echo "OK   pnpm test:server:coverage"
-  else
-    echo "FAIL pnpm test:server:coverage"
-    FAIL=1
-  fi
-
-  if pnpm run test:ui:coverage; then
-    echo "OK   pnpm test:ui:coverage"
-  else
-    echo "FAIL pnpm test:ui:coverage"
-    FAIL=1
-  fi
-
-  if pnpm run build:ui; then
-    echo "OK   pnpm build:ui"
-  else
-    echo "FAIL pnpm build:ui"
-    FAIL=1
-  fi
-
-  echo
-  echo "-- Design-system gates (Phase 6b fix-round; vendored under scripts/design/,"
-  echo "   reaching outside this repo at neither build nor run time —"
-  echo "   ui/docs/DESIGN.md's 'Gates wired' table) --"
-
-  if python3 scripts/design/lint_hardcodes.py ui/src; then
-    echo "OK   scripts/design/lint_hardcodes.py ui/src"
-  else
-    echo "FAIL scripts/design/lint_hardcodes.py ui/src"
-    FAIL=1
-  fi
-
-  if python3 scripts/design/check_no_emoji.py ui/src; then
-    echo "OK   scripts/design/check_no_emoji.py ui/src"
-  else
-    echo "FAIL scripts/design/check_no_emoji.py ui/src"
-    FAIL=1
-  fi
-
-  if node scripts/design/contrast_check.mjs; then
-    echo "OK   node scripts/design/contrast_check.mjs"
-  else
-    echo "FAIL node scripts/design/contrast_check.mjs"
-    FAIL=1
-  fi
-
-  if python3 scripts/design/check_tokens.py ui/src; then
-    echo "OK   scripts/design/check_tokens.py ui/src"
-  else
-    echo "FAIL scripts/design/check_tokens.py ui/src"
-    FAIL=1
-  fi
-
-  # ds-spec.md §2.5, DS0: "A lint check in DS0 flags an <IconButton> without
-  # label and any icon-only <button>/<a> without aria-label."
-  if python3 scripts/design/lint_icon_only.py ui/src; then
-    echo "OK   scripts/design/lint_icon_only.py ui/src"
-  else
-    echo "FAIL scripts/design/lint_icon_only.py ui/src"
-    FAIL=1
-  fi
-
-  # Where Chromium lives depends on who installed it. The dev container pins
-  # it at $PLAYWRIGHT_BROWSERS_PATH/chromium — the same path
-  # ui/playwright.config.ts hands to launchOptions. Everywhere else (macOS,
-  # WSL, a CI runner) `playwright install chromium` writes a revision-stamped
-  # directory into the per-user cache, which this probe used to miss: a
-  # machine with a perfectly good browser reported SKIP, so a full local run
-  # could print PASS having never opened a page. Ask Playwright where it
-  # thinks its own binary is before concluding there isn't one.
-  #
-  # .github/workflows/ci.yml still runs e2e in its own jobs (the e2e-shard
-  # matrix; each installs Chromium first), so a SKIP there is coverage moved, not coverage lost.
-  CHROMIUM_BIN="${PLAYWRIGHT_CHROMIUM_PATH:-${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}/chromium}"
-  if [ ! -x "$CHROMIUM_BIN" ]; then
-    CHROMIUM_BIN="$(node -e 'try { process.stdout.write(require("@playwright/test").chromium.executablePath()) } catch { /* not installed */ }' 2>/dev/null)"
-  fi
-  if [ -n "$CHROMIUM_BIN" ] && [ -x "$CHROMIUM_BIN" ]; then
-    if pnpm run test:e2e; then
-      echo "OK   pnpm test:e2e"
-    else
-      echo "FAIL pnpm test:e2e"
-      FAIL=1
-    fi
-    # The specs call page.screenshot({path}) straight into a committed
-    # directory, so a green e2e run still rewrites every committed PNG — and now that
-    # the gate actually runs e2e, it dirties them on every local invocation.
-    # Say so. Silent churn is how a rendering diff from an unrelated branch
-    # ends up committed by someone who only ran the gate. Never a failure:
-    # regenerating an artifact is what the run is for.
-    if command -v git >/dev/null 2>&1; then
-      shot_churn="$(git status --porcelain -- ui/e2e/__screenshots__/ 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
-      if [ "${shot_churn:-0}" -gt 0 ]; then
-        echo "NOTE e2e regenerated $shot_churn screenshot(s) under ui/e2e/__screenshots__/."
-        echo "     They are artifacts, not assertions. Commit them only if this branch"
-        echo "     meant to change the UI; otherwise 'git checkout -- ui/e2e/__screenshots__/'."
-      fi
-    fi
-  else
-    echo "SKIP pnpm test:e2e — no Chromium at \$PLAYWRIGHT_BROWSERS_PATH/chromium and none in Playwright's own cache (run 'pnpm exec playwright install chromium')."
-  fi
-elif [ -n "${CI:-}" ]; then
-  # Locally a missing pnpm means "you only wanted the Phase-2 half". In CI it
-  # means the toolchain step failed, and a run that skipped lint, every
-  # typecheck set, all three suites and every design gate must not be able to
-  # report PASS.
-  echo "FAIL pnpm not found on PATH — in CI a missing toolchain is a failure, not a skip."
-  FAIL=1
-else
-  echo "SKIP pnpm not found on PATH — orchestrator package checks not run."
-fi
-
-echo
-echo "-- blacksmith plugin (only if claude is on PATH) --"
-# .claude is the plugin root, and since it ships hooks/hooks.json a malformed
-# manifest or hook file would only surface in an operator's session.
+echo "-- claude plugin validate / test --"
 if command -v claude >/dev/null 2>&1; then
-  if claude plugin validate .claude; then
-    echo "OK   claude plugin validate .claude"
-  else
-    echo "FAIL claude plugin validate .claude"
-    FAIL=1
-  fi
+  claude plugin validate plugin >/dev/null 2>&1 && ok "validate plugin" || bad "validate plugin"
+  claude plugin validate mods/pr-mod >/dev/null 2>&1 && ok "validate mods/pr-mod" || bad "validate mods/pr-mod"
+  claude plugin test mods/pr-mod >/dev/null 2>&1 && ok "test mods/pr-mod" || bad "test mods/pr-mod"
 else
-  echo "SKIP claude not found on PATH — .claude not validated as a plugin."
-fi
-
-echo
-echo "-- bs-mod plugin (only if claude is on PATH) --"
-# mods/bs-mod is a Claude Code plugin module: its tests import Claude Code's
-# own test kit and run only in its plugin runner, so vitest, biome and the
-# tsconfigs never see them. Unlike gitleaks and pnpm above, a missing claude
-# stays a SKIP under CI: CI has no claude to install, and the marketplace
-# wiring is still guarded there by pluginManifest.test.ts.
-if command -v claude >/dev/null 2>&1; then
-  if claude plugin validate mods/bs-mod; then
-    echo "OK   claude plugin validate mods/bs-mod"
-  else
-    echo "FAIL claude plugin validate mods/bs-mod"
-    FAIL=1
-  fi
-  if claude plugin test mods/bs-mod; then
-    echo "OK   claude plugin test mods/bs-mod"
-  else
-    echo "FAIL claude plugin test mods/bs-mod"
-    FAIL=1
-  fi
-else
-  echo "SKIP claude not found on PATH — mods/bs-mod not validated or tested (its tests run only in Claude Code's plugin runner)."
-fi
-
-echo
-echo "-- pr-mod plugin (only if claude is on PATH) --"
-# Same as bs-mod above: its tests run only in the plugin runner, and a missing claude is a SKIP.
-if command -v claude >/dev/null 2>&1; then
-  if claude plugin validate mods/pr-mod; then
-    echo "OK   claude plugin validate mods/pr-mod"
-  else
-    echo "FAIL claude plugin validate mods/pr-mod"
-    FAIL=1
-  fi
-  if claude plugin test mods/pr-mod; then
-    echo "OK   claude plugin test mods/pr-mod"
-  else
-    echo "FAIL claude plugin test mods/pr-mod"
-    FAIL=1
-  fi
-else
-  echo "SKIP claude not found on PATH — mods/pr-mod not validated or tested (its tests run only in Claude Code's plugin runner)."
-fi
-
-echo
-echo "-- minimal plugin: plugin/test/run.sh --"
-if bash plugin/test/run.sh; then
-  echo "OK   plugin/test/run.sh"
-else
-  echo "FAIL plugin/test/run.sh"
-  FAIL=1
+  skip "claude not on PATH: plugin validate and pr-mod tests did not run"
 fi
 
 echo

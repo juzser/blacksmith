@@ -796,7 +796,7 @@ describe('polling', () => {
 
 // ---------------------------------------------------------------- palette
 
-/** The `/config` theme row, as `$.config.list()` answers it; the same shape bs-mod reads. */
+/** The `/config` theme row, as `$.config.list()` answers it. */
 function themed(on: On, theme: string): void {
   on('config.list', () => ({
     value: [{ key: 'theme', label: 'Theme', kind: 'choice' as const, value: theme, provider: { plugin: 'engine', tier: 'core' as const }, isLocked: false }],
@@ -806,7 +806,7 @@ function themed(on: On, theme: string): void {
 
 const PENDING_PR = { mergeStateStatus: 'UNSTABLE', statusCheckRollup: [cr('gate', '', 'IN_PROGRESS')] }
 
-// the same hex values as bs-mod's palette: green success, red failure, yellow pending, pastel accent
+// the palette's hex values: green success, red failure, yellow pending, pastel accent
 const LOOKS = [
   ['dark', { green: '#a6e3a1', red: '#f38ba8', pending: '#f9e2af', accent: '#fab387' }],
   ['dark-ansi', { green: '#a6e3a1', red: '#f38ba8', pending: '#f9e2af', accent: '#fab387' }],

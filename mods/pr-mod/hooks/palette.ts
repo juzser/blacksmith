@@ -1,6 +1,5 @@
-// The colours pr-mod draws with: the Catppuccin pastels bs-mod uses, by the same theme rule and the same hex
-// values, so one colour means the same thing in both bands. A plugin cannot import another's files, so this is
-// pr-mod's own copy of the few roles it needs; keep it in step with bs-mod's hooks/fold.ts `paletteOf`.
+// The colours pr-mod draws with: Catppuccin pastels (Mocha under a dark theme, Latte under a light one).
+// Green is success, red failure, yellow pending or a conflict.
 export type PaletteRole = 'success' | 'error' | 'warning' | 'claude'
 export type Palette = Readonly<Record<PaletteRole, string>>
 

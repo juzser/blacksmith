@@ -31,8 +31,8 @@ for h in "Talking to a person" "Confidence" "Model and effort" "Cross-check" "Co
   grep -qi "^#.*$h" "$P/rules.md" && ok "rules.md has heading: $h" || bad "rules.md lacks heading: $h"
 done
 check "README <= 60 lines" test "$(wc -l < "$P/README.md" | tr -d ' ')" -le 60
-check "README states diff is sent only when invoked" grep -qi "only when" "$P/README.md"
-check "README has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/README.md"
+check "cross-check doc states code is sent only when invoked" grep -qi "only when" "$P/../docs/cross-check.md"
+check "compact doc has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/../docs/compact.md"
 
 echo "-- agent frontmatter --"
 for a in planner coder reviewer researcher scout; do
@@ -201,7 +201,7 @@ r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
 case "$r" in *untracked*) bad "untracked warning with no untracked files";; *) ok "no warning when nothing is untracked";; esac
 check "SKILL.md uses a rare heredoc delimiter" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
 check "SKILL.md mentions git add -N" grep -q "git add -N" "$P/skills/cross-check/SKILL.md"
-check "README mentions git add -N" grep -q "git add -N" "$P/README.md"
+check "cross-check doc mentions git add -N" grep -q "git add -N" "$P/../docs/cross-check.md"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "== PASS =="; exit 0; else echo "== FAIL =="; exit 1; fi

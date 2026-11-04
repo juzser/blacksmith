@@ -1,26 +1,22 @@
 # Changelog
 
-Blacksmith has one versioned artifact and it is not the whole factory. The
-`bs` CLI (`smith` is kept as a deprecated alias) — the binaries plus the
-policies, schemas, scaffold templates, agent role files, `/bs` playbooks,
-migrations and roadmap they read, and the built dashboard that `bs ui serve`
-runs — is published to npm as `@juzser/blacksmith`; `package.json` carries
-that version and a `v<version>` git tag marks each publish. The `/bs` console
-reaches Claude Code as the `blacksmith` plugin, the `.claude/` folder of this
-repository installed through its marketplace, whose manifest carries the same
-version; bs-mod and pr-mod are optional plugins beside it. Everything else —
-the docs, the tests, the sources — is read from a clone, and the only
-supported revision of the clone is `main`. So this file is not a list of
-releases — it is a list of what landed, in the order it landed, keyed to the
-milestones in [`factory/specs/roadmap.md`](factory/specs/roadmap.md).
+What landed, newest first. Format loosely follows
+[Keep a Changelog](https://keepachangelog.com). The plugin's version is in
+`plugin/.claude-plugin/plugin.json`. Entries below 1.0.0 describe the old
+factory, which is preserved at the git tag `factory-final`; paths they
+mention no longer exist in this tree.
 
-Dates are the day the roadmap first recorded a milestone as `completed`,
-derived from the development history that preceded this repository. They mark
-when the phase was declared done, which for the earliest phases is later than
-when the work started — development began 2026-08-03.
+## 1.0.0: the reset to a minimal plugin
 
-Format loosely follows [Keep a Changelog](https://keepachangelog.com);
-newest first.
+Blacksmith is now a small Claude Code plugin with five pieces: plain-explanation rules, a confidence % on options, `/cross-check` through codex (read-only), five agents with their own model and effort, and a compact rule. See [README.md](README.md) and [docs/history.md](docs/history.md) for why.
+
+- **Added:** the plugin in `plugin/` (PR #542); a markdown link check in `scripts/check.sh`; a docs set, `INSTALL.md` and `README.md` rewritten for the plugin.
+- **Kept:** `mods/pr-mod` (its own version), `LICENSE`, `CODE_OF_CONDUCT.md`, this changelog.
+- **Removed:** the orchestrator (`factory/`), the dashboard (`ui/`), the `bs-mod` module, the fourteen `bs-*` agents and the `/bs` skill, the guard hook, the trial harness (`trial/`), the old docs, the npm packaging (`package.json`, lockfile, TypeScript, lint and test configs), the e2e CI jobs and `.gitleaks.toml`. The `bs` command and the `@juzser/blacksmith` npm package are not part of 1.0.0; the last published version is 0.7.0.
+- **Gate:** `scripts/check.sh` now runs the plugin tests, JSON, marketplace-path, shell-syntax and link checks, and the plugin validators when `claude` is present. The CI job keeps its name, `gate (scripts/check.sh)`; the `e2e (Playwright, Chromium)` check is gone.
+- **Old version:** preserved at the git tag `factory-final`. The open PRs #535, #536, #538 and #541 were closed with their branches kept.
+
+Everything below this line is the history of the old factory.
 
 ## Unreleased
 
@@ -1551,8 +1547,8 @@ before hand-off. One entry per task.
   is raised fresh as a regression. The working tree of the audited project is
   never written; `.blacksmith/` is state, and the `.gitignore` line is a
   question asked once at the hard stop, never an edit made on the operator's
-  behalf. [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md)
-  is the contract; [`.claude/skills/bs/audit.md`](.claude/skills/bs/audit.md)
+  behalf. `docs/specs/audit-command-scope.md`
+  is the contract; `.claude/skills/bs/audit.md`
   is the playbook.
 
 - **The dashboard can be asked about one run, and about that run's lineage.**
@@ -2016,7 +2012,7 @@ before hand-off. One entry per task.
 
 - **The guardrails moved out of bash and into a tested policy layer.** The
   data half is
-  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml) —
+  `factory/policies/guardrails.yml` —
   protected branch names, allowed roots, which commands count as a deploy,
   and the exact wording an agent sees when a rule fires. The deciding half is
   `factory/orchestrator/src/policy.ts`, in TypeScript, with unit tests. Two
@@ -2057,7 +2053,7 @@ before hand-off. One entry per task.
   editing the subject.** A test whose author may edit what it covers is a test
   that grades itself, which is the same failure the fresh-context reviewer
   exists to prevent one gate later. `role_write_scopes` in
-  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml) declares
+  `factory/policies/guardrails.yml` declares
   a role's `write_globs`, and the new S1 `role-write-scope` refuses a write
   outside them — for the tester: test and spec files, the test directories, and
   its own results under `state/`. It also refuses outright the verbs whose
@@ -2375,7 +2371,7 @@ before hand-off. One entry per task.
 
 - **`smith daemon` — the folds, without an open session** (Phase 10):
   `factory/orchestrator/src/daemon.ts` and the runbook that operates it,
-  [`docs/runbooks/ops.md`](docs/runbooks/ops.md). Until now, *knowing* what the
+  `docs/runbooks/ops.md`. Until now, *knowing* what the
   factory needed meant keeping a terminal open and re-running `smith budget
   alarm`, `smith scheduler run --dry` and `/bs status` by hand. The daemon runs
   those same folds on an interval — it does not reimplement them, so it and

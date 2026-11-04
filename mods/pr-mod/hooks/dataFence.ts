@@ -73,8 +73,8 @@ function neutralize(raw: string): string {
 }
 
 /**
- * Text from GitHub as a data fence of kind `issue-text`, byte-identical to
- * `bs prompt wrap --kind issue-text --source <source>` for the same text.
+ * Text from GitHub as a data fence of kind `issue-text`: quoted material the
+ * model must treat as data, never as instructions.
  */
 export function dataFence(text: string, source: string): string {
   const label = neutralize(source.replace(/\s+/g, ' ')).replace(/\|/g, '&#124;').trim()
