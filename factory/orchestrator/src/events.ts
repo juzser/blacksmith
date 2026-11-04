@@ -15,7 +15,7 @@ import {
 
 export class EventError extends SmithError {}
 
-export type EnvelopeDefault = 'session' | 'causal_parent';
+export type EnvelopeDefault = 'session' | 'causal_parent' | 'auto_root';
 
 export interface EventEdge {
   edge_type: string;
@@ -834,11 +834,27 @@ function keptTs(input: EventInput, existing: readonly StoredEvent[]): string {
  * log is read under the lock, never computed beforehand. Library callers never
  * set this, so for them a null parent is refused exactly as before.
  */
-const envelopeDefaults: { session?: string; parentFor?: string } = {};
+const envelopeDefaults: {
+  session?: string;
+  parentFor?: string;
+  parentGuard?: (existing: readonly StoredEvent[]) => void;
+} = {};
 
-export function setEnvelopeDefaults(defaults: { session?: string; parentFor?: string }): void {
+/**
+ * `parentGuard` runs under the log lock, on the events the default would pick
+ * its parent from, and may throw to refuse the default. It is a parameter and
+ * not an import because the live-dispatch fold (agents-registry.ts) imports
+ * this module.
+ */
+export function setEnvelopeDefaults(defaults: {
+  session?: string;
+  parentFor?: string;
+  parentGuard?: (existing: readonly StoredEvent[]) => void;
+}): void {
   delete envelopeDefaults.session;
   delete envelopeDefaults.parentFor;
+  delete envelopeDefaults.parentGuard;
+  if (defaults.parentGuard !== undefined) envelopeDefaults.parentGuard = defaults.parentGuard;
   if (defaults.session !== undefined) envelopeDefaults.session = defaults.session;
   if (defaults.parentFor !== undefined) envelopeDefaults.parentFor = defaults.parentFor;
 }
@@ -876,9 +892,15 @@ async function appendEventLocked(
     input.session_id === envelopeDefaults.parentFor
   ) {
     if (existing.length === 0) {
-      await appendEventLocked(rootInput(input.session_id), opts, filePath);
+      await appendEventLocked(
+        { ...rootInput(input.session_id), envelope_defaulted: ['auto_root'] },
+        opts,
+        filePath,
+      );
       existing = await readEventsAtPath(filePath, input.session_id);
     }
+    // Same lock as the read of the last event: check and default are atomic.
+    envelopeDefaults.parentGuard?.(existing);
     input = { ...input, causal_parent: (existing[existing.length - 1] as StoredEvent).event_id };
     defaulted.push('causal_parent');
   }

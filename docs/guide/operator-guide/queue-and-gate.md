@@ -416,7 +416,11 @@ bs gate run epic-1/task-1 \
   the append. An empty log gets the same root `bs session start` writes
   first. An event filled in this way records `envelope_defaulted`
   (`["session"]`, `["causal_parent"]` or both), so a reader can tell a
-  chosen parent from a defaulted one. **Fan-out writers must pass
+  chosen parent from a defaulted one; the root written for an empty log is
+  tagged `["auto_root"]`. While more than one dispatch is live in the session
+  (the agents-registry fold), a defaulted parent is refused with
+  `cli.envelope-parent-ambiguous` and nothing is written; an explicit
+  `--causal-parent` is never refused. **Fan-out writers must pass
   `--causal-parent` explicitly**: several tasks writing into one session at
   once, as the wave-runner does, can find a sibling's event as the "last
   event". A parent you pass must reference a real prior event in that

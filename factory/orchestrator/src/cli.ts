@@ -26,7 +26,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
+import { foldAgents, JUDGE_REPORT_EVENT_TYPE, liveAgents } from './agents-registry.js';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
 import { artifactHome } from './artifacts.js';
@@ -794,6 +794,24 @@ function requirePositionals(positional: string[], doc: CommandDoc, required?: nu
  * the shared envelope for twenty-odd verbs and the number outlives the typo, so
  * a fence read back tomorrow is the first place anyone would notice.
  */
+/**
+ * Under fan-out the log's last event can be a sibling's, so a defaulted parent
+ * is refused while more than one dispatch is live in the session (architecture
+ * §18 rule 8). "Live" is the registry's fold, the same one the daemon reuses.
+ */
+function refuseAmbiguousDefaultParent(existing: readonly StoredEvent[]): void {
+  const live = liveAgents(foldAgents(existing));
+  if (live.length <= 1) return;
+  const names = live.map(
+    (a) => `${a.agentRole}${a.taskId === null ? '' : ` on ${a.taskId}`} (${a.id})`,
+  );
+  throw new SmithError(
+    'cli.envelope-parent-ambiguous',
+    `${live.length} dispatches are live in this session (${names.join('; ')}), so its last event may belong to a sibling. Nothing was written. Pass --causal-parent <event-id> explicitly.`,
+    { live: live.map((a) => a.id) },
+  );
+}
+
 function eventContextFromFlags(flags: Record<string, string>): EventContext {
   // O-11: both are optional. The session falls back to the CLI session id the
   // Bash tool exports; the parent stays null here and the writer fills it in
@@ -807,7 +825,9 @@ function eventContextFromFlags(flags: Record<string, string>): EventContext {
   const explicitParent = flags['causal-parent'];
   setEnvelopeDefaults({
     ...(flags.session === undefined ? { session: sessionId } : {}),
-    ...(explicitParent === undefined ? { parentFor: sessionId } : {}),
+    ...(explicitParent === undefined
+      ? { parentFor: sessionId, parentGuard: refuseAmbiguousDefaultParent }
+      : {}),
   });
   return {
     sessionId,

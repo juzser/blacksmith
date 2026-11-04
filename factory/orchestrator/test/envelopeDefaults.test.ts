@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -102,6 +102,83 @@ describe('envelope defaults (built binary)', () => {
     expect(JSON.parse(bad.stdout).error.code).toBe('events.unknown-causal-parent');
   });
 
+  it('tags the root it wrote for an empty log as auto-created', async () => {
+    const stateDir = fresh();
+    record(stateDir, ['--session', 'tagged-root'], { CLAUDE_CODE_SESSION_ID: '' });
+    const [root] = await readEvents('tagged-root', { stateDir });
+    expect(root?.record.envelope_defaulted).toEqual(['auto_root']);
+    runCli(['session', 'start', 'plain-root', '--state-dir', stateDir]);
+    const [plain] = await readEvents('plain-root', { stateDir });
+    expect('envelope_defaulted' in (plain?.record ?? {})).toBe(false);
+  });
+
+  describe('fan-out refusal (cli.envelope-parent-ambiguous)', () => {
+    const dispatch = (task: string, i: number) => ({
+      session_id: 'fan',
+      actor: 'orchestrator',
+      event_type: 'dispatch_decision',
+      task_id: task,
+      plan_version: 1,
+      causal_parent: 'fan#0',
+      ts: `2026-11-04T00:00:0${i}.000Z`,
+      payload: {
+        agent_role: 'coder',
+        provider: 'claude',
+        model_tier: 'mid',
+        model: 'claude-sonnet-5',
+      },
+    });
+    const seed = async (live: number) => {
+      const stateDir = fresh();
+      await mkdir(stateDir, { recursive: true });
+      const root = {
+        session_id: 'fan',
+        actor: 'operator',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        ts: '2026-11-04T00:00:00.000Z',
+        payload: {},
+      };
+      const lines = [root, ...Array.from({ length: live }, (_, i) => dispatch(`e/t${i}`, i + 1))];
+      await writeFile(
+        path.join(stateDir, 'fan.jsonl'),
+        `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`,
+      );
+      return stateDir;
+    };
+    const lineCount = async (stateDir: string) =>
+      (await readFile(path.join(stateDir, 'fan.jsonl'), 'utf8')).trim().split('\n').length;
+
+    it.each([0, 1])('passes a defaulted parent with %i live dispatch(es)', async (live) => {
+      const stateDir = await seed(live);
+      const run = record(stateDir, ['--session', 'fan'], { CLAUDE_CODE_SESSION_ID: '' });
+      expect(run.status).toBe(0);
+      expect(await lineCount(stateDir)).toBe(live + 2);
+    });
+
+    it('refuses a defaulted parent with two live dispatches and writes nothing', async () => {
+      const stateDir = await seed(2);
+      const run = record(stateDir, ['--session', 'fan'], { CLAUDE_CODE_SESSION_ID: '' });
+      expect(run.status).toBe(1);
+      const error = JSON.parse(run.stdout).error;
+      expect(error.code).toBe('cli.envelope-parent-ambiguous');
+      expect(error.message).toContain('e/t0');
+      expect(error.message).toContain('e/t1');
+      expect(error.message).toContain('--causal-parent');
+      expect(await lineCount(stateDir)).toBe(3);
+    });
+
+    it('never refuses an explicit --causal-parent', async () => {
+      const stateDir = await seed(2);
+      const run = record(stateDir, ['--session', 'fan', '--causal-parent', 'fan#0'], {
+        CLAUDE_CODE_SESSION_ID: '',
+      });
+      expect(run.status).toBe(0);
+      expect(await lineCount(stateDir)).toBe(4);
+    });
+  });
+
   it('says in --help that the flags are optional, their defaults, and the fan-out rule', () => {
     for (const args of [['--help'], ['gate', 'run', '--help']]) {
       const text = runCli(args).stdout;
@@ -109,6 +186,7 @@ describe('envelope defaults (built binary)', () => {
       expect(text).toContain('CLAUDE_CODE_SESSION_ID');
       expect(text).toContain("session's last event");
       expect(text).toMatch(/fan-out.*must pass --causal-parent explicitly/);
+      expect(text).toContain('cli.envelope-parent-ambiguous');
     }
     expect(runCli(['gate', 'run', '--help']).stdout).toContain('[--causal-parent <event-id>]');
   });

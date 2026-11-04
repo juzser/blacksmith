@@ -56,7 +56,8 @@ Every write command carries an event-log envelope: `[--session <id>]
 sequential session may leave `--session` and `--causal-parent` out:
 `--session` defaults to `CLAUDE_CODE_SESSION_ID`, `--causal-parent` to the
 session's last event (an empty log gets its root first), and the event records
-`envelope_defaulted`. Fan-out writers (`wave-runner` inside a wave session — its
+`envelope_defaulted`; with more than one live dispatch the default is refused
+(`cli.envelope-parent-ambiguous`). Fan-out writers (`wave-runner` inside a wave session — its
 agent template has the rule) must pass `--causal-parent` explicitly, since the
 last event may be a sibling's. Open a
 session with `bs session start <session-id>` if one isn't already

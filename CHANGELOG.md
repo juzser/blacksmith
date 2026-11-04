@@ -36,8 +36,10 @@ than appearing in it.
   defaults to `CLAUDE_CODE_SESSION_ID` and is refused when neither is set;
   `--causal-parent` defaults to the session's last event, read under the log
   lock, with the root `bs session start` writes added first on an empty log.
-  A defaulted event records `envelope_defaulted`. Explicit flags behave as
-  before. Fan-out writers, such as the wave-runner, must still pass
+  A defaulted event records `envelope_defaulted` (an added root is tagged
+  `auto_root`). A defaulted parent is refused with
+  `cli.envelope-parent-ambiguous` while more than one dispatch is live in the
+  session. Explicit flags behave as before. Fan-out writers, such as the wave-runner, must still pass
   `--causal-parent`: the last event may be a sibling's.
 
 The check-tiers epic (`bs-check-tiers`) lets a project run each check where it
