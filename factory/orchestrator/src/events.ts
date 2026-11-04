@@ -801,13 +801,16 @@ export async function validateEventEnvelope(
     // this first, so a refusal must come now, not after the merge landed (D-42).
     // Run the refusal here and pin the last event as the parent: it is "the
     // last event when the command started", read, never computed, and the
-    // append then has nothing left to refuse. An empty log pins nothing; its
-    // root is written by the append.
+    // append then has nothing left to refuse. An empty log pins the session
+    // root: the append writes it if it is still absent, else uses the log's
+    // first event, so what another process wrote meanwhile is never the parent.
     const existing = await readEventsAtPath(logPath(input.session_id, opts), input.session_id);
     const last = existing[existing.length - 1];
     if (last !== undefined) {
       envelopeDefaults.parentGuard?.(existing);
       envelopeDefaults.pinnedParent = last.event_id;
+    } else {
+      envelopeDefaults.pinnedRoot = true;
     }
     return;
   }
@@ -853,6 +856,8 @@ const envelopeDefaults: {
   parentGuard?: (existing: readonly StoredEvent[]) => void;
   /** The last event read at pre-flight (`validateEventEnvelope`); see there. */
   pinnedParent?: string;
+  /** Pre-flight saw an empty log: the parent is the session root, wherever it ends up. */
+  pinnedRoot?: boolean;
 } = {};
 
 /**
@@ -870,6 +875,7 @@ export function setEnvelopeDefaults(defaults: {
   delete envelopeDefaults.parentFor;
   delete envelopeDefaults.parentGuard;
   delete envelopeDefaults.pinnedParent;
+  delete envelopeDefaults.pinnedRoot;
   if (defaults.parentGuard !== undefined) envelopeDefaults.parentGuard = defaults.parentGuard;
   if (defaults.session !== undefined) envelopeDefaults.session = defaults.session;
   if (defaults.parentFor !== undefined) envelopeDefaults.parentFor = defaults.parentFor;
@@ -939,14 +945,18 @@ async function appendEventLocked(
         filePath,
       );
       existing = await readEventsAtPath(filePath, input.session_id);
-    } else if (envelopeDefaults.pinnedParent === undefined) {
+    } else if (envelopeDefaults.pinnedParent === undefined && !envelopeDefaults.pinnedRoot) {
       // Same lock as the read of the last event: check and default are atomic.
       envelopeDefaults.parentGuard?.(existing);
     }
     input = {
       ...input,
       causal_parent:
-        envelopeDefaults.pinnedParent ?? (existing[existing.length - 1] as StoredEvent).event_id,
+        envelopeDefaults.pinnedParent ??
+        (envelopeDefaults.pinnedRoot
+          ? (existing[0] as StoredEvent)
+          : (existing[existing.length - 1] as StoredEvent)
+        ).event_id,
     };
     defaulted.push('causal_parent');
   }
