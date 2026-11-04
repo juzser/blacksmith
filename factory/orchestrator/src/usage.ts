@@ -1017,8 +1017,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'db apply',
     positionals: '',
     flags:
-      '--session <id> [--db <file>] [--state-dir <dir>] [--roadmap-path <file>] [--specs-dir <dir>]',
-    summary: 'Apply one session log onto the existing projection.',
+      '[--session <id>] [--db <file>] [--state-dir <dir>] [--roadmap-path <file>] [--specs-dir <dir>]',
+    summary:
+      'Apply one session log onto the existing projection. --session defaults to $CLAUDE_CODE_SESSION_ID.',
   },
   {
     command: 'stats overview',

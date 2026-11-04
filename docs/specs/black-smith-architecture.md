@@ -1335,11 +1335,17 @@ not in the diff — it is in every verdict the factory issued afterwards.
    computed.** `--session`, `--causal-parent`, `--plan-version` on every
    write command; the id comes back in that command's own output. `--session`
    and `--causal-parent` may be left out (lean-mode O-11): the session is then
-   `CLAUDE_CODE_SESSION_ID` and the parent is the session's last event, read
-   under the log lock, or at pre-flight for verbs that write outside state
-   (the id is still read, never computed). The event records
-   `envelope_defaulted`, a defaulted parent is refused while dispatches are
-   live (`cli.envelope-parent-ambiguous`), and fan-out writers stay explicit. *Breaks:*
+   `CLAUDE_CODE_SESSION_ID` and the parent is the session's last event, read,
+   never computed. The event records `envelope_defaulted`, and fan-out writers
+   stay explicit. A defaulted parent is refused (`cli.envelope-parent-ambiguous`)
+   while dispatches are live: at least 1 when the session came from the env
+   (subagents share it), at least 2 when `--session` was explicit. The check
+   and the read of the last event happen under the log lock, except for verbs
+   that write outside the log (files, branches, external processes) before they
+   append: those run both at pre-flight, before the first write, and pin that
+   event as the parent. A dispatch that goes live after pre-flight does not
+   invalidate a pinned parent: it was the tail when the command started, which
+   is a true causal ancestor. *Breaks:*
    under fan-out the events between yours belong to sibling tasks, so a
    guessed parent names a real event that is not the parent — it validates,
    and the lineage is quietly wrong.

@@ -96,6 +96,7 @@ import {
   setEnvelopeDefaults,
   startSession,
   tailEvents,
+  validateEventEnvelope,
 } from './events.js';
 import {
   type FeedbackKind,
@@ -483,9 +484,9 @@ const POST_MERGE_PROCEEDS: ReadonlySet<string> = new Set([
 ]);
 
 /** The event envelope the writing `checks` verbs share, as the overlay module takes it. */
-function checksEnvelope(flags: Record<string, string>, actor: string) {
+async function checksEnvelope(flags: Record<string, string>, actor: string) {
   requireFlag(flags, 'plan-version');
-  const ctx = eventContextFromFlags(flags);
+  const ctx = await pinnedEventContext(flags);
   return {
     session_id: ctx.sessionId,
     actor,
@@ -855,6 +856,26 @@ function eventContextFromFlags(flags: Record<string, string>): EventContext {
     causalParent: explicitParent ?? null,
     actor: flags.actor,
   };
+}
+
+/**
+ * `eventContextFromFlags` for a verb that writes outside the log (a file, a
+ * branch, an external process) BEFORE it appends. Awaiting the pre-flight here
+ * means an ambiguous defaulted parent is refused before the first of those
+ * writes, and the tail of the log is pinned as the parent, so the append at the
+ * far end has nothing left to refuse (D-42). Verbs that only append keep the
+ * plain form and decide under the log lock instead.
+ */
+async function pinnedEventContext(
+  flags: Record<string, string>,
+  eventType = 'pre-flight',
+): Promise<EventContext> {
+  const ctx = eventContextFromFlags(flags);
+  await validateEventEnvelope(
+    { session_id: ctx.sessionId, event_type: eventType, causal_parent: ctx.causalParent },
+    eventOptsFromFlags(flags),
+  );
+  return ctx;
 }
 
 /**
@@ -1917,8 +1938,8 @@ async function nextWaveInputFrom(
     const { foldTasks } = await import('./db/projector.js');
     for (const row of foldTasks(events)) statusById.set(row.taskId, row.taskStatus);
   }
-  const logged = flags.session
-    ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
+  const logged = session
+    ? await readAddedTasks({ sessionId: session }, eventOptsFromFlags(flags))
     : [];
   const planIds = new Set(planOnDisk.tasks.map((t) => t.task_id));
   // A lineage is not one epic. `readAddedTasks` reads the WHOLE lineage
@@ -2473,7 +2494,9 @@ async function main(): Promise<number> {
   // same non-load-bearing shape as `plan validate`'s.
   if (namespace === 'audit' && action === 'open') {
     const [projectDir] = requirePositionals(positional, usageFor('audit open')) as [string];
-    printJson(await openAudit(projectDir, eventContextFromFlags(flags), eventOptsFromFlags(flags)));
+    printJson(
+      await openAudit(projectDir, await pinnedEventContext(flags), eventOptsFromFlags(flags)),
+    );
     return 0;
   }
 
@@ -2563,7 +2586,7 @@ async function main(): Promise<number> {
       await closeAudit(
         projectDir,
         { force: flags.force === 'true' },
-        eventContextFromFlags(flags),
+        await pinnedEventContext(flags),
         eventOptsFromFlags(flags),
       ),
     );
@@ -2645,7 +2668,7 @@ async function main(): Promise<number> {
         { flag: 'confidence', value: flags.confidence },
       );
     }
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
     // D-211: the version comes off `ctx`, not off a second read of the flag.
     // This verb used to parse `--plan-version` twice with two parsers that
     // disagree — a bare `Number.parseInt` chose the plan FILE to critique,
@@ -2766,7 +2789,7 @@ async function main(): Promise<number> {
         sites,
         ...(changes ? { changes } : {}),
       },
-      eventContextFromFlags(flags),
+      await pinnedEventContext(flags),
       { ...eventOptsFromFlags(flags), ...amendSpecsDirOpts(planPath, plan, flags) },
     );
     // No no-op warning here any more. A pure carry-forward used to be legal
@@ -2866,7 +2889,7 @@ async function main(): Promise<number> {
         decidedBy: requireFlag(flags, 'decided-by'),
         ...(flags.rationale ? { rationale: flags.rationale } : {}),
       },
-      eventContextFromFlags(flags),
+      await pinnedEventContext(flags),
       { ...eventOptsFromFlags(flags), ...amendSpecsDirOpts(planPath, plan, flags) },
     );
     printJson({
@@ -3296,7 +3319,8 @@ async function main(): Promise<number> {
       return 0;
     }
 
-    const ctx = eventContextFromFlags(flags);
+    const ctx =
+      flags.dry === 'true' ? eventContextFromFlags(flags) : await pinnedEventContext(flags);
     const result = await runScheduler(
       input,
       {
@@ -3912,7 +3936,7 @@ async function main(): Promise<number> {
         { epic },
       );
     }
-    const events = { ctx: eventContextFromFlags(flags), ...eventOptsFromFlags(flags) };
+    const events = { ctx: await pinnedEventContext(flags), ...eventOptsFromFlags(flags) };
     // `--tasks` is hand-written, so its ids are whatever was typed. Minting
     // them from the plan before any git runs is the whole point of P9-29: a
     // bare id here would put `wave-merged` in the log under a spelling the
@@ -4889,7 +4913,7 @@ async function main(): Promise<number> {
       ...(flags['uiux-visual'] ? mintFromUiuxVisual(flags['uiux-visual'], taskId) : []),
     ];
     const lessons = flags.lessons ? parseLessons(readFileSync(flags.lessons, 'utf8')) : [];
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
 
     // --plan is what lets the gate answer "whose finding is this" from the
     // file rather than from who happened to be at the gate (D-41/P9-24).
@@ -5162,7 +5186,7 @@ async function main(): Promise<number> {
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
     const checks = readChecksFile(requireFlag(flags, 'checks'), { dir: projectDir });
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
     const tier = flags.tier;
     if (
       tier !== undefined &&
@@ -5198,7 +5222,7 @@ async function main(): Promise<number> {
     // without knowing where the integration branch actually is, and an
     // optional flag would silently mean "no check needed".
     const projectDir = requireFlag(flags, 'project');
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
     const outcome = await runEpicVerdict(
       {
         epicId,
@@ -5240,7 +5264,7 @@ async function main(): Promise<number> {
     const { closeEpic } = await import('./epic.js');
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
     const record = await closeEpic(
       {
         epicId,
@@ -5790,7 +5814,7 @@ async function main(): Promise<number> {
       return 0;
     }
     requireFlag(flags, 'plan-version');
-    const ctx = eventContextFromFlags(flags);
+    const ctx = await pinnedEventContext(flags);
     const { runPostMerge } = await import('./postMerge.js');
     const { promoteAfterCatch } = await import('./tierProposals.js');
     // The ledger's own options: promotion re-reads the project's log through them. The specs dir
@@ -5812,7 +5836,7 @@ async function main(): Promise<number> {
         const answers = await promoteAfterCatch(
           culprit,
           { dir: projectDir, checks: declared, events: fresh, gather },
-          checksEnvelope(flags, flags.actor ?? 'system'),
+          await checksEnvelope(flags, flags.actor ?? 'system'),
           { events: eventOpts },
         );
         for (const a of answers) promotions.push({ task: culprit.task, ...a });
@@ -5861,7 +5885,7 @@ async function main(): Promise<number> {
   if (namespace === 'checks' && action === 'proposals') {
     const checksFile = requireFlag(flags, 'checks');
     const epicId = requireFlag(flags, 'epic');
-    const ctx = checksEnvelope(flags, flags.actor ?? 'system');
+    const ctx = await checksEnvelope(flags, flags.actor ?? 'system');
     const { currentProjectLog, pendingProposals } = await import('./tierProposals.js');
     const eventOpts = eventOptsFromFlags(flags);
     const read = await gatherChecks(flags);
@@ -5892,7 +5916,7 @@ async function main(): Promise<number> {
     const checksFile = requireFlag(flags, 'checks');
     const epicId = requireFlag(flags, 'epic');
     const handOff = flags['hand-off'];
-    const ctx = checksEnvelope(
+    const ctx = await checksEnvelope(
       flags,
       handOff === undefined ? requireFlag(flags, 'actor') : (flags.actor ?? 'system'),
     );
@@ -6377,7 +6401,7 @@ async function main(): Promise<number> {
       });
       const result = await runIndependentFinder(
         { taskId, request, native, policy },
-        eventContextFromFlags(flags),
+        await pinnedEventContext(flags),
         eventOpts,
       );
       // `raise` is printed, never minted (crossFinding.ts's contract): which

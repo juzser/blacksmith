@@ -73,7 +73,7 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": { "enum": ["session", "causal_parent", "auto_root"] },
-      "description": "Optional — which envelope fields the writer filled in rather than being given: 'session' (from CLAUDE_CODE_SESSION_ID) and 'causal_parent' (the log's last event, read under the log lock). 'auto_root' marks the session-start the writer added to an empty log, so it is visibly not an explicit `bs session start`. Absent when the envelope was given in full, so a reader can tell a chosen parent from a defaulted one; under fan-out a defaulted parent may be a sibling's event (architecture §18 rule 8)."
+      "description": "Optional — which envelope fields the writer filled in rather than being given: 'session' (from CLAUDE_CODE_SESSION_ID) and 'causal_parent' (the log's last event: read under the log lock, or at the command's pre-flight for verbs that write outside the log, in which case it is the tail when the command started). 'auto_root' marks the session-start the writer added to an empty log, so it is visibly not an explicit `bs session start`. Absent when the envelope was given in full, so a reader can tell a chosen parent from a defaulted one; under fan-out a defaulted parent may be a sibling's event (architecture §18 rule 8)."
     },
     "edge": {
       "type": "object",
