@@ -16,6 +16,21 @@ check() { # check <name> <command...>
   n="$1"; shift
   if "$@" >/dev/null 2>&1; then ok "$n"; else bad "$n"; fi
 }
+# waitfor <what> <command...>: poll every 0.1 s, up to 30 s, until the command succeeds.
+# On a missed deadline it fails with a clear message and returns 1.
+waitfor() {
+  w_what="$1"; shift; w_i=0
+  while ! "$@" 2>/dev/null; do
+    w_i=$((w_i + 1))
+    if [ "$w_i" -gt 300 ]; then bad "timed out after 30 s waiting for: $w_what"; return 1; fi
+    sleep 0.1
+  done
+}
+# condition helpers for waitfor
+has_file() { [ -s "$1" ]; }
+has_path() { [ -e "$1" ]; }
+file_has() { grep -qF -- "$2" "$1"; }
+no_proc() { ! ps -ax -o args= | grep -F -- "$1" | grep -v grep | grep -q .; }
 jsonok() { node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$1"; }
 
 echo "-- JSON files parse --"
@@ -257,7 +272,7 @@ const srv = http.createServer((q, s) => {
 srv.listen(0, "127.0.0.1", () => fs.writeFileSync(d + "/port", String(srv.address().port)));
 SRVJS
 node "$T/server.js" & SRV=$!
-i=0; while [ ! -s "$T/port" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+waitfor "the fake server port" has_file "$T/port"
 URL="http://127.0.0.1:$(cat "$T/port")"
 dsrun() { # dsrun <path> [env assignments...]: run the script with a key, default providers
   pth="$1"; shift
@@ -314,7 +329,7 @@ done
 mkdir -p "$T/tmp3"; rm -f "$T/ds.hit"
 (cd "$R" && TMPDIR="$T/tmp3" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=4 CROSSCHECK_GRACE=1 sh "$X" main > "$T/stall.out" 2>&1) &
 SP=$!
-i=0; while [ ! -e "$T/ds.hit" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+waitfor "the stalled call to reach the server" has_path "$T/ds.hit"
 [ -e "$T/ds.hit" ] && ok "the call is in flight (server stalled)" || bad "the call never reached the server"
 if ps -ax -o args= | grep -F -- "$KEY" | grep -qv "grep -F"; then bad "the key is visible in ps"; else ok "the key is not on any command line during the call"; fi
 [ -n "$(ls -A "$T"/tmp3/*/ 2>/dev/null)" ] && ok "the run's temp dir exists mid-call" || bad "no temp dir mid-call"
@@ -406,7 +421,7 @@ for sh_ in sh dash; do
   mkdir -p "$T/tmp5"; rm -f "$T/ds.hit" "$T/child" "$T/parent" "$T/term.out"
   (cd "$R" && exec env TMPDIR="$T/tmp5" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" FAKE_MODE=child CROSSCHECK_GRACE=1 "$sh_" "$X" main > "$T/term.out" 2>&1) &
   TP=$!
-  i=0; while { [ ! -e "$T/ds.hit" ] || [ ! -s "$T/child" ]; } && [ "$i" -lt 80 ]; do sleep 0.1; i=$((i + 1)); done
+  waitfor "ds.hit and the codex child (TERM, $sh_)" sh -c "[ -e '$T/ds.hit' ] && [ -s '$T/child' ]"
   kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
   [ "$rc" -eq 0 ] && ok "TERM ($sh_) exits 0" || bad "TERM ($sh_) exit $rc"
   case "$(cat "$T/term.out")" in *"skipped (cancelled)"*) ok "TERM ($sh_) says cancelled";; *) bad "TERM ($sh_): $(cat "$T/term.out")";; esac
@@ -414,16 +429,16 @@ for sh_ in sh dash; do
   c="$(cat "$T/child" 2>/dev/null)"
   if [ -n "$c" ] && kill -0 "$c" 2>/dev/null; then bad "TERM ($sh_) left codex's child running"; else ok "TERM ($sh_) stops codex's child"; fi
   if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "TERM ($sh_) left curl running"; else ok "TERM ($sh_) stops curl"; fi
-  i=0; while ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+  waitfor "the watchdog to exit (TERM, $sh_)" no_proc "$X"
   ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "TERM ($sh_) left the watchdog running" || ok "TERM ($sh_) stops the watchdog"
 done
 # KILL cannot be trapped: the watchdog still ends with its parent
 mkdir -p "$T/tmp6"; rm -f "$T/ds.hit"
 (cd "$R" && exec env TMPDIR="$T/tmp6" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=300 sh "$X" main >/dev/null 2>&1) &
 KP=$!
-i=0; while [ ! -e "$T/ds.hit" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
+waitfor "the stalled call to reach the server (KILL)" has_path "$T/ds.hit"
 kill -KILL "$KP" 2>/dev/null; wait "$KP" 2>/dev/null
-i=0; while ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && [ "$i" -lt 40 ]; do sleep 0.1; i=$((i + 1)); done
+waitfor "the watchdog to exit (KILL)" no_proc "$X"
 ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "the watchdog or a job outlived a killed script" || ok "the watchdog and the jobs end when the script is killed"
 if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "curl outlived a killed script"; else ok "curl ends when the script is killed"; fi
 [ -z "$(ls -A "$T/tmp6")" ] && ok "temp dir removed after a KILL" || bad "temp dir left after a KILL"
@@ -438,30 +453,31 @@ printf '%s' "$r" | LC_ALL=C grep -qF "$(printf '\302\240D')" && ok "U+00A0 (not 
 # a fake tool that stalls one step, to land a TERM in a given window
 mkdir -p "$T/slow"
 REALGIT="$(command -v git)"; REALTR="$(command -v tr)"
-printf '#!/bin/sh\ncase "$*" in *" diff "*) sleep 3 ;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$T/slow/git"
-printf '#!/bin/sh\ncase "$*" in *000*) "%s" "$@"; sleep 3 ;; *) exec "%s" "$@" ;; esac\n' "$REALTR" "$REALTR" > "$T/slowtr.sh"
+printf '#!/bin/sh\ncase "$*" in *" diff "*) : > "$FAKE_DIR/git.hit"; sleep 5 ;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$T/slow/git"
+printf '#!/bin/sh\ncase "$*" in *000*) : > "$FAKE_DIR/tr.hit"; "%s" "$@"; sleep 5 ;; *) exec "%s" "$@" ;; esac\n' "$REALTR" "$REALTR" > "$T/slowtr.sh"
 mkdir -p "$T/slowtr"; mv "$T/slowtr.sh" "$T/slowtr/tr"
 chmod +x "$T/slow/git" "$T/slowtr/tr"
 # round-2 item 1: a TERM while the diff is being collected removes the temp dir
 for sh_ in sh dash; do
   command -v "$sh_" >/dev/null 2>&1 || continue
-  mkdir -p "$T/tmp7"; rm -f "$T/t7.out"
+  mkdir -p "$T/tmp7"; rm -f "$T/t7.out" "$T/git.hit"
   (cd "$R" && exec env TMPDIR="$T/tmp7" PATH="$T/slow:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t7.out" 2>&1) &
   TP=$!
-  i=0; while [ -z "$(ls -A "$T/tmp7" 2>/dev/null)" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-  sleep 0.5; kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
+  waitfor "git diff to start (early TERM, $sh_)" has_path "$T/git.hit"
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
   [ "$rc" -eq 0 ] && ok "TERM during diff collection ($sh_) exits 0" || bad "TERM during diff collection ($sh_) exit $rc"
   [ -z "$(ls -A "$T/tmp7")" ] && ok "TERM during diff collection ($sh_) leaves no temp file" || bad "TERM during diff collection ($sh_) left $(ls -A "$T/tmp7")"
 done
 # round-2 item 2: a TERM after the findings printed adds no cancel line
 for sh_ in sh dash; do
   command -v "$sh_" >/dev/null 2>&1 || continue
-  mkdir -p "$T/tmp8"; rm -f "$T/t8.out" "$T/stdin"
+  mkdir -p "$T/tmp8"; rm -f "$T/t8.out" "$T/stdin" "$T/tr.hit"
   (cd "$R" && exec env TMPDIR="$T/tmp8" PATH="$T/slowtr:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t8.out" 2>&1) &
   TP=$!
-  i=0; while [ ! -s "$T/stdin" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i + 1)); done
-  sleep 1
+  waitfor "the output pipeline to start (late TERM, $sh_)" has_path "$T/tr.hit"
+  kill -0 "$TP" 2>/dev/null && ok "late TERM ($sh_): the script is still running when TERM lands" || bad "late TERM ($sh_): the script had already finished, so the TERM tests nothing"
   kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null
+  waitfor "the findings to be printed (late TERM, $sh_)" file_has "$T/t8.out" FAKE-FINDING
   case "$(cat "$T/t8.out")" in *"cancelled"*) bad "late TERM ($sh_) appended a cancel line";; *FAKE-FINDING*) ok "late TERM ($sh_) adds no cancel line";; *) bad "late TERM ($sh_): $(cat "$T/t8.out")";; esac
   [ -z "$(ls -A "$T/tmp8")" ] && ok "late TERM ($sh_) leaves no temp file" || bad "late TERM ($sh_) left temp files"
 done
