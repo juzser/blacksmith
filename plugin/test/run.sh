@@ -101,6 +101,8 @@ for a in planner coder reviewer auditor; do
   ae="$(sed -n 's/^effort:[[:space:]]*//p' "$P/agents/$a.md" | head -1)"
   [ -n "$am" ] && [ "$rm_" = "$am" ] && [ "$re_" = "$ae" ] && ok "$a row matches ($am, $ae)" || bad "$a row ($rm_,$re_) vs frontmatter ($am,$ae)"
 done
+check "rules.md rule 2: a choice is asked with options" grep -q "ask with the AskUserQuestion tool" "$P/rules.md"
+check "rules.md rule 2: without the tool, options are numbered" grep -qi "number the options" "$P/rules.md"
 check "rules.md rule 4: the person runs /cross-check" grep -qi "the person runs it" "$P/rules.md"
 check "INSTALL.md asks the person to run /cross-check" grep -q 'ask the person to run `/cross-check`' "$P/../INSTALL.md"
 check "INSTALL.md has the update path" grep -q 'claude plugin update blacksmith@blacksmith' "$P/../INSTALL.md"

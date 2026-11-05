@@ -13,7 +13,7 @@ One short file, [plugin/rules.md](plugin/rules.md). A hook loads it when a sessi
 | Rule | What you notice |
 |---|---|
 | Plain explanations | Claude leads with the result, in short sentences and in your language. Jargon is explained and technical details come last. |
-| Confidence on options | Every option shows a %, and the recommended one says what its figure rests on. |
+| Confidence on options | When you must decide, you pick from options or reply with a number. Every option shows a %, and the recommended one says what its figure rests on. |
 | Verify before done | Claude does not say "done", "fixed" or "passing" until it has run the command that shows it. |
 | The right agent for the job | Planning goes to a stronger model, routine coding and review to a cheaper one. |
 | Compact early | Near 60% of the context window, Claude asks you to compact and says what to keep. [One setting](docs/usage.md#compact) makes it automatic. |

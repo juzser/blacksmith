@@ -2,7 +2,7 @@
 
 ## Rules
 
-The always-on rules are one file, [`plugin/rules.md`](../plugin/rules.md): how to talk to a person, a confidence % on options, model and effort routing, the cross-check, the compact rule, and verifying before calling something done. Read that file for the text; this section says how it gets into a session.
+The always-on rules are one file, [`plugin/rules.md`](../plugin/rules.md): how to talk to a person, options to pick from with a confidence %, model and effort routing, the cross-check, the compact rule, and verifying before calling something done. Read that file for the text; this section says how it gets into a session.
 
 **How they load.** [`plugin/hooks/hooks.json`](../plugin/hooks/hooks.json) registers a `SessionStart` hook for `startup`, `resume`, `clear` and `compact`. It runs [`session-rules.sh`](../plugin/hooks/session-rules.sh), which prints `rules.md` to stdout; Claude Code adds that stdout to the session as context. The script always exits 0, so a hook failure never blocks a session. Registering `compact` brings the rules back after a compaction.
 
