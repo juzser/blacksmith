@@ -20,6 +20,8 @@ Applies to chat replies and to documents a person will read. It does not apply t
 
 ## 2. Confidence on options
 
+When the person must choose, ask with the AskUserQuestion tool: one question, 2 to 4 concrete options. Where that tool is not available, number the options so the person can reply with a number. Do not end on an open question in prose when options would do.
+
 When you offer options and recommend one, every option's title carries a confidence figure for how well it fits the person's goal, judged on its own (the figures need not add to 100). Example: `Keep the current layout (Recommended · 80%)`, `Rebuild the page · 35%`. The recommended option has the highest figure. Its one-line description says briefly what the figure rests on.
 
 ## 3. Model and effort routing

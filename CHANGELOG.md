@@ -2,6 +2,12 @@
 
 What landed, newest first. The plugin's version is in `plugin/.claude-plugin/plugin.json`. Each release has a `v<version>` git tag, and from 0.2.0 on a [GitHub release](https://github.com/juzser/blacksmith/releases).
 
+## Unreleased
+
+### Changed
+
+- **Decisions come as options to pick.** `plugin/rules.md` now tells Claude to ask with the AskUserQuestion tool, or to number the options when that tool is not available, instead of ending on an open question in prose.
+
 ## 1.0.0 (2026-11-05): the reset to a minimal plugin
 
 **This release breaks 0.x on purpose.** Blacksmith stops being a factory and becomes a small Claude Code plugin: always-on rules, `/cross-check`, `/audit` and four agents. Everything else is left to Claude Code's defaults.
