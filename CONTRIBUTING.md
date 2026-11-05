@@ -13,7 +13,7 @@ You need bash, git and node. Without the `claude` CLI the plugin validators prin
 
 ## Sending a change
 
-1. Branch from `main` as `feat/<slug>` or `fix/<slug>`.
+1. Branch from `main` as `feat/<slug>`, `fix/<slug>` or `chore/<slug>`.
 2. Write the failing test first where there is a testable surface (`plugin/test/run.sh` for the plugin), then the change.
 3. Run `bash scripts/check.sh` and paste its tail into the PR. It is the same file CI runs, as the job `gate (scripts/check.sh)`. A red gate is not merged.
 4. Add a line to [CHANGELOG.md](CHANGELOG.md) under Unreleased if users will notice.

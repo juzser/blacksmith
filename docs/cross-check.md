@@ -6,7 +6,7 @@ Providers run in parallel on the same prompt. The output has one group per provi
 
 ## Setup
 
-- **codex.** Install it and log in (`codex login`). See [INSTALL.md](../INSTALL.md#step-2-codex-optional). With no `codex` on PATH it is skipped.
+- **codex.** Install it and log in (`codex login`). See [INSTALL.md](../INSTALL.md#step-2-codex-for-cross-check-optional). With no `codex` on PATH it is skipped.
 - **DeepSeek (opt-in).** DeepSeek runs only when you name it: `CROSSCHECK_PROVIDERS="codex deepseek"`. Merely having `DEEPSEEK_API_KEY` exported for other tools sends nothing; the output then carries a one-line note saying how to turn it on. Export `DEEPSEEK_API_KEY` in your own shell, or put it under `env` in your user settings (`~/.claude/settings.json`); never in a file inside a repository. Needs `curl`, and `node` or `python3` to build and read the JSON. Listed without the key, it is skipped.
 
 The key is read from the environment only, then removed from it, so codex and every other child process never see it. It is piped to `curl` on stdin (`-H @-`): no file on disk ever holds it and it is on no command line. The script never prints it, never prints raw response headers or an error body, and never reads a `.env` file. `curl` runs with `-q` (no `.curlrc`), `-g`, no `-L` (a redirect is never followed with the key), and `https` only. The endpoint must be an `https://` URL; `http://` is accepted only for `127.0.0.1` or `localhost`. Anything else is `skipped: bad deepseek URL`.

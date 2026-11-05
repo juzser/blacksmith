@@ -5,5 +5,3 @@
 
 .DS_Store
 *.log
-# Per-project canvas state for a local editor, not a fact about the repo.
-.nodeterm/
