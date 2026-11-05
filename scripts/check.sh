@@ -49,6 +49,12 @@ while IFS= read -r f; do
 done < <(git ls-files 'plugin/*.sh')
 
 echo
+echo "-- local secret files stay ignored --"
+for f in .env .env.local; do
+  if git check-ignore -q --no-index "$f"; then ok "$f is ignored"; else bad "$f is not ignored by .gitignore"; fi
+done
+
+echo
 echo "-- markdown links --"
 bash scripts/test-md-links.sh || FAIL=1
 node scripts/check-md-links.mjs . || FAIL=1
