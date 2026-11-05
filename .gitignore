@@ -5,3 +5,7 @@
 
 .DS_Store
 *.log
+
+# Local secrets, e.g. a DEEPSEEK_API_KEY for /cross-check. Never commit them.
+.env
+.env.*
