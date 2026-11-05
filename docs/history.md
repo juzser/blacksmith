@@ -24,11 +24,11 @@ Before deciding, the same five tasks were run twice on a small sample app: once 
 
 Tokens are a floor (cache reads are not counted; see the methodology in the `factory-final` tag, `docs/trial/methodology.md`). Active time is the span of the run minus the time spent waiting for the person. A blind review of the outputs found them all merge-ready. Blacksmith's outputs were slightly better in three tasks, equal in one, and slightly worse in one. The edge came from the tests it wrote, not from the process around them.
 
-That is a large cost for a small gain on tasks of this size. So the process was dropped and the few parts that helped were kept: explanations a person can follow, a confidence % on options, a second opinion from another model, the right model and effort per kind of task, and a compact rule.
+That is a large cost for a small gain on tasks of this size. So the process was dropped and the few parts that helped were kept: explanations a person can follow, a confidence % on options, a second opinion from another model, the right model and effort per kind of task, and a compact rule. A small read-only audit and a verify-before-done rule stayed too.
 
 ## Get the old factory back
 
-- From git: `git checkout factory-final`, then follow the `INSTALL.md` in that tree.
-- From npm: the last published version of the old command-line tool is `@juzser/blacksmith@0.7.0` (`npm i -g @juzser/blacksmith@0.7.0`).
+- From git: `git checkout factory-final`, then follow the `INSTALL.md` in that tree. This is 0.7.0 plus what merged after it ([list](../CHANGELOG.md#merged-after-070-never-published)).
+- From npm: the last published version of the old command-line tool is `@juzser/blacksmith@0.7.0` (`npm i -g @juzser/blacksmith@0.7.0`). The package is marked deprecated, so npm prints a warning; it still installs.
 
 Nothing from the old setup is removed from your projects automatically; see [INSTALL.md](../INSTALL.md#remove-the-old-setup).
