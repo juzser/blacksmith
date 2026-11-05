@@ -1,21 +1,4 @@
 {
-  "env": {
-    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "1000",
-    "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY": "1000"
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh\""
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "deny": [
       "Bash(git push origin main)",
@@ -26,8 +9,6 @@
       "Bash(git push -f*)",
       "Bash(git push --force-with-lease*)",
       "Bash(git filter-branch*)",
-      "Bash(wrangler deploy*)",
-      "Bash(wrangler pages publish*)",
       "Bash(rm -rf /*)",
       "Bash(rm -rf ~*)"
     ]

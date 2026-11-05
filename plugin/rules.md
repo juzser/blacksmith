@@ -31,14 +31,13 @@ Send work to the agent that fits it. Each agent carries its own model and effort
 | Split work of 2+ independent parts into a plan | `planner` | opus | high |
 | Implement one part, test-first, in its own worktree | `coder` | sonnet | medium |
 | Fresh-context, read-only review of a diff | `reviewer` | sonnet | medium |
-| Docs, web research, reading unfamiliar code | `researcher` | sonnet | medium |
-| Searches, summaries, mechanical checks | `scout` | haiku | low |
+| Whole-project audit, one axis (performance, code-quality, security); started by `/audit` | `auditor` | sonnet | high |
 
 Use subagents for independent work that can run in parallel, and to keep bulky output out of the main session. Keep the main session for talking to the person and for decisions.
 
 ## 4. Cross-check
 
-After a non-trivial change, offer `/cross-check` (a second opinion from a different model). The person runs it; you do not, because it sends code to another vendor. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
+After a non-trivial change, offer `/cross-check` (a second opinion from a different model). The person runs it; you do not, because it sends code to other vendors. Its findings are advisory. A finding counts only once you reproduce it with a failing test or a probe. Report each as reproduced and fixed, reproduced and not fixed, or not reproduced.
 
 ## 5. Compact
 
@@ -48,3 +47,7 @@ Compact at about 60% of the context window, not at 90%: the room left is what yo
 - Drop: raw tool output and the raw returns of dispatched agents. Anything re-readable from files or git is not worth carrying.
 
 If the person has set `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (for example to 60), the harness compacts there. Otherwise, when you are near 60%, ask the person to run `/compact <what to keep>`; you cannot run it yourself. Auto-compact handles the rest.
+
+## 6. Verify before you call it done
+
+Never say done, fixed or passing without running the command that shows it (the tests, the build, or the real flow) in this session and reading its output. If something was not verified, say so plainly.

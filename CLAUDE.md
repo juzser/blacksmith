@@ -1,54 +1,7 @@
-# Blacksmith — Claude Code entry point
+# Blacksmith: Claude Code entry point
 
-Thin on purpose. This repo practises progressive disclosure: nothing here is
-restated from another file, because a second copy is a copy that drifts.
+Read [`AGENTS.md`](AGENTS.md) before you act: branches, test-first, verification, and which decisions stop for the maintainer. The rules live there, not here.
 
-## Read first
+To **install, set up or verify** Blacksmith, read and run [`INSTALL.md`](INSTALL.md). Its Part 0 binds you: ask before touching the machine outside the clone, and never report a step as passing without running it.
 
-[`AGENTS.md`](AGENTS.md) is the router and the operating rules — branches,
-worktrees, specs-as-contracts, declarations vs state, language, commits, and
-which decisions stop for the operator. Read it before you act on this repo,
-and follow its "Read on demand" table for anything deeper. **The rules live
-there, not here.**
-
-## Installing Blacksmith — the self-install runbook
-
-[`INSTALL.md`](INSTALL.md) is an executable runbook, not prose. When the
-operator asks you to **install, set up, bootstrap, or verify** Blacksmith —
-including a bare *"install Blacksmith"* — read that file and run it.
-
-Which part depends on what they are standing in. Asked from a project that is
-not this repo, the install is the block at the top of the file — the global
-package, the plugin, `bs init` (which also raises the concurrency caps) —
-plus Step 5, the stack interview, and nothing else. Asked inside this checkout,
-work through Part 2 step by step, in order.
-
-`INSTALL.md` Part 0 states the rules that bind you while you run it. The two
-that matter most:
-
-- **Ask before touching the machine outside the clone.** `brew`/`apt`/`dnf`/
-  `apk`, anything with `sudo`, global npm installs, `corepack enable`, and
-  `pnpm link --global` all change the operator's system: propose the exact
-  command and wait for a yes. Everything inside the clone — `pnpm install`,
-  `pnpm run build`, creating `.venv` — you may just do.
-- **Never report a step as passing without running it.** `scripts/check.sh`
-  degrades to a printed `SKIP` rather than a false `OK` when a tool is
-  missing, so read the tail of its output, not the exit code, and say plainly
-  which steps were skipped or declined.
-
-## Driving the factory
-
-[`.claude/skills/bs/SKILL.md`](.claude/skills/bs/SKILL.md) is the operator
-console (`/bs new|mcp|plan|run|audit|use|status|ui|waivers|lessons|report`) and a
-router:
-it carries the event-log envelope and routes each verb to its own playbook
-beside it, read when that verb runs. The playbooks own the lessons splice
-and the loop; [`dispatch.md`](.claude/skills/bs/dispatch.md) owns the
-dispatch contract every one of them dispatches under — use them rather than
-improvising a dispatch.
-
-`/bs run` is two files, because an epic outlives its waves.
-[`run.md`](.claude/skills/bs/run.md) is the epic tier: it admits one wave
-and closes the epic. [`wave.md`](.claude/skills/bs/wave.md) is the wave
-tier — steps 2-10, worktrees through merge queue — and is read from inside
-a run, never invoked on its own.
+The [README](README.md) says what Blacksmith is; [`docs/usage.md`](docs/usage.md) covers the rules, agents and compact.

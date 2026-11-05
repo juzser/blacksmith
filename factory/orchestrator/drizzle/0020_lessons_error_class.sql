@@ -1,1 +1,0 @@
-ALTER TABLE `lessons` ADD `error_class` text;

@@ -1,41 +1,7 @@
-# runtime state (declarations are committed; state is not)
-state/
-workspaces/
-.agents/generated/
-agents.lock
 # Scratch git worktrees a subagent creates to work in isolation. They are
 # checkouts of this repo living inside it: tracked, they would commit a copy
 # of the tree into the tree.
 .claude/worktrees/
 
-# dependencies / build
-node_modules/
-dist/
-.wrangler/
-coverage/
-test-results/
-playwright-report/
-blob-report/
-
-# local env + editor
-.env
-.env.*
-# guardrails.md: ".env.example is the only committed env file" — `.env.*` above
-# would otherwise ignore it too, making that rule unenforceable.
-!.env.example
 .DS_Store
 *.log
-# Per-project canvas state for a local editor: viewport, sticky notes, node
-# coordinates. One developer's window, not a fact about the repo.
-.nodeterm/
-
-# Per-clone audit store (smith audit), never committed
-.blacksmith/
-
-# bs-mod's engine API types and base tsconfig: Claude Code writes them when it
-# loads the mod, for the Claude Code build doing the loading. A committed copy
-# would pin one build's API. mods/bs-mod/types/ is the mod's own state
-# contract and stays tracked.
-/mods/bs-mod/.claude-plugin/types/
-# pr-mod: the same engine-written folder, for the same reason.
-/mods/pr-mod/.claude-plugin/types/

@@ -1,1 +1,0 @@
-ALTER TABLE `events_raw` ADD `actor` text;

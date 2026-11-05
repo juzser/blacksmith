@@ -5,7 +5,10 @@ set -u
 P="$(cd "$(dirname "$0")/.." && pwd)"
 FAIL=0
 T="$(mktemp -d)"
-trap 'rm -rf "$T"' EXIT
+trap '[ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null; rm -rf "$T"' EXIT
+# the operator may have these set; the tests must never reach a real provider
+unset DEEPSEEK_API_KEY CROSSCHECK_PROVIDERS CROSSCHECK_DEEPSEEK_URL CROSSCHECK_DEEPSEEK_MODEL
+export no_proxy=127.0.0.1 NO_PROXY=127.0.0.1
 
 ok()  { echo "OK   $1"; }
 bad() { echo "FAIL $1"; FAIL=1; }
@@ -13,6 +16,21 @@ check() { # check <name> <command...>
   n="$1"; shift
   if "$@" >/dev/null 2>&1; then ok "$n"; else bad "$n"; fi
 }
+# waitfor <what> <command...>: poll every 0.1 s, up to 30 s, until the command succeeds.
+# On a missed deadline it fails with a clear message and returns 1.
+waitfor() {
+  w_what="$1"; shift; w_i=0
+  while ! "$@" 2>/dev/null; do
+    w_i=$((w_i + 1))
+    if [ "$w_i" -gt 300 ]; then bad "timed out after 30 s waiting for: $w_what"; return 1; fi
+    sleep 0.1
+  done
+}
+# condition helpers for waitfor
+has_file() { [ -s "$1" ]; }
+has_path() { [ -e "$1" ]; }
+file_has() { grep -qF -- "$2" "$1"; }
+no_proc() { ! ps -ax -o args= | grep -F -- "$1" | grep -v grep | grep -q .; }
 jsonok() { node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$1"; }
 
 echo "-- JSON files parse --"
@@ -31,11 +49,11 @@ for h in "Talking to a person" "Confidence" "Model and effort" "Cross-check" "Co
   grep -qi "^#.*$h" "$P/rules.md" && ok "rules.md has heading: $h" || bad "rules.md lacks heading: $h"
 done
 check "README <= 60 lines" test "$(wc -l < "$P/README.md" | tr -d ' ')" -le 60
-check "README states diff is sent only when invoked" grep -qi "only when" "$P/README.md"
-check "README has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/README.md"
+check "cross-check doc states code is sent only when invoked" grep -qi "only when" "$P/../docs/cross-check.md"
+check "usage doc has CLAUDE_AUTOCOMPACT_PCT_OVERRIDE" grep -q CLAUDE_AUTOCOMPACT_PCT_OVERRIDE "$P/../docs/usage.md"
 
 echo "-- agent frontmatter --"
-for a in planner coder reviewer researcher scout; do
+for a in planner coder reviewer auditor; do
   f="$P/agents/$a.md"
   fm="$(awk 'NR==1&&$0!="---"{exit} NR>1&&$0=="---"{exit} NR>1{print}' "$f" 2>/dev/null)"
   get() { printf '%s\n' "$fm" | sed -n "s/^$1:[[:space:]]*//p" | head -1; }
@@ -45,8 +63,13 @@ for a in planner coder reviewer researcher scout; do
   case "$(get effort)" in low|medium|high|xhigh|max) ok "$a effort $(get effort)";; *) bad "$a effort";; esac
   l=$(wc -l < "$f" | tr -d ' ')
   [ "$l" -le 40 ] && ok "$a is $l lines" || bad "$a is $l lines"
+  b=$(awk 'c>=2{print} $0=="---"{c++}' "$f" | grep -c .)
+  [ "$b" -le 14 ] && ok "$a body is $b lines (<= 14)" || bad "$a body is $b lines (> 14)"
+  get description | grep -Eqi 'not for|never|do not' && ok "$a description says when not to use it" || bad "$a description lacks a when-not"
 done
-for a in reviewer scout; do
+n=$(ls "$P/agents" | tr '\n' ' ')
+[ "$n" = "auditor.md coder.md planner.md reviewer.md " ] && ok "only planner, coder, reviewer, auditor exist" || bad "agents dir has: $n"
+for a in reviewer auditor; do
   t="$(sed -n 's/^tools:[[:space:]]*//p' "$P/agents/$a.md" | head -1)"
   case "$t" in *Write*|*Edit*|"") bad "$a is read-only via tools ($t)";; *) ok "$a is read-only via tools";; esac
 done
@@ -68,7 +91,9 @@ rm "$T/fake/rules.md"
 CLAUDE_PLUGIN_ROOT="$T/fake" sh "$T/fake/hooks/session-rules.sh" >/dev/null 2>&1; [ $? -eq 0 ] && ok "exits 0 when rules.md is missing" || bad "missing rules.md exit"
 
 echo "-- rules.md routing table matches the agents --"
-for a in planner coder reviewer researcher scout; do
+rows=$(grep -c '^| .*`[a-z]*` |' "$P/rules.md")
+[ "$rows" -eq 4 ] && ok "routing table has 4 agent rows" || bad "routing table has $rows agent rows"
+for a in planner coder reviewer auditor; do
   row="$(grep -F "\`$a\`" "$P/rules.md" | grep '^|' | head -1)"
   rm_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$4); print $4}')"
   re_="$(printf '%s' "$row" | awk -F'|' '{gsub(/ /,"",$5); print $5}')"
@@ -77,10 +102,25 @@ for a in planner coder reviewer researcher scout; do
   [ -n "$am" ] && [ "$rm_" = "$am" ] && [ "$re_" = "$ae" ] && ok "$a row matches ($am, $ae)" || bad "$a row ($rm_,$re_) vs frontmatter ($am,$ae)"
 done
 check "rules.md rule 4: the person runs /cross-check" grep -qi "the person runs it" "$P/rules.md"
+check "INSTALL.md asks the person to run /cross-check" grep -q 'ask the person to run `/cross-check`' "$P/../INSTALL.md"
+check "INSTALL.md has the update path" grep -q 'claude plugin update blacksmith@blacksmith' "$P/../INSTALL.md"
 check "SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$P/skills/cross-check/SKILL.md"
 check "SKILL.md shows a quoted heredoc for criteria" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
 check "SKILL.md asks for a 600000 Bash timeout" grep -q 600000 "$P/skills/cross-check/SKILL.md"
-for a in reviewer scout; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
+for a in reviewer auditor; do check "$a says read-only by instruction" grep -qi "by instruction" "$P/agents/$a.md"; done
+
+echo "-- audit skill and marketplace --"
+A="$P/skills/audit/SKILL.md"
+check "audit SKILL.md has name audit" grep -q '^name: audit' "$A"
+check "audit SKILL.md disables model invocation" grep -q '^disable-model-invocation: true' "$A"
+for ax in performance code-quality security; do check "audit SKILL.md names axis $ax" grep -q "$ax" "$A"; done
+check "audit SKILL.md has no architecture axis" sh -c "! grep -qi architecture '$A'"
+t="$(sed -n 's/^tools:[[:space:]]*//p' "$P/agents/auditor.md" | head -1)"
+[ "$t" = "Read, Grep, Glob, Bash" ] && ok "auditor tools are Read, Grep, Glob, Bash" || bad "auditor tools ($t)"
+check "marketplace lists one plugin: blacksmith at ./plugin" node -e '
+const m=JSON.parse(require("fs").readFileSync(process.argv[1]));
+if(m.plugins.length!==1||m.plugins[0].name!=="blacksmith"||m.plugins[0].source!=="./plugin")process.exit(1)' "$P/../.claude-plugin/marketplace.json"
+check "no mods/ directory" test ! -e "$P/../mods"
 
 echo "-- cross-check.sh --"
 X="$P/skills/cross-check/cross-check.sh"
@@ -98,9 +138,12 @@ cat > "$T/bin/codex" <<'FAKE'
 printf '%s\n' "$@" > "$FAKE_DIR/args"
 cat > "$FAKE_DIR/stdin"
 cat "$FAKE_DIR/stdin" >&2
+env > "$FAKE_DIR/codexenv"
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
 [ -n "${FAKE_FAIL:-}" ] && { echo "boom: not logged in" >&2; exit 3; }
 case "${FAKE_MODE:-}" in
+  ctl) printf 'A\033]52;c;ZXZpbA==\007B\033[2JC\033]8;;http://x\033\\D\ttab\n' > "$out"; exit 0 ;;
+  c1) printf 'Vi\341\273\207t Nam \360\237\230\200 A\302\233[2JB \302\235C \302\240D end\n' > "$out"; exit 0 ;;
   child) sleep 31 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; wait ;;
   stubborn) trap '' TERM; sleep 32 & echo $! > "$FAKE_DIR/child"; echo $$ > "$FAKE_DIR/parent"; while :; do sleep 1; done ;;
 esac
@@ -201,7 +244,246 @@ r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
 case "$r" in *untracked*) bad "untracked warning with no untracked files";; *) ok "no warning when nothing is untracked";; esac
 check "SKILL.md uses a rare heredoc delimiter" grep -q "<<'CROSSCHECK_CRITERIA_END'" "$P/skills/cross-check/SKILL.md"
 check "SKILL.md mentions git add -N" grep -q "git add -N" "$P/skills/cross-check/SKILL.md"
-check "README mentions git add -N" grep -q "git add -N" "$P/README.md"
+check "cross-check doc mentions git add -N" grep -q "git add -N" "$P/../docs/cross-check.md"
+
+echo "-- cross-check.sh: deepseek --"
+KEY="sk-TESTKEY-9f3a1c77"
+export CROSSCHECK_PROVIDERS="codex deepseek"
+cat > "$T/server.js" <<'SRVJS'
+const http = require("http"), fs = require("fs");
+const d = process.env.FAKE_DIR;
+const srv = http.createServer((q, s) => {
+  const ch = []; q.on("data", c => ch.push(c));
+  q.on("end", () => {
+    const body = Buffer.concat(ch);
+    fs.writeFileSync(d + "/ds.auth", String(q.headers.authorization || ""));
+    fs.writeFileSync(d + "/ds.req", body);
+    fs.writeFileSync(d + "/ds.url", q.url);
+    try { const j = JSON.parse(body); fs.writeFileSync(d + "/ds.prompt", j.messages[0].content); fs.writeFileSync(d + "/ds.model", j.model); } catch (e) {}
+    fs.writeFileSync(d + "/ds.hit", "");
+    const m = q.url.split("/")[1];
+    if (m === "stall") return;
+    if (m === "401" || m === "500") { s.statusCode = +m; return s.end("SECRET-BODY-TEXT"); }
+    if (m === "malformed") return s.end("{not json SECRET-BODY-TEXT");
+    if (m === "ctl") return s.end(JSON.stringify({ choices: [{ message: { content: "A\u001b]52;c;ZXZpbA==\u0007B\u001b[2JC\u001b]8;;http://x\u001b\\D\ttab" } }] }));
+    if (m === "empty") return s.end(JSON.stringify({ choices: [] }));
+    s.setHeader("content-type", "application/json");
+    s.end(JSON.stringify({ choices: [{ message: { content: "DS-FINDING: none é \"q\"" } }] }));
+  });
+});
+srv.listen(0, "127.0.0.1", () => fs.writeFileSync(d + "/port", String(srv.address().port)));
+SRVJS
+node "$T/server.js" & SRV=$!
+waitfor "the fake server port" has_file "$T/port"
+URL="http://127.0.0.1:$(cat "$T/port")"
+dsrun() { # dsrun <path> [env assignments...]: run the script with a key, default providers
+  pth="$1"; shift
+  rm -f "$T/ds.hit"
+  (cd "$R" && env PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/$pth" "$@" sh "$X" main "Must add c" 2>&1)
+}
+mklinks() { # mklinks <dir>: basic tools only, no codex, node or python3
+  mkdir -p "$1"
+  for b in git sh cat sed awk grep tr wc head tail mktemp rm mkdir dirname date cut sort ps sleep curl env cmp; do p="$(command -v "$b")"; [ -n "$p" ] && ln -s "$p" "$1/$b" 2>/dev/null; done
+  return 0
+}
+# the hostile prompt: quotes, backslashes, newlines, non-ASCII, a tab, shell syntax
+printf 'q"uote \\ back\\slash\\n tab\t $(x) `y` caf\303\251 \342\202\254 \360\237\230\200\n' > "$R/test/hostile.test.js"
+git -C "$R" add -N test/hostile.test.js
+r="$(dsrun ok)"; rc=$?
+[ "$rc" -eq 0 ] && ok "both providers: exits 0" || bad "both providers: exit $rc"
+case "$r" in *"## codex"*FAKE-FINDING*"## deepseek"*DS-FINDING*) ok "both groups appear, in order, with findings";; *) bad "both groups: $r";; esac
+case "$r" in *"cannot read the repo"*) ok "deepseek group says it sees only the prompt";; *) bad "no only-the-prompt note: $r";; esac
+cmp -s "$T/stdin" "$T/ds.prompt" && ok "prompt reaches the server byte for byte (quotes, backslashes, newlines, non-ASCII)" || bad "prompt differs on the server side"
+grep -q 'caf.*€' "$T/ds.prompt" && grep -qF 'q"uote \ back' "$T/ds.prompt" && ok "hostile bytes are in what the server received" || bad "hostile bytes missing"
+[ "$(cat "$T/ds.url")" = "/ok" ] && [ "$(cat "$T/ds.model")" = "deepseek-v4-pro" ] && ok "default model deepseek-v4-pro" || bad "default model: $(cat "$T/ds.model")"
+[ "$(cat "$T/ds.auth")" = "Bearer $KEY" ] && ok "the server got the bearer key" || bad "auth header: $(cat "$T/ds.auth")"
+case "$r" in *"$KEY"*) bad "the key is in the output";; *) ok "the key is not in the output";; esac
+grep -qF "$KEY" "$T/stdin" "$T/args" "$T/ds.prompt" && bad "the key is in the prompt or codex args" || ok "the key is not in the prompt or codex args"
+r="$(dsrun ok CROSSCHECK_DEEPSEEK_MODEL=other-model)"; [ "$(cat "$T/ds.model")" = "other-model" ] && ok "CROSSCHECK_DEEPSEEK_MODEL overrides the model" || bad "model override"
+# one provider available
+r="$(cd "$R" && PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+case "$r" in *"## codex"*FAKE-FINDING*"## deepseek"*"skipped: "*DEEPSEEK_API_KEY*) ok "no key: deepseek skipped, codex findings kept";; *) bad "no key: $r";; esac
+case "$r" in "cross-check: skipped"*) bad "one provider ran but the output says skipped";; *) ok "one provider ran: output is not a skip";; esac
+mklinks "$T/nocx"; ln -s "$(command -v node)" "$T/nocx/node"
+rm -f "$T/ds.hit"
+r="$(cd "$R" && PATH="$T/nocx" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" /bin/sh "$X" main 2>&1)"
+case "$r" in *"## codex"*"skipped: "*codex*"## deepseek"*DS-FINDING*) ok "no codex: codex skipped, deepseek findings kept";; *) bad "no codex: $r";; esac
+# CROSSCHECK_PROVIDERS
+rm -f "$T/args"
+r="$(dsrun ok CROSSCHECK_PROVIDERS=deepseek)"
+case "$r" in *"## codex"*) bad "providers=deepseek still shows codex";; *"## deepseek"*DS-FINDING*) ok "CROSSCHECK_PROVIDERS=deepseek runs only deepseek";; *) bad "providers=deepseek: $r";; esac
+[ ! -e "$T/args" ] && ok "codex not called when not listed" || bad "codex called when not listed"
+r="$(dsrun ok CROSSCHECK_PROVIDERS=codex)"; [ ! -e "$T/ds.hit" ] && ok "deepseek not called when not listed" || bad "deepseek called when not listed"
+r="$(dsrun ok CROSSCHECK_PROVIDERS=bogus)"; case "$r" in "cross-check: skipped"*bogus*) ok "unknown provider name is skipped with the name";; *) bad "unknown provider: $r";; esac
+# HTTP errors and malformed answers: skipped, code only, never the body
+for c in 401 500; do
+  r="$(dsrun $c CROSSCHECK_PROVIDERS=deepseek)"; rc=$?
+  [ "$rc" -eq 0 ] && ok "HTTP $c exits 0" || bad "HTTP $c exit $rc"
+  case "$r" in *"skipped: "*"HTTP $c"*) ok "HTTP $c skipped with the code";; *) bad "HTTP $c: $r";; esac
+  case "$r" in *SECRET-BODY-TEXT*|*"$KEY"*) bad "HTTP $c echoed the body or key";; *) ok "HTTP $c does not echo the body";; esac
+done
+for m in malformed empty; do
+  r="$(dsrun $m CROSSCHECK_PROVIDERS=deepseek)"; rc=$?
+  [ "$rc" -eq 0 ] && case "$r" in *"skipped: "*malformed*) true;; *) false;; esac && ok "$m response skipped as malformed" || bad "$m response: $r"
+  case "$r" in *SECRET-BODY-TEXT*) bad "$m response echoed the body";; *) ok "$m response does not echo the body";; esac
+done
+# the key never appears on a command line while the call is in flight
+mkdir -p "$T/tmp3"; rm -f "$T/ds.hit"
+(cd "$R" && TMPDIR="$T/tmp3" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=4 CROSSCHECK_GRACE=1 sh "$X" main > "$T/stall.out" 2>&1) &
+SP=$!
+waitfor "the stalled call to reach the server" has_path "$T/ds.hit"
+[ -e "$T/ds.hit" ] && ok "the call is in flight (server stalled)" || bad "the call never reached the server"
+if ps -ax -o args= | grep -F -- "$KEY" | grep -qv "grep -F"; then bad "the key is visible in ps"; else ok "the key is not on any command line during the call"; fi
+[ -n "$(ls -A "$T"/tmp3/*/ 2>/dev/null)" ] && ok "the run's temp dir exists mid-call" || bad "no temp dir mid-call"
+if grep -rlF "$KEY" "$T/tmp3" 2>/dev/null | grep -q .; then bad "the key is on disk mid-call"; else ok "no file holds the key mid-call"; fi
+wait "$SP"
+case "$(cat "$T/stall.out")" in *"skipped: "*"timed out"*) ok "timeout stops a stalled deepseek call";; *) bad "stall: $(cat "$T/stall.out")";; esac
+if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "curl survived the timeout"; else ok "no curl left after the timeout"; fi
+grep -qF "$KEY" "$T/stall.out" && bad "the key is in the timeout output" || ok "the key is not in the timeout output"
+[ -z "$(ls -A "$T/tmp3")" ] && ok "temp dir and header file removed after the run" || bad "temp dir left: $(ls -A "$T/tmp3")"
+mkdir -p "$T/tmp4"
+(cd "$R" && TMPDIR="$T/tmp4" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/401" sh "$X" main >/dev/null 2>&1)
+[ -z "$(ls -A "$T/tmp4")" ] && ok "header file removed after an HTTP error" || bad "temp dir left after an error"
+# both providers timing out are each reported
+r="$(dsrun stall FAKE_MODE=child CROSSCHECK_TIMEOUT=2 CROSSCHECK_GRACE=1)"
+case "$r" in *"## codex"*"skipped: "*"timed out"*"## deepseek"*"skipped: "*"timed out"*) ok "both providers timing out are each reported";; *) bad "double timeout: $r";; esac
+# the cap applies before either call
+rm -f "$T/ds.hit" "$T/args"
+r="$(dsrun ok CROSSCHECK_MAX_BYTES=10)"
+[ ! -e "$T/ds.hit" ] && [ ! -e "$T/args" ] && case "$r" in *skipped*) true;; *) false;; esac && ok "cap applied before any call" || bad "a provider was called over the cap"
+# no JSON tool: skipped with the reason, no hand-built JSON
+mklinks "$T/nojson"
+rm -f "$T/ds.hit"
+r="$(cd "$R" && PATH="$T/nojson" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" CROSSCHECK_PROVIDERS=deepseek /bin/sh "$X" main 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && case "$r" in *"skipped: needs node or python3"*) true;; *) false;; esac && [ ! -e "$T/ds.hit" ] && ok "no node and no python3: skipped, no call" || bad "no json tool: $r"
+# python3 alone is enough
+if command -v python3 >/dev/null 2>&1 && python3 -c 'pass' >/dev/null 2>&1; then
+  mklinks "$T/pyonly"; ln -s "$(command -v python3)" "$T/pyonly/python3"
+  rm -f "$T/ds.hit" "$T/ds.prompt"
+  r="$(cd "$R" && PATH="$T/pyonly" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" CROSSCHECK_PROVIDERS=deepseek /bin/sh "$X" main 2>&1)"
+  case "$r" in *DS-FINDING*) ok "python3 alone: deepseek findings returned";; *) bad "python3 only: $r";; esac
+  grep -qF 'q"uote \ back' "$T/ds.prompt" && grep -q '€' "$T/ds.prompt" && ok "python3 path keeps hostile bytes intact" || bad "python3 path mangled the prompt"
+else
+  echo "SKIP python3 path (python3 not usable here)"
+fi
+# a key with a control character is refused, not sent
+r="$(dsrun ok DEEPSEEK_API_KEY="$(printf 'bad\nX-Evil: 1')" CROSSCHECK_PROVIDERS=deepseek)"
+[ ! -e "$T/ds.hit" ] && ok "a key with a newline is not sent" || bad "a key with a newline was sent"
+# the same dual-provider run under dash
+if command -v dash >/dev/null 2>&1; then
+  r="$(cd "$R" && PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" dash "$X" main 2>&1)"
+  case "$r" in *"## codex"*FAKE-FINDING*"## deepseek"*DS-FINDING*) ok "dash: both groups appear";; *) bad "dash: $r";; esac
+  cmp -s "$T/stdin" "$T/ds.prompt" && ok "dash: prompt intact on the server" || bad "dash: prompt differs"
+fi
+echo "-- cross-check.sh: review fixes --"
+# opt-in: deepseek does not run unless named, whatever the environment holds
+rm -f "$T/ds.hit"
+r="$(cd "$R" && env -u CROSSCHECK_PROVIDERS PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" sh "$X" main 2>&1)"
+[ ! -e "$T/ds.hit" ] && ok "default providers: deepseek is not called" || bad "deepseek ran without being listed"
+case "$r" in *"## deepseek"*) bad "default output has a deepseek group";; *) ok "default output has no deepseek group";; esac
+case "$r" in *"## codex"*FAKE-FINDING*) ok "default still runs codex";; *) bad "default codex: $r";; esac
+case "$r" in *"DEEPSEEK_API_KEY is set"*CROSSCHECK_PROVIDERS*) ok "hint says how to enable deepseek";; *) bad "no hint: $r";; esac
+r="$(cd "$R" && env -u CROSSCHECK_PROVIDERS -u DEEPSEEK_API_KEY PATH="$T/bin:$PATH" sh "$X" main 2>&1)"
+case "$r" in *"DEEPSEEK_API_KEY is set"*) bad "hint shown with no key";; *) ok "no hint when no key is set";; esac
+r="$(dsrun ok CROSSCHECK_PROVIDERS=codex)"
+case "$r" in *"DEEPSEEK_API_KEY is set"*) ok "hint also when only codex is listed";; *) bad "no hint for codex-only: $r";; esac
+# codex never sees the key
+dsrun ok >/dev/null
+grep -qF "$KEY" "$T/codexenv" && bad "codex's environment holds the key" || ok "codex's environment does not hold the key"
+grep -q '^DEEPSEEK_API_KEY=' "$T/codexenv" && bad "codex inherits DEEPSEEK_API_KEY" || ok "codex does not inherit DEEPSEEK_API_KEY"
+# control bytes in model output are stripped, newline and tab kept
+r="$(dsrun ok FAKE_MODE=ctl)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\033\|\007')"; then bad "ESC or BEL reached the output"; else ok "ESC and BEL are stripped from both providers' output"; fi
+r="$(dsrun ctl FAKE_MODE=ctl)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\033\|\007')"; then bad "ESC or BEL reached the output (deepseek ctl)"; else ok "control bytes stripped (deepseek ctl payload)"; fi
+case "$r" in *"A]52"*"tab"*) ok "the text around the control bytes is kept";; *) bad "stripping removed text: $r";; esac
+printf '%s' "$r" | LC_ALL=C grep -q "$(printf 'D\ttab')" && ok "tab survives" || bad "tab lost"
+# the curl command line: -q first, -g, https-only proto, no -L, no key
+mkdir -p "$T/fakecurl"; REALCURL="$(command -v curl)"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "$FAKE_DIR/curlargs"\nexec "%s" "$@"\n' "$REALCURL" > "$T/fakecurl/curl"; chmod +x "$T/fakecurl/curl"
+rm -f "$T/curlargs"
+(cd "$R" && env PATH="$T/fakecurl:$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/ok" CROSSCHECK_PROVIDERS=deepseek sh "$X" main >/dev/null 2>&1)
+[ "$(head -1 "$T/curlargs")" = "-q" ] && ok "curl gets -q first" || bad "curl does not start with -q"
+grep -qxF -- '-g' "$T/curlargs" && ok "curl gets -g" || bad "curl lacks -g"
+grep -qxF -- '--proto' "$T/curlargs" && grep -qxF -- '=http' "$T/curlargs" && ok "curl gets --proto (=http for localhost)" || bad "curl lacks --proto"
+grep -qxF -- '--url' "$T/curlargs" && ok "curl gets the URL through --url" || bad "curl lacks --url"
+if grep -Eqx -- '-L|--location|--location-trusted|-[a-zA-Z]*L[a-zA-Z]*' "$T/curlargs"; then bad "curl follows redirects"; else ok "curl never follows redirects"; fi
+grep -qF "$KEY" "$T/curlargs" && bad "the key is on curl's command line" || ok "the key is not on curl's command line"
+grep -qxF -- '@-' "$T/curlargs" && ok "the header is read from stdin (-H @-)" || bad "header not from stdin"
+# URL validation
+for u in 'https://a.example/{x,y}/chat' 'https://a.example/[1-3]/chat' '-o/tmp/pwn' '--url=https://evil.example' 'http://example.com/chat' 'ftp://a.example/x' 'http://127.0.0.1@evil.example/x' 'http://127.0.0.1:80@evil.example/x' 'https://a.example/a b'; do
+  rm -f "$T/ds.hit"
+  r="$(cd "$R" && env PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$u" CROSSCHECK_PROVIDERS=deepseek sh "$X" main 2>&1)"
+  case "$r" in *"skipped: bad deepseek URL"*) ok "refused URL: $u";; *) bad "accepted URL: $u -> $r";; esac
+done
+case "$(cd "$R" && env PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="http://localhost:1/x" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=5 sh "$X" main 2>&1)" in *"bad deepseek URL"*) bad "localhost URL refused";; *) ok "http://localhost is allowed";; esac
+# a TERM mid-call: no temp files, no live children, no watchdog, under sh and dash
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp5"; rm -f "$T/ds.hit" "$T/child" "$T/parent" "$T/term.out"
+  (cd "$R" && exec env TMPDIR="$T/tmp5" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" FAKE_MODE=child CROSSCHECK_GRACE=1 "$sh_" "$X" main > "$T/term.out" 2>&1) &
+  TP=$!
+  waitfor "ds.hit and the codex child (TERM, $sh_)" sh -c "[ -e '$T/ds.hit' ] && [ -s '$T/child' ]"
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] && ok "TERM ($sh_) exits 0" || bad "TERM ($sh_) exit $rc"
+  case "$(cat "$T/term.out")" in *"skipped (cancelled)"*) ok "TERM ($sh_) says cancelled";; *) bad "TERM ($sh_): $(cat "$T/term.out")";; esac
+  [ -z "$(ls -A "$T/tmp5")" ] && ok "TERM ($sh_) leaves no temp file" || bad "TERM ($sh_) left $(ls -A "$T/tmp5")"
+  c="$(cat "$T/child" 2>/dev/null)"
+  if [ -n "$c" ] && kill -0 "$c" 2>/dev/null; then bad "TERM ($sh_) left codex's child running"; else ok "TERM ($sh_) stops codex's child"; fi
+  if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "TERM ($sh_) left curl running"; else ok "TERM ($sh_) stops curl"; fi
+  waitfor "the watchdog to exit (TERM, $sh_)" no_proc "$X"
+  ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "TERM ($sh_) left the watchdog running" || ok "TERM ($sh_) stops the watchdog"
+done
+# KILL cannot be trapped: the watchdog still ends with its parent
+mkdir -p "$T/tmp6"; rm -f "$T/ds.hit"
+(cd "$R" && exec env TMPDIR="$T/tmp6" PATH="$T/bin:$PATH" DEEPSEEK_API_KEY="$KEY" CROSSCHECK_DEEPSEEK_URL="$URL/stall" CROSSCHECK_PROVIDERS=deepseek CROSSCHECK_TIMEOUT=300 sh "$X" main >/dev/null 2>&1) &
+KP=$!
+waitfor "the stalled call to reach the server (KILL)" has_path "$T/ds.hit"
+kill -KILL "$KP" 2>/dev/null; wait "$KP" 2>/dev/null
+waitfor "the watchdog to exit (KILL)" no_proc "$X"
+ps -ax -o args= | grep -F "$X" | grep -v grep | grep -q . && bad "the watchdog or a job outlived a killed script" || ok "the watchdog and the jobs end when the script is killed"
+if ps -ax -o args= | grep -F "$URL/stall" | grep -v grep | grep -q .; then bad "curl outlived a killed script"; else ok "curl ends when the script is killed"; fi
+[ -z "$(ls -A "$T/tmp6")" ] && ok "temp dir removed after a KILL" || bad "temp dir left after a KILL"
+pkill -f "$URL/stall" 2>/dev/null
+rm -rf "$T/tmp6"
+echo "-- cross-check.sh: round 2 --"
+# C1 controls (UTF-8 U+0080..U+009F) are stripped; ordinary UTF-8 stays
+r="$(cd "$R" && env PATH="$T/bin:$PATH" FAKE_MODE=c1 CROSSCHECK_PROVIDERS=codex sh "$X" main 2>&1)"
+if printf '%s' "$r" | LC_ALL=C grep -q "$(printf '\302\233\|\302\235')"; then bad "C1 controls reached the output"; else ok "C1 controls U+009B and U+009D are stripped"; fi
+printf '%s' "$r" | LC_ALL=C grep -qF "$(printf 'Vi\341\273\207t Nam \360\237\230\200')" && ok "Vietnamese text and an emoji stay intact" || bad "UTF-8 text was damaged: $r"
+printf '%s' "$r" | LC_ALL=C grep -qF "$(printf '\302\240D')" && ok "U+00A0 (not a control) stays" || bad "U+00A0 was stripped"
+# a fake tool that stalls one step, to land a TERM in a given window
+mkdir -p "$T/slow"
+REALGIT="$(command -v git)"; REALTR="$(command -v tr)"
+printf '#!/bin/sh\ncase "$*" in *" diff "*) : > "$FAKE_DIR/git.hit"; sleep 5 ;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$T/slow/git"
+printf '#!/bin/sh\ncase "$*" in *000*) : > "$FAKE_DIR/tr.hit"; "%s" "$@"; sleep 5 ;; *) exec "%s" "$@" ;; esac\n' "$REALTR" "$REALTR" > "$T/slowtr.sh"
+mkdir -p "$T/slowtr"; mv "$T/slowtr.sh" "$T/slowtr/tr"
+chmod +x "$T/slow/git" "$T/slowtr/tr"
+# round-2 item 1: a TERM while the diff is being collected removes the temp dir
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp7"; rm -f "$T/t7.out" "$T/git.hit"
+  (cd "$R" && exec env TMPDIR="$T/tmp7" PATH="$T/slow:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t7.out" 2>&1) &
+  TP=$!
+  waitfor "git diff to start (early TERM, $sh_)" has_path "$T/git.hit"
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] && ok "TERM during diff collection ($sh_) exits 0" || bad "TERM during diff collection ($sh_) exit $rc"
+  [ -z "$(ls -A "$T/tmp7")" ] && ok "TERM during diff collection ($sh_) leaves no temp file" || bad "TERM during diff collection ($sh_) left $(ls -A "$T/tmp7")"
+done
+# round-2 item 2: a TERM after the findings printed adds no cancel line
+for sh_ in sh dash; do
+  command -v "$sh_" >/dev/null 2>&1 || continue
+  mkdir -p "$T/tmp8"; rm -f "$T/t8.out" "$T/stdin" "$T/tr.hit"
+  (cd "$R" && exec env TMPDIR="$T/tmp8" PATH="$T/slowtr:$T/bin:$PATH" CROSSCHECK_PROVIDERS=codex "$sh_" "$X" main > "$T/t8.out" 2>&1) &
+  TP=$!
+  waitfor "the output pipeline to start (late TERM, $sh_)" has_path "$T/tr.hit"
+  kill -0 "$TP" 2>/dev/null && ok "late TERM ($sh_): the script is still running when TERM lands" || bad "late TERM ($sh_): the script had already finished, so the TERM tests nothing"
+  kill -TERM "$TP" 2>/dev/null; wait "$TP" 2>/dev/null
+  waitfor "the findings to be printed (late TERM, $sh_)" file_has "$T/t8.out" FAKE-FINDING
+  case "$(cat "$T/t8.out")" in *"cancelled"*) bad "late TERM ($sh_) appended a cancel line";; *FAKE-FINDING*) ok "late TERM ($sh_) adds no cancel line";; *) bad "late TERM ($sh_): $(cat "$T/t8.out")";; esac
+  [ -z "$(ls -A "$T/tmp8")" ] && ok "late TERM ($sh_) leaves no temp file" || bad "late TERM ($sh_) left temp files"
+done
+check "cross-check doc names DEEPSEEK_API_KEY and CROSSCHECK_PROVIDERS" sh -c "grep -q DEEPSEEK_API_KEY '$P/../docs/cross-check.md' && grep -q CROSSCHECK_PROVIDERS '$P/../docs/cross-check.md'"
 
 echo
 if [ "$FAIL" -eq 0 ]; then echo "== PASS =="; exit 0; else echo "== FAIL =="; exit 1; fi

@@ -1,1 +1,0 @@
-ALTER TABLE `tasks` ADD `budget_tokens` integer;

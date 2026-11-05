@@ -1,72 +1,29 @@
-# Blacksmith — Agent Router
+# AGENTS.md: operating rules for this repo
 
-Autonomous agent factory: a planner on a top-tier model turns goals into spec
-contracts; the factory instantiates workers on cheap fast models from
-templates; gates (tests → review → adversarial verify → merge queue) decide
-what lands. The operator only plans and reviews outcomes.
+For any agent or person changing Blacksmith. Overview: [README.md](README.md). Usage: [docs/usage.md](docs/usage.md).
 
-This repo is self-governing: its rules live here, not in any other repo.
+## What this repo is
 
-## Read on demand (do not preload)
+A small Claude Code plugin in `plugin/`, a marketplace in `.claude-plugin/`, and the gate `scripts/check.sh`. Layout: [CONTRIBUTING.md](CONTRIBUTING.md). The old factory lives at the `factory-final` tag ([history](docs/history.md)).
 
-| Need | Read |
-|---|---|
-| Install / bootstrap / verify this repo (executable runbook) | `INSTALL.md` |
-| The ten rules a change may not break, and what each one makes the factory stop being able to claim — read before changing anything under `factory/orchestrator/src/` | `docs/specs/black-smith-architecture.md` §18 |
-| Architecture — 18 numbered sections, 82 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
-| Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
-| Per-agent interviews (constraints per role) — cited by id (`N-9`, `M-6`); the ids are bold leads, not headings, so start from the index, which maps each id to its lines and heading: read the id's paragraph, not the file | `docs/specs/agent-interviews-index.md`, then `docs/specs/agent-interviews.md` |
-| This operator's stack answers (install interview) | `factory/policies/stack.yml` |
-| What reads those answers, and what the templates honour | `docs/standards/stack.md` |
-| Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
-| Guardrails: secrets/env, git, deploy (S1 on violation) | `docs/standards/guardrails.md` |
-| Policies: taxonomy, budgets, severity, worktree, crosscheck | `factory/policies/` |
-| Agent templates — one `bs-<role>.md` per role, for every harness: Claude Code reads them in place, `bs harness plan` hands the same file to a cli harness | `.claude/agents/` |
-| Approved lessons (injected into agents) | `factory/policies/lessons.md` |
-| Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
-| Operator console (`/bs new\|mcp\|plan\|run\|audit\|use\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |
-| The dispatch contract every `/bs` playbook dispatches under | `.claude/skills/bs/dispatch.md` |
-| `/bs run` — the epic tier (`run.md`) and steps 2-10, one wave, thrown away when it lands (`wave.md`) | `.claude/skills/bs/run.md`, `.claude/skills/bs/wave.md` |
-| Operator guide — the index only; the guide is one file per question under `docs/guide/operator-guide/`, and its `§` numbers are guide-wide, so read the part a cite names | `docs/guide/operator-guide.md` |
-| New-project scaffolder (`bs new`) | `factory/scaffold/`, `factory/orchestrator/src/scaffold.ts` |
-| Recheck/maintenance/growth scheduler (`bs scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
-| Lessons pipeline (novelty gate, compile, `bs dream`) | `factory/orchestrator/src/lessons.ts` |
-| Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `bs judge preflight`, `bs judge run`, `bs stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
-| Who may dispatch, and what they owe for it (`bs delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
-| Which program holds a worker turn — in-process Agent tool or a `cli` harness such as Codex (`bs harness list\|plan` renders, `bs-run` starts) | `factory/policies/harness.yml`, `factory/orchestrator/src/harness.ts`, `src/runner.ts`, `docs/runbooks/harness.md` |
-| Background watcher (`bs daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
-| Which spec is a contract, a scope, or a record of the past — the records (`D-nnn`, `P9-n`, `FD-n`) are cited by id and never loaded whole | `docs/specs/README.md` |
-| Everything else under `docs/` and `factory/policies/` — one line per file, with who it is for | `docs/README.md` |
+## Branches
 
-## Operating rules
+- Branches are `feat/<slug>`, `fix/<slug>` or `chore/<slug>`, cut from `main`, one worktree per agent (in `.claude/worktrees/`, git-ignored, or outside the repo).
+- Never push to `main`, never force-push, never merge your own PR unless the maintainer said so for that PR. Deliver by pull request.
+- `git add` only the files you changed, never `-A`.
 
-- **Branches.** All work on `bs/<epic>/integration` integration branches
-  (git ref constraint: `bs/<epic>` cannot coexist with
-  `bs/<epic>/<task-id>`); tasks on `bs/<epic>/<task-id>`. An epic opened
-  before the `bs` rename keeps its `smith/` prefix to the end. Never push to
-  `main`; `main` changes only via a reviewed PR. Never force-push at all — a
-  branch you have pushed is append-only, and republishing rewritten history
-  is the operator's call, not an agent's.
-- **Worktrees.** Workers operate only inside their assigned worktree, and
-  only within their spec's path claims; out-of-claim edits fail the gate. A
-  worktree is a sibling of the project directory rather than a child of it
-  (D-42), so it follows the project wherever that directory is: the shape is
-  always `<project-parent>/.wt/<project>/<task-id>`, which for a project
-  beside this repo — where `bs new` puts one — is outside this repo too.
-- **Load-bearing rules.** Ten invariants in `docs/specs/black-smith-architecture.md`
-  §18 are the ones a change may not break. They are not style: each names the
-  module that breaks and the claim the factory stops being able to make. A diff
-  that crosses one is `S1-stop-the-line` however small it is, because the damage
-  is not in the diff but in every verdict issued after it. Changing a rule itself
-  is an operator decision.
-- **Specs are contracts.** No dispatch without objective, output schema,
-  acceptance criteria, tool allowlist, and budget.
-- **Declarations vs state.** Committed files are declarations. `state/`,
-  `workspaces/`, `.agents/generated/` are runtime output — gitignored, never
-  hand-edited, safe to delete.
-- **Language.** All artifacts in this repo (docs, code, commits, agent
-  prompts) are English.
-- **Commits.** Subject ≤72 chars, imperative, why-focused.
-- **Human gates.** Lessons compilation, taxonomy changes, budget extensions,
-  semantic merge conflicts, and sub-threshold inferred tasks always stop for
-  operator approval. Everything else runs autonomously within budget.
+## How to work
+
+- Test first: write the failing test, watch it fail for the right reason, make it pass.
+- Verify before you say done: run `bash scripts/check.sh` before every push. It must end in `== PASS ==`; a `SKIP` line proved nothing.
+- Root cause before a fix. After two or three failed hypotheses, re-examine your assumptions.
+- One source per fact: link, do not copy. A change users will notice gets a line in `CHANGELOG.md`.
+- Keep the plugin small and stack-neutral. A new rule, agent or setting needs a reason Claude Code's defaults do not cover.
+
+## Open-source hygiene
+
+Name no other project or company's product. No personal paths, emails or credentials. Commits are English, imperative, subject at most 72 characters, saying why.
+
+## Stops for the maintainer
+
+Propose and wait on: releases, version bumps, tags, repository rulesets and required checks, security policy, license, and anything that changes what `plugin/rules.md` tells every session to do.

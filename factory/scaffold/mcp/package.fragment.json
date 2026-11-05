@@ -1,9 +1,0 @@
-{
-  "scripts": {
-    "mcp:serve": "node dist/mcp/server.js"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "zod": "4.4.3"
-  }
-}
