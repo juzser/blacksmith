@@ -46,16 +46,6 @@ From a shell: `claude plugin marketplace add juzser/blacksmith`, then `claude pl
 
 Only `/cross-check` sends your code to another vendor, and only when you run it. By default that is codex, which can read any file in the repo. DeepSeek gets the diff, the changed tests and your criteria, and only if you opt in. [Exactly what goes where](docs/cross-check.md#privacy).
 
-## Why it is small
-
-Until 0.7.0 Blacksmith was a factory: an orchestrator, a dashboard, fourteen agents and a `bs` command. Then the same five tasks were run in plain Claude Code and through the factory, one run each. Both passed every check, and a blind review found the code about equal. The factory took about nine times the tokens and the time.
-
-So 1.0.0 keeps the few parts that helped and leaves the rest to Claude Code. A new piece has to give a reason the defaults do not cover. [The numbers and the full story](docs/history.md).
-
-## Coming from 0.x
-
-1.0.0 breaks 0.x on purpose: the `bs` command, `/bs`, the dashboard, `bs-mod` and `pr-mod` are gone. Follow the [upgrade steps](CHANGELOG.md#upgrading-from-0x). The old factory stays reachable at the git tag `factory-final` and as `@juzser/blacksmith@0.7.0` on npm ([how](docs/history.md#get-the-old-factory-back)).
-
 ## More
 
 - [Usage](docs/usage.md): how the rules load, how to turn them off or override them, agents, compact.
