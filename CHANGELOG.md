@@ -2,11 +2,12 @@
 
 What landed, newest first. The plugin's version is in `plugin/.claude-plugin/plugin.json`. Each release has a `v<version>` git tag, and from 0.2.0 on a [GitHub release](https://github.com/juzser/blacksmith/releases).
 
-## Unreleased
+## 1.0.1 (2026-11-06): decisions come as options to pick
 
 ### Changed
 
-- **Decisions come as options to pick.** `plugin/rules.md` now tells Claude to ask with the AskUserQuestion tool, or to number the options when that tool is not available, instead of ending on an open question in prose.
+- **Decisions come as options to pick** (#547). `plugin/rules.md` now tells Claude to ask with the AskUserQuestion tool, or to number the options when that tool is not available, instead of ending on an open question in prose.
+- **The README describes only the current plugin** (#546). The story of earlier versions stays in [docs/history.md](docs/history.md) and the upgrade steps stay below in this file.
 
 ## 1.0.0 (2026-11-05): the reset to a minimal plugin
 

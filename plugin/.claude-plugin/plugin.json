@@ -1,6 +1,6 @@
 {
   "name": "blacksmith",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Small things for Claude Code: plain explanations, a confidence % on every option, a cross-check by a different model, a read-only audit, agents with their own model and effort, and a compact rule.",
   "author": {
     "name": "juzser",
